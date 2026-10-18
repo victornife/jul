@@ -650,7 +650,7 @@ design must satisfy; the design owns mechanisms, bounds and tests.
 | Bound | Starts at publish; completes within a maximum delay chosen and *tested* by #642. Surfaces show only the tested value. |
 | Closure | Graceful where the protocol and library allow (WebSocket close frame, stream reset); otherwise abrupt, reported as forced. |
 | Observability | The terminal apply result and status report, per entry, a bounded count of ended exchanges, whether completion was confirmed, any collateral, and any keep-open exception. No client identities; no new metric labels. |
-| Preview | The plan states, per entry, that open exchanges will be ended and shows a **snapshot** count; connection membership can change before apply, so the result reports the actual scope. |
+| Preview | The plan states, per entry, that open exchanges will be ended and shows a **snapshot** count; connection membership can change before apply, so the result reports the actual scope. It also states, once, that entries with file-backed access inputs will have their exchanges ended if their loaded file contents change at publish (§9.5), and names them. |
 | Not covered | Provider sessions (Jul-routed requests are still denied by the gate), application sessions, traffic reaching the application without Jul, L4 streams. |
 
 **Delivery and earliest supported behaviour (SD-07).**
@@ -819,9 +819,10 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
   - `base_config_digest` and `candidate_config_digest` cover the canonical
     **raw** configuration, as written. They are what the evaluator compares;
     a collision cannot make another configuration pass for the candidate.
-    Equal digests mean the same canonical pre-expansion configuration; comments and formatting are not part of it. Resolved
-    reference values and the contents of named files are not in them; for
-    access inputs, the access fingerprint covers both.
+    Equal digests mean the same canonical pre-expansion configuration;
+    comments and formatting are not part of it. Resolved reference values and
+    the contents of named files are not in them, and no part of the object
+    compares file contents (below).
   - `expect` is `present` or `absent`. Every entry the plan affects (including
     the §9.5 expansion) is listed: `present` when it exists in the candidate,
     `absent` when the plan removes it. A plan that affects no entry (for
@@ -852,9 +853,9 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     also the life of the key, so its written form suffices. File-backed inputs
     enter by written value (path or reference text) only: local access files
     (htpasswd, CA, CRL, WAF rule files, request-plugin modules) and `${file:…}`
-    references. Their contents are never read for a postcondition, because a
-    caller able to write a file without reading it could otherwise test
-    guesses against what Jul has loaded (§9.5). Each entry result names them
+    references. Their contents never enter a postcondition, because a caller
+    able to write a file without reading it could otherwise test guesses
+    against what Jul has loaded (§9.5). Each entry result names them
     under `file_contents` (below).
   - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
@@ -888,7 +889,7 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
 | `unverifiable` | `candidate` is `unverifiable` | "Jul has restarted since this change was planned, so it cannot compare it." The next step depends on what was planned (recovery, below): plan the same raw configuration or repeatable operations again, or check the listed entries' current facts and the history by hand. Nothing is re-applied automatically. |
 | `not_serving_yet` | `candidate` is `base_serving` | "Not serving yet: the configuration this change was planned against is still serving." Access details are shown for information only. |
 | `candidate_serving` | `candidate` is `serving`; `access` is `matches` or `none_expected` | With `matches`: "The planned configuration is serving, and its expected access facts match." With `none_expected`: "The planned configuration is serving; this change expected no access facts to compare." The **only** result that may say the change is serving. |
-| `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields — including an access file changed after planning while the exact candidate serves. |
+| `diverged` | `access` is `differs` | "What is serving differs from the plan," naming the entries and fields. |
 | `unverifiable` | `access` is `unverifiable` | "Jul cannot compare these entries," naming each and the reason, with the next step from the recovery rules below. |
 | `access_matches` | `candidate` is `other_revision`; `access` is `matches` | "The expected access facts match, but a different configuration (<version>) is serving." |
 | `other_revision` | `candidate` is `other_revision`; `access` is `none_expected` | "A different configuration (<version>) is serving; this change expected no access facts to compare." |
@@ -967,17 +968,28 @@ File contents can change on disk at any time. Write access is not read access:
 a caller able to replace a referenced file without reading it could otherwise
 test guesses against what Jul has loaded.
 
-So plans never read file contents. File-backed inputs (`${file:…}` references,
+So file contents never enter plan output. A plan may read files while
+preparing and validating the candidate, as today, but no class, finding,
+warning or postcondition defined here depends on their contents or compares
+them with what Jul has loaded. File-backed inputs (`${file:…}` references,
 htpasswd, CA, CRL, WAF rule files, plugin modules) compare by written value: a
 written change is `uncertain`, and an unchanged one contributes no change.
-Every plan that affects an entry with such inputs says "file contents are read
-again when this is applied; this plan does not compare them". Content changes
-are classified at publish, server-side, from what the new generation loads, and
-only for §8.4 retirement; the htpasswd and CRL rows below apply there, never in
-plan output. Treating every unchanged reference as `uncertain` instead would
-retire the open exchanges of affected entries on every unrelated edit.
-Publishing reveals at most whether a reload changed anything, which needs
-reload authority and is part of #645.
+Treating every unchanged reference as `uncertain` instead would retire the open
+exchanges of affected entries on every unrelated edit.
+
+Content changes are classified at publish, server-side, from what the new
+generation loads, and only for §8.4 retirement; the htpasswd and CRL rows below
+apply there, never in plan output. Every plan therefore states, once, that
+publishing reads file-backed inputs again and that entries whose loaded file
+contents changed will have their open exchanges ended. It names the entries
+that have such inputs as a bounded list with a count, whether or not the plan
+otherwise affects them.
+
+The effect of publish-time retirement (ended exchanges and their counts in the
+apply result) can tell an applier whether a file changed. That reveals nothing
+beyond `config:apply`, which can already make Jul send the contents of any file
+it can read to an upstream, through a reference in a forwarded header (E63).
+Callers without apply authority see no such effect.
 
 `uncertain` keeps its full meaning: acknowledgement in the Console, and §8.4
 retirement by default with the keep-open exception. A class is never shown as
@@ -1724,7 +1736,7 @@ migration converter.
 
 | Tranche | Scope | Rough effort | Sequencing | Door |
 | --- | --- | --- | --- | --- |
-| **Intent and guarded changes** (SD-05, SD-11 to SD-14; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling and the bounded, paged response shape (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes including the host-dispatch rule; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 6–12 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, from 4–8 in r6 for the access fingerprint with per-generation access-file digests and the expanded §9.5 rules, and from 5–10 in r9 for the bounded paged projection, the host-dispatch analysis with its property test, and expected-absence postconditions; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
+| **Intent and guarded changes** (SD-05, SD-11 to SD-14; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling and the bounded, paged response shape (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes including the host-dispatch rule; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 6–12 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, from 4–8 in r6 for the access fingerprint and the expanded §9.5 rules (publish-time comparison of loaded file contents later moved to #642's retirement), and from 5–10 in r9 for the bounded paged projection, the host-dispatch analysis with its property test, and expected-absence postconditions; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
 | **Complete withdrawal** (SD-04, SD-02 bundle, SD-07–SD-09; #642 with #563/#562) | §9.3 gate and typed op; §8.4 stream-level retirement with #562 WebSocket ownership and per-request revocation re-check; collateral disclosure; real H1/H2/H3 clients; race and leak checks; same coverage rule | design 2–4 days + implementation 10–20 days (author estimate) | next shared-code stream; #581 environment work proceeds in parallel | gate field costly once adopted; promise additive |
 
 Together the two tranches are a nominal 18–36 focused days before waiting and

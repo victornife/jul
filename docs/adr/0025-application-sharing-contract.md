@@ -58,10 +58,10 @@ constrains any design:
    returns a stateless **postcondition** carrying expected presence or absence
    per affected entry and an access fingerprint over the access inputs as
    written, and digests of the configuration as written. File contents
-   (htpasswd, CA, CRL, WAF rules, plugin modules, `${file:…}` values) are never
-   read for a plan or postcondition, because write access is not read access;
+   (htpasswd, CA, CRL, WAF rules, plugin modules, `${file:…}` values) never
+   enter plan or postcondition output, because write access is not read access;
    they are named as not compared, and their changes are classified only at
-   publish, for retirement. Every digest is keyed
+   publish, for retirement, an effect `config:apply` could already learn. Every digest is keyed
    under a key held only by the running process, so the object allows no
    offline check of any secret, whether referenced, literal or inside a local
    file. It can be compared until that process restarts. Afterwards a re-plan
