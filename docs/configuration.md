@@ -2016,3 +2016,12 @@ The optional `[admin.oidc]` block configures one external Console provider; it r
 rules for client-offered identifiers. This Alpha, merged and unreleased extension
 requires `stream`; UDP/QUIC are excluded. See [the complete contract and example](stream-alpn.md)
 for precedence, identifier representation, bounds, fallback and management semantics.
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

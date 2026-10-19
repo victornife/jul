@@ -71,6 +71,8 @@ type AuditEvent struct {
 // over per-write fsync — events are written immediately but not flushed to
 // stable storage on every record, an explicit, documented trade-off.
 type auditLog struct {
+	// Immutable encoder installed before publication. Raw IDs remain private ownership keys.
+	publicTokenID func(string) string
 	// mu is the single event linearization lock. ID assignment, ring placement,
 	// sink-generation selection and write-lease/ticket allocation happen while
 	// it is held; physical filesystem I/O never does.
@@ -276,6 +278,7 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []AuditEvent{}
 	}
+	s.protectAuditIDs(events)
 	writeJSON(w, http.StatusOK, events)
 }
 
@@ -289,6 +292,7 @@ func (s *Server) handleAuditExport(w http.ResponseWriter, r *http.Request) {
 	if s.audit != nil {
 		events = s.audit.snapshot(r.URL.Query().Get("op"), r.URL.Query().Get("result"), 0)
 	}
+	s.protectAuditIDs(events)
 
 	switch strings.ToLower(r.URL.Query().Get("format")) {
 	case "csv":

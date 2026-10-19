@@ -47,14 +47,15 @@ type DriftState struct {
 
 // PendingRestartState reports a staged planned restart.
 type PendingRestartState struct {
-	Pending          bool     `json:"pending"`
-	State            string   `json:"state,omitempty"`
-	StagedAt         string   `json:"staged_at,omitempty"`
-	StagedVersion    string   `json:"staged_version,omitempty"`
-	PersistedVersion string   `json:"persisted_version,omitempty"`
-	ServingVersion   string   `json:"serving_version,omitempty"`
-	Subsystems       []string `json:"subsystems,omitempty"`
-	DiscardAvailable bool     `json:"discard_available"`
+	VersionComparison string   `json:"version_comparison,omitempty"`
+	Pending           bool     `json:"pending"`
+	State             string   `json:"state,omitempty"`
+	StagedAt          string   `json:"staged_at,omitempty"`
+	StagedVersion     string   `json:"staged_version,omitempty"`
+	PersistedVersion  string   `json:"persisted_version,omitempty"`
+	ServingVersion    string   `json:"serving_version,omitempty"`
+	Subsystems        []string `json:"subsystems,omitempty"`
+	DiscardAvailable  bool     `json:"discard_available"`
 }
 
 // StatusResponse is GET /api/v1/status.

@@ -22,6 +22,7 @@ import (
 	"jul/internal/auth"
 	"jul/internal/config"
 	"jul/internal/rbac"
+	"jul/internal/versionid"
 )
 
 var ErrUnauthenticated = errors.New("OIDC session unavailable")
@@ -31,6 +32,7 @@ const transactionLifetime = 5 * time.Minute
 // Runtime belongs to exactly one immutable admin authentication generation.
 // No background workers are needed: every store operation expires dead entries.
 type Runtime struct {
+	versions      *versionid.Context
 	cfg           config.AdminOIDCConfig
 	policy        *rbac.Policy
 	client        *http.Client
@@ -67,7 +69,7 @@ type provider struct {
 
 // New constructs local bounded state only; provider outages never make a
 // validated config candidate mutate or discard the current generation.
-func New(cfg config.AdminOIDCConfig, policy *rbac.Policy, client *http.Client) (*Runtime, error) {
+func New(cfg config.AdminOIDCConfig, policy *rbac.Policy, client *http.Client, contexts ...*versionid.Context) (*Runtime, error) {
 	config.DefaultAdminOIDC(&cfg)
 	callback, err := config.OIDCURL(cfg.CallbackURL)
 	if err != nil || callback.Path != "/auth/oidc/callback" || policy == nil || !policy.Enabled() || cfg.MaxSessions < 1 || cfg.MaxSessions > 65536 || cfg.MaxTransactions < 1 || cfg.MaxTransactions > 1024 {
@@ -83,7 +85,11 @@ func New(cfg config.AdminOIDCConfig, policy *rbac.Policy, client *http.Client) (
 	bounded := *client
 	bounded.Timeout = 10 * time.Second
 	bounded.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Runtime{cfg: cfg, policy: policy, client: &bounded, origin: callback.Scheme + "://" + canonicalHost(callback.Scheme, callback.Host), secure: callback.Scheme == "https", now: time.Now, transactions: map[[32]byte]transaction{}}, nil
+	versions := versionid.Process()
+	if len(contexts) > 0 && contexts[0] != nil {
+		versions = contexts[0]
+	}
+	return &Runtime{versions: versions, cfg: cfg, policy: policy, client: &bounded, origin: callback.Scheme + "://" + canonicalHost(callback.Scheme, callback.Host), secure: callback.Scheme == "https", now: time.Now, transactions: map[[32]byte]transaction{}}, nil
 }
 
 func randomSecret() string       { return rand.Text() + rand.Text() }

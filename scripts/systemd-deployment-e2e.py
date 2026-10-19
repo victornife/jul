@@ -267,6 +267,11 @@ def main():
         created["units"] = True
         for name in ("jul.service", "jul-readonly.service"):
             run("sudo", "install", "-m0644", "deploy/systemd/" + name, "/etc/systemd/system/" + name)
+        supported_commands = run("/usr/local/bin/jul", "completion", "bash")
+        if "version-key" in supported_commands:
+            run("sudo", "install", "-d", "-o", "jul", "-g", "jul", "-m0700", "/var/lib/jul", "/var/lib/jul/private", "/etc/jul/private")
+            run("sudo", "-u", "jul", "/usr/local/bin/jul", "version-key", "init", "--file", "/var/lib/jul/private/effective-version.key")
+            run("sudo", "install", "-o", "jul", "-g", "jul", "-m0400", "/var/lib/jul/private/effective-version.key", "/etc/jul/private/effective-version.key")
         run("sudo", "systemctl", "daemon-reload")
         run("sudo", "systemd-analyze", "verify", "/etc/systemd/system/jul.service",
             "/etc/systemd/system/jul-readonly.service")

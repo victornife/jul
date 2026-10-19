@@ -73,7 +73,7 @@ func TestCachePurgeAuditUsesAuthenticatedPrincipal(t *testing.T) {
 				t.Fatalf("purge audit events = %d, want 1", len(events))
 			}
 			event := events[0]
-			if event.Actor != "cache-operator" || event.TokenID != identity.TokenID || event.SourceIP != "127.0.0.1" || event.Resource != "cache" {
+			if event.Actor != "cache-operator" || event.TokenID != admin.publicTokenID(identity.TokenID) || event.SourceIP != "127.0.0.1" || event.Resource != "cache" {
 				t.Fatalf("purge audit attribution = %+v", event)
 			}
 			if strings.Contains(event.Detail, key) || strings.Contains(event.Detail, token) || event.ResourceID != "" || event.Selector != "" {

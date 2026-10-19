@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"jul/internal/atomicfile"
+	"jul/internal/versionid"
 )
 
 const plannedRestartMarkerVersion = 1
@@ -153,6 +154,8 @@ type PlannedRestartState struct {
 // Both files use 0600 permissions and are written atomically via temp-file
 // rename so a mid-write crash leaves the state readable.
 type PlannedRestartStore struct {
+	// Versions identifies the immutable active key context; nil is internal boot scope.
+	Versions *versionid.Context
 	// ConfigPath is the active config file path. When empty, the store operates
 	// in in-memory-only mode. Set by NewFilePlannedRestartStore.
 	ConfigPath string
@@ -805,6 +808,13 @@ func (s *PlannedRestartStore) DiscardSafe(liveServingVersion string) (restoredBy
 		return nil, ErrInconsistentState
 	}
 
+	// Legacy/unknown identifiers cannot be used to authorize a restoration.
+	// Preserve them privately for raw-digest recovery, but never skip this fence.
+	if versionid.Comparison(liveServingVersion, marker.BaseServingVersion) != "same_context" ||
+		versionid.Comparison(marker.StagedVersion, marker.BaseServingVersion) != "same_context" {
+		return nil, fmt.Errorf("%w: effective version context is unverifiable; restore the original key or restart to serve the staged configuration", ErrServingVersionChanged)
+	}
+
 	// Verify the live serving version matches the base (what the running process
 	// started with). If a concurrent reload promoted a different config to live,
 	// restoring the backup would silently undo that reload.
@@ -1047,9 +1057,24 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 	// Load version metadata from the marker when available.
 	if s.ConfigPath != "" && (st.State == PlannedRestartStateManagedStaged || st.State == PlannedRestartStateInconsistent) {
 		if m, err := s.loadMarkerLocked(); err == nil && m != nil {
-			prs.StagedVersion = m.StagedVersion
+			prs.VersionComparison = versionid.Comparison(m.StagedVersion, m.BaseServingVersion)
+			if prs.VersionComparison == "same_context" {
+				id, _ := versionid.Parse(m.StagedVersion)
+				if id != s.Versions.ID() {
+					prs.VersionComparison = "different_context"
+				}
+			}
+			if prs.VersionComparison != "same_context" {
+				prs.DiscardAvailable = false
+			}
+			// Only recognized keyed identifiers may leave private retained state.
+			if _, ok := versionid.Parse(m.StagedVersion); ok {
+				prs.StagedVersion = m.StagedVersion
+			}
+			if _, ok := versionid.Parse(m.BaseServingVersion); ok {
+				prs.ServingVersion = m.BaseServingVersion
+			}
 			prs.PersistedVersion = m.StagedPersistedVersion
-			prs.ServingVersion = m.BaseServingVersion
 			prs.Subsystems = m.PendingSubsystems
 		}
 	}
@@ -1060,17 +1085,18 @@ func (s *PlannedRestartStore) Status() pendingRestartStatus {
 // status. It maps directly to admin.PendingRestartStatus but avoids an import
 // cycle between the app and admin packages.
 type pendingRestartStatus struct {
-	State            string
-	Managed          bool
-	Staged           bool
-	External         bool
-	StagedAt         time.Time
-	StagedVersion    string
-	PersistedVersion string
-	ServingVersion   string
-	Subsystems       []string
-	DiscardAvailable bool
-	Inconsistent     bool
+	VersionComparison string
+	State             string
+	Managed           bool
+	Staged            bool
+	External          bool
+	StagedAt          time.Time
+	StagedVersion     string
+	PersistedVersion  string
+	ServingVersion    string
+	Subsystems        []string
+	DiscardAvailable  bool
+	Inconsistent      bool
 }
 
 // loadMarkerLocked reads and decodes the marker file. Must be called with

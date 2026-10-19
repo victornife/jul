@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/versionid"
 )
 
 // ReloadOutcome is the terminal classification of a reload transaction.
@@ -94,8 +95,8 @@ type PluginModuleChange struct {
 	After  string `json:"after,omitempty"`
 }
 
-// CanonicalVersion returns a short, stable fingerprint of a configuration
-// used for optimistic concurrency and desired/serving version correlation. It
+// CanonicalVersion fingerprints unresolved configuration for optimistic
+// concurrency and raw history. It
 // is computed over the canonical marshaled form so it is insensitive to
 // comments and whitespace in the on-disk file.
 func CanonicalVersion(c *config.Config) string {
@@ -109,3 +110,8 @@ func CanonicalVersion(c *config.Config) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:8])
 }
+
+// EffectiveVersion is the boot-scoped fallback for internal callers. Production
+// servers use their injected durable context. Never use CanonicalVersion on
+// resolved configurations in a public result.
+func EffectiveVersion(c *config.Config) string { return versionid.Process().Config(c) }

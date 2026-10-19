@@ -107,7 +107,7 @@ func TestOIDCAuditCapturesHistoricalAuthorityAcrossAllSinks(t *testing.T) {
 				t.Helper()
 				seen := map[string]bool{}
 				for _, ev := range events {
-					if ev.Actor != id.Principal || ev.TokenID != id.TokenID || ev.ProviderName != "Company identity" || ev.Role != "deployment" || !reflect.DeepEqual(ev.Permissions, []string{"cache:purge"}) || ev.Result != "success" {
+					if ev.Actor != id.Principal || ev.TokenID != s.publicTokenID(id.TokenID) || ev.ProviderName != "Company identity" || ev.Role != "deployment" || !reflect.DeepEqual(ev.Permissions, []string{"cache:purge"}) || ev.Result != "success" {
 						t.Fatalf("historical identity changed or missing: %+v", ev)
 					}
 					seen[ev.Operation] = true
@@ -140,7 +140,7 @@ func TestOIDCAuditCapturesHistoricalAuthorityAcrossAllSinks(t *testing.T) {
 				t.Fatalf("CSV: %v %v", rows, err)
 			}
 			for _, row := range rows[1:] {
-				if row[2] != id.Principal || row[8] != id.TokenID || row[9] != "Company identity" || row[10] != "deployment" || row[11] != "cache:purge" {
+				if row[2] != id.Principal || row[8] != s.publicTokenID(id.TokenID) || row[9] != "Company identity" || row[10] != "deployment" || row[11] != "cache:purge" {
 					t.Fatalf("CSV lost authority: %v", row)
 				}
 			}

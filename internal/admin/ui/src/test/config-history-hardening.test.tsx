@@ -534,4 +534,14 @@ describe("history identity, permission and recovery boundaries", () => {
       mutations("/config/history").filter(([url]) => url === "/api/config/history").length,
     ).toBeGreaterThan(1);
   });
+  it.each(["unverifiable", "different_context"])("explains %s effective versions without offering discard", async (comparison) => {
+    network((url) => url === "/api/config/pending-restart" ? json({ pending: true, status: {
+      state: "managed_staged", managed: true, staged: true, discard_available: false,
+      inconsistent: false, subsystems: ["cache"], version_comparison: comparison,
+    } }) : undefined);
+    render(<Scope><ConfigPanel /></Scope>);
+    expect(await screen.findByText(/restore the original version key/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Discard staged configuration" })).toBeNull();
+  });
+
 });

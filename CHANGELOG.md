@@ -9,6 +9,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Security
+
+- Protect effective desired/serving versions with a durable random HMAC key
+  (#644). Raw configuration CAS remains unchanged. Public authentication
+  generations and credential identifiers no longer expose unkeyed verifiers.
+  **Upgrade prerequisite:** explicitly provision and back up the private key
+  before serving; see [migration and recovery](docs/effective-versions.md).
+
+
 ### Added
 
 - Alpha offered-ALPN TCP passthrough routing (#434): ordered exact-SNI/wildcard

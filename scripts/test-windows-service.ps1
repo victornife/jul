@@ -274,12 +274,43 @@ mime = {types = {"$mimeExtension" = "application/x-jul516-explicit"}, default_ty
             $beforeAcls[$path] = @{ owner = (Get-Acl -LiteralPath $path).Owner; entries = @(Get-AclEntries $path) }
         }
     }
-    & $InstallerPath `
-        -BinaryPath $binary -ConfigPath $configPath -DataDir $dataDir
+    $installerOptions = @{ BinaryPath = $binary; ConfigPath = $configPath; DataDir = $dataDir }
+    # Frozen published installers keep their original contract.
+    if ((Get-Command $InstallerPath).Parameters.ContainsKey('InitializeVersionKey')) {
+        $versionKeyRoot = Join-Path (($env:SystemDrive + "\")) ('JulVersionE2E-' + [guid]::NewGuid().ToString('N'))
+        $installerOptions.VersionKeyFile = Join-Path $versionKeyRoot 'effective-version.key'
+        $installerOptions.InitializeVersionKey = $true
+    }
+    & $InstallerPath @installerOptions
     if (-not (Get-Service -Name 'jul' -ErrorAction SilentlyContinue)) {
         throw 'Installer returned without registering jul service.'
     }
     $serviceCreated = $true
+    if ($installerOptions.ContainsKey('VersionKeyFile')) {
+        # Static dummy bytes test a previously exposed/null-DACL state. Never
+        # copy the actual private context into this deliberately unsafe fixture.
+        $unsafeKey = Join-Path $versionKeyRoot 'null-dacl.key'
+        Set-Content -LiteralPath $unsafeKey -Value 'synthetic-invalid-key-state' -NoNewline
+        $unsafeAcl = [Security.AccessControl.FileSecurity]::new()
+        $unsafeAcl.SetSecurityDescriptorSddlForm('O:BAG:BAD:NO_ACCESS_CONTROL')
+        Set-Acl -LiteralPath $unsafeKey -AclObject $unsafeAcl
+        $beforeUnsafeAcl = (Get-Acl -LiteralPath $unsafeKey).Sddl
+        $unsafeOptions = $installerOptions.Clone()
+        $unsafeOptions.VersionKeyFile = $unsafeKey
+        $refused = $false
+        try { & $InstallerPath @unsafeOptions }
+        catch {
+            if ($_ -notmatch 'Refusing missing or empty version-key DACL|Refusing previously exposed version-key permissions') { throw }
+            $refused = $true
+        }
+        if (-not $refused) { throw 'Installer adopted a null-DACL established key.' }
+        if ((Get-Acl -LiteralPath $unsafeKey).Sddl -ne $beforeUnsafeAcl) { throw 'Installer repaired exposed key permissions instead of refusing.' }
+        if ((Get-Content -LiteralPath $unsafeKey -Raw) -ne 'synthetic-invalid-key-state') { throw 'Installer changed established key bytes.' }
+        # Restore the original explicit service arguments after the refused
+        # fixture; no process was started with that untrusted state.
+        & $InstallerPath @installerOptions
+        $report.checks.null_dacl_key_refused_without_repair = 'passed'
+    }
     $installed = Get-CimInstance Win32_Service -Filter "Name='jul'"
     if ($installed.StartName -ne 'NT SERVICE\jul') {
         throw "Unexpected service account: $($installed.StartName)"
@@ -396,7 +427,9 @@ exit 0
         Set-Content -LiteralPath $permissiveConfig -Value $permissiveRaw -Encoding utf8NoBOM
         Invoke-OrdinaryProbe -Readable -Config $permissiveConfig -History (Join-Path $permissiveData 'history')
         $oldEntries = @(Get-AclEntries $permissiveConfig)
-        & $InstallerPath -BinaryPath $permissiveBinary -ConfigPath $permissiveConfig -DataDir $permissiveData
+        $permissiveOptions = @{ BinaryPath = $permissiveBinary; ConfigPath = $permissiveConfig; DataDir = $permissiveData }
+        if ($installerOptions.ContainsKey("VersionKeyFile")) { $permissiveOptions.VersionKeyFile = $installerOptions.VersionKeyFile }
+        & $InstallerPath @permissiveOptions
         foreach ($entry in $oldEntries) {
             if ($entry -notin @(Get-AclEntries $permissiveConfig)) { throw 'Installer removed permissive existing entries.' }
         }
@@ -444,6 +477,7 @@ exit 0
             Start-Sleep -Seconds 1
         }
     }
+    if ($versionKeyRoot) { Remove-Item -LiteralPath $versionKeyRoot -Recurse -Force -ErrorAction SilentlyContinue }
     if ($probeCreated) { Remove-LocalUser -Name $probeUser -ErrorAction SilentlyContinue }
     if ($backendProcess -and -not $backendProcess.HasExited) { Stop-Process -Id $backendProcess.Id -Force }
     if ($registryCreated) { Remove-Item -LiteralPath $registryPath -Force }

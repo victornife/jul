@@ -11,6 +11,7 @@ $scratch = Join-Path ([IO.Path]::GetTempPath()) ('jul-zero-config-' + [guid]::Ne
 $site = Join-Path $scratch 'public'
 $server = $null
 $priorToken = $env:JUL_ADMIN_TOKEN
+$priorVersionKey = $env:JUL_EFFECTIVE_VERSION_KEY_FILE
 
 function Assert-ExitCode([int]$Expected, [string]$Action) {
     if ($LASTEXITCODE -ne $Expected) {
@@ -23,6 +24,9 @@ try {
     Set-Content -Path (Join-Path $site 'index.html') -Value 'Jul Windows first run' -NoNewline
     # Own only the process we started. A port conflict is an error, never a
     # reason to force-stop an unrelated listener on the operator's machine.
+    $env:JUL_EFFECTIVE_VERSION_KEY_FILE = Join-Path $scratch "private\effective-version.key"
+    & $jul version-key init
+    Assert-ExitCode 0 "provision disposable effective-version key"
     $server = Start-Process -FilePath $jul -ArgumentList @('run', '--serve', "`"$site`"", '--listen', '127.0.0.1:18080') -PassThru -NoNewWindow
     $served = $false
     for ($i = 0; $i -lt 30; $i++) {
@@ -71,6 +75,7 @@ root = "."
 } finally {
     if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     Remove-Item -Path $scratch -Recurse -Force -ErrorAction SilentlyContinue
+    if ($null -eq $priorVersionKey) { Remove-Item Env:JUL_EFFECTIVE_VERSION_KEY_FILE -ErrorAction SilentlyContinue } else { $env:JUL_EFFECTIVE_VERSION_KEY_FILE = $priorVersionKey }
     if ($null -eq $priorToken) {
         Remove-Item Env:JUL_ADMIN_TOKEN -ErrorAction SilentlyContinue
     } else {

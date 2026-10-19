@@ -21,8 +21,8 @@ type Identity struct {
 	Principal string
 	// Role is the effective role name for display and audit purposes.
 	Role string
-	// TokenID is the opaque public identifier of the credential that was
-	// presented. It is safe to log and audit; it never contains secret bytes.
+	// TokenID is private credential ownership metadata derived from secret inputs.
+	// Public identity/audit encoders must key it; never log or serialize it directly.
 	TokenID string
 	// TokenDigest is the full SHA-256 credential digest used only for internal
 	// equality. It must never be logged or serialized.

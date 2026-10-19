@@ -9,10 +9,10 @@ package admin
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"jul/internal/config"
 	"jul/internal/server"
+	"jul/internal/versionid"
 	"math"
 	"sort"
 	"strconv"
@@ -628,7 +628,7 @@ func rbacAuthSignature(a config.AdminConfig) string {
 		field(p.ExpiresAt.UTC().Format(time.RFC3339))
 		field(strconv.FormatBool(strings.TrimSpace(p.Token) != ""))
 	}
-	return hex.EncodeToString(h.Sum(nil)[:16])
+	return versionid.Process().Digest("admin-posture-generation", h.Sum(nil))
 }
 
 // wafBodyLimitStr renders a WAF request-body limit as a size string (e.g.

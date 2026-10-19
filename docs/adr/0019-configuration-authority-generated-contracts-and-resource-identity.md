@@ -2204,6 +2204,14 @@ maintained by hand, all overlapping, and all able to disagree.
 
 ### 20. Three notions of equality, kept apart
 
+**#644 amendment (unreleased, ADR 0025 proposed):** raw persisted/base/history
+revisions retain their existing canonical input. Effective desired/serving
+versions use a durable private context and `ev1:<context>:<tag>` identifiers.
+Only recognized values in the same context are comparable. Legacy retained
+effective values are never re-exported; incomparable pending state cannot
+authorize discard. See [migration and recovery](../effective-versions.md).
+
+
 Different operations require different comparisons, and conflating them produces bugs that look like
 either false drift or silent clobbering.
 

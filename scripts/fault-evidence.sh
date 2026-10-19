@@ -117,7 +117,16 @@ load() { # load <name> <seconds> <fault-load args...>
 	ev "load ${name}: $(tail -n1 "${OUT}/load-${name}.jsonl")"
 }
 
+ensure_version_key() {
+    if [[ -z "${VERSION_KEY_FIXTURE:-}" ]]; then
+        VERSION_KEY_FIXTURE="$(mktemp -d)"
+        export JUL_EFFECTIVE_VERSION_KEY_FILE="${VERSION_KEY_FIXTURE}/private/key"
+        "${BIN}/jul" version-key init >/dev/null
+    fi
+}
+
 start_jul() { # start_jul [prefix command...]
+    ensure_version_key
 	"$@" "${BIN}/jul" -config "${OUT}/jul.toml" >>"${OUT}/jul.log" 2>&1 &
 	JUL_PID=$!
 	if ! wait_http "http://${ADMIN}/metrics" 20; then
@@ -222,6 +231,7 @@ prepare_out() {
 }
 
 cleanup() {
+    [[ -n "${VERSION_KEY_FIXTURE:-}" ]] && rm -rf "${VERSION_KEY_FIXTURE}"
 	stop_scrape || true
 	[[ -n "${LOAD_PID:-}" ]] && kill "${LOAD_PID}" 2>/dev/null
 	[[ -n "${FLOOD_PID:-}" ]] && kill "${FLOOD_PID}" 2>/dev/null
@@ -246,7 +256,7 @@ start_backends() { # start_backends addr...
 # ---- profiles ----------------------------------------------------------------
 
 profile_dns_inner() {
-	ISOLATION="unshare --user --map-root-user --net --mount: private loopback, /etc/resolv.conf bind-mounted to nameserver 127.0.0.1 (fault-dnsd); the host resolver is never touched"
+	ISOLATION="root unshare --net --mount: private loopback, /etc/resolv.conf bind-mounted to nameserver 127.0.0.1 (fault-dnsd); the host resolver is never touched"
 	ip link set lo up
 	printf 'nameserver 127.0.0.1\noptions timeout:1 attempts:1\n' >"${OUT}/resolv.conf"
 	mount --bind "${OUT}/resolv.conf" /etc/resolv.conf
@@ -435,7 +445,7 @@ servers = ["127.0.0.1:19181", "127.0.0.1:19182"]
 }
 
 profile_disk_inner() {
-	ISOLATION="unshare --user --map-root-user --mount: a private 48 MiB tmpfs holds the disk cache tier, the access and audit logs, the managed config file and its history; the host filesystem is never filled"
+	ISOLATION="root unshare --mount: a private 48 MiB tmpfs holds the disk cache tier, the access and audit logs, the managed config file and its history; the host filesystem is never filled"
 	local fs="${OUT}/fs"
 	mkdir -p "${fs}"
 	mount -t tmpfs -o size=48m,mode=0755 tmpfs "${fs}"
@@ -480,6 +490,7 @@ servers = [\"127.0.0.1:19181\", \"127.0.0.1:19182\"]
 		ev "config file after apply $1: sha256=$(sha256sum "${fs}/data/jul.toml" | cut -c1-16) log_level=$(grep -m1 '^log_level' "${fs}/data/jul.toml") history_entries=$(find "${fs}/data/history" -type f | wc -l)"
 	}
 	start_jul_cfg() {
+        ensure_version_key
 		"${BIN}/jul" -config "${fs}/data/jul.toml" >>"${OUT}/jul.log" 2>&1 &
 		JUL_PID=$!
 		wait_http "http://${ADMIN}/metrics" 20 || {
@@ -562,7 +573,7 @@ print(bad)' "${fs}/logs/access.log" 2>/dev/null || echo "n/a")
 # pressure live and across a restart.
 profile_storage_inner() {
 	ISSUE=437
-	ISOLATION="unshare --user --map-root-user --mount: a private 48 MiB tmpfs holds the disk cache tier, the access and audit logs, the managed config file and its history; the host filesystem is never filled"
+	ISOLATION="root unshare --mount: a private 48 MiB tmpfs holds the disk cache tier, the access and audit logs, the managed config file and its history; the host filesystem is never filled"
 	local fs="${OUT}/fs"
 	mkdir -p "${fs}"
 	mount -t tmpfs -o size=48m,mode=0755 tmpfs "${fs}"
@@ -608,6 +619,7 @@ servers = [\"127.0.0.1:19181\", \"127.0.0.1:19182\"]
 		done
 	}
 	start_jul_cfg() {
+        ensure_version_key
 		"${BIN}/jul" -config "${fs}/data/jul.toml" >>"${OUT}/jul.log" 2>&1 &
 		JUL_PID=$!
 		wait_http "http://${ADMIN}/metrics" 20 || {
@@ -715,11 +727,15 @@ __inner_storage)
 	profile_storage_inner
 	;;
 dns | disk | storage)
+    if [[ "${EUID}" -ne 0 ]]; then
+        echo "Namespace fault profiles require root on a dedicated host; unmapped ancestor ownership in non-root user namespaces cannot establish a trusted version-key path." >&2
+        exit 2
+    fi
 	build
 	prepare_out
 	ev "building done; entering namespace for ${PROFILE}"
 	# The inner run owns its namespace; OUT, JUL_SHA and HARNESS_SHA are exported.
-	FAULT_BIN_DIR="${BIN}" unshare --user --map-root-user --mount $([[ "${PROFILE}" == dns ]] && echo --net) \
+	FAULT_BIN_DIR="${BIN}" unshare --mount $([[ "${PROFILE}" == dns ]] && echo --net) \
 		bash "$0" "__inner_${PROFILE}"
 	;;
 fd)
