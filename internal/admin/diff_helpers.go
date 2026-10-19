@@ -568,6 +568,63 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 
 	// CORS policy (ADR 0018 §9).
 	diffCORS(server, key, b.CORS, a.CORS, d)
+
+	// Declared sharing intent (ADR 0026 Decision 2, spec §4.5).
+	diffSharing(server, key, b.Sharing, a.Sharing, d)
+}
+
+func diffSharing(server, key string, b, a *config.SharingConfig, d *ConfigDiff) {
+	name := server + " " + key
+	switch {
+	case b == nil && a == nil:
+	case b == nil && a != nil:
+		d.mod(DiffEntry{
+			Kind:   "sharing",
+			Name:   name,
+			Before: config.SharingModeNotDeclared,
+			After:  a.Mode,
+			Detail: fmt.Sprintf("Declare sharing intent %q on route %s", a.Mode, key),
+		}, "route "+name+" sharing")
+		if config.IsSharingModeWider(config.SharingModeNotDeclared, a.Mode) {
+			d.warn("Declaring sharing.mode = %q on route %s on %s widens the declared audience intent.", a.Mode, key, server)
+		}
+	case b != nil && a == nil:
+		d.mod(DiffEntry{
+			Kind:   "sharing",
+			Name:   name,
+			Before: b.Mode,
+			After:  config.SharingModeNotDeclared,
+			Detail: fmt.Sprintf("Clear declared sharing intent from route %s", key),
+		}, "route "+name+" sharing")
+	default:
+		if b.Mode != a.Mode {
+			d.mod(DiffEntry{
+				Kind:   "sharing",
+				Name:   name,
+				Before: b.Mode,
+				After:  a.Mode,
+				Detail: fmt.Sprintf("Change declared sharing mode on route %s (%s -> %s)", key, b.Mode, a.Mode),
+			}, "route "+name+" sharing mode")
+			if config.IsSharingModeWider(b.Mode, a.Mode) {
+				d.warn("Changing sharing.mode from %q to %q on route %s on %s widens the declared audience intent.", b.Mode, a.Mode, key, server)
+			}
+		}
+		if !stringPtrsEqual(b.AudienceLabel, a.AudienceLabel) {
+			d.mod(DiffEntry{
+				Kind:   "sharing",
+				Name:   name,
+				Detail: fmt.Sprintf("Change sharing audience_label on route %s", key),
+			}, "route "+name+" sharing audience_label")
+		}
+		if !stringPtrsEqual(b.ExternalEnforcer, a.ExternalEnforcer) {
+			d.mod(DiffEntry{
+				Kind:   "sharing",
+				Name:   name,
+				Detail: fmt.Sprintf("Change sharing external_enforcer on route %s", key),
+			}, "route "+name+" sharing external_enforcer")
+		}
+	}
+	d.cover("servers.*.locations.*.sharing")
 }
 
 // diffResponseHeaders compares a route's ordered response-header operations.

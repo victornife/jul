@@ -401,4 +401,70 @@ func TestExecuteMutationVerboseSuccessDirect(t *testing.T) {
 	})
 }
 
+func TestRemotePostconditionCLIAndPlanSharingSummary(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/sharing/postcondition/evaluate", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"postcondition_version":1,"result":"candidate_serving","candidate":"serving","access":"matches","serving_version":"v1","candidate_summary":"The exact planned configuration is serving.","access_summary":"All expected entry access facts and fingerprints match what is serving.","summary":"The planned configuration is serving, and its expected access facts match.","recovery_guidance":"none","entries":[]}`)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	planFile := t.TempDir() + "/plan.json"
+	if err := os.WriteFile(planFile, []byte(`{"sharing":{"entries":[{"display_label":"app /"}],"requires_acknowledgement":true,"postcondition":{"status":"available","postcondition_version":1,"key_id":"pk1-1234","base_config_digest":"hmac-sha256:aa","candidate_config_digest":"hmac-sha256:bb","repeatable":true,"entries":[]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		handled, code := dispatchRemoteSubcommand([]string{"postcondition", "--endpoint", ts.URL, "--file", planFile})
+		if !handled || code != 0 || !strings.Contains(out.String(), "result: candidate_serving") {
+			t.Fatalf("handled=%v code=%d out=%s err=%s", handled, code, out, errOut)
+		}
+		out.Reset()
+		errOut.Reset()
+		code = cmdRemotePostcondition([]string{"--endpoint", ts.URL, "--file", planFile, "--json"})
+		if code != 0 || !json.Valid(out.Bytes()) {
+			t.Fatalf("json code=%d out=%s err=%s", code, out, errOut)
+		}
+	})
+
+	// Error cases for cmdRemotePostcondition and extractPostconditionPayload.
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemotePostcondition([]string{"--endpoint", ts.URL}); code != 2 {
+			t.Fatalf("missing --file code=%d", code)
+		}
+		if code := cmdRemotePostcondition([]string{"--endpoint", ts.URL, "--file", planFile, "extra"}); code != 2 {
+			t.Fatalf("extra arg code=%d", code)
+		}
+		if code := cmdRemotePostcondition([]string{"--endpoint", ts.URL, "--file", planFile + ".missing"}); code != 2 {
+			t.Fatalf("missing file code=%d", code)
+		}
+	})
+	for _, bad := range []string{
+		`not-json`,
+		`{"postcondition":{"status":"unavailable","unavailable_reason":"config_raw_required"}}`,
+		`{"status":"available"}`,
+	} {
+		if _, err := extractPostconditionPayload([]byte(bad)); err == nil {
+			t.Fatalf("expected error for %s", bad)
+		}
+	}
+
+	// Verify renderRawSuccess prints sharing summary and postcondition status.
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		rawResp := adminclient.RawResponse{
+			Body: []byte(`{"base_version":"v1","valid":true,"sharing":{"entries":[{"display_label":"app /"}],"requires_acknowledgement":true,"postcondition":{"status":"available","key_id":"pk1-abc"}}}`),
+		}
+		if code := renderRawSuccess(remoteCommon{}, "plan", rawResp, "assessed"); code != 0 || !strings.Contains(out.String(), "sharing entries affected: 1") || !strings.Contains(out.String(), "postcondition: available (key_id=pk1-abc)") {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+		out.Reset()
+		rawUnavail := adminclient.RawResponse{
+			Body: []byte(`{"base_version":"v1","valid":true,"sharing":{"entries":[],"requires_acknowledgement":false,"postcondition":{"status":"unavailable","unavailable_reason":"config_raw_required"}}}`),
+		}
+		if code := renderRawSuccess(remoteCommon{}, "plan", rawUnavail, "assessed"); code != 0 || !strings.Contains(out.String(), "postcondition: unavailable (config_raw_required)") {
+			t.Fatalf("code=%d out=%s", code, out)
+		}
+	})
+}
+
 var _ = fmt.Sprintf

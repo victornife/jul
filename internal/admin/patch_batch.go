@@ -98,6 +98,7 @@ type patchBatchExecution struct {
 	ValidationErrors   []validationError
 	Diff               ConfigDiff
 	Lifecycle          lifecycle.Result
+	Ops                []patchRequest
 
 	Valid bool
 }
@@ -256,7 +257,7 @@ func executePatchBatch(
 		// route_id is immutable outside minting, so this is a stable identity
 		// even for an op like location_remove or location_set_match, whose
 		// own effect would make the target unresolvable afterward.
-		preOpIdentity := resolveRouteAuditIdentity(candidateConfig, op.locationTarget())
+		preOpIdentity := resolvePatchOpAuditIdentity(candidateConfig, op)
 		if baseline.DenyMint {
 			op.denyMint = true
 		}
@@ -338,6 +339,7 @@ func executePatchBatch(
 		ValidationErrors:   validationErrors,
 		Diff:               diffConfigs(beforeConfig, candidateConfig),
 		Lifecycle:          classification,
+		Ops:                append([]patchRequest(nil), ops...),
 		Valid:              len(validationErrors) == 0 && len(classification.ValidationRejected) == 0,
 	}
 	return out, nil

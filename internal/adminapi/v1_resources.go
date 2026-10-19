@@ -49,12 +49,21 @@ type Route struct {
 	Upstream string   `json:"upstream,omitempty"`
 	Methods  []string `json:"methods,omitempty"`
 
-	TLS               bool `json:"tls"`
-	Auth              bool `json:"auth"`
-	RequireClientCert bool `json:"require_client_cert"`
-	Cache             bool `json:"cache"`
-	RateLimit         bool `json:"rate_limit"`
-	WAF               bool `json:"waf"`
+	TLS               bool          `json:"tls"`
+	Auth              bool          `json:"auth"`
+	RequireClientCert bool          `json:"require_client_cert"`
+	Cache             bool          `json:"cache"`
+	RateLimit         bool          `json:"rate_limit"`
+	WAF               bool          `json:"waf"`
+	Sharing           *RouteSharing `json:"sharing,omitempty"`
+}
+
+// RouteSharing is the optional operator-declared sharing posture on a route
+// ([servers.locations.sharing], ADR 0026 Decision 2, spec §4.5).
+type RouteSharing struct {
+	Mode             string `json:"mode"`
+	AudienceLabel    string `json:"audience_label,omitempty"`
+	ExternalEnforcer string `json:"external_enforcer,omitempty"`
 }
 
 // RoutesResponse is GET /api/v1/routes.

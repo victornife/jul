@@ -175,6 +175,27 @@ func ContainsStringValue(c *Config, needle string) bool {
 	return found
 }
 
+// ContainsSecretRef reports whether s carries at least one supported secret
+// reference (${env:...}, ${file:...}, ${secret:...}) or any ${scheme:...}
+// reference token.
+func ContainsSecretRef(s string) bool {
+	return secretRefAnyRE.MatchString(s)
+}
+
+// SecretRefSchemes returns the distinct reference schemes ("env", "file")
+// appearing in s, normalizing "secret" to "file".
+func SecretRefSchemes(s string) (hasEnv, hasFile bool) {
+	for _, m := range secretRefRE.FindAllStringSubmatch(s, -1) {
+		switch m[1] {
+		case "env":
+			hasEnv = true
+		case "file", "secret":
+			hasFile = true
+		}
+	}
+	return hasEnv, hasFile
+}
+
 // containsSecretRef reports whether s carries at least one supported secret
 // reference (${env:...}, ${file:...}). Lint uses it to tell a literal secret
 // from one already externalized.

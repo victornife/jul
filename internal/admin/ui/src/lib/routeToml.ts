@@ -74,6 +74,12 @@ export const AUTH_METHODS: { value: AuthMethod; label: string; hint: string }[] 
   },
 ];
 
+export interface RouteSharingDraft {
+  mode: "preview" | "private_network" | "restricted" | "public";
+  audienceLabel?: string;
+  externalEnforcer?: string;
+}
+
 export interface RouteDraft {
   listen: string;
   serverNames: string;
@@ -84,6 +90,8 @@ export interface RouteDraft {
   auth: AuthDraft;
   cache: boolean;
   rateLimit: boolean;
+  routeId?: string;
+  sharing?: RouteSharingDraft;
 }
 
 function tomlString(s: string): string {
@@ -187,6 +195,9 @@ export function generateRouteToml(d: RouteDraft): string {
   }
   lines.push("");
   lines.push("  [[servers.locations]]");
+  if (d.routeId && d.routeId.trim().length > 0) {
+    lines.push(`  route_id = ${tomlString(d.routeId.trim())}`);
+  }
   lines.push(
     `  match = { type = ${tomlString(d.matchType)}, path = ${tomlString(d.path.trim() || "/")} }`,
   );
@@ -215,6 +226,17 @@ export function generateRouteToml(d: RouteDraft): string {
   if (d.rateLimit)
     lines.push(`  rate_limit = { enabled = true, rate = 100, burst = 100, key = "ip" }`);
   for (const line of authLines(d.auth)) lines.push(line);
+  if (d.sharing) {
+    lines.push("");
+    lines.push("    [servers.locations.sharing]");
+    lines.push(`    mode = ${tomlString(d.sharing.mode)}`);
+    if (d.sharing.audienceLabel && d.sharing.audienceLabel.trim().length > 0) {
+      lines.push(`    audience_label = ${tomlString(d.sharing.audienceLabel.trim())}`);
+    }
+    if (d.sharing.externalEnforcer && d.sharing.externalEnforcer.trim().length > 0) {
+      lines.push(`    external_enforcer = ${tomlString(d.sharing.externalEnforcer.trim())}`);
+    }
+  }
   return lines.join("\n");
 }
 

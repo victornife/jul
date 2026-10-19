@@ -111,6 +111,7 @@ func Validate(c *Config) error {
 			locWhere := fmt.Sprintf("%s.locations[%d]", where, j)
 			errs = append(errs, validateMatch(loc.Match, srv, locWhere)...)
 			errs = append(errs, validateRouteID(loc.RouteID, locWhere)...)
+			errs = append(errs, validateSharing(loc.Sharing, loc.RouteID, locWhere)...)
 			if loc.RouteID != nil {
 				routeIDLocations[*loc.RouteID] = append(routeIDLocations[*loc.RouteID], locWhere)
 			}

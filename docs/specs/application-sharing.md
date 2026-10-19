@@ -355,9 +355,9 @@ for #586 and #587).
   `admin_listener_not_loopback` (existing lint), `jwt_header_only` (a provider
   token in another header or cookie is not validated by Jul).
 
-### 4.5 Declared intent and intent-guarded changes (accepted, SD-05)
+### 4.5 Declared intent and intent-guarded changes (accepted, SD-05; delivered in #641)
 
-Delivered by a bounded runtime tranche before #581's evidence run (§17). Shape:
+Delivered in #641 (`SHARE-01A`) before #581's evidence run (§17). Shape:
 
 ```toml
 [[servers.locations]]
@@ -1758,7 +1758,7 @@ migration converter.
 
 | Tranche | Scope | Rough effort | Sequencing | Door |
 | --- | --- | --- | --- | --- |
-| **Intent and guarded changes** (SD-05, SD-11 to SD-14; #641) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling and the bounded, paged response shape (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes including the host-dispatch rule; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 6–12 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, from 4–8 in r6 for the access fingerprint and the expanded §9.5 rules (publish-time comparison of loaded file contents later moved to #642's retirement), and from 5–10 in r9 for the bounded paged projection, the host-dispatch analysis with its property test, and expected-absence postconditions; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
+| **Intent and guarded changes** (SD-05, SD-11 to SD-14; #641 — **delivered**) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling and the bounded, paged response shape (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes including the host-dispatch rule; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 6–12 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, from 4–8 in r6 for the access fingerprint and the expanded §9.5 rules (publish-time comparison of loaded file contents later moved to #642's retirement), and from 5–10 in r9 for the bounded paged projection, the host-dispatch analysis with its property test, and expected-absence postconditions; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
 | **Complete withdrawal** (SD-04, SD-02 bundle, SD-07–SD-09; #642 with #563/#562) | §9.3 gate and typed op; §8.4 stream-level retirement with #562 WebSocket ownership and per-request revocation re-check; collateral disclosure; real H1/H2/H3 clients; race and leak checks; same coverage rule | design 2–4 days + implementation 10–20 days (author estimate) | next shared-code stream; #581 environment work proceeds in parallel | gate field costly once adopted; promise additive |
 
 Together the two tranches are a nominal 18–36 focused days before waiting and

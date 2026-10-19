@@ -843,6 +843,12 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		loc.CORS = nil
 		return fmt.Sprintf("route %s%s CORS policy cleared", req.Listen, req.Path), nil
 
+	case "location_set_sharing":
+		return applyLocationSharingSet(c, req)
+
+	case "location_clear_sharing":
+		return applyLocationSharingClear(c, req)
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}

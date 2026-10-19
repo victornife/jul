@@ -288,6 +288,104 @@ func findLocationIndex(c *config.Config, t routeTarget) (int, int, error) {
 	return matches[ordinal].srv, matches[ordinal].loc, nil
 }
 
+// findLocationByRouteID locates a single location by its literal route_id.
+func findLocationByRouteID(c *config.Config, id string) (*config.ServerConfig, *config.LocationConfig, error) {
+	trimmed := strings.TrimSpace(id)
+	if trimmed == "" {
+		return nil, nil, fmt.Errorf("route_id is required")
+	}
+	var foundSrv *config.ServerConfig
+	var foundLoc *config.LocationConfig
+	matches := 0
+	for i := range c.Servers {
+		for j := range c.Servers[i].Locations {
+			loc := &c.Servers[i].Locations[j]
+			if loc.RouteID != nil && *loc.RouteID == trimmed && !config.ContainsSecretRef(*loc.RouteID) {
+				foundSrv = &c.Servers[i]
+				foundLoc = loc
+				matches++
+			}
+		}
+	}
+	switch {
+	case matches == 0:
+		return nil, nil, fmt.Errorf("no route found with route_id %q", trimmed)
+	case matches > 1:
+		return nil, nil, fmt.Errorf("route target is ambiguous: %d locations carry route_id %q", matches, trimmed)
+	default:
+		return foundSrv, foundLoc, nil
+	}
+}
+
+func resolveLocationForSharingPatch(c *config.Config, req patchRequest) (*config.ServerConfig, *config.LocationConfig, error) {
+	var srv *config.ServerConfig
+	var loc *config.LocationConfig
+	switch {
+	case strings.TrimSpace(req.Listen) != "" || strings.TrimSpace(req.Path) != "":
+		srvIdx, locIdx, err := findLocationIndex(c, req.locationTarget())
+		if err != nil {
+			return nil, nil, err
+		}
+		srv = &c.Servers[srvIdx]
+		loc = &srv.Locations[locIdx]
+		if req.RouteID != nil && strings.TrimSpace(*req.RouteID) != "" {
+			if loc.RouteID == nil || *loc.RouteID != strings.TrimSpace(*req.RouteID) {
+				return nil, nil, fmt.Errorf("%s: target route does not match route_id %q", req.Op, strings.TrimSpace(*req.RouteID))
+			}
+		}
+	case req.RouteID != nil && strings.TrimSpace(*req.RouteID) != "":
+		var err error
+		srv, loc, err = findLocationByRouteID(c, *req.RouteID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", req.Op, err)
+		}
+	default:
+		return nil, nil, fmt.Errorf("%s: route target requires route_id or listen and path", req.Op)
+	}
+	if loc.RouteID == nil || strings.TrimSpace(*loc.RouteID) == "" || config.ContainsSecretRef(*loc.RouteID) {
+		return nil, nil, fmt.Errorf("%s: route %s%s has no literal route_id; add route_id via raw TOML first (editing never mints a route_id)", req.Op, srv.Listen, loc.Match.Path)
+	}
+	return srv, loc, nil
+}
+
+func applyLocationSharingSet(c *config.Config, req patchRequest) (string, error) {
+	srv, loc, err := resolveLocationForSharingPatch(c, req)
+	if err != nil {
+		return "", err
+	}
+	if req.Sharing == nil {
+		loc.Sharing = nil
+		return fmt.Sprintf("route %s%s sharing intent cleared", srv.Listen, loc.Match.Path), nil
+	}
+	mode := strings.TrimSpace(req.Sharing.Mode)
+	if mode == "" {
+		return "", fmt.Errorf("location_set_sharing: mode is required (want preview | private_network | restricted | public)")
+	}
+	if !config.ValidSharingMode(mode) {
+		return "", fmt.Errorf("location_set_sharing: invalid mode %q (want preview | private_network | restricted | public)", mode)
+	}
+	sh := &config.SharingConfig{Mode: mode}
+	if req.Sharing.AudienceLabel != nil {
+		lbl := *req.Sharing.AudienceLabel
+		sh.AudienceLabel = &lbl
+	}
+	if req.Sharing.ExternalEnforcer != nil {
+		enf := *req.Sharing.ExternalEnforcer
+		sh.ExternalEnforcer = &enf
+	}
+	loc.Sharing = sh
+	return fmt.Sprintf("route %s%s sharing intent set to %s", srv.Listen, loc.Match.Path, mode), nil
+}
+
+func applyLocationSharingClear(c *config.Config, req patchRequest) (string, error) {
+	srv, loc, err := resolveLocationForSharingPatch(c, req)
+	if err != nil {
+		return "", err
+	}
+	loc.Sharing = nil
+	return fmt.Sprintf("route %s%s sharing intent cleared", srv.Listen, loc.Match.Path), nil
+}
+
 // stringSetsEqual reports whether a and b contain the same elements regardless
 // of order (multiset equality, so repeated server names are compared exactly).
 func stringSetsEqual(a, b []string) bool {

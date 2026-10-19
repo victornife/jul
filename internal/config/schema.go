@@ -467,6 +467,12 @@ type LocationConfig struct {
 	// base_version; neither form is degraded relative to the other.
 	RouteID *string `toml:"route_id,omitempty"`
 
+	// Sharing is the optional operator-declared sharing posture for this
+	// location ([servers.locations.sharing], ADR 0026 Decision 2, spec §4.5).
+	// It requires a non-empty route_id on the same location and has no effect
+	// on routing, matching, enforcement, caching, or metrics.
+	Sharing *SharingConfig `toml:"sharing,omitempty"`
+
 	// ResponseHeaders is the ordered list of add/set/remove operations applied
 	// to the response this location produces, outside the cache and outside
 	// compression's own headers (ADR 0018 §8). CORS's own Access-Control-*
@@ -603,6 +609,39 @@ type LocationConfig struct {
 	// (mutually exclusive with root/proxy_pass/etc.). The name must appear in
 	// [plugins] with type = "handler". Requires the "wasmplugins" build tag.
 	Plugin string `toml:"plugin"`
+}
+
+// SharingConfig declares the operator's intended sharing posture for a
+// location ([servers.locations.sharing], ADR 0026 Decision 2, spec §4.5).
+// It has no effect on routing, matching, enforcement, caching, or metrics;
+// it is consumed by config.Lint, plan/preview findings, and projections.
+type SharingConfig struct {
+	// Mode is the declared sharing posture: "preview", "private_network",
+	// "restricted", or "public". Required when [servers.locations.sharing] is present.
+	Mode string `toml:"mode"`
+	// AudienceLabel is an optional short printable UTF-8 description of the
+	// intended audience (1..64 bytes, no control characters; never a user list).
+	AudienceLabel *string `toml:"audience_label,omitempty"`
+	// ExternalEnforcer names an external gate declared by the operator (1..64
+	// bytes of printable UTF-8, no control characters, SD-12). Rendered only as
+	// "declared by the operator, not verified by Jul".
+	ExternalEnforcer *string `toml:"external_enforcer,omitempty"`
+}
+
+// AudienceLabelValue returns the configured audience_label or "".
+func (s *SharingConfig) AudienceLabelValue() string {
+	if s == nil || s.AudienceLabel == nil {
+		return ""
+	}
+	return *s.AudienceLabel
+}
+
+// ExternalEnforcerValue returns the configured external_enforcer or "".
+func (s *SharingConfig) ExternalEnforcerValue() string {
+	if s == nil || s.ExternalEnforcer == nil {
+		return ""
+	}
+	return *s.ExternalEnforcer
 }
 
 // GRPCTranscodeConfig configures gRPC<->REST/JSON transcoding for a location.
@@ -1243,6 +1282,10 @@ func (c CompressionConfig) IsEnabled() bool { return c.Enabled != nil && *c.Enab
 // Bool returns a pointer to b. It is a convenience helper for constructing
 // *bool config fields in struct literals and tests.
 func Bool(b bool) *bool { return &b }
+
+// String returns a pointer to s. It is a convenience helper for constructing
+// *string config fields in struct literals and tests.
+func String(s string) *string { return &s }
 
 // Int returns a pointer to i, for the config fields where an absent key and an
 // explicit zero are different answers.

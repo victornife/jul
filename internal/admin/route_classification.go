@@ -40,11 +40,14 @@ var internalRouteReasons = map[string]string{
 		"Console; its shape is not stable.",
 
 	// ── Runtime projections for subsystems still completing ───────────────
-	"/api/certs":    "A runtime projection that will change as the certificate subsystem completes.",
-	"/api/tls":      "A runtime projection that will change as the TLS subsystem completes.",
-	"/api/mtls":     "A runtime projection that will change as the mTLS subsystem completes.",
-	"/api/security": "A runtime projection that will change as the security subsystem completes.",
-	"/api/plugins":  "A runtime projection that will change as the plugin subsystem completes.",
+	"/api/certs":                          "A runtime projection that will change as the certificate subsystem completes.",
+	"/api/tls":                            "A runtime projection that will change as the TLS subsystem completes.",
+	"/api/mtls":                           "A runtime projection that will change as the mTLS subsystem completes.",
+	"/api/security":                       "A runtime projection that will change as the security subsystem completes.",
+	"/api/plugins":                        "A runtime projection that will change as the plugin subsystem completes.",
+	"/api/sharing":                        "Internal sharing projection (ADR 0026 / spec §4.3); its bounded paged shape is refined across the first sharing journeys before external /api/v1 promotion.",
+	"/api/sharing/value":                  "Internal snapshot-bound chunked full-value read for the sharing projection (spec §4.3).",
+	"/api/sharing/postcondition/evaluate": "Internal stateless postcondition evaluator (spec §9.4); evaluates process-keyed plan postconditions against the serving snapshot.",
 	"/api/upstreams/{name}/resilience": "A resilience projection whose taxonomy is still being closed by #144. " +
 		"Publishing it now would freeze a shape that issue is still deciding.",
 

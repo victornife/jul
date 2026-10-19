@@ -1,0 +1,30 @@
+[global]
+config_authority = "managed"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["portal.example.com"]
+
+  [[servers.locations]]
+  route_id = "public-portal"
+  match = { type = "prefix", path = "/" }
+  return = 200
+
+    [servers.locations.sharing]
+    mode = "public"
+    audience_label = "anyone"
+
+[[servers]]
+listen = "127.0.0.1:8081"
+server_names = ["dash.example.com"]
+
+  [[servers.locations]]
+  route_id = "family-dashboard"
+  match = { type = "prefix", path = "/" }
+  return = 200
+  auth.allow = ["127.0.0.1/32"]
+
+    [servers.locations.sharing]
+    mode = "restricted"
+    audience_label = "family"
+    external_enforcer = "cloudflare-access:dash-team"

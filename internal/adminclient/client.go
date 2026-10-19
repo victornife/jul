@@ -420,6 +420,18 @@ func (c *Client) Export(ctx context.Context) (RawResponse, error) {
 	return c.do(ctx, operation("exportConfig"), nil, nil, nil, "", "")
 }
 
+// EvaluatePostcondition evaluates a §9.4 plan postcondition against the live
+// serving snapshot without re-reading environment or file inputs.
+func (c *Client) EvaluatePostcondition(ctx context.Context, payload []byte) (RawResponse, error) {
+	op := Operation{
+		ID:          "evaluatePostcondition",
+		Method:      http.MethodPost,
+		Path:        "/api/sharing/postcondition/evaluate",
+		ContentType: "application/json",
+	}
+	return c.do(ctx, op, nil, nil, payload, "application/json", "")
+}
+
 // PreparedMutation freezes every fingerprint-relevant request component before
 // the first send. Retry sends the same body slice, query and headers verbatim.
 type PreparedMutation struct {

@@ -61,6 +61,7 @@ func (s Severity) MarshalJSON() ([]byte, error) {
 // a fix. The JSON field names are lowercase and stable so the `jul lint -json`
 // output can be consumed by automation.
 type Diagnostic struct {
+	Code     string   `json:"code,omitempty"`
 	Severity Severity `json:"severity"`
 	Field    string   `json:"field,omitempty"`
 	Message  string   `json:"message"`
@@ -72,11 +73,28 @@ type Diagnostic struct {
 // outright-invalid configurations; Lint only returns warnings. Each rule is
 // conservative to avoid false positives.
 func Lint(c *Config) []Diagnostic {
+	return LintWithRaw(c, c, false)
+}
+
+// LintWithRaw runs Lint using rawCfg for display strings and sharing findings
+// so resolved secret references never appear in diagnostic messages.
+func LintWithRaw(rawCfg, effCfg *Config, forPlan bool) []Diagnostic {
+	if effCfg == nil {
+		effCfg = rawCfg
+	}
+	if rawCfg == nil {
+		rawCfg = effCfg
+	}
+	c := rawCfg
 	var diags []Diagnostic
 
 	// A server with no locations answers every request with 404. An HTTPS
 	// redirector (redirect_https set) legitimately has no locations.
 	for i, srv := range c.Servers {
+		displayListen := srv.Listen
+		if i < len(rawCfg.Servers) {
+			displayListen = rawCfg.Servers[i].Listen
+		}
 		if srv.AccessLog != "" {
 			diags = append(diags, Diagnostic{
 				Severity: SeverityWarning,
@@ -96,7 +114,7 @@ func Lint(c *Config) []Diagnostic {
 		if len(srv.Locations) == 0 && srv.RedirectHTTPS == 0 {
 			diags = append(diags, Diagnostic{
 				Severity: SeverityWarning,
-				Field:    fmt.Sprintf("servers[%d] (listen %q)", i, srv.Listen),
+				Field:    fmt.Sprintf("servers[%d] (listen %q)", i, displayListen),
 				Message:  "server has no locations; every request will return 404",
 				Hint:     "add a [[servers.locations]] block, or set redirect_https for an HTTP->HTTPS redirector",
 			})
@@ -199,11 +217,15 @@ func Lint(c *Config) []Diagnostic {
 
 	// An admin listener reachable off-loopback without a shared token or
 	// named-principal RBAC is unauthenticated remote control of the server.
+	displayAdminListen := rawCfg.Admin.Listen
+	if displayAdminListen == "" {
+		displayAdminListen = c.Admin.Listen
+	}
 	if c.Admin.Enabled && c.Admin.Token == "" && !c.Admin.RBAC.Enabled && !IsLoopbackListen(c.Admin.Listen) {
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Field:    "[admin]",
-			Message:  fmt.Sprintf("admin listener %q is not loopback and has no token or enabled RBAC; it is unauthenticated", c.Admin.Listen),
+			Message:  fmt.Sprintf("admin listener %q is not loopback and has no token or enabled RBAC; it is unauthenticated", displayAdminListen),
 			Hint:     "set [admin].token, enable [admin.rbac] with named principals, or bind listen to 127.0.0.1",
 		})
 	}
@@ -216,7 +238,7 @@ func Lint(c *Config) []Diagnostic {
 		diags = append(diags, Diagnostic{
 			Severity: SeverityWarning,
 			Field:    "[admin]",
-			Message:  fmt.Sprintf("admin listener %q is not loopback and has no TLS; credentials and configuration travel in cleartext", c.Admin.Listen),
+			Message:  fmt.Sprintf("admin listener %q is not loopback and has no TLS; credentials and configuration travel in cleartext", displayAdminListen),
 			Hint:     "configure [admin.tls], or bind listen to 127.0.0.1 and tunnel instead",
 		})
 	}
@@ -299,6 +321,8 @@ func Lint(c *Config) []Diagnostic {
 			Hint:     "remove error_log; redirect stderr in your process supervisor instead",
 		})
 	}
+
+	diags = append(diags, LintSharingFindingsWithRaw(rawCfg, effCfg, forPlan)...)
 
 	return diags
 }

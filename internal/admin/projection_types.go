@@ -104,6 +104,16 @@ type LocationProjection struct {
 	// "grpc_transcode". It seeds the quick-edit form and the "Edit in
 	// designer" deep-edit flow.
 	Transcode *TranscodeProjection `json:"transcode,omitempty"`
+	// Sharing is the location's optional declared sharing intent
+	// ([servers.locations.sharing], ADR 0026 Decision 2, spec §4.5).
+	Sharing *LocationSharingState `json:"sharing,omitempty"`
+}
+
+// LocationSharingState summarises a location's declared [sharing] block.
+type LocationSharingState struct {
+	Mode             string `json:"mode"`
+	AudienceLabel    string `json:"audience_label,omitempty"`
+	ExternalEnforcer string `json:"external_enforcer,omitempty"`
 }
 
 // LocationAuthState summarises a location's access-control rule for the guided

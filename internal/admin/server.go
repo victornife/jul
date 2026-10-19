@@ -734,6 +734,17 @@ type Server struct {
 	// applyMu serializes the write path itself.
 	certMu          sync.Mutex
 	certFingerprint string
+
+	// sharingKeyOnce initializes the process-only 256-bit HMAC-SHA-256 key and
+	// key_id used to produce and evaluate §9.4 postconditions (#641).
+	sharingKeyOnce sync.Once
+	sharingKeyID   string
+	sharingKey     []byte
+
+	// sharingCacheMu guards sharingCache, the snapshot-bound in-memory sharing
+	// derivation cache (§4.3).
+	sharingCacheMu sync.Mutex
+	sharingCache   *cachedSharingDerivation
 }
 
 // RecordManagedApplyOutcome records the terminal async outcome of a managed

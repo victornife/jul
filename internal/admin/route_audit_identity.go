@@ -44,6 +44,22 @@ func resolveRouteAuditIdentity(c *config.Config, t routeTarget) routeAuditIdenti
 	return routeAuditIdentity{Selector: routeTargetSelector(t.Listen, t.ServerNames, t.MatchType, t.Path, t.Ordinal)}
 }
 
+func resolvePatchOpAuditIdentity(c *config.Config, op patchRequest) routeAuditIdentity {
+	if id := resolveRouteAuditIdentity(c, op.locationTarget()); id != (routeAuditIdentity{}) {
+		return id
+	}
+	if op.Op != "location_add" && op.RouteID != nil {
+		if rid := strings.TrimSpace(*op.RouteID); rid != "" {
+			if _, loc, err := findLocationByRouteID(c, rid); err == nil && loc != nil {
+				if id := routeID(loc); id != "" {
+					return routeAuditIdentity{ResourceID: id}
+				}
+			}
+		}
+	}
+	return routeAuditIdentity{}
+}
+
 // auditIdentityOf is resolveRouteAuditIdentity's counterpart for a location
 // the caller already has a pointer to — used for location_add, whose target
 // does not exist until the operation runs, so there is nothing to resolve

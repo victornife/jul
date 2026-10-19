@@ -706,6 +706,13 @@ export const TranscodeProjectionSchema = z.object({
 });
 export type TranscodeProjection = z.infer<typeof TranscodeProjectionSchema>;
 
+export const LocationSharingStateSchema = z.object({
+  mode: z.string(),
+  audience_label: z.string().optional(),
+  external_enforcer: z.string().optional(),
+});
+export type LocationSharingState = z.infer<typeof LocationSharingStateSchema>;
+
 export const LocationProjectionSchema = z.object({
   index: z.number().default(0),
   match: z.string(),
@@ -761,6 +768,7 @@ export const LocationProjectionSchema = z.object({
   // cors is the location's own [cors] policy, present only when configured.
   cors: LocationCORSStateSchema.optional(),
   transcode: TranscodeProjectionSchema.optional(),
+  sharing: LocationSharingStateSchema.optional(),
   warnings: z.array(z.string()).optional(),
 });
 export type LocationProjection = z.infer<typeof LocationProjectionSchema>;
@@ -1648,6 +1656,94 @@ export const DiffEntrySchema = z.object({
   detail: z.string().optional(),
 });
 
+export const SharingEntryPositionSchema = z.object({
+  revision: z.string().optional(),
+  block_index: z.number(),
+  location_index: z.number(),
+});
+
+export const SharingEntryRefSchema = z.object({
+  kind: z.string(),
+  route_id: z.string().optional(),
+  position: SharingEntryPositionSchema.optional(),
+});
+
+export const SharingPlanFindingSchema = z.object({
+  code: z.string(),
+  severity: z.string(),
+  field: z.string().optional(),
+  message: z.string(),
+  hint: z.string().optional(),
+  created: z.boolean().default(false),
+});
+export type SharingPlanFinding = z.infer<typeof SharingPlanFindingSchema>;
+
+export const SharingEntryDeltaSchema = z.object({
+  ref: SharingEntryRefSchema,
+  display_label: z.string(),
+  expect: z.string(),
+  class: z.string(),
+  declared_mode_before: z.string(),
+  declared_mode_after: z.string(),
+  declared_mode_widened: z.boolean().default(false),
+  requires_acknowledgement: z.boolean().default(false),
+  triggers_retirement: z.boolean().default(false),
+  reasons: z.array(z.string()).optional(),
+  intent_findings: z.array(SharingPlanFindingSchema).optional(),
+  provider_checklist_required: z.boolean().default(false),
+});
+export type SharingEntryDelta = z.infer<typeof SharingEntryDeltaSchema>;
+
+export const SharingFileBackedEntrySchema = z.object({
+  ref: SharingEntryRefSchema,
+  display_label: z.string(),
+  input_kinds: z.array(z.string()),
+});
+
+export const SharingPostconditionExpectedSchema = z.object({
+  bind_scope: z.string().optional(),
+  network_check: z.string().optional(),
+  credential_check: z.string().optional(),
+  client_certificate: z.string().optional(),
+  declared_intent: z.string().optional(),
+  withdrawn: z.boolean().optional(),
+  omitted_file_facts: z.array(z.string()).optional(),
+  access_fingerprint: z.string(),
+});
+
+export const SharingPostconditionItemSchema = z.object({
+  ref: SharingEntryRefSchema,
+  expect: z.string(),
+  expected: SharingPostconditionExpectedSchema.optional(),
+  external_inputs: z.array(z.string()).optional(),
+});
+
+export const SharingPlanPostconditionSchema = z.object({
+  status: z.string(),
+  unavailable_reason: z.string().optional(),
+  postcondition_version: z.number().optional(),
+  key_id: z.string().optional(),
+  base_config_digest: z.string().optional(),
+  candidate_config_digest: z.string().optional(),
+  repeatable: z.boolean().optional(),
+  entries: z.array(SharingPostconditionItemSchema).optional(),
+});
+export type SharingPlanPostcondition = z.infer<typeof SharingPlanPostconditionSchema>;
+
+export const SharingPlanReportSchema = z.object({
+  entries: z.array(SharingEntryDeltaSchema).default([]),
+  requires_acknowledgement: z.boolean().default(false),
+  acknowledgement_entries: z.array(z.string()).optional(),
+  intent_findings: z.array(SharingPlanFindingSchema).optional(),
+  file_backed_inputs_notice: z.string().optional(),
+  file_backed_entries: z.array(SharingFileBackedEntrySchema).optional(),
+  file_backed_entry_count: z.number().default(0),
+  file_backed_entries_truncated: z.boolean().default(false),
+  provider_checklist_notice: z.string().optional(),
+  postcondition: SharingPlanPostconditionSchema.optional(),
+});
+export type SharingPlanReport = z.infer<typeof SharingPlanReportSchema>;
+
 export const ConfigDiffSchema = z.object({
   summary: z.string(),
   affected: z.array(z.string()).optional(),
@@ -1655,6 +1751,7 @@ export const ConfigDiffSchema = z.object({
   additions: z.array(DiffEntrySchema).optional(),
   removals: z.array(DiffEntrySchema).optional(),
   modifications: z.array(DiffEntrySchema).optional(),
+  sharing: SharingPlanReportSchema.optional(),
 });
 export type ConfigDiff = z.infer<typeof ConfigDiffSchema>;
 
@@ -1806,6 +1903,12 @@ export type CORSPatch = {
   max_age?: string;
 };
 
+export type LocationSharingPatch = {
+  mode: "preview" | "private_network" | "restricted" | "public";
+  audience_label?: string;
+  external_enforcer?: string;
+};
+
 // LocationMatchPatch is the new match (type + path) for location_set_match. It
 // renames the route's matching pattern in place. An empty/omitted type defaults
 // to "prefix"; changing the match changes the route's identity, so the diff
@@ -1951,6 +2054,8 @@ export type ConfigPatch =
   | ({ op: "location_response_headers_clear" } & RouteTarget)
   | ({ op: "location_cors_set"; cors_set: CORSPatch } & RouteTarget)
   | ({ op: "location_cors_clear" } & RouteTarget)
+  | ({ op: "location_set_sharing"; sharing?: LocationSharingPatch; route_id?: string } & Partial<RouteTarget>)
+  | ({ op: "location_clear_sharing"; route_id?: string } & Partial<RouteTarget>)
   | ({ op: "location_set_match"; match_set: LocationMatchPatch } & RouteTarget)
   | ({ op: "location_set_action"; action: LocationActionPatch } & RouteTarget)
   | ({ op: "location_set_transcode"; transcode: TranscodePatch } & RouteTarget)

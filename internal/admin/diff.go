@@ -18,12 +18,13 @@ import (
 
 // ConfigDiff is a structured before/after report for the Console v2 diff view.
 type ConfigDiff struct {
-	Summary       string      `json:"summary"`
-	Affected      []string    `json:"affected,omitempty"`
-	Warnings      []string    `json:"warnings,omitempty"`
-	Additions     []DiffEntry `json:"additions,omitempty"`
-	Removals      []DiffEntry `json:"removals,omitempty"`
-	Modifications []DiffEntry `json:"modifications,omitempty"`
+	Summary       string             `json:"summary"`
+	Affected      []string           `json:"affected,omitempty"`
+	Warnings      []string           `json:"warnings,omitempty"`
+	Additions     []DiffEntry        `json:"additions,omitempty"`
+	Removals      []DiffEntry        `json:"removals,omitempty"`
+	Modifications []DiffEntry        `json:"modifications,omitempty"`
+	Sharing       *SharingPlanReport `json:"sharing,omitempty"`
 
 	// coveredPaths tracks which lifecycle registry paths have already been
 	// represented by the high-level comparators. The registry-driven
