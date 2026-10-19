@@ -246,4 +246,16 @@ The final separate re-review found no remaining concrete source blocker and
 independently ran all 9 disclosure tests successfully. Reviewer independence
 is a separate AI context, not a human maintainer approval.
 Final-head required CI and browser outcomes must be posted with exact URLs before
-claiming the complete acceptance scope or using an automatic closing keyword.
+claiming the complete acceptance scope. The maintainer subsequently directed
+`Closes #645` on PR #648 while CI runs; the issue closes on merge, not before.
+
+### Initial hosted CI correction
+
+The first hosted `semantic-noop-console` job passed all 928 tests and coverage
+floors, then detected two generated sourcemaps containing paths through the
+shared local dependency directory. A local materialized dependency tree now
+produces the same portable relative paths as a clean CI checkout. The maps were
+regenerated with Vite; no generated content was hand-edited and no drift guard
+was weakened. The served JavaScript hashes and behavior did not change. A second
+build is checked for zero generated-asset diff. Original job evidence:
+https://github.com/victornife/jul/actions/runs/39178364274/job/117825654547
