@@ -801,6 +801,7 @@ func classifyEntryPair(
 		afterMode := declaredSharingMode(a.loc)
 		modeWidened := config.IsSharingModeWider(config.SharingModeNotDeclared, afterMode)
 		findings := buildEntryPlanFindings(nil, afterFindingsByLoc[[2]int{a.srvIdx, a.locIdx}])
+		hasIntent := afterMode != config.SharingModeNotDeclared
 		return SharingEntryDelta{
 			Ref:                       ref,
 			DisplayLabel:              entryDisplayLabel(a.srv, a.loc),
@@ -809,7 +810,7 @@ func classifyEntryPair(
 			DeclaredModeBefore:        config.SharingModeNotDeclared,
 			DeclaredModeAfter:         afterMode,
 			DeclaredModeWidened:       modeWidened,
-			RequiresAcknowledgement:   true,
+			RequiresAcknowledgement:   hasIntent || modeWidened || len(findings) > 0,
 			TriggersRetirement:        false,
 			Reasons:                   []string{"entry added"},
 			IntentFindings:            findings,
@@ -935,13 +936,12 @@ func classifyEntryPair(
 		reasons = append(reasons, "declared sharing intent changed")
 	}
 
-	requiresAck := finalClass == AudienceDeltaWidened || finalClass == AudienceDeltaUncertain || modeWidened
-	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged
-
 	findings := buildEntryPlanFindings(
 		beforeFindingsByLoc[[2]int{b.srvIdx, b.locIdx}],
 		afterFindingsByLoc[[2]int{a.srvIdx, a.locIdx}],
 	)
+	requiresAck := finalClass == AudienceDeltaWidened || finalClass == AudienceDeltaUncertain || modeWidened
+	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged
 
 	return SharingEntryDelta{
 		Ref:                       ref,
