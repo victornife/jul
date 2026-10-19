@@ -86,25 +86,28 @@ def main():
     old, new = args.old_bin.resolve(), args.new_bin.resolve()
     with tempfile.TemporaryDirectory(prefix="jul-version-upgrade-") as d:
         root = Path(d)
-        path, key, secret = root / "jul.toml", root / "private" / "key", root / "reference"
+        path, key, reference_file = root / "jul.toml", root / "private" / "key", root / "reference"
         admin, traffic = free_address(), free_address()
-        env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str(key), JUL_644_NAME="a")
+        # Both binaries resolve this credential from the child environment;
+        # raw configuration and managed history never store the bearer value.
+        env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str(key), JUL_644_NAME="a",
+                   JUL_644_ADMIN_TOKEN=TOKEN)
         raw = f'''[global]
 config_authority = "managed"
 [admin]
 enabled = true
 listen = "{admin}"
-token = "{TOKEN}"
+token = "${{env:JUL_644_ADMIN_TOKEN}}"
 history_dir = "{root / 'history'}"
 [[servers]]
-name = "literal-${{env:JUL_644_NAME}}-${{file:{secret}}}-${{env:JUL_644_NAME}}"
+name = "literal-${{env:JUL_644_NAME}}-${{file:{reference_file}}}-${{env:JUL_644_NAME}}"
 listen = "{traffic}"
 [[servers.locations]]
 match = {{type = "prefix", path = "/"}}
 return = 200
 '''
         path.write_text(raw)
-        secret.write_text("a")
+        reference_file.write_text("a")
         with (root / "operator.log").open("wb") as log:
             p, before = start(old, path, admin, env, log)
             code, adopted = request(admin, "/api/config/adopt-external", {"mode":"hot", "confirm":True, "observed_digest":hashlib.sha256(raw.encode()).hexdigest()})
@@ -137,7 +140,7 @@ return = 200
             p, rotated = start(new, path, admin, env, log)
             assert rotated["persisted_version"] == initial["persisted_version"] and rotated["serving_version"] != stable
             # File rotation while running uses the real managed resolution/reload.
-            secret.write_text("b")
+            reference_file.write_text("b")
             code, rotated_file = request(admin, "/api/config/apply?base_version=" + rotated["persisted_version"], raw, True)
             assert code == 200 and rotated_file["serving_version"] != rotated["serving_version"]
             # No-change under unchanged effective inputs retains its ID.
@@ -162,10 +165,15 @@ return = 200
             p, upgraded_again = start(new, path, admin, env, log)
             assert upgraded_again["serving_version"] == converged["serving_version"]
             stop(p)
+        # Inspect actual persisted state, including history and logs, rather
+        # than only the input TOML. Never collect or print the private key.
+        for stored in root.rglob("*"):
+            if stored.is_file() and stored != key:
+                assert TOKEN.encode() not in stored.read_bytes(), "probe credential persisted to temporary state"
         print(json.dumps({"raw_cas_preserved": True, "missing_key_refused": True, "restart_stable": True,
             "env_and_file_rotation_detected": True, "hot_apply_and_rollback": True, "no_change_stable": True,
             "staged_not_serving": True, "restart_converged": True, "converged_binary_downgrade": True,
-            "history_and_key_retained": True, "reupgrade_stable": True}))
+            "history_and_key_retained": True, "reupgrade_stable": True, "credential_not_persisted": True}))
 
 
 if __name__ == "__main__":
