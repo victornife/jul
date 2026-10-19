@@ -52,6 +52,10 @@ test(
       await action.click();
       const dialog = page.getByRole("dialog", { name: `${label}?` });
       await expect(dialog).toBeVisible();
+      const ackCheckbox = dialog.getByRole("checkbox");
+      if ((await ackCheckbox.count()) > 0) {
+        await ackCheckbox.check();
+      }
       const responsePromise = page.waitForResponse(
         (response) =>
           response.url().includes("/api/config/patch/apply") &&

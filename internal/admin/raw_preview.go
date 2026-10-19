@@ -114,7 +114,7 @@ func previewRawCandidate(
 	if err != nil {
 		return out, err
 	}
-	lint := config.Lint(candidate.Effective)
+	lint := config.LintWithRaw(candidateConfig, candidate.Effective, true)
 	if lint == nil {
 		lint = []config.Diagnostic{}
 	}

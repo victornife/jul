@@ -1511,3 +1511,265 @@ func TestSharingAdditionalCoverageBranches(t *testing.T) {
 		}
 	})
 }
+
+func TestPR651ReviewFindingsRegressions(t *testing.T) {
+	t.Run("Finding 1: postcondition fingerprint detects listener trusted_proxies and competing block host-dispatch changes", func(t *testing.T) {
+		baseCfg := &config.Config{
+			Servers: []config.ServerConfig{
+				{
+					Name:        "wildcard-block",
+					Listen:      "127.0.0.1:8080",
+					ServerNames: []string{"*.example.com"},
+					ClientAddress: &config.ClientAddressConfig{
+						TrustedProxies:   []string{"10.0.0.1/32"},
+						ForwardedHeaders: []string{"x-forwarded-for"},
+						MaxHops:          1,
+					},
+					Locations: []config.LocationConfig{{
+						RouteID: strPtrTest("dash"),
+						Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+						Return:  200,
+						Sharing: &config.SharingConfig{Mode: "preview"},
+					}},
+				},
+			},
+		}
+		candCfg, _ := baseCfg.Clone()
+		candCfg.Servers[0].Locations[0].Sharing = &config.SharingConfig{Mode: "restricted"}
+		candCfg.Servers[0].Locations[0].Auth = &config.AuthConfig{Allow: []string{"10.0.0.0/8"}}
+
+		var serving *config.Config
+		serving, _ = candCfg.Clone()
+		s := newTestServer(t, config.AdminConfig{}, Deps{
+			LiveSnapshot: func() server.LiveSnapshot {
+				c, _ := serving.Clone()
+				return server.LiveSnapshot{Generation: 1, RawConfig: c, EffectiveConfig: c}
+			},
+		})
+
+		rep := s.BuildSharingPlanReport(baseCfg, baseCfg, candCfg, candCfg, true, nil, true)
+		post := rep.Postcondition
+		if post == nil || post.Status != "available" || len(post.Entries) != 1 {
+			t.Fatalf("unexpected postcondition: %+v", post)
+		}
+		evalReq := SharingPostconditionEvaluateRequest{
+			PostconditionVersion:  post.PostconditionVersion,
+			KeyID:                 post.KeyID,
+			BaseConfigDigest:      post.BaseConfigDigest,
+			CandidateConfigDigest: post.CandidateConfigDigest,
+			Repeatable:            post.Repeatable,
+			Entries:               post.Entries,
+		}
+
+		// 1a. Mutate listener trusted_proxies on serving config -> must report diverged (never access_matches).
+		servingTrustedProxyChanged, _ := candCfg.Clone()
+		servingTrustedProxyChanged.Servers[0].ClientAddress.TrustedProxies = []string{"10.0.0.0/8"}
+		serving = servingTrustedProxyChanged
+		resTP := s.EvaluatePostcondition(evalReq, true)
+		if resTP.Result != PostconditionResultDiverged || resTP.Access != "differs" {
+			t.Fatalf("Finding 1a: trusted_proxies change must diverge postcondition, got %+v", resTP)
+		}
+
+		// 1b. Add a competing block on the same listener with overlapping pattern *.corp.example.com -> must report diverged.
+		servingCompetingHost, _ := candCfg.Clone()
+		servingCompetingHost.Servers = append(servingCompetingHost.Servers, config.ServerConfig{
+			Name:        "competing-corp",
+			Listen:      "127.0.0.1:8080",
+			ServerNames: []string{"*.corp.example.com"},
+			ClientAddress: &config.ClientAddressConfig{
+				TrustedProxies:   []string{"10.0.0.1/32"},
+				ForwardedHeaders: []string{"x-forwarded-for"},
+				MaxHops:          1,
+			},
+			Locations: []config.LocationConfig{{
+				RouteID: strPtrTest("other"),
+				Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+				Return:  200,
+			}},
+		})
+		serving = servingCompetingHost
+		resHost := s.EvaluatePostcondition(evalReq, true)
+		if resHost.Result != PostconditionResultDiverged || resHost.Access != "differs" {
+			t.Fatalf("Finding 1b: competing block host-dispatch change must diverge postcondition, got %+v", resHost)
+		}
+	})
+
+	t.Run("Finding 2: plan findings and preview lint never expose resolved secret references", func(t *testing.T) {
+		t.Setenv("APP_LISTEN", "192.168.99.77:8080")
+		t.Setenv("SECRET_ENFORCER", "internal-secret-gate-name")
+		rawTOML := `
+[cache]
+enabled = true
+
+[[servers]]
+listen = "${env:APP_LISTEN}"
+server_names = ["app.example.com"]
+  [[servers.locations]]
+  route_id = "r-preview"
+  match = { type = "prefix", path = "/a" }
+  return = 200
+  cache = true
+    [servers.locations.sharing]
+    mode = "preview"
+
+  [[servers.locations]]
+  route_id = "r-restricted"
+  match = { type = "prefix", path = "/b" }
+  return = 200
+    [servers.locations.sharing]
+    mode = "restricted"
+    external_enforcer = "${env:SECRET_ENFORCER}"
+
+[[servers]]
+listen = "${env:APP_LISTEN}"
+server_names = ["app.example.com"]
+  [[servers.locations]]
+  route_id = "r-peer"
+  match = { type = "prefix", path = "/a/sub" }
+  return = 200
+  cache = true
+`
+		rawCfg, err := config.Parse([]byte(rawTOML))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		effCfg, _, _, err := config.Resolve(rawCfg)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+
+		s := newTestServer(t, config.AdminConfig{}, Deps{
+			LiveSnapshot: func() server.LiveSnapshot {
+				return server.LiveSnapshot{Generation: 1, RawConfig: rawCfg, EffectiveConfig: effCfg}
+			},
+		})
+
+		rep := s.BuildSharingPlanReport(rawCfg, effCfg, rawCfg, effCfg, true, nil, true)
+		repBytes, _ := json.Marshal(rep)
+		if strings.Contains(string(repBytes), "192.168.99.77") || strings.Contains(string(repBytes), "internal-secret-gate-name") {
+			t.Fatalf("Finding 2: plan report leaked resolved reference value: %s", string(repBytes))
+		}
+		if !strings.Contains(string(repBytes), `"intent_preview_not_loopback"`) || !strings.Contains(string(repBytes), "${env:APP_LISTEN}") {
+			t.Fatalf("Finding 2: expected intent_preview_not_loopback naming ${env:APP_LISTEN}, got: %s", string(repBytes))
+		}
+
+		_, live := s.patchRuntimeBaseline(nil, rawCfg)
+		assessment, err := previewRawCandidate(t.Context(), rawCfg, effCfg, live, "v1", []byte(rawTOML))
+		if err != nil {
+			t.Fatalf("previewRawCandidate: %v", err)
+		}
+		lintBytes, _ := json.Marshal(assessment.Lint)
+		if strings.Contains(string(lintBytes), "192.168.99.77") || strings.Contains(string(lintBytes), "internal-secret-gate-name") {
+			t.Fatalf("Finding 2: previewRawCandidate lint leaked resolved reference value: %s", string(lintBytes))
+		}
+
+		viewPage, err := s.BuildSharingViewPage("", 50)
+		if err != nil {
+			t.Fatalf("BuildSharingViewPage: %v", err)
+		}
+		viewBytes, _ := json.Marshal(viewPage)
+		if strings.Contains(string(viewBytes), "192.168.99.77") || strings.Contains(string(viewBytes), "internal-secret-gate-name") {
+			t.Fatalf("Finding 2: sharing view leaked resolved reference value: %s", string(viewBytes))
+		}
+	})
+
+	t.Run("Finding 3: replacing an inline authorization plugin produces uncertain audience delta", func(t *testing.T) {
+		before := &config.Config{
+			Plugins: map[string]config.PluginConfig{
+				"inline_authz": {
+					Inline: "AGFzbQEAAA==",
+					Type:   "middleware",
+				},
+			},
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{{
+					RouteID: strPtrTest("protected"),
+					Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+					Plugins: []string{"inline_authz"},
+					Return:  200,
+				}},
+			}},
+		}
+		after, _ := before.Clone()
+		after.Plugins["inline_authz"] = config.PluginConfig{
+			Inline: "AGFzbQEBBB==",
+			Type:   "middleware",
+		}
+
+		s := newTestServer(t, config.AdminConfig{}, Deps{})
+		rep := s.BuildSharingPlanReport(before, before, after, after, true, nil, true)
+		if len(rep.Entries) != 1 || rep.Entries[0].Class != AudienceDeltaUncertain || !rep.Entries[0].RequiresAcknowledgement || !rep.Entries[0].TriggersRetirement {
+			t.Fatalf("Finding 3: replacing inline plugin bytes must classify as uncertain with ack and retirement, got %+v", rep.Entries)
+		}
+	})
+
+	t.Run("Finding 5: 1 MiB page limit bounds complete serialized response including blocks and backend_groups", func(t *testing.T) {
+		longHostPrefix := strings.Repeat("h", 220)
+		longPathPrefix := "/" + strings.Repeat("p", 900)
+		servers := make([]config.ServerConfig, 50)
+		for i := range servers {
+			names := make([]string, 100)
+			for k := range names {
+				names[k] = fmt.Sprintf("%s-%d-%d.example.com", longHostPrefix, i, k)
+			}
+			servers[i] = config.ServerConfig{
+				Name:        fmt.Sprintf("block-%d-%s", i, strings.Repeat("n", 200)),
+				Listen:      fmt.Sprintf("127.0.0.1:%d", 10000+i),
+				ServerNames: names,
+				Locations: []config.LocationConfig{{
+					RouteID:   strPtrTest(fmt.Sprintf("route-%02d", i)),
+					Match:     config.MatchConfig{Type: "prefix", Path: fmt.Sprintf("%s/%d", longPathPrefix, i)},
+					ProxyPass: "http://shared-pool",
+					Sharing: &config.SharingConfig{
+						Mode:             "restricted",
+						AudienceLabel:    strPtrTest(strings.Repeat("a", 60)),
+						ExternalEnforcer: strPtrTest(strings.Repeat("e", 60)),
+					},
+				}},
+			}
+		}
+		bigCfg := &config.Config{
+			Upstreams: []config.UpstreamConfig{{
+				Name:    "shared-pool",
+				Servers: []config.UpstreamServer{{Address: "127.0.0.1:9000", Weight: 1}},
+			}},
+			Servers: servers,
+		}
+
+		s := newTestServer(t, config.AdminConfig{}, Deps{
+			LiveSnapshot: func() server.LiveSnapshot {
+				return server.LiveSnapshot{Generation: 1, RawConfig: bigCfg, EffectiveConfig: bigCfg}
+			},
+		})
+
+		cursor := ""
+		seenEntries := 0
+		pages := 0
+		for {
+			page, err := s.BuildSharingViewPage(cursor, 200)
+			if err != nil {
+				t.Fatalf("BuildSharingViewPage(%q): %v", cursor, err)
+			}
+			pages++
+			rawPage, err := json.Marshal(page)
+			if err != nil {
+				t.Fatalf("Marshal page: %v", err)
+			}
+			if len(rawPage) > SharingMaxPageBytes {
+				t.Fatalf("Finding 5: page %d serialized to %d bytes, exceeding 1 MiB (%d bytes)", pages, len(rawPage), SharingMaxPageBytes)
+			}
+			if len(page.Entries) == 0 {
+				t.Fatalf("page %d returned 0 entries", pages)
+			}
+			seenEntries += len(page.Entries)
+			if page.NextCursor == "" {
+				break
+			}
+			cursor = page.NextCursor
+		}
+		if seenEntries != 50 || pages < 2 {
+			t.Fatalf("expected 50 entries across multiple <=1 MiB pages, got %d entries across %d page(s)", seenEntries, pages)
+		}
+	})
+}

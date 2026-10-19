@@ -767,12 +767,12 @@ func buildSingleEntryLayer(
 	if evalCfg == nil {
 		evalCfg = rawCfg
 	}
-	warnings, warningsComplete := deriveSharingEntryWarnings(evalCfg, srvIdx, locIdx, bindScope, transport, julChecks, controls)
+	warnings, warningsComplete := deriveSharingEntryWarnings(rawCfg, evalCfg, srvIdx, locIdx, bindScope, transport, julChecks, controls, isSavedLayer)
 	if isSavedLayer && (bindScope == config.BindScopeUnknown || checksUnknown || intentUnknown) {
 		warningsComplete = false
 	}
 
-	rawIntentDiags, intentComplete := config.LintLocationSharingFindings(evalCfg, srvIdx, locIdx)
+	rawIntentDiags, intentComplete := config.LintLocationSharingFindingsWithRaw(rawCfg, evalCfg, srvIdx, locIdx, isSavedLayer)
 	if isSavedLayer && (bindScope == config.BindScopeUnknown || checksUnknown || intentUnknown) {
 		intentComplete = false
 	}
@@ -1059,12 +1059,13 @@ func deriveSharingDeclaredIntent(
 }
 
 func deriveSharingEntryWarnings(
-	c *config.Config,
+	rawCfg, c *config.Config,
 	srvIdx, locIdx int,
 	bindScope string,
 	transport SharingTransportView,
 	checks SharingJulChecksView,
 	controls SharingControlsView,
+	isSavedLayer bool,
 ) ([]SharingFindingView, bool) {
 	if c == nil || srvIdx < 0 || srvIdx >= len(c.Servers) {
 		return nil, true
@@ -1134,7 +1135,7 @@ func deriveSharingEntryWarnings(
 	}
 
 	// Cross-entry cache sharing.
-	for _, d := range config.LintSharingFindings(c) {
+	for _, d := range config.LintSharingFindingsWithRaw(rawCfg, c, isSavedLayer) {
 		if d.Code != config.FindingCacheSharedAcrossEntries {
 			continue
 		}
@@ -1280,34 +1281,68 @@ func (s *Server) BuildSharingViewPage(cursor string, requestedLimit int) (Sharin
 	var pageBlockList []SharingBlockRow
 	var pageGroupList []SharingBackendGroupRow
 
-	var runningBytes int
+	// Account for the response envelope (including worst-case NextCursor and JSON
+	// framing) plus every referenced block and backend-group row so the complete
+	// serialized SharingViewResponse stays within SharingMaxPageBytes (1 MiB).
+	envelopeBytes, _ := json.Marshal(SharingViewResponse{
+		SharingViewVersion: CurrentSharingViewVersion,
+		Snapshot:           derived.snapshotToken,
+		SavedStatus:        derived.savedStatus,
+		Authority:          derived.authority,
+		Blocks:             []SharingBlockRow{},
+		BackendGroups:      []SharingBackendGroupRow{},
+		Entries:            []SharingEntryView{},
+		TotalEntries:       total,
+		NextCursor:         fmt.Sprintf("%s#%d", derived.snapshotToken, total),
+	})
+	runningBytes := len(envelopeBytes) + 64
+
 	for idx := startIdx; idx < total && len(pageEntries) < limit; idx++ {
 		entry := derived.entries[idx]
 		entryBytes, _ := json.Marshal(entry)
-		// Always include at least one entry per page (§4.3).
-		if len(pageEntries) > 0 && runningBytes+len(entryBytes) > SharingMaxPageBytes {
-			break
-		}
-		pageEntries = append(pageEntries, entry)
-		runningBytes += len(entryBytes)
+		deltaBytes := len(entryBytes) + 1
+
+		var newBlocks []SharingBlockRow
+		seenNewBlocks := make(map[string]bool)
+		var newGroups []SharingBackendGroupRow
+		seenNewGroups := make(map[string]bool)
 
 		for _, layer := range []*SharingEntryLayer{entry.Serving, entry.Saved} {
 			if layer == nil {
 				continue
 			}
-			if layer.ServiceBlock != "" && !usedBlocks[layer.ServiceBlock] {
+			if layer.ServiceBlock != "" && !usedBlocks[layer.ServiceBlock] && !seenNewBlocks[layer.ServiceBlock] {
 				if blk, ok := derived.blocksByKey[layer.ServiceBlock]; ok {
-					usedBlocks[layer.ServiceBlock] = true
-					pageBlockList = append(pageBlockList, blk)
+					seenNewBlocks[layer.ServiceBlock] = true
+					newBlocks = append(newBlocks, blk)
+					blkBytes, _ := json.Marshal(blk)
+					deltaBytes += len(blkBytes) + 1
 				}
 			}
-			if layer.BackendGroup != "" && !usedGroups[layer.BackendGroup] {
+			if layer.BackendGroup != "" && !usedGroups[layer.BackendGroup] && !seenNewGroups[layer.BackendGroup] {
 				if grp, ok := derived.groupsByKey[layer.BackendGroup]; ok {
-					usedGroups[layer.BackendGroup] = true
-					pageGroupList = append(pageGroupList, grp)
+					seenNewGroups[layer.BackendGroup] = true
+					newGroups = append(newGroups, grp)
+					grpBytes, _ := json.Marshal(grp)
+					deltaBytes += len(grpBytes) + 1
 				}
 			}
 		}
+
+		// Always include at least one entry per page (§4.3).
+		if len(pageEntries) > 0 && runningBytes+deltaBytes > SharingMaxPageBytes {
+			break
+		}
+		pageEntries = append(pageEntries, entry)
+		for _, blk := range newBlocks {
+			usedBlocks[blk.Key] = true
+			pageBlockList = append(pageBlockList, blk)
+		}
+		for _, grp := range newGroups {
+			usedGroups[grp.Key] = true
+			pageGroupList = append(pageGroupList, grp)
+		}
+		runningBytes += deltaBytes
 	}
 
 	nextCursor := ""

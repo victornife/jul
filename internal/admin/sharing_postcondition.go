@@ -163,7 +163,7 @@ func (s *Server) keyedAccessFingerprint(rawCfg *config.Config, srvIdx, locIdx in
 		srv := rawCfg.Servers[srvIdx]
 		if locIdx >= 0 && locIdx < len(srv.Locations) {
 			loc := srv.Locations[locIdx]
-			payload := canonicalWrittenAccessInputs(rawCfg, srvIdx, loc)
+			payload := canonicalWrittenAccessInputs(rawCfg, srvIdx, locIdx, loc)
 			data, _ := json.Marshal(payload)
 			_, _ = mac.Write(data)
 		}
@@ -171,15 +171,68 @@ func (s *Server) keyedAccessFingerprint(rawCfg *config.Config, srvIdx, locIdx in
 	return "hmac-sha256:" + hex.EncodeToString(mac.Sum(nil))
 }
 
-func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx int, loc config.LocationConfig) map[string]any {
+type competingBlockFingerprint struct {
+	Position        string   `json:"position"`
+	NormalizedNames []string `json:"normalized_names"`
+	CatchAll        bool     `json:"catch_all"`
+}
+
+type siblingLocationFingerprint struct {
+	Match    config.MatchConfig     `json:"match"`
+	Rewrites []config.RewriteConfig `json:"rewrites,omitempty"`
+}
+
+func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc config.LocationConfig) map[string]any {
 	srv := rawCfg.Servers[srvIdx]
 	listenerIn, _ := summarizeListenerInputs(rawCfg, srv.Listen)
 	effWAF := effectiveRawWAFForLocation(rawCfg, loc.WAF)
 
-	// Block order and sibling matches within the same block affect fall-through (§9.5).
-	siblingMatches := make([]string, 0, len(srv.Locations))
+	// Host dispatch on srv.Listen (§9.5): record whether srv is the listener's
+	// first-declared block (which receives unmatched hosts), and the ordered
+	// competing blocks on srv.Listen whose host patterns can affect dispatch to srv.
+	firstOnListener := -1
+	for i, other := range rawCfg.Servers {
+		if other.Listen == srv.Listen {
+			firstOnListener = i
+			break
+		}
+	}
+	isFirstOnListener := firstOnListener == srvIdx
+	isSelfCatchAll := config.IsCatchAllServerNames(srv.ServerNames)
+
+	var competingBlocks []competingBlockFingerprint
+	for i, other := range rawCfg.Servers {
+		if other.Listen != srv.Listen {
+			continue
+		}
+		include := isFirstOnListener || isSelfCatchAll || i == srvIdx || config.ServerHostSetsOverlap(srv.ServerNames, other.ServerNames)
+		if !include {
+			continue
+		}
+		pos := "self"
+		if i < srvIdx {
+			pos = "before"
+		} else if i > srvIdx {
+			pos = "after"
+		}
+		normNames := make([]string, 0, len(other.ServerNames))
+		for _, n := range other.ServerNames {
+			normNames = append(normNames, config.NormalizeHostPattern(n))
+		}
+		competingBlocks = append(competingBlocks, competingBlockFingerprint{
+			Position:        pos,
+			NormalizedNames: normNames,
+			CatchAll:        config.IsCatchAllServerNames(other.ServerNames),
+		})
+	}
+
+	// Block order and sibling matches/rewrites within the same block affect fall-through (§9.5).
+	siblingLocations := make([]siblingLocationFingerprint, 0, len(srv.Locations))
 	for _, sl := range srv.Locations {
-		siblingMatches = append(siblingMatches, locationKey(&sl))
+		siblingLocations = append(siblingLocations, siblingLocationFingerprint{
+			Match:    sl.Match,
+			Rewrites: sl.Rewrites,
+		})
 	}
 
 	var pluginDefs map[string]config.PluginConfig
@@ -202,23 +255,44 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx int, loc config.
 		}
 	}
 
+	var referencedUpstream *config.UpstreamConfig
+	if upName := locationUpstreamName(loc); upName != "" {
+		referencedUpstream = findUpstreamByName(rawCfg, upName)
+	}
+
 	return map[string]any{
-		"listen":              srv.Listen,
-		"server_names":        srv.ServerNames,
-		"listener_inputs":     listenerIn,
-		"sibling_matches":     siblingMatches,
-		"match":               loc.Match,
-		"rewrites":            loc.Rewrites,
-		"server_plugins":      srv.Plugins,
-		"location_plugins":    loc.Plugins,
-		"handler_plugin":      loc.Plugin,
-		"plugin_defs":         pluginDefs,
-		"cors":                loc.CORS,
-		"auth":                loc.Auth,
-		"require_client_cert": loc.RequireClientCert,
-		"deny":                loc.Deny,
-		"sharing":             loc.Sharing,
-		"waf":                 effWAF,
+		"listen":                srv.Listen,
+		"server_names":          srv.ServerNames,
+		"server_redirect_https": srv.RedirectHTTPS,
+		"is_first_on_listener":  isFirstOnListener,
+		"competing_blocks":      competingBlocks,
+		"listener_inputs":       listenerIn,
+		"location_index":        locIdx,
+		"sibling_locations":     siblingLocations,
+		"match":                 loc.Match,
+		"rewrites":              loc.Rewrites,
+		"server_plugins":        srv.Plugins,
+		"location_plugins":      loc.Plugins,
+		"handler_plugin":        loc.Plugin,
+		"plugin_defs":           pluginDefs,
+		"cors":                  loc.CORS,
+		"auth":                  loc.Auth,
+		"require_client_cert":   loc.RequireClientCert,
+		"deny":                  loc.Deny,
+		"action":                locationAction(&loc),
+		"target":                locationTarget(&loc),
+		"grpc":                  loc.GRPC,
+		"grpc_transcode":        loc.GRPCTranscode,
+		"backend_tls":           loc.BackendTLS,
+		"fastcgi_params":        loc.FastCGIParams,
+		"index":                 loc.Index,
+		"try_files":             loc.TryFiles,
+		"directory_listing":     loc.DirectoryListing,
+		"allow_hidden":          loc.AllowHidden,
+		"return":                loc.Return,
+		"upstream":              referencedUpstream,
+		"sharing":               loc.Sharing,
+		"waf":                   effWAF,
 	}
 }
 

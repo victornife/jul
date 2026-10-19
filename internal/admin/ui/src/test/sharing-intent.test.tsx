@@ -460,4 +460,95 @@ describe("DiffView and ConfigPanel widening acknowledgement gate", () => {
       expect(applyCalled).toBe(true);
     });
   });
+
+  it("Finding 4: prevents bypassing acknowledgement while raw diff assessment is still loading", async () => {
+    let applyCalled = false;
+    let resolveDiff: ((res: Response) => void) | undefined;
+
+    globalThis.fetch = vi.fn().mockImplementation((input: string | URL) => {
+      const url = typeof input === "string" ? input : input.href;
+      if (url.endsWith("/api/config")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ raw: 'listen = ":8443"\n', base_version: "v1" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.endsWith("/api/config/pending-restart")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ pending: false }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.endsWith("/api/config/validate")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.endsWith("/api/config/diff")) {
+        return new Promise<Response>((resolve) => {
+          resolveDiff = resolve;
+        });
+      }
+      if (url.includes("/api/config/apply")) {
+        applyCalled = true;
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: true, version: "v2" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+
+    render(<ConfigPanel />, { wrapper: Wrapper });
+    const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+    fireEvent.change(editor, { target: { value: 'listen = "0.0.0.0:8443"\n' } });
+
+    const openApplyBtn = await screen.findByRole("button", { name: "Apply live" });
+    await waitFor(() => {
+      expect(openApplyBtn).not.toBeDisabled();
+    });
+    fireEvent.click(openApplyBtn);
+
+    // While /api/config/diff is still pending, confirmation must be disabled and show loading status.
+    expect(await screen.findByText("Loading change assessment…")).toBeInTheDocument();
+    const applyButtons = screen.getAllByRole("button", { name: "Apply live" });
+    const confirmBtn = applyButtons[applyButtons.length - 1];
+    if (!confirmBtn) throw new Error("missing confirm button");
+    expect(confirmBtn).toBeDisabled();
+    fireEvent.click(confirmBtn);
+    expect(applyCalled).toBe(false);
+
+    // Resolve /api/config/diff with a widening report -> confirm button stays disabled until acknowledged.
+    if (!resolveDiff) throw new Error("diff request was not issued");
+    resolveDiff(
+      new Response(
+        JSON.stringify({
+          summary: "1 modification",
+          modifications: [{ kind: "listener", name: "0.0.0.0:8443" }],
+          sharing: wideningReport,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const checkbox = await screen.findByRole("checkbox", {
+      name: /I acknowledge the audience change for dash\.example\.com \/ \(dashboard\)/i,
+    });
+    expect(confirmBtn).toBeDisabled();
+    fireEvent.click(checkbox);
+    expect(confirmBtn).not.toBeDisabled();
+    fireEvent.click(confirmBtn);
+    await waitFor(() => {
+      expect(applyCalled).toBe(true);
+    });
+  });
 });

@@ -255,6 +255,47 @@ func ServerHostSetsOverlap(a, b []string) bool {
 	return false
 }
 
+// ServerHostSetsOverlapLiteralOnly reports whether two server blocks'
+// server_names sets overlap using only literal patterns or identical reference
+// tokens, preserving RR11 disclosure rules so a caller-chosen host pattern
+// cannot act as an oracle for a hidden reference value.
+func ServerHostSetsOverlapLiteralOnly(a, b []string) bool {
+	if IsCatchAllServerNames(a) || IsCatchAllServerNames(b) {
+		return true
+	}
+	for _, ha := range a {
+		for _, hb := range b {
+			if ContainsSecretRef(ha) || ContainsSecretRef(hb) {
+				if strings.TrimSpace(ha) != "" && strings.TrimSpace(ha) == strings.TrimSpace(hb) {
+					return true
+				}
+				continue
+			}
+			if HostPatternsOverlap(ha, hb) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// MatchPathsOverlapLiteralOnly reports whether two location match configurations
+// overlap without comparing a secret reference against a different literal (RR11).
+func MatchPathsOverlapLiteralOnly(a, b MatchConfig) bool {
+	if ContainsSecretRef(a.Path) || ContainsSecretRef(b.Path) {
+		ta := a.Type
+		if ta == "" {
+			ta = "prefix"
+		}
+		tb := b.Type
+		if tb == "" {
+			tb = "prefix"
+		}
+		return ta == tb && strings.TrimSpace(a.Path) != "" && strings.TrimSpace(a.Path) == strings.TrimSpace(b.Path)
+	}
+	return MatchPathsOverlap(a, b)
+}
+
 // MatchPathsOverlap reports whether two location match configurations can match
 // an overlapping request path.
 func MatchPathsOverlap(a, b MatchConfig) bool {
@@ -319,6 +360,27 @@ func LocationHasClientCertCheck(srv ServerConfig, loc LocationConfig) bool {
 	}
 }
 
+// LocationHasClientCertCheckInConfig reports whether a location requires a
+// verified client certificate when taking into account listener-scoped
+// client_auth across all server blocks sharing srv.Listen.
+func LocationHasClientCertCheckInConfig(c *Config, srv ServerConfig, loc LocationConfig) bool {
+	if LocationHasClientCertCheck(srv, loc) {
+		return true
+	}
+	if c == nil {
+		return false
+	}
+	for _, other := range c.Servers {
+		if other.Listen != srv.Listen {
+			continue
+		}
+		if LocationHasClientCertCheck(other, loc) {
+			return true
+		}
+	}
+	return false
+}
+
 // LocationHasAnyJulCheck reports whether a location has at least one Jul-enforced
 // network, credential, or client-certificate check.
 func LocationHasAnyJulCheck(srv ServerConfig, loc LocationConfig) bool {
@@ -349,36 +411,98 @@ func LocationCheckBypassKinds(srv ServerConfig, loc LocationConfig) []string {
 // location (spec §4.5). It returns findings and a boolean reporting whether all
 // inputs required to evaluate the location's intent findings were known.
 func LintLocationSharingFindings(c *Config, srvIdx, locIdx int) ([]Diagnostic, bool) {
-	if c == nil || srvIdx < 0 || srvIdx >= len(c.Servers) {
+	return LintLocationSharingFindingsWithRaw(c, c, srvIdx, locIdx, false)
+}
+
+// LintLocationSharingFindingsWithRaw evaluates the closed intent-finding rules
+// for one location using rawCfg for all display text (never exposing resolved
+// secret references). When forPlan is true, all checks are evaluated strictly
+// against rawCfg so plan findings never depend on or disclose resolved
+// ${env:...} or ${file:...} reference values (spec §9.5, RR11). When forPlan is
+// false (the serving layer of GET /api/sharing, spec §4.3), closed-set facts
+// are derived from effCfg while display strings still come from rawCfg.
+func LintLocationSharingFindingsWithRaw(rawCfg, effCfg *Config, srvIdx, locIdx int, forPlan bool) ([]Diagnostic, bool) {
+	if rawCfg == nil {
+		rawCfg = effCfg
+	}
+	if effCfg == nil {
+		effCfg = rawCfg
+	}
+	if rawCfg == nil || srvIdx < 0 || srvIdx >= len(rawCfg.Servers) {
 		return nil, true
 	}
-	srv := c.Servers[srvIdx]
-	if locIdx < 0 || locIdx >= len(srv.Locations) {
+	rawSrv := rawCfg.Servers[srvIdx]
+	if locIdx < 0 || locIdx >= len(rawSrv.Locations) {
 		return nil, true
 	}
-	loc := srv.Locations[locIdx]
-	if loc.Sharing == nil {
+	rawLoc := rawSrv.Locations[locIdx]
+	if rawLoc.Sharing == nil {
 		return nil, true
 	}
+
+	effSrv := rawSrv
+	effLoc := rawLoc
+	if srvIdx < len(effCfg.Servers) {
+		effSrv = effCfg.Servers[srvIdx]
+		if locIdx < len(effSrv.Locations) {
+			effLoc = effSrv.Locations[locIdx]
+		}
+	}
+
 	field := fmt.Sprintf("servers[%d].locations[%d].sharing", srvIdx, locIdx)
-	mode := strings.TrimSpace(loc.Sharing.Mode)
-	if ContainsSecretRef(mode) {
-		return nil, false
+	rawMode := strings.TrimSpace(rawLoc.Sharing.Mode)
+	if forPlan {
+		if _, hasFile := SecretRefSchemes(rawMode); hasFile {
+			return nil, false
+		}
 	}
+	mode := rawMode
+	if ContainsSecretRef(rawMode) {
+		if effLoc.Sharing != nil && !ContainsSecretRef(effLoc.Sharing.Mode) {
+			mode = strings.TrimSpace(effLoc.Sharing.Mode)
+		} else {
+			return nil, false
+		}
+	}
+
 	complete := true
-	bindScope := BindScope(srv.Listen)
+	bindScope := BindScope(effSrv.Listen)
+	if forPlan {
+		if _, hasFile := SecretRefSchemes(rawSrv.Listen); hasFile {
+			bindScope = BindScopeUnknown
+		}
+	}
 	if bindScope == BindScopeUnknown {
 		complete = false
 	}
 
+	displayListen := rawSrv.Listen
+	enforcer := strings.TrimSpace(rawLoc.Sharing.ExternalEnforcerValue())
+
 	var diags []Diagnostic
-	hasJulCheck := LocationHasAnyJulCheck(srv, loc)
-	hasCredOrCert := LocationHasCredentialCheck(loc) || LocationHasClientCertCheck(srv, loc)
-	enforcer := strings.TrimSpace(loc.Sharing.ExternalEnforcerValue())
+	hasNetCheck := LocationHasNetworkCheck(effLoc)
+	if forPlan && rawLoc.Auth != nil {
+		for _, cidr := range append(append([]string(nil), rawLoc.Auth.Allow...), rawLoc.Auth.Deny...) {
+			if _, hasFile := SecretRefSchemes(cidr); hasFile {
+				complete = false
+				break
+			}
+		}
+	}
+	hasCredCheck := LocationHasCredentialCheck(effLoc)
+	hasCertCheck := LocationHasClientCertCheckInConfig(effCfg, effSrv, effLoc)
+	if forPlan && rawSrv.TLS != nil && rawSrv.TLS.ClientAuth != nil {
+		if _, hasFile := SecretRefSchemes(rawSrv.TLS.ClientAuth.Mode); hasFile {
+			hasCertCheck = false
+			complete = false
+		}
+	}
+	hasJulCheck := hasNetCheck || hasCredCheck || hasCertCheck
+	hasCredOrCert := hasCredCheck || hasCertCheck
 
 	switch mode {
 	case SharingModeRestricted:
-		if !loc.Deny && !hasJulCheck {
+		if !effLoc.Deny && !hasJulCheck {
 			msg := "location declares sharing.mode = \"restricted\" but configures no Jul access check (auth.allow, auth.basic, auth.jwt, auth.forward_auth, or client certificate requirement)"
 			hint := "configure a Jul access check on this location, or verify origin protection if an external gate enforces access"
 			if enforcer != "" {
@@ -398,7 +522,7 @@ func LintLocationSharingFindings(c *Config, srvIdx, locIdx int) ([]Diagnostic, b
 				Code:     FindingIntentPrivateBindTooWide,
 				Severity: SeverityWarning,
 				Field:    field,
-				Message:  fmt.Sprintf("location declares sharing.mode = \"private_network\" on listener %q with bind scope %s", srv.Listen, bindScope),
+				Message:  fmt.Sprintf("location declares sharing.mode = \"private_network\" on listener %q with bind scope %s", displayListen, bindScope),
 				Hint:     "bind the listener to a loopback, RFC 1918 private, link-local, or 100.64.0.0/10 address, or add an explicit auth.allow CIDR check",
 			})
 		}
@@ -408,7 +532,7 @@ func LintLocationSharingFindings(c *Config, srvIdx, locIdx int) ([]Diagnostic, b
 				Code:     FindingIntentPreviewNotLoopback,
 				Severity: SeverityWarning,
 				Field:    field,
-				Message:  fmt.Sprintf("location declares sharing.mode = \"preview\" on non-loopback listener %q (bind scope %s)", srv.Listen, bindScope),
+				Message:  fmt.Sprintf("location declares sharing.mode = \"preview\" on non-loopback listener %q (bind scope %s)", displayListen, bindScope),
 				Hint:     "bind the listener to 127.0.0.1, ::1, or localhost for local preview, or update sharing.mode",
 			})
 		}
@@ -424,8 +548,8 @@ func LintLocationSharingFindings(c *Config, srvIdx, locIdx int) ([]Diagnostic, b
 		}
 	}
 
-	if (mode == SharingModeRestricted || mode == SharingModePrivateNetwork) && !loc.Deny {
-		if bypass := LocationCheckBypassKinds(srv, loc); len(bypass) > 0 {
+	if (mode == SharingModeRestricted || mode == SharingModePrivateNetwork) && !effLoc.Deny {
+		if bypass := LocationCheckBypassKinds(effSrv, effLoc); len(bypass) > 0 {
 			diags = append(diags, Diagnostic{
 				Code:     FindingIntentChecksBypassed,
 				Severity: SeverityWarning,
@@ -434,7 +558,7 @@ func LintLocationSharingFindings(c *Config, srvIdx, locIdx int) ([]Diagnostic, b
 				Hint:     "review redirect rewrites, request plugins, and CORS preflight on this location because they execute before per-location auth and certificate checks",
 			})
 		}
-		if c.Cache.Enabled && loc.Cache {
+		if effCfg.Cache.Enabled && effLoc.Cache {
 			diags = append(diags, Diagnostic{
 				Code:     FindingIntentRestrictedCached,
 				Severity: SeverityWarning,
@@ -451,40 +575,63 @@ func LintLocationSharingFindings(c *Config, srvIdx, locIdx int) ([]Diagnostic, b
 // LintSharingFindings returns all location sharing-intent diagnostics and
 // cross-entry cache-sharing diagnostics for c.
 func LintSharingFindings(c *Config) []Diagnostic {
-	if c == nil {
+	return LintSharingFindingsWithRaw(c, c, false)
+}
+
+// LintSharingFindingsWithRaw returns all location sharing-intent diagnostics
+// and cross-entry cache-sharing diagnostics using rawCfg for display strings
+// and literal host/path comparisons and effCfg for closed-set facts.
+func LintSharingFindingsWithRaw(rawCfg, effCfg *Config, forPlan bool) []Diagnostic {
+	if rawCfg == nil {
+		rawCfg = effCfg
+	}
+	if effCfg == nil {
+		effCfg = rawCfg
+	}
+	if rawCfg == nil {
 		return nil
 	}
 	var diags []Diagnostic
-	for i := range c.Servers {
-		for j := range c.Servers[i].Locations {
-			locDiags, _ := LintLocationSharingFindings(c, i, j)
+	for i := range rawCfg.Servers {
+		for j := range rawCfg.Servers[i].Locations {
+			locDiags, _ := LintLocationSharingFindingsWithRaw(rawCfg, effCfg, i, j, forPlan)
 			diags = append(diags, locDiags...)
 		}
 	}
-	diags = append(diags, lintSharedCacheAcrossEntries(c)...)
+	diags = append(diags, lintSharedCacheAcrossEntriesWithRaw(rawCfg, effCfg)...)
 	return diags
 }
 
 type cacheEnabledLocRef struct {
 	srvIdx int
 	locIdx int
-	srv    ServerConfig
-	loc    LocationConfig
+	rawSrv ServerConfig
+	rawLoc LocationConfig
 }
 
-func lintSharedCacheAcrossEntries(c *Config) []Diagnostic {
-	if c == nil || !c.Cache.Enabled {
+func lintSharedCacheAcrossEntriesWithRaw(rawCfg, effCfg *Config) []Diagnostic {
+	if rawCfg == nil {
+		rawCfg = effCfg
+	}
+	if effCfg == nil {
+		effCfg = rawCfg
+	}
+	if rawCfg == nil || !effCfg.Cache.Enabled {
 		return nil
 	}
 	var refs []cacheEnabledLocRef
-	for i, srv := range c.Servers {
-		for j, loc := range srv.Locations {
-			if loc.Cache && !loc.Deny {
+	for i, rawSrv := range rawCfg.Servers {
+		for j, rawLoc := range rawSrv.Locations {
+			effLoc := rawLoc
+			if i < len(effCfg.Servers) && j < len(effCfg.Servers[i].Locations) {
+				effLoc = effCfg.Servers[i].Locations[j]
+			}
+			if effLoc.Cache && !effLoc.Deny {
 				refs = append(refs, cacheEnabledLocRef{
 					srvIdx: i,
 					locIdx: j,
-					srv:    srv,
-					loc:    loc,
+					rawSrv: rawSrv,
+					rawLoc: rawLoc,
 				})
 			}
 		}
@@ -502,10 +649,10 @@ func lintSharedCacheAcrossEntries(c *Config) []Diagnostic {
 			if ra.srvIdx == rb.srvIdx {
 				continue
 			}
-			if !ServerHostSetsOverlap(ra.srv.ServerNames, rb.srv.ServerNames) {
+			if !ServerHostSetsOverlapLiteralOnly(ra.rawSrv.ServerNames, rb.rawSrv.ServerNames) {
 				continue
 			}
-			if !MatchPathsOverlap(ra.loc.Match, rb.loc.Match) {
+			if !MatchPathsOverlapLiteralOnly(ra.rawLoc.Match, rb.rawLoc.Match) {
 				continue
 			}
 			for _, ref := range []cacheEnabledLocRef{ra, rb} {
@@ -522,7 +669,7 @@ func lintSharedCacheAcrossEntries(c *Config) []Diagnostic {
 					Code:     FindingCacheSharedAcrossEntries,
 					Severity: SeverityWarning,
 					Field:    fmt.Sprintf("servers[%d].locations[%d].cache", ref.srvIdx, ref.locIdx),
-					Message:  fmt.Sprintf("cache-enabled location shares the process cache namespace with servers[%d].locations[%d] (listen %q) for overlapping host and path", other.srvIdx, other.locIdx, other.srv.Listen),
+					Message:  fmt.Sprintf("cache-enabled location shares the process cache namespace with servers[%d].locations[%d] (listen %q) for overlapping host and path", other.srvIdx, other.locIdx, other.rawSrv.Listen),
 					Hint:     "the HTTP cache keys by method, scheme, Host, URI, and Vary (not listener); disable cache on one entry or separate their server_names",
 				})
 			}

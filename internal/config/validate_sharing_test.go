@@ -422,6 +422,91 @@ func TestLintSharingIntentFindings(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("LintWithRaw and LintSharingFindingsWithRaw preserve raw reference text and RR11 disclosure rules", func(t *testing.T) {
+		rawCfg := &config.Config{
+			Cache: config.CacheConfig{Enabled: true},
+			Admin: config.AdminConfig{Enabled: true, Listen: "${env:ADMIN_LISTEN}"},
+			Servers: []config.ServerConfig{
+				{
+					Listen:      "${env:APP_LISTEN}",
+					ServerNames: []string{"${env:APP_HOST}"},
+					TLS: &config.TLSConfig{
+						Enabled:    true,
+						ClientAuth: &config.ClientAuthConfig{Mode: "${file:/ca_mode}"},
+					},
+					Locations: []config.LocationConfig{
+						{
+							RouteID: config.String("r-env"),
+							Match:   config.MatchConfig{Type: "prefix", Path: "${env:APP_PATH}"},
+							Return:  200,
+							Cache:   true,
+							Auth:    &config.AuthConfig{Allow: []string{"${file:/cidr}"}},
+							Sharing: &config.SharingConfig{Mode: "${env:SHARE_MODE}", ExternalEnforcer: config.String("${env:ENF}")},
+						},
+						{
+							RouteID: config.String("r-file-mode"),
+							Match:   config.MatchConfig{Type: "prefix", Path: "/f"},
+							Return:  200,
+							Sharing: &config.SharingConfig{Mode: "${file:/mode}"},
+						},
+					},
+				},
+				{
+					Listen:      "${file:/listen_file}",
+					ServerNames: []string{"${env:APP_HOST}"},
+					TLS: &config.TLSConfig{
+						Enabled:    true,
+						ClientAuth: &config.ClientAuthConfig{Mode: "require"},
+					},
+					Locations: []config.LocationConfig{
+						{
+							RouteID: config.String("r-peer"),
+							Match:   config.MatchConfig{Type: "prefix", Path: "${env:APP_PATH}"},
+							Return:  200,
+							Cache:   true,
+							Sharing: &config.SharingConfig{Mode: "preview"},
+						},
+					},
+				},
+			},
+		}
+		effCfg, _ := rawCfg.Clone()
+		effCfg.Admin.Listen = "0.0.0.0:9090"
+		effCfg.Servers[0].Listen = "192.168.10.20:8443"
+		effCfg.Servers[0].ServerNames = []string{"resolved-host.example"}
+		effCfg.Servers[0].TLS.ClientAuth.Mode = "require"
+		effCfg.Servers[0].Locations[0].Match.Path = "/resolved-path"
+		effCfg.Servers[0].Locations[0].Auth.Allow = []string{"10.0.0.0/8"}
+		effCfg.Servers[0].Locations[0].Sharing.Mode = "preview"
+		effCfg.Servers[0].Locations[0].Sharing.ExternalEnforcer = config.String("resolved-enforcer")
+		effCfg.Servers[0].Locations[1].Sharing.Mode = "restricted"
+		effCfg.Servers[1].Listen = "192.168.10.20:8443"
+		effCfg.Servers[1].ServerNames = []string{"resolved-host.example"}
+		effCfg.Servers[1].Locations[0].Match.Path = "/resolved-path"
+
+		for _, d := range config.LintWithRaw(rawCfg, effCfg, true) {
+			if strings.Contains(d.Message, "192.168.10.20") || strings.Contains(d.Message, "0.0.0.0:9090") || strings.Contains(d.Message, "resolved-") {
+				t.Fatalf("LintWithRaw leaked resolved reference in %+v", d)
+			}
+		}
+		// Identical reference tokens overlap; a reference vs a different literal does not.
+		if !config.ServerHostSetsOverlapLiteralOnly([]string{"${env:H}"}, []string{"${env:H}"}) {
+			t.Fatal("expected identical host reference tokens to overlap")
+		}
+		if config.ServerHostSetsOverlapLiteralOnly([]string{"${env:H}"}, []string{"literal.example"}) {
+			t.Fatal("reference host must not overlap a different literal")
+		}
+		if !config.MatchPathsOverlapLiteralOnly(config.MatchConfig{Path: "${env:P}"}, config.MatchConfig{Path: "${env:P}"}) {
+			t.Fatal("expected identical path reference tokens to overlap")
+		}
+		if config.MatchPathsOverlapLiteralOnly(config.MatchConfig{Path: "${env:P}"}, config.MatchConfig{Path: "/lit"}) {
+			t.Fatal("reference path must not overlap a different literal")
+		}
+		if !config.LocationHasClientCertCheckInConfig(effCfg, effCfg.Servers[1], effCfg.Servers[1].Locations[0]) {
+			t.Fatal("expected listener-wide client cert check to be detected")
+		}
+	})
 }
 
 // TestHostPatternsOverlapMatchesRealRouter proves the §9.5 host-dispatch

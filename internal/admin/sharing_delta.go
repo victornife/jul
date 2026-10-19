@@ -5,9 +5,11 @@ package admin
 
 import (
 	"fmt"
+	"maps"
 	"math/big"
 	"net"
 	"net/netip"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -147,8 +149,8 @@ func (s *Server) BuildSharingPlanReport(
 		afterEff = afterRaw
 	}
 
-	beforeFindingsByLoc := collectSharingFindingsByLoc(beforeEff)
-	afterFindingsByLoc := collectSharingFindingsByLoc(afterEff)
+	beforeFindingsByLoc := collectSharingFindingsByLoc(beforeRaw, beforeEff)
+	afterFindingsByLoc := collectSharingFindingsByLoc(afterRaw, afterEff)
 
 	pairs := correlatePlanEntries(beforeRaw, afterRaw)
 	hostDispatchAffectedBefore, hostDispatchAffectedAfter := computeHostDispatchAffectedBlocks(beforeRaw, afterRaw)
@@ -260,12 +262,12 @@ func declaredSharingMode(loc config.LocationConfig) string {
 	return strings.TrimSpace(loc.Sharing.Mode)
 }
 
-func collectSharingFindingsByLoc(c *config.Config) map[[2]int][]config.Diagnostic {
+func collectSharingFindingsByLoc(rawCfg, effCfg *config.Config) map[[2]int][]config.Diagnostic {
 	out := make(map[[2]int][]config.Diagnostic)
-	if c == nil {
+	if rawCfg == nil && effCfg == nil {
 		return out
 	}
-	for _, d := range config.LintSharingFindings(c) {
+	for _, d := range config.LintSharingFindingsWithRaw(rawCfg, effCfg, true) {
 		var srvIdx, locIdx int
 		if _, err := fmt.Sscanf(d.Field, "servers[%d].locations[%d]", &srvIdx, &locIdx); err == nil {
 			key := [2]int{srvIdx, locIdx}
@@ -801,7 +803,6 @@ func classifyEntryPair(
 		afterMode := declaredSharingMode(a.loc)
 		modeWidened := config.IsSharingModeWider(config.SharingModeNotDeclared, afterMode)
 		findings := buildEntryPlanFindings(nil, afterFindingsByLoc[[2]int{a.srvIdx, a.locIdx}])
-		hasIntent := afterMode != config.SharingModeNotDeclared
 		return SharingEntryDelta{
 			Ref:                       ref,
 			DisplayLabel:              entryDisplayLabel(a.srv, a.loc),
@@ -810,7 +811,7 @@ func classifyEntryPair(
 			DeclaredModeBefore:        config.SharingModeNotDeclared,
 			DeclaredModeAfter:         afterMode,
 			DeclaredModeWidened:       modeWidened,
-			RequiresAcknowledgement:   hasIntent || modeWidened || len(findings) > 0,
+			RequiresAcknowledgement:   true,
 			TriggersRetirement:        false,
 			Reasons:                   []string{"entry added"},
 			IntentFindings:            findings,
@@ -1031,49 +1032,63 @@ func classifyBindChange(beforeListen, afterListen string) (string, string) {
 }
 
 type listenerEffectiveInputs struct {
-	tlsEnabled      bool
-	minVersion      string
-	redirectHTTPS   int
-	proxyProtocol   string
-	clientAddrSig   string
-	clientAuthMode  string
-	clientAuthFiles string
+	TLSEnabled      bool   `json:"tls_enabled"`
+	MinVersion      string `json:"min_version,omitempty"`
+	TLSCertSig      string `json:"tls_cert_sig,omitempty"`
+	HTTP3Sig        string `json:"http3_sig,omitempty"`
+	H2C             bool   `json:"h2c,omitempty"`
+	RedirectHTTPS   int    `json:"redirect_https,omitempty"`
+	ProxyProtocol   string `json:"proxy_protocol,omitempty"`
+	ClientAddrSig   string `json:"client_addr_sig,omitempty"`
+	ClientAuthMode  string `json:"client_auth_mode,omitempty"`
+	ClientAuthFiles string `json:"client_auth_files,omitempty"`
 }
 
 func summarizeListenerInputs(c *config.Config, listen string) (listenerEffectiveInputs, bool) {
 	var out listenerEffectiveInputs
-	var caFiles, crlFiles, sans, fwd []string
+	var caFiles, crlFiles, sans, fwd, certs []string
 	hasSecretRef := false
 	for _, srv := range c.Servers {
 		if srv.Listen != listen {
 			continue
 		}
-		if srv.RedirectHTTPS != 0 && out.redirectHTTPS == 0 {
-			out.redirectHTTPS = srv.RedirectHTTPS
+		if srv.H2C {
+			out.H2C = true
 		}
-		if srv.ProxyProtocol != "" && out.proxyProtocol == "" {
-			out.proxyProtocol = srv.ProxyProtocol
+		if srv.HTTP3 != nil && srv.HTTP3.Enabled && out.HTTP3Sig == "" {
+			out.HTTP3Sig = fmt.Sprintf("enabled:%d", srv.HTTP3.AltSvcMaxAge)
 		}
-		if srv.ClientAddress != nil && out.clientAddrSig == "" {
+		if srv.RedirectHTTPS != 0 && out.RedirectHTTPS == 0 {
+			out.RedirectHTTPS = srv.RedirectHTTPS
+		}
+		if srv.ProxyProtocol != "" && out.ProxyProtocol == "" {
+			out.ProxyProtocol = srv.ProxyProtocol
+		}
+		if srv.ClientAddress != nil && out.ClientAddrSig == "" {
 			for _, tp := range srv.ClientAddress.TrustedProxies {
 				if config.ContainsSecretRef(tp) {
 					hasSecretRef = true
 				}
 			}
-			out.clientAddrSig = fmt.Sprintf("%v|%v|%d", srv.ClientAddress.TrustedProxies, srv.ClientAddress.ForwardedHeaders, srv.ClientAddress.MaxHops)
+			out.ClientAddrSig = fmt.Sprintf("%v|%v|%d", srv.ClientAddress.TrustedProxies, srv.ClientAddress.ForwardedHeaders, srv.ClientAddress.MaxHops)
 		}
 		if srv.TLS != nil && srv.TLS.Enabled {
-			out.tlsEnabled = true
-			if out.minVersion == "" {
-				out.minVersion = srv.TLS.MinVersion
+			out.TLSEnabled = true
+			if out.MinVersion == "" {
+				out.MinVersion = srv.TLS.MinVersion
 			}
+			acmeSig := ""
+			if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
+				acmeSig = fmt.Sprintf("acme:%s|%s|%s|%v", srv.TLS.ACME.Email, srv.TLS.ACME.CA, srv.TLS.ACME.Challenge, srv.TLS.ACME.Domains)
+			}
+			certs = append(certs, fmt.Sprintf("%s|%s|%s", strings.TrimSpace(srv.TLS.Cert), strings.TrimSpace(srv.TLS.Key), acmeSig))
 			if srv.TLS.ClientAuth != nil && srv.TLS.ClientAuth.Active() {
 				mode := strings.TrimSpace(srv.TLS.ClientAuth.Mode)
 				if config.ContainsSecretRef(mode) || config.ContainsSecretRef(srv.TLS.ClientAuth.CAFile) || config.ContainsSecretRef(srv.TLS.ClientAuth.CRLFile) {
 					hasSecretRef = true
 				}
-				if mode == "require" || out.clientAuthMode == "" {
-					out.clientAuthMode = mode
+				if mode == "require" || out.ClientAuthMode == "" {
+					out.ClientAuthMode = mode
 				}
 				caFiles = append(caFiles, strings.TrimSpace(srv.TLS.ClientAuth.CAFile))
 				crlFiles = append(crlFiles, strings.TrimSpace(srv.TLS.ClientAuth.CRLFile))
@@ -1087,14 +1102,15 @@ func summarizeListenerInputs(c *config.Config, listen string) (listenerEffective
 			}
 		}
 	}
-	if out.clientAuthMode == "" {
-		out.clientAuthMode = "none"
+	if out.ClientAuthMode == "" {
+		out.ClientAuthMode = "none"
 	}
 	sort.Strings(caFiles)
 	sort.Strings(crlFiles)
 	sort.Strings(sans)
 	sort.Strings(fwd)
-	out.clientAuthFiles = fmt.Sprintf("ca=%v|crl=%v|san=%v|fwd=%v", caFiles, crlFiles, sans, fwd)
+	out.TLSCertSig = strings.Join(certs, ";")
+	out.ClientAuthFiles = fmt.Sprintf("ca=%v|crl=%v|san=%v|fwd=%v", caFiles, crlFiles, sans, fwd)
 	return out, hasSecretRef
 }
 
@@ -1107,32 +1123,32 @@ func classifyListenerAndCertChanges(
 	bIn, bRef := summarizeListenerInputs(beforeRaw, bSrv.Listen)
 	aIn, aRef := summarizeListenerInputs(afterRaw, aSrv.Listen)
 
-	if bIn.tlsEnabled != aIn.tlsEnabled || bIn.minVersion != aIn.minVersion {
-		out = append(out, classReason{AudienceDeltaUncertain, "listener TLS configuration changed"})
+	if bIn.TLSEnabled != aIn.TLSEnabled || bIn.MinVersion != aIn.MinVersion || bIn.TLSCertSig != aIn.TLSCertSig || bIn.HTTP3Sig != aIn.HTTP3Sig || bIn.H2C != aIn.H2C {
+		out = append(out, classReason{AudienceDeltaUncertain, "listener TLS or protocol configuration changed"})
 	}
-	if bIn.redirectHTTPS != aIn.redirectHTTPS {
+	if bSrv.RedirectHTTPS != aSrv.RedirectHTTPS || bIn.RedirectHTTPS != aIn.RedirectHTTPS {
 		out = append(out, classReason{AudienceDeltaUncertain, "server redirect_https changed"})
 	}
-	if bIn.proxyProtocol != aIn.proxyProtocol || bIn.clientAddrSig != aIn.clientAddrSig {
+	if bIn.ProxyProtocol != aIn.ProxyProtocol || bIn.ClientAddrSig != aIn.ClientAddrSig {
 		out = append(out, classReason{AudienceDeltaUncertain, "listener client_address or proxy_protocol changed"})
 	}
 
-	if bIn.clientAuthMode != aIn.clientAuthMode || bIn.clientAuthFiles != aIn.clientAuthFiles || bLoc.RequireClientCert != aLoc.RequireClientCert {
+	if bIn.ClientAuthMode != aIn.ClientAuthMode || bIn.ClientAuthFiles != aIn.ClientAuthFiles || bLoc.RequireClientCert != aLoc.RequireClientCert {
 		if bRef || aRef {
 			out = append(out, classReason{AudienceDeltaUncertain, "client_auth comparison involves a secret reference"})
 			return out
 		}
-		if bIn.clientAuthMode != "none" && aIn.clientAuthMode != "none" && bIn.clientAuthFiles != aIn.clientAuthFiles {
+		if bIn.ClientAuthMode != "none" && aIn.ClientAuthMode != "none" && bIn.ClientAuthFiles != aIn.ClientAuthFiles {
 			out = append(out, classReason{AudienceDeltaUncertain, "client_auth CA bundle, CRL, SAN allow-list, or forwarded certificate setting changed"})
 			return out
 		}
-		if bIn.clientAuthMode != aIn.clientAuthMode {
+		if bIn.ClientAuthMode != aIn.ClientAuthMode {
 			switch {
-			case aIn.clientAuthMode == "require":
+			case aIn.ClientAuthMode == "require":
 				out = append(out, classReason{AudienceDeltaNarrowed, "listener client_auth mode raised to require"})
-			case bIn.clientAuthMode == "require" && aIn.clientAuthMode == "none":
+			case bIn.ClientAuthMode == "require" && aIn.ClientAuthMode == "none":
 				out = append(out, classReason{AudienceDeltaWidened, "listener client_auth mode lowered from require"})
-			case bIn.clientAuthMode == "require" && aIn.clientAuthMode == "request":
+			case bIn.ClientAuthMode == "require" && aIn.ClientAuthMode == "request":
 				if aLoc.RequireClientCert {
 					// Still requires client cert on this route.
 				} else {
@@ -1140,9 +1156,9 @@ func classifyListenerAndCertChanges(
 				}
 			default:
 				// none <-> request
-				if aIn.clientAuthMode == "request" && aLoc.RequireClientCert && bIn.clientAuthMode == "none" {
+				if aIn.ClientAuthMode == "request" && aLoc.RequireClientCert && bIn.ClientAuthMode == "none" {
 					out = append(out, classReason{AudienceDeltaNarrowed, "client certificate requirement added"})
-				} else if bIn.clientAuthMode == "request" && bLoc.RequireClientCert && aIn.clientAuthMode == "none" {
+				} else if bIn.ClientAuthMode == "request" && bLoc.RequireClientCert && aIn.ClientAuthMode == "none" {
 					out = append(out, classReason{AudienceDeltaWidened, "client certificate requirement removed"})
 				} else {
 					out = append(out, classReason{AudienceDeltaUncertain, "listener client_auth mode changed between none and request"})
@@ -1150,7 +1166,7 @@ func classifyListenerAndCertChanges(
 			}
 			return out
 		}
-		if bLoc.RequireClientCert != aLoc.RequireClientCert && aIn.clientAuthMode == "request" {
+		if bLoc.RequireClientCert != aLoc.RequireClientCert && aIn.ClientAuthMode == "request" {
 			if aLoc.RequireClientCert {
 				out = append(out, classReason{AudienceDeltaNarrowed, "require_client_cert enabled"})
 			} else {
@@ -1653,20 +1669,26 @@ func pluginsEqualForEntry(before, after *config.Config, bSrv, aSrv config.Server
 }
 
 func pluginConfigsEqual(b, a config.PluginConfig) bool {
-	if b.Path != a.Path || b.Type != a.Type || b.ABI != a.ABI ||
-		b.MaxInstances != a.MaxInstances || b.MaxInvocations != a.MaxInvocations ||
-		b.MemoryLimit != a.MemoryLimit || b.Timeout != a.Timeout ||
-		b.MaxRequestBody != a.MaxRequestBody || b.MaxResponseBody != a.MaxResponseBody ||
-		b.FetchTimeout != a.FetchTimeout || b.MaxFetchResponse != a.MaxFetchResponse ||
-		b.KVMaxEntries != a.KVMaxEntries || b.KVMaxBytes != a.KVMaxBytes ||
+	if b.Path != a.Path ||
+		b.Inline != a.Inline ||
+		b.Type != a.Type ||
+		b.ABI != a.ABI ||
+		b.KV != a.KV ||
+		b.Fetch != a.Fetch ||
+		b.SHA256 != a.SHA256 ||
+		b.MaxInstances != a.MaxInstances ||
+		b.MaxInvocations != a.MaxInvocations ||
+		b.MemoryLimit != a.MemoryLimit ||
+		b.Timeout != a.Timeout ||
+		b.MaxRequestBody != a.MaxRequestBody ||
+		b.MaxResponseBody != a.MaxResponseBody ||
+		b.FetchTimeout != a.FetchTimeout ||
+		b.MaxFetchResponse != a.MaxFetchResponse ||
+		b.KVMaxEntries != a.KVMaxEntries ||
+		b.KVMaxBytes != a.KVMaxBytes ||
 		!stringSlicesEqual(b.AllowedHosts, a.AllowedHosts) ||
-		len(b.Config) != len(a.Config) {
+		!maps.Equal(b.Config, a.Config) {
 		return false
-	}
-	for k, v := range b.Config {
-		if a.Config[k] != v {
-			return false
-		}
 	}
 	return true
 }
@@ -1688,6 +1710,13 @@ func entryTargetAndUpstreamEqual(before, after *config.Config, bLoc, aLoc config
 	if locationAction(&bLoc) != locationAction(&aLoc) ||
 		locationTarget(&bLoc) != locationTarget(&aLoc) ||
 		bLoc.GRPC != aLoc.GRPC ||
+		bLoc.Return != aLoc.Return ||
+		bLoc.DirectoryListing != aLoc.DirectoryListing ||
+		bLoc.AllowHidden != aLoc.AllowHidden ||
+		!stringSlicesEqual(bLoc.Index, aLoc.Index) ||
+		!stringSlicesEqual(bLoc.TryFiles, aLoc.TryFiles) ||
+		!maps.Equal(bLoc.FastCGIParams, aLoc.FastCGIParams) ||
+		!reflect.DeepEqual(bLoc.GRPCTranscode, aLoc.GRPCTranscode) ||
 		!backendTLSConfigsEqual(bLoc.BackendTLS, aLoc.BackendTLS) {
 		return false
 	}
@@ -1719,7 +1748,9 @@ func findUpstreamByName(c *config.Config, name string) *config.UpstreamConfig {
 }
 
 func upstreamsAccessEqual(b, a config.UpstreamConfig) bool {
-	if b.Strategy != a.Strategy || !backendTLSConfigsEqual(b.BackendTLS, a.BackendTLS) {
+	if b.Strategy != a.Strategy ||
+		!reflect.DeepEqual(b.Hash, a.Hash) ||
+		!backendTLSConfigsEqual(b.BackendTLS, a.BackendTLS) {
 		return false
 	}
 	if len(b.Servers) != len(a.Servers) {
@@ -1730,15 +1761,7 @@ func upstreamsAccessEqual(b, a config.UpstreamConfig) bool {
 			return false
 		}
 	}
-	if (b.Discovery == nil) != (a.Discovery == nil) {
-		return false
-	}
-	if b.Discovery != nil && a.Discovery != nil {
-		if b.Discovery.Type != a.Discovery.Type || b.Discovery.Target != a.Discovery.Target {
-			return false
-		}
-	}
-	return true
+	return reflect.DeepEqual(b.Discovery, a.Discovery)
 }
 
 func backendTLSConfigsEqual(b, a *config.BackendTLSConfig) bool {

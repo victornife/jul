@@ -863,7 +863,7 @@ function AuthorizedConfigPanel() {
   const rawDiff = useQuery({
     queryKey: ["config-diff", debounced],
     queryFn: () => diffConfig(debounced),
-    enabled: !isPatchMode && rawHandoff === null && dirty && valid,
+    enabled: !isPatchMode && rawHandoff === null && dirty && draft !== null && debounced.length > 0,
     staleTime: Infinity,
     refetchInterval: false,
     refetchOnWindowFocus: false,
@@ -875,6 +875,22 @@ function AuthorizedConfigPanel() {
     () => patchDraft?.previewDiff ?? rawHandoff?.previewDiff ?? rawDiff.data,
     [patchDraft, rawHandoff, rawDiff.data],
   );
+
+  // Require a completed assessment for the current draft before confirmation so
+  // sharing widening acknowledgement cannot be bypassed while /api/config/diff
+  // (or a handoff refresh) is still pending or failed.
+  const assessmentReady = isPatchMode
+    ? !patchNeedsAssessmentRefresh && !patchAssessmentRefresh.isFetching
+    : rawHandoff !== null
+      ? !rawAssessmentRefresh.isFetching
+      : draft !== null &&
+        draft === debounced &&
+        rawDiff.isSuccess &&
+        !rawDiff.isFetching;
+
+  useEffect(() => {
+    setSharingAcknowledged(false);
+  }, [previewDiff]);
 
   // N-01 (WS05): when a config:raw operator is reviewing a structured patch,
   // fetch the true server-computed candidate TOML so the source view can show
@@ -1964,10 +1980,11 @@ function AuthorizedConfigPanel() {
           busy={applyActive.isPending}
           confirmDisabled={
             !canApplyPerm ||
+            !assessmentReady ||
             (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged)
           }
           onConfirm={() => {
-            if (!canApplyPerm) return;
+            if (!canApplyPerm || !assessmentReady) return;
             if (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged) return;
             const operationID = operationIDRef.current;
             if (adminChangeError) {
@@ -2032,6 +2049,13 @@ function AuthorizedConfigPanel() {
               </p>
             </>
           )}
+          {!assessmentReady && (
+            <p role="status" className="mt-2 text-xs text-jul-warning">
+              {rawDiff.isError
+                ? "Change assessment failed; resolve the diff error before applying."
+                : "Loading change assessment…"}
+            </p>
+          )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
           {sharingPlanRequiresAck(previewDiff?.sharing) && (
             <SharingAcknowledgementBox
@@ -2051,11 +2075,12 @@ function AuthorizedConfigPanel() {
           busy={applyStage.isPending}
           confirmDisabled={
             !canApplyPerm ||
+            !assessmentReady ||
             applyStage.error instanceof ConfigConflictError ||
             (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged)
           }
           onConfirm={() => {
-            if (!canApplyPerm) return;
+            if (!canApplyPerm || !assessmentReady) return;
             if (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged) return;
             const operationID = operationIDRef.current;
             const confirmAdmin =
@@ -2121,6 +2146,13 @@ function AuthorizedConfigPanel() {
                 </p>
               )}
             </>
+          )}
+          {!assessmentReady && (
+            <p role="status" className="mt-2 text-xs text-jul-warning">
+              {rawDiff.isError
+                ? "Change assessment failed; resolve the diff error before staging."
+                : "Loading change assessment…"}
+            </p>
           )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
           {sharingPlanRequiresAck(previewDiff?.sharing) && (
