@@ -6,8 +6,11 @@
 package waf
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -23,6 +26,7 @@ import (
 	"testing/fstest"
 
 	"jul/internal/config"
+	"jul/internal/versionid"
 )
 
 // goModVersion reads a module's required version from the repository go.mod.
@@ -146,8 +150,8 @@ SecRule REQUEST_URI "@contains /admin" "id:20002,phase:1,deny,status:403"
 	if first.RuleFilesConfigured != 1 || first.ExternalFiles != 2 || first.Rules.External != 2 || first.Rules.Total != 2 {
 		t.Fatalf("external info = %+v", first)
 	}
-	if !strings.HasPrefix(first.ExternalDigest, "sha256:") || len(first.ExternalDigest) != len("sha256:")+64 {
-		t.Fatalf("digest = %q", first.ExternalDigest)
+	if _, ok := versionid.Parse(first.ExternalDigest); !ok {
+		t.Fatalf("digest = %q, want valid ev1:<ctx>:<tag>", first.ExternalDigest)
 	}
 	if again := buildInfo(t, cfg); again.ExternalDigest != first.ExternalDigest {
 		t.Fatalf("unchanged bytes produced a different digest: %q vs %q", again.ExternalDigest, first.ExternalDigest)
@@ -159,6 +163,41 @@ SecRule REQUEST_URI "@contains /admin" "id:20002,phase:1,deny,status:403"
 	}
 	if strings.Contains(fmt.Sprintf("%+v", changed), dir) {
 		t.Fatalf("policy info leaks a rule file path: %+v", changed)
+	}
+
+	// Private SourceChanged detects content changes even across independent version contexts.
+	ctxA, err := versionid.New(bytes.Repeat([]byte{0x11}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctxB, err := versionid.New(bytes.Repeat([]byte{0x22}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwA, err := New(context.Background(), cfg, Options{Versions: ctxA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fwB, err := New(context.Background(), cfg, Options{Versions: ctxB})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if versionid.Comparison(fwA.Info().ExternalDigest, fwB.Info().ExternalDigest) != "different_context" {
+		t.Fatalf("expected different_context across independent keys: %q vs %q", fwA.Info().ExternalDigest, fwB.Info().ExternalDigest)
+	}
+	if fwA.SourceChanged(fwB) || fwA.SourceChanged(fwA) || (*Firewall)(nil).SourceChanged(nil) {
+		t.Fatal("unchanged external bytes reported SourceChanged=true")
+	}
+	if !fwA.SourceChanged(nil) || !(*Firewall)(nil).SourceChanged(fwA) {
+		t.Fatal("nil vs non-nil Firewall must report SourceChanged=true")
+	}
+	write(data, "evil\nworse\nyet-another\n")
+	fwChanged, err := New(context.Background(), cfg, Options{Versions: ctxA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fwA.SourceChanged(fwChanged) {
+		t.Fatal("changed external bytes reported SourceChanged=false")
 	}
 
 	// A candidate that fails to compile yields no Firewall, so no info.
@@ -231,14 +270,42 @@ func TestSourceRecorderServesTheHashedBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	n, digest := rec.identity()
+	keyBytes := bytes.Repeat([]byte{0x42}, 32)
+	vctx, err := versionid.New(keyBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, digest, rawSum := rec.identity(vctx)
 	chain := fmt.Sprintf("sha256:%s\nsha256:%s\n", hexSum("alpha"), hexSum("beta"))
-	if n != 2 || digest != "sha256:"+hexSum(chain) {
-		t.Fatalf("identity = %d %q", n, digest)
+	wantRawSum := sha256.Sum256([]byte(chain))
+	wantKeyed := hmacExternalSourceOracle(keyBytes, []byte(chain))
+	if n != 2 || digest != wantKeyed || rawSum != wantRawSum {
+		t.Fatalf("identity = %d %q (raw %x), want %q (raw %x)", n, digest, rawSum, wantKeyed, wantRawSum)
 	}
-	if n, d := newSourceRecorder(mem).identity(); n != 0 || d != "" {
-		t.Fatalf("empty recorder identity = %d %q", n, d)
+	if digest == "sha256:"+hexSum(chain) {
+		t.Fatalf("identity leaked unkeyed sha256 chain digest: %q", digest)
 	}
+	if n, d, rs := newSourceRecorder(mem).identity(vctx); n != 0 || d != "" || rs != ([32]byte{}) {
+		t.Fatalf("empty recorder identity = %d %q %x", n, d, rs)
+	}
+}
+
+func hmacExternalSourceOracle(key, chain []byte) string {
+	frame := func(domain string, data []byte) []byte {
+		h := hmac.New(sha256.New, key)
+		_, _ = h.Write([]byte("jul/versionid/v1\x00"))
+		var length [8]byte
+		binary.BigEndian.PutUint64(length[:], uint64(len(domain)))
+		_, _ = h.Write(length[:])
+		_, _ = h.Write([]byte(domain))
+		binary.BigEndian.PutUint64(length[:], uint64(len(data)))
+		_, _ = h.Write(length[:])
+		_, _ = h.Write(data)
+		return h.Sum(nil)
+	}
+	ctxID := hex.EncodeToString(frame("context-id", nil)[:16])
+	tag := hex.EncodeToString(frame("waf-external-source", chain))
+	return "ev1:" + ctxID + ":" + tag
 }
 
 func hexSum(s string) string {
@@ -305,7 +372,7 @@ func TestSourceRecorderRejectsOversizedRuleStream(t *testing.T) {
 			if err := read.read(rec); err == nil || !strings.Contains(err.Error(), "exceeds") {
 				t.Fatalf("oversized stream error = %v", err)
 			}
-			if n, digest := rec.identity(); n != 0 || digest != "" {
+			if n, digest, _ := rec.identity(nil); n != 0 || digest != "" {
 				t.Fatalf("rejected input recorded: %d %q", n, digest)
 			}
 		})
@@ -361,10 +428,12 @@ func FuzzSourceRecorderServesHashedBytes(f *testing.F) {
 		if err != nil || string(gb) != string(b) {
 			t.Fatalf("ReadFile = %q, %v", gb, err)
 		}
-		n, digest := rec.identity()
+		n, digest, rawSum := rec.identity(nil)
 		chain := fmt.Sprintf("sha256:%s\nsha256:%s\n", hexSum(string(a)), hexSum(string(b)))
-		if n != 2 || digest != "sha256:"+hexSum(chain) {
-			t.Fatalf("identity = %d %q", n, digest)
+		wantRaw := sha256.Sum256([]byte(chain))
+		wantDigest := versionid.Process().Digest("waf-external-source", []byte(chain))
+		if n != 2 || digest != wantDigest || rawSum != wantRaw {
+			t.Fatalf("identity = %d %q (raw %x), want %q (raw %x)", n, digest, rawSum, wantDigest, wantRaw)
 		}
 	})
 }

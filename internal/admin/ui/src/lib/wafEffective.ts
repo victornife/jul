@@ -20,6 +20,18 @@ export function ruleSources(p: WAFPolicySummary): string {
   return `${plural(r.total, "rule")}${parts.length > 0 ? ` (${parts.join(", ")})` : ""}`;
 }
 
+// shortDigest formats a context-keyed "ev1:<ctx>:<tag>" digest so both the
+// context prefix and the per-policy HMAC tag prefix are visible at a glance
+// (#649), falling back to a simple prefix slice for legacy/other strings.
+export function shortDigest(digest: string | undefined): string {
+  if (!digest) return "…";
+  const parts = digest.split(":");
+  if (parts.length === 3 && parts[0] === "ev1" && parts[1] && parts[2]) {
+    return `ev1:${parts[1].slice(0, 8)}:${parts[2].slice(0, 12)}…`;
+  }
+  return `${digest.slice(0, 19)}…`;
+}
+
 // servingDiffers reports that the saved global configuration no longer matches
 // what the serving generation compiled — a reload is pending or failed.
 export function servingDiffers(d: SecurityProjection, e: WAFEffectivePolicy): boolean {

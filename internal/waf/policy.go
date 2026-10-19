@@ -29,8 +29,9 @@ type PolicyInfo struct {
 	RuleFilesConfigured int
 	// ExternalFiles is the number of distinct filesystem files the compile
 	// read (rule files, their includes and operator data files), and
-	// ExternalDigest an aggregate "sha256:" digest of the exact bytes read, in
-	// read order. Empty when nothing external was read.
+	// ExternalDigest a context-keyed "ev1:<context-id>:<tag>" HMAC-SHA-256
+	// digest over the exact bytes read, in read order (#649). Empty when
+	// nothing external was read.
 	ExternalFiles  int
 	ExternalDigest string
 	// InlineRules reports that inline_rules is non-empty.

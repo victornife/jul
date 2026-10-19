@@ -18,6 +18,8 @@ import (
 	"sync"
 
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
+
+	"jul/internal/versionid"
 )
 
 // sourceRecorder wraps the OS filesystem the rule parser reads from and
@@ -51,16 +53,18 @@ func (r *sourceRecorder) record(name string, data []byte) {
 	r.chain.WriteByte('\n')
 }
 
-// identity returns the number of distinct files read and the aggregate
-// digest over the ordered per-read digests ("" when nothing was read).
-func (r *sourceRecorder) identity() (int, string) {
+// identity returns the number of distinct files read, the context-keyed
+// public digest over the ordered per-read digests ("" when nothing was read),
+// and the private raw chain digest used only for in-memory content-change
+// comparison (#649 / EX01).
+func (r *sourceRecorder) identity(versions *versionid.Context) (int, string, [32]byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.names) == 0 {
-		return 0, ""
+		return 0, "", [32]byte{}
 	}
-	sum := sha256.Sum256(r.chain.Bytes())
-	return len(r.names), "sha256:" + hex.EncodeToString(sum[:])
+	chain := r.chain.Bytes()
+	return len(r.names), versions.Digest("waf-external-source", chain), sha256.Sum256(chain)
 }
 
 func (r *sourceRecorder) Open(name string) (fs.File, error) {

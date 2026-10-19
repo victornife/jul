@@ -30,6 +30,7 @@ import (
 	"jul/internal/router"
 	"jul/internal/server"
 	"jul/internal/upstream"
+	"jul/internal/versionid"
 	"jul/internal/waf"
 )
 
@@ -57,7 +58,8 @@ type HandlerFactory struct {
 	PoolReg    *upstream.Registry
 	PluginMgr  *plugins.Manager
 	GenRes     *GenerationResources
-	RT         *Runtime // Tracer.Middleware, ACME
+	RT         *Runtime           // Tracer.Middleware, ACME
+	Versions   *versionid.Context // private effective-version context (#649)
 
 	mu sync.Mutex // serialises every build (startup, reload, preflight)
 
@@ -596,8 +598,9 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if loc.WAF != nil || fw == nil {
 				var err error
 				fw, err = newFirewall(ctx, wcfg, waf.Options{
-					Logger: f.Log,
-					Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
+					Logger:   f.Log,
+					Hooks:    waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
+					Versions: f.Versions,
 				})
 				if err != nil {
 					return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)

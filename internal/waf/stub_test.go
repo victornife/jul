@@ -38,6 +38,12 @@ func TestLeanFirewallSurfaceIsNoOp(t *testing.T) {
 	if err := firewall.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
+	if firewall.SourceChanged(firewall) || (*Firewall)(nil).SourceChanged(nil) {
+		t.Fatal("identical stub firewalls reported SourceChanged=true")
+	}
+	if !firewall.SourceChanged(nil) || !(*Firewall)(nil).SourceChanged(firewall) {
+		t.Fatal("nil vs non-nil stub firewall must report SourceChanged=true")
+	}
 }
 
 func TestStubReportsNoPolicyOrEmbeddedRuleSet(t *testing.T) {

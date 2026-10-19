@@ -6,14 +6,22 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/versionid"
 	"jul/internal/waf"
 )
 
@@ -158,5 +166,242 @@ func TestWAFPreparationErrorDoesNotExportMatcherFingerprint(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "servers[0].locations[1]") || strings.Contains(err.Error(), private) {
 		t.Fatalf("scope-bearing preparation error: %v", err)
+	}
+}
+
+// TestSecurityEndpointWAFExternalDigestMustNotConfirmOfflineGuess reproduces
+// EX01 (#649) through GET /api/security using a status:read-only principal and
+// synthetic low-entropy rule/include/data content, including the provider-overlap
+// case where a ${file:...} reference selects or overlaps a Coraza external file.
+func TestSecurityEndpointWAFExternalDigestMustNotConfirmOfflineGuess(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		t.Helper()
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	// Synthetic low-entropy external inputs:
+	// 1. A shared secret file used BOTH by a Jul ${file:...} provider and by Coraza @pmFromFile (overlap case).
+	// 2. An included SecLang file.
+	// 3. A top-level directive file whose path is selected via ${file:...}.
+	overlapSecret := "pin-0042\n"
+	write("overlap-secret.data", overlapSecret)
+	incContent := "SecAction \"id:50002,phase:1,pass,nolog\"\n"
+	write("included.conf", incContent)
+	mainRuleContent := "SecRule ARGS:pin \"@pmFromFile overlap-secret.data\" \"id:50001,phase:1,deny,status:403\"\nInclude included.conf\n"
+	mainRulePath := write("main.conf", mainRuleContent)
+	selectorPath := write("selected-rule-path.txt", mainRulePath)
+	overlapPath := filepath.Join(dir, "overlap-secret.data")
+
+	overrideRuleContent := "SecRule REQUEST_HEADERS:X-Pin \"@pmFromFile overlap-secret.data\" \"id:50003,phase:1,deny,status:403\"\n"
+	overrideRulePath := write("override.conf", overrideRuleContent)
+
+	const statusViewerToken = "status-viewer-synthetic-token-649-ex01"
+	t.Setenv("JUL_TEST_649_VIEWER_TOKEN", statusViewerToken)
+
+	cfgPath := filepath.Join(dir, "jul.toml")
+	cfg := config.ProxyTarget("http://127.0.0.1:9001", freePort(t))
+	cfg.Global.ConfigAuthority = "file_owned"
+	// Overlap: the same overlap-secret.data file is read by ${file:...} in the
+	// configuration and by Coraza @pmFromFile, and ${file:...} selects main.conf.
+	cfg.Servers[0].Name = "srv-${file:" + overlapPath + "}"
+	cfg.WAF = config.WAFConfig{
+		Enabled:          true,
+		Mode:             "block",
+		DirectivesFiles:  []string{"${file:" + selectorPath + "}"},
+		RequestBodyLimit: 128 << 10,
+	}
+	baseLoc := cfg.Servers[0].Locations[0]
+	baseLoc.ProxyPass = ""
+	baseLoc.Return = 200
+	overrideLoc := baseLoc
+	overrideLoc.Match.Path = "/override"
+	overrideLoc.WAF = &config.WAFConfig{
+		Enabled:          true,
+		Mode:             "detect",
+		DirectivesFiles:  []string{overrideRulePath},
+		RequestBodyLimit: 64 << 10,
+	}
+	cfg.Servers[0].Locations = []config.LocationConfig{baseLoc, overrideLoc}
+	cfg.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  freePort(t),
+		RBAC: config.AdminRBACConfig{
+			Enabled: true,
+			Roles: []config.AdminRole{{
+				Name:        "status-only",
+				Permissions: []string{"status:read"},
+			}},
+			Principals: []config.AdminPrincipal{
+				{
+					Name:  "viewer",
+					Role:  "status-only",
+					Token: "${env:JUL_TEST_649_VIEWER_TOKEN}",
+				},
+				{
+					Name:  "root-admin",
+					Role:  "admin",
+					Token: "admin-user-has-32-char-token--test",
+				},
+			},
+		},
+	}
+	raw, err := config.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	legacyUnkeyedDigest := func(files ...string) string {
+		var chain strings.Builder
+		for _, content := range files {
+			sum := sha256.Sum256([]byte(content))
+			chain.WriteString("sha256:")
+			chain.WriteString(hex.EncodeToString(sum[:]))
+			chain.WriteByte('\n')
+		}
+		outer := sha256.Sum256([]byte(chain.String()))
+		return "sha256:" + hex.EncodeToString(outer[:])
+	}
+	expectedChainBytes := func(files ...string) []byte {
+		var chain bytes.Buffer
+		for _, content := range files {
+			sum := sha256.Sum256([]byte(content))
+			chain.WriteString("sha256:")
+			chain.WriteString(hex.EncodeToString(sum[:]))
+			chain.WriteByte('\n')
+		}
+		return chain.Bytes()
+	}
+
+	versionsA, err := versionid.New(bytes.Repeat([]byte{0x64}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	versionsB, err := versionid.New(bytes.Repeat([]byte{0x99}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runServer := func(vctx *versionid.Context) (func() admin.SecurityProjection, chan struct{}, func()) {
+		ctx, cancel := context.WithCancel(context.Background())
+		signals := make(chan struct{}, 1)
+		done := make(chan int, 1)
+		parsed, err := config.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var logBuf bytes.Buffer
+		go func() {
+			done <- Serve(ctx, signals, config.NewTOMLSource(cfgPath), parsed, "Jul.IA", "649-test", WithEffectiveVersions(vctx), WithLogOutput(&logBuf))
+		}()
+		stop := func() {
+			cancel()
+			select {
+			case code := <-done:
+				if code != 0 {
+					t.Fatalf("Serve exit %d: %s", code, logBuf.String())
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("Serve shutdown timed out")
+			}
+		}
+		client := &http.Client{Timeout: time.Second}
+		fetchSecurity := func() admin.SecurityProjection {
+			req, _ := http.NewRequest(http.MethodGet, "http://"+cfg.Admin.Listen+"/api/security", nil)
+			req.Header.Set("Authorization", "Bearer "+statusViewerToken)
+			res, err := client.Do(req)
+			if err != nil {
+				return admin.SecurityProjection{}
+			}
+			defer res.Body.Close()
+			if res.StatusCode != http.StatusOK {
+				return admin.SecurityProjection{}
+			}
+			var sp admin.SecurityProjection
+			_ = json.NewDecoder(res.Body).Decode(&sp)
+			return sp
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if sp := fetchSecurity(); sp.WAFEffective != nil && sp.WAFEffective.Generation > 0 {
+				return fetchSecurity, signals, stop
+			}
+			time.Sleep(15 * time.Millisecond)
+		}
+		stop()
+		t.Fatal("GET /api/security did not become ready")
+		return nil, nil, nil
+	}
+
+	fetchA, signalsA, stopA := runServer(versionsA)
+	sp1 := fetchA()
+	eff1 := sp1.WAFEffective
+	if eff1 == nil || eff1.Global == nil || len(eff1.Overrides) != 1 || eff1.Overrides[0].Policy == nil {
+		stopA()
+		t.Fatalf("unexpected waf_effective = %+v", eff1)
+	}
+	globalDigest1 := eff1.Global.ExternalDigest
+	overrideDigest1 := eff1.Overrides[0].Policy.ExternalDigest
+
+	// 1. Neither global nor override digest may equal the legacy unkeyed SHA-256 chain or raw SHA-256.
+	unkeyedGlobal := legacyUnkeyedDigest(mainRuleContent, overlapSecret, incContent)
+	unkeyedOverride := legacyUnkeyedDigest(overrideRuleContent, overlapSecret)
+	if globalDigest1 == unkeyedGlobal || strings.HasPrefix(globalDigest1, "sha256:") {
+		stopA()
+		t.Fatalf("EX01 unkeyed global digest exposed: got %q, legacy %q", globalDigest1, unkeyedGlobal)
+	}
+	if overrideDigest1 == unkeyedOverride || strings.HasPrefix(overrideDigest1, "sha256:") {
+		stopA()
+		t.Fatalf("EX01 unkeyed override digest exposed: got %q, legacy %q", overrideDigest1, unkeyedOverride)
+	}
+
+	// 2. Both digests must be valid ev1 identifiers under versionsA's "waf-external-source" domain.
+	wantGlobalA := versionsA.Digest("waf-external-source", expectedChainBytes(mainRuleContent, overlapSecret, incContent))
+	wantOverrideA := versionsA.Digest("waf-external-source", expectedChainBytes(overrideRuleContent, overlapSecret))
+	if globalDigest1 != wantGlobalA || overrideDigest1 != wantOverrideA {
+		stopA()
+		t.Fatalf("digests = (%q, %q), want (%q, %q)", globalDigest1, overrideDigest1, wantGlobalA, wantOverrideA)
+	}
+
+	// 3. Replacing the shared low-entropy file in place updates both digests on reload.
+	newSecret := "pin-9999\n"
+	write("overlap-secret.data", newSecret)
+	signalsA <- struct{}{}
+	wantGlobalA2 := versionsA.Digest("waf-external-source", expectedChainBytes(mainRuleContent, newSecret, incContent))
+	wantOverrideA2 := versionsA.Digest("waf-external-source", expectedChainBytes(overrideRuleContent, newSecret))
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cur := fetchA().WAFEffective; cur != nil && cur.Generation > eff1.Generation {
+			if cur.Global.ExternalDigest != wantGlobalA2 || cur.Overrides[0].Policy.ExternalDigest != wantOverrideA2 {
+				stopA()
+				t.Fatalf("post-reload digests = (%q, %q), want (%q, %q)", cur.Global.ExternalDigest, cur.Overrides[0].Policy.ExternalDigest, wantGlobalA2, wantOverrideA2)
+			}
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	stopA()
+
+	// 4. Restarting with the SAME durable version context preserves digest equality,
+	// whereas restarting with an INDEPENDENT version context produces different_context digests.
+	fetchA2, _, stopA2 := runServer(versionsA)
+	effA2 := fetchA2().WAFEffective
+	stopA2()
+	if effA2.Global.ExternalDigest != wantGlobalA2 || versionid.Comparison(effA2.Global.ExternalDigest, wantGlobalA2) != "same_context" {
+		t.Fatalf("same-key restart changed digest: got %q, want %q", effA2.Global.ExternalDigest, wantGlobalA2)
+	}
+
+	fetchB, _, stopB := runServer(versionsB)
+	effB := fetchB().WAFEffective
+	stopB()
+	if effB.Global.ExternalDigest == wantGlobalA2 || versionid.Comparison(effB.Global.ExternalDigest, wantGlobalA2) != "different_context" {
+		t.Fatalf("independent-key restart did not isolate context: got %q vs %q", effB.Global.ExternalDigest, wantGlobalA2)
 	}
 }

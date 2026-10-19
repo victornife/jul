@@ -5,7 +5,7 @@
 
 import type { SecurityProjection, WAFEffectivePolicy, WAFPolicySummary } from "@/api/client.ts";
 import { formatBytes } from "@/lib/formatBytes.ts";
-import { plural, ruleSources, servingDiffers } from "@/lib/wafEffective.ts";
+import { plural, ruleSources, servingDiffers, shortDigest } from "@/lib/wafEffective.ts";
 
 function PolicySummary({ p }: { readonly p: WAFPolicySummary }) {
   return (
@@ -58,7 +58,7 @@ function PolicySummary({ p }: { readonly p: WAFPolicySummary }) {
           <div>
             {plural(p.external_files, "file")} read at compile · content{" "}
             <code className="font-mono" title={p.external_digest}>
-              {p.external_digest?.slice(0, 19)}…
+              {shortDigest(p.external_digest)}
             </code>
           </div>
         ) : (

@@ -24,9 +24,10 @@ func TestWAFReportClassifiesRoutes(t *testing.T) {
 	r := newWAFReport(c)
 	global := waf.PolicyInfo{Mode: "block", BlockStatus: 403, CRSEnabled: true, CRSVersion: "4.25.0", Paranoia: 1, ParanoiaDefault: true,
 		RequestBodyLimitBytes: 131072, Rules: waf.RuleCounts{Total: 3, Embedded: 3}}
+	const sampleDigest = "ev1:0123456789abcdef0123456789abcdef:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
 	r.protected(srv, inherit, global)
 	r.protected(srv, inherit, waf.PolicyInfo{Mode: "ignored"})
-	r.protected(srv, override, waf.PolicyInfo{Mode: "detect", BlockStatus: 403, ExternalFiles: 1, ExternalDigest: "sha256:ab", RuleFilesConfigured: 1,
+	r.protected(srv, override, waf.PolicyInfo{Mode: "detect", BlockStatus: 403, ExternalFiles: 1, ExternalDigest: sampleDigest, RuleFilesConfigured: 1,
 		Rules: waf.RuleCounts{Total: 1, External: 1}})
 	r.unprotected(srv, off)
 	r.unprotected(srv, inherit)
@@ -46,7 +47,7 @@ func TestWAFReportClassifiesRoutes(t *testing.T) {
 		t.Fatalf("overrides = %+v", got.Overrides)
 	}
 	o := got.Overrides[0]
-	if o.Path != "/api" || !o.Enabled || o.Policy == nil || o.Policy.Mode != "detect" || o.Policy.ExternalDigest != "sha256:ab" {
+	if o.Path != "/api" || !o.Enabled || o.Policy == nil || o.Policy.Mode != "detect" || o.Policy.ExternalDigest != sampleDigest {
 		t.Fatalf("override = %+v / %+v", o, o.Policy)
 	}
 	if d := got.Overrides[1]; d.Path != "/health" || d.Enabled || d.Policy != nil {

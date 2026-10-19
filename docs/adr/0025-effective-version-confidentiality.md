@@ -20,7 +20,9 @@ canonical bytes from the exact immutable resolved candidate or serving snapshot.
 A 256-bit independently generated server-held key provides a restart-stable
 context. Public identifiers have format `ev1:<128-bit context id>:<256-bit tag>`.
 The context id is a separately domain-separated HMAC of a fixed string; the
-configuration uses its durable context. Authentication generation and posture
+configuration and compiled WAF `external_digest` (`waf-external-source`, #649)
+use distinct domains under the server's durable context while keeping private
+in-memory WAF source-change comparison separate. Authentication generation and posture
 use distinct domains under a separate private boot-only context: their fences
 need within-process equality and do not promise comparison across restart. Both
 contexts use length framing and neither reuses the sharing key. No provider is read again for hashing. No unkeyed alias is emitted.

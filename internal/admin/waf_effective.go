@@ -45,7 +45,9 @@ type WAFPolicySummary struct {
 	ResponseBodyInspection bool   `json:"response_body_inspection"`
 	RuleFilesConfigured    int    `json:"rule_files_configured"`
 	// ExternalFiles/ExternalDigest identify the exact bytes read from disk at
-	// compile time: same path with changed content yields a new digest.
+	// compile time under the server's private version context ("ev1:<ctx>:<tag>",
+	// #649): same path with changed content yields a new digest without exposing
+	// an unkeyed offline dictionary verifier.
 	ExternalFiles  int           `json:"external_files"`
 	ExternalDigest string        `json:"external_digest,omitempty"`
 	InlineRules    bool          `json:"inline_rules"`

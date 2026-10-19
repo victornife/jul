@@ -25,6 +25,7 @@ import (
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/redact"
+	"jul/internal/versionid"
 )
 
 // Compiled reports whether this binary includes WAF support. It is true in
@@ -34,8 +35,10 @@ const Compiled = true
 
 // Firewall wraps a configured Coraza engine and exposes it as a middleware.
 type Firewall struct {
-	waf  coraza.WAF
-	info PolicyInfo
+	waf         coraza.WAF
+	info        PolicyInfo
+	hasExternal bool
+	sourceSum   [32]byte
 }
 
 // New builds a Firewall from a WAF policy. It assembles the SecLang directive
@@ -81,13 +84,29 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	}
 	// Wrap the engine so rules see Jul's canonical client address rather than
 	// Coraza's own parse of RemoteAddr (see clientaddr.go).
-	return &Firewall{waf: &clientAddrWAF{WAF: w}, info: policyInfo(cfg, counter.counts, rec)}, nil
+	info, rawSum := policyInfo(cfg, counter.counts, rec, opts.Versions)
+	return &Firewall{
+		waf:         &clientAddrWAF{WAF: w},
+		info:        info,
+		hasExternal: info.ExternalFiles > 0,
+		sourceSum:   rawSum,
+	}, nil
 }
 
 // Info describes the compiled policy this Firewall enforces.
 func (f *Firewall) Info() PolicyInfo { return f.info }
 
-func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder) PolicyInfo {
+// SourceChanged reports whether two compiled Firewalls read different external
+// file bytes, using the private in-memory digest chain rather than any public
+// identifier (#649).
+func (f *Firewall) SourceChanged(other *Firewall) bool {
+	if f == nil || other == nil {
+		return f != other
+	}
+	return f.hasExternal != other.hasExternal || f.sourceSum != other.sourceSum
+}
+
+func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, versions *versionid.Context) (PolicyInfo, [32]byte) {
 	info := PolicyInfo{
 		Mode:                   "block",
 		BlockStatus:            cfg.BlockStatus,
@@ -119,8 +138,9 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder) Po
 			info.Rules.Generated++
 		}
 	}
-	info.ExternalFiles, info.ExternalDigest = rec.identity()
-	return info
+	var rawSum [32]byte
+	info.ExternalFiles, info.ExternalDigest, rawSum = rec.identity(versions)
+	return info, rawSum
 }
 
 // Middleware returns the per-location middleware that runs each request (and,
