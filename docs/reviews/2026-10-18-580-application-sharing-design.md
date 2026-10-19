@@ -15,9 +15,10 @@
 > **r19** `c0af10a3` (whole-contract review, §6.20), **r20** `1332982a` (round
 > 21, §6.21), **r21** `a27acb0d` (round 22, §6.22), **r22** `68aed05d` (fourth
 > principal re-review, §6.23), **r23** `e73abca6` (round 24, §6.24), **r24**
-> `b7d2f786` (round 25, §6.25), **r25** `9ee59174` (round 26, §6.26) and **r26**
-> (this revision; round 27 in §6.27). This packet holds evidence, decisions,
-> review findings and traceability for the
+> `b7d2f786` (round 25, §6.25), **r25** `9ee59174` (round 26, §6.26), **r26**
+> `ef11929c` (round 27, §6.27) and **r27** (this revision: W7-1 and the round-27
+> record). This packet holds evidence, decisions, review findings and
+> traceability for the
 > [specification](../specs/application-sharing.md) and
 > [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
@@ -109,7 +110,7 @@ the row.
 | E60 | The existing configuration diff (`/api/config/diff`, `config:write`) reports whether `[admin].token` changed without showing it, so a writer without `config:raw` can already test guesses of a literal admin token online; discovery tokens are deliberately never diffed | internal/admin/diff_global.go:621-648; internal/admin/diff_helpers.go:980-982; internal/admin/route_catalog.go:620-640 | F (round 17) | pre-existing, outside #580 (#645) | high |
 | E61 | `plugin_set` replaces a plugin's whole configuration with `config:write`; plugin configuration is returned only to callers holding `config:raw`; the diff reports "Change plugin config" exactly when the maps differ, so it reveals equality of a hidden value | internal/admin/plugins.go:23-28,126,450-455; internal/admin/diff_global.go:420-421; internal/admin/route_catalog.go:628-637 | F (round 18) | pre-existing, outside #580 (#645) | high |
 | E62 | Typed `location_add` rejects a route that already exists, and `location_remove` rejects a missing target, so re-planning either against its own serving result fails. The normal typed preview returns no candidate configuration; `/api/config/patch/candidate` returns it only with `config:raw` | internal/admin/patch.go:662-679,707-711; internal/admin/patch_http.go:44-50,256-258; internal/admin/route_catalog.go:640-642 | F (round 23; the fourth principal re-review reproduced both through `executePatchBatch` with a refreshed fence) | — | high |
-| E63 | `[servers.locations.headers]` forwards request headers to the upstream, and references resolve in them, so a configuration can send `${file:…}` contents to any `proxy_pass` target; the egress guard covers only the auth, discovery, ACME and OCSP subsystems, not proxy upstreams. Anyone with `config:apply` can therefore already read any file Jul can read | internal/config/schema.go:554; docs/secrets.md:51-69,204-213; internal/egress/policy.go:1-45 | F + D (round 26) | not exercised end to end | high |
+| E63 | Anyone with `config:apply` can already read any regular file Jul can read. A static `root` location opens any directory (`os.OpenRoot`, no path restriction; dotfiles need the explicit hidden-files option), which covers multi-line and binary files such as htpasswd, WAF rules and plugin modules. For single-line values up to 1 MiB, `[servers.locations.headers]` forwards a resolved `${file:…}` reference to any `proxy_pass` target. Proxy dials are unguarded; the egress guard covers auth, discovery, ACME, OCSP and plugin fetches | internal/handler/static.go:53-60,323-334; internal/config/schema.go:552-554; internal/config/secrets.go:237-317; internal/handler/proxy.go:489-540,599-609; internal/config/validate_location.go:310-328; internal/egress/policy.go:41-46; docs/secrets.md:204-213 | F (round 26; header channel verified by the security reviewer in round 27, static-root channel by the author) | not exercised end to end | high |
 
 ### External primary sources
 
@@ -789,11 +790,23 @@ text and gaps; the security reviewer added a publish-time scenario.
 | W6-1 | high | "plans never read file contents" conflicted with preparing and validating the candidate | plans may read files to prepare and validate; contents never enter a class, finding, warning or postcondition |
 | W6-3 | high | publish-time retirement on content changes was not announced in the plan, contrary to §8.4 Preview | every plan states once that entries with file-backed inputs retire if their loaded contents change at publish, and names them; §8.4 Preview row aligned |
 | W6-4 | low | the #641 estimate still cited per-generation access-file digests | rationale updated; publish-time comparison belongs to #642's retirement |
-| S26-1 | high → none, disputed | an applier with write-without-read file access could use publish-time retirement as an equality oracle | kept, with its boundary stated: `config:apply` already grants reading any file Jul can read, by sending a `${file:…}` reference in a forwarded header to any upstream (E63); callers without apply authority see no effect. Unconditional retirement on every reload that re-reads files would end all open exchanges of entries with htpasswd or WAF files on every change |
+| S26-1 | high → none, disputed (judged sound in round 27) | an applier with write-without-read file access could use publish-time retirement as an equality oracle | kept, with its boundary stated: `config:apply` already grants reading any file Jul can read, by sending a `${file:…}` reference in a forwarded header to any upstream (E63); callers without apply authority see no effect. Unconditional retirement on every reload that re-reads files would end all open exchanges of entries with htpasswd or WAF files on every change |
 
-### 6.27 Round 27 (verification of r26)
+### 6.27 Round 27 (verification of r26 `ef11929c`)
 
-(Recorded below.)
+The security reviewer checked E63 in source and judged the S26-1 dispute sound
+under the documented trust boundary: `config:apply` already authorises reading
+Jul-readable secret files, so publish-time retirement does not expand it. The
+reviewer noted the header channel covers only single-line values up to 1 MiB.
+The author then confirmed a static `root` location covers multi-line and
+binary files too, and E63 now names both channels. The whole-contract reviewer
+verified W6-1 to W6-4 resolved and raised one item.
+
+| ID | Sev. | Finding | Resolution (r27) |
+| --- | --- | --- | --- |
+| W7-1 | high | evaluator messages named a file path and a key-set URL, which the view's field contract withholds | messages name the input kind and entry; paths and URLs appear only for callers who also hold `config:raw` |
+
+No blocker or high finding is open.
 
 ## 7. Traceability
 

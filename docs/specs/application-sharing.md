@@ -904,9 +904,11 @@ answer are always shown, separately.
   key rotation as divergence. File contents are not compared either (above).
   Each entry result lists these in `external_inputs` (closed set:
   `jwt_key_set`, `forward_auth`, `provider_policy`, `file_contents`), and every
-  surface says what was compared and that these were not ("The key set at
-  <URL> is controlled by its issuer and was not compared"; "The contents of
-  dashboard.htpasswd were not compared; test the change, §7"). `provider_policy` is listed
+  surface says what was compared and that these were not, by input kind and
+  entry, never by path or URL ("This entry's JWT key set is controlled by its
+  issuer and was not compared"; "This entry's credential file contents were
+  not compared; test the change, §7"). Paths and URLs appear only for a caller
+  who also holds `config:raw`, as for the rest of the raw configuration. `provider_policy` is listed
   for every entry that declares an `external_enforcer` (whose label it
   carries), declares `restricted` without a Jul check, or declares
   `private_network` (membership is enforced by the network provider). For an
@@ -987,8 +989,9 @@ otherwise affects them.
 
 The effect of publish-time retirement (ended exchanges and their counts in the
 apply result) can tell an applier whether a file changed. That reveals nothing
-beyond `config:apply`, which can already make Jul send the contents of any file
-it can read to an upstream, through a reference in a forwarded header (E63).
+beyond `config:apply`, which can already read any regular file Jul can read
+(E63): by serving its directory from a static `root` location, or, for a
+single-line value, by sending a reference to an upstream in a forwarded header.
 Callers without apply authority see no such effect.
 
 `uncertain` keeps its full meaning: acknowledgement in the Console, and §8.4
