@@ -637,21 +637,22 @@ application. Each is shown with its blast radius.
 
 ### 8.4 Complete withdrawal: the gate plus retirement on narrowing (#642 with #563/#562)
 
-*Accepted (SD-07, SD-08, SD-09, 2026-10-18).* Consumer contract the #642
-design must satisfy; the design owns mechanisms, bounds and tests.
+*Accepted (SD-07, SD-08, SD-09, 2026-10-18; mechanism, schema and bound settled
+by the [ADR 0026 #642 amendment](../adr/0026-application-sharing-contract.md#amendment--complete-withdrawal-outermost-withdrawal-gate-and-retirement-on-narrowing-642-with-563-and-562),
+2026-10-19).*
 
 | Aspect | Requirement |
 | --- | --- |
-| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set; a Jul check added or tightened; `require_client_cert` set; credential-file, WAF rule-file or plugin-module content change (classified at publish from the loaded contents, §9.5); a CA/CRL change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain. |
-| Uncertain changes (SD-09) | Treated as narrowing by default. The plan offers an explicit "keep open connections" exception per entry; choosing it is recorded in the result and forfeits any complete-withdrawal claim for that entry. |
+| Trigger | A published generation in which an entry's effective access inputs are classed `narrowed` or `uncertain` by §9.5, including: the withdrawal gate set (`withdrawn = true`); a Jul check added or tightened; `require_client_cert` set; credential-file (`htpasswd`), WAF rule-file, plugin-module or `${file:…}` content change (classified at publish from the loaded contents, §9.5); a CA/CRL/SAN/mode change that invalidates certificates; host names or match narrowed; **any target change** while exchanges admitted under the old target remain; or entry removal. |
+| Uncertain changes (SD-09) | Treated as narrowing by default. Apply and patch-apply requests accept an optional `keep_open_entries` list (by `route_id` or canonical coordinate) honoured only for entries whose retirement trigger is `uncertain` (including target/upstream changes); provably `narrowed` tightenings always retire open exchanges unconditionally. Choosing `keep_open_entries` is recorded in the result (`keep_open: true`) and forfeits any complete-withdrawal claim for that entry. |
 | Never triggers | `metadata_only` changes (declared intent and labels); changes to inputs that are not access inputs (§9.5: rate limits, request size limits outside the WAF, cache, compression, timeouts, response headers, transport failures); `widened` changes; and external events (provider policy, issuer key removal), which have no Jul event. |
 | Scope (SD-08) | **Exactly the narrowed entries.** Exchanges of every other entry continue uninterrupted, including exchanges multiplexed on the same HTTP/2 or HTTP/3 connection (browsers coalesce connections when one certificate covers several hosts). |
-| Mechanisms | Stream-level: end the narrowed entry's in-flight requests, SSE and gRPC streams and owned H1 WebSockets (#562), without closing connections shared with other entries. Certificate revocation and policy changes are enforced by re-checking the current client-certificate policy (mode, CA bundle, CRL and SAN allow-list) on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
-| Collateral | If a fallback closes a connection that also carried another entry's exchange, the result discloses the count, the entry's claim is downgraded to "new access stopped; open connections ended with collateral interruption", and §13 W3 counts it as a failure. |
-| Bound | Starts at publish; completes within a maximum delay chosen and *tested* by #642. Surfaces show only the tested value. |
-| Closure | Graceful where the protocol and library allow (WebSocket close frame, stream reset); otherwise abrupt, reported as forced. |
-| Observability | The terminal apply result and status report, per entry, a bounded count of ended exchanges, whether completion was confirmed, any collateral, and any keep-open exception. No client identities; no new metric labels. |
-| Preview | The plan states, per entry, that open exchanges will be ended and shows a **snapshot** count; connection membership can change before apply, so the result reports the actual scope. It also states, once, that entries with file-backed access inputs will have their exchanges ended if their loaded file contents change at publish (§9.5), and names them. |
+| Mechanisms | Stream-level: end the narrowed entry's in-flight HTTP/1.1, HTTP/2 and HTTP/3 requests, SSE and native/transcoded gRPC streams (via entry-scoped exchange context cancellation and H2 `RST_STREAM` / H3 stream reset) and owned H1 upgraded sessions (#562: RFC 6455 WebSocket Close frame `1008 Policy Violation` on narrowing and `1001 Going Away` on shutdown/listener removal, or direct socket close for non-WebSocket opaque `101` upgrades), without closing connections shared with other entries. Certificate revocation and policy changes are enforced by re-checking the current client-certificate policy (mode, CA bundle, CRL and SAN allow-list) on every request to entries that require a client certificate, instead of closing the connection. Closing a whole connection is a fallback only when no stream-level mechanism exists for that protocol. |
+| Collateral | If a fallback closes a connection that also carried another entry's exchange, the result discloses `collateral_count`, the entry's claim is downgraded to "new access stopped; open connections ended with collateral interruption", and §13 W3 counts it as a failure. |
+| Bound | Starts at `Publish` (before `applied_live` / `applied_degraded` returns); completes within a fixed, server-enforced **`2s` hard upper bound** (`1s` graceful protocol close window + `1s` forced cutoff; no new TOML knob). Monotonic: client/backend I/O activity and repeated reloads never extend an already-armed retirement deadline (`deadline = min(existingDeadline, publishTime + 2s)`). Surfaces show only the tested `2s` value. |
+| Closure | Graceful where the protocol and library allow (`1s` window for WebSocket Close handshake or stream reset, reported in `graceful_count`); otherwise abrupt at the `2s` cutoff, reported in `forced_count`. |
+| Observability | The terminal apply result and status report, per entry, a bounded count of ended exchanges (`graceful_count`, `forced_count`), whether completion within `2s` was confirmed (`completed_within_bound`), any collateral (`collateral_count`), and any keep-open exception (`keep_open`). No client identities; no new metric labels. |
+| Preview | The plan states, per entry, `triggers_retirement`, `open_exchanges_snapshot` (snapshot count at plan time), `keep_open_eligible` (`true` for `uncertain` triggers), and `retirement_bound: "2s"`; connection membership can change before apply, so the result reports the actual scope. It also states, once, that entries with file-backed access inputs will have their exchanges ended if their loaded file contents change at publish (§9.5), and names them. |
 | Not covered | Provider sessions (Jul-routed requests are still denied by the gate), application sessions, traffic reaching the application without Jul, L4 streams. |
 
 **Delivery and earliest supported behaviour (SD-07).**
@@ -746,16 +747,22 @@ withdrawal shows:
   remove the target needed for recovery.
 
 **Before #587 offers guided withdrawal: a dedicated withdrawal gate,** delivered
-with retirement as #642 (§8.4, §17). Requirements: per-location; placed **after**
-path canonicalisation and entry selection and **before** the location's
-rewrites, request plugins, CORS preflight, client-certificate handling, checks,
-cache and action, so nothing inside the entry can answer first;
-address-independent; preserves the route's configuration so recovery is one
-reversible change; works without the intent block; a sparse typed operation with
-preview and `base_version`; emits the §8.4 trigger; reported in the view. The
-server-level `redirect_https` stays where it is (moving it would change routing
-scope). Field name and shape are settled by #642's design as an amendment to
-ADR 0026 (public schema, costly once adopted).
+with retirement as #642 (§8.4, §17). Settled by the
+[ADR 0026 #642 amendment](../adr/0026-application-sharing-contract.md#amendment--complete-withdrawal-outermost-withdrawal-gate-and-retirement-on-narrowing-642-with-563-and-562):
+an optional per-location boolean `withdrawn = true` on `[[servers.locations]]`
+(lifecycle `hot_reload`, no build tag); placed **after** path canonicalisation
+and entry selection and **before** the location's rewrites (`redirect`,
+`permanent`, `last`, `break`), request plugins, CORS preflight,
+client-certificate handling, checks, WAF, rate limit, cache and action, so
+nothing inside the entry can answer first; responds with `403 Forbidden` and
+`Cache-Control: no-store`; address-independent; preserves the route's
+configuration so recovery (`withdrawn = false` or omitted) is one reversible
+change; works without the intent block and without requiring `route_id` in raw
+TOML; paired with the sparse repeatable typed operation
+`location_set_withdrawn` with preview and `base_version`; emits the §8.4
+retirement trigger (`narrowed` when set, `widened` when cleared); reported in
+`GET /api/sharing` as `withdrawn = "yes" | "no" | "unknown"`. The server-level
+`redirect_https` stays where it is (moving it would change routing scope).
 
 **Credential files** (htpasswd, CA, CRL) take effect only on an explicit reload:
 SIGHUP or a configuration rewrite in `file_owned` mode; a managed Apply or
