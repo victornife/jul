@@ -96,6 +96,9 @@ func TestKeyCorruptionAndPermissionsFailClosed(t *testing.T) {
 	}
 	good, _ := os.ReadFile(path)
 	cases := [][]byte{nil, []byte("garbage"), append(append([]byte{}, good...), 0), bytes.Replace(good, []byte(fileMagic), []byte("unknown-format\n"), 1)}
+	invalidHex := append([]byte{}, good...)
+	invalidHex[len(fileMagic)] = 'z'
+	cases = append(cases, invalidHex)
 	altered := append([]byte{}, good...)
 	if altered[len(fileMagic)] == '0' {
 		altered[len(fileMagic)] = '1'
@@ -110,6 +113,9 @@ func TestKeyCorruptionAndPermissionsFailClosed(t *testing.T) {
 		}
 		if _, err := Init(path); err == nil {
 			t.Fatal("corrupt established key replaced")
+		}
+		if retained, err := os.ReadFile(path); err != nil || !bytes.Equal(retained, bad) {
+			t.Fatal("refused initialization repaired or replaced corrupt established bytes")
 		}
 	}
 	os.WriteFile(path, good, 0600)

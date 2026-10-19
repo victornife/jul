@@ -170,3 +170,14 @@ profiles already required by the complete changed-Go gate; no file or threshold
 exemption is introduced. Fresh integrated-head CI and direct Codecov/CodeQL
 results remain the merge gate; the final PR and issue closure records bind the
 actual head, coverage result and merge commit.
+
+The complete integration upload (including native Windows) exposed a real
+Codecov line-coverage shortfall: 89.73214% against the unchanged 90% target,
+despite the separate statement gate passing 470/519. Merge was held. Additional
+regressions now exercise the actual v1 HTTP status boundary for absent,
+published and embedding-fallback snapshots; injected OIDC contexts preserve
+private ownership while isolating derived group principals; and malformed
+established key material is refused without replacing its bytes. Targeted race,
+affected lean/full suites and vet pass. The complete move-aware statement gate
+now measures **474/519 (91.33%)**, including fresh integrated-head native Windows
+profiles. Fresh CI and the final complete Codecov upload remain required.
