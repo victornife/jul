@@ -17,7 +17,7 @@ import {
 } from "@/api/client.ts";
 import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
 import { WAFEffectiveCard } from "@/features/security/WAFEffectiveCard.tsx";
-import { plural, ruleSources, servingDiffers } from "@/lib/wafEffective.ts";
+import { plural, ruleSources, servingDiffers, shortDigest } from "@/lib/wafEffective.ts";
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -62,7 +62,8 @@ const detectOverride: WAFPolicySummary = {
   response_body_inspection: true,
   rule_files_configured: 1,
   external_files: 2,
-  external_digest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  external_digest:
+    "ev1:0123456789abcdef0123456789abcdef:fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
   inline_rules: true,
   rules: { total: 3, embedded: 0, external: 2, inline: 1, generated: 0 },
 };
@@ -129,7 +130,7 @@ describe("WAFEffectiveCard (#440)", () => {
     expect(screen.getByText("detect only — not blocking")).toBeInTheDocument();
     expect(screen.getByText("3 rules (2 from rule files, 1 inline)")).toBeInTheDocument();
     expect(screen.getByText(/2 files read at compile/)).toBeInTheDocument();
-    const digest = screen.getByText("sha256:0123456789ab…");
+    const digest = screen.getByText("ev1:01234567:fedcba987654…");
     expect(digest).toHaveAttribute("title", detectOverride.external_digest);
     expect(screen.getByText(/inspected \(limit set by the engine/)).toBeInTheDocument();
     expect(screen.getByText("WAF turned off for this route by its override.")).toBeInTheDocument();
@@ -218,6 +219,9 @@ describe("wafEffective helpers", () => {
     expect(servingDiffers({ ...config, waf_crs_enabled: false }, serving)).toBe(true);
     expect(servingDiffers(config, { ...serving, global: undefined })).toBe(false);
     expect(servingDiffers({ ...config, waf_global_mode: undefined }, serving)).toBe(false);
+    expect(shortDigest(detectOverride.external_digest)).toBe("ev1:01234567:fedcba987654…");
+    expect(shortDigest("sha256:0123456789abcdef0123456789abcdef")).toBe("sha256:0123456789ab…");
+    expect(shortDigest(undefined)).toBe("…");
   });
 });
 

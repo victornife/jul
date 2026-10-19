@@ -393,11 +393,16 @@ configuration shipped in the binary), `external` (files on disk), `inline`
 files (`@pmFromFile`, `@ipMatchFromFile`, …) are read through a recording
 filesystem: each file is read once, hashed, and the parser is served exactly
 the hashed bytes, so there is no hash-then-reread window. `external_files` is
-the number of distinct files read and `external_digest` an aggregate
-`sha256:` digest over the per-file digests in read order. The same path with
-changed bytes therefore yields a new digest after the next reload; a file that
-no longer compiles fails the reload before Publish and the serving projection
-keeps the previous generation. The recorder property is fuzzed:
+the number of distinct files read and `external_digest` is a context-keyed
+`ev1:<128-bit context id>:<256-bit tag>` HMAC-SHA-256 digest (domain
+`waf-external-source` under the server's private [effective-version context](effective-versions.md), #649)
+over the per-file digests in read order. The same path with changed bytes
+therefore yields a new digest after the next reload, and equality is preserved
+across reloads and restarts under the same key without exposing an unkeyed
+offline dictionary verifier to `status:read` callers; a file that no longer
+compiles fails the reload before Publish and the serving projection keeps the
+previous generation. Private in-memory content-change detection (`Firewall.SourceChanged`)
+is kept separate from the public identifier. The recorder property is fuzzed:
 `go test -tags waf -run='^$' -fuzz='^FuzzSourceRecorderServesHashedBytes$' -fuzztime=30s ./internal/waf`.
 
 On Windows, reference a data file from a rule file by a path relative to that

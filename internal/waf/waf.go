@@ -20,6 +20,7 @@ import (
 	"log/slog"
 
 	"jul/internal/config"
+	"jul/internal/versionid"
 )
 
 // Hooks carries optional observation callbacks supplied by the composition root
@@ -33,8 +34,9 @@ type Hooks struct {
 
 // Options configures a Firewall.
 type Options struct {
-	Logger *slog.Logger
-	Hooks  Hooks
+	Logger   *slog.Logger
+	Hooks    Hooks
+	Versions *versionid.Context
 }
 
 // Enabled reports whether any WAF policy is turned on in the configuration —

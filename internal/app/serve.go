@@ -311,6 +311,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		PluginMgr:     pluginMgr,
 		GenRes:        genRes,
 		RT:            rt,
+		Versions:      options.versions,
 	}
 
 	// factory adapts HandlerFactory.Prepare to the server reload hook: the

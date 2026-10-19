@@ -37,6 +37,14 @@ func (f *Firewall) Close() error { return nil }
 // Info is empty in the stub: there is no compiled policy to describe.
 func (f *Firewall) Info() PolicyInfo { return PolicyInfo{} }
 
+// SourceChanged reports whether two stub Firewalls differ.
+func (f *Firewall) SourceChanged(other *Firewall) bool {
+	if f == nil || other == nil {
+		return f != other
+	}
+	return false
+}
+
 // EmbeddedCRSVersion is "" in a build without the "waf" tag: no rule set is
 // embedded.
 func EmbeddedCRSVersion() string { return "" }

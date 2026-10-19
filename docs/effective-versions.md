@@ -128,7 +128,11 @@ under the same key restores equality.
 
 Public credential IDs use domain-separated `cid1:<context>:<tag>`, including
 identity and JSON/CSV/durable audit. Internal ownership IDs remain private.
-Derived OIDC group principals are keyed too. Auth-generation/posture fences use
+Derived OIDC group principals are keyed too. Compiled WAF `external_digest`
+values in `GET /api/security` (`waf_effective`) use domain-separated
+`ev1:<context>:<tag>` (`waf-external-source`, #649) over the ordered per-read
+file digests under the same private version context, while keeping private
+in-memory content-change comparison separate. Auth-generation/posture fences use
 a separate boot-only random context, because those fences have no cross-restart
 contract. Location preparation errors use declaration indexes instead of private
 matcher hashes. No unkeyed effective compatibility alias is emitted.

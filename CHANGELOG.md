@@ -11,6 +11,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Protect exported WAF `external_digest` in `GET /api/security` (`waf_effective`)
+  from offline dictionary guessing (#649 / EX01): compiled external rule,
+  include, and operator-data file digests now use domain-separated
+  HMAC-SHA-256 (`waf-external-source`) under the server's private `ev1`
+  effective-version context (`ev1:<context-id>:<tag>`) with no unkeyed
+  compatibility alias, while keeping private in-memory content-change detection
+  (`Firewall.SourceChanged`) separate.
+
 - Protect effective desired/serving versions with a durable random HMAC key
   (#644). Raw configuration CAS remains unchanged. Public authentication
   generations and credential identifiers no longer expose unkeyed verifiers.
