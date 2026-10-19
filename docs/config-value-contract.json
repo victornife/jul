@@ -1176,6 +1176,36 @@
       "active_when": "always"
     },
     {
+      "go_field": "SharingConfig.AudienceLabel",
+      "path": "servers[].locations[].sharing.audience_label",
+      "kind": "grammar",
+      "constraint": "1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; never a user list",
+      "zero_semantics": "omitted means no audience label is declared",
+      "active_when": "sharing configured on a location with route_id"
+    },
+    {
+      "go_field": "SharingConfig.ExternalEnforcer",
+      "path": "servers[].locations[].sharing.external_enforcer",
+      "kind": "grammar",
+      "constraint": "1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; rendered only as declared by the operator, not verified by Jul",
+      "zero_semantics": "omitted means no external enforcer is declared",
+      "active_when": "sharing configured on a location with route_id"
+    },
+    {
+      "go_field": "SharingConfig.Mode",
+      "path": "servers[].locations[].sharing.mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enum; required when [servers.locations.sharing] is present and requires route_id on the same location",
+      "zero_semantics": "required when [servers.locations.sharing] is present; there is no default",
+      "active_when": "sharing configured on a location with route_id",
+      "allowed": [
+        "preview",
+        "private_network",
+        "restricted",
+        "public"
+      ]
+    },
+    {
       "go_field": "StreamALPNRoute.Protocols",
       "path": "stream[].alpn_routes[].protocols",
       "kind": "grammar",

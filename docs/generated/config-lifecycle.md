@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 417 |
-| Schema leaves (configurable values) | 351 |
-| Registry entries | 351 |
+| Schema paths (containers included) | 421 |
+| Schema leaves (configurable values) | 354 |
+| Registry entries | 354 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 308 |
+| Class `hot_reload` | 311 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -340,6 +340,9 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.root` | `hot_reload` | `root` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.route_id` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.send_timeout` | `hot_reload` | `listener_timeouts` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.sharing.audience_label` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.sharing.external_enforcer` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.sharing.mode` | `hot_reload` | `routing` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.try_files` | `hot_reload` | `try_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.uwsgi_pass` | `hot_reload` | `uwsgi` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.waf.block_status` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |

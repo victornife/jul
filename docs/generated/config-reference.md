@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 351 configurable leaves.
+Coverage: 354 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -2959,6 +2959,51 @@ SendTimeout overrides the server downstream write-inactivity timeout; omitted in
 | Constraint | non-negative when present |
 | Zero/empty semantics | omitted inherits the server value; explicit zero disables downstream write inactivity deadlines |
 | Active when | always |
+
+## `servers.*.locations.*.sharing.audience_label` {#servers-x-locations-x-sharing-audience_label}
+
+AudienceLabel is an optional short printable UTF-8 description of the intended audience (1..64 bytes, no control characters; never a user list).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `routing` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | 1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; never a user list |
+| Zero/empty semantics | omitted means no audience label is declared |
+| Active when | sharing configured on a location with route_id |
+
+## `servers.*.locations.*.sharing.external_enforcer` {#servers-x-locations-x-sharing-external_enforcer}
+
+ExternalEnforcer names an external gate declared by the operator (1..64 bytes of printable UTF-8, no control characters, SD-12).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `routing` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Constraint | 1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; rendered only as declared by the operator, not verified by Jul |
+| Zero/empty semantics | omitted means no external enforcer is declared |
+| Active when | sharing configured on a location with route_id |
+
+## `servers.*.locations.*.sharing.mode` {#servers-x-locations-x-sharing-mode}
+
+Mode is the declared sharing posture: "preview", "private_network", "restricted", or "public".
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `routing` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Allowed values | `preview`, `private_network`, `restricted`, `public` |
+| Constraint | exact lowercase enum; required when [servers.locations.sharing] is present and requires route_id on the same location |
+| Zero/empty semantics | required when [servers.locations.sharing] is present; there is no default |
+| Active when | sharing configured on a location with route_id |
 
 ## `servers.*.locations.*.try_files` {#servers-x-locations-x-try_files}
 

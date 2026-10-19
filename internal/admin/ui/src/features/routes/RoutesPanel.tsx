@@ -15,6 +15,7 @@ import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { usePersistentState } from "@/lib/usePersistentState.ts";
 import { emptyAuthDraft, type AuthDraft } from "@/lib/routeToml.ts";
+import { formatSharingModeLabel } from "@/lib/sharingIntent.ts";
 import { usePermission } from "@/auth/usePermission.ts";
 import {
   canonicalServerNames,
@@ -61,6 +62,14 @@ function LocationRow({
       <td className="px-4 py-2 truncate">
         <span className="mr-1 text-xs text-jul-muted">{loc.type}</span>
         <span className="font-mono text-sm text-jul-text">{loc.match}</span>
+        {loc.sharing && (
+          <span
+            title={`Declared sharing intent: ${formatSharingModeLabel(loc.sharing.mode)}`}
+            className="ml-2 inline-block rounded-full border border-jul-border bg-jul-bg px-2 py-0.5 text-xs text-jul-muted"
+          >
+            {formatSharingModeLabel(loc.sharing.mode)}
+          </span>
+        )}
         {loc.warnings && loc.warnings.length > 0 && (
           <span
             title={loc.warnings.join("\n")}

@@ -75,6 +75,8 @@ func dispatchRemoteSubcommand(args []string) (handled bool, code int) {
 		return true, cmdRemoteRollback(args[1:])
 	case "export":
 		return true, cmdRemoteExport(args[1:])
+	case "postcondition":
+		return true, cmdRemotePostcondition(args[1:])
 	case "diagnostics":
 		return true, cmdRemoteDiagnostics(args[1:])
 	default:
@@ -447,6 +449,87 @@ func cmdRemoteDiagnostics(args []string) int {
 	return 0
 }
 
+func cmdRemotePostcondition(args []string) int {
+	fs := flag.NewFlagSet("postcondition", flag.ContinueOnError)
+	var common remoteCommon
+	file := fs.String("file", "", "postcondition JSON file (or plan JSON containing .sharing.postcondition); - reads stdin")
+	client, code, ok := parseRemote(fs, args, &common)
+	if !ok {
+		return code
+	}
+	if fs.NArg() != 0 {
+		return renderUsageError(common.json, "postcondition", "unexpected positional arguments")
+	}
+	if strings.TrimSpace(*file) == "" {
+		return renderUsageError(common.json, "postcondition", "--file is required (use - for stdin)")
+	}
+	raw, err := readCandidate(*file)
+	if err != nil {
+		return renderUsageError(common.json, "postcondition", err.Error())
+	}
+	payload, err := extractPostconditionPayload(raw)
+	if err != nil {
+		return renderUsageError(common.json, "postcondition", err.Error())
+	}
+	ctx, cancel := remoteContext()
+	defer cancel()
+	r, err := client.EvaluatePostcondition(ctx, payload)
+	if err != nil {
+		return renderRemoteError(common.json, "postcondition", err, r.RequestID)
+	}
+	if common.json {
+		return renderJSONMap("postcondition", true, r.Body, nil)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(r.Body, &obj); err == nil {
+		fmt.Fprintf(stdout, "result: %v\n", obj["result"])
+		fmt.Fprintf(stdout, "candidate: %v — %v\n", obj["candidate"], obj["candidate_summary"])
+		fmt.Fprintf(stdout, "access: %v — %v\n", obj["access"], obj["access_summary"])
+		if sv, ok := obj["serving_version"].(string); ok && sv != "" {
+			fmt.Fprintf(stdout, "serving version: %s\n", sv)
+		}
+		if s, ok := obj["summary"].(string); ok && s != "" {
+			fmt.Fprintf(stdout, "summary: %s\n", s)
+		}
+		if g, ok := obj["recovery_guidance"].(string); ok && g != "" {
+			fmt.Fprintf(stdout, "next step: %s\n", g)
+		}
+	}
+	return 0
+}
+
+func extractPostconditionPayload(raw []byte) ([]byte, error) {
+	var top map[string]any
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil, fmt.Errorf("invalid postcondition JSON: %w", err)
+	}
+	// Accept either a direct postcondition object or a plan output carrying .sharing.postcondition.
+	if sharing, ok := top["sharing"].(map[string]any); ok {
+		if post, ok := sharing["postcondition"].(map[string]any); ok {
+			top = post
+		}
+	} else if post, ok := top["postcondition"].(map[string]any); ok {
+		top = post
+	}
+	if status, _ := top["status"].(string); status == "unavailable" {
+		reason, _ := top["unavailable_reason"].(string)
+		return nil, fmt.Errorf("postcondition is unavailable (%s)", reason)
+	}
+	keyID, _ := top["key_id"].(string)
+	if strings.TrimSpace(keyID) == "" {
+		return nil, errors.New("postcondition JSON is missing key_id")
+	}
+	clean := map[string]any{
+		"postcondition_version":   top["postcondition_version"],
+		"key_id":                  top["key_id"],
+		"base_config_digest":      top["base_config_digest"],
+		"candidate_config_digest": top["candidate_config_digest"],
+		"repeatable":              top["repeatable"],
+		"entries":                 top["entries"],
+	}
+	return json.Marshal(clean)
+}
+
 func renderTerminal(common remoteCommon, command, outcome string, restored bool, restoreError string, degraded []adminapi.Degradation, applyID, idemKey, bootID string, raw []byte) int {
 	exit, terminal := adminclient.OutcomeExit(outcome, restored, restoreError, degraded)
 	if !terminal {
@@ -499,6 +582,18 @@ func renderRawSuccess(common remoteCommon, command string, r adminclient.RawResp
 		}
 		if findings, ok := obj["validation_errors"].([]any); ok && len(findings) != 0 {
 			fmt.Fprintf(stdout, "validation findings: %d\n", len(findings))
+		}
+		if sharing, ok := obj["sharing"].(map[string]any); ok {
+			if entries, ok := sharing["entries"].([]any); ok && len(entries) != 0 {
+				fmt.Fprintf(stdout, "sharing entries affected: %d (requires acknowledgement: %v)\n", len(entries), sharing["requires_acknowledgement"])
+			}
+			if post, ok := sharing["postcondition"].(map[string]any); ok {
+				if st, _ := post["status"].(string); st == "available" {
+					fmt.Fprintf(stdout, "postcondition: available (key_id=%v)\n", post["key_id"])
+				} else if st != "" {
+					fmt.Fprintf(stdout, "postcondition: %s (%v)\n", st, post["unavailable_reason"])
+				}
+			}
 		}
 	}
 	if common.verbose && r.RequestID != "" {

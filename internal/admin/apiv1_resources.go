@@ -75,6 +75,14 @@ func v1Routes(c *config.Config) []adminapi.Route {
 	out := []adminapi.Route{}
 	for _, srv := range projectRoutes(c) {
 		for _, loc := range srv.Locations {
+			var sharing *adminapi.RouteSharing
+			if loc.Sharing != nil {
+				sharing = &adminapi.RouteSharing{
+					Mode:             loc.Sharing.Mode,
+					AudienceLabel:    loc.Sharing.AudienceLabel,
+					ExternalEnforcer: loc.Sharing.ExternalEnforcer,
+				}
+			}
 			out = append(out, adminapi.Route{
 				RouteID: loc.RouteID,
 				Selector: adminapi.RouteSelector{
@@ -95,6 +103,7 @@ func v1Routes(c *config.Config) []adminapi.Route {
 				Cache:             loc.Cache,
 				RateLimit:         loc.RateLimit,
 				WAF:               loc.WAF != nil,
+				Sharing:           sharing,
 			})
 		}
 	}

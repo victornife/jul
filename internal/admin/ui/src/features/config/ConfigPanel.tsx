@@ -52,6 +52,7 @@ import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
 import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
+import { sharingAckEntries, sharingPlanRequiresAck } from "@/lib/sharingIntent.ts";
 
 const CodeEditor = lazy(() =>
   import("@/features/config/CodeEditor.tsx").then((m) => ({ default: m.CodeEditor })),
@@ -227,6 +228,52 @@ function AssessmentPaths({
       {remaining > 0 && (
         <p className="text-xs text-jul-muted">…and {String(remaining)} more paths</p>
       )}
+    </div>
+  );
+}
+
+function SharingAcknowledgementBox({
+  entries,
+  checked,
+  onChange,
+}: {
+  readonly entries: readonly string[];
+  readonly checked: boolean;
+  readonly onChange: (next: boolean) => void;
+}) {
+  if (entries.length === 0) return null;
+  return (
+    <div
+      role="group"
+      aria-labelledby="sharing-ack-heading"
+      className="mt-3 space-y-2 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs"
+    >
+      <p id="sharing-ack-heading" className="font-semibold text-jul-warning">
+        Audience widening or uncertain change acknowledgement required
+      </p>
+      <p id="sharing-ack-desc" className="text-jul-text">
+        This change widens access, has an uncertain audience effect, or declares a wider sharing
+        mode on the following {entries.length === 1 ? "entry" : "entries"}:
+      </p>
+      <ul className="list-disc space-y-0.5 pl-5 font-mono text-jul-text">
+        {entries.map((entry) => (
+          <li key={entry}>{entry}</li>
+        ))}
+      </ul>
+      <label className="mt-2 flex cursor-pointer items-start gap-2 text-jul-text">
+        <input
+          type="checkbox"
+          checked={checked}
+          aria-describedby="sharing-ack-desc"
+          onChange={(e) => {
+            onChange(e.target.checked);
+          }}
+          className="mt-0.5 rounded border-jul-border"
+        />
+        <span>
+          I acknowledge the audience change for {entries.join(", ")} and want to proceed.
+        </span>
+      </label>
     </div>
   );
 }
@@ -526,6 +573,7 @@ function AuthorizedConfigPanel() {
   // Patch-reconcile status is pure editor-text UI concern, so it stays local.
   const [patchReconciling, setPatchReconciling] = useState(false);
   const [patchReconcileError, setPatchReconcileError] = useState<Error | null>(null);
+  const [sharingAcknowledged, setSharingAcknowledged] = useState(false);
 
   // Wrap the machine's operation-lifecycle transitions to also clear the local
   // reconcile UI state, preserving the panel's original startOperation/cancel
@@ -1484,6 +1532,7 @@ function AuthorizedConfigPanel() {
             type="button"
             onClick={() => {
               startOperation();
+              setSharingAcknowledged(false);
               // Route a known restart-bound patch directly to stage_restart;
               // never submit it once in hot mode merely to learn what preview
               // already established. Managed pending raw edits keep their
@@ -1913,9 +1962,13 @@ function AuthorizedConfigPanel() {
           title={`${configActionLabel("hot")}?`}
           confirmLabel={configActionLabel("hot")}
           busy={applyActive.isPending}
-          confirmDisabled={!canApplyPerm}
+          confirmDisabled={
+            !canApplyPerm ||
+            (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged)
+          }
           onConfirm={() => {
             if (!canApplyPerm) return;
+            if (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged) return;
             const operationID = operationIDRef.current;
             if (adminChangeError) {
               confirmAdminForOperation(operationID);
@@ -1980,6 +2033,13 @@ function AuthorizedConfigPanel() {
             </>
           )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
+          {sharingPlanRequiresAck(previewDiff?.sharing) && (
+            <SharingAcknowledgementBox
+              entries={sharingAckEntries(previewDiff?.sharing)}
+              checked={sharingAcknowledged}
+              onChange={setSharingAcknowledged}
+            />
+          )}
         </ConfirmDialog>
       )}
 
@@ -1989,9 +2049,14 @@ function AuthorizedConfigPanel() {
           title={`${primaryActionLabel}?`}
           confirmLabel={primaryActionLabel}
           busy={applyStage.isPending}
-          confirmDisabled={!canApplyPerm || applyStage.error instanceof ConfigConflictError}
+          confirmDisabled={
+            !canApplyPerm ||
+            applyStage.error instanceof ConfigConflictError ||
+            (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged)
+          }
           onConfirm={() => {
             if (!canApplyPerm) return;
+            if (sharingPlanRequiresAck(previewDiff?.sharing) && !sharingAcknowledged) return;
             const operationID = operationIDRef.current;
             const confirmAdmin =
               applyStage.error instanceof ConfigAdminChangeError ||
@@ -2058,6 +2123,13 @@ function AuthorizedConfigPanel() {
             </>
           )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
+          {sharingPlanRequiresAck(previewDiff?.sharing) && (
+            <SharingAcknowledgementBox
+              entries={sharingAckEntries(previewDiff?.sharing)}
+              checked={sharingAcknowledged}
+              onChange={setSharingAcknowledged}
+            />
+          )}
           {applyStage.error && !(applyStage.error instanceof ConfigAdminChangeError) && (
             <p className="mt-2 text-xs text-jul-danger">
               {applyStage.error instanceof ConfigConflictError

@@ -28,6 +28,26 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Application sharing intent and guarded audience changes (#641 / `SHARE-01A`,
+  ADR 0026 Decision 2, `docs/specs/application-sharing.md` §4.3, §4.5, §9.4,
+  §9.5): adds optional per-location `[servers.locations.sharing]` (`mode`:
+  `preview | private_network | restricted | public`, `audience_label`, and
+  `external_enforcer` rendered only as `"declared by the operator, not verified by Jul"`,
+  requiring `route_id` on the same location and classified `hot_reload`); sparse
+  typed operations `location_set_sharing` and `location_clear_sharing` refusing
+  routes without a literal `route_id` before any side effect; lint and plan
+  intent findings (`intent_restricted_unenforced`, `intent_private_bind_too_wide`,
+  `intent_preview_not_loopback`, `intent_public_has_checks`,
+  `intent_checks_bypassed`, `intent_restricted_cached`, and
+  `cache_shared_across_entries`); bounded, paged `serving`- and `saved`-layer
+  sharing projections (`GET /api/sharing` and `GET /api/sharing/value`);
+  `§9.5` audience-delta classification (`unchanged`, `metadata_only`,
+  `narrowed`, `widened`, `uncertain`) with `RR11` secret-reference disclosure
+  precedence, `SD-14` WAF rules, and normative host-dispatch expansion;
+  Console read-only intent display and explicit widening acknowledgement before
+  apply; and `§9.4` process-keyed HMAC-SHA-256 postcondition production and
+  evaluation (`POST /api/sharing/postcondition/evaluate` and `jul postcondition`).
+
 - Accepted application-sharing contract for #580 (SHARE-01):
   [specification](docs/specs/application-sharing.md),
   [ADR 0026](docs/adr/0026-application-sharing-contract.md) and a

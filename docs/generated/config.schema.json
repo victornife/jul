@@ -1713,6 +1713,33 @@
                   "type": "string",
                   "x-jul-constraint": "non-negative when present"
                 },
+                "sharing": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "audience_label": {
+                      "description": "AudienceLabel is an optional short printable UTF-8 description of the intended audience (1..64 bytes, no control characters; never a user list)",
+                      "type": "string",
+                      "x-jul-constraint": "1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; never a user list"
+                    },
+                    "external_enforcer": {
+                      "description": "ExternalEnforcer names an external gate declared by the operator (1..64 bytes of printable UTF-8, no control characters, SD-12)",
+                      "type": "string",
+                      "x-jul-constraint": "1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; rendered only as declared by the operator, not verified by Jul"
+                    },
+                    "mode": {
+                      "description": "Mode is the declared sharing posture: \"preview\", \"private_network\", \"restricted\", or \"public\"",
+                      "enum": [
+                        "preview",
+                        "private_network",
+                        "restricted",
+                        "public"
+                      ],
+                      "type": "string",
+                      "x-jul-constraint": "exact lowercase enum; required when [servers.locations.sharing] is present and requires route_id on the same location"
+                    }
+                  },
+                  "type": "object"
+                },
                 "try_files": {
                   "description": "TryFiles lists candidate paths tried in order before falling back to the location's action",
                   "items": {

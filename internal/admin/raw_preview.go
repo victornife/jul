@@ -11,6 +11,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/lifecycle"
+	"jul/internal/rbac"
 )
 
 const rawPreviewBaseVersionHeader = "X-Jul-Base-Version"
@@ -18,12 +19,16 @@ const rawPreviewBaseVersionHeader = "X-Jul-Base-Version"
 var errRawCandidateSyntax = errors.New("raw candidate TOML could not be parsed")
 
 type rawConfigPreviewAssessment struct {
-	BaseVersion      string
-	Valid            bool
-	ValidationErrors []validationError
-	Lint             []config.Diagnostic
-	Diff             ConfigDiff
-	Lifecycle        lifecycle.Result
+	BaseVersion        string
+	Valid              bool
+	ValidationErrors   []validationError
+	Lint               []config.Diagnostic
+	Diff               ConfigDiff
+	Lifecycle          lifecycle.Result
+	BeforeConfig       *config.Config
+	BeforeEffective    *config.Config
+	CandidateConfig    *config.Config
+	CandidateEffective *config.Config
 }
 
 type rawConfigPreviewResponse struct {
@@ -34,6 +39,7 @@ type rawConfigPreviewResponse struct {
 	Lint             []config.Diagnostic   `json:"lint"`
 	Diff             ConfigDiff            `json:"diff"`
 	Lifecycle        patchLifecycleSummary `json:"lifecycle"`
+	Sharing          *SharingPlanReport    `json:"sharing,omitempty"`
 }
 
 func secretSafeRawValidationErrors(err error) []validationError {
@@ -113,14 +119,48 @@ func previewRawCandidate(
 		lint = []config.Diagnostic{}
 	}
 	out = rawConfigPreviewAssessment{
-		BaseVersion:      baseVersion,
-		Valid:            len(validationErrors) == 0 && len(classification.ValidationRejected) == 0,
-		ValidationErrors: validationErrors,
-		Lint:             lint,
-		Diff:             diffConfigs(before, candidateConfig),
-		Lifecycle:        classification,
+		BaseVersion:        baseVersion,
+		Valid:              len(validationErrors) == 0 && len(classification.ValidationRejected) == 0,
+		ValidationErrors:   validationErrors,
+		Lint:               lint,
+		Diff:               diffConfigs(before, candidateConfig),
+		Lifecycle:          classification,
+		BeforeConfig:       before,
+		BeforeEffective:    beforeEffective,
+		CandidateConfig:    candidateConfig,
+		CandidateEffective: candidate.Effective,
 	}
 	return out, nil
+}
+
+func (s *Server) buildRawPreviewResponse(r *http.Request, assessment rawConfigPreviewAssessment) rawConfigPreviewResponse {
+	callerHasRaw := true
+	if r != nil {
+		if id, ok := rbac.IdentityFromContext(r.Context()); ok {
+			callerHasRaw = id.Has(rbac.ConfigRaw)
+		}
+	}
+	sharing := s.BuildSharingPlanReport(
+		assessment.BeforeConfig,
+		assessment.BeforeEffective,
+		assessment.CandidateConfig,
+		assessment.CandidateEffective,
+		true,
+		nil,
+		callerHasRaw,
+	)
+	diff := assessment.Diff
+	diff.Sharing = &sharing
+	return rawConfigPreviewResponse{
+		OK:               true,
+		BaseVersion:      assessment.BaseVersion,
+		Valid:            assessment.Valid,
+		ValidationErrors: assessment.ValidationErrors,
+		Lint:             assessment.Lint,
+		Diff:             diff,
+		Lifecycle:        s.patchLifecycleProjection(assessment.Lifecycle, assessment.Valid),
+		Sharing:          &sharing,
+	}
 }
 
 func (s *Server) handleConfigPreview(w http.ResponseWriter, r *http.Request) {
@@ -189,13 +229,5 @@ func (s *Server) handleConfigPreview(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, rawConfigPreviewResponse{
-		OK:               true,
-		BaseVersion:      assessment.BaseVersion,
-		Valid:            assessment.Valid,
-		ValidationErrors: assessment.ValidationErrors,
-		Lint:             assessment.Lint,
-		Diff:             assessment.Diff,
-		Lifecycle:        s.patchLifecycleProjection(assessment.Lifecycle, assessment.Valid),
-	})
+	writeJSON(w, http.StatusOK, s.buildRawPreviewResponse(r, assessment))
 }

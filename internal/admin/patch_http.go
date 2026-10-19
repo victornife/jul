@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"jul/internal/config"
+	"jul/internal/rbac"
 )
 
 // patchApplyRequest is a server-side, atomic, conflict-checked batch of patch
@@ -52,6 +53,7 @@ type patchPreviewResponse struct {
 	Diff               ConfigDiff              `json:"diff"`
 	ValidationErrors   []validationError       `json:"validation_errors"`
 	Lifecycle          patchLifecycleSummary   `json:"lifecycle"`
+	Sharing            *SharingPlanReport      `json:"sharing,omitempty"`
 }
 
 // patchCandidateResponse adds unresolved canonical TOML to the same assessment.
@@ -80,19 +82,45 @@ func configVersion(raw []byte) string {
 }
 
 func (s *Server) patchPreviewResponse(execution patchBatchExecution) patchPreviewResponse {
+	return s.patchPreviewResponseForCaller(execution, true)
+}
+
+func (s *Server) patchPreviewResponseForRequest(r *http.Request, execution patchBatchExecution) patchPreviewResponse {
+	callerHasRaw := true
+	if r != nil {
+		if id, ok := rbac.IdentityFromContext(r.Context()); ok {
+			callerHasRaw = id.Has(rbac.ConfigRaw)
+		}
+	}
+	return s.patchPreviewResponseForCaller(execution, callerHasRaw)
+}
+
+func (s *Server) patchPreviewResponseForCaller(execution patchBatchExecution, callerHasRaw bool) patchPreviewResponse {
 	operationSummaries := make([]patchOperationSummary, len(execution.OperationSummaries))
 	copy(operationSummaries, execution.OperationSummaries)
 	validationErrors := make([]validationError, len(execution.ValidationErrors))
 	copy(validationErrors, execution.ValidationErrors)
+	sharing := s.BuildSharingPlanReport(
+		execution.BeforeConfig,
+		execution.BeforeEffective,
+		execution.CandidateConfig,
+		execution.CandidateEffective,
+		false,
+		execution.Ops,
+		callerHasRaw,
+	)
+	diff := execution.Diff
+	diff.Sharing = &sharing
 	return patchPreviewResponse{
 		OK:                 true,
 		Summary:            execution.summaryText(),
 		OperationSummaries: operationSummaries,
 		BaseVersion:        execution.BaseVersion,
 		Valid:              execution.Valid,
-		Diff:               execution.Diff,
+		Diff:               diff,
 		ValidationErrors:   validationErrors,
 		Lifecycle:          s.patchLifecycleProjection(execution.Lifecycle, execution.Valid),
+		Sharing:            &sharing,
 	}
 }
 
@@ -223,7 +251,7 @@ func (s *Server) handleConfigPatch(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, s.patchPreviewResponse(execution))
+	writeJSON(w, http.StatusOK, s.patchPreviewResponseForRequest(r, execution))
 }
 
 // handleConfigPatchPreview assesses an ordered batch without persistence.
@@ -252,7 +280,7 @@ func (s *Server) handleConfigPatchPreview(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, s.patchPreviewResponse(execution))
+	writeJSON(w, http.StatusOK, s.patchPreviewResponseForRequest(r, execution))
 }
 
 // handleConfigPatchCandidate returns unresolved canonical TOML to config:raw

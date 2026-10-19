@@ -431,6 +431,24 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleRoutes) },
 	},
 	{
+		Pattern:    "/api/sharing",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleSharingView) },
+	},
+	{
+		Pattern:    "/api/sharing/value",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleSharingValue) },
+	},
+	{
+		Pattern:    "/api/sharing/postcondition/evaluate",
+		Methods:    []string{http.MethodPost},
+		Permission: rbac.StatusRead,
+		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleSharingPostconditionEvaluate) },
+	},
+	{
 		Pattern:    "/api/apps",
 		Methods:    []string{http.MethodGet},
 		Permission: rbac.StatusRead,

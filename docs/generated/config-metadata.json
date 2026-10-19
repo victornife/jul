@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 417,
-    "schema_leaves": 351,
+    "schema_paths": 421,
+    "schema_leaves": 354,
     "resources": 9
   },
   "capability_build_tags": {
@@ -3432,6 +3432,60 @@
       "active_when": "always",
       "description": "SendTimeout overrides the server downstream write-inactivity timeout; omitted inherits and zero disables",
       "anchor": "servers-x-locations-x-send_timeout"
+    },
+    "servers.*.locations.*.sharing.audience_label": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "*string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "routing",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; never a user list",
+      "zero_semantics": "omitted means no audience label is declared",
+      "active_when": "sharing configured on a location with route_id",
+      "description": "AudienceLabel is an optional short printable UTF-8 description of the intended audience (1..64 bytes, no control characters; never a user list)",
+      "anchor": "servers-x-locations-x-sharing-audience_label"
+    },
+    "servers.*.locations.*.sharing.external_enforcer": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "*string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "routing",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "grammar",
+      "constraint": "1 to 64 bytes of printable UTF-8 with no control characters; present-and-empty is rejected; rendered only as declared by the operator, not verified by Jul",
+      "zero_semantics": "omitted means no external enforcer is declared",
+      "active_when": "sharing configured on a location with route_id",
+      "description": "ExternalEnforcer names an external gate declared by the operator (1..64 bytes of printable UTF-8, no control characters, SD-12)",
+      "anchor": "servers-x-locations-x-sharing-external_enforcer"
+    },
+    "servers.*.locations.*.sharing.mode": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "routing",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum; required when [servers.locations.sharing] is present and requires route_id on the same location",
+      "zero_semantics": "required when [servers.locations.sharing] is present; there is no default",
+      "active_when": "sharing configured on a location with route_id",
+      "allowed": [
+        "preview",
+        "private_network",
+        "restricted",
+        "public"
+      ],
+      "description": "Mode is the declared sharing posture: \"preview\", \"private_network\", \"restricted\", or \"public\"",
+      "anchor": "servers-x-locations-x-sharing-mode"
     },
     "servers.*.locations.*.try_files": {
       "kind": "list",

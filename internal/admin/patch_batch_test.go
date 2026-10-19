@@ -503,7 +503,7 @@ func TestPatchPreviewAndCandidateShareAssessment(t *testing.T) {
 	if preview.OperationSummaries[0] != candidate.OperationSummaries[0] {
 		t.Fatalf("operation summaries differ: %+v vs %+v", preview.OperationSummaries, candidate.OperationSummaries)
 	}
-	if strings.Contains(previewRR.Body.String(), "candidate") {
+	if strings.Contains(previewRR.Body.String(), `"candidate":`) {
 		t.Fatal("secret-safe preview exposed candidate TOML")
 	}
 	parsedCandidate, err := config.Parse([]byte(candidate.Candidate))

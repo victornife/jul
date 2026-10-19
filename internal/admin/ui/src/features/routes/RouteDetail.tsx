@@ -122,6 +122,10 @@ import { usePermission } from "@/auth/usePermission.ts";
 import type { PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
 import { isEditableAction } from "@/lib/routeEdit.ts";
 import {
+  formatExternalEnforcerNote,
+  formatSharingModeLabel,
+} from "@/lib/sharingIntent.ts";
+import {
   buildServerRemovalBatch,
   canonicalServerNames,
   formatServerIdentity,
@@ -205,6 +209,9 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   }
   lines.push("");
   lines.push("  [[servers.locations]]");
+  if (loc.route_id) {
+    lines.push(`  route_id = ${quoted(loc.route_id)}`);
+  }
   lines.push(`  match = { type = ${quoted(loc.type)}, path = ${quoted(loc.match)} }`);
   switch (loc.action) {
     case "proxy":
@@ -278,6 +285,17 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
     lines.push(
       `  # auth = { method = "${loc.auth_detail?.method ?? "…"}", … }  (edit it in place below)`,
     );
+  if (loc.sharing) {
+    lines.push("");
+    lines.push("    [servers.locations.sharing]");
+    lines.push(`    mode = ${quoted(loc.sharing.mode)}`);
+    if (loc.sharing.audience_label) {
+      lines.push(`    audience_label = ${quoted(loc.sharing.audience_label)}`);
+    }
+    if (loc.sharing.external_enforcer) {
+      lines.push(`    external_enforcer = ${quoted(loc.sharing.external_enforcer)}`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -1094,6 +1112,30 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           <Row
             label="TLS"
             value={route.tls?.enabled ? `enabled${route.tls.acme ? " (ACME)" : ""}` : "off"}
+          />
+          <Row
+            label="Declared intent"
+            value={
+              loc.sharing ? (
+                <div className="space-y-0.5">
+                  <div>
+                    <span className="font-medium">{formatSharingModeLabel(loc.sharing.mode)}</span>
+                    {loc.sharing.audience_label && (
+                      <span className="ml-1.5 text-xs text-jul-muted">
+                        · Audience: {loc.sharing.audience_label}
+                      </span>
+                    )}
+                  </div>
+                  {loc.sharing.external_enforcer && (
+                    <p className="text-xs text-jul-muted">
+                      External gate: {formatExternalEnforcerNote(loc.sharing.external_enforcer)}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <span className="text-xs text-jul-muted">Not declared</span>
+              )
+            }
           />
         </div>
 

@@ -73,15 +73,7 @@ func (s *Server) handleV1ConfigPlan(w http.ResponseWriter, r *http.Request) {
 			"The candidate configuration could not be assessed.").WithDetails(adminapi.Details{Errors: v1Findings(err)}))
 		return
 	}
-	writeAPIJSON(w, http.StatusOK, rawConfigPreviewResponse{
-		OK:               true,
-		BaseVersion:      assessment.BaseVersion,
-		Valid:            assessment.Valid,
-		ValidationErrors: assessment.ValidationErrors,
-		Lint:             assessment.Lint,
-		Diff:             assessment.Diff,
-		Lifecycle:        s.patchLifecycleProjection(assessment.Lifecycle, assessment.Valid),
-	})
+	writeAPIJSON(w, http.StatusOK, s.buildRawPreviewResponse(r, assessment))
 }
 
 func (s *Server) handleV1RouteTest(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +119,7 @@ func (s *Server) handleV1ConfigPatch(w http.ResponseWriter, r *http.Request) {
 		s.writeV1PatchExecutionError(w, r, err, req.BaseVersion)
 		return
 	}
-	writeAPIJSON(w, http.StatusOK, s.patchPreviewResponse(execution))
+	writeAPIJSON(w, http.StatusOK, s.patchPreviewResponseForRequest(r, execution))
 }
 
 func (s *Server) handleV1ConfigApply(w http.ResponseWriter, r *http.Request) {

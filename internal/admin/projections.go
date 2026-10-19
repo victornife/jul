@@ -150,6 +150,18 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				}
 				lp.CORS = cs
 			}
+			if loc.Sharing != nil && !config.ContainsSecretRef(loc.Sharing.Mode) {
+				sh := &LocationSharingState{
+					Mode: loc.Sharing.Mode,
+				}
+				if lbl := loc.Sharing.AudienceLabelValue(); lbl != "" && !config.ContainsSecretRef(lbl) {
+					sh.AudienceLabel = lbl
+				}
+				if enf := loc.Sharing.ExternalEnforcerValue(); enf != "" && !config.ContainsSecretRef(enf) {
+					sh.ExternalEnforcer = enf
+				}
+				lp.Sharing = sh
+			}
 			lp.Warnings = locationWarnings(c, srv, loc, &lp)
 			rp.Locations = append(rp.Locations, lp)
 		}

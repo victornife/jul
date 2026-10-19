@@ -462,6 +462,42 @@ explicit `deny`.
 
 Only one action may be present per location; validation rejects ambiguous blocks.
 
+### Declared sharing intent (`[servers.locations.sharing]`)
+
+A location that carries a durable `route_id` may optionally declare its intended
+sharing posture (`[servers.locations.sharing]`, [ADR 0026](adr/0026-application-sharing-contract.md)
+Decision 2, [application sharing specification](specs/application-sharing.md#45-declared-intent-and-intent-guarded-changes-accepted-sd-05)):
+
+```toml
+[[servers.locations]]
+route_id = "dashboard"
+match = { type = "prefix", path = "/" }
+proxy_pass = "http://dashboard"
+
+  [servers.locations.sharing]
+  mode = "restricted"                               # preview | private_network | restricted | public
+  audience_label = "family"                         # optional, 1–64 bytes of printable UTF-8
+  external_enforcer = "cloudflare-access:dash-team" # optional, 1–64 bytes of printable UTF-8
+```
+
+| Key | Type | Required | Description |
+| --- | ---- | -------- | ----------- |
+| `mode` | string | yes (when `[servers.locations.sharing]` is present) | Closed enum: `preview`, `private_network`, `restricted`, or `public`. Requires a non-empty `route_id` on the same location. |
+| `audience_label` | string | no | Short human label describing the intended audience (`1..64` bytes of printable UTF-8 with no control characters; never a user list). |
+| `external_enforcer` | string | no | Operator declaration of an external access gate (`1..64` bytes of printable UTF-8 with no control characters). Rendered only as `"declared by the operator, not verified by Jul"` (`SD-12`); it never suppresses or downgrades lint or plan findings. |
+
+`[servers.locations.sharing]` has no runtime effect on routing, matching,
+enforcement, caching, or metrics, and is classified `hot_reload`. It drives
+`jul lint` and plan intent findings (`intent_restricted_unenforced`,
+`intent_private_bind_too_wide`, `intent_preview_not_loopback`,
+`intent_public_has_checks`, `intent_checks_bypassed`,
+`intent_restricted_cached`, and `cache_shared_across_entries`), Console
+audience-widening acknowledgement, and stateless `§9.4` plan postconditions. In
+`managed` authority mode, the sparse typed operations `location_set_sharing` and
+`location_clear_sharing` require a literal `route_id` on the target location and
+refuse routes without one before any side effect (editing never mints a
+`route_id`, ADR 0019 §6).
+
 **Matching:**
 
 ```toml

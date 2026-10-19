@@ -181,6 +181,19 @@ type patchRequest struct {
 	// location_cors_set payload: the route's whole CORS policy, replaced
 	// wholesale. location_cors_clear ignores it.
 	CORS *corsPatch `json:"cors_set,omitempty"`
+
+	// location_set_sharing payload: the route's declared [sharing] block
+	// (ADR 0026 Decision 2, spec §4.5). Requires a literal route_id on the
+	// target route (editing never mints a route_id).
+	Sharing *locationSharingPatch `json:"sharing,omitempty"`
+}
+
+// locationSharingPatch carries the location's [sharing] block for
+// location_set_sharing.
+type locationSharingPatch struct {
+	Mode             string  `json:"mode"`
+	AudienceLabel    *string `json:"audience_label,omitempty"`
+	ExternalEnforcer *string `json:"external_enforcer,omitempty"`
 }
 
 // locationPredicates carries the new method/header/query predicate facets for

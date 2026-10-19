@@ -61,6 +61,7 @@ func (s Severity) MarshalJSON() ([]byte, error) {
 // a fix. The JSON field names are lowercase and stable so the `jul lint -json`
 // output can be consumed by automation.
 type Diagnostic struct {
+	Code     string   `json:"code,omitempty"`
 	Severity Severity `json:"severity"`
 	Field    string   `json:"field,omitempty"`
 	Message  string   `json:"message"`
@@ -299,6 +300,8 @@ func Lint(c *Config) []Diagnostic {
 			Hint:     "remove error_log; redirect stderr in your process supervisor instead",
 		})
 	}
+
+	diags = append(diags, LintSharingFindings(c)...)
 
 	return diags
 }

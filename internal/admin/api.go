@@ -416,7 +416,19 @@ func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, diffConfigs(before, after))
+	diff := diffConfigs(before, after)
+	callerHasRaw := true
+	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
+		callerHasRaw = id.Has(rbac.ConfigRaw)
+	}
+	beforeEff, _ := s.patchRuntimeBaseline(nil, before)
+	var afterEff *config.Config
+	if cand, candErr := config.NewCandidateContext(r.Context(), after); candErr == nil {
+		afterEff = cand.Effective
+	}
+	sharing := s.BuildSharingPlanReport(before, beforeEff, after, afterEff, true, nil, callerHasRaw)
+	diff.Sharing = &sharing
+	writeJSON(w, http.StatusOK, diff)
 }
 
 // ErrRestartRequired marks a configuration apply that is valid but cannot be

@@ -160,6 +160,11 @@ func fullConfig() *config.Config {
 					}},
 				},
 				RouteID: strPtr("fixture-route"),
+				Sharing: &config.SharingConfig{
+					Mode:             "restricted",
+					AudienceLabel:    strPtr("family"),
+					ExternalEnforcer: strPtr("cloudflare-access:dash-team"),
+				},
 
 				Root:             "/srv",
 				Index:            []string{"index.html"},

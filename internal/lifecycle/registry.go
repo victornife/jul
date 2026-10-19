@@ -558,6 +558,9 @@ func locationEntries() []Entry {
 		loc+"match.query.*.value",
 		loc+"match.type",
 		loc+"route_id",
+		loc+"sharing.audience_label",
+		loc+"sharing.external_enforcer",
+		loc+"sharing.mode",
 	)...)
 	out = append(out, backendTLSEntries(loc+"backend_tls.", true)...)
 	out = append(out, hotGroup(SubStaticFiles, reasonHandlerRebuild,
