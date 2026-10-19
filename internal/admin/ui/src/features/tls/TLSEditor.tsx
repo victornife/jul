@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import { fetchRawConfig } from "@/api/client.ts";
+import { captureAdminIdentity,  fetchRawConfig } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import { appendFragment } from "@/lib/routeToml.ts";
 import {
@@ -76,9 +76,11 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
   }
 
   async function openInEditor(): Promise<void> {
+    const assertIdentity = captureAdminIdentity();
     setError(null);
     try {
       const raw = await fetchRawConfig();
+      assertIdentity();
       setPendingDraft({ kind: "toml", toml: appendFragment(raw.raw ?? "", fragment) });
       void navigate("/config");
     } catch {

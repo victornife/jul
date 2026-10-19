@@ -1,6 +1,6 @@
 # Secrets references
 
-Sensitive configuration values — admin tokens, JWT signing keys, ACME EAB keys,
+Sensitive configuration values — admin tokens, JWT-related credentials,
 Consul/Kubernetes tokens, upstream credentials — should not be literals in your
 `jul.toml`, where they get committed, copied, and logged. Jul.IA lets any string
 field carry a **reference** instead: `${env:NAME}` pulls a value from an
@@ -299,6 +299,18 @@ The soak test (criterion 5) was completed via Phase 2A on 2026-07-06.
 | 7 | Security / threat note | ✅ [Security / threat note](#security--threat-note) |
 | 8 | Fuzzing where parsing is involved | n/a — references use the TOML/config parser (Y1-08), no new parser |
 | 9 | Self-explanatory Console surface | ✅ Console **Status**/**Security** report *Secret references* with a count |
+
+## Preview disclosure boundary (#645)
+
+Configuration comparisons can reveal whether a literal value or reference text
+matches the baseline even when Before/After strings are masked. Full raw and
+typed previews therefore require `config:raw` alongside the existing operation
+permission. This includes opaque plugin maps, hidden header values, named
+credentials and lifecycle fallback fields. Reference resolution is unchanged;
+reporting never resolves a provider a second time. Ordinary restricted reads
+keep their projections. This is a comparison-output guarantee, not a claim that
+all status/export fingerprints or authorized mutation effects are confidential.
+See [comparison permissions](admin-api.md#configuration-comparison-permissions-645).
 
 ## Effective version confidentiality (#644, unreleased)
 

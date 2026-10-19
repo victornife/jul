@@ -17,7 +17,7 @@ import (
 // historyDiffAuthzServer builds a routes() stack under RBAC with a seeded
 // history snapshot, proving the N-02 contract for GET
 // /api/config/history/{id}/diff: a least-privilege rollback-only role can
-// preview what a rollback would change, a role that can read history but cannot
+// preview what a rollback would change when it also holds config:raw (#645); a role that can read history but cannot
 // roll back is forbidden, and the snapshot is diffed server-side against the
 // running config (never a submitted candidate). It returns the handler, the
 // seeded snapshot id, and the raw bytes of the running config.
@@ -32,12 +32,14 @@ func historyDiffAuthzServer(t *testing.T) (http.Handler, string, []byte) {
 
 	customRoles := map[string][]string{
 		// A rollback-only role can read history and roll back, but cannot write
-		// config — exactly the role that /api/config/diff (config:write) locks
+		// config. config:raw additionally authorizes comparisons (#645), while
+		// /api/config/diff (config:write) still locks
 		// out (N-02).
 		"rollback-only": {
 			string(rbac.HistoryRead),
 			string(rbac.HistoryReadRaw),
 			string(rbac.HistoryRollback),
+			string(rbac.ConfigRaw),
 		},
 		// history-read can read snapshots but must NOT reach the rollback diff:
 		// it lacks history:rollback.

@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { usePermission } from "@/auth/usePermission.ts";
 import {
   ConfigRejectedError,
+  captureAdminIdentity,
   PatchOperationRejectedError,
   fetchPendingRestart,
   patchConfigBatch,
@@ -57,7 +59,7 @@ function withMintedRouteIDs(
   });
 }
 
-/** Pure conversion from the secret-safe preview response to pending state. */
+/** Pure conversion from the raw-authorized preview response to pending state. */
 export function patchResultToPendingDraft(
   ops: readonly ConfigPatch[],
   result: PatchResult,
@@ -93,10 +95,9 @@ export function patchResultToPendingDraft(
       baseVersion === undefined ||
       baseVersion.trim() === "" ||
       result.lifecycle === undefined,
-    // Candidate is intentionally omitted; ordinary preview is secret-safe.
+    // Candidate is intentionally omitted; ordinary preview omits source but still requires raw authority.
   };
 }
-
 
 /**
  * Capture the value-free pending-restart state before previewing the pinned
@@ -107,9 +108,11 @@ export async function previewPatchBatchDraft(
   ops: readonly ConfigPatch[],
   baseVersion?: string,
 ): Promise<PendingPatchDraft> {
+  const assertIdentity = captureAdminIdentity();
   const pendingResponse = await fetchPendingRestart();
   const pendingSnapshot = snapshotPendingRestart(pendingResponse);
   const result = await patchConfigBatch([...ops], baseVersion);
+  assertIdentity();
   return patchResultToPendingDraft(ops, result, baseVersion, pendingSnapshot);
 }
 
@@ -132,35 +135,62 @@ export interface RunPatchBatch {
  */
 export function useRunPatchBatch(): RunPatchBatch {
   const navigate = useNavigate();
+  const { has } = usePermission();
+  const mounted = useRef(true);
+  const originatingIdentity = useRef(captureAdminIdentity());
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [error, setError] = useState<PatchBatchPreviewError | null>(null);
   const [busy, setBusy] = useState(false);
 
   const preview = useCallback(
     async (ops: readonly ConfigPatch[], baseVersion?: string) => {
       setError(null);
+      if (!has("config:raw")) {
+        setError(
+          new Error(
+            "Configuration previews require config:raw. Ask an administrator to review the change or grant that permission.",
+          ),
+        );
+        return null;
+      }
       if (ops.length === 0) {
         setError(new Error("The structured patch batch must contain at least one operation."));
         return null;
       }
       setBusy(true);
+      const assertIdentity = captureAdminIdentity();
       try {
-        return await previewPatchBatchDraft(ops, baseVersion);
+        const draft = await previewPatchBatchDraft(ops, baseVersion);
+        assertIdentity();
+        return mounted.current ? draft : null;
       } catch (caught) {
-        setError(toError(caught));
+        if (mounted.current) setError(toError(caught));
         return null;
       } finally {
-        setBusy(false);
+        if (mounted.current) setBusy(false);
       }
     },
-    [],
+    [has],
   );
 
   const handoff = useCallback(
     (draft: PendingPatchDraft): void => {
+      if (!mounted.current || !has("config:raw")) return;
+      try {
+        originatingIdentity.current();
+      } catch (caught) {
+        setError(toError(caught));
+        return;
+      }
       setPendingDraft(draft);
       void navigate("/config");
     },
-    [navigate],
+    [navigate, has],
   );
 
   const run = useCallback(

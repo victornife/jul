@@ -431,6 +431,14 @@ function RawAssessment({
 }
 
 export function ConfigPanel() {
+  const { ready, has } = usePermission();
+  if (ready && !has("config:raw")) {
+    return <p role="note">Configuration previews require config:raw because comparisons can reveal hidden values. Ask an administrator to review the change or grant that permission.</p>;
+  }
+  return <AuthorizedConfigPanel />;
+}
+
+function AuthorizedConfigPanel() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   // canApplyPerm proactively gates the primary apply action for principals that

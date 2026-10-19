@@ -4069,3 +4069,28 @@ prerequisites are not merged.
 - [ADR 0011](0011-reload-plan.md) — the reload transaction and the lifecycle registry
 - [ADR 0016](0016-inbound-identity-and-backend-peer-trust.md) — `config:trust`, the precedent for
   splitting a privileged capability into its own permission
+
+## Security correction — configuration comparisons (#645)
+
+Full comparison disclosure is authorized by `config:raw` in addition to the
+existing action grant, including history and adoption previews. No permission
+is inferred from a role name. The authenticated request identity and wildcard
+evaluator remain authoritative; the check occurs before parsing, CAS or baseline
+reads. Existing raw-only source-preview routes retain that permission contract.
+
+A caller-aware opaque report was considered: operation intent could label hidden
+replacements without comparing them. Under the current complete lifecycle and
+raw-version response contract, hiding rows still exposes equality through the
+fallback, flags and raw canonical digest, including on public-only typed edits.
+A safe opaque mode would need a new lifecycle/CAS disclosure contract and client
+migration. The smaller correction gates the existing detailed assessment, keeps
+all internal execution exact and preserves useful privileged previews. It costs
+writer-only/rollback-only/adoption-only preview workflows; those roles need an
+explicit raw grant or administrator review. No predefined role is widened.
+
+OpenAPI and capabilities publish an additive explicit raw-permission conjunction;
+old clients receive a hard `403`, never a false no-op. Console handoffs become
+same-credential memory-only, and identity transitions purge projection caches.
+No configuration/lifecycle schema changes or sharing-design acceptance follow
+from this correction. The [audit](../reviews/2026-10-19-645-preview-disclosure.md)
+records tests, field/surface dispositions and residual version exposure.

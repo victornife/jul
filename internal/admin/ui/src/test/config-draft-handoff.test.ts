@@ -59,12 +59,11 @@ beforeEach(() => {
 });
 
 describe("pending configuration draft handoff", () => {
-  it("persists the complete secret-safe patch assessment and drops candidate", () => {
+  it("keeps comparison assessments in memory only and drops candidate", () => {
     setPendingDraft(completePatch('token = "must-not-survive"'));
 
     const serialized = sessionStorage.getItem(pendingDraftStorageKey);
-    expect(serialized).not.toBeNull();
-    expect(serialized).not.toContain("must-not-survive");
+    expect(serialized).toBeNull();
 
     const restored = takePendingDraft();
     expect(restored).toMatchObject({
@@ -85,7 +84,7 @@ describe("pending configuration draft handoff", () => {
     expect(takePendingDraft()).toEqual({ kind: "toml", toml: 'admin_token = "secret"' });
   });
 
-  it("migrates an incomplete legacy patch for lifecycle refresh without trusting candidate", () => {
+  it("discards legacy stored comparisons rather than reusing privileged results", () => {
     sessionStorage.setItem(
       "__jul_config_pending_draft_v2",
       JSON.stringify({
@@ -98,16 +97,7 @@ describe("pending configuration draft handoff", () => {
     );
 
     const restored = takePendingDraft();
-    expect(restored).toMatchObject({
-      kind: "patch",
-      ops: [ops[0]],
-      baseVersion: "legacy-base",
-      summary: "legacy preview",
-      operationSummaries: [{ op_index: 0, op: "server_add", summary: "server_add" }],
-      valid: true,
-    });
-    expect(restored).not.toHaveProperty("candidate");
-    expect(restored).not.toHaveProperty("lifecycle");
+    expect(restored).toBeNull();
     expect(sessionStorage.getItem("__jul_config_pending_draft_v2")).toBeNull();
   });
 

@@ -4418,11 +4418,11 @@
         "internal/admin/apiv1_status_test.go",
         "internal/admin/apply_concurrency_legacy_test.go",
         "internal/admin/apply_concurrency_test.go",
-        "internal/admin/assets/dist/assets/CodeEditor-BaPSgBDp.js",
-        "internal/admin/assets/dist/assets/CodeEditor-BaPSgBDp.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js",
+        "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js.map",
         "internal/admin/assets/dist/assets/index-BBFvT2bh.css",
-        "internal/admin/assets/dist/assets/index-vVLRgnxU.js",
-        "internal/admin/assets/dist/assets/index-vVLRgnxU.js.map",
+        "internal/admin/assets/dist/assets/index-CKevWejD.js",
+        "internal/admin/assets/dist/assets/index-CKevWejD.js.map",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-Bh1tDfsg.js",
@@ -4887,12 +4887,12 @@
       ],
       "open_defects": [],
       "establishing_pr": "https://github.com/victornife/jul/pull/604",
-      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing. PR615 and PR618 subsequently rebuild these four artifacts for Console UI updates; the prior mapping followed the original paths through PR597 and PR615 to the PR618 artifact names. This reconciles paths only and does not certify the new implementations under the historical D11 review. PR635 rebuilds these four artifacts for the selected ALPN Console integration; current paths and original-to-current mapping follow that rebuild. Historical rebuild records and review verdicts are preserved; this path reconciliation does not recertify new ALPN code under D11. #643 regenerates content-addressed Console assets; current paths and original-to-current mapping follow this build. A new rebuild record is appended; all earlier identities, mappings and review evidence remain unchanged. This does not recertify new code under D11. #644 integrates with merged PR646 and rebuilds the combined Console. Current paths now follow that combined build; both prior branch rebuild records remain unchanged, with a separate integration mapping appended. This is path reconciliation only, not historical D11 recertification.",
+      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing. PR615 and PR618 subsequently rebuild these four artifacts for Console UI updates; the prior mapping followed the original paths through PR597 and PR615 to the PR618 artifact names. This reconciles paths only and does not certify the new implementations under the historical D11 review. PR635 rebuilds these four artifacts for the selected ALPN Console integration; current paths and original-to-current mapping follow that rebuild. Historical rebuild records and review verdicts are preserved; this path reconciliation does not recertify new ALPN code under D11. #643 regenerates content-addressed Console assets; current paths and original-to-current mapping follow this build. A new rebuild record is appended; all earlier identities, mappings and review evidence remain unchanged. This does not recertify new code under D11. #644 integrates with merged PR646 and rebuilds the combined Console. Current paths now follow that combined build; both prior branch rebuild records remain unchanged, with a separate integration mapping appended. This is path reconciliation only, not historical D11 recertification. PR648 first rebuilt these assets for comparison authorization; that branch record is retained. Its main integration combines merged PR646/PR647 with PR648 and rebuilds the complete Console; current paths and original-to-current mapping follow the combined build, with both input mappings appended. Historical review evidence and verdicts are unchanged.",
       "path_changes": {
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-BaPSgBDp.js",
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-BaPSgBDp.js.map",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-vVLRgnxU.js",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-vVLRgnxU.js.map"
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js",
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js.map",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-CKevWejD.js",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-CKevWejD.js.map"
       },
       "resolved_defects": [
         {
@@ -4969,6 +4969,28 @@
             "internal/admin/assets/dist/assets/CodeEditor-W18qIe9x.js.map": "internal/admin/assets/dist/assets/CodeEditor-BaPSgBDp.js.map",
             "internal/admin/assets/dist/assets/index-C8ZAGiaC.js": "internal/admin/assets/dist/assets/index-vVLRgnxU.js",
             "internal/admin/assets/dist/assets/index-C8ZAGiaC.js.map": "internal/admin/assets/dist/assets/index-vVLRgnxU.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/648",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js": "internal/admin/assets/dist/assets/CodeEditor-CLGa_Bsl.js",
+            "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js.map": "internal/admin/assets/dist/assets/CodeEditor-CLGa_Bsl.js.map",
+            "internal/admin/assets/dist/assets/index-BX3TkNGY.js": "internal/admin/assets/dist/assets/index-CldYSzHc.js",
+            "internal/admin/assets/dist/assets/index-BX3TkNGY.js.map": "internal/admin/assets/dist/assets/index-CldYSzHc.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/648",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CodeEditor-BaPSgBDp.js": "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js",
+            "internal/admin/assets/dist/assets/CodeEditor-BaPSgBDp.js.map": "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js.map",
+            "internal/admin/assets/dist/assets/index-vVLRgnxU.js": "internal/admin/assets/dist/assets/index-CKevWejD.js",
+            "internal/admin/assets/dist/assets/index-vVLRgnxU.js.map": "internal/admin/assets/dist/assets/index-CKevWejD.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-CLGa_Bsl.js": "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js",
+            "internal/admin/assets/dist/assets/CodeEditor-CLGa_Bsl.js.map": "internal/admin/assets/dist/assets/CodeEditor-C2XHisUT.js.map",
+            "internal/admin/assets/dist/assets/index-CldYSzHc.js": "internal/admin/assets/dist/assets/index-CKevWejD.js",
+            "internal/admin/assets/dist/assets/index-CldYSzHc.js.map": "internal/admin/assets/dist/assets/index-CKevWejD.js.map"
           }
         }
       ]

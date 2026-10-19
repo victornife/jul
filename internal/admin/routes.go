@@ -3,7 +3,11 @@
 
 package admin
 
-import "net/http"
+import (
+	"net/http"
+
+	"jul/internal/rbac"
+)
 
 // routes builds the admin mux from the authoritative Catalog. Every entry is
 // either public (no auth) or wrapped with method-aware authorization so
@@ -18,18 +22,22 @@ func (s *Server) routes() http.Handler {
 	}
 	mux := http.NewServeMux()
 	for _, spec := range Catalog {
+		handler := spec.Handler(s)
+		if spec.RequiresConfigRaw {
+			handler = requireConfigComparisonRead(handler)
+		}
 		var h http.Handler
 		switch {
 		case spec.Public:
-			h = spec.Handler(s)
+			h = handler
 		case spec.Authenticated:
-			h = s.authWithRBAC(spec.Handler(s))
+			h = s.authWithRBAC(handler)
 		case len(spec.AnyPermissions) > 0:
-			h = s.requireAnyPermission(spec.AnyPermissions, spec.Handler(s))
+			h = s.requireAnyPermission(spec.AnyPermissions, handler)
 		case spec.Permissions != nil:
-			h = s.requirePermissionForMethods(spec.Permissions, spec.Handler(s))
+			h = s.requirePermissionForMethods(spec.Permissions, handler)
 		default:
-			h = s.requirePermission(spec.Permission, spec.Handler(s))
+			h = s.requirePermission(spec.Permission, handler)
 		}
 
 		if !spec.Public {
@@ -48,6 +56,21 @@ func (s *Server) routes() http.Handler {
 	return s.captureAdminRuntimeSnapshot(
 		s.requireSecureTransport(s.requireBrowserSameOrigin(s.observeConsole(mux))),
 	)
+}
+
+// This check runs after authentication and uses exactly its pinned identity,
+// including wildcard grants. It precedes candidate parsing, baseline reads,
+// CAS checks and all comparison/fallback producers. Internal comparisons and
+// real mutation semantics remain exact; no lifecycle result is falsified.
+func requireConfigComparisonRead(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, _ := rbac.IdentityFromContext(r.Context())
+		if !id.Has(rbac.ConfigRaw) {
+			writeForbidden(w, r, rbac.ConfigRaw, id)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // handleConsoleOrRoot keeps one stable mux registration and selects the UI at

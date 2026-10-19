@@ -393,7 +393,7 @@ report degraded history health. See [deployment.md](deployment.md) and
 [ADR 0015](adr/0015-managed-apply-terminal-ledger.md).
 
 The History panel lists snapshots newest-first. Ordinary **Preview** uses a
-secret-safe diff; complete stored TOML additionally requires `history:raw`.
+raw-authorized comparison diff; complete stored TOML additionally requires `history:raw`.
 **Roll back** uses the validated managed write path, with conflict, authority,
 trust/admin-change and lifecycle checks. A live rollback records its previous
 configuration through the same terminal finalizer. A reverse rollback is
@@ -472,7 +472,9 @@ candidate, computes the human diff, and asks the closed-world lifecycle registry
 for the whole-candidate verdict. Preview never persists, reloads, publishes
 handlers, or mutates a loader-owned configuration pointer.
 
-The normal preview response is deliberately secret-safe. It contains the legacy
+Full comparison previews require `config:raw` in addition to the authoring
+permission (`config:write`). Hidden-value equality is sensitive even when no
+plaintext is shown. The response contains the legacy
 combined `summary` string, an ordered `operation_summaries` array with zero-based
 `op_index`, the canonical `base_version`, validation issues, the full diff, and a
 value-free `lifecycle` object. Lifecycle entries contain only canonical schema
@@ -777,14 +779,15 @@ Every route-side one-operation edit and every creation batch uses the same
 `POST /api/config/patch/preview` handoff. The resulting pending draft preserves
 the exact ordered operations, canonical base version, combined and per-operation
 summaries, validation issues, structured diff, and backend lifecycle verdict.
-Ordinary handoff and session storage never carry candidate TOML; ConfigPanel may
+All comparison handoffs are memory-only and bound to the originating credential;
+no comparison or operations are restored from session storage. ConfigPanel may
 request source separately from the `config:raw`-gated candidate endpoint.
 
-`config:write` gates creation, cloning, quick edits, and destructive previews;
-`config:apply` independently gates the final ConfigPanel write; and `config:raw`
-controls source visibility and the raw escape hatch. A diff-only operator may
-review and apply a valid structured patch without gaining access to secret-bearing
-canonical TOML.
+`config:write` gates creation, cloning and quick edits. Full comparison previews
+also require `config:raw`, which controls source visibility and the raw escape
+hatch. `config:apply` independently gates the final write. A writer without raw
+access must request administrator review or an explicit raw grant; masked values
+are insufficient because comparison results expose equality (#645).
 
 For structured patches, ConfigPanel treats the backend lifecycle assessment as
 the sole authority. A hot-capable preview goes to hot apply. A valid
@@ -1260,8 +1263,8 @@ field is restart-bound.
 Cache intentionally has no `cache_set`. The editor regenerates the complete
 seven-field `[cache]` table from the exact raw fetch and keeps the candidate and
 its `base_version` together in memory. It always stages and never offers Apply
-live. Raw candidate source requires `config:raw`; typed edits require
-`config:write`, and the final action independently requires `config:apply`.
+live. Raw candidate source requires `config:raw`; typed previews require both
+`config:write` and `config:raw`, and the final action independently requires `config:apply`.
 Candidate TOML is not serialized to `sessionStorage` or `localStorage`.
 
 ## Hot Console mode (HR-06B)
@@ -1293,6 +1296,23 @@ restart/staging operations.
 ## External Console sign-in
 
 [OIDC authentication](admin-oidc.md) adds one-provider Code + PKCE login as a separate unreleased Beta capability. The Console shows mapped principal/role and expiry, provides local logout and offers explicit reauthentication after expiry. Local scoped tokens remain available for automation and recovery. Browser sessions use HttpOnly cookies, exact-origin/header CSRF protection and the same server-enforced RBAC catalogue. See the guide for provider evidence, setup, reload revocation and outage limits.
+
+## Comparison privacy and permission changes (#645)
+
+A writer without `config:raw` cannot obtain full configuration comparisons, even
+for a public-only edit. The Console explains that an administrator must review
+the change or explicitly grant raw access. Rollback review also needs
+`history:rollback` plus `config:raw`; adoption review needs `config:adopt` plus
+`config:raw`. Public structured read projections retain their existing access.
+No opaque comparison is labelled unchanged: insufficient permission is a denial.
+
+Preview assessments, operation payloads and source candidates are held only in
+memory for navigation within the same credential. They are never saved in
+browser storage, and historical stored drafts are discarded. Reloading the page
+requires preparing the change again. Before mounting panels, the Console verifies
+identity; credential or permission changes remove cached projections and unmount
+old panel state. Privileged operators keep the existing diff and source editing
+workflow. API authorization remains authoritative.
 
 ## Effective version confidentiality (#644, unreleased)
 

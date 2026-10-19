@@ -40,10 +40,11 @@ var v1WriteCatalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1ConfigValidate) },
 	},
 	{
-		Pattern:    "/api/v1/config/plan",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigWrite,
-		Stability:  StabilityExternal,
+		Pattern:           "/api/v1/config/plan",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigWrite,
+		Stability:         StabilityExternal,
 		Operations: map[string]ExternalOperation{http.MethodPost: {
 			ID:                  "planConfig",
 			Summary:             "Assess candidate TOML against the authoritative baseline: validation, lint, diff and lifecycle, without any side effect.",
@@ -76,10 +77,11 @@ var v1WriteCatalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1RouteTest) },
 	},
 	{
-		Pattern:    "/api/v1/config/patch",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigWrite,
-		Stability:  StabilityExternal,
+		Pattern:           "/api/v1/config/patch",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigWrite,
+		Stability:         StabilityExternal,
 		Operations: map[string]ExternalOperation{http.MethodPost: {
 			ID:                  "previewConfigPatch",
 			Summary:             "Preview an ordered typed patch batch atomically against one baseline without persistence.",
@@ -158,10 +160,11 @@ var v1WriteCatalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Rollback) },
 	},
 	{
-		Pattern:    "/api/v1/config/adopt-external/preview",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigAdopt,
-		Stability:  StabilityExternal,
+		Pattern:           "/api/v1/config/adopt-external/preview",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigAdopt,
+		Stability:         StabilityExternal,
 		Operations: map[string]ExternalOperation{http.MethodPost: {
 			ID:                  "previewAdoptExternal",
 			Summary:             "Assess the current external configuration against the managed baseline without changing authority, disk, history or runtime.",

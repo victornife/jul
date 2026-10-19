@@ -287,6 +287,16 @@ v2.1.0 tag or its packaged READMEs.
 
 ### Security
 
+- **Configuration comparison confidentiality (#645):** raw, typed, history and
+  adoption previews now require `config:raw` alongside their existing action
+  permission, preventing hidden-value equality disclosure through diffs,
+  lifecycle fallback, no-op flags and raw-version metadata. Successful DTOs and
+  actual apply/CAS semantics are unchanged. Writer-only roles need administrator
+  review or an explicit raw grant; remote CLI rollback/adoption also preview.
+  Console comparison drafts are memory-only and cached privileged state is
+  cleared on credential or permission changes. Existing stored drafts are
+  discarded. See `docs/admin-api.md` and `docs/compatibility.md`.
+
 - Include the scoped admin diagnostic/readback confidentiality corrections
   from #514. Both verified advisory records identify v2.2.0 as the first
   patched release; disclosure follows actual fixed-package verification.

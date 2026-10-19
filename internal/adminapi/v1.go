@@ -98,6 +98,7 @@ type EndpointAvailability struct {
 	RequiredCapability string   `json:"required_capability,omitempty"`
 	Stability          string   `json:"stability"`
 	Permissions        []string `json:"permissions,omitempty"`
+	RequiresConfigRaw  bool     `json:"requires_config_raw,omitempty"`
 	SunsetOn           string   `json:"sunset_on,omitempty"`
 }
 

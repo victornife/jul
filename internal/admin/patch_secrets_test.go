@@ -97,8 +97,8 @@ func rbacOperatorServer(t *testing.T) (*Server, string, string) {
 }
 
 // TestPatchPreviewOperatorCannotSeeSecrets verifies N-01: an operator with only
-// config:write can preview a structured patch and receive a diff, but the
-// response must not contain any literal credential.
+// config:write cannot compare hidden credentials (#645), even when the
+// submitted operation changes only a public route field.
 func TestPatchPreviewOperatorCannotSeeSecrets(t *testing.T) {
 	s, opTok, _ := rbacOperatorServer(t)
 
@@ -115,8 +115,8 @@ func TestPatchPreviewOperatorCannotSeeSecrets(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+opTok)
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body: %s", rr.Code, rr.Body.String())
 	}
 
 	resp := rr.Body.String()

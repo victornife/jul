@@ -1332,7 +1332,7 @@ describe("ConfigPanel apply flow", () => {
 
     render(
       <Wrapper>
-        <PermissionScope permissions={["config:write"]}>
+        <PermissionScope permissions={["config:write", "config:raw"]}>
           <ConfigPanel />
         </PermissionScope>
       </Wrapper>,
@@ -1376,7 +1376,7 @@ describe("ConfigPanel apply flow", () => {
 
     render(
       <Wrapper>
-        <PermissionScope permissions={["config:apply"]}>
+        <PermissionScope permissions={["config:apply", "config:raw"]}>
           <ConfigPanel />
         </PermissionScope>
       </Wrapper>,

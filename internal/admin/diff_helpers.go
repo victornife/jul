@@ -977,8 +977,9 @@ func diffHealthCheckFields(name string, b, a *config.HealthCheckConfig, d *Confi
 
 // diffDiscoveryFields reports per-field changes to an upstream's dynamic
 // discovery when the provider type is unchanged (target, refresh, and the
-// active provider's non-secret knobs). Token changes are not surfaced because
-// tokens are preserved server-side and never diffed.
+// active provider's non-secret knobs). This helper omits tokens; the lifecycle
+// completeness pass still reports credential changes without their values. Full
+// comparison disclosure is therefore separately protected by config:raw (#645).
 func diffDiscoveryFields(name string, b, a *config.DiscoveryConfig, d *ConfigDiff) {
 	if b == nil || a == nil {
 		return

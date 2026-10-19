@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import { fetchRawConfig, type TrafficControls } from "@/api/client.ts";
+import { captureAdminIdentity,  fetchRawConfig, type TrafficControls } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import { upsertTopLevelTable } from "@/lib/trafficToml.ts";
 import {
@@ -84,6 +84,7 @@ export function AccessLogEditor({ current, onClose }: AccessLogEditorProps) {
   }
 
   async function openInEditor(): Promise<void> {
+    const assertIdentity = captureAdminIdentity();
     setError(null);
     if (blocking) {
       setError("Select at least one sink or disable access logging.");
@@ -91,6 +92,7 @@ export function AccessLogEditor({ current, onClose }: AccessLogEditorProps) {
     }
     try {
       const raw = await fetchRawConfig();
+      assertIdentity();
       setPendingDraft({
         kind: "toml",
         toml: upsertTopLevelTable(raw.raw ?? "", "observability.access_log", fragment),
