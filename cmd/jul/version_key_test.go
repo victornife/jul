@@ -67,8 +67,8 @@ func TestLegacyStartupSelectsExplicitKeyPath(t *testing.T) {
 	// The original flag-based entry point must honor the same precedence as
 	// serve/run. TestMain supplies a valid environment key; this explicit missing
 	// path must still fail before any listener starts.
-	args, flags := os.Args, flag.CommandLine
-	t.Cleanup(func() { os.Args, flag.CommandLine = args, flags })
+	args, flags, usage := os.Args, flag.CommandLine, flag.Usage
+	t.Cleanup(func() { os.Args, flag.CommandLine, flag.Usage = args, flags, usage })
 	flag.CommandLine = flag.NewFlagSet("jul", flag.ContinueOnError)
 	os.Args = []string{"jul", "--config", writeTemp(t, validConfig), "--effective-version-key-file", filepath.Join(t.TempDir(), "missing")}
 	if code := run(); code != 1 {

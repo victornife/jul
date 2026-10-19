@@ -91,10 +91,12 @@ See [operator recovery and deployment patterns](../effective-versions.md).
 
 ## Sharing context
 
-#640 remains Proposed. Sharing postconditions keep raw configuration digests;
-AD-09's process-only access-input key remains separate, with its deliberately
-restart-unverifiable lifetime. Do not reuse that key or the new effective-version
-context to change those guarantees. Cursor/evidence consumers must treat these
+#640 remains Proposed. Sharing postconditions keep raw configuration as their
+configuration-digest input. Its latest AD-09 keys every postcondition digest,
+including raw configuration digests and access fingerprints, under a separate
+process-only context with a deliberately restart-unverifiable lifetime. Do not
+reuse that key or the new effective-version context to change those guarantees.
+Cursor/evidence consumers must treat these
 version strings as opaque and compare only within their identified context.
 
 Companion edit required before #640 lands: its proposed sharing ADR currently

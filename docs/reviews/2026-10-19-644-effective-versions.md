@@ -9,7 +9,8 @@ ADR 0025 compares durable keyed canonical identifiers with process-only IDs.
 The implementation covers the complete immutable resolved configuration using
 standard HMAC-SHA-256 with a 256-bit random private key, length framing and
 separate domains. Context identity is separately keyed. Raw canonical CAS,
-history, baseline and sharing postconditions remain raw. Effective versions
+history and baseline remain raw; sharing postcondition configuration inputs
+remain raw under their separate process-only keyed scheme. Effective versions
 are cached at publication, not computed by re-reading secret providers. The
 same key preserves restart and rollback equality; independent keys and unknown
 formats are explicitly incomparable.
@@ -101,8 +102,10 @@ NGINX directive. The configuration-value/lifecycle contract is unchanged.
 #640 remains Proposed. It needs a rebase companion edit: its proposed sharing
 ADR currently uses main's next number 0025; rename that proposed record to 0026
 and update spec/review/index references before landing. Append the distinction
-between durable effective IDs and AD-09's separate process-only access-input
-key; shareable postconditions remain raw. No #641/#642 runtime work is complete.
+between durable effective IDs and AD-09's separate process-only context, which
+keys every postcondition digest, including those over raw configuration inputs.
+The proposed design was refreshed at `68aed05d4e947262de4437cf97705dcb579aa811`;
+precise companion edits are recorded on #640. No #641/#642 runtime work is complete.
 
 ## CI-driven deployment correction
 
