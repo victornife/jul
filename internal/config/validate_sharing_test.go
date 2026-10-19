@@ -506,6 +506,16 @@ func TestLintSharingIntentFindings(t *testing.T) {
 		if !config.LocationHasClientCertCheckInConfig(effCfg, effCfg.Servers[1], effCfg.Servers[1].Locations[0]) {
 			t.Fatal("expected listener-wide client cert check to be detected")
 		}
+		if !config.LocationHasAnyJulCheck(effCfg.Servers[1], effCfg.Servers[1].Locations[0]) {
+			t.Fatal("expected LocationHasAnyJulCheck to be true when require mode is set")
+		}
+		// File-backed listener association or sibling block client_auth.mode must be suppressed in forPlan=true.
+		if hasCert, hasFile := config.LocationHasClientCertCheckForPlan(rawCfg, effCfg, 0, effCfg.Servers[0].Locations[0]); hasCert || !hasFile {
+			t.Fatalf("expected LocationHasClientCertCheckForPlan to suppress file-backed client_auth, got hasCert=%v hasFile=%v", hasCert, hasFile)
+		}
+		if hasCert, hasFile := config.LocationHasClientCertCheckForPlan(nil, nil, 0, config.LocationConfig{}); hasCert || hasFile {
+			t.Fatalf("expected nil LocationHasClientCertCheckForPlan to return false, false")
+		}
 	})
 }
 

@@ -489,15 +489,10 @@ func (s *Server) buildExpectedEntryFacts(
 
 	credCheck := deriveCredentialCheckKind(effLoc)
 	certCheck := deriveClientCertCheckKind(effCfg, effSrv, effLoc)
-	for _, ls := range rawCfg.Servers {
-		if ls.Listen == rawSrv.Listen && ls.TLS != nil && ls.TLS.ClientAuth != nil {
-			if _, hasFile := config.SecretRefSchemes(ls.TLS.ClientAuth.Mode); hasFile {
-				certCheck = ""
-				omitted = append(omitted, "client_certificate")
-				addExt(ExternalInputFileContents)
-				break
-			}
-		}
+	if _, certHasFile := config.LocationHasClientCertCheckForPlan(rawCfg, effCfg, srvIdx, effLoc); certHasFile {
+		certCheck = ""
+		omitted = append(omitted, "client_certificate")
+		addExt(ExternalInputFileContents)
 	}
 
 	intentMode := declaredSharingMode(effLoc)
@@ -518,7 +513,7 @@ func (s *Server) buildExpectedEntryFacts(
 	if effLoc.Auth != nil && effLoc.Auth.ForwardAuth != nil {
 		addExt(ExternalInputForwardAuth)
 	}
-	if entryRequiresProviderChecklist(effCfg, srvIdx, locIdx) {
+	if entryRequiresProviderChecklist(rawCfg, effCfg, srvIdx, locIdx) {
 		addExt(ExternalInputProviderPolicy)
 	}
 	if len(entryFileBackedInputKinds(rawCfg, rawSrv, rawLoc)) > 0 {

@@ -1120,7 +1120,7 @@ func deriveSharingEntryWarnings(
 			if ll.Deny {
 				continue
 			}
-			if config.LocationHasAnyJulCheck(ls, ll) {
+			if config.LocationHasNetworkCheck(ll) || config.LocationHasCredentialCheck(ll) || config.LocationHasClientCertCheckInConfig(c, ls, ll) {
 				hasProtectedOnListen = true
 			} else {
 				hasOpenOnListen = true

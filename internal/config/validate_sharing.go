@@ -381,6 +381,60 @@ func LocationHasClientCertCheckInConfig(c *Config, srv ServerConfig, loc Locatio
 	return false
 }
 
+// LocationHasClientCertCheckForPlan evaluates listener-scoped client-certificate
+// enforcement for servers[srvIdx] while applying §9.5 / RR12 file-reference
+// suppression across every block sharing the listener. It returns
+// (hasCertCheck, hasFileRefOnListener).
+func LocationHasClientCertCheckForPlan(rawCfg, effCfg *Config, srvIdx int, effLoc LocationConfig) (bool, bool) {
+	if rawCfg == nil {
+		rawCfg = effCfg
+	}
+	if effCfg == nil {
+		effCfg = rawCfg
+	}
+	if rawCfg == nil || srvIdx < 0 || srvIdx >= len(rawCfg.Servers) {
+		return false, false
+	}
+	rawSrv := rawCfg.Servers[srvIdx]
+	effSrv := rawSrv
+	if srvIdx < len(effCfg.Servers) {
+		effSrv = effCfg.Servers[srvIdx]
+	}
+	_, rawSrvListenHasFile := SecretRefSchemes(rawSrv.Listen)
+
+	hasCert := false
+	for i := range rawCfg.Servers {
+		rOther := rawCfg.Servers[i]
+		eOther := rOther
+		if i < len(effCfg.Servers) {
+			eOther = effCfg.Servers[i]
+		}
+		sameRawListen := strings.TrimSpace(rOther.Listen) != "" && rOther.Listen == rawSrv.Listen
+		sameEffListen := strings.TrimSpace(eOther.Listen) != "" && eOther.Listen == effSrv.Listen
+		if i != srvIdx && !sameRawListen {
+			if !sameEffListen {
+				continue
+			}
+			_, otherListenHasFile := SecretRefSchemes(rOther.Listen)
+			if rawSrvListenHasFile || otherListenHasFile {
+				if (rOther.TLS != nil && rOther.TLS.ClientAuth != nil) || LocationHasClientCertCheck(eOther, effLoc) {
+					return false, true
+				}
+				continue
+			}
+		}
+		if rOther.TLS != nil && rOther.TLS.ClientAuth != nil {
+			if _, hasFile := SecretRefSchemes(rOther.TLS.ClientAuth.Mode); hasFile {
+				return false, true
+			}
+		}
+		if LocationHasClientCertCheck(eOther, effLoc) {
+			hasCert = true
+		}
+	}
+	return hasCert, false
+}
+
 // LocationHasAnyJulCheck reports whether a location has at least one Jul-enforced
 // network, credential, or client-certificate check.
 func LocationHasAnyJulCheck(srv ServerConfig, loc LocationConfig) bool {
@@ -490,12 +544,15 @@ func LintLocationSharingFindingsWithRaw(rawCfg, effCfg *Config, srvIdx, locIdx i
 		}
 	}
 	hasCredCheck := LocationHasCredentialCheck(effLoc)
-	hasCertCheck := LocationHasClientCertCheckInConfig(effCfg, effSrv, effLoc)
-	if forPlan && rawSrv.TLS != nil && rawSrv.TLS.ClientAuth != nil {
-		if _, hasFile := SecretRefSchemes(rawSrv.TLS.ClientAuth.Mode); hasFile {
-			hasCertCheck = false
+	var hasCertCheck bool
+	if forPlan {
+		var certHasFile bool
+		hasCertCheck, certHasFile = LocationHasClientCertCheckForPlan(rawCfg, effCfg, srvIdx, effLoc)
+		if certHasFile {
 			complete = false
 		}
+	} else {
+		hasCertCheck = LocationHasClientCertCheckInConfig(effCfg, effSrv, effLoc)
 	}
 	hasJulCheck := hasNetCheck || hasCredCheck || hasCertCheck
 	hasCredOrCert := hasCredCheck || hasCertCheck

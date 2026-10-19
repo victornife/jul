@@ -815,7 +815,7 @@ func classifyEntryPair(
 			TriggersRetirement:        false,
 			Reasons:                   []string{"entry added"},
 			IntentFindings:            findings,
-			ProviderChecklistRequired: entryRequiresProviderChecklist(afterEff, a.srvIdx, a.locIdx),
+			ProviderChecklistRequired: entryRequiresProviderChecklist(afterRaw, afterEff, a.srvIdx, a.locIdx),
 		}
 	}
 
@@ -834,7 +834,7 @@ func classifyEntryPair(
 			RequiresAcknowledgement:   false,
 			TriggersRetirement:        true,
 			Reasons:                   []string{"entry removed"},
-			ProviderChecklistRequired: entryRequiresProviderChecklist(beforeEff, b.srvIdx, b.locIdx),
+			ProviderChecklistRequired: entryRequiresProviderChecklist(beforeRaw, beforeEff, b.srvIdx, b.locIdx),
 		}
 	}
 
@@ -956,7 +956,7 @@ func classifyEntryPair(
 		TriggersRetirement:        triggersRetirement,
 		Reasons:                   reasons,
 		IntentFindings:            findings,
-		ProviderChecklistRequired: entryRequiresProviderChecklist(beforeEff, b.srvIdx, b.locIdx) || entryRequiresProviderChecklist(afterEff, a.srvIdx, a.locIdx),
+		ProviderChecklistRequired: entryRequiresProviderChecklist(beforeRaw, beforeEff, b.srvIdx, b.locIdx) || entryRequiresProviderChecklist(afterRaw, afterEff, a.srvIdx, a.locIdx),
 	}
 }
 
@@ -1811,26 +1811,47 @@ func buildEntryPlanFindings(beforeDiags, afterDiags []config.Diagnostic) []Shari
 	return out
 }
 
-func entryRequiresProviderChecklist(c *config.Config, srvIdx, locIdx int) bool {
-	if c == nil || srvIdx < 0 || srvIdx >= len(c.Servers) {
+func entryRequiresProviderChecklist(rawCfg, effCfg *config.Config, srvIdx, locIdx int) bool {
+	if rawCfg == nil {
+		rawCfg = effCfg
+	}
+	if effCfg == nil {
+		effCfg = rawCfg
+	}
+	if rawCfg == nil || srvIdx < 0 || srvIdx >= len(rawCfg.Servers) {
 		return false
 	}
-	srv := c.Servers[srvIdx]
-	if locIdx < 0 || locIdx >= len(srv.Locations) {
+	rawSrv := rawCfg.Servers[srvIdx]
+	if locIdx < 0 || locIdx >= len(rawSrv.Locations) {
 		return false
 	}
-	loc := srv.Locations[locIdx]
-	if loc.Sharing == nil {
+	rawLoc := rawSrv.Locations[locIdx]
+	if rawLoc.Sharing == nil {
 		return false
 	}
-	if loc.Sharing.ExternalEnforcerValue() != "" {
+	effLoc := rawLoc
+	if srvIdx < len(effCfg.Servers) && locIdx < len(effCfg.Servers[srvIdx].Locations) {
+		effLoc = effCfg.Servers[srvIdx].Locations[locIdx]
+	}
+	if strings.TrimSpace(rawLoc.Sharing.ExternalEnforcerValue()) != "" {
 		return true
 	}
-	switch loc.Sharing.Mode {
+	rawMode := strings.TrimSpace(rawLoc.Sharing.Mode)
+	if _, hasFile := config.SecretRefSchemes(rawMode); hasFile {
+		return false
+	}
+	mode := rawMode
+	if config.ContainsSecretRef(rawMode) && effLoc.Sharing != nil && !config.ContainsSecretRef(effLoc.Sharing.Mode) {
+		mode = strings.TrimSpace(effLoc.Sharing.Mode)
+	}
+	switch mode {
 	case config.SharingModePrivateNetwork:
 		return true
 	case config.SharingModeRestricted:
-		return !config.LocationHasAnyJulCheck(srv, loc)
+		hasNet := config.LocationHasNetworkCheck(effLoc)
+		hasCred := config.LocationHasCredentialCheck(effLoc)
+		hasCert, _ := config.LocationHasClientCertCheckForPlan(rawCfg, effCfg, srvIdx, effLoc)
+		return !hasNet && !hasCred && !hasCert
 	default:
 		return false
 	}
@@ -1906,6 +1927,30 @@ func hasFileSecretRefInEntry(rawCfg *config.Config, srv config.ServerConfig, loc
 	}
 	if checkStr(srv.Listen) {
 		return true
+	}
+	if rawCfg != nil {
+		for _, ls := range rawCfg.Servers {
+			if ls.Listen != srv.Listen {
+				continue
+			}
+			if ls.TLS != nil && ls.TLS.ClientAuth != nil {
+				if checkStr(ls.TLS.ClientAuth.Mode) || checkStr(ls.TLS.ClientAuth.CAFile) || checkStr(ls.TLS.ClientAuth.CRLFile) {
+					return true
+				}
+				for _, san := range ls.TLS.ClientAuth.VerifySAN {
+					if checkStr(san) {
+						return true
+					}
+				}
+			}
+			if ls.ClientAddress != nil {
+				for _, tp := range ls.ClientAddress.TrustedProxies {
+					if checkStr(tp) {
+						return true
+					}
+				}
+			}
+		}
 	}
 	for _, n := range srv.ServerNames {
 		if checkStr(n) {

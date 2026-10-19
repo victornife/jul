@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1670,6 +1671,56 @@ server_names = ["app.example.com"]
 		viewBytes, _ := json.Marshal(viewPage)
 		if strings.Contains(string(viewBytes), "192.168.99.77") || strings.Contains(string(viewBytes), "internal-secret-gate-name") {
 			t.Fatalf("Finding 2: sharing view leaked resolved reference value: %s", string(viewBytes))
+		}
+
+		// Listener-wide file-backed client_auth on a sibling block sharing the listener
+		// must not change plan findings when the file-backed mode changes from require to request.
+		sharedListenerRaw := &config.Config{
+			Servers: []config.ServerConfig{
+				{
+					Listen:      "127.0.0.1:8443",
+					ServerNames: []string{"tls-owner.example.com"},
+					TLS: &config.TLSConfig{
+						Enabled:    true,
+						ClientAuth: &config.ClientAuthConfig{Mode: "${file:/ca_mode}", CAFile: "/ca.pem"},
+					},
+					Locations: []config.LocationConfig{{
+						RouteID: strPtrTest("tls-owner-route"),
+						Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+						Return:  200,
+					}},
+				},
+				{
+					Listen:      "127.0.0.1:8443",
+					ServerNames: []string{"sibling.example.com"},
+					Locations: []config.LocationConfig{{
+						RouteID: strPtrTest("sibling-restricted"),
+						Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+						Return:  200,
+						Sharing: &config.SharingConfig{Mode: "restricted"},
+					}},
+				},
+			},
+		}
+		effRequire, _ := sharedListenerRaw.Clone()
+		effRequire.Servers[0].TLS.ClientAuth.Mode = "require"
+		effRequest, _ := sharedListenerRaw.Clone()
+		effRequest.Servers[0].TLS.ClientAuth.Mode = "request"
+
+		diagsReq, completeReq := config.LintLocationSharingFindingsWithRaw(sharedListenerRaw, effRequire, 1, 0, true)
+		diagsOpt, completeOpt := config.LintLocationSharingFindingsWithRaw(sharedListenerRaw, effRequest, 1, 0, true)
+		if completeReq || completeOpt {
+			t.Fatalf("expected complete=false when sibling block on listener uses file-backed client_auth.mode, got %v / %v", completeReq, completeOpt)
+		}
+		if !reflect.DeepEqual(diagsReq, diagsOpt) {
+			t.Fatalf("listener-wide file-backed client_auth leaked into LintLocationSharingFindingsWithRaw: require=%+v vs request=%+v", diagsReq, diagsOpt)
+		}
+
+		repTransition := s.BuildSharingPlanReport(sharedListenerRaw, effRequire, sharedListenerRaw, effRequest, true, nil, true)
+		for _, f := range repTransition.IntentFindings {
+			if f.Created {
+				t.Fatalf("changing another block's file-backed client_auth.mode from require to request created a plan finding: %+v", f)
+			}
 		}
 	})
 
