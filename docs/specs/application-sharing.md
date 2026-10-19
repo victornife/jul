@@ -10,7 +10,7 @@
 > package baseline v2.2.0. Evidence, decision log, adversarial review and
 > traceability live in the
 > [design review packet](../reviews/2026-10-18-580-application-sharing-design.md);
-> the durable decisions are in [ADR 0025](../adr/0025-application-sharing-contract.md).
+> the durable decisions are in [ADR 0026](../adr/0026-application-sharing-contract.md).
 
 ## 1. Purpose, scope and classification
 
@@ -755,7 +755,7 @@ reversible change; works without the intent block; a sparse typed operation with
 preview and `base_version`; emits the §8.4 trigger; reported in the view. The
 server-level `redirect_https` stays where it is (moving it would change routing
 scope). Field name and shape are settled by #642's design as an amendment to
-ADR 0025 (public schema, costly once adopted).
+ADR 0026 (public schema, costly once adopted).
 
 **Credential files** (htpasswd, CA, CRL) take effect only on an explicit reload:
 SIGHUP or a configuration rewrite in `file_owned` mode; a managed Apply or
@@ -1837,7 +1837,7 @@ order in #579).
 
 ## 18. #581 handoff
 
-**Entry gates.** (1) Maintainer acceptance of this contract and ADR 0025, and the
+**Entry gates.** (1) Maintainer acceptance of this contract and ADR 0026, and the
 design change merged; (2) #581 selected in #62; (3) **for the evidence run**, the
 intent tranche (#641) merged; (4) environment: one host with a LAN address and two
 clients (or labelled namespaces), a pinned harness, an existing dashboard backend

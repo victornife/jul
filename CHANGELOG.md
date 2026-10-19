@@ -22,7 +22,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 - Accepted application-sharing contract for #580 (SHARE-01):
   [specification](docs/specs/application-sharing.md),
-  [ADR 0025](docs/adr/0025-application-sharing-contract.md) and a
+  [ADR 0026](docs/adr/0026-application-sharing-contract.md) and a
   [design review packet](docs/reviews/2026-10-18-580-application-sharing-design.md).
   It defines a derived sharing view, four access modes, trust and evidence
   contracts, the withdrawal promise, three reference fixtures, a protocol

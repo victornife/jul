@@ -20,7 +20,7 @@
 > §6.28) and **r28** (this revision: RR12–RR14 and acceptance). This packet
 > holds evidence, decisions, review findings and traceability for the
 > [specification](../specs/application-sharing.md) and
-> [ADR 0025](../adr/0025-application-sharing-contract.md). It certifies nothing
+> [ADR 0026](../adr/0026-application-sharing-contract.md). It certifies nothing
 > about runtime behaviour beyond the executed checks in §5.
 
 ## 1. Baseline and inputs
@@ -350,7 +350,7 @@ proposed separate F1 listeners. Both were tested in phase 2.
 | U-3 | high | demonstrated | wireframe allowed withdrawal without preview | accepted | §9.8 two-step flow | #587 |
 | U-5 | high | demonstrated | rubric gated dangerous failures on three tasks only | accepted | §14 all six tasks; predeclared protocol | #585, #587 |
 | A-5 | medium | risk | recovery after unknown external outcome could duplicate or broaden | accepted | §9.6 stop-and-reconcile | #580, #583, #588 |
-| A-6 | medium | demonstrated | derived view and vocabulary under-classified as readily reversible | accepted | ADR door table; versioned projection | ADR 0025 |
+| A-6 | medium | demonstrated | derived view and vocabulary under-classified as readily reversible | accepted | ADR door table; versioned projection | ADR 0026 |
 | S-6 | medium | demonstrated | JWKS refresh is lazy with 1 h stale grace | accepted | §8.1 row | #580 |
 | U-4 | medium | risk | vocabulary exposes implementation structure | accepted | §2: Console wording tested by #585 | #585, #587 |
 | U-6 | medium | demonstrated | L4 shown as an entry without enforcement or withdrawal | accepted | L4 outside the contract (§2, §12) | #580 |
@@ -848,7 +848,7 @@ does not cover WAF raw-file content identity; #646 (merged) closed #643.
 | 12 | Intent mapped to #633 findings and #634 assertions; unsupported/unanalysed explicit; no second store | spec §4.5 tables | §6 (A) | #633, #634, intent tranche |
 | 13 | Executable usability rubric for #585/#587; #588 keeps its later GO gate | spec §14, §16; ADR D8 | §6 (U) | #585, #587, #588 |
 
-Issue deliverables 1–8 map to: (1) spec §1 and ADR 0025; (2) §4; (3) §5;
+Issue deliverables 1–8 map to: (1) spec §1 and ADR 0026; (2) §4; (3) §5;
 (4) §6–§7; (5) §8; (6) §10–§11; (7) §12; (8) §2, §4.3, §9, §9.8, §13. The
 resource and value evidence contract maps to §13–§15 and §17.
 

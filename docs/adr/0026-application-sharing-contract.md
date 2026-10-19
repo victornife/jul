@@ -1,4 +1,4 @@
-# ADR 0025 — Application-sharing contract: derived view, declared intent and complete withdrawal
+# ADR 0026 — Application-sharing contract: derived view, declared intent and complete withdrawal
 
 - **Status:** Accepted — 2026-10-19, maintainer acceptance of the whole contract under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-16 were answered individually on 2026-10-18 and 2026-10-19; the rest was accepted with the contract (verbatim record in the review packet §3, answer 14).
 - **Date:** 2026-10-18
