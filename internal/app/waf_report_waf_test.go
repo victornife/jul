@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -193,7 +192,7 @@ func TestSecurityEndpointWAFExternalDigestMustNotConfirmOfflineGuess(t *testing.
 	write("overlap-secret.data", overlapSecret)
 	incContent := "SecAction \"id:50002,phase:1,pass,nolog\"\n"
 	write("included.conf", incContent)
-	mainRuleContent := "SecRule ARGS:pin \"@pmFromFile overlap-secret.data\" \"id:50001,phase:1,deny,status:403\"\nInclude " + filepath.ToSlash(filepath.Join(dir, "included.conf")) + "\n"
+	mainRuleContent := "SecRule ARGS:pin \"@pmFromFile overlap-secret.data\" \"id:50001,phase:1,deny,status:403\"\nInclude included.conf\n"
 	mainRulePath := write("main.conf", mainRuleContent)
 	selectorPath := write("selected-rule-path.txt", mainRulePath)
 	overlapPath := filepath.Join(dir, "overlap-secret.data")
@@ -298,15 +297,16 @@ func TestSecurityEndpointWAFExternalDigestMustNotConfirmOfflineGuess(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
+		var logBuf bytes.Buffer
 		go func() {
-			done <- Serve(ctx, signals, config.NewTOMLSource(cfgPath), parsed, "Jul.IA", "649-test", WithEffectiveVersions(vctx), WithLogOutput(io.Discard))
+			done <- Serve(ctx, signals, config.NewTOMLSource(cfgPath), parsed, "Jul.IA", "649-test", WithEffectiveVersions(vctx), WithLogOutput(&logBuf))
 		}()
 		stop := func() {
 			cancel()
 			select {
 			case code := <-done:
 				if code != 0 {
-					t.Fatalf("Serve exit %d", code)
+					t.Fatalf("Serve exit %d: %s", code, logBuf.String())
 				}
 			case <-time.After(10 * time.Second):
 				t.Fatal("Serve shutdown timed out")
