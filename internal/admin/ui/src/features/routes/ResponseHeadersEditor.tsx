@@ -21,6 +21,7 @@ import {
 export interface ResponseHeadersEditorProps {
   /** The location whose response-header operations are being edited. */
   readonly target: RouteTarget;
+  readonly baseVersion?: string | undefined;
   /** The location's current ordered operations, used to seed the form. */
   readonly seed?: readonly { op: string; name: string; value?: string }[] | undefined;
   /** Whether the location already has response-header operations. */
@@ -51,12 +52,13 @@ function moveRow<T>(rows: readonly T[], from: number, to: number): T[] {
  */
 export function ResponseHeadersEditor({
   target,
+  baseVersion,
   seed,
   existing = Boolean(seed && seed.length > 0),
   onClose,
 }: ResponseHeadersEditorProps) {
   const [rows, setRows] = useState<ResponseHeaderRow[]>(() => seedResponseHeaderRows(seed));
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(baseVersion);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const rowsContainerRef = useRef<HTMLDivElement>(null);

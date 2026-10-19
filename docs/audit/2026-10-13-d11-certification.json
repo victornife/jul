@@ -4418,11 +4418,11 @@
         "internal/admin/apiv1_status_test.go",
         "internal/admin/apply_concurrency_legacy_test.go",
         "internal/admin/apply_concurrency_test.go",
-        "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js",
-        "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-BYDl6z_W.js",
+        "internal/admin/assets/dist/assets/CodeEditor-BYDl6z_W.js.map",
         "internal/admin/assets/dist/assets/index-BBFvT2bh.css",
-        "internal/admin/assets/dist/assets/index-BX3TkNGY.js",
-        "internal/admin/assets/dist/assets/index-BX3TkNGY.js.map",
+        "internal/admin/assets/dist/assets/index-6xKtIPPk.js",
+        "internal/admin/assets/dist/assets/index-6xKtIPPk.js.map",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js",
         "internal/admin/assets/dist/assets/query-BdSLN-Ub.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-Bh1tDfsg.js",
@@ -4887,12 +4887,12 @@
       ],
       "open_defects": [],
       "establishing_pr": "https://github.com/victornife/jul/pull/604",
-      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing. PR615 and PR618 subsequently rebuild these four artifacts for Console UI updates; the prior mapping followed the original paths through PR597 and PR615 to the PR618 artifact names. This reconciles paths only and does not certify the new implementations under the historical D11 review. PR635 rebuilds these four artifacts for the selected ALPN Console integration; current paths and original-to-current mapping follow that rebuild. Historical rebuild records and review verdicts are preserved; this path reconciliation does not recertify new ALPN code under D11.",
+      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing. PR615 and PR618 subsequently rebuild these four artifacts for Console UI updates; the prior mapping followed the original paths through PR597 and PR615 to the PR618 artifact names. This reconciles paths only and does not certify the new implementations under the historical D11 review. PR635 rebuilds these four artifacts for the selected ALPN Console integration; current paths and original-to-current mapping follow that rebuild. Historical rebuild records and review verdicts are preserved; this path reconciliation does not recertify new ALPN code under D11. #643 regenerates content-addressed Console assets; current paths and original-to-current mapping follow this build. A new rebuild record is appended; all earlier identities, mappings and review evidence remain unchanged. This does not recertify new code under D11.",
       "path_changes": {
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js",
-        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js.map",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-BX3TkNGY.js",
-        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-BX3TkNGY.js.map"
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-BYDl6z_W.js",
+        "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-BYDl6z_W.js.map",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js": "internal/admin/assets/dist/assets/index-6xKtIPPk.js",
+        "internal/admin/assets/dist/assets/index-CTCwXmN5.js.map": "internal/admin/assets/dist/assets/index-6xKtIPPk.js.map"
       },
       "resolved_defects": [
         {
@@ -4937,6 +4937,15 @@
             "internal/admin/assets/dist/assets/CodeEditor-H1G76wxI.js.map": "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js.map",
             "internal/admin/assets/dist/assets/index-DqMIbvEo.js": "internal/admin/assets/dist/assets/index-BX3TkNGY.js",
             "internal/admin/assets/dist/assets/index-DqMIbvEo.js.map": "internal/admin/assets/dist/assets/index-BX3TkNGY.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/646",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js": "internal/admin/assets/dist/assets/CodeEditor-BYDl6z_W.js",
+            "internal/admin/assets/dist/assets/CodeEditor-BFCDz025.js.map": "internal/admin/assets/dist/assets/CodeEditor-BYDl6z_W.js.map",
+            "internal/admin/assets/dist/assets/index-BX3TkNGY.js": "internal/admin/assets/dist/assets/index-6xKtIPPk.js",
+            "internal/admin/assets/dist/assets/index-BX3TkNGY.js.map": "internal/admin/assets/dist/assets/index-6xKtIPPk.js.map"
           }
         }
       ]

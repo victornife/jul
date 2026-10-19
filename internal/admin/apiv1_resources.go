@@ -78,11 +78,12 @@ func v1Routes(c *config.Config) []adminapi.Route {
 			out = append(out, adminapi.Route{
 				RouteID: loc.RouteID,
 				Selector: adminapi.RouteSelector{
-					Listen:       srv.Listen,
-					ServerNames:  srv.ServerNames,
-					MatchType:    loc.Type,
-					Path:         loc.Match,
-					MatchOrdinal: loc.MatchOrdinal,
+					Listen:          srv.Listen,
+					ServerNames:     srv.ServerNames,
+					MatchType:       loc.Type,
+					Path:            loc.Match,
+					MatchOrdinal:    loc.MatchOrdinal,
+					SelectorVersion: loc.SelectorVersion,
 				},
 				Action:            loc.Action,
 				Target:            loc.Target,
