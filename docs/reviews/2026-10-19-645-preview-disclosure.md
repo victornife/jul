@@ -203,8 +203,8 @@ scripts. Results are updated below after final validation; no presumed CI green.
   changed statements covered (100%)**, no exclusions/threshold changes.
 - `go vet ./...` and `go vet -tags '<full tags>' ./...` — passed.
 - Console `tsc --noEmit`, `eslint . --cache`, `vitest run --coverage`, coverage
-  contract script and `vite build` — passed. **928 tests, 80 files**; statements
-  75.28%, branches 72.41%, functions 64.55%, lines 77.33%; all seven existing
+  contract script and `vite build` — passed. **938 tests, 80 files**; statements
+  76.41%, branches 73.50%, functions 65.60%, lines 78.55%; all seven existing
   coverage-contract targets and global/area/exact-file floors passed.
 - Browser smoke regressions were added for stored-result denial, live grant loss
   and initial-401 recovery. Local execution was attempted, but Chromium was
@@ -259,3 +259,25 @@ regenerated with Vite; no generated content was hand-edited and no drift guard
 was weakened. The served JavaScript hashes and behavior did not change. A second
 build is checked for zero generated-asset diff. Original job evidence:
 https://github.com/victornife/jul/actions/runs/39178364274/job/117825654547
+
+### Hosted coverage and inventory follow-up
+
+The initial Codecov patch result was 80.95%, with missing or partial paths in
+Console identity transitions, preview handoffs, and editor producers. Ten added
+regressions exercise denial before requests, permission-check failure/retry,
+replacement credentials, same-identity TLS/WAF/cache success, delayed revoked
+responses, editor unmount, and unavailable storage. The complete Console suite
+passes 938 tests and all existing coverage floors. Applying the repository's
+changed-frontend-statement selector to the final local coverage profile measures
+126/128 changed statements (98.44%); the hosted Codecov result remains a separate
+required gate. No coverage configuration or production source was changed for
+this follow-up. The separate reviewer independently passed all 19 disclosure
+tests and found no material false-positive or blocker.
+
+Hosted docs-check also found four old content-hashed paths in D11-104 after the
+embedded Console rebuild. Its current paths and original-to-current mapping now
+follow PR648, with an appended rebuild record. The historical frozen inventory,
+prior mappings, denominator and review verdict are retained. Both the inventory
+check (zero errors) and its 22 regression tests pass; docs-check again passes
+2,385 checks with zero failures. Initial failed-job evidence:
+https://github.com/victornife/jul/actions/runs/39178903879/job/117827376748
