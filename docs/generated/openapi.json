@@ -6927,6 +6927,10 @@
                 "listen": {
                   "type": "string"
                 },
+                "location_index": {
+                  "type": "integer",
+                  "format": "int64"
+                },
                 "match_ordinal": {
                   "type": "integer",
                   "format": "int64"
@@ -7213,8 +7217,51 @@
                 "route_id": {
                   "type": "string"
                 },
+                "route_selector": {
+                  "type": "object",
+                  "properties": {
+                    "listen": {
+                      "type": "string"
+                    },
+                    "location_index": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "match_ordinal": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "match_type": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "route_id": {
+                      "type": "string"
+                    },
+                    "selector_version": {
+                      "type": "string"
+                    },
+                    "server_index": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "server_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "selector_version": {
                   "type": "string"
+                },
+                "server_index": {
+                  "type": "integer",
+                  "format": "int64"
                 },
                 "server_names": {
                   "type": "array",

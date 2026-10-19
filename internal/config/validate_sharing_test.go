@@ -517,6 +517,45 @@ func TestLintSharingIntentFindings(t *testing.T) {
 			t.Fatalf("expected nil LocationHasClientCertCheckForPlan to return false, false")
 		}
 	})
+
+	t.Run("ClassifyCIDRChange and CIDRSetPermitsNone including IPv4-mapped IPv6 prefixes", func(t *testing.T) {
+		if cls, _ := config.ClassifyCIDRChange([]string{"::ffff:192.0.2.0/120"}, nil, []string{"192.0.2.0/24"}, nil, false); cls != "unchanged" {
+			t.Fatalf("expected ::ffff:192.0.2.0/120 and 192.0.2.0/24 to be unchanged, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"::ffff:192.0.2.0/64"}, nil, []string{"::ffff:192.0.2.0/120"}, nil, false); cls != "uncertain" {
+			t.Fatalf("expected <96 mapped prefix comparison to not panic and return uncertain, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"10.0.0.1", "10.0.0.2", "10.0.0.0/30", "192.168.1.0/24", "2001:db8::/32"}, []string{"10.0.0.3", "2001:db8:1::1"}, []string{"10.0.0.1"}, nil, true); cls != "narrowed" {
+			t.Fatalf("expected narrowed, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"10.0.0.1"}, nil, []string{"10.0.0.0/8"}, nil, true); cls != "widened" {
+			t.Fatalf("expected widened, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"10.0.0.0/8"}, nil, []string{"192.168.0.0/16"}, nil, true); cls != "uncertain" {
+			t.Fatalf("expected uncertain on disjoint ranges, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"10.0.0.0/8"}, nil, []string{"${env:CIDR}"}, nil, true); cls != "uncertain" {
+			t.Fatalf("expected uncertain on secret ref when rejectSecretRefs=true, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"bad"}, nil, []string{"10.0.0.0/8"}, nil, false); cls != "uncertain" {
+			t.Fatalf("expected uncertain on invalid CIDR, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"10.0.0.0/8"}, []string{"bad"}, []string{"10.0.0.0/8"}, nil, false); cls != "uncertain" {
+			t.Fatalf("expected uncertain on invalid deny CIDR, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{""}, nil, []string{"10.0.0.0/8"}, nil, false); cls != "uncertain" {
+			t.Fatalf("expected uncertain on empty CIDR entry, got %s", cls)
+		}
+		if cls, _ := config.ClassifyCIDRChange([]string{"10.0.0.1/99"}, nil, []string{"10.0.0.0/8"}, nil, false); cls != "uncertain" {
+			t.Fatalf("expected uncertain on invalid prefix length, got %s", cls)
+		}
+		if !config.CIDRSetPermitsNone(nil, []string{"0.0.0.0/0", "::/0"}) {
+			t.Fatal("expected CIDRSetPermitsNone=true when 0.0.0.0/0 and ::/0 are denied")
+		}
+		if config.CIDRSetPermitsNone(nil, nil) || config.CIDRSetPermitsNone(nil, []string{"10.0.0.0/8"}) {
+			t.Fatal("expected CIDRSetPermitsNone=false when addresses remain permitted")
+		}
+	})
 }
 
 // TestHostPatternsOverlapMatchesRealRouter proves the §9.5 host-dispatch

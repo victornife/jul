@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	"jul/internal/lifecycle"
 	"jul/internal/middleware"
 	"jul/internal/redact"
+	"jul/internal/respwriter"
 	"jul/internal/router"
 	"jul/internal/upstream"
 )
@@ -173,11 +175,14 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 		t.Fatal("server did not start")
 	}
 
-	// Build a single shared HTTP/2 transport that dials addr regardless of Host header
-	// (simulating browser connection coalescing across portal.example.com and dash.example.com).
+	// Build a single shared HTTP/2 transport that dials addr once and multiplexes
+	// requests for both portal.example.com and dash.example.com over that single
+	// TCP/TLS/HTTP2 connection (using one URL authority + per-request Host header).
+	var dialCount atomic.Int32
 	h2Tr := &http.Transport{
 		ForceAttemptHTTP2: true,
 		DialTLSContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			dialCount.Add(1)
 			d := &tls.Dialer{
 				Config: &tls.Config{
 					InsecureSkipVerify: true,
@@ -191,9 +196,17 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 	}
 	defer h2Tr.CloseIdleConnections()
 	h2Client := &http.Client{Transport: h2Tr, Timeout: 5 * time.Second}
+	doH2Get := func(host, path string) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+path, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Host = host
+		return h2Client.Do(req)
+	}
 
 	// 1. Open both a portal stream and a dashboard stream on the SAME shared HTTP/2 connection.
-	portalResp, err := h2Client.Get("https://portal.example.com/?stream=1")
+	portalResp, err := doH2Get("portal.example.com", "/?stream=1")
 	if err != nil {
 		t.Fatalf("portal GET: %v", err)
 	}
@@ -206,7 +219,7 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 		t.Fatalf("portal initial frame = %q, err = %v", line, rErr)
 	}
 
-	dashResp, err := h2Client.Get("https://dash.example.com/?stream=1")
+	dashResp, err := doH2Get("dash.example.com", "/?stream=1")
 	if err != nil {
 		t.Fatalf("dashboard GET: %v", err)
 	}
@@ -214,6 +227,9 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 	dashBR := bufio.NewReader(dashResp.Body)
 	if line, rErr := dashBR.ReadString('\n'); rErr != nil || !strings.Contains(line, "start-dashboard") {
 		t.Fatalf("dashboard initial frame = %q, err = %v", line, rErr)
+	}
+	if gotDials := dialCount.Load(); gotDials != 1 {
+		t.Fatalf("shared-H2 fixture must use exactly 1 TCP/TLS connection, got %d", gotDials)
 	}
 
 	// 2. Withdraw dashboard (Withdrawn = true). Only the dashboard stream must end;
@@ -262,7 +278,7 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 		t.Fatalf("restore-and-revoke reload = %+v", r)
 	}
 
-	dashAfterCRL, err := h2Client.Get("https://dash.example.com/")
+	dashAfterCRL, err := doH2Get("dash.example.com", "/")
 	if err != nil {
 		t.Fatalf("dashboard GET on open H2 conn after CRL reload failed at transport instead of HTTP 403: %v", err)
 	}
@@ -271,7 +287,7 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 		t.Fatalf("dashboard status on open H2 conn with revoked cert = %d, want 403", dashAfterCRL.StatusCode)
 	}
 
-	portalAfterCRL, err := h2Client.Get("https://portal.example.com/")
+	portalAfterCRL, err := doH2Get("portal.example.com", "/")
 	if err != nil {
 		t.Fatalf("portal GET on open H2 conn after CRL reload: %v", err)
 	}
@@ -290,7 +306,7 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 	if r := <-resCh3; r.Outcome != ReloadAppliedLive {
 		t.Fatalf("san-restrict reload = %+v", r)
 	}
-	dashAfterSAN, err := h2Client.Get("https://dash.example.com/")
+	dashAfterSAN, err := doH2Get("dash.example.com", "/")
 	if err != nil {
 		t.Fatalf("dashboard GET after SAN reload: %v", err)
 	}
@@ -309,13 +325,16 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 	if r := <-resCh4; r.Outcome != ReloadAppliedLive {
 		t.Fatalf("ca-rotate reload = %+v", r)
 	}
-	dashAfterCA, err := h2Client.Get("https://dash.example.com/")
+	dashAfterCA, err := doH2Get("dash.example.com", "/")
 	if err != nil {
 		t.Fatalf("dashboard GET after CA rotation: %v", err)
 	}
 	_ = dashAfterCA.Body.Close()
 	if dashAfterCA.StatusCode != http.StatusForbidden {
 		t.Fatalf("dashboard status on open H2 conn after CA rotation = %d, want 403", dashAfterCA.StatusCode)
+	}
+	if gotDials := dialCount.Load(); gotDials != 1 {
+		t.Fatalf("expected all requests to share the single H2 connection, got %d dials", gotDials)
 	}
 }
 
@@ -776,5 +795,386 @@ func TestPublishClassificationAllSubsystems(t *testing.T) {
 	trsPlug := ComputePublishEntryTransitions(cfgPlug1, cfgPlug1, filesPlug1, cfgPlug2, cfgPlug2, filesPlug2, []PluginModuleChange{{Name: "p1", Before: "a", After: "b"}}, nil)
 	if len(trsPlug) != 1 || !trsPlug[0].Retire {
 		t.Fatalf("expected plugin/listener/WAF/rewrite transition to retire, got %+v", trsPlug)
+	}
+}
+
+func audit653Config() *config.Config {
+	id := "portal"
+	return &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: "127.0.0.1:8080",
+			Locations: []config.LocationConfig{{
+				RouteID:   &id,
+				Match:     config.MatchConfig{Type: "prefix", Path: "/portal"},
+				ProxyPass: "http://127.0.0.1:9001",
+			}},
+		}},
+	}
+}
+
+func TestAudit653H2FixtureActuallySharesConnection(t *testing.T) {
+	TestSharedH2StreamRetirementAndPerRequestCertRecheck(t)
+}
+
+func TestAudit653WAFIncludeContentChangeRetires(t *testing.T) {
+	dir := t.TempDir()
+	child := filepath.Join(dir, "child.conf")
+	dataFile := filepath.Join(dir, "words.data")
+	main := filepath.Join(dir, "main.conf")
+	if err := os.WriteFile(dataFile, []byte("badword1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(main, []byte("# comment\nInclude @owasp_crs/ignore.conf\nInclude \"*.conf\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child, []byte("SecRule REQUEST_URI \"@pmFromFile words.data\" \\\n\"id:1001,phase:1,deny\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := audit653Config()
+	cfg.WAF = config.WAFConfig{Enabled: true, Mode: "block", DirectivesFiles: []string{main}, InlineRules: "IncludeOptional " + child}
+	beforeFiles := captureLoadedAccessFiles(cfg)
+	if err := os.WriteFile(child, []byte(`SecRule REQUEST_URI "@contains new" "id:1002,phase:1,deny"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	afterFiles := captureLoadedAccessFiles(cfg)
+	trs := ComputePublishEntryTransitions(cfg, cfg, beforeFiles, cfg, cfg, afterFiles, nil, nil)
+	if len(trs) != 1 || !trs[0].Retire {
+		t.Fatalf("loaded WAF include changed but no retirement: %+v", trs)
+	}
+}
+
+func TestAudit653HandlerPanicReleasesGeneration(t *testing.T) {
+	s := &Server{baseCtx: context.Background(), exchanges: respwriter.NewExchangeRegistry(), listeners: make(map[string]*listenerEntry)}
+	g := newHandlerGen(context.Background(), time.Second, map[string]http.Handler{"addr": http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })}, nil, 1)
+	s.handlers.Store(g)
+	func() {
+		defer func() { _ = recover() }()
+		s.dynamicHandler("addr").ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil))
+	}()
+	if got := g.inflight.Load(); got != 0 {
+		t.Fatalf("generation inflight=%d after aborted request, want 0", got)
+	}
+}
+
+func TestAudit653RealListenerRemoveAndReadd(t *testing.T) {
+	addr1, addr2 := freePort(t), freePort(t)
+	base := audit653Config()
+	base.Servers[0].Listen = addr1
+	otherID := "other"
+	other := base.Servers[0]
+	other.Listen = addr2
+	other.Locations = []config.LocationConfig{{RouteID: &otherID, Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "http://127.0.0.1:9002"}}
+	base.Servers = append(base.Servers, other)
+
+	src := &stubSource{}
+	src.set(base, nil)
+	s := New(base, base, lifecycle.ComputeFingerprint(base), quietLogger(), buildTestRouterFactory(t, nil, nil), src, func(context.Context, *config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	s.OnInitialGenerationReady = func() { close(ready) }
+	reload := make(chan ReloadRequest)
+	go func() { done <- s.Run(ctx, reload, redact.EmptyState()) }()
+	defer func() { cancel(); <-done }()
+	<-ready
+
+	tr := &http.Transport{DisableKeepAlives: true}
+	defer tr.CloseIdleConnections()
+	client := &http.Client{Transport: tr, Timeout: time.Second}
+	get := func() error {
+		r, err := client.Get("http://" + addr1 + "/portal")
+		if err != nil {
+			return err
+		}
+		_ = r.Body.Close()
+		return nil
+	}
+	if err := get(); err != nil {
+		t.Fatalf("before remove: %v", err)
+	}
+	apply := func(c *config.Config) {
+		cand, err := config.NewCandidate(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := make(chan ReloadResult, 1)
+		reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: cand, Result: res}
+		if r := <-res; r.Outcome != ReloadAppliedLive {
+			t.Fatalf("reload=%+v", r)
+		}
+	}
+	removed, _ := base.Clone()
+	removed.Servers = removed.Servers[1:]
+	apply(removed)
+	apply(base)
+	if err := get(); err != nil {
+		t.Fatalf("fresh request after remove/re-add fails despite applied_live: %v", err)
+	}
+}
+
+func TestAudit653MappedIPv4CIDRDoesNotPanicAtPublish(t *testing.T) {
+	cfg := audit653Config()
+	cfg.Servers[0].Locations[0].Auth = &config.AuthConfig{Allow: []string{"::ffff:192.0.2.0/120"}}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatalf("fixture must pass config validation: %v", err)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("validated mapped IPv4 CIDR panics during publication: %v", p)
+		}
+	}()
+	ComputePublishEntryTransitions(cfg, cfg, nil, cfg, cfg, nil, nil, nil)
+}
+
+func TestRealH1StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
+	dir := t.TempDir()
+	ca1 := newCA(t)
+	caFile := writePEM(t, dir, "ca.pem", ca1.pem)
+	crlFile := ca1.writeCRL(t, dir, "clients.crl")
+	srvCert, srvKey := writeSelfSigned(t, dir, "srv", "dash.example.com")
+	_, clientCert1 := ca1.clientCert(t, "alice", 202, []string{"alice.example"}, nil)
+	addr := freePort(t)
+	strPtr := func(s string) *string { return &s }
+
+	baseCfg := func() *config.Config {
+		return &config.Config{
+			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Servers: []config.ServerConfig{{
+				Name:        "dash",
+				Listen:      addr,
+				ServerNames: []string{"dash.example.com"},
+				TLS: &config.TLSConfig{
+					Enabled: true,
+					Cert:    srvCert,
+					Key:     srvKey,
+					ClientAuth: &config.ClientAuthConfig{
+						Mode:    "request",
+						CAFile:  caFile,
+						CRLFile: crlFile,
+					},
+				},
+				Locations: []config.LocationConfig{{
+					RouteID:           strPtr("dashboard"),
+					Match:             config.MatchConfig{Type: "prefix", Path: "/"},
+					ProxyPass:         "http://127.0.0.1:9002",
+					RequireClientCert: true,
+					Sharing:           &config.SharingConfig{Mode: "restricted"},
+				}},
+			}},
+		}
+	}
+
+	streamHold := make(chan struct{})
+	defer close(streamHold)
+	initCfg := baseCfg()
+	src := &stubSource{}
+	src.set(initCfg, nil)
+	srv := New(initCfg, initCfg, lifecycle.ComputeFingerprint(initCfg), quietLogger(), buildTestRouterFactory(t, streamHold, nil), src, func(context.Context, *config.Config) error { return nil })
+	srv.exchanges.Grace = 120 * time.Millisecond
+	srv.exchanges.Bound = 350 * time.Millisecond
+
+	ready := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reloadCh := make(chan ReloadRequest, 1)
+	go func() { _ = srv.Run(ctx, reloadCh, redact.EmptyState()) }()
+	<-ready
+
+	var h1Dials atomic.Int32
+	h1Tr := &http.Transport{
+		ForceAttemptHTTP2: false,
+		TLSNextProto:      make(map[string]func(string, *tls.Conn) http.RoundTripper),
+		DialTLSContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			h1Dials.Add(1)
+			d := &tls.Dialer{
+				Config: &tls.Config{
+					InsecureSkipVerify: true,
+					ServerName:         "dash.example.com",
+					NextProtos:         []string{"http/1.1"},
+					Certificates:       []tls.Certificate{clientCert1},
+				},
+			}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+	defer h1Tr.CloseIdleConnections()
+	h1Client := &http.Client{Transport: h1Tr, Timeout: 5 * time.Second}
+
+	// 1. Unary request on HTTP/1.1 keep-alive connection succeeds, then CRL revocation denies next request on SAME H1 connection (h1Dials == 1).
+	req1, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/", nil)
+	req1.Host = "dash.example.com"
+	resp1, err := h1Client.Do(req1)
+	if err != nil || resp1.ProtoMajor != 1 || resp1.StatusCode != http.StatusOK {
+		t.Fatalf("initial H1 GET: resp=%+v err=%v", resp1, err)
+	}
+	_, _ = io.Copy(io.Discard, resp1.Body)
+	_ = resp1.Body.Close()
+
+	ca1.writeCRL(t, "", crlFile, 202)
+	candCRL, _ := config.NewCandidate(baseCfg())
+	resCh := make(chan ReloadResult, 1)
+	reloadCh <- ReloadRequest{ID: "h1-crl", Source: ReloadSourceAdmin, Candidate: candCRL, Result: resCh}
+	if r := <-resCh; r.Outcome != ReloadAppliedLive {
+		t.Fatalf("h1-crl reload = %+v", r)
+	}
+
+	req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/", nil)
+	req2.Host = "dash.example.com"
+	resp2, err := h1Client.Do(req2)
+	if err != nil {
+		t.Fatalf("second H1 GET on reused keep-alive conn failed: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp2.Body)
+	_ = resp2.Body.Close()
+	if resp2.StatusCode != http.StatusForbidden || h1Dials.Load() != 1 {
+		t.Fatalf("expected 403 on reused H1 keep-alive conn (dials=1), got status=%d dials=%d", resp2.StatusCode, h1Dials.Load())
+	}
+
+	// 2. Lift CRL revocation, open an active H1 stream, then withdraw route -> stream ends within bound.
+	ca1.writeCRL(t, "", crlFile)
+	candRestore, _ := config.NewCandidate(baseCfg())
+	resCh2 := make(chan ReloadResult, 1)
+	reloadCh <- ReloadRequest{ID: "h1-restore", Source: ReloadSourceAdmin, Candidate: candRestore, Result: resCh2}
+	<-resCh2
+
+	reqStream, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/?stream=1", nil)
+	reqStream.Host = "dash.example.com"
+	respStream, err := h1Client.Do(reqStream)
+	if err != nil {
+		t.Fatalf("H1 stream GET: %v", err)
+	}
+	defer respStream.Body.Close()
+	br := bufio.NewReader(respStream.Body)
+	if line, rErr := br.ReadString('\n'); rErr != nil || !strings.Contains(line, "start-dashboard") {
+		t.Fatalf("H1 stream initial line = %q, err = %v", line, rErr)
+	}
+
+	withdrawnCfg := baseCfg()
+	withdrawnCfg.Servers[0].Locations[0].Withdrawn = true
+	candWithdrawn, _ := config.NewCandidate(withdrawnCfg)
+	resCh3 := make(chan ReloadResult, 1)
+	reloadCh <- ReloadRequest{ID: "h1-withdraw", Source: ReloadSourceAdmin, Candidate: candWithdrawn, Result: resCh3}
+	rel3 := <-resCh3
+	if len(rel3.EntryRetirements) != 1 || rel3.EntryRetirements[0].EndedExchanges != 1 || !rel3.EntryRetirements[0].CompletedWithinBound {
+		t.Fatalf("expected H1 stream retirement within bound, got %+v", rel3.EntryRetirements)
+	}
+}
+
+func TestRealGRPCStreamRetirementOnSharedH2Conn(t *testing.T) {
+	dir := t.TempDir()
+	srvCert, srvKey := writeSelfSigned(t, dir, "srv", "portal.example.com", "grpc.example.com")
+	addr := freePort(t)
+	strPtr := func(s string) *string { return &s }
+
+	baseCfg := func() *config.Config {
+		return &config.Config{
+			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Servers: []config.ServerConfig{
+				{
+					Name:        "portal",
+					Listen:      addr,
+					ServerNames: []string{"portal.example.com"},
+					TLS:         &config.TLSConfig{Enabled: true, Cert: srvCert, Key: srvKey},
+					Locations: []config.LocationConfig{{
+						RouteID:   strPtr("portal"),
+						Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+						ProxyPass: "http://127.0.0.1:9001",
+					}},
+				},
+				{
+					Name:        "grpc-svc",
+					Listen:      addr,
+					ServerNames: []string{"grpc.example.com"},
+					TLS:         &config.TLSConfig{Enabled: true, Cert: srvCert, Key: srvKey},
+					Locations: []config.LocationConfig{{
+						RouteID:   strPtr("grpc-route"),
+						Match:     config.MatchConfig{Type: "prefix", Path: "/pkg.Svc/Stream"},
+						ProxyPass: "http://127.0.0.1:9002",
+					}},
+				},
+			},
+		}
+	}
+
+	streamHold := make(chan struct{})
+	defer close(streamHold)
+	portalRelease := make(chan struct{})
+	initCfg := baseCfg()
+	src := &stubSource{}
+	src.set(initCfg, nil)
+	srv := New(initCfg, initCfg, lifecycle.ComputeFingerprint(initCfg), quietLogger(), buildTestRouterFactory(t, streamHold, portalRelease), src, func(context.Context, *config.Config) error { return nil })
+	srv.exchanges.Grace = 120 * time.Millisecond
+	srv.exchanges.Bound = 350 * time.Millisecond
+
+	ready := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reloadCh := make(chan ReloadRequest, 1)
+	go func() { _ = srv.Run(ctx, reloadCh, redact.EmptyState()) }()
+	<-ready
+
+	var dials atomic.Int32
+	h2Tr := &http.Transport{
+		ForceAttemptHTTP2: true,
+		DialTLSContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			dials.Add(1)
+			d := &tls.Dialer{
+				Config: &tls.Config{
+					InsecureSkipVerify: true,
+					ServerName:         "portal.example.com",
+					NextProtos:         []string{"h2"},
+				},
+			}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+	defer h2Tr.CloseIdleConnections()
+	h2Client := &http.Client{Transport: h2Tr, Timeout: 5 * time.Second}
+
+	portalReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/?stream=1", nil)
+	portalReq.Host = "portal.example.com"
+	portalResp, err := h2Client.Do(portalReq)
+	if err != nil {
+		t.Fatalf("portal stream: %v", err)
+	}
+	defer portalResp.Body.Close()
+	portalBR := bufio.NewReader(portalResp.Body)
+	_, _ = portalBR.ReadString('\n')
+
+	grpcReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+addr+"/pkg.Svc/Stream?stream=1", strings.NewReader("\x00\x00\x00\x00\x00"))
+	grpcReq.Host = "grpc.example.com"
+	grpcReq.Header.Set("Content-Type", "application/grpc")
+	grpcReq.Header.Set("TE", "trailers")
+	grpcResp, err := h2Client.Do(grpcReq)
+	if err != nil {
+		t.Fatalf("gRPC stream: %v", err)
+	}
+	defer grpcResp.Body.Close()
+	grpcBR := bufio.NewReader(grpcResp.Body)
+	_, _ = grpcBR.ReadString('\n')
+
+	if dials.Load() != 1 {
+		t.Fatalf("expected 1 shared H2 connection for gRPC + portal, got %d", dials.Load())
+	}
+
+	// Narrow grpc-route by adding CIDR restriction -> gRPC stream resets while portal completes.
+	narrowCfg := baseCfg()
+	narrowCfg.Servers[1].Locations[0].Auth = &config.AuthConfig{Allow: []string{"10.254.0.0/16"}}
+	candNarrow, _ := config.NewCandidate(narrowCfg)
+	resCh := make(chan ReloadResult, 1)
+	reloadCh <- ReloadRequest{ID: "narrow-grpc", Source: ReloadSourceAdmin, Candidate: candNarrow, Result: resCh}
+	rel := <-resCh
+	if len(rel.EntryRetirements) != 1 || rel.EntryRetirements[0].EndedExchanges != 1 || rel.EntryRetirements[0].CollateralCount != 0 || !rel.EntryRetirements[0].CompletedWithinBound {
+		t.Fatalf("expected gRPC stream retirement with 0 collateral, got %+v", rel.EntryRetirements)
+	}
+	if _, gErr := io.ReadAll(grpcBR); gErr == nil {
+		t.Fatal("expected narrowed gRPC H2 stream to be reset")
+	}
+	close(portalRelease)
+	rest, pErr := io.ReadAll(portalBR)
+	if pErr != nil || !strings.Contains(string(rest), "end-portal") {
+		t.Fatalf("sibling portal stream failed: err=%v body=%q", pErr, string(rest))
 	}
 }

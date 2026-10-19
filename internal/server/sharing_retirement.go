@@ -9,10 +9,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"maps"
-	"math/big"
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sort"
@@ -83,6 +83,9 @@ func captureLoadedAccessFiles(effCfg *config.Config) *LoadedAccessFiles {
 		}
 		if bundle, err := clientAuthForAddr(effCfg.Servers, addr, nil); err == nil && bundle != nil {
 			out.crlsByAddr[addr] = bundle.crls
+			if bundle.caDigest != "" {
+				out.caDigestByAddr[addr] = bundle.caDigest
+			}
 		}
 	}
 
@@ -101,6 +104,21 @@ func captureLoadedAccessFiles(effCfg *config.Config) *LoadedAccessFiles {
 		}
 	}
 	return out
+}
+
+func (f *LoadedAccessFiles) applyMTLSRotation(c *clientAuthRotationComponent) {
+	if f == nil || c == nil {
+		return
+	}
+	for _, sw := range c.swaps {
+		if sw.entry == nil || sw.bundle == nil {
+			continue
+		}
+		if sw.bundle.caDigest != "" {
+			f.caDigestByAddr[sw.entry.addr] = sw.bundle.caDigest
+		}
+		f.crlsByAddr[sw.entry.addr] = sw.bundle.crls
+	}
 }
 
 func parseHtpasswdSnapshot(path string) htpasswdSnapshot {
@@ -133,22 +151,97 @@ func parseHtpasswdSnapshot(path string) htpasswdSnapshot {
 }
 
 func digestWAFDirectiveFiles(w config.WAFConfig) string {
-	if !w.Enabled || len(w.DirectivesFiles) == 0 {
+	if !w.Enabled || (len(w.DirectivesFiles) == 0 && strings.TrimSpace(w.InlineRules) == "") {
 		return ""
 	}
 	h := sha256.New()
-	for _, p := range w.DirectivesFiles {
-		path := strings.TrimSpace(p)
-		if path == "" {
-			continue
+	visited := make(map[string]bool)
+	wroteAny := false
+
+	var walkFile func(path string)
+	var scanSecLangText func(text, baseDir string)
+
+	resolveAndWalk := func(rawRef, baseDir string) {
+		ref := strings.Trim(strings.TrimSpace(rawRef), `"'`)
+		if ref == "" || strings.HasPrefix(ref, "@") {
+			return
 		}
-		data, err := os.ReadFile(path)
+		target := ref
+		if !filepath.IsAbs(target) && baseDir != "" {
+			target = filepath.Join(baseDir, target)
+		}
+		if strings.ContainsAny(target, "*?[") {
+			if matches, err := filepath.Glob(target); err == nil && len(matches) > 0 {
+				sort.Strings(matches)
+				for _, m := range matches {
+					walkFile(m)
+				}
+				return
+			}
+		}
+		walkFile(target)
+	}
+
+	scanSecLangText = func(text, baseDir string) {
+		var continued strings.Builder
+		for _, rawLine := range strings.Split(text, "\n") {
+			line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			if strings.HasSuffix(line, `\`) {
+				continued.WriteString(strings.TrimSuffix(line, `\`))
+				continued.WriteByte(' ')
+				continue
+			}
+			if continued.Len() > 0 {
+				continued.WriteString(line)
+				line = continued.String()
+				continued.Reset()
+			}
+			lower := strings.ToLower(line)
+			for _, kw := range []string{"includeoptional ", "include "} {
+				if strings.HasPrefix(lower, kw) {
+					resolveAndWalk(line[len(kw):], baseDir)
+				}
+			}
+			for _, op := range []string{"@pmfromfile ", "@pmf ", "@ipmatchfromfile ", "@ipmatchf "} {
+				if idx := strings.Index(lower, op); idx >= 0 {
+					rest := strings.TrimSpace(line[idx+len(op):])
+					if end := strings.IndexAny(rest, `" '	`); end > 0 {
+						rest = rest[:end]
+					}
+					resolveAndWalk(rest, baseDir)
+				}
+			}
+		}
+	}
+
+	walkFile = func(path string) {
+		clean := filepath.Clean(strings.TrimSpace(path))
+		if clean == "" || clean == "." || visited[clean] {
+			return
+		}
+		visited[clean] = true
+		wroteAny = true
+		data, err := os.ReadFile(clean)
 		if err != nil {
-			fmt.Fprintf(h, "err:%s\n", path)
-			continue
+			fmt.Fprintf(h, "err:%s\n", clean)
+			return
 		}
 		sum := sha256.Sum256(data)
-		fmt.Fprintf(h, "file:%s:%x\n", path, sum[:])
+		fmt.Fprintf(h, "file:%s:%x\n", clean, sum[:])
+		scanSecLangText(string(data), filepath.Dir(clean))
+	}
+
+	for _, p := range w.DirectivesFiles {
+		resolveAndWalk(p, "")
+	}
+	if strings.TrimSpace(w.InlineRules) != "" {
+		scanSecLangText(w.InlineRules, "")
+	}
+	if !wroteAny {
+		return ""
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -1176,177 +1269,9 @@ func classifyPublishAuth(beforeFiles, afterFiles *LoadedAccessFiles, b, a *confi
 	return out
 }
 
-type publishIPInterval struct {
-	start *big.Int
-	end   *big.Int
-}
-
 func classifyPublishCIDR(bAllow, bDeny, aAllow, aDeny []string) string {
-	if len(bAllow) == 0 && len(bDeny) == 0 && len(aAllow) == 0 && len(aDeny) == 0 {
-		return "unchanged"
-	}
-	bv4, bv6, bok := computePublishIPSet(bAllow, bDeny)
-	av4, av6, aok := computePublishIPSet(aAllow, aDeny)
-	if !bok || !aok {
-		return "uncertain"
-	}
-	eq4 := publishIntervalsEqual(bv4, av4)
-	eq6 := publishIntervalsEqual(bv6, av6)
-	if eq4 && eq6 {
-		return "unchanged"
-	}
-	aSubB := publishIntervalsSubset(av4, bv4) && publishIntervalsSubset(av6, bv6)
-	bSubA := publishIntervalsSubset(bv4, av4) && publishIntervalsSubset(bv6, av6)
-	if aSubB && !bSubA {
-		return "narrowed"
-	}
-	if bSubA && !aSubB {
-		return "widened"
-	}
-	return "uncertain"
-}
-
-func computePublishIPSet(allow, deny []string) ([]publishIPInterval, []publishIPInterval, bool) {
-	fullV4 := []publishIPInterval{{start: big.NewInt(0), end: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 32), big.NewInt(1))}}
-	fullV6 := []publishIPInterval{{start: big.NewInt(0), end: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))}}
-	var v4, v6 []publishIPInterval
-	if len(allow) == 0 {
-		v4, v6 = fullV4, fullV6
-	} else {
-		for _, raw := range allow {
-			iv, isV6, ok := parsePublishCIDR(raw)
-			if !ok {
-				return nil, nil, false
-			}
-			if isV6 {
-				v6 = append(v6, iv)
-			} else {
-				v4 = append(v4, iv)
-			}
-		}
-		v4 = normalizePublishIntervals(v4)
-		v6 = normalizePublishIntervals(v6)
-	}
-	for _, raw := range deny {
-		iv, isV6, ok := parsePublishCIDR(raw)
-		if !ok {
-			return nil, nil, false
-		}
-		if isV6 {
-			v6 = subtractPublishInterval(v6, iv)
-		} else {
-			v4 = subtractPublishInterval(v4, iv)
-		}
-	}
-	return v4, v6, true
-}
-
-func parsePublishCIDR(raw string) (publishIPInterval, bool, bool) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return publishIPInterval{}, false, false
-	}
-	var pfx netip.Prefix
-	if strings.Contains(s, "/") {
-		var err error
-		pfx, err = netip.ParsePrefix(s)
-		if err != nil {
-			return publishIPInterval{}, false, false
-		}
-		pfx = pfx.Masked()
-	} else {
-		addr, err := netip.ParseAddr(s)
-		if err != nil {
-			return publishIPInterval{}, false, false
-		}
-		addr = addr.Unmap()
-		pfx = netip.PrefixFrom(addr, addr.BitLen())
-	}
-	addr := pfx.Addr().Unmap()
-	bits := pfx.Bits()
-	if addr.Is4() {
-		b4 := addr.As4()
-		start := new(big.Int).SetBytes(b4[:])
-		mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(32-bits)), big.NewInt(1))
-		return publishIPInterval{start: start, end: new(big.Int).Or(start, mask)}, false, true
-	}
-	b16 := addr.As16()
-	start := new(big.Int).SetBytes(b16[:])
-	mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(128-bits)), big.NewInt(1))
-	return publishIPInterval{start: start, end: new(big.Int).Or(start, mask)}, true, true
-}
-
-func normalizePublishIntervals(in []publishIPInterval) []publishIPInterval {
-	if len(in) == 0 {
-		return nil
-	}
-	sorted := make([]publishIPInterval, len(in))
-	for i, iv := range in {
-		sorted[i] = publishIPInterval{start: new(big.Int).Set(iv.start), end: new(big.Int).Set(iv.end)}
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		if cmp := sorted[i].start.Cmp(sorted[j].start); cmp != 0 {
-			return cmp < 0
-		}
-		return sorted[i].end.Cmp(sorted[j].end) < 0
-	})
-	out := []publishIPInterval{sorted[0]}
-	for _, cur := range sorted[1:] {
-		last := &out[len(out)-1]
-		if cur.start.Cmp(new(big.Int).Add(last.end, big.NewInt(1))) <= 0 {
-			if cur.end.Cmp(last.end) > 0 {
-				last.end = new(big.Int).Set(cur.end)
-			}
-		} else {
-			out = append(out, cur)
-		}
-	}
-	return out
-}
-
-func subtractPublishInterval(set []publishIPInterval, sub publishIPInterval) []publishIPInterval {
-	var out []publishIPInterval
-	for _, iv := range set {
-		if sub.end.Cmp(iv.start) < 0 || sub.start.Cmp(iv.end) > 0 {
-			out = append(out, iv)
-			continue
-		}
-		if sub.start.Cmp(iv.start) > 0 {
-			out = append(out, publishIPInterval{start: new(big.Int).Set(iv.start), end: new(big.Int).Sub(sub.start, big.NewInt(1))})
-		}
-		if sub.end.Cmp(iv.end) < 0 {
-			out = append(out, publishIPInterval{start: new(big.Int).Add(sub.end, big.NewInt(1)), end: new(big.Int).Set(iv.end)})
-		}
-	}
-	return out
-}
-
-func publishIntervalsEqual(a, b []publishIPInterval) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].start.Cmp(b[i].start) != 0 || a[i].end.Cmp(b[i].end) != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func publishIntervalsSubset(a, b []publishIPInterval) bool {
-	for _, iv := range a {
-		rem := []publishIPInterval{iv}
-		for _, biv := range b {
-			rem = subtractPublishInterval(rem, biv)
-			if len(rem) == 0 {
-				break
-			}
-		}
-		if len(rem) > 0 {
-			return false
-		}
-	}
-	return true
+	cls, _ := config.ClassifyCIDRChange(bAllow, bDeny, aAllow, aDeny, false)
+	return cls
 }
 
 func classifyPublishWAF(

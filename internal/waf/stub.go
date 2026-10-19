@@ -45,6 +45,9 @@ func (f *Firewall) SourceChanged(other *Firewall) bool {
 	return false
 }
 
+// SourceDigest returns "" in the no-WAF stub.
+func (f *Firewall) SourceDigest() string { return "" }
+
 // EmbeddedCRSVersion is "" in a build without the "waf" tag: no rule set is
 // embedded.
 func EmbeddedCRSVersion() string { return "" }

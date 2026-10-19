@@ -2032,3 +2032,58 @@ func TestCompleteWithdrawalAndKeepOpenEligibility(t *testing.T) {
 		t.Fatalf("expected LastRetirement on both entries in SharingViewPage, got %+v", viewWithRet.Entries)
 	}
 }
+
+func TestAudit653ADRWithdrawalCoordinatesDecode(t *testing.T) {
+	var req patchApplyRequest
+	body := `{"base_version":"version","ops":[{"op":"location_set_withdrawn","withdrawn":true,"server_index":0,"location_index":0}]}`
+	if err := decodePatchJSON(strings.NewReader(body), &req); err != nil {
+		t.Fatalf("ADR 0026 withdrawal coordinate wire shape rejected: %v", err)
+	}
+	if len(req.Ops) != 1 || req.Ops[0].ServerIndex == nil || *req.Ops[0].ServerIndex != 0 || req.Ops[0].LocationIndex == nil || *req.Ops[0].LocationIndex != 0 {
+		t.Fatalf("unexpected decoded op: %+v", req.Ops)
+	}
+
+	// Verify applyPatch works for both server_index+location_index and route_selector wire shapes.
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: "127.0.0.1:8080",
+			Locations: []config.LocationConfig{{
+				RouteID: strPtrTest("dash"),
+				Match:   config.MatchConfig{Type: "prefix", Path: "/dash"},
+				Return:  200,
+			}},
+		}},
+	}
+	if _, err := applyPatch(cfg, req.Ops[0]); err != nil || !cfg.Servers[0].Locations[0].Withdrawn {
+		t.Fatalf("applyPatch with server_index+location_index failed: %v", err)
+	}
+	if id := resolvePatchOpAuditIdentity(cfg, req.Ops[0]); id.ResourceID != "dash" {
+		t.Fatalf("expected resolvePatchOpAuditIdentity ResourceID=dash, got %+v", id)
+	}
+	if !req.Ops[0].usesPositionalCoordinates() {
+		t.Fatal("expected usesPositionalCoordinates=true for server_index+location_index")
+	}
+
+	var reqSel patchApplyRequest
+	bodySel := `{"base_version":"version","ops":[{"op":"location_set_withdrawn","withdrawn":false,"route_selector":{"route_id":"dash","server_index":0,"location_index":0}}]}`
+	if err := decodePatchJSON(strings.NewReader(bodySel), &reqSel); err != nil {
+		t.Fatalf("ADR 0026 route_selector wire shape rejected: %v", err)
+	}
+	if _, err := applyPatch(cfg, reqSel.Ops[0]); err != nil || cfg.Servers[0].Locations[0].Withdrawn {
+		t.Fatalf("applyPatch with route_selector failed: %v", err)
+	}
+
+	// Out-of-bounds or partial server_index/location_index is rejected cleanly.
+	idxZero := 0
+	idxOOB := 9
+	boolTrue := true
+	if _, err := applyPatch(cfg, patchRequest{Op: "location_set_withdrawn", Withdrawn: &boolTrue, ServerIndex: &idxZero}); err == nil {
+		t.Fatal("expected partial server_index without location_index to fail")
+	}
+	if _, err := applyPatch(cfg, patchRequest{Op: "location_set_withdrawn", Withdrawn: &boolTrue, ServerIndex: &idxOOB, LocationIndex: &idxZero}); err == nil {
+		t.Fatal("expected out-of-range server_index to fail")
+	}
+	if _, err := applyPatch(cfg, patchRequest{Op: "location_set_withdrawn", Withdrawn: &boolTrue, ServerIndex: &idxZero, LocationIndex: &idxOOB}); err == nil {
+		t.Fatal("expected out-of-range location_index to fail")
+	}
+}

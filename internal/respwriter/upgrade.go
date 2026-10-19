@@ -443,10 +443,17 @@ func (c *upgradedClientConn) inspectClientBytes(b []byte) {
 		c.session.mu.Lock()
 		c.session.closeReceivedFromClient = true
 		sent := c.session.closeSentToClient
+		closing := c.session.closingRequested
 		c.session.mu.Unlock()
 		if sent && !c.session.forceClosed.Load() {
 			c.session.handshakeCompleted.Store(true)
-			c.session.markClosed()
+			// Only tear down the upstream leg inside Read when Jul itself is
+			// retiring the session; for a peer-originated Close handshake, let
+			// Read return the reciprocal Close bytes so ReverseProxy forwards
+			// them to the backend first (#562, F5).
+			if closing {
+				c.session.markClosed()
+			}
 		}
 	}
 }
@@ -457,7 +464,7 @@ func (c *upgradedClientConn) Write(p []byte) (int, error) {
 
 	s := c.session
 	s.mu.Lock()
-	if s.closeSentToClient || s.forceClosed.Load() {
+	if (s.closingRequested && s.closeSentToClient) || s.forceClosed.Load() {
 		s.mu.Unlock()
 		return 0, net.ErrClosed
 	}

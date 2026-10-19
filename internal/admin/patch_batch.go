@@ -217,12 +217,12 @@ func executePatchBatch(
 	// Requiring the CAS binding turns that race into a 409 (ADR 0018 §14).
 	if requestedVersion == "" {
 		for i, op := range ops {
-			if op.MatchOrdinal == nil {
+			if !op.usesPositionalCoordinates() {
 				continue
 			}
 			return out, &patchVersionConflictError{
 				CurrentVersion: baseVersion,
-				Message: fmt.Sprintf("operation %d (%s) selects a route by match_ordinal, which requires base_version",
+				Message: fmt.Sprintf("operation %d (%s) selects a route by match_ordinal or server_index/location_index, which requires base_version",
 					i+1, op.Op),
 			}
 		}
@@ -249,8 +249,8 @@ func executePatchBatch(
 		// Published ordinals name the original revision. An earlier structural
 		// operation can shift them even though the batch CAS still matches.
 		// Refuse before dispatch rather than reinterpret a published selector.
-		if declarationsChanged && op.MatchOrdinal != nil {
-			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: errors.New("an ordinal selector cannot follow a declaration-changing operation in one batch; apply that operation first, then fetch a fresh route projection")}
+		if declarationsChanged && op.usesPositionalCoordinates() {
+			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: errors.New("an ordinal or index selector cannot follow a declaration-changing operation in one batch; apply that operation first, then fetch a fresh route projection")}
 		}
 		// Route-targeting ops (everything except location_add, which has no
 		// target until it runs) are resolved against the *pre-op* candidate:

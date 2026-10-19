@@ -108,14 +108,84 @@ type EntryRetirementResult struct {
 	Claim                string `json:"claim,omitempty"`
 }
 
+type entryTracker struct {
+	tr        EntryTransition
+	exchanges []*ActiveExchange
+}
+
+type retirementBatch struct {
+	mu      sync.Mutex
+	pending int
+	doneCh  chan struct{}
+}
+
+func newRetirementBatch() *retirementBatch {
+	ch := make(chan struct{})
+	close(ch)
+	return &retirementBatch{doneCh: ch}
+}
+
+func (b *retirementBatch) add() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if b.pending == 0 {
+		b.doneCh = make(chan struct{})
+	}
+	b.pending++
+	b.mu.Unlock()
+}
+
+func (b *retirementBatch) done() {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if b.pending > 0 {
+		b.pending--
+		if b.pending == 0 {
+			close(b.doneCh)
+		}
+	}
+	b.mu.Unlock()
+}
+
+func (b *retirementBatch) wait(deadline time.Time) {
+	if b == nil {
+		return
+	}
+	for {
+		b.mu.Lock()
+		p := b.pending
+		ch := b.doneCh
+		b.mu.Unlock()
+		if p == 0 {
+			return
+		}
+		waitDur := time.Until(deadline) + 50*time.Millisecond
+		if waitDur <= 0 {
+			return
+		}
+		select {
+		case <-ch:
+		case <-time.After(waitDur):
+			return
+		}
+	}
+}
+
 type genStep struct {
-	fromGen     uint64
-	toGen       uint64
-	publishTime time.Time
-	grace       time.Duration
-	bound       time.Duration
-	byCoord     map[blockLocCoord]EntryTransition
-	byRouteID   map[string]EntryTransition
+	fromGen         uint64
+	toGen           uint64
+	publishTime     time.Time
+	grace           time.Duration
+	bound           time.Duration
+	byCoord         map[blockLocCoord]EntryTransition
+	byRouteID       map[string]EntryTransition
+	trackersByCoord map[blockLocCoord]*entryTracker
+	trackersByID    map[string]*entryTracker
+	batch           *retirementBatch
 }
 
 type exchangeCtxKey struct{}
@@ -157,28 +227,28 @@ func ActiveExchangeFrom(ctx context.Context) *ActiveExchange {
 // ExchangeRegistry owns active HTTP/1.1, HTTP/2, HTTP/3 streams and hijacked
 // HTTP/1.1 101 upgraded sessions across handler generations (#642, #563, #562).
 type ExchangeRegistry struct {
-	mu           sync.Mutex
-	nextID       uint64
-	publishedGen uint64
-	shuttingDown bool
-	closedAddrs  map[string]bool
-	active       map[uint64]*ActiveExchange
-	history      []genStep
+	mu              sync.Mutex
+	nextID          uint64
+	publishedGen    uint64
+	shuttingDown    bool
+	closedAddrAtGen map[string]uint64
+	active          map[uint64]*ActiveExchange
+	history         []genStep
 
 	Grace time.Duration
 	Bound time.Duration
 
-	lastResults []EntryRetirementResult
-	lastBatchWg *sync.WaitGroup
+	lastResults     []EntryRetirementResult
+	lastRecomputeFn func()
 }
 
 // NewExchangeRegistry constructs a process-lifetime exchange and upgrade registry.
 func NewExchangeRegistry() *ExchangeRegistry {
 	return &ExchangeRegistry{
-		closedAddrs: make(map[string]bool),
-		active:      make(map[uint64]*ActiveExchange),
-		Grace:       DefaultRetirementGrace,
-		Bound:       DefaultRetirementBound,
+		closedAddrAtGen: make(map[string]uint64),
+		active:          make(map[uint64]*ActiveExchange),
+		Grace:           DefaultRetirementGrace,
+		Bound:           DefaultRetirementBound,
 	}
 }
 
@@ -284,6 +354,7 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 	var immediateGrace time.Time
 	var immediateBound time.Time
 	var immediateCode uint16
+	var lateBatches []*retirementBatch
 
 	r.mu.Lock()
 	r.nextID++
@@ -294,11 +365,13 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 
 	// Walk any generation transitions that occurred after coord.GenID was acquired.
 	cur := coord
+	removed := false
 	for _, step := range r.history {
 		if step.fromGen != cur.GenID {
 			continue
 		}
-		tr, ok := step.byCoord[blockLocCoord{cur.ServerIndex, cur.LocationIndex}]
+		cKey := blockLocCoord{cur.ServerIndex, cur.LocationIndex}
+		tr, ok := step.byCoord[cKey]
 		if !ok && cur.RouteID != "" {
 			tr, ok = step.byRouteID[cur.RouteID]
 		}
@@ -313,7 +386,20 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 				immediateBound = b
 			}
 			immediateCode = WSClosePolicyViolation
-			if tr.Removed {
+			if ok {
+				et := step.trackersByCoord[cKey]
+				if et == nil && cur.RouteID != "" {
+					et = step.trackersByID[cur.RouteID]
+				}
+				if et != nil {
+					et.exchanges = append(et.exchanges, ex)
+				}
+			}
+			if step.batch != nil {
+				lateBatches = append(lateBatches, step.batch)
+			}
+			if !ok || tr.Removed {
+				removed = true
 				break
 			}
 		}
@@ -327,9 +413,25 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 			}
 		}
 	}
+	// F7 fail-closed invariant: if coord.GenID predates the retained history
+	// window or could not be advanced to r.publishedGen, retire immediately.
+	if !removed && coord.GenID != 0 && r.publishedGen != 0 && cur.GenID != r.publishedGen {
+		immediateRetire = true
+		now := time.Now()
+		if immediateGrace.IsZero() || now.Before(immediateGrace) {
+			immediateGrace = now
+		}
+		if immediateBound.IsZero() || now.Before(immediateBound) {
+			immediateBound = now
+		}
+		if immediateCode == 0 {
+			immediateCode = WSClosePolicyViolation
+		}
+	}
 	ex.curCoord = cur
 
-	if r.shuttingDown || r.closedAddrs[coord.ListenAddr] {
+	closedGen, addrClosed := r.closedAddrAtGen[coord.ListenAddr]
+	if r.shuttingDown || (addrClosed && (coord.GenID == 0 || coord.GenID <= closedGen)) {
 		immediateRetire = true
 		now := time.Now()
 		g := now.Add(r.graceDuration())
@@ -349,7 +451,7 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 	r.mu.Unlock()
 
 	if immediateRetire {
-		ex.armRetirement(immediateGrace, immediateBound, immediateCode, true, nil)
+		ex.armRetirement(immediateGrace, immediateBound, immediateCode, true, lateBatches...)
 	}
 
 	ew := &exchangeResponseWriter{
@@ -395,10 +497,6 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 		}
 	}
 
-	type entryTracker struct {
-		tr        EntryTransition
-		exchanges []*ActiveExchange
-	}
 	trackers := make([]*entryTracker, 0, len(transitions))
 	trackerByFromCoord := make(map[blockLocCoord]*entryTracker, len(transitions))
 	trackerByRouteID := make(map[string]*entryTracker, len(transitions))
@@ -418,7 +516,7 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 		ex        *ActiveExchange
 		mandatory bool
 	}
-	var wg sync.WaitGroup
+	batch := newRetirementBatch()
 	var toArm []armItem
 
 	r.mu.Lock()
@@ -427,13 +525,16 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 	}
 	r.publishedGen = toGen
 	r.history = append(r.history, genStep{
-		fromGen:     fromGen,
-		toGen:       toGen,
-		publishTime: now,
-		grace:       grace,
-		bound:       bound,
-		byCoord:     byCoord,
-		byRouteID:   byRouteID,
+		fromGen:         fromGen,
+		toGen:           toGen,
+		publishTime:     now,
+		grace:           grace,
+		bound:           bound,
+		byCoord:         byCoord,
+		byRouteID:       byRouteID,
+		trackersByCoord: trackerByFromCoord,
+		trackersByID:    trackerByRouteID,
+		batch:           batch,
 	})
 	if len(r.history) > 32 {
 		r.history = append([]genStep(nil), r.history[len(r.history)-32:]...)
@@ -471,35 +572,14 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 			}
 		}
 	}
-	r.lastBatchWg = &wg
 	r.mu.Unlock()
 
 	for _, item := range toArm {
-		var itemWg *sync.WaitGroup
 		immediate := item.mandatory || item.ex.hasWrittenHeader()
-		if immediate || item.ex.isUpgraded() {
-			itemWg = &wg
-		}
-		item.ex.armRetirement(graceDeadline, boundDeadline, WSClosePolicyViolation, immediate, itemWg)
+		item.ex.armRetirement(graceDeadline, boundDeadline, WSClosePolicyViolation, immediate, batch)
 	}
 
-	return func() []EntryRetirementResult {
-		if len(toArm) > 0 {
-			done := make(chan struct{})
-			go func() {
-				wg.Wait()
-				close(done)
-			}()
-			waitLimit := time.Until(boundDeadline) + 250*time.Millisecond
-			if waitLimit < 100*time.Millisecond {
-				waitLimit = 100 * time.Millisecond
-			}
-			select {
-			case <-done:
-			case <-time.After(waitLimit):
-			}
-		}
-
+	computeResults := func() []EntryRetirementResult {
 		results := make([]EntryRetirementResult, 0, len(trackers))
 		for _, et := range trackers {
 			res := EntryRetirementResult{
@@ -517,7 +597,10 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 				res.LocationIndex = et.tr.FromLocationIndex
 				res.RouteID = et.tr.FromRouteID
 			}
-			for _, ex := range et.exchanges {
+			r.mu.Lock()
+			exList := append([]*ActiveExchange(nil), et.exchanges...)
+			r.mu.Unlock()
+			for _, ex := range exList {
 				graceful, forced, withinBound, collateral := ex.outcome(boundDeadline)
 				if graceful {
 					res.GracefulCount++
@@ -533,6 +616,8 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 			switch {
 			case res.KeepOpen:
 				res.Claim = "new access updated; open connections kept by operator exception"
+			case !res.CompletedWithinBound:
+				res.Claim = "new access stopped; open connections not confirmed ended within bound"
 			case res.CollateralCount > 0:
 				res.Claim = "new access stopped; open connections ended with collateral interruption"
 			default:
@@ -546,6 +631,18 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 		r.mu.Unlock()
 		return results
 	}
+
+	r.mu.Lock()
+	r.lastRecomputeFn = func() {
+		_ = computeResults()
+	}
+	r.mu.Unlock()
+	_ = computeResults()
+
+	return func() []EntryRetirementResult {
+		batch.wait(boundDeadline)
+		return computeResults()
+	}
 }
 
 // DrainAddr initiates graceful/forced retirement for all active exchanges and
@@ -556,11 +653,11 @@ func (r *ExchangeRegistry) DrainAddr(ctx context.Context, listenAddr string) {
 		return
 	}
 	grace, bound := r.shutdownDeadlines(ctx)
-	var wg sync.WaitGroup
+	batch := newRetirementBatch()
 	var toArm []*ActiveExchange
 
 	r.mu.Lock()
-	r.closedAddrs[listenAddr] = true
+	r.closedAddrAtGen[listenAddr] = r.publishedGen
 	for _, ex := range r.active {
 		if !ex.closed.Load() && ex.curCoord.ListenAddr == listenAddr {
 			toArm = append(toArm, ex)
@@ -572,9 +669,9 @@ func (r *ExchangeRegistry) DrainAddr(ctx context.Context, listenAddr string) {
 		return
 	}
 	for _, ex := range toArm {
-		ex.armRetirement(grace, bound, WSCloseGoingAway, true, &wg)
+		ex.armRetirement(grace, bound, WSCloseGoingAway, true, batch)
 	}
-	waitWgContext(ctx, &wg, bound)
+	waitBatchContext(ctx, batch, bound)
 }
 
 // DrainAll initiates graceful/forced retirement for all active exchanges and
@@ -584,7 +681,7 @@ func (r *ExchangeRegistry) DrainAll(ctx context.Context) {
 		return
 	}
 	grace, bound := r.shutdownDeadlines(ctx)
-	var wg sync.WaitGroup
+	batch := newRetirementBatch()
 	var toArm []*ActiveExchange
 
 	r.mu.Lock()
@@ -600,9 +697,9 @@ func (r *ExchangeRegistry) DrainAll(ctx context.Context) {
 		return
 	}
 	for _, ex := range toArm {
-		ex.armRetirement(grace, bound, WSCloseGoingAway, true, &wg)
+		ex.armRetirement(grace, bound, WSCloseGoingAway, true, batch)
 	}
-	waitWgContext(ctx, &wg, bound)
+	waitBatchContext(ctx, batch, bound)
 }
 
 func (r *ExchangeRegistry) shutdownDeadlines(ctx context.Context) (time.Time, time.Time) {
@@ -622,10 +719,10 @@ func (r *ExchangeRegistry) shutdownDeadlines(ctx context.Context) (time.Time, ti
 	return now.Add(graceDur), now.Add(boundDur)
 }
 
-func waitWgContext(ctx context.Context, wg *sync.WaitGroup, bound time.Time) {
+func waitBatchContext(ctx context.Context, batch *retirementBatch, bound time.Time) {
 	done := make(chan struct{})
 	go func() {
-		wg.Wait()
+		batch.wait(bound)
 		close(done)
 	}()
 	waitDur := time.Until(bound) + 100*time.Millisecond
@@ -666,7 +763,7 @@ type ActiveExchange struct {
 	hijacked      bool
 	upgraded      *upgradedSession
 	upgradedBack  *upgradedBackConn
-	waiters       []*sync.WaitGroup
+	batches       []*retirementBatch
 
 	closed       atomic.Bool
 	closedAt     atomic.Int64
@@ -738,7 +835,7 @@ func (ex *ActiveExchange) triggerStreamAbort(forceConnClose bool) {
 	}
 }
 
-func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, immediate bool, wg *sync.WaitGroup) {
+func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, immediate bool, batches ...*retirementBatch) {
 	if ex == nil {
 		return
 	}
@@ -766,9 +863,11 @@ func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, imm
 	effCode := ex.closeCode
 	up := ex.upgraded
 	hijacked := ex.hijacked
-	if wg != nil {
-		wg.Add(1)
-		ex.waiters = append(ex.waiters, wg)
+	for _, b := range batches {
+		if b != nil {
+			b.add()
+			ex.batches = append(ex.batches, b)
+		}
 	}
 	ex.mu.Unlock()
 
@@ -820,14 +919,18 @@ func (ex *ActiveExchange) markClosed() {
 		ex.cancel()
 		ex.reg.mu.Lock()
 		delete(ex.reg.active, ex.id)
+		recompute := ex.reg.lastRecomputeFn
 		ex.reg.mu.Unlock()
 
 		ex.mu.Lock()
-		waiters := ex.waiters
-		ex.waiters = nil
+		batches := ex.batches
+		ex.batches = nil
 		ex.mu.Unlock()
-		for _, wg := range waiters {
-			wg.Done()
+		for _, b := range batches {
+			b.done()
+		}
+		if recompute != nil {
+			recompute()
 		}
 		ex.doneOnce.Do(func() {
 			close(ex.doneCh)
@@ -838,7 +941,7 @@ func (ex *ActiveExchange) markClosed() {
 func (ex *ActiveExchange) outcome(boundDeadline time.Time) (graceful bool, forced bool, withinBound bool, collateral int) {
 	closedNs := ex.closedAt.Load()
 	if closedNs == 0 {
-		return false, true, false, 0
+		return false, false, false, 0
 	}
 	closedTime := time.Unix(0, closedNs)
 	withinBound = !closedTime.After(boundDeadline.Add(50 * time.Millisecond))

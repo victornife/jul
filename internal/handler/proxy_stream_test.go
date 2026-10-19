@@ -7,6 +7,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
@@ -407,4 +410,152 @@ func readSSEDataWithin(t *testing.T, br *bufio.Reader, d time.Duration) string {
 		t.Fatalf("timed out after %s waiting for an SSE event (proxy buffered the response instead of streaming)", d)
 		return ""
 	}
+}
+
+func TestAudit653BackendInitiatedCloseIsForwardedBothWays(t *testing.T) {
+	reply := make(chan error, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, b, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			reply <- err
+			return
+		}
+		defer c.Close()
+		_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+		sum := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+		_, _ = fmt.Fprintf(b, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", base64.StdEncoding.EncodeToString(sum[:]))
+		_ = b.Flush()
+		_, err = c.Write([]byte{0x88, 2, 3, 0xe8})
+		if err != nil {
+			reply <- err
+			return
+		}
+		var frame [8]byte
+		_, err = io.ReadFull(b, frame[:])
+		reply <- err
+	}))
+	defer backend.Close()
+	fixture := newLongLivedServer(t, newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil))
+	c, err := net.Dial("tcp", fixture.address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+	br := bufio.NewReader(c)
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	var frame [4]byte
+	if _, err := io.ReadFull(br, frame[:]); err != nil {
+		t.Fatal(err)
+	}
+	if frame[0] != 0x88 {
+		t.Fatalf("not Close: %x", frame)
+	}
+	// Valid masked reciprocal Close frame with code 1000.
+	_, err = c.Write([]byte{0x88, 0x82, 1, 2, 3, 4, 3 ^ 1, 0xe8 ^ 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reply; err != nil {
+		t.Fatalf("backend never receives reciprocal client Close: %v", err)
+	}
+}
+
+func TestRealProxyWebSocketRetirementHandshakeAndForcedFallback(t *testing.T) {
+	t.Run("real proxy WebSocket narrowing retirement sends unmasked 1008 to client and masked 1008 to backend", func(t *testing.T) {
+		backendGotMaskedClose := make(chan []byte, 1)
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			c, b, err := http.NewResponseController(w).Hijack()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+			_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+			sum := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+			_, _ = fmt.Fprintf(b, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", base64.StdEncoding.EncodeToString(sum[:]))
+			_ = b.Flush()
+			var frame [8]byte
+			if _, err := io.ReadFull(b, frame[:]); err == nil {
+				backendGotMaskedClose <- frame[:]
+			}
+		}))
+		defer backend.Close()
+
+		reg := respwriter.NewExchangeRegistry()
+		reg.Grace = 300 * time.Millisecond
+		reg.Bound = 600 * time.Millisecond
+		reg.SetInitialGeneration(1)
+
+		proxyH := newProxy(t, config.LocationConfig{ProxyPass: backend.URL}, nil)
+		wrappedH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := respwriter.WithExchangeRegistry(r.Context(), reg, 1)
+			r = r.WithContext(ctx)
+			wAdmitted, rAdmitted, _, release := reg.Admit(w, r, respwriter.EntryCoord{
+				GenID:      1,
+				ListenAddr: "127.0.0.1:8080",
+				RouteID:    "ws-real",
+			})
+			defer release()
+			proxyH.ServeHTTP(wAdmitted, rAdmitted)
+		})
+		ts := httptest.NewServer(wrappedH)
+		defer ts.Close()
+
+		c, err := net.Dial("tcp", ts.Listener.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+		_, _ = fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+		br := bufio.NewReader(c)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			if line == "\r\n" {
+				break
+			}
+		}
+
+		// Client reads Jul's unmasked 1008 Close frame and replies with a masked 1008 Close frame.
+		clientGotClose := make(chan uint16, 1)
+		go func() {
+			var frame [4]byte
+			if _, rErr := io.ReadFull(br, frame[:]); rErr == nil && frame[0] == 0x88 && frame[1] == 0x02 {
+				code := binary.BigEndian.Uint16(frame[2:4])
+				clientGotClose <- code
+				// Reply with masked 1008 (0x03f0).
+				_, _ = c.Write([]byte{0x88, 0x82, 1, 2, 3, 4, 0x03 ^ 1, 0xf0 ^ 2})
+			}
+		}()
+
+		results := reg.PublishGeneration(1, 2, []respwriter.EntryTransition{{
+			FromRouteID: "ws-real",
+			ToRouteID:   "ws-real",
+			Retire:      true,
+			Mandatory:   true,
+		}})()
+
+		if len(results) != 1 || results[0].GracefulCount != 1 || results[0].ForcedCount != 0 || !results[0].CompletedWithinBound {
+			t.Fatalf("expected graceful_count=1 forced_count=0 on real proxy WebSocket retirement, got %+v", results)
+		}
+		if code := <-clientGotClose; code != respwriter.WSClosePolicyViolation {
+			t.Fatalf("client got Close code %d, want %d", code, respwriter.WSClosePolicyViolation)
+		}
+		upFrame := <-backendGotMaskedClose
+		if upFrame[0] != 0x88 || (upFrame[1]&0x80) == 0 {
+			t.Fatalf("expected masked Close frame on real backend leg, got %x", upFrame)
+		}
+	})
 }

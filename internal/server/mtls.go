@@ -5,13 +5,16 @@ package server
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -33,6 +36,8 @@ type clientAuthBundle struct {
 	verifyConn func(tls.ConnectionState) error
 	// crls records each CRL's issuer and NextUpdate for expiry reporting.
 	crls []crlSet
+	// caDigest records the canonical digest of the loaded CA certificate DERs (#642).
+	caDigest string
 }
 
 // clientAuthMode maps a config mode string to a tls.ClientAuthType. "request"
@@ -108,6 +113,12 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 	if mode == tls.NoClientCert || pool == nil {
 		return nil, nil
 	}
+	caHashes := make([]string, 0, len(caCerts))
+	for _, c := range caCerts {
+		sum := sha256.Sum256(c.Raw)
+		caHashes = append(caHashes, hex.EncodeToString(sum[:]))
+	}
+	sort.Strings(caHashes)
 	return &clientAuthBundle{
 		mode:       mode,
 		pool:       pool,
@@ -115,6 +126,7 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 		verify:     makeClientCertVerifier(sanAllow, crls, onResult),
 		verifyConn: makeClientConnVerifier(sanAllow, crls, onResult),
 		crls:       crls,
+		caDigest:   strings.Join(caHashes, "|"),
 	}, nil
 }
 

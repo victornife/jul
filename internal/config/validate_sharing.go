@@ -5,8 +5,11 @@ package config
 
 import (
 	"fmt"
+	"math/big"
 	"net"
 	"net/netip"
+	"slices"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -733,4 +736,226 @@ func lintSharedCacheAcrossEntriesWithRaw(rawCfg, effCfg *Config) []Diagnostic {
 		}
 	}
 	return diags
+}
+
+type cidrInterval struct {
+	start *big.Int
+	end   *big.Int
+}
+
+// ClassifyCIDRChange compares two CIDR allow/deny sets (allow minus deny across
+// IPv4 and IPv6) and returns ("unchanged"|"narrowed"|"widened"|"uncertain", reason).
+// When rejectSecretRefs is true (plan preview), any secret reference in a
+// changed allow/deny list returns "uncertain" without inspecting resolved values.
+func ClassifyCIDRChange(bAllow, bDeny, aAllow, aDeny []string, rejectSecretRefs bool) (string, string) {
+	if slices.Equal(bAllow, aAllow) && slices.Equal(bDeny, aDeny) {
+		return "unchanged", ""
+	}
+	if rejectSecretRefs {
+		for _, list := range [][]string{bAllow, bDeny, aAllow, aDeny} {
+			for _, entry := range list {
+				if ContainsSecretRef(entry) {
+					return "uncertain", "CIDR allow/deny comparison involves a secret reference"
+				}
+			}
+		}
+	}
+	bV4, bV6, ok1 := computePermittedCIDRSet(bAllow, bDeny)
+	aV4, aV6, ok2 := computePermittedCIDRSet(aAllow, aDeny)
+	if !ok1 || !ok2 {
+		return "uncertain", "CIDR allow/deny entries could not be compared"
+	}
+	v4Eq := cidrIntervalsEqual(bV4, aV4)
+	v6Eq := cidrIntervalsEqual(bV6, aV6)
+	if v4Eq && v6Eq {
+		return "unchanged", ""
+	}
+	aSubB := cidrIntervalsSubset(aV4, bV4) && cidrIntervalsSubset(aV6, bV6)
+	bSubA := cidrIntervalsSubset(bV4, aV4) && cidrIntervalsSubset(bV6, aV6)
+	switch {
+	case aSubB && !bSubA:
+		return "narrowed", "CIDR permitted address set strictly shrank"
+	case bSubA && !aSubB:
+		return "widened", "CIDR permitted address set strictly grew"
+	default:
+		return "uncertain", "CIDR permitted address set changed in both directions"
+	}
+}
+
+// CIDRSetPermitsNone reports whether allow minus deny leaves both the IPv4 and
+// IPv6 permitted sets empty.
+func CIDRSetPermitsNone(allow, deny []string) bool {
+	if len(deny) == 0 {
+		return false
+	}
+	v4, v6, ok := computePermittedCIDRSet(allow, deny)
+	return ok && len(v4) == 0 && len(v6) == 0
+}
+
+func computePermittedCIDRSet(allow, deny []string) (v4, v6 []cidrInterval, ok bool) {
+	maxV4 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 32), big.NewInt(1))
+	maxV6 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+
+	if len(allow) == 0 {
+		v4 = []cidrInterval{{big.NewInt(0), maxV4}}
+		v6 = []cidrInterval{{big.NewInt(0), maxV6}}
+	} else {
+		for _, raw := range allow {
+			iv, isV6, valid := parseCIDRInterval(raw)
+			if !valid {
+				return nil, nil, false
+			}
+			if isV6 {
+				v6 = append(v6, iv)
+			} else {
+				v4 = append(v4, iv)
+			}
+		}
+		v4 = normalizeCIDRIntervals(v4)
+		v6 = normalizeCIDRIntervals(v6)
+	}
+
+	for _, raw := range deny {
+		iv, isV6, valid := parseCIDRInterval(raw)
+		if !valid {
+			return nil, nil, false
+		}
+		if isV6 {
+			v6 = subtractCIDRInterval(v6, iv)
+		} else {
+			v4 = subtractCIDRInterval(v4, iv)
+		}
+	}
+	return v4, v6, true
+}
+
+func parseCIDRInterval(raw string) (cidrInterval, bool, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return cidrInterval{}, false, false
+	}
+	var pfx netip.Prefix
+	if strings.Contains(s, "/") {
+		var err error
+		pfx, err = netip.ParsePrefix(s)
+		if err != nil {
+			return cidrInterval{}, false, false
+		}
+		if pfx.Addr().Is4In6() && pfx.Bits() >= 96 {
+			pfx = netip.PrefixFrom(pfx.Addr().Unmap(), pfx.Bits()-96)
+		}
+		pfx = pfx.Masked()
+	} else {
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			return cidrInterval{}, false, false
+		}
+		addr = addr.Unmap()
+		pfx = netip.PrefixFrom(addr, addr.BitLen())
+	}
+	addr := pfx.Addr()
+	bits := pfx.Bits()
+	if addr.Is4() {
+		if bits < 0 || bits > 32 {
+			return cidrInterval{}, false, false
+		}
+		b4 := addr.As4()
+		start := new(big.Int).SetBytes(b4[:])
+		hostBits := uint(32 - bits)
+		mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), hostBits), big.NewInt(1))
+		end := new(big.Int).Or(start, mask)
+		return cidrInterval{start: start, end: end}, false, true
+	}
+	if bits < 0 || bits > 128 {
+		return cidrInterval{}, false, false
+	}
+	b16 := addr.As16()
+	start := new(big.Int).SetBytes(b16[:])
+	hostBits := uint(128 - bits)
+	mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), hostBits), big.NewInt(1))
+	end := new(big.Int).Or(start, mask)
+	return cidrInterval{start: start, end: end}, true, true
+}
+
+func normalizeCIDRIntervals(in []cidrInterval) []cidrInterval {
+	if len(in) == 0 {
+		return nil
+	}
+	sorted := make([]cidrInterval, len(in))
+	for i, iv := range in {
+		sorted[i] = cidrInterval{
+			start: new(big.Int).Set(iv.start),
+			end:   new(big.Int).Set(iv.end),
+		}
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if cmp := sorted[i].start.Cmp(sorted[j].start); cmp != 0 {
+			return cmp < 0
+		}
+		return sorted[i].end.Cmp(sorted[j].end) < 0
+	})
+	out := []cidrInterval{sorted[0]}
+	for _, cur := range sorted[1:] {
+		last := &out[len(out)-1]
+		lastPlusOne := new(big.Int).Add(last.end, big.NewInt(1))
+		if cur.start.Cmp(lastPlusOne) <= 0 {
+			if cur.end.Cmp(last.end) > 0 {
+				last.end = new(big.Int).Set(cur.end)
+			}
+		} else {
+			out = append(out, cur)
+		}
+	}
+	return out
+}
+
+func subtractCIDRInterval(set []cidrInterval, sub cidrInterval) []cidrInterval {
+	var out []cidrInterval
+	for _, iv := range set {
+		if sub.end.Cmp(iv.start) < 0 || sub.start.Cmp(iv.end) > 0 {
+			out = append(out, iv)
+			continue
+		}
+		if sub.start.Cmp(iv.start) > 0 {
+			out = append(out, cidrInterval{
+				start: new(big.Int).Set(iv.start),
+				end:   new(big.Int).Sub(sub.start, big.NewInt(1)),
+			})
+		}
+		if sub.end.Cmp(iv.end) < 0 {
+			out = append(out, cidrInterval{
+				start: new(big.Int).Add(sub.end, big.NewInt(1)),
+				end:   new(big.Int).Set(iv.end),
+			})
+		}
+	}
+	return out
+}
+
+func cidrIntervalsEqual(a, b []cidrInterval) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].start.Cmp(b[i].start) != 0 || a[i].end.Cmp(b[i].end) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func cidrIntervalsSubset(a, b []cidrInterval) bool {
+	for _, iv := range a {
+		rem := []cidrInterval{iv}
+		for _, biv := range b {
+			rem = subtractCIDRInterval(rem, biv)
+			if len(rem) == 0 {
+				break
+			}
+		}
+		if len(rem) > 0 {
+			return false
+		}
+	}
+	return true
 }

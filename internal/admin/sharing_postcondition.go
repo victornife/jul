@@ -605,8 +605,7 @@ func isLocationWithdrawnByConfig(loc config.LocationConfig) bool {
 	if loc.Auth == nil || len(loc.Auth.Deny) == 0 {
 		return false
 	}
-	v4, v6, ok := computePermittedIPSet(loc.Auth.Allow, loc.Auth.Deny)
-	return ok && len(v4) == 0 && len(v6) == 0
+	return config.CIDRSetPermitsNone(loc.Auth.Allow, loc.Auth.Deny)
 }
 
 // EvaluatePostcondition evaluates req against one captured serving snapshot

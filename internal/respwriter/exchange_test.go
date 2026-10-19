@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -721,4 +722,88 @@ func TestUpgradedSessionPreReadMidFrameAndSlowPeerFallback(t *testing.T) {
 	_, _ = connStall.Write([]byte{0x81, 0x0a, 'x'})
 	exStall.armRetirement(time.Now().Add(20*time.Millisecond), time.Now().Add(50*time.Millisecond), 0, true, nil)
 	relStall()
+}
+
+func TestAudit653ReaddedListenerAcceptsRequests(t *testing.T) {
+	reg := NewExchangeRegistry()
+	reg.SetInitialGeneration(1)
+	reg.DrainAddr(context.Background(), "127.0.0.1:8080")
+	reg.PublishGeneration(1, 2, nil)()
+	_, req, ex, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 2, ListenAddr: "127.0.0.1:8080"})
+	defer release()
+	if ex.IsRetired() || req.Context().Err() != nil {
+		t.Fatal("fresh request on re-added listener is immediately retired")
+	}
+	// Stale request from the removed listener generation (GenID: 1) remains retired.
+	_, staleReq, staleEx, staleRelease := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 1, ListenAddr: "127.0.0.1:8080"})
+	defer staleRelease()
+	if !staleEx.IsRetired() || staleReq.Context().Err() == nil {
+		t.Fatal("stale request from removed listener lifetime must still be retired")
+	}
+}
+
+func TestAudit653AdmissionBeyondHistoryWindow(t *testing.T) {
+	reg := NewExchangeRegistry()
+	reg.Grace = time.Millisecond
+	reg.Bound = 2 * time.Millisecond
+	reg.SetInitialGeneration(1)
+	reg.PublishGeneration(1, 2, []EntryTransition{{Retire: true, Mandatory: true}})()
+	for gen := uint64(2); gen < 35; gen++ {
+		reg.PublishGeneration(gen, gen+1, []EntryTransition{{}})()
+	}
+	time.Sleep(5 * time.Millisecond)
+	_, req, ex, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 1})
+	defer release()
+	if !ex.IsRetired() || req.Context().Err() == nil {
+		t.Fatal("request using withdrawn old generation escaped retirement after history truncation")
+	}
+}
+
+func TestAudit653IncompleteRetirementDoesNotClaimComplete(t *testing.T) {
+	reg := NewExchangeRegistry()
+	reg.Grace = 80 * time.Millisecond
+	reg.Bound = 160 * time.Millisecond
+	reg.SetInitialGeneration(1)
+	_, _, _, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 1})
+	defer release()
+	start := time.Now()
+	results := reg.PublishGeneration(1, 2, []EntryTransition{{Retire: true}})()
+	t.Logf("terminal after %v, active=%d, result=%+v", time.Since(start), reg.ActiveCount(), results)
+	if len(results) != 1 {
+		t.Fatalf("results=%+v", results)
+	}
+	if results[0].Claim == "complete_withdrawal" && (!results[0].CompletedWithinBound || reg.ActiveCount() != 0) {
+		t.Fatal("terminal result claims complete withdrawal while the exchange is still open")
+	}
+	if results[0].EndedExchanges != 0 || results[0].CompletedWithinBound {
+		t.Fatalf("expected EndedExchanges=0 and CompletedWithinBound=false while exchange is still open, got %+v", results[0])
+	}
+
+	// Late admission that races with PublishGeneration and closes within bound must be
+	// waited on by waitFn and counted in EndedExchanges with Claim == "complete_withdrawal".
+	reg2 := NewExchangeRegistry()
+	reg2.Grace = 80 * time.Millisecond
+	reg2.Bound = 200 * time.Millisecond
+	reg2.SetInitialGeneration(1)
+	wait2 := reg2.PublishGeneration(1, 2, []EntryTransition{{
+		FromRouteID: "late-r",
+		ToRouteID:   "late-r",
+		Retire:      true,
+		Mandatory:   true,
+	}})
+	_, lateReq, lateEx, lateRelease := reg2.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{
+		GenID:   1,
+		RouteID: "late-r",
+	})
+	if !lateEx.IsRetired() || lateReq.Context().Err() == nil {
+		t.Fatal("late admission must immediately inherit retirement")
+	}
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		lateRelease()
+	}()
+	res2 := wait2()
+	if len(res2) != 1 || res2[0].EndedExchanges != 1 || !res2[0].CompletedWithinBound || res2[0].Claim != "complete_withdrawal" {
+		t.Fatalf("late admission must be waited on and counted in outcome: %+v", res2)
+	}
 }

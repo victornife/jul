@@ -94,10 +94,11 @@ type ReloadPlan struct {
 	stagedListeners map[string]*listenerEntry
 	bindErrs        []string
 
-	keepOpenEntries      []string
-	nextAccessFiles      *LoadedAccessFiles
-	pluginChanges        []PluginModuleChange
-	waitEntryRetirements func() []respwriter.EntryRetirementResult
+	keepOpenEntries       []string
+	nextAccessFiles       *LoadedAccessFiles
+	pluginChanges         []PluginModuleChange
+	waitEntryRetirements  func() []respwriter.EntryRetirementResult
+	hasDeferredUnaryDrain bool
 
 	// published is true once Publish has succeeded; it gates Abort safety.
 	published bool
@@ -253,6 +254,9 @@ func (p *ReloadPlan) Prepare() error {
 			p.Runtime.add(clientAuth)
 		}
 		p.nextAccessFiles = captureLoadedAccessFiles(p.Candidate.Effective)
+		if clientAuth != nil {
+			p.nextAccessFiles.applyMTLSRotation(clientAuth)
+		}
 		return nil
 	})
 }
@@ -351,6 +355,14 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 		p.Candidate.Raw, p.Candidate.Effective, p.nextAccessFiles,
 		p.pluginChanges, p.keepOpenEntries,
 	)
+	if p.s.exchanges.ActiveCount() > 0 {
+		for _, tr := range transitions {
+			if tr.Retire && !tr.Mandatory && !tr.Removed {
+				p.hasDeferredUnaryDrain = true
+				break
+			}
+		}
+	}
 
 	newGen := p.s.newGeneration(p.Handlers, snapshots, p.GenID)
 	p.s.handlers.Store(newGen)

@@ -7,6 +7,7 @@ package waf
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -104,6 +105,16 @@ func (f *Firewall) SourceChanged(other *Firewall) bool {
 		return f != other
 	}
 	return f.hasExternal != other.hasExternal || f.sourceSum != other.sourceSum
+}
+
+// SourceDigest returns the hex-encoded private in-memory digest of the exact
+// external files read during compilation, or "" when no external files were
+// read (#642, #563).
+func (f *Firewall) SourceDigest() string {
+	if f == nil || !f.hasExternal {
+		return ""
+	}
+	return hex.EncodeToString(f.sourceSum[:])
 }
 
 func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, versions *versionid.Context) (PolicyInfo, [32]byte) {

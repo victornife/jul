@@ -27,6 +27,7 @@ func TestCIDRGate(t *testing.T) {
 		{"ipv6 allow match", []string{"2001:db8::/32"}, nil, "[2001:db8::1]:443", true},
 		{"ipv6 allow miss", []string{"2001:db8::/32"}, nil, "[2001:dead::1]:443", false},
 		{"ipv4-mapped matches ipv4 prefix", []string{"10.0.0.0/8"}, nil, "[::ffff:10.0.0.1]:9", true},
+		{"ipv4-mapped prefix matches ipv4 peer", []string{"::ffff:192.0.2.0/120"}, nil, "192.0.2.5:1234", true},
 		{"bare host no port", []string{"10.0.0.0/8"}, nil, "10.0.0.1", true},
 		{"unparseable addr with allow fails closed", []string{"10.0.0.0/8"}, nil, "garbage", false},
 		{"unparseable addr without allow passes", nil, []string{"10.0.0.0/8"}, "garbage", true},

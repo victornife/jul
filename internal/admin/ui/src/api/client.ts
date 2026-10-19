@@ -2060,7 +2060,18 @@ export type ConfigPatch =
   | ({ op: "location_cors_clear" } & RouteTarget)
   | ({ op: "location_set_sharing"; sharing?: LocationSharingPatch; route_id?: string } & Partial<RouteTarget>)
   | ({ op: "location_clear_sharing"; route_id?: string } & Partial<RouteTarget>)
-  | ({ op: "location_set_withdrawn"; withdrawn: boolean; route_id?: string } & Partial<RouteTarget>)
+  | ({
+      op: "location_set_withdrawn";
+      withdrawn: boolean;
+      route_id?: string;
+      server_index?: number;
+      location_index?: number;
+      route_selector?: Partial<RouteTarget> & {
+        route_id?: string;
+        server_index?: number;
+        location_index?: number;
+      };
+    } & Partial<RouteTarget>)
   | ({ op: "location_set_match"; match_set: LocationMatchPatch } & RouteTarget)
   | ({ op: "location_set_action"; action: LocationActionPatch } & RouteTarget)
   | ({ op: "location_set_transcode"; transcode: TranscodePatch } & RouteTarget)

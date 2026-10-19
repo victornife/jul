@@ -1131,9 +1131,9 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 			http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
+		defer g.release()
 		h, ok := g.handlers[addr]
 		if !ok || h == nil {
-			g.release()
 			http.Error(w, "503 Service Unavailable", http.StatusServiceUnavailable)
 			return
 		}
@@ -1167,7 +1167,6 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 			w = wrapBareClientAuthCheck(w, reqWithCtx, caHolder, &certChecked)
 		}
 		h.ServeHTTP(w, reqWithCtx)
-		g.release()
 
 		if ex := respwriter.ActiveExchangeFrom(ctx); ex != nil && ex.ShouldAbortStream() {
 			panic(http.ErrAbortHandler)
@@ -1599,7 +1598,16 @@ func (s *Server) doReload(req ReloadRequest) {
 	plan.RetirePreparedRuntime()
 	adminErr, onReloadErr := plan.PostCommit()
 	if plan.waitEntryRetirements != nil {
-		result.EntryRetirements = plan.waitEntryRetirements()
+		if req.Source == ReloadSourceAdmin || !plan.hasDeferredUnaryDrain {
+			result.EntryRetirements = plan.waitEntryRetirements()
+		} else {
+			result.EntryRetirements = s.exchanges.LastRetirementResults()
+			s.wg.Add(1)
+			go func(waitFn func() []respwriter.EntryRetirementResult) {
+				defer s.wg.Done()
+				_ = waitFn()
+			}(plan.waitEntryRetirements)
+		}
 	}
 
 	result.CompletedAt = time.Now()
