@@ -1,6 +1,6 @@
 # ADR 0025 — Application-sharing contract: derived view, declared intent and complete withdrawal
 
-- **Status:** Proposed — awaiting maintainer acceptance under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-16 were answered by the maintainer on 2026-10-18 and 2026-10-19 (verbatim record in the review packet §3); the remaining content is the author's proposal until #580 is accepted.
+- **Status:** Accepted — 2026-10-19, maintainer acceptance of the whole contract under [#580](https://github.com/victornife/jul/issues/580). Decisions SD-01 to SD-16 were answered individually on 2026-10-18 and 2026-10-19; the rest was accepted with the contract (verbatim record in the review packet §3, answer 14).
 - **Date:** 2026-10-18
 - **Deciders:** Jul.IA maintainer (decision owner); #580 design author
 - **Applies to:** the sharing programme [#579](https://github.com/victornife/jul/issues/579) and successors #581–#588, #613; inputs to #627, #633, #634; #562/#563
@@ -61,7 +61,7 @@ constrains any design:
    (htpasswd, CA, CRL, WAF rules, plugin modules, `${file:…}` values) never
    enter plan or postcondition output, because write access is not read access;
    they are named as not compared, and their changes are classified only at
-   publish, for retirement, an effect `config:apply` could already learn. Every digest is keyed
+   publish, for retirement, whose effect appliers, status readers and affected clients can observe. Every digest is keyed
    under a key held only by the running process, so the object allows no
    offline check of any secret, whether referenced, literal or inside a local
    file. It can be compared until that process restarts. Afterwards a re-plan

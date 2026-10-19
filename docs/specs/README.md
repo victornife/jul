@@ -1,6 +1,6 @@
 # Engineering specs
 
-> Version 1.6 · Updated 2026-10-18
+> Version 1.7 · Updated 2026-10-19
 
 Detailed engineering plans behind the [roadmap](../roadmap/). Year 1 and Year 2
 specs describe delivered historical capability. **Year 3–5 specs remain concept
@@ -23,7 +23,7 @@ For product direction and programme entry rules, see:
 | Scope | Theme | Spec |
 |------|-------|------|
 | **Current core** | Bounded standalone gateway completeness: trust, resilience, routing policy, lifecycle, automation, diagnostics, migration, and selected runtime dynamics | [core-gateway-completeness.md](core-gateway-completeness.md) |
-| **Sharing (proposed)** | Application-sharing contract (SHARE-01, #580): derived view, declared intent and guarded changes, access modes, trust and evidence, complete withdrawal, reference fixtures, measurement and usability contracts | [application-sharing.md](application-sharing.md) |
+| **Sharing** | Application-sharing contract (SHARE-01, #580): derived view, declared intent and guarded changes, access modes, trust and evidence, complete withdrawal, reference fixtures, measurement and usability contracts | [application-sharing.md](application-sharing.md) |
 | Year 1 | Credibility & effortlessness (Auto-HTTPS, Console v1, gRPC↔REST MVP, table-stakes proxy) | [year-1.md](year-1.md) |
 | Year 2 | Protocol gateway + extensibility moat (gRPC streaming, WASM plugins, L4 stream, discovery, WAF, mTLS) | [year-2.md](year-2.md) |
 | Year 3 | Scale, fleet & ecosystem — **concept horizon** (fleet, multi-node config, external identity, plugin registry) | [year-3.md](year-3.md) |
@@ -58,6 +58,7 @@ would otherwise mislead current work.
 
 | Date | Ver | What changed | What stayed | Source |
 | --- | --- | --- | --- | --- |
+| 2026-10-19 | 1.7 | Marked the [application-sharing contract](application-sharing.md) and [ADR 0025](../adr/0025-application-sharing-contract.md) accepted after the maintainer's explicit acceptance. | Every existing spec row, authority and horizon rule. | #580 |
 | 2026-10-18 | 1.6 | Indexed the proposed [application-sharing contract](application-sharing.md) (SHARE-01) and its [ADR 0025](../adr/0025-application-sharing-contract.md); design only, awaiting maintainer acceptance. | Every existing spec row, authority and horizon rule. | #580 |
 | 2026-08-03 | 1.5 | Added the Core Gateway Completeness specification as the current cross-cutting product boundary; linked ADR 0013/0014 and the operating model; clarified that AI and other Year 3–5 categories are horizons or bounded experiments rather than automatic next phases. | Year 1–2 historical specifications and the permanent OSS/open-core boundary. | Combined audit, #108, #114 |
 | 2026-07-20 | 1.4 | Clarified that Year 3–5 specs are concept horizons, not committed schedules; marked them as such in the index; linked the permanent OSS/open-core boundary ([ADR 0012](../adr/0012-oss-open-core-boundary.md)) in the intro. | Year 1–2 spec rows, hardening-platform row, sync guidance, and prior changelog rows. | Issue #65 |

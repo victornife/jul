@@ -11,7 +11,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
-- Proposed application-sharing contract for #580 (SHARE-01):
+- Accepted application-sharing contract for #580 (SHARE-01):
   [specification](docs/specs/application-sharing.md),
   [ADR 0025](docs/adr/0025-application-sharing-contract.md) and a
   [design review packet](docs/reviews/2026-10-18-580-application-sharing-design.md).
@@ -20,8 +20,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   matrix, and measurement and usability contracts. It also selects two bounded
   follow-up tranches: declared intent with guarded changes (#641), and complete
   withdrawal with #563/#562 (#642). Design only: no runtime, configuration, API,
-  Console or maturity change, and not accepted until the maintainer accepts
-  #580. Known limitations and mTLS notes now state that a revoked client
+  Console or maturity change. Known limitations and mTLS notes now state that a revoked client
   certificate still passes `require_client_cert` on an already-open connection.
 
 - Alpha offered-ALPN TCP passthrough routing (#434): ordered exact-SNI/wildcard

@@ -1,10 +1,11 @@
 # Application sharing contract (SHARE-01)
 
-> **Status: Proposed — design for maintainer acceptance under
-> [#580](https://github.com/victornife/jul/issues/580).** Nothing here is a
-> shipped capability. Decisions marked *Accepted* record a maintainer answer
-> (SD-01 to SD-16, 2026-10-18/19); everything else is a proposal until #580 is
-> accepted. Runtime work belongs to the successor owners named in §17. Source
+> **Status: Accepted — the maintainer accepted the whole contract on
+> 2026-10-19 under [#580](https://github.com/victornife/jul/issues/580).**
+> Nothing here is a shipped capability. Decisions marked *Accepted* record
+> individual maintainer answers (SD-01 to SD-16); the rest, including author
+> decisions AD-02 to AD-09, was accepted with the whole contract (review packet
+> §3, answer 14). Runtime work belongs to the successor owners named in §17. Source
 > baseline: `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a`; published
 > package baseline v2.2.0. Evidence, decision log, adversarial review and
 > traceability live in the
@@ -857,6 +858,17 @@ pipelines, which Jul cannot fence, and it never attributes a change to a writer.
     able to write a file without reading it could otherwise test guesses
     against what Jul has loaded (§9.5). Each entry result names them
     under `file_contents` (below).
+  - **File-dependent facts are not compared (RR12).** A closed-set expected
+    fact whose value depends on file contents (a setting written as a
+    `${file:…}` reference, for example `listen = "${file:/etc/jul/listen}"`
+    for bind scope) is omitted from `expected`. The entry result names it
+    under `external_inputs: file_contents`, and the evaluator compares only the
+    facts present. An omitted fact never yields `differs` and is never counted
+    as matching: `matches` then means that every compared fact and the
+    fingerprint match. The message names what was not compared ("Bind scope
+    comes from a file and was not compared"). The exact-candidate answer is
+    unaffected, and the view still shows the current serving fact to callers
+    allowed to read it. #641 fixes the encoding.
   - Jul stores nothing; the owner keeps the object with the change.
 - **Evaluator.** A read-only, server-owned operation requiring the same
   permissions as inspecting the configuration (`status:read` and
@@ -992,7 +1004,12 @@ apply result) can tell an applier whether a file changed. That reveals nothing
 beyond `config:apply`, which can already read any regular file Jul can read
 (E63): by serving its directory from a static `root` location, or, for a
 single-line value, by sending a reference to an upstream in a forwarded header.
-Callers without apply authority see no such effect.
+Others observe it too: status readers see per-entry retirement counts in apply
+results and status (§8.4), and clients see their own exchanges end. It is a
+bounded equality signal about the previously loaded contents, produced only by
+an actual publish. Jul does not promise that file contents stay confidential
+from someone who can both replace a file and observe a publish; #642 states
+this visibility boundary.
 
 `uncertain` keeps its full meaning: acknowledgement in the Console, and §8.4
 retirement by default with the keep-open exception. A class is never shown as
@@ -1091,10 +1108,10 @@ class or retirement.
 | CORS: an origin added while credentials are allowed, credentials newly allowed, or `["*"]` introduced | `widened` |
 | CORS: origins only removed or credentials disallowed | `narrowed` |
 | WAF: disabled → `block` / `block` → disabled, with rules, rule files and other WAF settings unchanged (a WAF can only interrupt or fail a request, never admit one; approved CORS preflights skip Jul's credential checks but still pass through it) | `narrowed` / `widened` |
-| WAF without runtime engine control (no rule in the serving generation's loaded policy — inline, in a rule file or anything it includes — uses `ctl:ruleEngine`; the embedded CRS has none, E51; never judged from disk contents at plan time): disabled ↔ `detect`, everything else unchanged | `unchanged`: detect mode never interrupts on a rule match and does not enforce its body limit (E49). It does read the request body before the action, so a body that cannot be read — a client abort, malformed framing, or a chunked body over `client_max_body_size` — fails where a handler that ignores the body would answer; that is a transport or size-limit effect, not an access input (above; AD-08) |
-| WAF without runtime engine control: `detect` → `block` / `block` → `detect`, everything else unchanged | `narrowed` / `widened` |
-| WAF with runtime engine control: disabled → `detect` / `detect` → disabled, everything else unchanged | `narrowed` / `widened` (a rule can switch blocking on per request) |
-| WAF with runtime engine control: `detect` ↔ `block` | `uncertain` (detect mode ignores `allow`, so a rule that switches blocking on can deny what `block` mode allows) |
+| WAF provably without runtime engine control from inputs the caller can read (inline rules and the embedded CRS only, no rule files or includes, and no `ctl:ruleEngine`; the embedded CRS has none, E51): disabled ↔ `detect`, everything else unchanged | `unchanged`: detect mode never interrupts on a rule match and does not enforce its body limit (E49). It does read the request body before the action, so a body that cannot be read — a client abort, malformed framing, or a chunked body over `client_max_body_size` — fails where a handler that ignores the body would answer; that is a transport or size-limit effect, not an access input (above; AD-08) |
+| WAF provably without runtime engine control (as above): `detect` → `block` / `block` → `detect`, everything else unchanged | `narrowed` / `widened` |
+| WAF with runtime engine control, or with rule files or includes (whose contents plans never use): disabled → `detect` / `detect` → disabled, everything else unchanged | `narrowed` / `widened` (a rule can switch blocking on per request) |
+| WAF with runtime engine control, or with rule files or includes: `detect` ↔ `block` | `uncertain` (detect mode ignores `allow`, so a rule that switches blocking on can deny what `block` mode allows) |
 | Target (`proxy_pass`, `root`, upstream membership) changed | `uncertain` for audience; `narrowed` for retirement of exchanges admitted under the old target |
 | Host names, match, predicates, rewrites, request plugins or their module content, block order, or entry addition or removal changed anywhere in the block; credential method replaced; JWT issuer, audience or key URL changed; forward-auth URL or response headers changed; htpasswd entries added or changed; any change to WAF rules, rule-file contents, the Core Rule Set, paranoia, body limit or response inspection (rule removal can remove an `allow` or exclusion); `client_address` or PROXY settings changed | `uncertain` for every affected entry |
 | Any change not matched exactly above | `uncertain` |
@@ -1127,7 +1144,7 @@ idempotency where available, and read-after-write reconciliation.
 | Declare intent | raw apply; sparse typed op (intent tranche) | `jul apply` | intent tranche: read-only display; editing in #587 |
 | Preview | `/api/v1/config/plan`, `/config/patch` (+ intent findings) | `jul plan`, `jul diff` | existing diff + intent acknowledgement |
 | Publish | `/config/apply`, `/config/patch/apply` | `jul apply`, `jul stage` | existing apply; guided flow (#587) |
-| Check a change (postcondition) | postcondition from every plan; read-only evaluation reports whether the exact planned configuration is serving and whether the expected access facts match (#641, §9.4) | `jul plan` output; evaluation command (#641) | shown after apply with both answers; file-owned users paste or upload the postcondition (#587) |
+| Check a change (postcondition) | postcondition from plans that may return one (§9.4: otherwise `unavailable` with the reason); read-only evaluation reports whether the exact planned configuration is serving and whether the expected access facts match (#641, §9.4) | `jul plan` output; evaluation command (#641) | shown after apply with both answers; file-owned users paste or upload the postcondition (#587) |
 | Withdraw | complete candidate via `/config/apply`; gate typed op (complete-withdrawal stream) | `jul apply` | guided withdraw (#587, after the gate) |
 | Recover | `/config/rollback` | `jul rollback` | History |
 | Cut established | — none — | — | guidance only |
@@ -1184,8 +1201,10 @@ Error language says what happened, what did not change and the next step:
 - "This configuration is owned by a file or pipeline. Make this change there:
   <the exact edit from the plan>; keep the postcondition shown below. After your
   pipeline reloads Jul, check it here: Jul shows whether this exact change is
-  serving and whether access matches what it should be." (`file_owned`; once the gate ships the exact edit
-  is the gate setting — #587 never recommends `auth.deny`)
+  serving and whether access matches what it should be." (`file_owned`; when
+  the plan returns no postcondition, the copy says so and why, and points to
+  evidence instead; once the gate ships the exact edit is the gate setting —
+  #587 never recommends `auth.deny`)
 - "Unknown: Jul restarted before confirming the outcome. Nothing will be retried
   automatically. Check what is serving now." (lost ledger)
 
