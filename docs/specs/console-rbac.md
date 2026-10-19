@@ -185,10 +185,10 @@ without the other.
 | `status:read` | Runtime state: dashboards, runtime overview, stats, certificate inventory/expiry. |
 | `metrics:read` | Prometheus `/metrics` scrape. |
 | `config:read` | View structured, secret-safe configuration projections. |
-| `config:raw` | Privileged complete current/candidate TOML readback, which may contain secrets. |
+| `config:raw` | Privileged complete current/candidate TOML readback and configuration comparison disclosure, which can reveal hidden equality (#645). |
 | `config:trust` | Change inbound client-address trust policy in addition to the operation grant. |
 | `config:adopt` | Adopt an external/unadopted/drifted managed baseline in addition to the operation grant. |
-| `config:write` | **Author/preview** changes without persisting: validate, diff, structured-patch preview, route dry-run test, wizard generation, descriptor upload. |
+| `config:write` | Author changes without persisting: validate, route dry-run test, wizard generation, descriptor upload. Diff/plan/structured preview additionally require `config:raw` (#645). |
 | `config:apply` | **Persist** configuration changes: apply, patch-apply, settings save. |
 | `history:read` | List history metadata and permitted secret-safe previews. |
 | `history:raw` | Retrieve a complete historical TOML snapshot, which may contain secrets. |
@@ -560,3 +560,13 @@ identity governance remain [Y3-02](../roadmap/) horizon work outside HP-02.
 - **Two-person apply.** Should high-risk applies optionally require a second
   `approver` principal? Expressible with `config:write` vs `config:apply`; the
   enforcement (pending-change queue) would be a follow-on.
+
+## Comparison disclosure amendment (#645)
+
+`config:write` does not authorize reading a hidden value or learning whether a
+guess matches it. Full comparison responses also disclose canonical versions
+and lifecycle effects, so raw, typed, history and adoption comparisons require
+`config:raw` alongside their existing action grant. Predefined roles are not
+silently widened: `operator` lacks raw access and must ask for administrator
+review or an explicit custom-role grant. Direct mutations retain their existing
+permissions. See [the exact surface matrix](../admin-api.md#configuration-comparison-permissions-645).

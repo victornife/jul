@@ -160,6 +160,7 @@ function RollbackConfirm({
 }) {
   const { has } = usePermission();
   const canRollback = has("history:rollback");
+  const canPreview = canRollback && has("config:raw");
   // The preview reads the snapshot server-side and diffs it against the
   // persisted config through the rollback-scoped endpoint, so a least-privilege
   // rollback-only role can review the change without config:write (N-02). It
@@ -169,6 +170,7 @@ function RollbackConfirm({
   const diff = useQuery({
     queryKey: ["history-rollback-diff", id],
     queryFn: () => diffHistorySnapshot(id),
+    enabled: canPreview,
     staleTime: 0,
     refetchInterval: false,
     refetchOnWindowFocus: false,
@@ -192,10 +194,10 @@ function RollbackConfirm({
       // Query can serve the previous successful preview during a background
       // refetch, so gating on diff.isSuccess alone could confirm against a stale
       // baseline (Net-new issue 1, cached-preview manifestation).
-      confirmDisabled={!canRollback || pending || diff.isFetching || !diff.isSuccess}
+      confirmDisabled={!canPreview || pending || diff.isFetching || !diff.isSuccess}
       cancelDisabled={pending && !pollingExpired}
       onConfirm={() => {
-        if (!canRollback) return;
+        if (!canPreview) return;
         onConfirm(diff.data?.base_version, challengeActive);
       }}
       onCancel={onCancel}
@@ -209,6 +211,9 @@ function RollbackConfirm({
       <div className="mt-3">
         {!canRollback && (
           <p className="text-xs text-jul-warning">Requires the history:rollback permission.</p>
+        )}
+        {!has("config:raw") && (
+          <p role="note">Rollback previews also require config:raw. Ask an administrator to review this revision.</p>
         )}
         {adminChanges.length > 0 && (
           <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-jul-warning">

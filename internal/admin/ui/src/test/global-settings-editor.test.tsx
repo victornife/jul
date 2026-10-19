@@ -26,7 +26,7 @@ const preview = {
 };
 function mount(canWrite = true) {
   const onClose = vi.fn();
-  const permissions = canWrite ? ["config:write"] : [];
+  const permissions = canWrite ? ["config:write", "config:raw"] : [];
   render(
     <MemoryRouter>
       <PermissionContext.Provider

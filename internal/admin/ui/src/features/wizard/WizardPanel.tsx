@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import {
+import { captureAdminIdentity,
   generateConfig,
   generateConfigPatches,
   patchConfigBatch,
@@ -126,9 +126,11 @@ export function WizardPanel() {
   }
 
   async function openInEditor(): Promise<void> {
+    const assertIdentity = captureAdminIdentity();
     if (previewOps === null) return;
     try {
       const res = await patchConfigBatch(previewOps);
+      assertIdentity();
       setPendingDraft({
         kind: "patch",
         ops: previewOps,

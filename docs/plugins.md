@@ -129,6 +129,13 @@ Other permitted readers receive the metadata projection with
 edit sends `preserve_config = true` so stored parameters remain unchanged.
 That flag cannot be combined with a replacement `config` map. Privileged
 parameter editing and newly authored declarations retain their normal path.
+Full `plugin_set` previews additionally require `config:raw` plus `config:write`
+(#645), including metadata-only edits: preview envelopes compare the complete
+configuration. An absent replacement map follows full-replacement semantics;
+`preserve_config = true` explicitly preserves the stored map, an empty map
+clears it, and preserve-plus-map is invalid. No hidden keys or map size are
+returned to a caller denied comparison access. Direct mutation semantics are
+unchanged.
 This is an internal Console API contract, not a new TOML configuration key or
 a change to the guest ABI.
 

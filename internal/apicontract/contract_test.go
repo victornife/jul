@@ -82,6 +82,9 @@ func TestPermissionsAgreeOnBothSides(t *testing.T) {
 		if op == nil {
 			continue // reported by the test above
 		}
+		if op.RequiresConfigRaw != r.RequiresConfigRaw {
+			t.Errorf("%s %s: config:raw conjunction differs between runtime and document", r.Method, r.Pattern)
+		}
 		if len(op.Permissions) != len(r.Permissions) {
 			t.Errorf("%s %s: document publishes permissions %v, catalog enforces %v", r.Method, r.Pattern, op.Permissions, r.Permissions)
 			continue

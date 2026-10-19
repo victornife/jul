@@ -467,3 +467,14 @@ cut at the first GA release.
 [Admin Console OIDC](admin-oidc.md) is additive, disabled by default and Beta/unreleased. Local token/API behavior remains available; arbitrary provider access tokens are not accepted as Jul API credentials. One provider, exact issuer/subject mapping and bounded groups are supported. See the guide for honest Google/Entra/Keycloak/Auth0/Meta evidence labels. SAML/SCIM are unsupported. Older binaries require removal of the unknown `[admin.oidc]` block before downgrade. NGINX migration is unaffected.
 
 The existing `jul_auth_decisions_total` counter adds the fixed `method="oidc"` value for Console login outcomes. Name, counter type, `method`/`result` label keys and existing method series remain unchanged; help text now lists the additive method. No identity is a metric label.
+
+## Configuration preview access correction (#645)
+
+Full comparison endpoints now require `config:raw` in addition to their existing
+action grant. This security correction intentionally makes former writer-only,
+rollback-only and adoption-only previews return `403`; response DTOs and direct
+mutation permissions do not change. Remote CLI rollback/adoption obtain previews,
+so these CLI workflows also need raw access. Custom roles must request an explicit
+grant or administrator review; the predefined operator role is not widened.
+Console handoffs are now memory-only and are cleared on credential/permission
+changes; drafts stored by older versions are discarded and must be prepared again.

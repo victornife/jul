@@ -62,7 +62,7 @@ describe("issue #81 handoff storage boundary", () => {
     });
   });
 
-  it("persists only secret-safe structured metadata and drops injected candidate source", () => {
+  it("keeps comparisons and operations out of browser storage", () => {
     setPendingDraft({
       kind: "patch",
       ops: [{ op: "compression_set", compression: { enabled: false } }],
@@ -76,9 +76,7 @@ describe("issue #81 handoff storage boundary", () => {
       candidate: "raw-secret-candidate",
     });
     const stored = sessionStorage.getItem(pendingDraftStorageKey);
-    expect(stored).not.toBeNull();
-    expect(stored).not.toContain("raw-secret-candidate");
-    expect(stored).not.toContain("candidate\"");
+    expect(stored).toBeNull();
   });
 
   it("fails old or incomplete structured handoffs closed", () => {

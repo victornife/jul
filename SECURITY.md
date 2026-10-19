@@ -193,3 +193,14 @@ permanent regression seed.
 ## Admin Console and plugin-upload hot reload
 
 HR-06B (#157) treats admin authentication/RBAC, Console dispatch and plugin-upload policy as one immutable per-request generation. Disabling uploads rejects before request-body parsing; candidate upload storage is validated before Publish with reversible probes; admitted writes are confined to an `os.Root`, use owner-only files on Unix, and reject symbolic-link/special-file final destinations. Bounded runtime diagnostics do not expose upload paths, filenames, bearer tokens or resolved secrets as metric labels/status fields. See [`docs/admin-runtime-hot-reload.md`](docs/admin-runtime-hot-reload.md) for the complete security and concurrency contract.
+
+## Configuration comparison confidentiality (#645)
+
+Full diff/plan/preview access requires `config:raw` together with the operation's
+existing grant. A write grant alone does not permit probing hidden equality.
+The gate precedes configuration reads and covers lifecycle/version metadata as
+well as secret-bearing rows. Console comparison artifacts are memory-only and
+are removed across identity/permission changes. This correction does not claim
+to hide independently authorized mutation effects or all existing status/export
+fingerprints; [the evidence record](docs/reviews/2026-10-19-645-preview-disclosure.md)
+states the boundary and relationship to #644.

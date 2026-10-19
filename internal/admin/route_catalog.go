@@ -37,6 +37,11 @@ type RouteSpec struct {
 	// granted status:read (AC-02). Authentication still happens exactly once;
 	// only authorization loops over the allowed permissions.
 	AnyPermissions []rbac.Permission
+	// RequiresConfigRaw additionally requires config:raw after the ordinary
+	// action permission has authenticated the request. Full comparison results
+	// contain hidden-value equality and raw canonical versions; value masking
+	// alone cannot make those results safe for a write-only caller (#645).
+	RequiresConfigRaw bool
 	// Public, when true, skips authentication entirely. Only use this for
 	// truly public endpoints (health, readiness, and console static shell).
 	Public bool
@@ -349,10 +354,11 @@ var Catalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1ConfigExport) },
 	},
 	{
-		Pattern:    "/api/v1/config/history/{id}/diff",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.HistoryRollback,
-		Stability:  StabilityExternal,
+		Pattern:           "/api/v1/config/history/{id}/diff",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodGet},
+		Permission:        rbac.HistoryRollback,
+		Stability:         StabilityExternal,
 		Operations: map[string]ExternalOperation{
 			http.MethodGet: {
 				ID: "diffHistoryRevision",
@@ -597,10 +603,11 @@ var Catalog = []RouteSpec{
 	// holding config:write and without POSTing arbitrary candidate TOML to the
 	// generic /api/config/diff endpoint (N-02).
 	{
-		Pattern:    "/api/config/history/{id}/diff",
-		Methods:    []string{http.MethodGet},
-		Permission: rbac.HistoryRollback,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigHistoryDiff) },
+		Pattern:           "/api/config/history/{id}/diff",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodGet},
+		Permission:        rbac.HistoryRollback,
+		Handler:           func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigHistoryDiff) },
 	},
 
 	// ── Config write/preview (config:write) ───────────────────────────────────
@@ -612,35 +619,40 @@ var Catalog = []RouteSpec{
 		Handler:      func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigValidate) },
 	},
 	{
-		Pattern:    "/api/config/preview",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigRaw,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPreview) },
+		Pattern:           "/api/config/preview",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigRaw,
+		Handler:           func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPreview) },
 	},
 	{
-		Pattern:      "/api/config/diff",
-		Methods:      []string{http.MethodPost},
-		Permission:   rbac.ConfigWrite,
-		LimitClasses: map[string]limitKind{http.MethodPost: limitApply},
-		Handler:      func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigDiff) },
+		Pattern:           "/api/config/diff",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigWrite,
+		LimitClasses:      map[string]limitKind{http.MethodPost: limitApply},
+		Handler:           func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigDiff) },
 	},
 	{
-		Pattern:    "/api/config/patch",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigWrite,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatch) },
+		Pattern:           "/api/config/patch",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigWrite,
+		Handler:           func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatch) },
 	},
 	{
-		Pattern:    "/api/config/patch/preview",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigWrite,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchPreview) },
+		Pattern:           "/api/config/patch/preview",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigWrite,
+		Handler:           func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchPreview) },
 	},
 	{
-		Pattern:    "/api/config/patch/candidate",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.ConfigRaw,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchCandidate) },
+		Pattern:           "/api/config/patch/candidate",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodPost},
+		Permission:        rbac.ConfigRaw,
+		Handler:           func(s *Server) http.Handler { return http.HandlerFunc(s.handleConfigPatchCandidate) },
 	},
 	{
 		Pattern:    "/api/routes/test",
@@ -721,10 +733,11 @@ var Catalog = []RouteSpec{
 	// requires the same permission — it renders content of a file Jul has
 	// not yet validated or taken responsibility for.
 	{
-		Pattern:    "/api/config/adopt-external/preview",
-		Methods:    []string{http.MethodGet, http.MethodPost},
-		Permission: rbac.ConfigAdopt,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleAdoptExternalPreview) },
+		Pattern:           "/api/config/adopt-external/preview",
+		RequiresConfigRaw: true,
+		Methods:           []string{http.MethodGet, http.MethodPost},
+		Permission:        rbac.ConfigAdopt,
+		Handler:           func(s *Server) http.Handler { return http.HandlerFunc(s.handleAdoptExternalPreview) },
 	},
 	{
 		Pattern:    "/api/config/adopt-external",

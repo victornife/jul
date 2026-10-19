@@ -505,6 +505,7 @@
         "x-jul-permissions": [
           "config:adopt"
         ],
+        "x-jul-requires-config-raw": true,
         "x-jul-max-body-bytes": 1048576,
         "x-jul-error-codes": [
           "insecure_transport",
@@ -1195,6 +1196,7 @@
         "x-jul-permissions": [
           "history:rollback"
         ],
+        "x-jul-requires-config-raw": true,
         "x-jul-error-codes": [
           "insecure_transport",
           "unauthenticated",
@@ -1353,6 +1355,7 @@
         "x-jul-permissions": [
           "config:write"
         ],
+        "x-jul-requires-config-raw": true,
         "x-jul-max-body-bytes": 1048576,
         "x-jul-error-codes": [
           "insecure_transport",
@@ -1968,6 +1971,7 @@
         "x-jul-permissions": [
           "config:write"
         ],
+        "x-jul-requires-config-raw": true,
         "x-jul-max-body-bytes": 1048576,
         "x-jul-error-codes": [
           "insecure_transport",
@@ -4824,6 +4828,9 @@
           },
           "required_capability": {
             "type": "string"
+          },
+          "requires_config_raw": {
+            "type": "boolean"
           },
           "stability": {
             "type": "string"

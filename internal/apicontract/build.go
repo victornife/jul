@@ -183,14 +183,15 @@ func addPaths(doc *Document, routes []admin.ExternalRoute) error {
 
 func buildOperation(r admin.ExternalRoute, doc *Document) (*Operation, error) {
 	op := &Operation{
-		OperationID: r.Operation.ID,
-		Summary:     r.Operation.Summary,
-		Tags:        tagsFor(r.Pattern),
-		Deprecated:  r.Stability == admin.StabilityDeprecated,
-		Stability:   r.Stability.String(),
-		Permissions: r.Permissions,
-		Sunset:      r.Sunset,
-		Responses:   map[string]*Response{},
+		OperationID:       r.Operation.ID,
+		Summary:           r.Operation.Summary,
+		Tags:              tagsFor(r.Pattern),
+		Deprecated:        r.Stability == admin.StabilityDeprecated,
+		Stability:         r.Stability.String(),
+		Permissions:       r.Permissions,
+		RequiresConfigRaw: r.RequiresConfigRaw,
+		Sunset:            r.Sunset,
+		Responses:         map[string]*Response{},
 	}
 	if r.Sunset != "" {
 		op.Description = "Deprecated. This operation keeps working until " + r.Sunset + " and responds with Deprecation and Sunset headers."

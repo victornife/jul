@@ -166,6 +166,13 @@ async function setupApiMocks(page: Page): Promise<void> {
   // see unexpected error banners).
   await page.route("/api/**", (route) => json(route, { error: "not found" }, 404));
 
+  // Identity is verified before panels mount; these default smoke journeys
+  // exercise the privileged comparison workflow. Role tests override it below.
+  await page.route("/api/admin/me", (route) => json(route, {
+    principal: "smoke-admin", role: "admin", token_id: "synthetic-smoke",
+    legacy: false,
+    permissions: ["status:read", "metrics:read", "config:read", "config:raw", "config:write", "config:apply", "config:trust", "config:adopt", "history:read", "history:raw", "history:rollback", "plugins:upload", "observability:read", "audit:read", "audit:export", "cache:purge", "reload:trigger", "admin:manage"],
+  }));
   await page.route("/api/runtime/overview", (route) => json(route, OVERVIEW));
   await page.route("/api/routes", (route) => json(route, ROUTES));
   await page.route("/api/config", (route) => json(route, RAW_CONFIG));
@@ -532,5 +539,49 @@ test.describe("Console RBAC gating (P3-04)", () => {
     await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
     await expect(page.getByText("snap-001")).toBeVisible();
     await expect(page.getByRole("button", { name: "Rollback" })).toBeEnabled();
+  });
+});
+
+// #645: run against the shipped SPA, including identity and browser storage.
+test.describe("Configuration comparison confidentiality", () => {
+  test("writer without raw cannot restore a stored privileged comparison", async ({ page }) => {
+    await setupApiMocks(page);
+    await mockIdentity(page, OPERATOR_IDENTITY);
+    let rawRequests = 0;
+    await page.route("/api/config", (route) => {
+      rawRequests += 1;
+      return json(route, { raw: "SYNTHETIC_PRIVILEGED_645", base_version: "private" });
+    });
+    await page.addInitScript(() => {
+      sessionStorage.setItem("__jul_config_pending_draft_v4", JSON.stringify({
+        kind: "patch", ops: [{ op: "compression_set" }],
+        previewDiff: { summary: "SYNTHETIC_PRIVILEGED_645" },
+      }));
+    });
+    await page.goto("/config");
+    await expect(page.getByRole("note").filter({ hasText: "Configuration previews require config:raw" })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("SYNTHETIC_PRIVILEGED_645");
+    expect(rawRequests).toBe(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("__jul_config_pending_draft_v4"))).toBeNull();
+  });
+
+  test("verified permission loss removes an already rendered raw configuration", async ({ page }) => {
+    await setupApiMocks(page);
+    await page.route("/api/config", (route) => json(route, { raw: "# SYNTHETIC_PRIVILEGED_645", base_version: "v1" }));
+    await page.goto("/config");
+    await expect(page.locator(".cm-content")).toContainText("SYNTHETIC_PRIVILEGED_645");
+    await mockIdentity(page, OPERATOR_IDENTITY);
+    await page.evaluate(() => { window.dispatchEvent(new CustomEvent("jul:forbidden")); });
+    await expect(page.getByRole("note").filter({ hasText: "Configuration previews require config:raw" })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("SYNTHETIC_PRIVILEGED_645");
+  });
+
+  test("an initial rejected identity keeps token recovery operable", async ({ page }) => {
+    await setupApiMocks(page);
+    await page.route("/api/admin/me", (route) => json(route, { error: "unauthorized" }, 401));
+    await page.goto("/");
+    await expect(page.getByRole("dialog", { name: "Admin token required" })).toBeVisible();
+    await expect(page.getByLabel("Token", { exact: true })).toBeEditable();
+    await expect(page.getByRole("heading", { name: "Overview" })).not.toBeVisible();
   });
 });

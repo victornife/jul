@@ -189,13 +189,13 @@ describe("PermissionProvider unauthorized handling", () => {
     await waitFor(() => {
       expect(screen.getByTestId("ready").textContent).toBe("true");
     });
-    // A 401 broadcast clears the identity; gating reverts to fail-open (unknown).
+    // A 401 unmounts panels while the caller has no verified identity.
     act(() => {
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
     });
     await waitFor(() => {
-      expect(screen.getByTestId("ready").textContent).toBe("false");
+      expect(screen.getByRole("status")).toHaveTextContent("Checking admin permissions");
     });
-    expect(screen.getByTestId("can").textContent).toBe("true");
+    expect(screen.queryByTestId("can")).toBeNull();
   });
 });

@@ -156,7 +156,7 @@ describe("open confirmations follow the current permission grants", () => {
         <HistoryPanel />
       </Scope>,
     );
-    expect(submit).toBeEnabled();
+    await waitFor(() => { expect(submit).toBeEnabled(); });
     expect(mutations("/config/rollback")).toHaveLength(0);
     fireEvent.click(submit);
     await waitFor(() => {
@@ -215,7 +215,7 @@ describe("open confirmations follow the current permission grants", () => {
     "blocks %s confirmation after config:apply is revoked",
     async (_name, patch, stage) => {
       const grants = patch
-        ? ["config:write", "config:apply"]
+        ? ["config:write", "config:raw", "config:apply"]
         : ["config:raw", "config:write", "config:apply"];
       const label = stage ? "Save for next restart" : "Apply live";
       const endpoint = patch ? "/api/config/patch/apply" : "/api/config/apply";

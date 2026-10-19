@@ -84,13 +84,37 @@ const ApplyPendingRestartStatusSchema = PendingRestartStatusSchema.extend({
 // ── Design-token helpers ─────────────────────────────────────────────────────
 
 /** Central auth-token store (sessionStorage so it clears on tab close). */
+let adminIdentityGeneration = 0;
+
+/** Invalidate async assessments when credentials or verified grants change. */
+export function invalidateAdminResponses(): void {
+  adminIdentityGeneration += 1;
+}
+
+/** Capture before starting an async editor action, then check before handoff. */
+export function captureAdminIdentity(): () => void {
+  const generation = adminIdentityGeneration;
+  const credential = authToken.get();
+  return (): void => {
+    if (generation !== adminIdentityGeneration || credential !== authToken.get()) {
+      throw new Error(
+        "Admin identity changed. Prepare the change again with the current credential.",
+      );
+    }
+  };
+}
+
 export const authToken = {
   get: (): string => sessionStorage.getItem("jul_admin_token") ?? "",
   set: (t: string): void => {
+    invalidateAdminResponses();
     sessionStorage.setItem("jul_admin_token", t);
+    window.dispatchEvent(new CustomEvent("jul:credential-changed"));
   },
   clear: (): void => {
+    invalidateAdminResponses();
     sessionStorage.removeItem("jul_admin_token");
+    window.dispatchEvent(new CustomEvent("jul:credential-changed"));
   },
 };
 
@@ -160,12 +184,14 @@ function parseRetryAfter(resp: Response): number | undefined {
 }
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const assertIdentity = captureAdminIdentity();
   const token = authToken.get();
   const headers = new Headers(init?.headers);
   headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const resp = await fetch(`/api${path}`, { ...init, headers });
+  assertIdentity();
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
     else if (resp.status === 403) notifyForbidden();
@@ -178,7 +204,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(path, resp.status, msg, parseRetryAfter(resp));
   }
-  return resp.json() as Promise<T>;
+  const data = (await resp.json()) as T;
+  assertIdentity();
+  return data;
 }
 
 // ── Error taxonomy ───────────────────────────────────────────────────────────
@@ -2126,6 +2154,7 @@ export async function previewRawConfig(
   candidate: string,
   baseVersion: string,
 ): Promise<RawConfigPreview> {
+  const assertIdentity = captureAdminIdentity();
   const headers = new Headers({
     Accept: "application/json",
     "Content-Type": "application/toml",
@@ -2145,6 +2174,7 @@ export async function previewRawConfig(
   } catch {
     data = null;
   }
+  assertIdentity();
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
     else if (resp.status === 403) notifyForbidden();
@@ -2192,6 +2222,7 @@ export type PatchResult = z.infer<typeof PatchResultSchema>;
  * applied (target not found, invalid op, last backend, …).
  */
 export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
+  const assertIdentity = captureAdminIdentity();
   const headers = new Headers();
   headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
@@ -2209,6 +2240,7 @@ export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
   } catch {
     data = null;
   }
+  assertIdentity();
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
     classifyPatchFailure("/config/patch", resp.status, resp.statusText, data, resp);
@@ -2228,6 +2260,7 @@ export async function patchConfigBatch(
   ops: ConfigPatch[],
   baseVersion?: string,
 ): Promise<PatchResult> {
+  const assertIdentity = captureAdminIdentity();
   const headers = new Headers();
   headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
@@ -2245,6 +2278,7 @@ export async function patchConfigBatch(
   } catch {
     data = null;
   }
+  assertIdentity();
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
     classifyPatchFailure("/config/patch/preview", resp.status, resp.statusText, data, resp);
@@ -2283,6 +2317,7 @@ export async function fetchPatchCandidate(
   ops: ConfigPatch[],
   baseVersion?: string,
 ): Promise<PatchCandidate> {
+  const assertIdentity = captureAdminIdentity();
   const headers = new Headers();
   headers.set("X-Jul-Console", "1");
   headers.set("Accept", "application/json");
@@ -2300,6 +2335,7 @@ export async function fetchPatchCandidate(
   } catch {
     data = null;
   }
+  assertIdentity();
   if (!resp.ok) {
     if (resp.status === 401) notifyUnauthorized();
     classifyPatchFailure("/config/patch/candidate", resp.status, resp.statusText, data, resp);

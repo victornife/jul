@@ -8,8 +8,7 @@ import { createRoot } from "react-dom/client";
 import "@/styles/globals.css";
 import { Providers } from "@/app/providers.tsx";
 import { App } from "@/app/App.tsx";
-import { AuthGate } from "@/app/AuthGate.tsx";
-import { PermissionProvider } from "@/auth/PermissionProvider.tsx";
+import { AdminSession } from "@/app/AdminSession.tsx";
 import { initThemeEarly } from "@/lib/theme.ts";
 import { installErrorReporter } from "@/lib/errorReporter.ts";
 
@@ -28,10 +27,9 @@ if (!rootEl) throw new Error("#root not found in index.html");
 createRoot(rootEl).render(
   <StrictMode>
     <Providers>
-      <PermissionProvider>
+      <AdminSession>
         <App />
-        <AuthGate />
-      </PermissionProvider>
+      </AdminSession>
     </Providers>
   </StrictMode>,
 );

@@ -8,7 +8,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader, Button, Loading } from "@/components/ui.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
-import { fetchRoutes, uploadTranscodeDescriptor, type TranscodeMethod } from "@/api/client.ts";
+import { captureAdminIdentity,  fetchRoutes, uploadTranscodeDescriptor, type TranscodeMethod } from "@/api/client.ts";
 import { fetchRawConfig } from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import { generateTranscodeRouteToml, transcodeDraftWarnings } from "@/lib/transcodeToml.ts";
@@ -139,6 +139,7 @@ export function TranscodeDesignerPanel() {
   }
 
   async function openInEditor() {
+    const assertIdentity = captureAdminIdentity();
     setEditorError(null);
     const effectiveListen = listen === ":8080" ? customListen : listen;
     const draft = {
@@ -161,6 +162,7 @@ export function TranscodeDesignerPanel() {
     try {
       const raw = await fetchRawConfig();
       const fragment = generateTranscodeRouteToml(draft);
+      assertIdentity();
       setPendingDraft({ kind: "toml", toml: appendFragment(raw.raw ?? "", fragment) });
       void navigate("/config");
     } catch {
