@@ -14,6 +14,13 @@ console.
 Current macOS builds require macOS 13 Ventura or later; see
 [supported platforms](compatibility.md#supported-build-toolchain-and-platforms).
 
+## Provision the private version key
+
+Before serving, run `./jul version-key init` (`./jul.exe version-key init` in
+PowerShell). Keep that protected key across restarts and in restricted backups.
+Startup never replaces a missing or corrupt key. A configuration file is not
+required for this step. See [provisioning, upgrade and recovery](effective-versions.md).
+
 ## Zero-config mode
 
 Jul.IA can run without a config file. This is useful for quick tests and local

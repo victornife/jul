@@ -28,6 +28,9 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+# Provision this private key explicitly before first start; preserve in backups.
+# See docs/effective-versions.md. No automatic replacement on restart.
+Environment=JUL_EFFECTIVE_VERSION_KEY_FILE=/etc/jul/private/effective-version.key
 ExecStart=/usr/local/bin/jul --config /etc/jul/server.toml
 # Reload re-reads the on-disk config; with an immutable /etc/jul this only
 # re-applies what the provisioning pipeline shipped.

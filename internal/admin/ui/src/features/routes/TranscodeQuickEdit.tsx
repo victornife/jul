@@ -12,6 +12,7 @@ import {
 } from "@/api/client.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
+import { routeTargetFromProjection } from "@/lib/routePatch.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
 
 function Toggle({
@@ -38,7 +39,7 @@ function Toggle({
 
 function useTranscodeQuickEdit(route: RouteProjection, loc: LocationProjection) {
   const t = loc.transcode;
-  const { run, busy, error } = useRunPatch();
+  const { run, busy, error } = useRunPatch(route.base_version);
 
   const [tcTarget, setTcTarget]               = useState(loc.target ?? "");
   const [tcDescPath, setTcDescPath]           = useState(t?.descriptor_set ?? "");
@@ -81,10 +82,7 @@ function useTranscodeQuickEdit(route: RouteProjection, loc: LocationProjection) 
     };
     return {
       op: "location_set_transcode",
-      listen: route.listen,
-      server_names: route.server_names ?? [],
-      match_type: loc.type,
-      path: loc.match,
+      ...routeTargetFromProjection(route, loc),
       transcode: payload,
     };
   }

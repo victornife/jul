@@ -12,6 +12,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/router"
+	"jul/internal/server"
 )
 
 // routeTestRequest is the input to POST /api/routes/test: a synthetic request
@@ -56,8 +57,9 @@ type routeTestCandidate struct {
 	// MatchOrdinal is the candidate's index among the locations sharing its
 	// listen, host set, match type and path. It is revision-relative: it names a
 	// route within this configuration and must not be stored or correlated.
-	MatchOrdinal int  `json:"match_ordinal"`
-	Selected     bool `json:"selected"`
+	MatchOrdinal    int    `json:"match_ordinal"`
+	SelectorVersion string `json:"selector_version"`
+	Selected        bool   `json:"selected"`
 	// Rejection is the configuration path of the predicate that rejected this
 	// candidate, empty on the selected one.
 	Rejection string `json:"rejection,omitempty"`
@@ -67,6 +69,7 @@ type routeTestCandidate struct {
 // how the router would resolve the request without sending real upstream traffic
 // (Milestone 2.3).
 type routeTestResult struct {
+	BaseVersion string   `json:"base_version,omitempty"`
 	Matched     bool     `json:"matched"`
 	Listen      string   `json:"listen,omitempty"`
 	ServerNames []string `json:"server_names,omitempty"`
@@ -84,7 +87,8 @@ type routeTestResult struct {
 	Explanation string   `json:"explanation"`
 	// MatchOrdinal is the selected location's ordinal among its same-coordinate
 	// siblings, which is what a typed patch needs to address it unambiguously.
-	MatchOrdinal int `json:"match_ordinal,omitempty"`
+	MatchOrdinal    int    `json:"match_ordinal,omitempty"`
+	SelectorVersion string `json:"selector_version,omitempty"`
 	// Candidates is every candidate the enumeration visited, including the
 	// rejected ones and the reason each was rejected.
 	Candidates []routeTestCandidate `json:"candidates,omitempty"`
@@ -162,6 +166,7 @@ func testRoute(c *config.Config, in routeTestRequest) routeTestResult {
 			Explanation: "The running configuration could not be compiled into a routing table: " + err.Error(),
 		}
 	}
+	ordinals := routeOrdinals(c)
 	explanation := rt.Explain(in.Host, syntheticRequest(in))
 	if !explanation.ServerMatched {
 		return routeTestResult{
@@ -174,12 +179,13 @@ func testRoute(c *config.Config, in routeTestRequest) routeTestResult {
 	candidates := make([]routeTestCandidate, 0, len(explanation.Candidates))
 	for _, candidate := range explanation.Candidates {
 		candidates = append(candidates, routeTestCandidate{
-			MatchType:    candidate.MatchType,
-			Match:        candidate.Path,
-			Tier:         candidate.Tier,
-			MatchOrdinal: matchOrdinalOf(srv, candidate.LocationIndex),
-			Selected:     candidate.Selected,
-			Rejection:    candidate.Rejection,
+			MatchType:       srv.Locations[candidate.LocationIndex].Match.Type,
+			Match:           srv.Locations[candidate.LocationIndex].Match.Path,
+			Tier:            candidate.Tier,
+			MatchOrdinal:    ordinals[explanation.ServerIndex][candidate.LocationIndex],
+			SelectorVersion: routeSelectorVersion,
+			Selected:        candidate.Selected,
+			Rejection:       candidate.Rejection,
 		})
 	}
 
@@ -190,44 +196,34 @@ func testRoute(c *config.Config, in routeTestRequest) routeTestResult {
 			Listen:      srv.Listen,
 			ServerNames: srv.ServerNames,
 			Candidates:  candidates,
+			BaseVersion: server.CanonicalVersion(c),
 			Explanation: noMatchExplanation(candidates),
 		}
 	}
 	loc := &srv.Locations[selected.LocationIndex]
 	lp := projectLocation(c, srv, loc)
 	res := routeTestResult{
-		Matched:      true,
-		Listen:       srv.Listen,
-		ServerNames:  srv.ServerNames,
-		Match:        lp.Match,
-		MatchType:    lp.Type,
-		Action:       lp.Action,
-		Target:       lp.Target,
-		Upstream:     lp.Upstream,
-		Auth:         lp.Auth,
-		Cache:        lp.Cache,
-		Compression:  lp.Compression,
-		RateLimit:    lp.RateLimit,
-		Secure:       lp.Secure,
-		Warnings:     lp.Warnings,
-		MatchOrdinal: matchOrdinalOf(srv, selected.LocationIndex),
-		Candidates:   candidates,
+		BaseVersion:     server.CanonicalVersion(c),
+		Matched:         true,
+		Listen:          srv.Listen,
+		ServerNames:     srv.ServerNames,
+		Match:           lp.Match,
+		MatchType:       lp.Type,
+		Action:          lp.Action,
+		Target:          lp.Target,
+		Upstream:        lp.Upstream,
+		Auth:            lp.Auth,
+		Cache:           lp.Cache,
+		Compression:     lp.Compression,
+		RateLimit:       lp.RateLimit,
+		Secure:          lp.Secure,
+		Warnings:        lp.Warnings,
+		MatchOrdinal:    ordinals[explanation.ServerIndex][selected.LocationIndex],
+		SelectorVersion: routeSelectorVersion,
+		Candidates:      candidates,
 	}
 	res.Explanation = explainMatch(srv, &lp) + rejectedCandidateNote(candidates)
 	return res
-}
-
-// matchOrdinalOf reports a location's index among the locations of its server
-// block that share its match type and path.
-func matchOrdinalOf(srv *config.ServerConfig, locationIndex int) int {
-	target := srv.Locations[locationIndex].Match
-	ordinal := 0
-	for i := 0; i < locationIndex; i++ {
-		if srv.Locations[i].Match.Type == target.Type && srv.Locations[i].Match.Path == target.Path {
-			ordinal++
-		}
-	}
-	return ordinal
 }
 
 // noMatchExplanation says why the request ends in the router's 404. There is no

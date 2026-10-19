@@ -5,7 +5,7 @@
 
 import { useState } from "react";
 import { Drawer } from "@/components/Drawer.tsx";
-import type { LocationWAF } from "@/api/client.ts";
+import type { LocationWAF, RouteTarget } from "@/api/client.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
@@ -19,6 +19,8 @@ import {
 export interface LocationWAFEditorProps {
   /** The per-location override being edited, from the security projection. */
   readonly target: LocationWAF;
+ readonly baseVersion?: string | undefined;
+ readonly selector?: RouteTarget | undefined;
   /**
    * Whether the location already has a [waf] override. When false (adding a
    * fresh override to a route that currently inherits the global policy) the
@@ -52,9 +54,9 @@ function routeTarget(w: LocationWAF) {
  * writes directly: it previews the patch, then hands the diff to the Config
  * editor for Validate → Diff → Apply.
  */
-export function LocationWAFEditor({ target, existing = true, onClose }: LocationWAFEditorProps) {
+export function LocationWAFEditor({ target, baseVersion, selector, existing = true, onClose }: LocationWAFEditorProps) {
   const [draft, setDraft] = useState<WAFOverrideDraft>(() => seedWAFOverride(target));
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(baseVersion);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const warnings = wafOverrideWarnings(draft);
@@ -68,13 +70,13 @@ export function LocationWAFEditor({ target, existing = true, onClose }: Location
   function save(): void {
     runPatch({
       op: "location_waf_set",
-      ...routeTarget(target),
+      ...(selector ?? routeTarget(target)),
       waf: wafOverrideToPatch(draft),
     });
   }
 
   function clearOverride(): void {
-    runPatch({ op: "location_waf_clear", ...routeTarget(target) });
+    runPatch({ op: "location_waf_clear", ...(selector ?? routeTarget(target)) });
   }
 
   return (

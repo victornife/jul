@@ -520,7 +520,7 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 				OK:             true,
 				Mode:           mode,
 				Version:        configVersion(data),
-				ServingVersion: configVersion(data),
+				ServingVersion: s.servingVersion(),
 				Message:        "Configuration validated and saved.",
 			}, nil
 		}

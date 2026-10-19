@@ -1918,7 +1918,7 @@ func TestCoordinatorStageDiscardRace(t *testing.T) {
 		BaseCtx:        context.Background(),
 		Path:           path,
 		Preflight:      pf,
-		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{EffectiveConfig: mustParse(t, original)} },
 		PlannedRestart: store,
 	}
 

@@ -19,6 +19,8 @@ import (
 
 // RouteProjection is a structured route for the Console v2 Routes panel.
 type RouteProjection struct {
+	// BaseVersion binds every selector in this block to this exact raw snapshot.
+	BaseVersion string               `json:"base_version"`
 	Name        string               `json:"name,omitempty"`
 	Listen      string               `json:"listen"`
 	ServerNames []string             `json:"server_names,omitempty"`
@@ -35,15 +37,16 @@ type LocationProjection struct {
 	Type   string `json:"type"`   // exact, prefix, regex
 	Action string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
 	Target string `json:"target,omitempty"`
-	// MatchOrdinal is the route's 0-based index among the locations of its
-	// server block sharing its match type and path, which predicates made
+	// MatchOrdinal is the route's 0-based index among the locations across all
+	// matching server blocks sharing its match type and path, which predicates made
 	// non-unique (ADR 0018 §14). A typed patch sends it, together with the
 	// base_version it was read at, to address one of several same-path routes.
 	//
 	// It is a revision-relative selector and not an identity: it must not be
 	// stored, shown as a resource name, or correlated across revisions. A
 	// durable route_id is projected separately below (ADR 0019 §4).
-	MatchOrdinal int `json:"match_ordinal"`
+	MatchOrdinal    int    `json:"match_ordinal"`
+	SelectorVersion string `json:"selector_version"`
 	// RouteID is the location's durable identity (ADR 0019 §4), present only
 	// when the route has one. Unlike MatchOrdinal, it is stable across
 	// revisions and is what diff/audit correlation and the external

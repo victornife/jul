@@ -34,6 +34,7 @@ import (
 	"jul/internal/observability"
 	"jul/internal/rbac"
 	"jul/internal/server"
+	"jul/internal/versionid"
 )
 
 // Purger clears cached responses. A nil Purger means caching is disabled.
@@ -84,7 +85,7 @@ type ApplyRequestContext struct {
 	Actor   string
 	TokenID string
 	// TokenDigest is retained only for internal confirmation binding. Never log
-	// or serialize it; TokenID remains the public audit identifier.
+	// or serialize it; TokenID is private ownership metadata; public encoders key it.
 	TokenDigest string
 	SourceIP    string
 
@@ -331,6 +332,8 @@ type ManagedApplyCompletion struct {
 // root. All fields are optional; endpoints degrade gracefully when a
 // dependency is nil.
 type Deps struct {
+	// EffectiveVersions protects public credential identifiers; production uses its durable context.
+	EffectiveVersions *versionid.Context
 	// OIDCClient is the application-owned generation-aware auth egress client.
 	OIDCClient *http.Client
 	// ObserveOIDCLogin receives only fixed allow/deny outcomes, never identity labels.
@@ -830,6 +833,7 @@ func New(cfg config.AdminConfig, log *slog.Logger, deps Deps) *Server {
 		health:         newConsoleHealth(),
 		quit:           make(chan struct{}),
 	}
+	s.audit.publicTokenID = s.publicTokenID
 	if cfg.TLS != nil && cfg.TLS.Enabled {
 		provider, err := server.NewSingleCertProvider(cfg.TLS.Cert, cfg.TLS.Key)
 		if err != nil {

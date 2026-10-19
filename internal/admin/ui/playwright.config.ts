@@ -87,7 +87,7 @@ export default defineConfig({
       ? [
           {
             command:
-              'cd ../../../ && go build -tags "console grpc" -o jul ./cmd/jul && ./jul serve -config testdata/console-e2e.toml',
+              'cd ../../../ && bash scripts/console-e2e-server.sh',
             url: `${realServerURL}/healthz`,
             reuseExistingServer: !process.env.CI,
             timeout: 60_000,

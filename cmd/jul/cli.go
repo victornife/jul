@@ -43,6 +43,8 @@ func dispatchSubcommand(args []string) (handled bool, code int) {
 		return false, 0
 	}
 	switch args[0] {
+	case "version-key":
+		return true, cmdVersionKey(args[1:])
 	case "lint":
 		return true, cmdLint(args[1:])
 	case "fmt":
@@ -74,6 +76,7 @@ func usage() {
 	fmt.Fprint(stderr, `jul - an NGINX-inspired HTTP edge server
 
 Usage:
+  jul version-key init [--file PATH]   provision the required private version key
   jul [flags]                          run the server (default)
   jul serve [-config f]                run the server (explicit form)
   jul check [-config f] [-json] [-quiet] [-skip-static-roots]
@@ -336,6 +339,7 @@ func writeUnifiedDiff(w io.Writer, a, b []string) {
 func cmdRun(args []string) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	versionKeyPath := fs.String("effective-version-key-file", "", "startup protected effective-version key file")
 	serveDir := fs.String("serve", "", "serve this directory of static files")
 	proxyTarget := fs.String("proxy", "", "reverse-proxy all requests to this target (URL, host:port, or :port)")
 	listen := fs.String("listen", config.DefaultZeroConfigListen, "address to listen on")
@@ -371,7 +375,7 @@ func cmdRun(args []string) int {
 
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
-	return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version)
+	return app.Serve(ctx, reloadSig, memorySource{name: name, cfg: cfg}, cfg, productName, version, app.WithEffectiveVersionKeyFile(*versionKeyPath))
 }
 
 // noticeExposedListen prints one line when `jul run` binds beyond loopback:
@@ -475,6 +479,7 @@ func isTTY(w io.Writer) bool {
 func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	versionKeyPath := fs.String("effective-version-key-file", "", "startup protected effective-version key file")
 	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -499,7 +504,7 @@ func cmdServe(args []string) int {
 	}
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
-	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
+	return app.Serve(ctx, reloadSig, src, cfg, productName, version, app.WithEffectiveVersionKeyFile(*versionKeyPath))
 }
 
 // cmdCheck validates structure, stateless runtime prerequisites, and the

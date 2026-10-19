@@ -158,7 +158,9 @@ func (r *Runtime) mapIdentity(claims map[string]any) (rbac.Identity, error) {
 	if role == "" {
 		return rbac.Identity{}, ErrUnauthenticated
 	}
-	return r.policy.ExternalIdentity("oidc-"+fp, role, fp)
+	// The derived public principal must not expose the unkeyed subject fingerprint.
+	public := r.versions.Digest("oidc-public-principal", []byte(fp))
+	return r.policy.ExternalIdentity("oidc-"+public[len(public)-32:], role, fp)
 }
 
 func validateMetadata(cfg config.AdminOIDCConfig, m metadata) (string, error) {

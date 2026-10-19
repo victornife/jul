@@ -15,7 +15,6 @@ import (
 	"jul/internal/adminapi"
 	"jul/internal/buildcaps"
 	"jul/internal/configcontract"
-	"jul/internal/server"
 )
 
 // externalEndpointList is derived from Catalog after the v1 write closure has
@@ -123,7 +122,10 @@ func (s *Server) servingVersion() string {
 	if snap.EffectiveConfig == nil {
 		return ""
 	}
-	return server.CanonicalVersion(snap.EffectiveConfig)
+	if snap.EffectiveVersion != "" {
+		return snap.EffectiveVersion
+	}
+	return s.deps.EffectiveVersions.Config(snap.EffectiveConfig)
 }
 
 func (s *Server) pendingRestartState() adminapi.PendingRestartState {
@@ -135,14 +137,15 @@ func (s *Server) pendingRestartState() adminapi.PendingRestartState {
 		return adminapi.PendingRestartState{}
 	}
 	return adminapi.PendingRestartState{
-		Pending:          true,
-		State:            st.State,
-		StagedAt:         st.StagedAt,
-		StagedVersion:    st.StagedVersion,
-		PersistedVersion: st.PersistedVersion,
-		ServingVersion:   st.ServingVersion,
-		Subsystems:       st.Subsystems,
-		DiscardAvailable: st.DiscardAvailable,
+		Pending:           true,
+		State:             st.State,
+		StagedAt:          st.StagedAt,
+		VersionComparison: st.VersionComparison,
+		StagedVersion:     st.StagedVersion,
+		PersistedVersion:  st.PersistedVersion,
+		ServingVersion:    st.ServingVersion,
+		Subsystems:        st.Subsystems,
+		DiscardAvailable:  st.DiscardAvailable,
 	}
 }
 

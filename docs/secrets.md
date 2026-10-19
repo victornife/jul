@@ -311,3 +311,12 @@ reporting never resolves a provider a second time. Ordinary restricted reads
 keep their projections. This is a comparison-output guarantee, not a claim that
 all status/export fingerprints or authorized mutation effects are confidential.
 See [comparison permissions](admin-api.md#configuration-comparison-permissions-645).
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

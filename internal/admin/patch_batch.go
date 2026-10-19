@@ -240,9 +240,16 @@ func executePatchBatch(
 	}
 
 	operationSummaries := make([]patchOperationSummary, 0, len(ops))
+	declarationsChanged := false
 	for i, op := range ops {
 		if err := ctx.Err(); err != nil {
 			return out, &patchCandidateError{Err: err}
+		}
+		// Published ordinals name the original revision. An earlier structural
+		// operation can shift them even though the batch CAS still matches.
+		// Refuse before dispatch rather than reinterpret a published selector.
+		if declarationsChanged && op.MatchOrdinal != nil {
+			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: errors.New("an ordinal selector cannot follow a declaration-changing operation in one batch; apply that operation first, then fetch a fresh route projection")}
 		}
 		// Route-targeting ops (everything except location_add, which has no
 		// target until it runs) are resolved against the *pre-op* candidate:
@@ -256,6 +263,10 @@ func executePatchBatch(
 		summary, applyErr := applyPatch(candidateConfig, op)
 		if applyErr != nil {
 			return out, &patchOperationError{OpIndex: i, Op: op.Op, Err: applyErr}
+		}
+		switch op.Op {
+		case "location_add", "location_remove", "location_set_match", "route_rename", "server_add", "server_remove":
+			declarationsChanged = true
 		}
 		opSummary := patchOperationSummary{
 			OpIndex: i,

@@ -54,12 +54,14 @@ func run() int {
 	}
 
 	var (
-		configPath  string
-		checkOnly   bool
-		showVersion bool
+		configPath     string
+		versionKeyPath string
+		checkOnly      bool
+		showVersion    bool
 	)
 	flag.Usage = remoteExtendedUsage
 	flag.StringVar(&configPath, "config", "server.toml", "path to the TOML configuration file")
+	flag.StringVar(&versionKeyPath, "effective-version-key-file", "", "startup protected effective-version key file")
 	flag.BoolVar(&checkOnly, "check", false, "validate the configuration and exit")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Parse()
@@ -105,5 +107,5 @@ func run() int {
 
 	ctx, reloadSig, stop := signals.Listen(context.Background())
 	defer stop()
-	return app.Serve(ctx, reloadSig, src, cfg, productName, version)
+	return app.Serve(ctx, reloadSig, src, cfg, productName, version, app.WithEffectiveVersionKeyFile(versionKeyPath))
 }

@@ -240,7 +240,7 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatal("break-glass unavailable")
 	}
-	if !strings.HasPrefix(id.TokenID, "oidc:") {
+	if !strings.HasPrefix(id.TokenID, "cid1:") {
 		t.Fatal("no stable audit identifier")
 	}
 	// Callback processing and audit must never expose codes/session IDs.

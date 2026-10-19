@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import signal
 import socket
 import subprocess
@@ -34,6 +35,8 @@ def main() -> None:
         check=True,
     )
 
+    env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str((package / "private" / "version.key").resolve()))
+    subprocess.run([binary, "version-key", "init"], env=env, check=True, stdout=subprocess.DEVNULL)
     site = package / "public"
     site.mkdir()
     (site / "index.html").write_text("<h1>Hello from Jul.IA</h1>\n")
@@ -45,6 +48,7 @@ def main() -> None:
         process = subprocess.Popen(
             [binary, "run", "--serve", "./public", "--listen", f"127.0.0.1:{port}"],
             cwd=package,
+            env=env,
             stdout=output,
             stderr=subprocess.STDOUT,
         )

@@ -124,13 +124,14 @@ func v1PendingRestartFromApply(st *PendingRestartStatus) *adminapi.PendingRestar
 		return nil
 	}
 	return &adminapi.PendingRestartState{
-		Pending:          st.State != "" && st.State != "none",
-		State:            st.State,
-		StagedAt:         st.StagedAt,
-		StagedVersion:    st.StagedVersion,
-		PersistedVersion: st.PersistedVersion,
-		ServingVersion:   st.ServingVersion,
-		Subsystems:       append([]string(nil), st.Subsystems...),
-		DiscardAvailable: st.DiscardAvailable,
+		Pending:           st.State != "" && st.State != "none",
+		State:             st.State,
+		StagedAt:          st.StagedAt,
+		VersionComparison: st.VersionComparison,
+		StagedVersion:     st.StagedVersion,
+		PersistedVersion:  st.PersistedVersion,
+		ServingVersion:    st.ServingVersion,
+		Subsystems:        append([]string(nil), st.Subsystems...),
+		DiscardAvailable:  st.DiscardAvailable,
 	}
 }

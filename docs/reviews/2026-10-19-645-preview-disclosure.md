@@ -144,10 +144,10 @@ Tests cover old stored payloads, cached raw data, same-token live permission los
 unknown initial identity, supplied plugin secrets and credential switching.
 Existing privileged source/edit/apply and accessible confirmation tests remain.
 
-## #644 / #580 coordination and scope limits
+## Initial #644 / #580 coordination and scope limits
 
-#644 remains open; its current implementation is draft PR #647, not merged into
-this base. It changes *effective* versions and explicitly leaves raw persisted/CAS
+At the initial recorded base, #644 was open and its implementation was draft
+PR #647, not merged into that base. It changes *effective* versions and explicitly leaves raw persisted/CAS
 versions unchanged. #645 does not depend on that unmerged work and does not import
 its branch. Raw fingerprints in a preview are protected here by denying the full
 response without raw authority.
@@ -281,3 +281,35 @@ prior mappings, denominator and review verdict are retained. Both the inventory
 check (zero errors) and its 22 regression tests pass; docs-check again passes
 2,385 checks with zero failures. Initial failed-job evidence:
 https://github.com/victornife/jul/actions/runs/39178903879/job/117827376748
+
+### Main integration before merge
+
+The maintainer subsequently authorized conflict resolution, merge of PR648 and a
+closure comment on issue645. Main advanced to
+`12fbbf100505ef84ad15762ff87a73c84c2a16bc`, containing merged PR646 (#643 route
+selectors) and PR647 (#644 effective-version confidentiality). This supersedes
+the initial draft-status snapshot above; it does not rewrite the original
+reproduction or earlier CI evidence.
+
+The integration retains both route-selector/effective-version fixes and the
+additional raw-read comparison gate. #644 protects effective desired/serving and
+public credential identifiers with a durable private context; raw persisted,
+base/CAS and history revisions keep their existing semantics. The raw comparison
+permission boundary remains necessary and unchanged. See ADR0025 and
+[effective-version migration and recovery](../effective-versions.md).
+
+The conflicting Console/secrets sections are both retained. OpenAPI and embedded
+Console assets are regenerated from the combined source; D11 retains both prior
+branch rebuild histories plus an explicit integration mapping. Final integration
+validation, exact source identity, CI and merge evidence are appended to the PR
+and issue closure records.
+
+Local integration verification passes the affected admin/API/RBAC/versionid Go
+suites in both lean and full profiles; TypeScript and ESLint; all 950 Console
+tests across 81 files and all existing coverage floors; two identical Console
+builds; generated-contract drift checks; D11 inventory (zero errors); and 2,398
+documentation checks with zero failures. Console coverage is 77.49% statements,
+75.09% branches, 66.72% functions and 79.68% lines. A separate reviewer inspected
+all auto-merged source intersections and the manual documentation/history
+resolutions and found no integration blocker. These results do not substitute
+for the final combined-head CI/merge evidence recorded externally.

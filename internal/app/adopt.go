@@ -372,7 +372,7 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	}()
 
 	persistedVersion := server.CanonicalVersion(cfg)
-	desiredVersion := server.CanonicalVersion(pfResult.Candidate.Effective)
+	desiredVersion := c.Versions.Config(pfResult.Candidate.Effective)
 	id := c.nextID()
 
 	result := ApplyResult{
@@ -465,7 +465,7 @@ func (c *ConfigApplyCoordinator) AdoptExternal(reqCtx admin.ApplyRequestContext,
 	}
 
 	if c.LiveSnapshot != nil {
-		result.ServingVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+		result.ServingVersion = c.currentServingVersion()
 	}
 
 	rawDigest := sha256.Sum256(raw)
@@ -589,7 +589,7 @@ func (c *ConfigApplyCoordinator) adoptAndStageLockedWithCommit(origin, baselineD
 
 	liveVersion := ""
 	if c.LiveSnapshot != nil {
-		liveVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+		liveVersion = c.currentServingVersion()
 	}
 	marker := PlannedRestartMarker{
 		BaseServingVersion:     liveVersion,

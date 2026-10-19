@@ -28,7 +28,7 @@ func (s *Server) prepareOIDC(out *authSnapshot) error {
 		out.oidc = old.oidc
 		return nil
 	}
-	runtime, err := adminoidc.New(out.cfg.OIDC, out.policy, s.deps.OIDCClient)
+	runtime, err := adminoidc.New(out.cfg.OIDC, out.policy, s.deps.OIDCClient, s.deps.EffectiveVersions)
 	if err != nil {
 		return err
 	}

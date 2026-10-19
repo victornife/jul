@@ -108,10 +108,16 @@ def request(url, token=None):
 
 def exercise(binary, configuration, traffic, admin, token, full):
     command(binary, "check", "-config", configuration)
+    # A source harness can also validate an older released package. Only newer
+    # binaries advertise this command; any supported init failure is fatal.
+    completion = subprocess.run([str(binary), "completion", "bash"], capture_output=True, text=True, check=True).stdout
+    env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str((Path(configuration).parent / "private" / "version.key").resolve()))
+    if "version-key" in completion:
+        subprocess.run([str(binary), "version-key", "init"], env=env, check=True, stdout=subprocess.DEVNULL)
     with tempfile.TemporaryFile(mode="w+t") as output:
         options = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {}
         process = subprocess.Popen([str(binary), "-config", str(configuration)], stdout=output,
-                                   stderr=subprocess.STDOUT, **options)
+                                   stderr=subprocess.STDOUT, env=env, **options)
         try:
             deadline = time.monotonic() + 30
             while True:

@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/sys/windows/svc"
 
+	"jul/internal/app"
 	"jul/internal/config"
 )
 
@@ -32,9 +33,12 @@ func runService() (handled bool, exitCode int) {
 	// from the image path arguments, defaulting to server.toml.
 	fs := flag.NewFlagSet(serviceName, flag.ContinueOnError)
 	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
-	_ = fs.Parse(os.Args[1:])
+	versionKeyPath := fs.String("effective-version-key-file", "", "startup protected effective-version key file")
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		return true, 2
+	}
 
-	h := &edgeService{configPath: *configPath}
+	h := &edgeService{configPath: *configPath, versionKeyPath: *versionKeyPath}
 	if err := svc.Run(serviceName, h); err != nil {
 		fmt.Fprintf(os.Stderr, "service %q failed: %v\n", serviceName, err)
 		return true, 1
@@ -45,8 +49,9 @@ func runService() (handled bool, exitCode int) {
 // edgeService adapts the server lifecycle to the Windows service control
 // protocol.
 type edgeService struct {
-	configPath string
-	exitCode   int
+	configPath     string
+	versionKeyPath string
+	exitCode       int
 	// serveFn, when non-nil, replaces the call to serve() inside Execute.
 	// It is used by unit tests to avoid binding real listeners.
 	serveFn func(context.Context, <-chan struct{}, config.Source, *config.Config) int
@@ -76,7 +81,7 @@ func (s *edgeService) Execute(_ []string, r <-chan svc.ChangeRequest, status cha
 			done <- s.serveFn(ctx, nil, src, cfg)
 			return
 		}
-		done <- serve(ctx, nil, src, cfg)
+		done <- app.Serve(ctx, nil, src, cfg, productName, version, app.WithEffectiveVersionKeyFile(s.versionKeyPath))
 	}()
 
 	status <- svc.Status{State: svc.Running, Accepts: accepted}

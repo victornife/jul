@@ -141,10 +141,19 @@ jobs:
       # and listener drain timing (the CQ-1 class of intermittent hang). Race is
       # not run here — it needs a CGO C toolchain and is covered on the Linux
       # `race` job — but the goroutine-leak checks (goleak) still run.
+      - name: Private version-key lifecycle on the native filesystem
+        run: go test -v ./internal/versionid
       - name: go build
         run: go build -tags "${{ matrix.tags }}" ./...
       - name: go test
-        run: go test -tags "${{ matrix.tags }}" ./...
+        run: go test -tags "${{ matrix.tags }}" "-coverprofile=windows-${{ matrix.profile }}.cover" ./...
+      - name: retain native Windows coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-windows-coverage-${{ matrix.profile }}
+          path: windows-${{ matrix.profile }}.cover
+          if-no-files-found: error
 
   test-macos:
     name: test-macos (${{ matrix.profile }})
@@ -191,6 +200,8 @@ jobs:
             -ldflags "-s -w -X main.version=ci-smoke" \
             -tags "${{ matrix.tags }}" -o "stage/$name/jul" ./cmd/jul
           cp README.md SECURITY.md server.toml "stage/$name/"
+          mkdir -p "stage/$name/docs"
+          cp docs/effective-versions.md "stage/$name/docs/"
           archive="dist/$name.tar.gz"
           tar -C stage -czf "$archive" "$name"
           shasum -a 256 "$archive" | awk '{print $1}' > "$archive.sha256"
@@ -285,6 +296,7 @@ jobs:
         run: go test -race -p 2 -tags "${{ env.FULL_TAGS }}" ./...
 
   coverage:
+    needs: test-windows
     name: coverage gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -303,6 +315,12 @@ jobs:
           cache: true
       - name: go test -coverprofile
         run: go test -tags "${{ env.FULL_TAGS }}" -coverprofile=cover.out ./...
+      - name: Native platform coverage for the complete changed diff
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: native-windows-coverage-*
+          path: native-coverage
+          merge-multiple: true
       - name: Load-generator regressions and complete changed Go coverage
         shell: bash
         run: |
@@ -311,7 +329,7 @@ jobs:
           go test -race -count=1 -coverprofile=http-load.cover scripts/burn-in-load.go scripts/burn-in-load_test.go
           python3 scripts/test_check_added_go_coverage.py
           git diff --unified=0 origin/main...HEAD -- '*.go' | python3 scripts/strip_moved_lines.py > stream-load.diff
-          python3 scripts/check-added-go-coverage.py --diff stream-load.diff --profile cover.out --profile stream-load.cover --profile http-load.cover > stream-load-coverage.json
+          python3 scripts/check-added-go-coverage.py --diff stream-load.diff --profile cover.out --profile stream-load.cover --profile http-load.cover --profile native-coverage/windows-lean.cover --profile native-coverage/windows-full.cover > stream-load-coverage.json
       - name: signed-URL policy coverage (separate guest module)
         shell: bash
         run: |
@@ -406,7 +424,7 @@ jobs:
       - name: upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
-          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover,./http-load.cover
+          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover,./http-load.cover,./native-coverage/windows-lean.cover,./native-coverage/windows-full.cover
           disable_search: true
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}

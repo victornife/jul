@@ -16,6 +16,7 @@ import (
 	"jul/internal/atomicfile"
 	"jul/internal/config"
 	"jul/internal/server"
+	"jul/internal/versionid"
 )
 
 // ApplyMode selects how a managed configuration apply should behave.
@@ -138,6 +139,8 @@ const (
 // atomically, suppresses watcher echoes, submits correlated reloads, waits for
 // results, and restores the previous bytes when a pre-Publish failure occurs.
 type ConfigApplyCoordinator struct {
+	// Versions is immutable and loaded before startup. Nil is boot-scoped for internal callers.
+	Versions       *versionid.Context
 	BaseCtx        context.Context
 	Path           string
 	Preflight      *Preflight
@@ -622,7 +625,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		}
 	}()
 	persistedVersion := server.CanonicalVersion(candidate.Raw)
-	desiredVersion := server.CanonicalVersion(candidate.Effective)
+	desiredVersion := c.Versions.Config(candidate.Effective)
 	rawDigest := sha256.Sum256(data)
 	// AC-08/R15-01: reuse the ONE absolute deadline bound at HTTP admission.
 	// transactionStarted is the admission time so provisional results and the
@@ -797,7 +800,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 				ID:             id,
 				Source:         server.ReloadSourceAdmin,
 				DesiredVersion: desiredVersion,
-				ServingVersion: server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig),
+				ServingVersion: c.currentServingVersion(),
 				Outcome:        server.ReloadNotApplied,
 				Persisted:      true,
 				Published:      false,
@@ -992,4 +995,18 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		// correlate the async finalizer's later terminal result (M-05).
 		return c.provisionalResult(id, mode, persistedVersion, desiredVersion, transactionStarted, true, "Configuration saved; the live reload is still in flight. Check the runtime overview for the final outcome."), nil
 	}
+}
+
+// currentServingVersion reads the same immutable snapshot as serving state.
+// Internal test/embedding snapshots without a cached version retain a keyed
+// fallback; the production server publishes the version with its configuration.
+func (c *ConfigApplyCoordinator) currentServingVersion() string {
+	if c.LiveSnapshot == nil {
+		return ""
+	}
+	snapshot := c.LiveSnapshot()
+	if snapshot.EffectiveVersion != "" {
+		return snapshot.EffectiveVersion
+	}
+	return c.Versions.Config(snapshot.EffectiveConfig)
 }

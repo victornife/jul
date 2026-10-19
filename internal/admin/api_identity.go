@@ -58,7 +58,7 @@ func (s *Server) handleIdentity(w http.ResponseWriter, r *http.Request) {
 		SessionExpiresAt: expiry,
 		Principal:        id.Principal,
 		Role:             id.Role,
-		TokenID:          id.TokenID,
+		TokenID:          s.publicTokenID(id.TokenID),
 		Permissions:      expandIdentityPermissions(id),
 		Legacy:           id.Legacy,
 	})

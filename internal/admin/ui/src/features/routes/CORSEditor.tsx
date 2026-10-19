@@ -14,6 +14,7 @@ import { corsDraftToPatch, corsWarnings, seedCORSDraft, type CORSDraft } from "@
 export interface CORSEditorProps {
   /** The location whose CORS policy is being edited. */
   readonly target: RouteTarget;
+  readonly baseVersion?: string | undefined;
   /** The location's current policy, from the route projection, used to seed the form. */
   readonly seed?: LocationCORSState | undefined;
   /** Whether the location already has a CORS policy. Defaults to whether a seed was supplied. */
@@ -31,9 +32,9 @@ export interface CORSEditorProps {
  * directly: it previews the patch, then hands the diff to the Config editor for
  * Validate → Diff → Apply.
  */
-export function CORSEditor({ target, seed, existing = Boolean(seed), onClose }: CORSEditorProps) {
+export function CORSEditor({ target, baseVersion, seed, existing = Boolean(seed), onClose }: CORSEditorProps) {
   const [draft, setDraft] = useState<CORSDraft>(() => seedCORSDraft(seed));
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(baseVersion);
   const { has } = usePermission();
   const canWrite = has("config:write");
 

@@ -232,7 +232,8 @@ func TestFileStoreDiscardSafeRestoresBytes(t *testing.T) {
 		State:              plannedRestartStateStaged,
 		ConfigPath:         configPath,
 		BaseRawSHA256:      sha256Hex(original),
-		BaseServingVersion: "v1",
+		BaseServingVersion: server.EffectiveVersion(config.ProxyTarget("http://127.0.0.1:9000", ":8080")),
+		StagedVersion:      server.EffectiveVersion(config.ProxyTarget("http://127.0.0.1:9000", ":8081")),
 		StagedRawSHA256:    sha256Hex(staged),
 	}
 	raw, _ := marshalMarker(marker)
@@ -244,7 +245,7 @@ func TestFileStoreDiscardSafeRestoresBytes(t *testing.T) {
 	}
 	store.pending = true
 
-	restored, err := store.DiscardSafe("v1")
+	restored, err := store.DiscardSafe(server.EffectiveVersion(config.ProxyTarget("http://127.0.0.1:9000", ":8080")))
 	if err != nil {
 		t.Fatalf("DiscardSafe: %v", err)
 	}
@@ -638,7 +639,7 @@ func TestStageDiscardRoundtripRestoresExactBytes(t *testing.T) {
 		BaseCtx:        context.Background(),
 		Path:           configPath,
 		Preflight:      p,
-		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{EffectiveConfig: mustParse(t, seed)} },
 		PlannedRestart: store,
 	}
 

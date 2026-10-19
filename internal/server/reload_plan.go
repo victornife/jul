@@ -41,8 +41,9 @@ import (
 // On any failure before Publish, Abort must be called to release all candidate
 // resources without touching live state.
 type ReloadPlan struct {
-	s     *Server
-	start time.Time
+	EffectiveVersion string
+	s                *Server
+	start            time.Time
 	// ctx bounds the pre-publish phases. Post-publish work uses the process
 	// context because Publish is the point of no return.
 	ctx context.Context
@@ -169,6 +170,7 @@ func (p *ReloadPlan) Resolve() error {
 			}
 			p.Candidate = candidate
 		}
+		p.EffectiveVersion = p.s.versions.Config(p.Candidate.Effective)
 		p.CandidateFP = lifecycle.ComputeFingerprint(p.Candidate.Effective)
 		p.newAddrs = setOf(uniqueListenAddrs(p.Candidate.Effective.Servers))
 		return nil
@@ -398,11 +400,15 @@ func (p *ReloadPlan) publishRuntimeState() {
 	if g := p.s.handlers.Load(); g != nil {
 		gen = g.genID
 	}
+	if p.EffectiveVersion == "" {
+		p.EffectiveVersion = p.s.versions.Config(p.s.cfg)
+	}
 	rs := &runtimeState{
-		EffectiveConfig: p.s.cfg,
-		RawConfig:       p.s.rawCfg,
-		Listeners:       p.s.boundListenerSnapshot(),
-		Generation:      gen,
+		EffectiveVersion: p.EffectiveVersion,
+		EffectiveConfig:  p.s.cfg,
+		RawConfig:        p.s.rawCfg,
+		Listeners:        p.s.boundListenerSnapshot(),
+		Generation:       gen,
 	}
 	p.s.runtimeState.Store(rs)
 }

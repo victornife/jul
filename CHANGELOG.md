@@ -9,6 +9,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Security
+
+- Protect effective desired/serving versions with a durable random HMAC key
+  (#644). Raw configuration CAS remains unchanged. Public authentication
+  generations and credential identifiers no longer expose unkeyed verifiers.
+  **Upgrade prerequisite:** explicitly provision and back up the private key
+  before serving; see [migration and recovery](docs/effective-versions.md).
+
+
 ### Added
 
 - Alpha offered-ALPN TCP passthrough routing (#434): ordered exact-SNI/wildcard
@@ -70,6 +79,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 
 ### Fixed
+
+- Route selectors now count declaration order across matching server blocks
+  (#643). Console edits use the projection revision. Old cross-block selectors
+  and batches that could shift later ordinal targets are refused before writes;
+  refresh cached Console/API projections after upgrading.
 
 - Upgrade quic-go from v0.63.0 to v0.64.0 for HTTP/3 header-buffer allocation
   hardening and QUIC congestion/recovery, MTU and path-validation fixes. Go
