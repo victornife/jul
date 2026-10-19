@@ -74,7 +74,7 @@ type SharingPlanFinding struct {
 }
 
 // SharingEntryDelta is the per-entry audience-delta classification and intent
-// assessment in a plan response (spec §4.5, §9.5).
+// assessment in a plan response (spec §4.5, §8.4, §9.5, ADR 0026 #642 amendment).
 type SharingEntryDelta struct {
 	Ref                       SharingEntryRef      `json:"ref"`
 	DisplayLabel              string               `json:"display_label"`
@@ -85,6 +85,9 @@ type SharingEntryDelta struct {
 	DeclaredModeWidened       bool                 `json:"declared_mode_widened"`
 	RequiresAcknowledgement   bool                 `json:"requires_acknowledgement"`
 	TriggersRetirement        bool                 `json:"triggers_retirement"`
+	KeepOpenEligible          bool                 `json:"keep_open_eligible"`
+	OpenExchangesSnapshot     int                  `json:"open_exchanges_snapshot"`
+	RetirementBound           string               `json:"retirement_bound,omitempty"`
 	Reasons                   []string             `json:"reasons,omitempty"`
 	IntentFindings            []SharingPlanFinding `json:"intent_findings,omitempty"`
 	ProviderChecklistRequired bool                 `json:"provider_checklist_required"`
@@ -157,6 +160,14 @@ func (s *Server) BuildSharingPlanReport(
 	blockStructureChangedAfter := computeBlockStructureChanged(beforeRaw, afterRaw)
 	hiddenPluginsChanged, hiddenUpstreamsChanged := hiddenOpsTouched(ops, callerHasRaw)
 
+	var openByCoord map[[2]int]int
+	var openByRouteID map[string]int
+	if s != nil && s.deps.LiveSnapshot != nil {
+		if ex := s.deps.LiveSnapshot().Exchanges; ex != nil {
+			openByCoord, openByRouteID = ex.SnapshotCounts()
+		}
+	}
+
 	var allFindings []SharingPlanFinding
 	var ackEntries []string
 	anyProviderChecklist := false
@@ -174,6 +185,16 @@ func (s *Server) BuildSharingPlanReport(
 			beforeFindingsByLoc,
 			afterFindingsByLoc,
 		)
+		if pair.before != nil {
+			openCount := 0
+			if rid := routeID(&pair.before.loc); rid != "" && openByRouteID != nil {
+				openCount = openByRouteID[rid]
+			}
+			if openCount == 0 && openByCoord != nil {
+				openCount = openByCoord[[2]int{pair.before.srvIdx, pair.before.locIdx}]
+			}
+			delta.OpenExchangesSnapshot = openCount
+		}
 		// Include all entries that either changed, have intent findings, or were
 		// expanded by §9.5.
 		if delta.Class != AudienceDeltaUnchanged || len(delta.IntentFindings) > 0 || delta.DeclaredModeBefore != delta.DeclaredModeAfter {
@@ -833,6 +854,8 @@ func classifyEntryPair(
 			DeclaredModeWidened:       false,
 			RequiresAcknowledgement:   false,
 			TriggersRetirement:        true,
+			KeepOpenEligible:          false,
+			RetirementBound:           "2s",
 			Reasons:                   []string{"entry removed"},
 			ProviderChecklistRequired: entryRequiresProviderChecklist(beforeRaw, beforeEff, b.srvIdx, b.locIdx),
 		}
@@ -917,7 +940,14 @@ func classifyEntryPair(
 		record(cls, why)
 	}
 
-	// 9. Action / target / upstream changes.
+	// 9. Outermost withdrawal gate (withdrawn) and action / target / upstream changes.
+	if b.loc.Withdrawn != a.loc.Withdrawn {
+		if a.loc.Withdrawn {
+			record(AudienceDeltaNarrowed, "location withdrawal gate enabled")
+		} else {
+			record(AudienceDeltaWidened, "location withdrawal gate cleared")
+		}
+	}
 	if b.loc.Deny != a.loc.Deny {
 		if a.loc.Deny {
 			record(AudienceDeltaNarrowed, "location deny enabled")
@@ -942,7 +972,16 @@ func classifyEntryPair(
 		afterFindingsByLoc[[2]int{a.srvIdx, a.locIdx}],
 	)
 	requiresAck := finalClass == AudienceDeltaWidened || finalClass == AudienceDeltaUncertain || modeWidened
-	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged
+	hasNarrowedConstituent := slices.Contains(classes, AudienceDeltaNarrowed) || a.loc.Withdrawn || a.loc.Deny
+	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged || hasNarrowedConstituent
+	// Point 1 (ADR 0026 #642 amendment): keep_open_eligible is defined from
+	// constituent reasons, never from combined class alone. Any mandatory
+	// tightening, withdrawal, or removal overrides keep_open_entries.
+	keepOpenEligible := triggersRetirement && !hasNarrowedConstituent
+	retirementBound := ""
+	if triggersRetirement {
+		retirementBound = "2s"
+	}
 
 	return SharingEntryDelta{
 		Ref:                       ref,
@@ -954,6 +993,8 @@ func classifyEntryPair(
 		DeclaredModeWidened:       modeWidened,
 		RequiresAcknowledgement:   requiresAck,
 		TriggersRetirement:        triggersRetirement,
+		KeepOpenEligible:          keepOpenEligible,
+		RetirementBound:           retirementBound,
 		Reasons:                   reasons,
 		IntentFindings:            findings,
 		ProviderChecklistRequired: entryRequiresProviderChecklist(beforeRaw, beforeEff, b.srvIdx, b.locIdx) || entryRequiresProviderChecklist(afterRaw, afterEff, a.srvIdx, a.locIdx),

@@ -278,6 +278,7 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc
 		"cors":                  loc.CORS,
 		"auth":                  loc.Auth,
 		"require_client_cert":   loc.RequireClientCert,
+		"withdrawn":             loc.Withdrawn,
 		"deny":                  loc.Deny,
 		"action":                locationAction(&loc),
 		"target":                locationTarget(&loc),
@@ -308,6 +309,7 @@ func IsPatchOpRepeatable(op patchRequest) bool {
 		"location_set_auth",
 		"location_set_sharing",
 		"location_clear_sharing",
+		"location_set_withdrawn",
 		"location_set_action",
 		"location_set_transcode",
 		"location_set_predicates",
@@ -597,7 +599,7 @@ func deriveClientCertCheckKind(c *config.Config, srv config.ServerConfig, loc co
 }
 
 func isLocationWithdrawnByConfig(loc config.LocationConfig) bool {
-	if loc.Deny {
+	if loc.Withdrawn || loc.Deny {
 		return true
 	}
 	if loc.Auth == nil || len(loc.Auth.Deny) == 0 {

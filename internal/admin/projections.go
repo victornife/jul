@@ -64,6 +64,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				Compression:       c.Compression.IsEnabled(),
 				Secure:            srv.TLS != nil && srv.TLS.Enabled,
 				RequireClientCert: loc.RequireClientCert,
+				Withdrawn:         loc.Withdrawn,
 			}
 			if loc.RateLimit != nil {
 				lp.RateLimitDetail = &RateLimitProjection{

@@ -29,8 +29,9 @@ import (
 // patchApplyRequest is a server-side, atomic, conflict-checked batch of patch
 // operations. Empty BaseVersion is the existing explicit force mode.
 type patchApplyRequest struct {
-	BaseVersion string         `json:"base_version,omitempty"`
-	Ops         []patchRequest `json:"ops"`
+	BaseVersion     string         `json:"base_version,omitempty"`
+	Ops             []patchRequest `json:"ops"`
+	KeepOpenEntries []string       `json:"keep_open_entries,omitempty"`
 }
 
 // conflictResponse is the 409 body returned when the current editable
@@ -346,10 +347,11 @@ func (s *Server) handleConfigPatchApply(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.applyPatchOps(w, r, patchApplyParams{
-		ops:         req.Ops,
-		baseVersion: req.BaseVersion,
-		mode:        mode,
-		auditAction: auditActionPatch,
+		ops:             req.Ops,
+		baseVersion:     req.BaseVersion,
+		keepOpenEntries: req.KeepOpenEntries,
+		mode:            mode,
+		auditAction:     auditActionPatch,
 	})
 }
 
@@ -363,10 +365,11 @@ const (
 
 // patchApplyParams is one already-decoded, already-authorized batch apply.
 type patchApplyParams struct {
-	ops         []patchRequest
-	baseVersion string
-	mode        string
-	auditAction string
+	ops             []patchRequest
+	baseVersion     string
+	keepOpenEntries []string
+	mode            string
+	auditAction     string
 }
 
 // applyPatchOps runs the shared apply pipeline: fresh baseline under applyMu,
@@ -378,6 +381,9 @@ func (s *Server) applyPatchOps(w http.ResponseWriter, r *http.Request, params pa
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
+	if len(params.keepOpenEntries) > 0 {
+		reqCtx.KeepOpenEntries = append(reqCtx.KeepOpenEntries, params.keepOpenEntries...)
+	}
 	s.bindManagedApplyDeadline(&reqCtx)
 
 	// Prefer the correlated managed path; retain the legacy closure only for

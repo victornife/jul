@@ -162,6 +162,33 @@ func AddrServesTLS(servers []config.ServerConfig, addr string) bool {
 	return false
 }
 
+func listenerClientAuthRequired(servers []config.ServerConfig, addr string) bool {
+	for _, srv := range servers {
+		if srv.Listen == addr && srv.TLS != nil && srv.TLS.Enabled && srv.TLS.ClientAuth != nil {
+			if strings.EqualFold(strings.TrimSpace(srv.TLS.ClientAuth.Mode), "require") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func listenerClientCertForward(servers []config.ServerConfig, addr string, cur config.ServerConfig) string {
+	if cur.TLS != nil && cur.TLS.ClientAuth != nil {
+		if f := strings.ToLower(strings.TrimSpace(cur.TLS.ClientAuth.ForwardCertificate)); f != "" && f != middleware.ForwardCertNone {
+			return f
+		}
+	}
+	for _, srv := range servers {
+		if srv.Listen == addr && srv.TLS != nil && srv.TLS.Enabled && srv.TLS.ClientAuth != nil {
+			if f := strings.ToLower(strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate)); f != "" && f != middleware.ForwardCertNone {
+				return f
+			}
+		}
+	}
+	return middleware.ForwardCertNone
+}
+
 // IndexUpstreams builds a name -> upstream lookup table.
 func IndexUpstreams(ups []config.UpstreamConfig) map[string]config.UpstreamConfig {
 	m := make(map[string]config.UpstreamConfig, len(ups))

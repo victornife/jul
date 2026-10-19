@@ -933,6 +933,7 @@ return = 200
 | `redirect` | string | Target URL (uses `return` code or 302) |
 | `return` | int | Status for a redirect or bare return |
 | `deny` | bool | Reject matching requests with 403 |
+| `withdrawn` | bool | Outermost stage-0 withdrawal gate (`403 Forbidden` with `Cache-Control: no-store` before rewrites, plugins, preflight, client-cert, auth, WAF, cache, and action; preserves the route's action and credentials for single-edit recovery; triggers `2s` stream/WebSocket retirement on narrowing) |
 | `rewrites` | array | Regex rewrite rules (`pattern`, `replacement`, `flag`) |
 | `cache` | bool | Enable response caching for this location (requires `[cache].enabled`) |
 | `client_max_body_size` | size | Override the server default for this location |

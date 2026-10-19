@@ -307,3 +307,41 @@ func TestValidateRuntimeConfig(t *testing.T) {
 		t.Error("ValidateRuntimeConfig(invalid) = nil, want an error")
 	}
 }
+
+func TestListenerClientAuthHelpers(t *testing.T) {
+	srvs := []config.ServerConfig{
+		{
+			Listen: "127.0.0.1:8443",
+			TLS: &config.TLSConfig{
+				Enabled: true,
+				ClientAuth: &config.ClientAuthConfig{
+					Mode:               "require",
+					CAFile:             "ca.pem",
+					ForwardCertificate: "chain",
+				},
+			},
+		},
+		{
+			Listen: "127.0.0.1:8443",
+		},
+	}
+	if !listenerClientAuthRequired(srvs, "127.0.0.1:8443") {
+		t.Fatal("expected listenerClientAuthRequired=true on shared TLS listener")
+	}
+	if listenerClientAuthRequired(srvs, "127.0.0.1:8080") {
+		t.Fatal("expected listenerClientAuthRequired=false on plain listener")
+	}
+	if got := listenerClientCertForward(srvs, "127.0.0.1:8443", srvs[1]); got != "chain" {
+		t.Fatalf("listenerClientCertForward from sibling = %q, want chain", got)
+	}
+	curLeaf := config.ServerConfig{
+		Listen: "127.0.0.1:8443",
+		TLS:    &config.TLSConfig{Enabled: true, ClientAuth: &config.ClientAuthConfig{ForwardCertificate: "leaf"}},
+	}
+	if got := listenerClientCertForward(srvs, "127.0.0.1:8443", curLeaf); got != "leaf" {
+		t.Fatalf("listenerClientCertForward from cur = %q, want leaf", got)
+	}
+	if got := listenerClientCertForward(srvs, "127.0.0.1:8080", config.ServerConfig{}); got != "none" {
+		t.Fatalf("listenerClientCertForward none = %q, want none", got)
+	}
+}

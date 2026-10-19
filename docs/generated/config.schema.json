@@ -1835,6 +1835,10 @@
                     }
                   },
                   "type": "object"
+                },
+                "withdrawn": {
+                  "description": "Withdrawn enables the outermost per-location withdrawal gate (ADR 0026 #642 amendment, spec §8.4/§9.3)",
+                  "type": "boolean"
                 }
               },
               "type": "object"

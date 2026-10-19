@@ -23,9 +23,10 @@ import (
 // against, and an optional post-verification callback enforcing CRL revocation
 // and a SAN allow-list. A nil bundle means client authentication is off.
 type clientAuthBundle struct {
-	mode   tls.ClientAuthType
-	pool   *x509.CertPool
-	verify func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error
+	mode     tls.ClientAuthType
+	pool     *x509.CertPool
+	sanAllow []string
+	verify   func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error
 	// verifyConn is the data-plane check. It runs on full and resumed
 	// handshakes, so a certificate revoked or de-trusted by a reload cannot keep
 	// resuming a session ticket issued before it.
@@ -110,10 +111,76 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 	return &clientAuthBundle{
 		mode:       mode,
 		pool:       pool,
+		sanAllow:   sanAllow,
 		verify:     makeClientCertVerifier(sanAllow, crls, onResult),
 		verifyConn: makeClientConnVerifier(sanAllow, crls, onResult),
 		crls:       crls,
 	}, nil
+}
+
+// verifyPeerChain re-evaluates an established connection's peer certificates
+// against this bundle's current mode, CA pool, CRLs, and SAN allow-list (#642, #563).
+func (b *clientAuthBundle) verifyPeerChain(cs *tls.ConnectionState) error {
+	if b == nil || b.mode == tls.NoClientCert {
+		return nil
+	}
+	if cs == nil || len(cs.PeerCertificates) == 0 {
+		if b.mode == tls.RequireAndVerifyClientCert {
+			return errors.New("client certificate required")
+		}
+		return nil
+	}
+	leaf := cs.PeerCertificates[0]
+	if b.pool == nil {
+		return errors.New("client CA pool is empty")
+	}
+	intermediates := x509.NewCertPool()
+	for _, ic := range cs.PeerCertificates[1:] {
+		intermediates.AddCert(ic)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         b.pool,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}); err != nil {
+		return fmt.Errorf("client certificate CA verification failed: %w", err)
+	}
+	return checkClientLeaf(leaf, b.sanAllow, b.crls)
+}
+
+// verifyRequest evaluates cs and a location's require_client_cert flag against
+// this bundle's current policy (#642, #563).
+func (b *clientAuthBundle) verifyRequest(cs *tls.ConnectionState, locRequire bool) (bool, error) {
+	if b == nil || b.mode == tls.NoClientCert {
+		if locRequire {
+			return false, errors.New("client certificate required")
+		}
+		return false, nil
+	}
+	mustHaveCert := b.mode == tls.RequireAndVerifyClientCert || locRequire
+	if cs == nil || len(cs.PeerCertificates) == 0 {
+		if mustHaveCert {
+			return false, errors.New("client certificate required")
+		}
+		return false, nil
+	}
+	if err := b.verifyPeerChain(cs); err != nil {
+		if mustHaveCert {
+			return false, err
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+// BuildClientCertVerifier compiles the per-request client-certificate verifier
+// for addr from servers (#642, #563).
+func BuildClientCertVerifier(servers []config.ServerConfig, addr string) (func(*tls.ConnectionState, bool) (bool, error), error) {
+	bundle, err := clientAuthForAddr(servers, addr, nil)
+	if err != nil {
+		return nil, err
+	}
+	return bundle.verifyRequest, nil
 }
 
 // ClientAuthBundle is the resolved mutual-TLS configuration for one TLS

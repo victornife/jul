@@ -112,3 +112,50 @@ func TestClientCertPopulatesIdentity(t *testing.T) {
 		t.Errorf("Fingerprint = %q, want 64 hex chars", got.Fingerprint)
 	}
 }
+
+func TestClientCertWithVerifierAndForwardModes(t *testing.T) {
+	leaf := testLeaf(t, "bob", "bob.example.com")
+	inter := testLeaf(t, "inter")
+
+	var gotID *PeerCertIdentity
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotID = PeerCertIdentityFrom(r.Context())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// 1. Context verifier returns verified=true -> populates identity and chain.
+	hChain := ClientCertWithVerifier(true, ForwardCertChain, nil)(next)
+	req1 := httptest.NewRequest(http.MethodGet, "https://x/", nil)
+	req1.TLS = &tls.ConnectionState{PeerCertificates: []*x509.Certificate{leaf, inter}}
+	req1 = req1.WithContext(WithClientCertVerifier(req1.Context(), func(_ *tls.ConnectionState, _ bool) (bool, error) {
+		return true, nil
+	}))
+	rec1 := httptest.NewRecorder()
+	hChain.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusOK || gotID == nil || len(gotID.Raw) == 0 || len(gotID.Chain) != 1 {
+		t.Fatalf("expected 200 with chain identity, got code=%d id=%+v", rec1.Code, gotID)
+	}
+
+	// 2. Fallback verifier returns verified=false, nil (optional cert absent/unverified) -> proceeds without identity.
+	gotID = nil
+	hFallbackOpt := ClientCertWithVerifier(false, ForwardCertLeaf, func(_ *tls.ConnectionState, _ bool) (bool, error) {
+		return false, nil
+	})(next)
+	req2 := httptest.NewRequest(http.MethodGet, "https://x/", nil)
+	rec2 := httptest.NewRecorder()
+	hFallbackOpt.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK || gotID != nil {
+		t.Fatalf("expected 200 with nil identity on optional unverified cert, got code=%d id=%+v", rec2.Code, gotID)
+	}
+
+	// 3. Fallback verifier returns error -> 403 Forbidden.
+	hFallbackRej := ClientCertWithVerifier(true, ForwardCertLeaf, func(_ *tls.ConnectionState, _ bool) (bool, error) {
+		return false, http.ErrAbortHandler
+	})(next)
+	req3 := httptest.NewRequest(http.MethodGet, "https://x/", nil)
+	rec3 := httptest.NewRecorder()
+	hFallbackRej.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when verifier rejects, got %d", rec3.Code)
+	}
+}

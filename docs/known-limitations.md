@@ -437,26 +437,27 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
 The [reload/shutdown matrix](reload-semantics.md#long-lived-connection-matrix)
 records the observable HTTP/1, HTTP/2, WebSocket, SSE, native/transcoded gRPC
 and L4 behavior, with named tests for every applicable boundary. In particular,
-forced generation resource retirement is not a blanket HTTP request-context
-cancellation: active proxies can continue, while an owned transcoder backend
-connection is closed. An upgraded WebSocket is neither awaited nor closed by
-HTTP server drain; process exit still drops its socket without a guaranteed
-WebSocket close handshake.
+an unrelated reload does not cancel in-flight HTTP request contexts or close
+owned H1 upgraded WebSockets. When an entry's effective access inputs narrow
+(or change with `uncertain` direction without an eligible `keep_open_entries`
+exception) at `Publish` (#642, #563, #562), Jul retires that entry's open
+HTTP/1.1, HTTP/2 and HTTP/3 streams and owned H1 upgraded sessions within a
+fixed **`2s` hard upper bound** (`1s` maximum graceful close window + `1s`
+forced cutoff) without closing shared HTTP/2 or HTTP/3 connections carrying
+other entries' streams. On server shutdown or listener removal (#562), Jul
+initiates RFC 6455 Close `1001 Going Away` (`1008 Policy Violation` on
+narrowing) on owned H1 WebSockets and closes non-WebSocket opaque `101`
+upgrades within the bounded drain window.
 
-Client-auth/CRL changes apply to new TLS handshakes, not established connections:
-new requests and new HTTP/2 streams on an already-open connection keep the
-certificate identity it was accepted with (observed in a 2026-10-18 probe for
-the [sharing design](specs/application-sharing.md#81-verified-current-behaviour)).
-`require_client_cert` checks only that the connection presented a verified
-certificate, so it follows the same handshake-bound model (source inspection;
-no dedicated route-level test yet).
-Revocation has no enforced time bound on those connections. Client reconnect
-requests are not enforcement, and Jul has no targeted session-termination API;
-operator-controlled backend/load-balancer termination or process shutdown may
-be required. Closing one HTTP/2 stream does not re-handshake its shared TLS
-connection. No maximum connection age or graceful upgraded-session drain is
-implemented by #519. The existing retirement metric is wired, but its `forced`
-mode counts resource retirement rather than proving all streams were cut.
+Client-auth/CA/CRL/SAN/mode changes apply both to new full and resumed TLS/QUIC
+handshakes (#486) and, per request, to already-open HTTP/1.1, HTTP/2 and HTTP/3
+connections (#642, #563): every request on a TLS listener re-evaluates `r.TLS`
+against the listener's current published `clientAuthBundle` (mode, CA pool,
+CRLs and SAN allow-list) and the location's current `require_client_cert`
+before location checks and action run, denying invalidated certificates with
+`403 Forbidden` on that stream without closing shared connections. There is no
+periodic maximum connection age and no general or targeted session-termination
+API.
 The Console **Status** view shows graceful/forced totals since process start;
 see [retirement observability](observability.md#handler-generation-retirement).
 HTTP `send_timeout` bounds stalled output, not quiet

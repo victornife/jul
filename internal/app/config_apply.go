@@ -758,6 +758,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		Candidate:          candidate,
 		PreparedAdmin:      preparedAdmin,
 		ExpectedGeneration: reqCtx.LiveGeneration,
+		KeepOpenEntries:    reqCtx.KeepOpenEntries,
 		AuthGeneration:     reqCtx.AuthGeneration,
 		ValidateAuthGeneration: func(expected string) bool {
 			return c.AuthGeneration == nil || c.AuthGeneration() == expected

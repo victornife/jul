@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 354 configurable leaves.
+Coverage: 355 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3149,6 +3149,18 @@ ResponseBodyCheck enables inspection of response bodies (CRS phase 4).
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+
+## `servers.*.locations.*.withdrawn` {#servers-x-locations-x-withdrawn}
+
+Withdrawn enables the outermost per-location withdrawal gate (ADR 0026 #642 amendment, spec §8.4/§9.3).
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `access_control` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
 
 ## `servers.*.max_header_bytes` {#servers-x-max_header_bytes}
 

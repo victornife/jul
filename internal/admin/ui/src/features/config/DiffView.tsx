@@ -144,6 +144,13 @@ function SharingPlanSummary({ report }: { readonly report: SharingPlanReport }) 
                 {entry.reasons && entry.reasons.length > 0 && (
                   <p className="mt-0.5 text-jul-muted">{entry.reasons.join("; ")}</p>
                 )}
+                {entry.triggers_retirement && (
+                  <p className="mt-0.5 text-jul-muted">
+                    Open connections ended within {entry.retirement_bound ?? "2s"} (snapshot:{" "}
+                    {String(entry.open_exchanges_snapshot ?? 0)} open)
+                    {entry.keep_open_eligible ? " · keep-open exception available" : ""}
+                  </p>
+                )}
               </li>
             );
           })}

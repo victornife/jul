@@ -26,6 +26,16 @@ type dynamicClientAuth struct {
 
 func (d *dynamicClientAuth) set(b *clientAuthBundle) { d.current.Store(b) }
 
+func (d *dynamicClientAuth) verifyRequest(cs *tls.ConnectionState, locRequire bool) (bool, error) {
+	if d == nil {
+		if locRequire {
+			return false, fmt.Errorf("client certificate required")
+		}
+		return false, nil
+	}
+	return d.current.Load().verifyRequest(cs, locRequire)
+}
+
 // configForClient returns the GetConfigForClient callback for base. Only the
 // client-auth fields differ from base, and ticket keys stay base's (crypto/tls
 // keeps the original Config's keys for a returned Config without its own).

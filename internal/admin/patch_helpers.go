@@ -386,6 +386,45 @@ func applyLocationSharingClear(c *config.Config, req patchRequest) (string, erro
 	return fmt.Sprintf("route %s%s sharing intent cleared", srv.Listen, loc.Match.Path), nil
 }
 
+func applyLocationWithdrawnSet(c *config.Config, req patchRequest) (string, error) {
+	val := req.Withdrawn
+	if val == nil {
+		val = req.Enabled
+	}
+	if val == nil {
+		return "", fmt.Errorf("location_set_withdrawn: withdrawn is required")
+	}
+	var srv *config.ServerConfig
+	var loc *config.LocationConfig
+	switch {
+	case strings.TrimSpace(req.Listen) != "" || strings.TrimSpace(req.Path) != "":
+		srvIdx, locIdx, err := findLocationIndex(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		srv = &c.Servers[srvIdx]
+		loc = &srv.Locations[locIdx]
+		if req.RouteID != nil && strings.TrimSpace(*req.RouteID) != "" {
+			if loc.RouteID == nil || *loc.RouteID != strings.TrimSpace(*req.RouteID) {
+				return "", fmt.Errorf("location_set_withdrawn: target route does not match route_id %q", strings.TrimSpace(*req.RouteID))
+			}
+		}
+	case req.RouteID != nil && strings.TrimSpace(*req.RouteID) != "":
+		var err error
+		srv, loc, err = findLocationByRouteID(c, *req.RouteID)
+		if err != nil {
+			return "", fmt.Errorf("location_set_withdrawn: %w", err)
+		}
+	default:
+		return "", fmt.Errorf("location_set_withdrawn: route target requires route_id or listen and path")
+	}
+	loc.Withdrawn = *val
+	if *val {
+		return fmt.Sprintf("route %s%s withdrawn gate enabled", srv.Listen, loc.Match.Path), nil
+	}
+	return fmt.Sprintf("route %s%s withdrawn gate cleared", srv.Listen, loc.Match.Path), nil
+}
+
 // stringSetsEqual reports whether a and b contain the same elements regardless
 // of order (multiset equality, so repeated server names are compared exactly).
 func stringSetsEqual(a, b []string) bool {

@@ -635,11 +635,11 @@ There is no targeted termination API. The escapes are a Jul restart (all
 entries), stopping a connector (all provider-path traffic) or stopping the
 application. Each is shown with its blast radius.
 
-### 8.4 Complete withdrawal: the gate plus retirement on narrowing (#642 with #563/#562)
+### 8.4 Complete withdrawal: the gate plus retirement on narrowing (#642 with #563/#562 — delivered)
 
 *Accepted (SD-07, SD-08, SD-09, 2026-10-18; mechanism, schema and bound settled
-by the [ADR 0026 #642 amendment](../adr/0026-application-sharing-contract.md#amendment--complete-withdrawal-outermost-withdrawal-gate-and-retirement-on-narrowing-642-with-563-and-562),
-2026-10-19).*
+by the [ADR 0026 #642 amendment](../adr/0026-application-sharing-contract.md#amendment--complete-withdrawal-outermost-withdrawal-gate-and-retirement-on-narrowing-642-with-563-and-562)
+at `801bb862`, 2026-10-19; delivered in #642).*
 
 | Aspect | Requirement |
 | --- | --- |
@@ -1769,7 +1769,7 @@ migration converter.
 | Tranche | Scope | Rough effort | Sequencing | Door |
 | --- | --- | --- | --- | --- |
 | **Intent and guarded changes** (SD-05, SD-11 to SD-14; #641 — **delivered**) | §4.5 block including `external_enforcer`; validation, lifecycle and generated contracts; serving-layer projection with saved-layer labelling and the bounded, paged response shape (§4.3); Routes read-only display; lint and plan intent findings; §9.5 audience-delta classes including the host-dispatch rule; Console acknowledgement; sparse typed op; §9.4 postcondition producer and evaluator; docs; tests with **more than 90 %** of added or edited Go production statements and, separately, of added or edited frontend statements covered, existing floors preserved | 6–12 focused days (author estimate, raised from 3–6 for the postcondition and delta classes, from 4–8 in r6 for the access fingerprint and the expanded §9.5 rules (publish-time comparison of loaded file contents later moved to #642's retirement), and from 5–10 in r9 for the bounded paged projection, the host-dispatch analysis with its property test, and expected-absence postconditions; the owner re-estimates at selection) | first shared-code stream after #580 is accepted; prerequisite of #581's evidence run by product decision (SD-05) | names costly once adopted |
-| **Complete withdrawal** (SD-04, SD-02 bundle, SD-07–SD-09; #642 with #563/#562) | §9.3 gate and typed op; §8.4 stream-level retirement with #562 WebSocket ownership and per-request revocation re-check; collateral disclosure; real H1/H2/H3 clients; race and leak checks; same coverage rule | design 2–4 days + implementation 10–20 days (author estimate) | next shared-code stream; #581 environment work proceeds in parallel | gate field costly once adopted; promise additive |
+| **Complete withdrawal** (SD-04, SD-02 bundle, SD-07–SD-09; #642 with #563/#562 — **delivered**) | §9.3 gate (`withdrawn = true`) and typed op (`location_set_withdrawn`); §8.4 stream-level retirement (`2s` bound: `1s` graceful + `1s` forced) with #562 WebSocket ownership, publish-time file-content classification, constituent-reason `keep_open_entries` override, and per-request revocation re-check; collateral disclosure; real H1/H2/H3 clients; race and leak checks; same coverage rule | design 2–4 days + implementation 10–20 days (author estimate) | next shared-code stream; #581 environment work proceeds in parallel | gate field costly once adopted; promise additive |
 
 Together the two tranches are a nominal 18–36 focused days before waiting and
 shared-work reconciliation. These are author estimates, not owner estimates;

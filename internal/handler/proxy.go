@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -23,6 +24,7 @@ import (
 	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/respwriter"
 	"jul/internal/tracing"
 	"jul/internal/upstream"
 )
@@ -184,6 +186,13 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// and for a 101 upgrade only once the spliced connection closes, so the slot
 	// spans the request's real lifetime including WebSocket and SSE streams.
 	defer release()
+	if respwriter.ActiveExchangeFrom(r.Context()) == nil {
+		if reg, genID := respwriter.ExchangeRegistryFrom(r.Context()); reg != nil {
+			var releaseEx func()
+			w, r, _, releaseEx = reg.Admit(w, r, respwriter.EntryCoord{GenID: genID})
+			defer releaseEx()
+		}
+	}
 	h.ReverseProxy.ServeHTTP(w, r)
 }
 
@@ -392,6 +401,11 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 					t.pool.Release(b.Backend)
 					finishRetryContext()
 				})
+			if r.StatusCode == http.StatusSwitchingProtocols {
+				if rwc, ok := r.Body.(io.ReadWriteCloser); ok {
+					r.Body = respwriter.AttachUpgradedBackend(req.Context(), rwc, r.Header)
+				}
+			}
 			resp = r
 			return upstream.AttemptResult{Retain: true, RetainContext: &finishRetryContext}
 		}

@@ -10,7 +10,26 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+
+	"jul/internal/respwriter"
 )
+
+// ClientCertVerifier evaluates r.TLS against the listener's current live
+// client_auth policy (mode, CA pool, CRLs, and SAN allow-list) and the
+// location's require_client_cert flag on every request (#642, #563).
+// It returns (certVerified, error). A non-nil error rejects the request with
+// 403 Forbidden without closing the underlying connection.
+type ClientCertVerifier = respwriter.ClientCertVerifier
+
+// WithClientCertVerifier returns a copy of ctx carrying verifier.
+func WithClientCertVerifier(ctx context.Context, verifier ClientCertVerifier) context.Context {
+	return respwriter.WithClientCertVerifier(ctx, verifier)
+}
+
+// ClientCertVerifierFrom extracts the per-request ClientCertVerifier from ctx.
+func ClientCertVerifierFrom(ctx context.Context) ClientCertVerifier {
+	return respwriter.ClientCertVerifierFrom(ctx)
+}
 
 // PeerCertIdentity is the verified identity of a mutual-TLS client certificate,
 // extracted once per request and carried in the request context so downstream
@@ -52,15 +71,34 @@ func PeerCertIdentityFrom(ctx context.Context) *PeerCertIdentity {
 // ClientCert extracts the mutual-TLS client identity from the connection and
 // stores it in the request context. When require is true a request that arrives
 // without a verified client certificate is rejected with 403; otherwise the
-// request proceeds with no identity attached. CA-chain verification has already
-// happened at the TLS handshake, so any certificate present here is trusted.
+// request proceeds with no identity attached.
 //
 // forward selects how much of the certificate is retained for RFC 9440
 // forwarding: "leaf", "chain", or anything else for none.
 func ClientCert(require bool, forward string) Middleware {
+	return ClientCertWithVerifier(require, forward, nil)
+}
+
+// ClientCertWithVerifier is ClientCert with a fallback ClientCertVerifier used
+// when the request context does not already carry a live listener verifier.
+func ClientCertWithVerifier(require bool, forward string, fallback ClientCertVerifier) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			verifier := ClientCertVerifierFrom(r.Context())
+			if verifier == nil {
+				verifier = fallback
+			}
+			if verifier != nil {
+				verified, err := verifier(r.TLS, require)
+				if err != nil {
+					http.Error(w, "client certificate required", http.StatusForbidden)
+					return
+				}
+				if !verified || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+					next.ServeHTTP(w, r)
+					return
+				}
+			} else if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 				if require {
 					http.Error(w, "client certificate required", http.StatusForbidden)
 					return

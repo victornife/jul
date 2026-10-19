@@ -75,6 +75,9 @@ type LocationProjection struct {
 	// effect on hot reload (enforced per request), unlike the server-level
 	// client_auth that binds with the listener.
 	RequireClientCert bool `json:"require_client_cert"`
+	// Withdrawn reports the location's outermost withdrawal gate (withdrawn = true,
+	// ADR 0026 #642 amendment, spec §9.3).
+	Withdrawn bool `json:"withdrawn"`
 	// Upstream is the referenced upstream pool name when Action proxies to a
 	// named upstream (proxy_pass http://<name>); empty for direct host:port.
 	Upstream string `json:"upstream,omitempty"`

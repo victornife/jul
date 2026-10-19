@@ -758,6 +758,7 @@ export const LocationProjectionSchema = z.object({
     .optional(),
   secure: z.boolean(),
   require_client_cert: z.boolean().default(false),
+  withdrawn: z.boolean().optional(),
   upstream: z.string().optional(),
   waf: LocationWAFStateSchema.optional(),
   // response_headers reports whether the location has any
@@ -1688,6 +1689,9 @@ export const SharingEntryDeltaSchema = z.object({
   declared_mode_widened: z.boolean().default(false),
   requires_acknowledgement: z.boolean().default(false),
   triggers_retirement: z.boolean().default(false),
+  keep_open_eligible: z.boolean().optional(),
+  open_exchanges_snapshot: z.number().optional(),
+  retirement_bound: z.string().optional(),
   reasons: z.array(z.string()).optional(),
   intent_findings: z.array(SharingPlanFindingSchema).optional(),
   provider_checklist_required: z.boolean().default(false),
@@ -2056,6 +2060,7 @@ export type ConfigPatch =
   | ({ op: "location_cors_clear" } & RouteTarget)
   | ({ op: "location_set_sharing"; sharing?: LocationSharingPatch; route_id?: string } & Partial<RouteTarget>)
   | ({ op: "location_clear_sharing"; route_id?: string } & Partial<RouteTarget>)
+  | ({ op: "location_set_withdrawn"; withdrawn: boolean; route_id?: string } & Partial<RouteTarget>)
   | ({ op: "location_set_match"; match_set: LocationMatchPatch } & RouteTarget)
   | ({ op: "location_set_action"; action: LocationActionPatch } & RouteTarget)
   | ({ op: "location_set_transcode"; transcode: TranscodePatch } & RouteTarget)

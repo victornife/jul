@@ -665,20 +665,20 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		// without one nothing.
 		cors := middleware.CompileCORS(loc.CORS)
 		pf := middleware.Preflight(cors, locPreflightRateLimit(srv, loc), wf)
-		// Client-certificate handling applies when the server enables mutual
-		// TLS or the location requires a client certificate. It populates the
-		// $ssl_client_* identity for proxied requests and, when the location
-		// sets require_client_cert, rejects a request that arrives without a
-		// verified certificate with 403. It runs just inside the plugins and
-		// outside authentication so the identity is available to auth and the
-		// upstream.
+		// Client-certificate handling applies when any server block on the
+		// listener enables TLS or the location requires a client certificate.
+		// It re-evaluates r.TLS against the listener's current client_auth
+		// policy (mode, CA bundle, CRL, and SAN allow-list) on every request
+		// (#642, #563), populates $ssl_client_* identity for proxied requests,
+		// and rejects a request that lacks a required valid certificate with 403
+		// without closing shared H2/H3 connections.
 		var cc middleware.Middleware
-		if (srv.TLS != nil && srv.TLS.ClientAuth.Active()) || loc.RequireClientCert {
-			forward := middleware.ForwardCertNone
-			if srv.TLS != nil && srv.TLS.ClientAuth != nil {
-				forward = strings.ToLower(strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate))
-			}
-			cc = middleware.ClientCert(loc.RequireClientCert, forward)
+		listenerTLS := AddrServesTLS(c.Servers, srv.Listen)
+		if listenerTLS || (srv.TLS != nil && srv.TLS.ClientAuth.Active()) || loc.RequireClientCert {
+			forward := listenerClientCertForward(c.Servers, srv.Listen, srv)
+			locReqCert := loc.RequireClientCert || listenerClientAuthRequired(c.Servers, srv.Listen)
+			fallbackVerifier, _ := server.BuildClientCertVerifier(c.Servers, srv.Listen)
+			cc = middleware.ClientCertWithVerifier(locReqCert, forward, fallbackVerifier)
 		}
 		var pluginMW []middleware.Middleware
 		for _, name := range srv.Plugins {

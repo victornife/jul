@@ -13,6 +13,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/observability"
+	"jul/internal/respwriter"
 	"jul/internal/upstream"
 )
 
@@ -92,6 +93,11 @@ type ReloadPlan struct {
 	newAddrs        map[string]struct{}
 	stagedListeners map[string]*listenerEntry
 	bindErrs        []string
+
+	keepOpenEntries      []string
+	nextAccessFiles      *LoadedAccessFiles
+	pluginChanges        []PluginModuleChange
+	waitEntryRetirements func() []respwriter.EntryRetirementResult
 
 	// published is true once Publish has succeeded; it gates Abort safety.
 	published bool
@@ -246,6 +252,7 @@ func (p *ReloadPlan) Prepare() error {
 		if clientAuth != nil {
 			p.Runtime.add(clientAuth)
 		}
+		p.nextAccessFiles = captureLoadedAccessFiles(p.Candidate.Effective)
 		return nil
 	})
 }
@@ -332,8 +339,25 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	p.s.updateAltSvcState(p.Candidate.Effective)
 
 	prevGen := p.s.handlers.Load()
+	var prevGenID uint64
+	if prevGen != nil {
+		prevGenID = prevGen.genID
+	}
+	if p.s.PluginModuleChanges != nil {
+		p.pluginChanges = p.s.PluginModuleChanges(p.GenID)
+	}
+	transitions := ComputePublishEntryTransitions(
+		p.s.rawCfg, p.s.cfg, p.s.loadedAccessFiles,
+		p.Candidate.Raw, p.Candidate.Effective, p.nextAccessFiles,
+		p.pluginChanges, p.keepOpenEntries,
+	)
+
 	newGen := p.s.newGeneration(p.Handlers, snapshots, p.GenID)
 	p.s.handlers.Store(newGen)
+	p.waitEntryRetirements = p.s.exchanges.PublishGeneration(prevGenID, p.GenID, transitions)
+	if p.nextAccessFiles != nil {
+		p.s.loadedAccessFiles = p.nextAccessFiles
+	}
 
 	// Update the authoritative config pointers so code that still reads s.cfg
 	// directly sees the new effective config. Then publish the coherent runtime

@@ -176,7 +176,13 @@ func TestLongLivedWebSocketReloadAndShutdown(t *testing.T) {
 			echo("before")
 			if phase == "shutdown" {
 				fixture.stop()
-				echo("hijacked tunnel still alive after server drain returns")
+				if err := connection.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+					t.Fatal(err)
+				}
+				var received []byte
+				if err := websocket.Message.Receive(connection, &received); err == nil {
+					t.Fatalf("expected owned WebSocket to be closed by server shutdown drain (#562), got %q", string(received))
+				}
 			} else {
 				fixture.reload(t)
 				echo("after reload")

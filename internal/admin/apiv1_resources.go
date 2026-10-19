@@ -100,6 +100,7 @@ func v1Routes(c *config.Config) []adminapi.Route {
 				TLS:               loc.Secure,
 				Auth:              loc.Auth,
 				RequireClientCert: loc.RequireClientCert,
+				Withdrawn:         loc.Withdrawn,
 				Cache:             loc.Cache,
 				RateLimit:         loc.RateLimit,
 				WAF:               loc.WAF != nil,

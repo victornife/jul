@@ -571,6 +571,17 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 
 	// Declared sharing intent (ADR 0026 Decision 2, spec §4.5).
 	diffSharing(server, key, b.Sharing, a.Sharing, d)
+
+	// Outermost withdrawal gate (ADR 0026 #642 amendment, spec §9.3).
+	if b.Withdrawn != a.Withdrawn {
+		if a.Withdrawn {
+			d.mod(DiffEntry{Kind: "location", Name: name, Before: "active", After: "withdrawn", Detail: "Withdraw route " + key + " (deny new requests at stage 0)"}, "route "+name+" withdrawn")
+		} else {
+			d.mod(DiffEntry{Kind: "location", Name: name, Before: "withdrawn", After: "active", Detail: "Restore withdrawn route " + key}, "route "+name+" withdrawn")
+			d.warn("Clearing withdrawn = true on route %s on %s restores external access to that route.", key, server)
+		}
+	}
+	d.cover("servers.*.locations.*.withdrawn")
 }
 
 func diffSharing(server, key string, b, a *config.SharingConfig, d *ConfigDiff) {

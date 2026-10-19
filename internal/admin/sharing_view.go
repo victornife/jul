@@ -16,6 +16,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/rbac"
+	"jul/internal/respwriter"
 	"jul/internal/server"
 )
 
@@ -206,28 +207,30 @@ type SharingFindingView struct {
 
 // SharingEntryLayer is one layer (serving or saved) of an entry (spec §4.3).
 type SharingEntryLayer struct {
-	Layer                  string                    `json:"layer"`
-	Revision               string                    `json:"revision"`
-	RouteID                *SharingRouteIDView       `json:"route_id,omitempty"`
-	Selector               SharingSelectorView       `json:"selector"`
-	Position               SharingEntryPosition      `json:"position"`
-	Identity               string                    `json:"identity"`
-	ServiceBlock           string                    `json:"service_block"`
-	Path                   BoundedText               `json:"path"`
-	Listener               SharingListenerView       `json:"listener"`
-	URLs                   SharingURLsView           `json:"urls"`
-	JulChecks              SharingJulChecksView      `json:"jul_checks"`
-	Action                 string                    `json:"action"`
-	UpstreamRef            string                    `json:"upstream_ref,omitempty"`
-	Controls               SharingControlsView       `json:"controls"`
-	Withdrawn              string                    `json:"withdrawn"`
-	BackendGroup           string                    `json:"backend_group,omitempty"`
-	Warnings               []SharingFindingView      `json:"warnings"`
-	WarningsComplete       bool                      `json:"warnings_complete"`
-	DeclaredIntent         SharingDeclaredIntentView `json:"declared_intent"`
-	IntentFindings         []SharingFindingView      `json:"intent_findings"`
-	IntentFindingsComplete bool                      `json:"intent_findings_complete"`
-	NextActions            []string                  `json:"next_actions"`
+	Layer                  string                            `json:"layer"`
+	Revision               string                            `json:"revision"`
+	RouteID                *SharingRouteIDView               `json:"route_id,omitempty"`
+	Selector               SharingSelectorView               `json:"selector"`
+	Position               SharingEntryPosition              `json:"position"`
+	Identity               string                            `json:"identity"`
+	ServiceBlock           string                            `json:"service_block"`
+	Path                   BoundedText                       `json:"path"`
+	Listener               SharingListenerView               `json:"listener"`
+	URLs                   SharingURLsView                   `json:"urls"`
+	JulChecks              SharingJulChecksView              `json:"jul_checks"`
+	Action                 string                            `json:"action"`
+	UpstreamRef            string                            `json:"upstream_ref,omitempty"`
+	Controls               SharingControlsView               `json:"controls"`
+	Withdrawn              string                            `json:"withdrawn"`
+	OpenExchanges          int                               `json:"open_exchanges"`
+	LastRetirement         *respwriter.EntryRetirementResult `json:"last_retirement,omitempty"`
+	BackendGroup           string                            `json:"backend_group,omitempty"`
+	Warnings               []SharingFindingView              `json:"warnings"`
+	WarningsComplete       bool                              `json:"warnings_complete"`
+	DeclaredIntent         SharingDeclaredIntentView         `json:"declared_intent"`
+	IntentFindings         []SharingFindingView              `json:"intent_findings"`
+	IntentFindingsComplete bool                              `json:"intent_findings_complete"`
+	NextActions            []string                          `json:"next_actions"`
 }
 
 // SharingEntryView is one entry in the sharing view, carrying its serving layer
@@ -1281,6 +1284,29 @@ func (s *Server) BuildSharingViewPage(cursor string, requestedLimit int) (Sharin
 	var pageBlockList []SharingBlockRow
 	var pageGroupList []SharingBackendGroupRow
 
+	var openByCoord map[[2]int]int
+	var openByRouteID map[string]int
+	var lastRetByCoord map[[2]int]respwriter.EntryRetirementResult
+	var lastRetByRouteID map[string]respwriter.EntryRetirementResult
+	if s.deps.LiveSnapshot != nil {
+		if ex := s.deps.LiveSnapshot().Exchanges; ex != nil {
+			openByCoord, openByRouteID = ex.SnapshotCounts()
+			lastRets := ex.LastRetirementResults()
+			if len(lastRets) > 0 {
+				lastRetByCoord = make(map[[2]int]respwriter.EntryRetirementResult, len(lastRets))
+				lastRetByRouteID = make(map[string]respwriter.EntryRetirementResult, len(lastRets))
+				for _, lr := range lastRets {
+					if !lr.Removed {
+						lastRetByCoord[[2]int{lr.ServerIndex, lr.LocationIndex}] = lr
+					}
+					if lr.RouteID != "" {
+						lastRetByRouteID[lr.RouteID] = lr
+					}
+				}
+			}
+		}
+	}
+
 	// Account for the response envelope (including worst-case NextCursor and JSON
 	// framing) plus every referenced block and backend-group row so the complete
 	// serialized SharingViewResponse stays within SharingMaxPageBytes (1 MiB).
@@ -1299,6 +1325,33 @@ func (s *Server) BuildSharingViewPage(cursor string, requestedLimit int) (Sharin
 
 	for idx := startIdx; idx < total && len(pageEntries) < limit; idx++ {
 		entry := derived.entries[idx]
+		if entry.Serving != nil {
+			srvCopy := *entry.Serving
+			coord := [2]int{srvCopy.Position.BlockIndex, srvCopy.Position.LocationIndex}
+			rid := ""
+			if srvCopy.RouteID != nil {
+				rid = srvCopy.RouteID.Literal
+			}
+			if rid != "" && openByRouteID != nil {
+				srvCopy.OpenExchanges = openByRouteID[rid]
+			}
+			if srvCopy.OpenExchanges == 0 && openByCoord != nil {
+				srvCopy.OpenExchanges = openByCoord[coord]
+			}
+			if rid != "" && lastRetByRouteID != nil {
+				if lr, ok := lastRetByRouteID[rid]; ok {
+					lrCopy := lr
+					srvCopy.LastRetirement = &lrCopy
+				}
+			}
+			if srvCopy.LastRetirement == nil && lastRetByCoord != nil {
+				if lr, ok := lastRetByCoord[coord]; ok {
+					lrCopy := lr
+					srvCopy.LastRetirement = &lrCopy
+				}
+			}
+			entry.Serving = &srvCopy
+		}
 		entryBytes, _ := json.Marshal(entry)
 		deltaBytes := len(entryBytes) + 1
 

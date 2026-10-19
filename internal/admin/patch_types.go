@@ -58,6 +58,7 @@ type patchRequest struct {
 	// Operation payloads (only the field relevant to Op is read).
 	Target    string          `json:"target,omitempty"`     // route_set_target: new proxy_pass
 	Enabled   *bool           `json:"enabled,omitempty"`    // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c / location_toggle_require_client_cert
+	Withdrawn *bool           `json:"withdrawn,omitempty"`  // location_set_withdrawn: stage-0 withdrawal gate
 	RateLimit *rateLimitPatch `json:"rate_limit,omitempty"` // route_set_rate_limit
 	Address   string          `json:"address,omitempty"`    // upstream_add_backend / upstream_remove_backend
 	Weight    int             `json:"weight,omitempty"`     // upstream_add_backend (defaults to 1)
