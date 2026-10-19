@@ -34,6 +34,7 @@ import (
 	"jul/internal/storagefs"
 	"jul/internal/stream"
 	"jul/internal/upstream"
+	"jul/internal/versionid"
 	"jul/internal/waf"
 )
 
@@ -42,7 +43,9 @@ import (
 type ServeOption func(*serveOptions)
 
 type serveOptions struct {
-	logOutput io.Writer
+	logOutput      io.Writer
+	versions       *versionid.Context
+	versionKeyPath string
 }
 
 func projectPluginInstanceStats(stats []plugins.InstanceStats) []observability.PluginInstanceStats {
@@ -60,6 +63,17 @@ func WithLogOutput(w io.Writer) ServeOption {
 	return func(o *serveOptions) {
 		o.logOutput = w
 	}
+}
+
+// WithEffectiveVersions injects an already-loaded private context for embeddings
+// and deterministic tests. The ordinary production path loads the provisioned key.
+func WithEffectiveVersions(versions *versionid.Context) ServeOption {
+	return func(o *serveOptions) { o.versions = versions }
+}
+
+// WithEffectiveVersionKeyFile selects a startup-only protected key path.
+func WithEffectiveVersionKeyFile(path string) ServeOption {
+	return func(o *serveOptions) { o.versionKeyPath = path }
 }
 
 // Serve builds the runtime from a validated configuration and runs until
@@ -82,6 +96,21 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	options := serveOptions{logOutput: os.Stderr}
 	for _, o := range opts {
 		o(&options)
+	}
+
+	if options.versions == nil {
+		var loaded *versionid.Context
+		var err error
+		if options.versionKeyPath != "" {
+			loaded, err = versionid.Load(options.versionKeyPath)
+		} else {
+			loaded, err = versionid.LoadDefault()
+		}
+		if err != nil {
+			fmt.Fprintln(options.logOutput, err)
+			return 1
+		}
+		options.versions = loaded
 	}
 
 	// ── Section 1: Init ────────────────────────────────────────────────────
@@ -439,7 +468,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// after that call is invisible to the admin server's apply handlers.
 	srv := server.New(cfg, startupCand.Raw, startupFP, log, factory, src, func(ctx context.Context, c *config.Config) error {
 		return ValidateRuntimeConfig(ctx, c)
-	})
+	}, options.versions)
 	// Overrides the src.Load()-backed default from BuildAdminDeps: certificate
 	// status must reflect the server's actually-installed certificate, not
 	// whatever bytes currently sit on disk — a rejected candidate, or an
@@ -567,6 +596,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 
 		// Single shared store — coordinator and reconciliation use the same instance.
 		sharedStore := NewFilePlannedRestartStore(configPath)
+		sharedStore.Versions = options.versions
 		// The managed baseline persists ownership across a restart (ADR 0019
 		// §11.2). It is constructed regardless of authority mode so a
 		// file_owned startup can find and clean up artifacts inherited from a
@@ -587,6 +617,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		}
 
 		coordinator = &ConfigApplyCoordinator{
+			Versions:        options.versions,
 			BaseCtx:         ctx,
 			Path:            configPath,
 			Preflight:       &pf,
@@ -930,6 +961,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// reload hook can call UpdatePolicy after each successful hot reload.
 	deps.OIDCClient = egressManager.Client(egress.SubsystemAuth, 10*time.Second)
 	deps.ObserveOIDCLogin = func(result string) { metrics.ObserveAuthDecision("oidc", result) }
+	deps.EffectiveVersions = options.versions
 	adminSrv := admin.New(cfg.Admin, log, deps)
 	// Jul-owned storage headroom (#437) is read on demand by /api/stats and
 	// scrapes; nothing polls in the background. A nil adminSrv (admin

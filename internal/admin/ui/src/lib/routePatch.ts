@@ -13,6 +13,18 @@ import type {
   RouteTarget,
 } from "@/api/client.ts";
 
+/** Echo server-owned coordinates; ordinals are meaningful only in route.base_version. */
+export function routeTargetFromProjection(route: RouteProjection, loc: LocationProjection): RouteTarget {
+  return {
+    listen: route.listen,
+    server_names: route.server_names ?? [],
+    match_type: loc.type,
+    path: loc.match,
+    ...(loc.match_ordinal !== undefined ? { match_ordinal: loc.match_ordinal } : {}),
+    ...(loc.selector_version !== undefined ? { selector_version: loc.selector_version } : {}),
+  };
+}
+
 /** A server block's exact structured-patch identity. */
 export interface ServerIdentity {
   readonly listen: string;
@@ -28,6 +40,7 @@ export interface LocationIdentity {
   // it is simply preferred over the revision-relative matchType+path key
   // when present, since it is stable across edits that change the match.
   readonly routeId?: string;
+  readonly matchOrdinal?: number;
 }
 
 export interface RouteSelection {
@@ -89,7 +102,15 @@ export interface StoredRouteSelectionV3 {
   readonly route_id: string;
 }
 
-export type StoredRouteSelection = StoredRouteSelectionV2 | StoredRouteSelectionV3;
+export interface StoredRouteSelectionV4 {
+  readonly version: 4;
+  readonly base_version: string;
+  readonly selector_version: string;
+  readonly server: { readonly listen: string; readonly server_names: string[] };
+  readonly location: { readonly match_type: string; readonly path: string; readonly match_ordinal: number };
+}
+
+export type StoredRouteSelection = StoredRouteSelectionV2 | StoredRouteSelectionV3 | StoredRouteSelectionV4;
 
 export class RoutePatchValidationError extends Error {
   constructor(public readonly issues: readonly string[]) {
@@ -202,6 +223,7 @@ export function routeIdentityKey(server: ServerIdentity, location: LocationIdent
     canonicalServerNames(server.serverNames),
     location.matchType,
     location.path,
+    location.matchOrdinal ?? null,
   ]);
 }
 
@@ -461,6 +483,15 @@ export function buildServerRemovalBatch(server: ServerIdentity): ConfigPatch[] {
 
 export function storeRouteSelection(selection: RouteSelection, baseVersion: string): StoredRouteSelection {
   const server = serverIdentityFromRoute(selection.route);
+  if (!selection.loc.route_id && selection.loc.selector_version && selection.loc.match_ordinal !== undefined) {
+    return {
+      version: 4,
+      base_version: baseVersion,
+      selector_version: selection.loc.selector_version,
+      server: { listen: server.listen, server_names: [...server.serverNames] },
+      location: { match_type: selection.loc.type, path: selection.loc.match, match_ordinal: selection.loc.match_ordinal },
+    };
+  }
   return storeRouteIdentity(
     server,
     {
@@ -553,6 +584,27 @@ export function restoreRouteSelection(
 
   if (root.version === 3) {
     return typeof root.route_id === "string" ? findByRouteID(routes, root.route_id) : null;
+  }
+
+  if (root.version === 4) {
+    const server = objectValue(root.server);
+    const location = objectValue(root.location);
+    if (!server || !location || typeof server.listen !== "string" ||
+      typeof root.base_version !== "string" || !root.base_version || root.base_version !== currentBaseVersion ||
+      typeof root.selector_version !== "string" || typeof location.match_type !== "string" ||
+      typeof location.path !== "string" || typeof location.match_ordinal !== "number" ||
+      !Number.isInteger(location.match_ordinal) || location.match_ordinal < 0) return null;
+    const names = stringArray(server.server_names);
+    if (names === null) return null;
+    const matches: RouteSelection[] = [];
+    for (const route of routes) {
+      if (route.base_version !== root.base_version || !sameServerIdentity(serverIdentityFromRoute(route), { listen: server.listen, serverNames: names })) continue;
+      for (const loc of route.locations) {
+        if (loc.type === location.match_type && loc.match === location.path &&
+          loc.match_ordinal === location.match_ordinal && loc.selector_version === root.selector_version) matches.push({ route, loc });
+      }
+    }
+    return matches.length === 1 ? matches[0] ?? null : null;
   }
 
   if (root.version === 2) {

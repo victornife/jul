@@ -36,7 +36,7 @@ func TestAuditCSVRetainsCredentialIdentityAdditively(t *testing.T) {
 	if len(rows) != 3 || !reflect.DeepEqual(rows[0], want) {
 		t.Fatalf("CSV schema/rows = %v", rows)
 	}
-	if rows[1][8] != "" || rows[2][2] != "csv-operator" || rows[2][8] != "synthetic-public-id" {
+	if rows[1][8] != "" || rows[2][2] != "csv-operator" || rows[2][8] != s.publicTokenID("synthetic-public-id") {
 		t.Fatalf("CSV loses credential attribution: %v", rows)
 	}
 	rr = httptest.NewRecorder()

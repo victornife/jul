@@ -146,3 +146,17 @@ func TestFactorySharesTheGlobalFirewall(t *testing.T) {
 		t.Fatalf("shared global = %+v", p)
 	}
 }
+
+func TestWAFPreparationErrorDoesNotExportMatcherFingerprint(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+	cfg := wafFactoryConfig(filepath.Join(t.TempDir(), "missing-rules"))
+	private := WAFScope(cfg.Servers[0], cfg.Servers[0].Locations[1])
+	_, done, err := f.Build(context.Background(), cfg, false)
+	if done != nil {
+		defer done()
+	}
+	if err == nil || !strings.Contains(err.Error(), "servers[0].locations[1]") || strings.Contains(err.Error(), private) {
+		t.Fatalf("scope-bearing preparation error: %v", err)
+	}
+}

@@ -58,7 +58,7 @@ const bashCompletion = `# jul bash completion. Load with:  source <(jul completi
 _jul() {
     local cur subcmds remote_common
     cur="${COMP_WORDS[COMP_CWORD]}"
-    subcmds="serve check doctor support-bundle lint fmt run healthcheck import version capabilities completion plan diff apply stage status rollback export diagnostics"
+    subcmds="serve check doctor support-bundle version-key lint fmt run healthcheck import version capabilities completion plan diff apply stage status rollback export diagnostics"
     remote_common="--endpoint --profile --token-file --ca-file --client-cert --client-key --timeout --json --verbose"
     if [ "${COMP_CWORD}" -eq 1 ]; then
         COMPREPLY=( $(compgen -W "${subcmds} -config -check -version -help" -- "${cur}") ); return 0
@@ -85,7 +85,7 @@ const zshCompletion = `#compdef jul
 # jul zsh completion. Load with:  source <(jul completion zsh)
 _jul() {
     local -a subcmds remote_common
-    subcmds=(serve check doctor support-bundle lint fmt run healthcheck import version capabilities completion plan diff apply stage status rollback export diagnostics)
+    subcmds=(serve check doctor support-bundle version-key lint fmt run healthcheck import version capabilities completion plan diff apply stage status rollback export diagnostics)
     remote_common=(--endpoint --profile --token-file --ca-file --client-cert --client-key --timeout --json --verbose)
     if (( CURRENT == 2 )); then _describe -t commands 'jul command' subcmds; return; fi
     case ${words[2]} in
@@ -112,6 +112,7 @@ complete -c jul -n __fish_use_subcommand -a serve -d 'Run the server (explicit f
 complete -c jul -n __fish_use_subcommand -a check -d 'Structural and stateless runtime preflight'
 complete -c jul -n __fish_use_subcommand -a doctor -d 'Run deterministic read-only diagnostics'
 complete -c jul -n __fish_use_subcommand -a support-bundle -d 'Write a bounded secret-safe local archive'
+complete -c jul -n __fish_use_subcommand -a version-key -d 'Initialize the private effective-version key'
 complete -c jul -n __fish_use_subcommand -a lint -d 'Validate and report best-practice warnings'
 complete -c jul -n __fish_use_subcommand -a fmt -d 'Rewrite the config in canonical TOML'
 complete -c jul -n __fish_use_subcommand -a run -d 'Run a zero-config server'
@@ -156,7 +157,7 @@ complete -c jul -n '__fish_seen_subcommand_from rollback diff' -l history-id -r 
 const powershellCompletion = `# jul PowerShell completion. Load with:  jul completion powershell | Out-String | Invoke-Expression
 Register-ArgumentCompleter -Native -CommandName jul -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
-    $verbs = @('serve','check','doctor','support-bundle','lint','fmt','run','healthcheck','import','version','capabilities','completion','plan','diff','apply','stage','status','rollback','export','diagnostics')
+    $verbs = @('serve','check','doctor','support-bundle','version-key','lint','fmt','run','healthcheck','import','version','capabilities','completion','plan','diff','apply','stage','status','rollback','export','diagnostics')
     $elements = $commandAst.CommandElements
     if ($elements.Count -le 2) { $verbs | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }; return }
     $sub = $elements[1].Value

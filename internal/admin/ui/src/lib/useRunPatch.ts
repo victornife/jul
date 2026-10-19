@@ -11,7 +11,7 @@ import {
 } from "@/lib/useRunPatchBatch.ts";
 
 /** Thin one-operation compatibility wrapper around the shared ordered batch hook. */
-export function useRunPatch(): {
+export function useRunPatch(baseVersion?: string): {
   readonly error: string | null;
   readonly busy: boolean;
   readonly run: (patch: ConfigPatch) => void;
@@ -19,9 +19,9 @@ export function useRunPatch(): {
   const { error, busy, run: runBatch } = useRunPatchBatch();
   const run = useCallback(
     (patch: ConfigPatch): void => {
-      void runBatch([patch]);
+      void runBatch([patch], baseVersion);
     },
-    [runBatch],
+    [runBatch, baseVersion],
   );
   return { error: describePatchBatchError(error), busy, run };
 }

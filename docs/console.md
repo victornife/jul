@@ -575,9 +575,20 @@ path, so it is never logged per request, and no predicate value ever becomes a
 metric label.
 
 `match_ordinal` is a revision-relative selector, not an identity. It is safe to
-feed straight back into a typed patch together with the `base_version` the same
-session read; it must not be stored or used to correlate a route across
+feed back into a typed patch together with its `selector_version` and the
+`base_version` from that exact projection; it must not be stored or used to correlate a route across
 revisions.
+
+After upgrading a server containing duplicate blocks, refresh any already-open
+Console before editing. The server refuses old cross-block selectors even if
+the raw configuration revision is unchanged. Fresh selectors count declaration
+order across all blocks sharing the listener, raw server-name multiset, match
+type and path. Name order is insignificant; duplicate counts, case and spaces
+are preserved. The Console pins edits and ID-less navigation to the projection
+revision; a stale editor must be refreshed. A prior declaration-changing edit in
+a batch requires a new projection before another ordinal edit. These refusals
+occur before persistence and do not change serving traffic. The route tester
+also returns `base_version` alongside emitted candidate selectors.
 
 ### Match predicates, response headers and CORS
 
@@ -1282,3 +1293,12 @@ restart/staging operations.
 ## External Console sign-in
 
 [OIDC authentication](admin-oidc.md) adds one-provider Code + PKCE login as a separate unreleased Beta capability. The Console shows mapped principal/role and expiry, provides local logout and offers explicit reauthentication after expiry. Local scoped tokens remain available for automation and recovery. Browser sessions use HttpOnly cookies, exact-origin/header CSRF protection and the same server-enforced RBAC catalogue. See the guide for provider evidence, setup, reload revocation and outage limits.
+
+## Effective version confidentiality (#644, unreleased)
+
+Effective desired/serving versions are opaque keyed identifiers scoped to a
+private durable context. Raw persisted/base/history revisions retain their
+existing meaning. Provision the key before starting or upgrading, including
+read-only and container deployments. See [effective versions, migration and
+recovery](effective-versions.md) for comparison rules, legacy pending-state
+handling, key backup/loss and the binary-downgrade boundary.

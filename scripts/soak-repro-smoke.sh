@@ -34,6 +34,9 @@ trap cleanup EXIT
 echo "== building full-tag jul binary"
 go build -tags "$FULL_TAGS" -o "$WORKDIR/jul" ./cmd/jul
 
+export JUL_EFFECTIVE_VERSION_KEY_FILE="$WORKDIR/private/effective-version.key"
+"$WORKDIR/jul" version-key init >/dev/null
+
 # Build helpers instead of `go run`: killing `go run` does not kill the child
 # it execs, which left backends holding :8081/:8082 after the smoke exited.
 go build -o "$WORKDIR/burn-in-backend" scripts/burn-in-backend.go

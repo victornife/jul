@@ -485,6 +485,9 @@ func (a *auditLog) warnPersistence(gen *auditSinkGeneration, result auditWriteRe
 }
 
 func (a *auditLog) record(ev AuditEvent) {
+	if a.publicTokenID != nil {
+		ev.TokenID = a.publicTokenID(ev.TokenID)
+	}
 	a.mu.Lock()
 	a.nextID++
 	ev.ID = a.nextID

@@ -8,6 +8,7 @@ import { Drawer } from "@/components/Drawer.tsx";
 import type { LocationProjection, RouteProjection } from "@/api/client.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
+import { routeTargetFromProjection } from "@/lib/routePatch.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
 
 export interface LocationRateLimitEditorProps {
@@ -24,7 +25,7 @@ export function LocationRateLimitEditor({
   loc,
   onClose,
 }: LocationRateLimitEditorProps) {
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(route.base_version);
   const { has } = usePermission();
   const canWrite = has("config:write");
 
@@ -57,10 +58,7 @@ export function LocationRateLimitEditor({
   function save(): void {
     runPatch({
       op: "route_set_rate_limit",
-      listen: route.listen,
-      server_names: route.server_names ?? [],
-      match_type: loc.type,
-      path: loc.match,
+      ...routeTargetFromProjection(route, loc),
       rate_limit: {
         enabled,
         rate,

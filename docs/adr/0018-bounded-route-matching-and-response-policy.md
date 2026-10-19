@@ -1093,6 +1093,21 @@ used one mechanism for both and the weaker property leaked into the stronger rol
 - `match_ordinal` is therefore a **revision-relative selector, and explicitly not an identity.** It
   must not be persisted, exported as a resource name, or used to correlate anything across revisions.
 
+**#643 correction and compatibility (2026-10-19).** The ordinal spans *all*
+blocks with the same exact listener, raw server-name multiset, match type and
+path. Names are compared without trimming, case folding or deduplication; order
+is insignificant and nil/empty lists are equal. Producers compute the rule once
+per snapshot. Corrected selectors carry `selector_version = "global-v1"` and
+require the projection's raw `base_version`. Cross-block ordinal mutations that
+omit the format are refused: pre-fix and corrected payloads are otherwise
+indistinguishable even after an upgrade with unchanged raw bytes. Unknown formats
+are refused, while unambiguous legacy targeting remains supported. Cached
+Console/API clients must fetch and echo a fresh selector. Within ordered batches,
+a declaration-changing operation may not precede a later ordinal operation;
+split the operations and re-project between them. This conservative refusal
+keeps ordinals relative to their original revision instead of reinterpreting them
+against a partially edited candidate. It introduces no durable identity.
+
 **Naming a location's state across revisions — a predicate fingerprint.**
 
 `AuthScope`, `WAFScope` and the per-location rate-limit scope key on

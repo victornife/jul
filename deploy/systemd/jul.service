@@ -10,6 +10,9 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
+# Provision this private key explicitly before first start; preserve in backups.
+# See docs/effective-versions.md. No automatic replacement on restart.
+Environment=JUL_EFFECTIVE_VERSION_KEY_FILE=/var/lib/jul/private/effective-version.key
 # Reload configuration on `systemctl reload jul` (SIGHUP).
 ExecStart=/usr/local/bin/jul --config /etc/jul/server.toml
 ExecReload=/bin/kill -HUP $MAINPID

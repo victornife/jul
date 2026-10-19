@@ -125,6 +125,9 @@ def main():
         for volume in volumes:
             docker("volume", "create", volume)
 
+        for state in (volumes[1], volumes[4]):
+            docker("run", "--rm", "-v", state + ":/var/lib/jul", image, "version-key", "init")
+
         docker("run", "-d", "--name", containers[0], "-p", "127.0.0.1::8080",
                "-v", volumes[0] + ":/etc/jul", "-v", volumes[1] + ":/var/lib/jul",
                "-v", volumes[2] + ":/var/cache/jul", "-v", volumes[3] + ":/var/log/jul", image)

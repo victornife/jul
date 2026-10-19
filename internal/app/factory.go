@@ -543,11 +543,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			}
 			forwardPool, err := f.authDependencyPool(ctx, forwardURL, upstreams)
 			if err != nil {
-				return nil, fmt.Errorf("location %s: forward_auth.url: %w", key, err)
+				return nil, fmt.Errorf("servers[%d].locations[%d]: forward_auth.url: %w", i, j, err)
 			}
 			jwksPool, err := f.authDependencyPool(ctx, jwksURL, upstreams)
 			if err != nil {
-				return nil, fmt.Errorf("location %s: jwt.jwks_url: %w", key, err)
+				return nil, fmt.Errorf("servers[%d].locations[%d]: jwt.jwks_url: %w", i, j, err)
 			}
 			a, err := auth.New(ctx, *loc.Auth, auth.Options{
 				Logger:      f.Log,
@@ -557,7 +557,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				JWKSPool:    jwksPool,
 			})
 			if err != nil {
-				return nil, fmt.Errorf("location %s: %w", key, err)
+				return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
 			}
 			gen.Stage(a)
 			authByScope[key] = a
@@ -600,7 +600,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 					Hooks:  waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
 				})
 				if err != nil {
-					return nil, fmt.Errorf("location %s: %w", WAFScope(c.Servers[i], loc), err)
+					return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
 				}
 				if loc.WAF == nil {
 					globalFW = fw

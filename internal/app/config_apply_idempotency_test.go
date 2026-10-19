@@ -191,7 +191,7 @@ func TestIdempotentDiscardReservesBeforeRestoreAndRechecksCAS(t *testing.T) {
 		BaseCtx:        context.Background(),
 		Path:           path,
 		Preflight:      testPreflightStage(t, seed),
-		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{} },
+		LiveSnapshot:   func() server.LiveSnapshot { return server.LiveSnapshot{EffectiveConfig: mustParse(t, seed)} },
 		PlannedRestart: store,
 	}
 	candidate := restartRequiredConfigRaw(t, ":8080")

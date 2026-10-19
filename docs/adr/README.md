@@ -45,6 +45,8 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0024](0024-range-aware-cache-option-a.md) | Range-aware response caching (Option A: complete-object fill and bounded slice serving) | Accepted — Beta/unreleased | 2026-10-15 |
 | [0025](0025-application-sharing-contract.md) | Application-sharing contract: derived view, declared intent and complete withdrawal | Accepted | 2026-10-18 |
 
+| [0025](0025-effective-version-confidentiality.md) | Confidential effective configuration versions | Accepted — #644 / #647 | 2026-10-19 |
+
 ## Reading order
 
 - **What the product is and how work enters it:** [0013](0013-project-operating-model-and-completeness.md),

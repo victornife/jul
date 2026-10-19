@@ -66,6 +66,7 @@ export const PendingRestartStatusSchema = z.object({
   external: z.boolean().optional(),
   staged_at: z.string().optional(),
   staged_version: z.string().optional(),
+  version_comparison: z.string().optional(),
   persisted_version: z.string().optional(),
   serving_version: z.string().optional(),
   subsystems: z.array(z.string()).optional(),
@@ -583,6 +584,7 @@ export const OverviewSchema = z.object({
       external: z.boolean().optional(),
       staged_at: z.string().optional(),
       staged_version: z.string().optional(),
+  version_comparison: z.string().optional(),
       serving_version: z.string().optional(),
       subsystems: z.array(z.string()).optional(),
       discard_available: z.boolean(),
@@ -683,7 +685,7 @@ export const LocationProjectionSchema = z.object({
   action: z.string(),
   target: z.string().optional(),
   // match_ordinal is the route's 0-based index among the locations of its
-  // server block sharing its match type and path (ADR 0018 §14) — a typed
+  // matching blocks sharing its match type and path (ADR 0018 §14) — a typed
   // patch that targets a location must send it back, together with a
   // base_version, whenever predicates make several such locations exist. It is
   // a revision-relative selector, never an identity. Optional (rather than
@@ -691,6 +693,7 @@ export const LocationProjectionSchema = z.object({
   // valid; absent means "treat as 0", the same as an omitted patch ordinal
   // means "there must be exactly one".
   match_ordinal: z.number().optional(),
+  selector_version: z.string().optional(),
   // route_id is the route's durable identity (ADR 0019 §4), present only
   // when the route has one. Unlike match_ordinal, it is stable across
   // revisions; the Console must not derive its own correlation from
@@ -735,6 +738,7 @@ export const LocationProjectionSchema = z.object({
 export type LocationProjection = z.infer<typeof LocationProjectionSchema>;
 
 export const RouteProjectionSchema = z.object({
+  base_version: z.string().optional(),
   name: z.string().optional(),
   listen: z.string(),
   server_names: z.array(z.string()).optional(),
@@ -1339,6 +1343,10 @@ export interface RouteTestInput {
 }
 
 export const RouteTestResultSchema = z.object({
+  base_version: z.string().optional(),
+  selector_version: z.string().optional(),
+  match_ordinal: z.number().optional(),
+  candidates: z.array(z.object({ match_type: z.string(), match: z.string(), tier: z.number(), match_ordinal: z.number(), selector_version: z.string().optional(), selected: z.boolean(), rejection: z.string().optional() })).optional(),
   matched: z.boolean(),
   listen: z.string().optional(),
   server_names: z.array(z.string()).optional(),
@@ -1686,6 +1694,7 @@ export type RouteTarget = {
   // which predicates made possible (ADR 0018 §14). Omitted means "there must
   // be exactly one"; a patch that carries it requires base_version.
   match_ordinal?: number;
+  selector_version?: string;
 };
 
 // LocationWAFPatch is the per-location [waf] override the guided editor sets. As

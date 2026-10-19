@@ -31,7 +31,7 @@ func (c *ConfigApplyCoordinator) timedOutResult(mode ApplyMode, phase string) Ap
 }
 
 func (c *ConfigApplyCoordinator) provisionalResult(id string, mode ApplyMode, persistedVersion, desiredVersion string, startedAt time.Time, timedOut bool, message string) ApplyResult {
-	servingVersion := server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+	servingVersion := c.currentServingVersion()
 	return ApplyResult{
 		ApplyID:          id,
 		OK:               true,
@@ -151,7 +151,7 @@ func (c *ConfigApplyCoordinator) buildTerminalResult(mode ApplyMode, persistedVe
 	res := c.decorateResultNoRestore(mode, persistedVersion, desiredVersion, rr)
 	res.FinalServingVersion = rr.ServingVersion
 	if res.FinalServingVersion == "" && c.LiveSnapshot != nil {
-		res.FinalServingVersion = server.CanonicalVersion(c.LiveSnapshot().EffectiveConfig)
+		res.FinalServingVersion = c.currentServingVersion()
 	}
 	if res.OK {
 		res.Persisted = true
