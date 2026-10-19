@@ -154,12 +154,16 @@ implementation:
      (`middleware.ClientCert`), location authentication (`auth.*`), WAF, rate
      limiting, response caching and the location's action. The server-level
      `redirect_https` remains before location selection.
-   - **HTTP response:** When `withdrawn = true`, Jul answers immediately with
-     `403 Forbidden`, `Cache-Control: no-store` and
-     `Content-Type: text/plain; charset=utf-8` (decorated by the location's
-     configured `response_headers` / `expires` wrapper when present, while
-     never answering CORS preflight with `204` or storing in the response
-     cache).
+   - **HTTP response and `no-store` precedence:** When `withdrawn = true`, Jul
+     answers immediately with `403 Forbidden`, `Cache-Control: no-store` and
+     `Content-Type: text/plain; charset=utf-8`, without executing CORS preflight
+     `204` or storing in the response cache. Non-conflicting location
+     `response_headers` may still decorate the response, but **withdrawal's
+     cache prohibition (`Cache-Control: no-store` and removal of `Expires`) is
+     enforced after any `response_headers` (`set`, `add`, `remove`) or
+     `expires` decoration**, so a route configured with `expires` or
+     `Cache-Control: public, max-age=…` (or `remove = ["Cache-Control"]`) never
+     emits a cacheable `403` when withdrawn.
    - **Sparse repeatable typed patch operation:** `location_set_withdrawn`
      (`withdrawn: bool`, addressed by `route_selector` or `server_index` +
      `location_index`, guarded by `base_version`), classified as repeatable
@@ -173,8 +177,12 @@ implementation:
      reference).
 
 2. **Publish-time content classification for file-backed access inputs (`§9.5`, `RR12`, `RR13`).**
-   - Plans and postconditions never read or compare file contents (`RR11`,
-     `RR12`).
+   - Plans **may read files while preparing and validating the candidate**, as
+     today, but plan output (audience-delta classes, intent findings, warnings
+     and postconditions) must **never compare or disclose file contents**
+     (`RR11`, `RR12`), and postcondition evaluation
+     (`POST /api/sharing/postcondition/evaluate`) must **never reread** external
+     files.
    - At `Publish`, the server compares the loaded contents of file-backed
      access inputs between the retiring serving generation and the newly
      published generation to drive `§8.4` retirement only:
@@ -200,34 +208,69 @@ implementation:
      produced only by an actual publish; it adds nothing beyond `config:apply`
      (`E63`).
 
-3. **Exact-entry retirement on narrowing and enforced bound (`#563` + `#642`, `SD-08`, `SD-09`).**
+3. **Exact-entry retirement on narrowing, constituent-reason eligibility, atomic admission and enforced bound (`#563` + `#642`, `SD-08`, `SD-09`).**
    - **Trigger set:** Any entry whose publish-time effective access delta
      (combining raw configuration changes and publish-time loaded file-content
      changes) is `narrowed` or `uncertain` (including any target or upstream
      backend change while open exchanges remain), plus any entry removed in the
      new generation.
-   - **Per-entry keep-open exception (`SD-09`):** Apply and patch-apply requests
-     accept an optional `keep_open_entries` list (by `route_id` or canonical
-     entry coordinate). The exception is honoured only for entries whose
-     retirement trigger is `uncertain` (including target/upstream changes);
-     provably `narrowed` tightenings (withdrawal gate set, auth/CIDR/cert/CRL/WAF
-     tightening, or entry removal) always retire open exchanges unconditionally.
-     When honoured, stream/upgrade retirement is skipped for that entry on that
-     publish, `keep_open: true` is recorded in the apply result and status, and
-     the entry's complete-withdrawal claim is forfeited (`"new access updated;
-     open connections kept by operator exception"`).
+   - **Per-entry keep-open exception (`SD-09`) — defined from constituent reasons:**
+     - Apply and patch-apply requests accept an optional `keep_open_entries`
+       list (by `route_id` or canonical entry coordinate).
+     - Eligibility is determined from the **constituent change reasons, never
+       from the combined entry class alone**: an entry is eligible
+       (`keep_open_eligible: true`) **if and only if** it remains present in the
+       candidate, its retirement trigger arises **solely** from `uncertain`
+       constituent changes (such as a backend target/upstream change, host/match
+       reshaping or unclassified edit), and **zero** constituent changes are
+       mandatory `narrowed` tightenings (withdrawal gate set, Jul network,
+       credential or client-certificate check added or tightened,
+       `require_client_cert` set, `client_auth` mode raised to `require`,
+       listener bind narrowed, CORS narrowed, WAF enabled/tightened, or
+       publish-time `htpasswd` entry removal / CRL serial addition).
+     - **Mandatory tightening, withdrawal or removal always overrides
+       `keep_open_entries`**, even when combined with an `uncertain` change in
+       the same candidate (for example, adding a CIDR restriction **and**
+       changing `proxy_pass` produces a combined class of `uncertain`, sets
+       `keep_open_eligible: false`, overrides any supplied `keep_open_entries`
+       item, and retires the entry's open exchanges). Likewise, if an entry is
+       `keep_open_eligible` in the plan (written inputs only) but publish-time
+       file-content classification detects a `narrowed` tightening (`htpasswd`
+       user removal or CRL revocation addition), mandatory tightening overrides
+       `keep_open_entries` at publish.
+     - When `keep_open_entries` is honoured for an eligible entry, stream and
+       upgrade retirement is skipped for that entry on that publish,
+       `keep_open: true` is recorded in the apply result and status, and the
+       entry's complete-withdrawal claim is forfeited (`"new access updated;
+       open connections kept by operator exception"`).
    - **Never triggers:** `unchanged`, `metadata_only` (`[servers.locations.sharing]`
      edits), `widened`, non-access inputs (`rate_limit`, non-WAF
      `client_max_body_size`, `cache`, `compression`, timeouts,
      `response_headers`), and external events.
-   - **Deadline origin, grace and hard upper bound (`#563`):**
+   - **Deadline origin, grace, hard upper bound and cross-generation atomic admission (`#563`):**
      - Time origin: `Publish` of the new serving generation (before
        `applied_live` / `applied_degraded` returns).
      - Enforced bound (fixed server contract, no new TOML knob): **`1s`
-       graceful protocol close window (`RetirementGrace = 1s`) + `1s` forced
-       cutoff = `2s` hard upper bound (`RetirementBound = 2s`)** from `Publish`.
-     - Monotonic deadline invariant: client/backend I/O activity and repeated
-       reloads **never** extend an already-armed retirement deadline
+       maximum graceful protocol close window (`RetirementGrace = 1s`) + `1s`
+       forced cutoff = `2s` absolute closure deadline (`RetirementBound = 2s`)**
+       from `Publish`.
+     - **Atomic admission-or-retire invariant:** Exchange registration is
+       synchronised with generation publication so a request that selected an
+       older handler generation just before `Publish` cannot register after the
+       retirement scan and escape retirement. Every admitted exchange either
+       evaluates the newly published generation's policy or registers into the
+       retiring set with that publish's original `(publishTime + 2s)` deadline
+        already attached.
+     - **Coverage across older generations:** Active exchanges are tracked
+       across generations in a process-lifetime, entry-correlated registry (by
+       durable `route_id` or correlated `(genID, server_index, location_index)`
+       chain). When generation $G_k$ triggers retirement for an entry, it
+       retires **every** still-open exchange mapped to that entry from **all**
+       prior generations ($G_1 \dots G_{k-1}$), including exchanges preserved
+       across an intermediate reload by `keep_open_entries`.
+     - **Monotonic, irrevocable deadline invariant:** Client/backend I/O
+       activity, repeated reloads, and any subsequent `keep_open_entries`
+       request **never** disarm or extend an already-armed retirement deadline
        (`deadline = min(existingDeadline, publishTime + 2s)`).
 
 4. **Protocol retirement matrix, per-request certificate re-check and owned H1 upgrades (`#563`, `#562`, `SD-08`).**
@@ -268,29 +311,49 @@ implementation:
    - **Owned H1 upgraded sessions (`#562` — WebSockets and opaque `101` upgrades):**
      - At the `101 Switching Protocols` boundary in `internal/handler/proxy.go`,
        Jul wraps the hijacked client `net.Conn` and upstream connection in an
-       **owned upgraded session** registered with both the entry's exchange
-       tracker and the listener/server shutdown tracker, preserving `#284`'s
-       exactly-once admission release and `#428`'s resource-ownership
-       invariants.
-     - **RFC 6455 WebSocket upgrades (`Upgrade: websocket`):** Jul tracks
-       server-to-client frame boundaries so it can safely originate an
-       unfragmented Close control frame (`0x88`) without corrupting an
-       in-flight data frame. On narrowing retirement, Jul sends Close code
-       `1008 Policy Violation` (and `1001 Going Away` on server shutdown or
-       listener removal), closes/half-closes the upstream leg, waits up to `1s`
-       (`RetirementGrace`) for the peer's Close response or EOF (`graceful`),
-       and forcibly closes both `net.Conn` legs at `2s` (`RetirementBound`,
-       reported as `forced`).
+       **owned upgraded session** registered with both the cross-generation
+       entry exchange registry and the listener/server shutdown registry,
+       preserving `#284`'s exactly-once admission release and `#428`'s
+       resource-ownership invariants.
+     - **RFC 6455 WebSocket upgrades (`Upgrade: websocket`) — serialized writes,
+       masking and conditional graceful counting:**
+       - Jul owns write serialization and closure on **both** legs:
+         - **Jul → client leg (server-to-client):** frames originated by Jul
+           are **unmasked** (`MASK = 0`, RFC 6455 §5.1) and inserted only at a
+           WebSocket frame boundary so a control frame never interleaves
+           mid-payload of a data frame (RFC 6455 §5.4).
+         - **Jul → upstream leg (client-to-server):** any Close frame
+           originated by Jul toward the backend is serialized at an upstream
+           frame boundary and **masked with a fresh 4-byte key** (`MASK = 1`,
+           RFC 6455 §5.1/§5.3) before half-closing/closing the upstream leg.
+       - **Best-effort Close within `1s`, forced close by `2s`:** On narrowing
+         retirement, Jul attempts best-effort Close initiation (`1008 Policy
+         Violation` on narrowing; `1001 Going Away` on server shutdown or
+         listener removal) within the `1s` graceful window (`RetirementGrace`)
+         and enforces absolute socket closure of both `net.Conn` legs by `2s`
+         (`RetirementBound`). If a slow peer or a partially transmitted frame
+         prevents safe Close-frame insertion within `1s`, or if the peer does
+         not complete the closing handshake in time, Jul forcibly closes both
+         legs by `2s`.
+       - **Accurate RFC 6455 `graceful_count` vs `forced_count`:** Per RFC 6455
+         §7.1.4, an owned WebSocket session counts toward `graceful_count` **only
+         when the closing handshake completes** (Jul sends a Close control frame
+         and receives a valid reciprocal Close control frame from the client
+         within the bound before raw TCP EOF or reset). **Raw EOF, connection
+         reset, inability to insert a Close frame at a frame boundary within
+         `1s`, or expiry of the `2s` deadline is counted in `forced_count`,
+         never in `graceful_count`.**
      - **Non-WebSocket / opaque `101` upgrades:** Jul never fabricates a
        WebSocket frame; on narrowing retirement or server shutdown, Jul closes
-       both `net.Conn` legs within the `2s` bound and reports the closure as
-       `forced`.
+       both `net.Conn` legs within the `2s` bound and reports the closure in
+       `forced_count`.
      - **Unrelated reloads vs listener removal / server shutdown (`#562`):**
        Unrelated reloads (`unchanged`, `metadata_only`, `widened`) leave owned
-       H1 upgraded sessions running uninterrupted. Listener removal on reload
-       or full server shutdown drains all owned upgraded sessions on that
-       listener within the bounded deadline (initiated asynchronously rather
-       than blocking inside `http.Server.RegisterOnShutdown`).
+       H1 upgraded sessions running uninterrupted in the cross-generation
+       registry. Listener removal on reload or full server shutdown drains all
+       owned upgraded sessions on that listener within the bounded deadline
+       (initiated asynchronously rather than blocking inside
+       `http.Server.RegisterOnShutdown`).
    - **Collateral accounting (`SD-08`, `§8.4`):**
      - Stream-level cancellation (`H2`/`H3`), H1 single-request close, owned H1
        upgrade close, and per-request TLS client-certificate re-checks produce
@@ -303,8 +366,10 @@ implementation:
 
 5. **Preview, Apply Result and Sharing View Observability (`§8.4`, `§4.3`, `§9.8`).**
    - Plans report per-entry `triggers_retirement`, `open_exchanges_snapshot`
-     (active requests/streams plus owned H1 upgrades at plan time),
-     `keep_open_eligible` (`true` when the trigger is `uncertain`), and
+     (active requests/streams plus owned H1 upgrades across all live
+     generations at plan time), `keep_open_eligible` (`true` only when the
+     entry's retirement trigger comes solely from `uncertain` constituent
+     changes with no mandatory tightening, withdrawal or removal), and
      `retirement_bound: "2s"`, alongside the once-per-plan
      `file_backed_entries` notice.
    - Terminal apply results and `GET /api/sharing` report per-entry
@@ -316,6 +381,32 @@ implementation:
 6. **NGINX migration disposition.**
    - Not applicable: NGINX has no per-location outermost withdrawal gate or
      entry-scoped narrowing stream retirement.
+
+7. **Mandatory Phase 4 acceptance and regression obligations.**
+   - **Mixed-change `keep_open_entries` override:** Adding a mandatory
+     tightening (for example a CIDR restriction, credential check,
+     `require_client_cert`, WAF tightening, or publish-time `htpasswd` removal
+     / CRL revocation addition) together with an `uncertain` change (for
+     example a backend target/upstream change) classifies the entry as
+     `uncertain`, sets `keep_open_eligible: false`, overrides any supplied
+     `keep_open_entries` item, and retires open exchanges within `2s`.
+   - **Atomic admission vs `Publish` and multi-generation retirement:** A
+     request or upgrade racing with `Publish` either evaluates the new
+     generation's policy or registers into the retiring set with the original
+     `Publish` deadline; a subsequent narrowing retires exchanges retained from
+     earlier generations (including those preserved across an intermediate
+     reload by `keep_open_entries`); and a later `keep_open_entries` request
+     never disarms an already-armed retirement deadline.
+   - **RFC 6455 Close handshake vs forced closure counting:** Owned WebSocket
+     tests cover completed Close handshake (`graceful_count`), peer TCP EOF
+     without a reciprocal Close frame (`forced_count`), slow/backpressured peer
+     or mid-frame write preventing Close insertion within `1s` (`forced_count`
+     by `2s`), and masked upstream Close framing.
+   - **Withdrawal `Cache-Control: no-store` precedence:** A withdrawn location
+     configured with `expires` or `response_headers` setting
+     `Cache-Control: public, max-age=3600` (or removing `Cache-Control`) still
+     returns `403 Forbidden` with `Cache-Control: no-store` and no `Expires`
+     header.
 
 ## Reversibility and one-way doors
 
