@@ -424,7 +424,7 @@ jobs:
       - name: upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
-          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover,./http-load.cover
+          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover,./http-load.cover,./native-coverage/windows-lean.cover,./native-coverage/windows-full.cover
           disable_search: true
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}

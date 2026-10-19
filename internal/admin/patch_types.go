@@ -48,6 +48,9 @@ type patchRequest struct {
 	// every later ordinal — so a force-applied ordinal patch would silently edit
 	// a different route than the operator previewed.
 	MatchOrdinal *int `json:"match_ordinal,omitempty"`
+	// SelectorVersion must be echoed from fresh projections for cross-block
+	// ambiguous targets; pre-#643 ordinals are unsafe even with a current CAS.
+	SelectorVersion string `json:"selector_version,omitempty"`
 
 	// Upstream target (upstream_* ops).
 	Upstream string `json:"upstream,omitempty"`

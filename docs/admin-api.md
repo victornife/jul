@@ -317,10 +317,24 @@ design:
   one.
 - `selector` is a **revision-scoped coordinate**: `listen`, `server_names`,
   `match_type`, `path` and a `match_ordinal` that disambiguates two locations
-  with the same match within one server block. Every one of those is mutable
+  across every block with the same listener, raw server-name multiset, match
+  type and path. Name order is insignificant; duplicates, case and whitespace
+  remain significant. Every one of those coordinates is mutable
   route semantics, so a selector means nothing on its own — it is only valid
   against the `base_version` it was read with, which is why the collection
   publishes that version alongside it.
+
+Selectors also carry `selector_version: "global-v1"`. Echo this field and the
+collection's `base_version` in typed mutations. Before #643 the projection
+incorrectly counted within each block; an old and corrected ordinal can have
+identical coordinates and raw revisions. Therefore an ordinal mutation spanning
+multiple matching blocks without the new format field is refused. Refresh an
+already-open Console or re-fetch API projections; changing `base_version` alone
+cannot repair a cached selector. Unique-target legacy operations and ordinals
+contained within one block retain their existing behavior. Unknown formats are
+refused. A declaration-changing batch operation (add/remove, match or host
+change) must be applied before fetching fresh ordinals for subsequent operations;
+a later ordinal operation in that same batch is refused atomically.
 
 A route with no `route_id` is **collection-only**. It appears here, but it is not
 addressable at `/api/v1/routes/{...}` under any encoding — not an index, not an

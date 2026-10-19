@@ -1,7 +1,9 @@
 # #644 implementation and acceptance evidence
 
-Base: `9f72938ce71392c6394dca79bae70704625ce758`. Proposed, unreleased;
-no release/deployment, merge or sharing-design acceptance is implied.
+Original reproduction base: `9f72938ce71392c6394dca79bae70704625ce758`.
+Integration base: `509dacab64b85273d7e33a8af45fb25cf989a4de` (merged #646).
+ADR 0025 is accepted for this fix; implementation merge remains gated on green
+CI. This is unreleased and does not accept the proposed sharing design.
 
 ## Decision and data-flow review
 
@@ -139,3 +141,32 @@ resource abort, unchanged snapshot and the original live HTTP response. They
 and the legacy flag-entry key precedence regression pass under the race
 detector. Rebuilt source maps use a separate dependency installation so their
 paths match clean CI checkouts. The complete final-head gates remain required.
+
+## Integration after #646 and Codecov follow-up
+
+The integration keeps #646's snapshot-wide selector index and raw projection
+revision together with #644's private posture-generation context. Generated
+OpenAPI and Console assets are rebuilt from the combined sources. D11 preserves
+both parents' historical records and appends a separate integration path mapping.
+An independent reviewer found no lost selector behavior, version data-flow
+regression or historical audit rewrite; focused race checks and 26 UI tests pass.
+
+Combined affected Go packages pass lean/full tests with coverage; focused CLI
+full-tag lifecycle tests, targeted race, lean/full vet and the full-tag Windows
+cross-build pass. Both actual pre-fix/combined-binary probes pass, including the
+unchanged-raw legacy-selector refusal, restart/rotation/rollback/downgrade matrix
+and persisted credential absence check. D11 has zero errors and 22 unit tests
+pass. Console typecheck/lint and all 931 tests pass; production coverage is
+76.37% statements and 73.98% branches, preserving all existing frontend floors.
+
+The #646 Codecov bot comment marked uncovered/partial lines despite reporting
+95.57522% patch coverage. Its actual merged-commit Codecov status passes the
+unchanged 90% target. Six additional regressions exercise both rate-limit states,
+descriptor/reflection transcode previews, legacy coordinate omission and malformed,
+missing or ambiguous retained selectors. The previously uncovered editor selector
+statements execute twice each; the server-name fallback and retained-selector
+refusal branches are exercised. Codecov now also receives the native Windows
+profiles already required by the complete changed-Go gate; no file or threshold
+exemption is introduced. Fresh integrated-head CI and direct Codecov/CodeQL
+results remain the merge gate; the final PR and issue closure records bind the
+actual head, coverage result and merge commit.

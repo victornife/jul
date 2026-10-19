@@ -25,6 +25,7 @@ import {
 export interface PredicatesEditorProps {
   /** The location whose match predicates are being edited. */
   readonly target: RouteTarget;
+  readonly baseVersion?: string | undefined;
   readonly seedMethods?: readonly string[] | undefined;
   readonly seedHeaders?: readonly { name: string; op: string; value?: string }[] | undefined;
   readonly seedQuery?: readonly { name: string; op: string; value?: string }[] | undefined;
@@ -47,6 +48,7 @@ const QUERY_OPS: QueryPredicateOp[] = ["present", "exact"];
  */
 export function PredicatesEditor({
   target,
+  baseVersion,
   seedMethods,
   seedHeaders,
   seedQuery,
@@ -60,7 +62,7 @@ export function PredicatesEditor({
   const [draft, setDraft] = useState<PredicatesDraft>(() =>
     seedPredicatesDraft(seedMethods as string[] | undefined, seedHeaders, seedQuery),
   );
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(baseVersion);
   const { has } = usePermission();
   const canWrite = has("config:write");
 

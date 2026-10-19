@@ -14,7 +14,6 @@ import {
   type LocationProjection,
   type LocationWAF,
   type RouteProjection,
-  type RouteTarget,
 } from "@/api/client.ts";
 
 function RouteMetrics({ routeId }: { readonly routeId: string | undefined }) {
@@ -123,12 +122,12 @@ import { usePermission } from "@/auth/usePermission.ts";
 import type { PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
 import { isEditableAction } from "@/lib/routeEdit.ts";
 import {
-  buildRouteRemovalBatch,
   buildServerRemovalBatch,
   canonicalServerNames,
   formatServerIdentity,
   serverIdentityFromRoute,
 } from "@/lib/routePatch.ts";
+import { routeTargetFromProjection } from "@/lib/routePatch.ts";
 import { useRunPatch } from "@/lib/useRunPatch.ts";
 import { describePatchBatchError, useRunPatchBatch } from "@/lib/useRunPatchBatch.ts";
 
@@ -161,7 +160,7 @@ function Flag({ on, label }: { readonly on: boolean; readonly label: string }) {
 function routeOrderNote(route: RouteProjection, loc: LocationProjection): string | null {
   const siblings = route.locations.filter((l) => l.type === loc.type && l.match === loc.match);
   if (siblings.length <= 1) return null;
-  const position = (loc.match_ordinal ?? 0) + 1;
+  const position = siblings.indexOf(loc) + 1;
   return `${String(position)} of ${String(siblings.length)} routes sharing this match — evaluated in declaration order; the first whose predicates all match wins.`;
 }
 
@@ -294,7 +293,7 @@ function QuickEdits({
   readonly loc: LocationProjection;
 }) {
   const [target, setTarget] = useState(loc.target ?? "");
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(route.base_version);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const [wafEditing, setWafEditing] = useState(false);
@@ -312,13 +311,7 @@ function QuickEdits({
   // predicate/response-header/CORS editors. match_ordinal is only included
   // when the projection reports one, so exactOptionalPropertyTypes never sees
   // an explicit undefined where RouteTarget expects the key omitted entirely.
-  const routeTarget: RouteTarget = {
-    listen: route.listen,
-    server_names: route.server_names ?? [],
-    match_type: loc.type,
-    path: loc.match,
-    ...(loc.match_ordinal !== undefined ? { match_ordinal: loc.match_ordinal } : {}),
-  };
+  const routeTarget = routeTargetFromProjection(route, loc);
 
   // wafTarget builds the LocationWAF the guided per-location editor expects from
   // the route coordinates plus the location's current override (or safe
@@ -326,10 +319,7 @@ function QuickEdits({
   // passes the advanced SecLang fields through verbatim so the editor seeds and
   // round-trips them instead of clobbering rules it never showed (Phase 4e).
   const wafTarget: LocationWAF = {
-    listen: route.listen,
-    server_names: route.server_names ?? [],
-    match_type: loc.type,
-    path: loc.match,
+    ...routeTargetFromProjection(route, loc),
     enabled: loc.waf?.enabled ?? true,
     mode: loc.waf?.mode ?? "detect",
     crs_enabled: loc.waf?.crs_enabled ?? false,
@@ -373,10 +363,7 @@ function QuickEdits({
               onClick={() => {
                 runPatch({
                   op: "route_set_target",
-                  listen: route.listen,
-                  server_names: route.server_names ?? [],
-                  match_type: loc.type,
-                  path: loc.match,
+                  ...routeTargetFromProjection(route, loc),
                   target: target.trim(),
                 });
               }}
@@ -417,10 +404,7 @@ function QuickEdits({
           onClick={() => {
             runPatch({
               op: "route_toggle_cache",
-              listen: route.listen,
-              server_names: route.server_names ?? [],
-              match_type: loc.type,
-              path: loc.match,
+              ...routeTargetFromProjection(route, loc),
               enabled: !loc.cache,
             });
           }}
@@ -434,10 +418,7 @@ function QuickEdits({
           onClick={() => {
             runPatch({
               op: "route_toggle_rate_limit",
-              listen: route.listen,
-              server_names: route.server_names ?? [],
-              match_type: loc.type,
-              path: loc.match,
+              ...routeTargetFromProjection(route, loc),
               enabled: !loc.rate_limit,
             });
           }}
@@ -466,10 +447,7 @@ function QuickEdits({
           onClick={() => {
             runPatch({
               op: "location_toggle_require_client_cert",
-              listen: route.listen,
-              server_names: route.server_names ?? [],
-              match_type: loc.type,
-              path: loc.match,
+              ...routeTargetFromProjection(route, loc),
               enabled: !loc.require_client_cert,
             });
           }}
@@ -536,6 +514,8 @@ function QuickEdits({
 
       {wafEditing && (
         <LocationWAFEditor
+          baseVersion={route.base_version}
+          selector={routeTarget}
           target={wafTarget}
           existing={Boolean(loc.waf)}
           onClose={() => {
@@ -546,11 +526,9 @@ function QuickEdits({
 
       {authEditing && (
         <AuthEditor
+          baseVersion={route.base_version}
           target={{
-            listen: route.listen,
-            server_names: route.server_names ?? [],
-            match_type: loc.type,
-            path: loc.match,
+            ...routeTargetFromProjection(route, loc),
           }}
           seed={loc.auth_detail}
           existing={loc.auth}
@@ -562,6 +540,7 @@ function QuickEdits({
 
       {predicatesEditing && (
         <PredicatesEditor
+          baseVersion={route.base_version}
           target={routeTarget}
           seedMethods={loc.methods}
           seedHeaders={undefined}
@@ -575,6 +554,7 @@ function QuickEdits({
 
       {responseHeadersEditing && (
         <ResponseHeadersEditor
+          baseVersion={route.base_version}
           target={routeTarget}
           existing={Boolean(loc.response_headers)}
           onClose={() => {
@@ -585,6 +565,7 @@ function QuickEdits({
 
       {corsEditing && (
         <CORSEditor
+          baseVersion={route.base_version}
           target={routeTarget}
           seed={loc.cors}
           existing={Boolean(loc.cors)}
@@ -633,7 +614,7 @@ function QuickEdits({
 // TLS on the listener while h2c only applies to a plaintext one, so each button
 // is disabled when the listener's TLS posture rules it out.
 function ServerToggles({ route }: { readonly route: RouteProjection }) {
-  const { run: runPatch, error, busy } = useRunPatch();
+  const { run: runPatch, error, busy } = useRunPatch(route.base_version);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const [renameEditing, setRenameEditing] = useState(false);
@@ -896,9 +877,9 @@ function RouteDangerZone({
     setPreviewing(kind);
     const ops =
       kind === "route"
-        ? buildRouteRemovalBatch(identity, { matchType: loc.type, path: loc.match })
+        ? [{ op: "location_remove" as const, ...routeTargetFromProjection(route, loc) }]
         : buildServerRemovalBatch(identity);
-    const draft = await batch.preview(ops);
+    const draft = await batch.preview(ops, route.base_version);
     setPreviewing(null);
     if (draft !== null) setPreview({ kind, draft });
   }

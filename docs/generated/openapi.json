@@ -6036,6 +6036,9 @@
                 "route_id": {
                   "type": "string"
                 },
+                "selector_version": {
+                  "type": "string"
+                },
                 "server_names": {
                   "type": "array",
                   "items": {
@@ -6715,6 +6718,9 @@
           "path": {
             "type": "string"
           },
+          "selector_version": {
+            "type": "string"
+          },
           "server_names": {
             "type": "array",
             "items": {
@@ -6726,7 +6732,8 @@
           "listen",
           "match_ordinal",
           "match_type",
-          "path"
+          "path",
+          "selector_version"
         ],
         "additionalProperties": false
       },
@@ -6787,6 +6794,9 @@
           "auth": {
             "type": "boolean"
           },
+          "base_version": {
+            "type": "string"
+          },
           "cache": {
             "type": "boolean"
           },
@@ -6811,6 +6821,9 @@
                 "selected": {
                   "type": "boolean"
                 },
+                "selector_version": {
+                  "type": "string"
+                },
                 "tier": {
                   "type": "integer",
                   "format": "int64"
@@ -6821,6 +6834,7 @@
                 "match_ordinal",
                 "match_type",
                 "selected",
+                "selector_version",
                 "tier"
               ],
               "additionalProperties": false
@@ -6853,6 +6867,9 @@
           },
           "secure": {
             "type": "boolean"
+          },
+          "selector_version": {
+            "type": "string"
           },
           "server_names": {
             "type": "array",

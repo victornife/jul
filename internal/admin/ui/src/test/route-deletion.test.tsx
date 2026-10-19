@@ -163,7 +163,7 @@ describe("RouteDetail destructive route workflows", () => {
         {
           op: "location_remove",
           listen: ":8443",
-          server_names: ["a.example", "b.example"],
+          server_names: projection.server_names,
           match_type: "prefix",
           path: "/api",
         },

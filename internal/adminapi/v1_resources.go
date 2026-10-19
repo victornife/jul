@@ -17,8 +17,9 @@ type RouteSelector struct {
 	MatchType   string   `json:"match_type"`
 	Path        string   `json:"path"`
 	// MatchOrdinal disambiguates two locations with the same match type and
-	// path within one server block.
-	MatchOrdinal int `json:"match_ordinal"`
+	// path across every block with the same listener and raw server-name multiset.
+	MatchOrdinal    int    `json:"match_ordinal"`
+	SelectorVersion string `json:"selector_version"`
 }
 
 // Route is one entry of the routes collection.

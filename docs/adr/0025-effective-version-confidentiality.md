@@ -1,8 +1,8 @@
 # ADR 0025 — Confidential effective configuration versions
 
-- Status: Proposed (implemented for review with #644)
+- Status: Accepted for #644 / PR #647
 - Date: 2026-10-19
-- Deciders: maintainer review pending
+- Deciders: maintainer approval, 2026-10-19; implementation merge gated on green CI
 - Applies to: startup, reload, admin version and identity output
 - Source: [#644](https://github.com/victornife/jul/issues/644)
 - Scope: effective desired/serving versions and public authentication generations
