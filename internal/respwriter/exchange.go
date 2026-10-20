@@ -176,8 +176,8 @@ func (b *retirementBatch) wait(deadline time.Time) {
 			return
 		}
 		waitDur := time.Until(deadline) + 50*time.Millisecond
-		if waitDur <= 0 {
-			return
+		if waitDur < 20*time.Millisecond {
+			waitDur = 20 * time.Millisecond
 		}
 		select {
 		case <-ch:
@@ -293,17 +293,28 @@ func (r *ExchangeRegistry) SetInitialGeneration(genID uint64) {
 }
 
 // SnapshotCounts returns the current count of open exchanges per (serverIndex, locationIndex)
-// and per literal route_id in the currently published generation.
+// and per literal route_id in the currently published generation. Exchanges
+// belonging to removed entries are excluded so replacement entries at reused
+// coordinates are never charged for draining removed exchanges.
 func (r *ExchangeRegistry) SnapshotCounts() (byCoord map[[2]int]int, byRouteID map[string]int) {
+	_, byCoord, byRouteID, _ = r.SnapshotCountsWithGeneration()
+	return byCoord, byRouteID
+}
+
+// SnapshotCountsWithGeneration atomically returns the registry's currently
+// published generation ID, open-exchange counts per coordinate and per
+// route_id in that generation, and a copy of the latest retirement results.
+func (r *ExchangeRegistry) SnapshotCountsWithGeneration() (genID uint64, byCoord map[[2]int]int, byRouteID map[string]int, lastRets []EntryRetirementResult) {
 	byCoord = make(map[[2]int]int)
 	byRouteID = make(map[string]int)
 	if r == nil {
-		return byCoord, byRouteID
+		return 0, byCoord, byRouteID, nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	genID = r.publishedGen
 	for _, ex := range r.active {
-		if ex.closed.Load() {
+		if ex.closed.Load() || ex.removed || (r.publishedGen != 0 && ex.curCoord.GenID != 0 && ex.curCoord.GenID != r.publishedGen) {
 			continue
 		}
 		key := [2]int{ex.curCoord.ServerIndex, ex.curCoord.LocationIndex}
@@ -312,7 +323,11 @@ func (r *ExchangeRegistry) SnapshotCounts() (byCoord map[[2]int]int, byRouteID m
 			byRouteID[ex.curCoord.RouteID]++
 		}
 	}
-	return byCoord, byRouteID
+	if len(r.lastResults) > 0 {
+		lastRets = make([]EntryRetirementResult, len(r.lastResults))
+		copy(lastRets, r.lastResults)
+	}
+	return genID, byCoord, byRouteID, lastRets
 }
 
 // LastRetirementResults returns the most recent publish's per-entry retirement results.
@@ -386,9 +401,17 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 			continue
 		}
 		cKey := blockLocCoord{cur.ServerIndex, cur.LocationIndex}
-		tr, ok := step.byCoord[cKey]
-		if !ok && cur.RouteID != "" {
+		var tr EntryTransition
+		var ok bool
+		if cur.RouteID != "" {
 			tr, ok = step.byRouteID[cur.RouteID]
+			if !ok {
+				if cand, cok := step.byCoord[cKey]; cok && cand.FromRouteID == "" {
+					tr, ok = cand, true
+				}
+			}
+		} else {
+			tr, ok = step.byCoord[cKey]
 		}
 		if !ok || tr.Removed || tr.Retire {
 			immediateRetire = true
@@ -402,9 +425,14 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 			}
 			if ok {
 				immediateCode = tr.closeCode()
-				et := step.trackersByCoord[cKey]
-				if et == nil && cur.RouteID != "" {
+				var et *entryTracker
+				if cur.RouteID != "" {
 					et = step.trackersByID[cur.RouteID]
+				}
+				if et == nil {
+					if cand := step.trackersByCoord[cKey]; cand != nil && (cur.RouteID == "" || cand.tr.FromRouteID == "") {
+						et = cand
+					}
 				}
 				if et != nil {
 					et.exchanges = append(et.exchanges, ex)
@@ -439,6 +467,7 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 	// a newly stored handler generation (coord.GenID > r.publishedGen) is
 	// already evaluating the new policy and must not be treated as stale.
 	if !removed && coord.GenID != 0 && r.publishedGen != 0 && cur.GenID < r.publishedGen {
+		removed = true
 		immediateRetire = true
 		now := time.Now()
 		if immediateGrace.IsZero() || now.Before(immediateGrace) {
@@ -452,6 +481,7 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 		}
 	}
 	ex.curCoord = cur
+	ex.removed = removed
 
 	closedGen, addrClosed := r.closedAddrAtGen[coord.ListenAddr]
 	if r.shuttingDown || (addrClosed && (coord.GenID == 0 || coord.GenID <= closedGen)) {
@@ -629,28 +659,45 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 	}
 
 	for _, ex := range r.active {
-		if ex.closed.Load() || (toGen != 0 && ex.curCoord.GenID >= toGen) {
+		if ex.closed.Load() || ex.removed || (toGen != 0 && ex.curCoord.GenID >= toGen) {
 			continue
 		}
 		cKey := blockLocCoord{ex.curCoord.ServerIndex, ex.curCoord.LocationIndex}
-		tr, ok := byCoord[cKey]
-		if !ok && ex.curCoord.RouteID != "" {
+		var tr EntryTransition
+		var ok bool
+		if ex.curCoord.RouteID != "" {
 			tr, ok = byRouteID[ex.curCoord.RouteID]
+			if !ok {
+				if cand, cok := byCoord[cKey]; cok && cand.FromRouteID == "" {
+					tr, ok = cand, true
+				}
+			}
+		} else {
+			tr, ok = byCoord[cKey]
 		}
 		if !ok {
+			ex.removed = true
+			toArm = append(toArm, armItem{ex: ex, mandatory: true, code: WSClosePolicyViolation})
 			continue
 		}
 		if tr.Retire || tr.Removed {
-			et := trackerByFromCoord[cKey]
-			if et == nil && ex.curCoord.RouteID != "" {
+			var et *entryTracker
+			if ex.curCoord.RouteID != "" {
 				et = trackerByRouteID[ex.curCoord.RouteID]
+			}
+			if et == nil {
+				if cand := trackerByFromCoord[cKey]; cand != nil && (ex.curCoord.RouteID == "" || cand.tr.FromRouteID == "") {
+					et = cand
+				}
 			}
 			if et != nil {
 				et.exchanges = append(et.exchanges, ex)
 			}
 			toArm = append(toArm, armItem{ex: ex, mandatory: tr.Mandatory || tr.Removed, code: tr.closeCode()})
 		}
-		if !tr.Removed {
+		if tr.Removed {
+			ex.removed = true
+		} else {
 			ex.curCoord = EntryCoord{
 				GenID:         toGen,
 				ListenAddr:    ex.curCoord.ListenAddr,
@@ -733,36 +780,28 @@ func (r *ExchangeRegistry) DrainAll(ctx context.Context) {
 
 func (r *ExchangeRegistry) shutdownDeadlines(ctx context.Context) (time.Time, time.Time) {
 	now := time.Now()
+	if ctx != nil && ctx.Err() != nil {
+		return now, now
+	}
 	graceDur := r.graceDuration()
 	boundDur := r.boundDuration()
-	if dl, ok := ctx.Deadline(); ok {
-		rem := time.Until(dl)
-		if rem <= 0 {
-			return now, now
-		}
-		if rem < boundDur {
-			boundDur = rem
-			graceDur = rem / 2
+	if ctx != nil {
+		if dl, ok := ctx.Deadline(); ok {
+			rem := time.Until(dl)
+			if rem <= 0 {
+				return now, now
+			}
+			if rem < boundDur {
+				boundDur = rem
+				graceDur = rem / 2
+			}
 		}
 	}
 	return now.Add(graceDur), now.Add(boundDur)
 }
 
-func waitBatchContext(ctx context.Context, batch *retirementBatch, bound time.Time) {
-	done := make(chan struct{})
-	go func() {
-		batch.wait(bound)
-		close(done)
-	}()
-	waitDur := time.Until(bound) + 100*time.Millisecond
-	if waitDur < 20*time.Millisecond {
-		waitDur = 20 * time.Millisecond
-	}
-	select {
-	case <-done:
-	case <-ctx.Done():
-	case <-time.After(waitDur):
-	}
+func waitBatchContext(_ context.Context, batch *retirementBatch, bound time.Time) {
+	batch.wait(bound)
 }
 
 // ActiveExchange represents one in-flight HTTP/1.1, HTTP/2, or HTTP/3 request
@@ -772,6 +811,7 @@ type ActiveExchange struct {
 	reg        *ExchangeRegistry
 	origCoord  EntryCoord
 	curCoord   EntryCoord
+	removed    bool
 	protoMajor int
 	reqMethod  string
 	reqUpgrade string
@@ -847,17 +887,18 @@ func (ex *ActiveExchange) triggerStreamAbort(forceConnClose bool) {
 	ex.mu.Lock()
 	ex.abortNow = true
 	wroteHdr := ex.wroteHeader
-	ex.mu.Unlock()
-
-	ex.cancel()
 	if wroteHdr || ex.protoMajor >= 2 {
 		ex.abortStream.Store(true)
 	}
-	if ex.controller != nil {
+	ctrl := ex.controller
+	if ctrl != nil && !ex.closed.Load() {
 		now := time.Now()
-		_ = ex.controller.SetReadDeadline(now)
-		_ = ex.controller.SetWriteDeadline(now)
+		_ = ctrl.SetReadDeadline(now)
+		_ = ctrl.SetWriteDeadline(now)
 	}
+	ex.mu.Unlock()
+
+	ex.cancel()
 	if forceConnClose && ex.protoMajor == 1 && ex.rawH1Conn != nil {
 		ex.forcedClose.Store(true)
 		ex.gracefulDone.Store(false)
@@ -879,8 +920,10 @@ func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, imm
 	if immediate {
 		ex.abortNow = true
 	}
+	graceShortened := false
 	if ex.graceDeadline.IsZero() || grace.Before(ex.graceDeadline) {
 		ex.graceDeadline = grace
+		graceShortened = true
 	}
 	if ex.boundDeadline.IsZero() || bound.Before(ex.boundDeadline) {
 		ex.boundDeadline = bound
@@ -910,7 +953,7 @@ func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, imm
 		if immediate {
 			ex.triggerStreamAbort(false)
 		}
-		if firstArm {
+		if firstArm || graceShortened {
 			go func() {
 				wait := time.Until(effGrace)
 				if wait > 0 {
@@ -932,6 +975,7 @@ func (ex *ActiveExchange) finishRequest() {
 		return
 	}
 	ex.mu.Lock()
+	ex.controller = nil
 	up := ex.upgraded
 	ex.mu.Unlock()
 	if up != nil {
@@ -973,8 +1017,14 @@ func (ex *ActiveExchange) outcome(boundDeadline time.Time) (graceful bool, force
 	if closedNs == 0 {
 		return false, false, false, 0
 	}
+	effBound := boundDeadline
+	ex.mu.Lock()
+	if !ex.boundDeadline.IsZero() && (effBound.IsZero() || ex.boundDeadline.Before(effBound)) {
+		effBound = ex.boundDeadline
+	}
+	ex.mu.Unlock()
 	closedTime := time.Unix(0, closedNs)
-	withinBound = !closedTime.After(boundDeadline.Add(50 * time.Millisecond))
+	withinBound = !closedTime.After(effBound)
 
 	if up := ex.upgradedPtr.Load(); up != nil {
 		if up.completedCleanHandshake() {

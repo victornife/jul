@@ -14,12 +14,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // wsFrameTracker tracks RFC 6455 frame boundaries on a byte stream so Jul can:
 //  1. know whether a WebSocket stream is currently between frames (safe to
 //     insert a Close control frame) or mid-frame; and
-//  2. detect when a peer has sent a complete Close control frame (opcode 0x8).
+//  2. detect when a peer has sent a complete, RFC 6455-valid Close control
+//     frame (opcode 0x8).
 type wsFrameTracker struct {
 	hdrBuf           [14]byte
 	hdrLen           int
@@ -27,6 +29,10 @@ type wsFrameTracker struct {
 	curOpcode        byte
 	curFin           bool
 	curMasked        bool
+	curMaskKey       [4]byte
+	curMaskOffset    int
+	closePayload     [125]byte
+	closePayloadLen  int
 	expectMasked     bool
 	corrupted        bool
 	sawCloseFrame    bool
@@ -71,6 +77,36 @@ func (t *wsFrameTracker) bytesToNextBoundary(p []byte) int {
 	return len(p)
 }
 
+func isValidWireCloseCode(code uint16) bool {
+	if code < 1000 || code >= 5000 {
+		return false
+	}
+	if code >= 3000 {
+		return true
+	}
+	switch code {
+	case 1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014:
+		return true
+	default:
+		// 1004, 1005, 1006, 1015, and unassigned 1016-2999 must not appear on the wire (RFC 6455 §7.4.1).
+		return false
+	}
+}
+
+func isValidClosePayload(body []byte) bool {
+	if len(body) == 0 {
+		return true
+	}
+	if len(body) == 1 {
+		return false
+	}
+	code := binary.BigEndian.Uint16(body[:2])
+	if !isValidWireCloseCode(code) {
+		return false
+	}
+	return utf8.Valid(body[2:])
+}
+
 func (t *wsFrameTracker) feed(p []byte) {
 	if t.corrupted {
 		return
@@ -81,10 +117,27 @@ func (t *wsFrameTracker) feed(p []byte) {
 			if take > t.remainingPayload {
 				take = t.remainingPayload
 			}
+			if t.curOpcode == 0x8 {
+				for i := 0; i < int(take); i++ {
+					b := p[i]
+					if t.curMasked {
+						b ^= t.curMaskKey[t.curMaskOffset&3]
+						t.curMaskOffset++
+					}
+					if t.closePayloadLen < len(t.closePayload) {
+						t.closePayload[t.closePayloadLen] = b
+						t.closePayloadLen++
+					}
+				}
+			}
 			t.remainingPayload -= take
 			p = p[int(take):]
 			if t.remainingPayload == 0 {
 				if t.curOpcode == 0x8 && t.curFin {
+					if !isValidClosePayload(t.closePayload[:t.closePayloadLen]) {
+						t.corrupted = true
+						return
+					}
 					t.sawCloseFrame = true
 				}
 				t.hdrLen = 0
@@ -108,19 +161,36 @@ func (t *wsFrameTracker) feed(p []byte) {
 		t.curFin = (b0 & 0x80) != 0
 		t.curOpcode = b0 & 0x0f
 		t.curMasked = (b1 & 0x80) != 0
-		if t.expectMasked && !t.curMasked {
-			// RFC 6455 §5.1: client-to-server frames must be masked.
+		if t.expectMasked != t.curMasked {
+			// RFC 6455 §5.1: client-to-server frames MUST be masked and
+			// server-to-client frames MUST NOT be masked.
 			t.corrupted = true
 			return
+		}
+		// Control frames (opcode >= 0x8) must never set RSV1, RSV2, or RSV3
+		// (RFC 6455 §5.2, RFC 7692 §6.1), and opcodes 0x3..0x7 / 0xB..0xF are reserved.
+		if (t.curOpcode >= 0x8 && (b0&0x70) != 0) || (t.curOpcode >= 0x3 && t.curOpcode <= 0x7) || t.curOpcode > 0x0a {
+			t.corrupted = true
+			return
+		}
+		if t.curMasked {
+			copy(t.curMaskKey[:], t.hdrBuf[need-4:need])
+			t.curMaskOffset = 0
 		}
 		len7 := b1 & 0x7f
 		var payloadLen uint64
 		switch len7 {
 		case 126:
 			payloadLen = uint64(binary.BigEndian.Uint16(t.hdrBuf[2:4]))
+			// RFC 6455 §5.2: minimal length encoding requires 16-bit extended length >= 126.
+			if payloadLen < 126 {
+				t.corrupted = true
+				return
+			}
 		case 127:
 			payloadLen = binary.BigEndian.Uint64(t.hdrBuf[2:10])
-			if (payloadLen & (uint64(1) << 63)) != 0 {
+			// RFC 6455 §5.2: MSB must be 0 and minimal length encoding requires 64-bit length > 65535.
+			if (payloadLen&(uint64(1)<<63)) != 0 || payloadLen <= 0xffff {
 				t.corrupted = true
 				return
 			}
@@ -128,9 +198,13 @@ func (t *wsFrameTracker) feed(p []byte) {
 			payloadLen = uint64(len7)
 		}
 		// Control frames (opcode >= 8) cannot have payload > 125 or be fragmented (RFC 6455 §5.5).
-		if t.curOpcode >= 0x8 && (!t.curFin || payloadLen > 125) {
+		// Close frames (opcode 8) cannot have a 1-byte payload (RFC 6455 §5.5.1).
+		if t.curOpcode >= 0x8 && (!t.curFin || payloadLen > 125 || (t.curOpcode == 0x8 && payloadLen == 1)) {
 			t.corrupted = true
 			return
+		}
+		if t.curOpcode == 0x8 {
+			t.closePayloadLen = 0
 		}
 		t.remainingPayload = payloadLen
 		if t.remainingPayload == 0 {
@@ -183,6 +257,8 @@ type upgradedSession struct {
 	closeCode               uint16
 	graceDeadline           time.Time
 	boundDeadline           time.Time
+	hardTimer               *time.Timer
+	deadlineChangedCh       chan struct{}
 	closeSentToClient       bool
 	closeReceivedFromClient bool
 	handshakeCompleted      atomic.Bool
@@ -194,12 +270,13 @@ type upgradedSession struct {
 
 func newUpgradedSession(ex *ActiveExchange, conn net.Conn, brw *bufio.ReadWriter, back *upgradedBackConn, isWS bool) *upgradedSession {
 	s := &upgradedSession{
-		ex:          ex,
-		rawConn:     conn,
-		origBRW:     brw,
-		back:        back,
-		isWebSocket: isWS,
-		closedCh:    make(chan struct{}),
+		ex:                ex,
+		rawConn:           conn,
+		origBRW:           brw,
+		back:              back,
+		isWebSocket:       isWS,
+		deadlineChangedCh: make(chan struct{}, 1),
+		closedCh:          make(chan struct{}),
 	}
 	s.cond = sync.NewCond(&s.mu)
 	// Seed buffered bytes that bufio.Reader may already hold after the HTTP request header.
@@ -277,16 +354,27 @@ func (s *upgradedSession) markClosed() {
 	})
 }
 
+func (s *upgradedSession) currentDeadlines() (grace, bound time.Time) {
+	s.mu.Lock()
+	grace = s.graceDeadline
+	bound = s.boundDeadline
+	s.mu.Unlock()
+	return grace, bound
+}
+
 func (s *upgradedSession) initiateClose(grace, bound time.Time, code uint16) {
 	if code == 0 {
 		code = WSClosePolicyViolation
 	}
 	s.mu.Lock()
+	shortened := false
 	if s.graceDeadline.IsZero() || grace.Before(s.graceDeadline) {
 		s.graceDeadline = grace
+		shortened = true
 	}
 	if s.boundDeadline.IsZero() || bound.Before(s.boundDeadline) {
 		s.boundDeadline = bound
+		shortened = true
 	}
 	if s.closeCode == 0 {
 		s.closeCode = code
@@ -294,27 +382,43 @@ func (s *upgradedSession) initiateClose(grace, bound time.Time, code uint16) {
 	effGrace := s.graceDeadline
 	effBound := s.boundDeadline
 	effCode := s.closeCode
+	if s.hardTimer != nil && shortened {
+		s.hardTimer.Reset(maxDuration(time.Until(effBound), 0))
+	}
 	s.closingRequested = true
 	s.cond.Broadcast()
 	s.mu.Unlock()
 
+	if shortened {
+		_ = s.rawConn.SetReadDeadline(effGrace)
+		select {
+		case s.deadlineChangedCh <- struct{}{}:
+		default:
+		}
+	}
+
 	s.initiateOnce.Do(func() {
-		go s.runCloseSequence(effGrace, effBound, effCode)
+		go s.runCloseSequence(effCode)
 	})
 }
 
-func (s *upgradedSession) runCloseSequence(grace, bound time.Time, code uint16) {
-	// Hard upper-bound watchdog: guarantees both transport legs are closed by bound (2s).
+func (s *upgradedSession) runCloseSequence(code uint16) {
+	// Hard upper-bound watchdog: guarantees both transport legs are closed by bound,
+	// and can be rearmed if a subsequent shutdown/listener-removal call shortens bound (#562, F5).
+	s.mu.Lock()
+	bound := s.boundDeadline
 	hardTimer := time.AfterFunc(maxDuration(time.Until(bound), 0), func() {
 		s.forceClosed.Store(true)
 		s.markClosed()
 	})
+	s.hardTimer = hardTimer
+	s.mu.Unlock()
 	defer hardTimer.Stop()
 
 	// Wait briefly if 101 response headers are still being flushed to the client.
 	s.mu.Lock()
-	for !s.httpHeaderDone && !s.forceClosed.Load() && time.Now().Before(grace) {
-		waitDur := minDuration(time.Until(grace), 10*time.Millisecond)
+	for !s.httpHeaderDone && !s.forceClosed.Load() && time.Now().Before(s.graceDeadline) {
+		waitDur := minDuration(time.Until(s.graceDeadline), 10*time.Millisecond)
 		if waitDur <= 0 {
 			break
 		}
@@ -324,6 +428,7 @@ func (s *upgradedSession) runCloseSequence(grace, bound time.Time, code uint16) 
 	}
 	isWS := s.isWebSocket
 	back := s.back
+	grace := s.graceDeadline
 	s.mu.Unlock()
 
 	// Non-WebSocket opaque 101 upgrade (#562): never fabricate a WebSocket frame;
@@ -341,18 +446,28 @@ func (s *upgradedSession) runCloseSequence(grace, bound time.Time, code uint16) 
 		back.sendMaskedCloseAndClose(code, grace)
 	}
 
-	// 2. Wait up to the 1s graceful window for the server->client leg to reach a
+	// 2. Wait up to the graceful window for the server->client leg to reach a
 	//    WebSocket frame boundary, then send an unmasked Close frame to the client.
+	grace, _ = s.currentDeadlines()
 	_ = s.rawConn.SetWriteDeadline(grace)
 	sentClose := s.wrappedClient.trySendClientCloseAtBoundary(code, grace)
 	if !sentClose {
-		// Could not safely insert Close frame within 1s (e.g. mid-frame stall or slow peer).
-		// Wait until bound (or close immediately if grace expired) and count as forced.
-		if wait := time.Until(bound); wait > 0 {
+		// Could not safely insert Close frame within grace (e.g. mid-frame stall or slow peer).
+		// Wait until current bound (which may be shortened by DrainAll) and count as forced.
+		for {
+			_, curBound := s.currentDeadlines()
+			wait := time.Until(curBound)
+			if wait <= 0 {
+				break
+			}
+			timer := time.NewTimer(wait)
 			select {
 			case <-s.closedCh:
+				timer.Stop()
 				return
-			case <-time.After(wait):
+			case <-s.deadlineChangedCh:
+				timer.Stop()
+			case <-timer.C:
 			}
 		}
 		s.forceClosed.Store(true)
@@ -361,24 +476,27 @@ func (s *upgradedSession) runCloseSequence(grace, bound time.Time, code uint16) 
 	}
 
 	// 3. Close frame was sent to the client. Bound client reads by grace so we wait
-	//    up to the 1s graceful window for the client's reciprocal Close control frame.
+	//    up to the graceful window for the client's reciprocal Close control frame.
+	grace, _ = s.currentDeadlines()
 	_ = s.rawConn.SetReadDeadline(grace)
-	waitGrace := time.Until(grace)
-	if waitGrace > 0 {
+	if time.Until(grace) > 0 {
 		ticker := time.NewTicker(5 * time.Millisecond)
 		defer ticker.Stop()
-		timer := time.NewTimer(waitGrace)
-		defer timer.Stop()
 	waitLoop:
 		for {
 			if s.handshakeCompleted.Load() {
 				break waitLoop
 			}
+			curGrace, _ := s.currentDeadlines()
+			if !time.Now().Before(curGrace) {
+				break waitLoop
+			}
 			select {
 			case <-s.closedCh:
 				break waitLoop
-			case <-timer.C:
-				break waitLoop
+			case <-s.deadlineChangedCh:
+				curGrace, _ = s.currentDeadlines()
+				_ = s.rawConn.SetReadDeadline(curGrace)
 			case <-ticker.C:
 			}
 		}
@@ -439,6 +557,16 @@ func (c *upgradedClientConn) inspectClientBytes(b []byte) {
 		return
 	}
 	c.c2sTracker.feed(b)
+	if c.c2sTracker.corrupted {
+		c.session.mu.Lock()
+		closing := c.session.closingRequested
+		c.session.mu.Unlock()
+		if closing {
+			c.session.forceClosed.Store(true)
+			c.session.markClosed()
+		}
+		return
+	}
 	if c.c2sTracker.sawCloseFrame {
 		c.session.mu.Lock()
 		c.session.closeReceivedFromClient = true
@@ -576,7 +704,10 @@ func (c *upgradedClientConn) Write(p []byte) (int, error) {
 			c.s2cTracker.feed(p[:n])
 			totalWritten += n
 			p = p[n:]
-			if c.s2cTracker.sawCloseFrame {
+			if c.s2cTracker.corrupted {
+				s.forceClosed.Store(true)
+				s.handshakeCompleted.Store(false)
+			} else if c.s2cTracker.sawCloseFrame {
 				s.mu.Lock()
 				s.closeSentToClient = true
 				rcvd := s.closeReceivedFromClient
@@ -626,13 +757,16 @@ func (c *upgradedClientConn) sendCloseLocked(code uint16) bool {
 }
 
 func (c *upgradedClientConn) trySendClientCloseAtBoundary(code uint16, grace time.Time) bool {
-	deadline := grace
 	for {
 		c.writeMu.Lock()
 		c.session.mu.Lock()
 		hdrDone := c.session.httpHeaderDone
 		alreadySent := c.session.closeSentToClient
 		forced := c.session.forceClosed.Load()
+		deadline := c.session.graceDeadline
+		if deadline.IsZero() {
+			deadline = grace
+		}
 		c.session.mu.Unlock()
 
 		if alreadySent {

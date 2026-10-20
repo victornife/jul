@@ -896,6 +896,18 @@ func upstreamKeysUsed(c *config.Config, upstreams map[string]config.UpstreamConf
 			if loc.GRPCTranscode != nil && loc.GRPCTranscode.Target != "" {
 				add(loc.GRPCTranscode.Target, "http")
 			}
+			if loc.Auth != nil {
+				if loc.Auth.ForwardAuth != nil && loc.Auth.ForwardAuth.URL != "" {
+					if u, err := url.Parse(loc.Auth.ForwardAuth.URL); err == nil && u.Host != "" {
+						add(u.Hostname(), u.Scheme)
+					}
+				}
+				if loc.Auth.JWT != nil && loc.Auth.JWT.JWKSURL != "" {
+					if u, err := url.Parse(loc.Auth.JWT.JWKSURL); err == nil && u.Host != "" {
+						add(u.Hostname(), u.Scheme)
+					}
+				}
+			}
 		}
 	}
 	return keys

@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -34,6 +33,7 @@ type LoadedAccessFiles struct {
 	htpasswdByLoc      map[[2]int]htpasswdSnapshot
 	caDigestByAddr     map[string]string
 	crlsByAddr         map[string][]crlSet
+	tlsCertFPByAddr    map[string]string
 	wafDigestByLoc     map[[2]int]string
 	globalWAFDigest    string
 	pluginDigestByName map[string]string
@@ -45,19 +45,24 @@ type htpasswdSnapshot struct {
 	valid     bool
 }
 
+func newEmptyLoadedAccessFiles() *LoadedAccessFiles {
+	return &LoadedAccessFiles{
+		htpasswdByPath:     make(map[string]htpasswdSnapshot),
+		htpasswdByLoc:      make(map[[2]int]htpasswdSnapshot),
+		caDigestByAddr:     make(map[string]string),
+		crlsByAddr:         make(map[string][]crlSet),
+		tlsCertFPByAddr:    make(map[string]string),
+		wafDigestByLoc:     make(map[[2]int]string),
+		pluginDigestByName: make(map[string]string),
+	}
+}
+
 func captureLoadedAccessFiles(effCfg *config.Config) *LoadedAccessFiles {
 	return captureLoadedAccessFilesOpt(effCfg, false)
 }
 
 func captureLoadedAccessFilesOpt(effCfg *config.Config, skipMTLS bool) *LoadedAccessFiles {
-	out := &LoadedAccessFiles{
-		htpasswdByPath:     make(map[string]htpasswdSnapshot),
-		htpasswdByLoc:      make(map[[2]int]htpasswdSnapshot),
-		caDigestByAddr:     make(map[string]string),
-		crlsByAddr:         make(map[string][]crlSet),
-		wafDigestByLoc:     make(map[[2]int]string),
-		pluginDigestByName: make(map[string]string),
-	}
+	out := newEmptyLoadedAccessFiles()
 	if effCfg == nil {
 		return out
 	}
@@ -141,8 +146,15 @@ func (f *LoadedAccessFiles) applyLiveMTLSListeners(retained map[string]*listener
 	}
 	clear(f.caDigestByAddr)
 	clear(f.crlsByAddr)
+	clear(f.tlsCertFPByAddr)
 	applyEntry := func(addr string, entry *listenerEntry) {
-		if entry == nil || entry.clientAuth == nil {
+		if entry == nil {
+			return
+		}
+		if entry.certFingerprint != "" {
+			f.tlsCertFPByAddr[addr] = entry.certFingerprint
+		}
+		if entry.clientAuth == nil {
 			return
 		}
 		if b := entry.clientAuth.current.Load(); b != nil {
@@ -239,9 +251,9 @@ func WrapHandlersWithLoadedAccess(
 }
 
 func captureLoadedAccessFilesFromHandlers(effCfg *config.Config, handlers map[string]http.Handler) *LoadedAccessFiles {
-	files := captureLoadedAccessFilesOpt(effCfg, true)
 	for _, h := range handlers {
 		if lah, ok := h.(*loadedAccessHandler); ok && lah != nil {
+			files := newEmptyLoadedAccessFiles()
 			files.applyBasicAuthByLoc(lah.basicByLoc)
 			files.applyWAFDigests(lah.wafGlobal, lah.wafByLoc)
 			for name, dig := range lah.pluginDigests {
@@ -249,10 +261,10 @@ func captureLoadedAccessFilesFromHandlers(effCfg *config.Config, handlers map[st
 					files.pluginDigestByName[name] = dig
 				}
 			}
-			break
+			return files
 		}
 	}
-	return files
+	return captureLoadedAccessFilesOpt(effCfg, true)
 }
 
 // WithCompiledWAF binds engine-owned external source digests from compiled
@@ -274,7 +286,7 @@ func (f *LoadedAccessFiles) WithCompiledWAF(global *waf.Firewall, byLoc map[[2]i
 }
 
 func parseHtpasswdSnapshot(path string) htpasswdSnapshot {
-	data, err := os.ReadFile(path)
+	data, err := readBoundedMTLSFile(path, 1<<20)
 	if err != nil {
 		return htpasswdSnapshot{}
 	}
@@ -389,7 +401,7 @@ func digestWAFDirectiveFiles(w config.WAFConfig) string {
 		}
 		visited[clean] = true
 		wroteAny = true
-		data, err := os.ReadFile(clean)
+		data, err := readBoundedMTLSFile(clean, 16<<20)
 		if err != nil {
 			fmt.Fprintf(h, "err:%s\n", clean)
 			return
@@ -611,9 +623,10 @@ func ComputePublishEntryTransitions(
 			changedPlugins,
 		)
 
-		hasNarrowed := slices.Contains(classes, "narrowed") || aEffLoc.Withdrawn || aEffLoc.Deny
+		hasNarrowedChange := slices.Contains(classes, "narrowed")
 		hasUncertain := slices.Contains(classes, "uncertain") || targetChanged
-		triggersRetirement := hasNarrowed || hasUncertain
+		triggersRetirement := hasNarrowedChange || hasUncertain
+		hasNarrowed := hasNarrowedChange || aEffLoc.Withdrawn || aEffLoc.Deny
 
 		// Point 1 (ADR 0026 #642 amendment): keep_open_entries eligibility is
 		// defined from constituent reasons, never from combined class alone. Any
@@ -745,10 +758,15 @@ func classifyPublishPair(
 	if !publishPluginsEqual(beforeEff, afterEff, bSrv, aSrv, bLoc, aLoc, changedPlugins) {
 		record("uncertain")
 	}
-	record(classifyPublishCORS(bLoc.CORS, aLoc.CORS))
+	if corsCls, _, corsNarrow := config.ClassifyCORSChange(bLoc.CORS, aLoc.CORS, false); corsCls != "unchanged" {
+		record(corsCls)
+		if corsNarrow {
+			record("narrowed")
+		}
+	}
 
-	// Auth (CIDR, credentials, and loaded htpasswd content).
-	for _, cls := range classifyPublishAuthWithCoords(beforeFiles, afterFiles, bSrvIdx, bLocIdx, aSrvIdx, aLocIdx, bLoc.Auth, aLoc.Auth) {
+	// Auth (CIDR, credentials, auth upstream dependencies, and loaded htpasswd content).
+	for _, cls := range classifyPublishAuthWithCoords(beforeEff, afterEff, beforeFiles, afterFiles, bSrvIdx, bLocIdx, aSrvIdx, aLocIdx, bLoc.Auth, aLoc.Auth) {
 		record(cls)
 	}
 
@@ -821,70 +839,124 @@ func publishLocationKey(l *config.LocationConfig) string {
 	return t + " " + l.Match.Path + "\x00" + l.Match.CanonicalPredicates()
 }
 
+func publishLocationCoordinates(l *config.LocationConfig) string {
+	t := l.Match.Type
+	if t == "" {
+		t = "prefix"
+	}
+	return t + " " + l.Match.Path
+}
+
 func correlateConfigEntries(before, after *config.Config) []publishLocPair {
-	var bList, aList []publishIndexedLoc
+	beforeUsed := make(map[[2]int]bool)
+	afterUsed := make(map[[2]int]bool)
+
+	beforeByRouteID := make(map[string]publishIndexedLoc)
 	for i, srv := range before.Servers {
 		for j, loc := range srv.Locations {
-			bList = append(bList, publishIndexedLoc{srvIdx: i, locIdx: j, srv: srv, loc: loc})
+			if id := literalRouteID(loc); id != "" {
+				beforeByRouteID[id] = publishIndexedLoc{srvIdx: i, locIdx: j, srv: srv, loc: loc}
+			}
 		}
 	}
+
+	var pairs []publishLocPair
+	afterPairByCoord := make(map[[2]int]publishLocPair)
+
+	// 1. Correlate by literal route_id first (global across all server blocks).
 	for i, srv := range after.Servers {
 		for j, loc := range srv.Locations {
-			aList = append(aList, publishIndexedLoc{srvIdx: i, locIdx: j, srv: srv, loc: loc})
-		}
-	}
-	bByID := make(map[string]int)
-	for idx, item := range bList {
-		if id := literalRouteID(item.loc); id != "" {
-			bByID[id] = idx
-		}
-	}
-	serverBlockMap := correlatePublishServerBlocks(before.Servers, after.Servers)
-	usedBefore := make(map[int]bool)
-	usedAfter := make(map[int]bool)
-	var pairs []publishLocPair
-
-	for aIdx := range aList {
-		aItem := &aList[aIdx]
-		if id := literalRouteID(aItem.loc); id != "" {
-			if bIdx, ok := bByID[id]; ok && !usedBefore[bIdx] {
-				usedBefore[bIdx] = true
-				usedAfter[aIdx] = true
-				bItem := bList[bIdx]
-				aCopy := *aItem
-				pairs = append(pairs, publishLocPair{before: &bItem, after: &aCopy})
-			}
-			continue
-		}
-		for bIdx := range bList {
-			if usedBefore[bIdx] {
-				continue
-			}
-			bItem := &bList[bIdx]
-			if literalRouteID(bItem.loc) != "" {
-				continue
-			}
-			if mappedAfter, ok := serverBlockMap[bItem.srvIdx]; ok && mappedAfter == aItem.srvIdx {
-				if publishLocationKey(&bItem.loc) == publishLocationKey(&aItem.loc) {
-					usedBefore[bIdx] = true
-					usedAfter[aIdx] = true
-					bCopy := *bItem
-					aCopy := *aItem
-					pairs = append(pairs, publishLocPair{before: &bCopy, after: &aCopy})
-					break
+			if id := literalRouteID(loc); id != "" {
+				if b, ok := beforeByRouteID[id]; ok && !beforeUsed[[2]int{b.srvIdx, b.locIdx}] {
+					bCopy := b
+					aCopy := publishIndexedLoc{srvIdx: i, locIdx: j, srv: srv, loc: loc}
+					beforeUsed[[2]int{b.srvIdx, b.locIdx}] = true
+					afterUsed[[2]int{i, j}] = true
+					afterPairByCoord[[2]int{i, j}] = publishLocPair{before: &bCopy, after: &aCopy}
 				}
 			}
 		}
 	}
-	for aIdx := range aList {
-		if !usedAfter[aIdx] {
-			aCopy := aList[aIdx]
+
+	// 2. Correlate remaining entries within matched server blocks.
+	srvPairs := correlatePublishServerBlocks(before.Servers, after.Servers)
+	for bSrvIdx, aSrvIdx := range srvPairs {
+		bSrv := before.Servers[bSrvIdx]
+		aSrv := after.Servers[aSrvIdx]
+		// 2a. Match by exact publishLocationKey (match type + path + predicates) when unique among unused.
+		for jAfter, aLoc := range aSrv.Locations {
+			if afterUsed[[2]int{aSrvIdx, jAfter}] {
+				continue
+			}
+			aKey := publishLocationKey(&aLoc)
+			matchIdx := -1
+			ambiguous := false
+			for jBefore, bLoc := range bSrv.Locations {
+				if beforeUsed[[2]int{bSrvIdx, jBefore}] {
+					continue
+				}
+				if publishLocationKey(&bLoc) == aKey {
+					if matchIdx >= 0 {
+						ambiguous = true
+						break
+					}
+					matchIdx = jBefore
+				}
+			}
+			if matchIdx >= 0 && !ambiguous {
+				bCopy := publishIndexedLoc{srvIdx: bSrvIdx, locIdx: matchIdx, srv: bSrv, loc: bSrv.Locations[matchIdx]}
+				aCopy := publishIndexedLoc{srvIdx: aSrvIdx, locIdx: jAfter, srv: aSrv, loc: aLoc}
+				beforeUsed[[2]int{bSrvIdx, matchIdx}] = true
+				afterUsed[[2]int{aSrvIdx, jAfter}] = true
+				afterPairByCoord[[2]int{aSrvIdx, jAfter}] = publishLocPair{before: &bCopy, after: &aCopy}
+			}
+		}
+		// 2b. Match by unique (matchType, path) coordinates among remaining unused in the block.
+		for jAfter, aLoc := range aSrv.Locations {
+			if afterUsed[[2]int{aSrvIdx, jAfter}] {
+				continue
+			}
+			aCoord := publishLocationCoordinates(&aLoc)
+			matchIdx := -1
+			ambiguous := false
+			for jBefore, bLoc := range bSrv.Locations {
+				if beforeUsed[[2]int{bSrvIdx, jBefore}] {
+					continue
+				}
+				if publishLocationCoordinates(&bLoc) == aCoord {
+					if matchIdx >= 0 {
+						ambiguous = true
+						break
+					}
+					matchIdx = jBefore
+				}
+			}
+			if matchIdx >= 0 && !ambiguous {
+				bCopy := publishIndexedLoc{srvIdx: bSrvIdx, locIdx: matchIdx, srv: bSrv, loc: bSrv.Locations[matchIdx]}
+				aCopy := publishIndexedLoc{srvIdx: aSrvIdx, locIdx: jAfter, srv: aSrv, loc: aLoc}
+				beforeUsed[[2]int{bSrvIdx, matchIdx}] = true
+				afterUsed[[2]int{aSrvIdx, jAfter}] = true
+				afterPairByCoord[[2]int{aSrvIdx, jAfter}] = publishLocPair{before: &bCopy, after: &aCopy}
+			}
+		}
+	}
+
+	for i, srv := range after.Servers {
+		for j, loc := range srv.Locations {
+			if p, ok := afterPairByCoord[[2]int{i, j}]; ok {
+				pairs = append(pairs, p)
+				continue
+			}
+			aCopy := publishIndexedLoc{srvIdx: i, locIdx: j, srv: srv, loc: loc}
 			pairs = append(pairs, publishLocPair{after: &aCopy})
 		}
 	}
-	for bIdx := range bList {
-		if !usedBefore[bIdx] {
-			bCopy := bList[bIdx]
+	for i, srv := range before.Servers {
+		for j, loc := range srv.Locations {
+			if beforeUsed[[2]int{i, j}] {
+				continue
+			}
+			bCopy := publishIndexedLoc{srvIdx: i, locIdx: j, srv: srv, loc: loc}
 			pairs = append(pairs, publishLocPair{before: &bCopy})
 		}
 	}
@@ -1024,6 +1096,15 @@ func computeHostDispatchAffected(before, after *config.Config) (map[int]bool, ma
 	for _, s := range after.Servers {
 		listeners[s.Listen] = true
 	}
+	countOnListen := func(srvs []config.ServerConfig, l string) int {
+		n := 0
+		for _, s := range srvs {
+			if s.Listen == l {
+				n++
+			}
+		}
+		return n
+	}
 	for listen := range listeners {
 		var bIdxs, aIdxs []int
 		for i, s := range before.Servers {
@@ -1036,6 +1117,8 @@ func computeHostDispatchAffected(before, after *config.Config) (map[int]bool, ma
 				aIdxs = append(aIdxs, i)
 			}
 		}
+		multiBlockListener := len(bIdxs) > 1 || len(aIdxs) > 1
+		listenerBlocksMutated := false
 		changedSet := make(map[string]bool)
 		addPatterns := func(names []string) {
 			if config.IsCatchAllServerNames(names) {
@@ -1051,9 +1134,18 @@ func computeHostDispatchAffected(before, after *config.Config) (map[int]bool, ma
 		var bCorrelatedOnListen, aCorrelatedOnListen []int
 		for _, bi := range bIdxs {
 			ai, ok := bToA[bi]
-			if !ok || after.Servers[ai].Listen != listen {
+			if !ok {
+				listenerBlocksMutated = true
 				addPatterns(before.Servers[bi].ServerNames)
 				affectedBefore[bi] = true
+				continue
+			}
+			if after.Servers[ai].Listen != listen {
+				if multiBlockListener || countOnListen(before.Servers, after.Servers[ai].Listen) > 0 || countOnListen(after.Servers, after.Servers[ai].Listen) > 1 {
+					listenerBlocksMutated = true
+					addPatterns(before.Servers[bi].ServerNames)
+					affectedBefore[bi] = true
+				}
 				continue
 			}
 			bCorrelatedOnListen = append(bCorrelatedOnListen, bi)
@@ -1063,9 +1155,18 @@ func computeHostDispatchAffected(before, after *config.Config) (map[int]bool, ma
 		}
 		for _, ai := range aIdxs {
 			bi, ok := aToB[ai]
-			if !ok || before.Servers[bi].Listen != listen {
+			if !ok {
+				listenerBlocksMutated = true
 				addPatterns(after.Servers[ai].ServerNames)
 				affectedAfter[ai] = true
+				continue
+			}
+			if before.Servers[bi].Listen != listen {
+				if multiBlockListener || countOnListen(after.Servers, before.Servers[bi].Listen) > 0 || countOnListen(before.Servers, before.Servers[bi].Listen) > 1 {
+					listenerBlocksMutated = true
+					addPatterns(after.Servers[ai].ServerNames)
+					affectedAfter[ai] = true
+				}
 				continue
 			}
 			aCorrelatedOnListen = append(aCorrelatedOnListen, ai)
@@ -1077,6 +1178,7 @@ func computeHostDispatchAffected(before, after *config.Config) (map[int]bool, ma
 				pos1 := slices.Index(aCorrelatedOnListen, ai1)
 				pos2 := slices.Index(aCorrelatedOnListen, ai2)
 				if pos1 > pos2 {
+					listenerBlocksMutated = true
 					addPatterns(before.Servers[bi1].ServerNames)
 					addPatterns(before.Servers[bi2].ServerNames)
 					addPatterns(after.Servers[ai1].ServerNames)
@@ -1092,13 +1194,14 @@ func computeHostDispatchAffected(before, after *config.Config) (map[int]bool, ma
 			firstB := bIdxs[0]
 			firstA := aIdxs[0]
 			if mappedA, ok := bToA[firstB]; !ok || mappedA != firstA {
+				listenerBlocksMutated = true
 				addPatterns(before.Servers[firstB].ServerNames)
 				addPatterns(after.Servers[firstA].ServerNames)
 				affectedBefore[firstB] = true
 				affectedAfter[firstA] = true
 			}
 		}
-		if len(changedSet) == 0 {
+		if len(changedSet) == 0 && !listenerBlocksMutated {
 			continue
 		}
 		var changed []string
@@ -1241,15 +1344,18 @@ func classifyPublishListenerAndCert(
 	bLoc, aLoc config.LocationConfig,
 ) []string {
 	var out []string
-	bTLS := listenerTLSEnabled(beforeEff, bSrv.Listen)
-	aTLS := listenerTLSEnabled(afterEff, aSrv.Listen)
-	if bTLS != aTLS || bSrv.H2C != aSrv.H2C || !reflect.DeepEqual(bSrv.HTTP3, aSrv.HTTP3) {
+	bIn, _ := config.SummarizeListenerAccessInputs(beforeEff, bSrv.Listen)
+	aIn, _ := config.SummarizeListenerAccessInputs(afterEff, aSrv.Listen)
+	bCertFP := beforeFiles.tlsCertFPByAddr[bSrv.Listen]
+	aCertFP := afterFiles.tlsCertFPByAddr[aSrv.Listen]
+	certFPChanged := bIn.TLSEnabled && aIn.TLSEnabled && bCertFP != "" && aCertFP != "" && bCertFP != aCertFP
+	if bIn.TLSEnabled != aIn.TLSEnabled || bIn.MinVersion != aIn.MinVersion || bIn.TLSCertSig != aIn.TLSCertSig || certFPChanged || bIn.HTTP3Sig != aIn.HTTP3Sig || bIn.H2C != aIn.H2C {
 		out = append(out, "uncertain")
 	}
-	if bSrv.RedirectHTTPS != aSrv.RedirectHTTPS {
+	if bSrv.RedirectHTTPS != aSrv.RedirectHTTPS || bIn.RedirectHTTPS != aIn.RedirectHTTPS {
 		out = append(out, "uncertain")
 	}
-	if bSrv.ProxyProtocol != aSrv.ProxyProtocol || !reflect.DeepEqual(bSrv.ClientAddress, aSrv.ClientAddress) {
+	if bIn.ProxyProtocol != aIn.ProxyProtocol || bIn.ClientAddrSig != aIn.ClientAddrSig {
 		out = append(out, "uncertain")
 	}
 
@@ -1262,7 +1368,7 @@ func classifyPublishListenerAndCert(
 	if aMode != "none" && crlClass != "unchanged" {
 		out = append(out, crlClass)
 	}
-	if bMode != "none" && aMode != "none" && (bMeta != aMeta || bCA != aCA) {
+	if bMode != "none" && aMode != "none" && (bMeta != aMeta || bCA != aCA || ((bCA == "" || aCA == "") && bIn.ClientAuthFiles != aIn.ClientAuthFiles)) {
 		out = append(out, "uncertain")
 	}
 	if bMode != aMode {
@@ -1292,15 +1398,6 @@ func classifyPublishListenerAndCert(
 		}
 	}
 	return out
-}
-
-func listenerTLSEnabled(c *config.Config, listen string) bool {
-	for _, s := range c.Servers {
-		if s.Listen == listen && s.TLS != nil && s.TLS.Enabled {
-			return true
-		}
-	}
-	return false
 }
 
 func summarizePublishClientAuth(c *config.Config, listen string) (string, string) {
@@ -1354,64 +1451,15 @@ func publishPluginsEqual(
 }
 
 func classifyPublishCORS(b, a *config.CORSConfig) string {
-	bOn := b != nil && b.Enabled
-	aOn := a != nil && a.Enabled
-	switch {
-	case !bOn && !aOn:
-		return "unchanged"
-	case !bOn && aOn:
-		return "widened"
-	case bOn && !aOn:
-		return "narrowed"
-	}
-	if !publishStringSetsEqual(b.AllowedMethods, a.AllowedMethods) || !publishStringSetsEqual(b.AllowedHeaders, a.AllowedHeaders) {
-		return "uncertain"
-	}
-	bOrigins := make(map[string]bool, len(b.AllowedOrigins))
-	for _, o := range b.AllowedOrigins {
-		bOrigins[strings.TrimSpace(o)] = true
-	}
-	aOrigins := make(map[string]bool, len(a.AllowedOrigins))
-	for _, o := range a.AllowedOrigins {
-		aOrigins[strings.TrimSpace(o)] = true
-	}
-	added, removed := false, false
-	for o := range aOrigins {
-		if !bOrigins[o] {
-			added = true
-		}
-	}
-	for o := range bOrigins {
-		if !aOrigins[o] {
-			removed = true
-		}
-	}
-	if !added && !removed && b.AllowCredentials == a.AllowCredentials {
-		return "unchanged"
-	}
-	if added && removed {
-		return "uncertain"
-	}
-	if removed && !added && (b.AllowCredentials == a.AllowCredentials || (b.AllowCredentials && !a.AllowCredentials)) {
-		return "narrowed"
-	}
-	if !added && !removed && b.AllowCredentials && !a.AllowCredentials {
-		return "narrowed"
-	}
-	if added && !removed {
-		return "widened"
-	}
-	if !b.AllowCredentials && a.AllowCredentials && !removed {
-		return "widened"
-	}
-	return "uncertain"
+	cls, _, _ := config.ClassifyCORSChange(b, a, false)
+	return cls
 }
 
 func classifyPublishAuth(beforeFiles, afterFiles *LoadedAccessFiles, b, a *config.AuthConfig) []string {
-	return classifyPublishAuthWithCoords(beforeFiles, afterFiles, 0, 0, 0, 0, b, a)
+	return classifyPublishAuthWithCoords(nil, nil, beforeFiles, afterFiles, 0, 0, 0, 0, b, a)
 }
 
-func classifyPublishAuthWithCoords(beforeFiles, afterFiles *LoadedAccessFiles, bSrvIdx, bLocIdx, aSrvIdx, aLocIdx int, b, a *config.AuthConfig) []string {
+func classifyPublishAuthWithCoords(beforeEff, afterEff *config.Config, beforeFiles, afterFiles *LoadedAccessFiles, bSrvIdx, bLocIdx, aSrvIdx, aLocIdx int, b, a *config.AuthConfig) []string {
 	var out []string
 	var bAllow, bDeny, aAllow, aDeny []string
 	if b != nil {
@@ -1439,25 +1487,35 @@ func classifyPublishAuthWithCoords(beforeFiles, afterFiles *LoadedAccessFiles, b
 		out = append(out, "widened")
 	case bBasic != aBasic || bJWT != aJWT || bFwd != aFwd:
 		out = append(out, "uncertain")
-	case bBasic && aBasic:
-		bFile := strings.TrimSpace(b.Basic.File)
-		aFile := strings.TrimSpace(a.Basic.File)
-		if bFile != aFile {
-			out = append(out, "uncertain")
-		} else if bFile != "" && beforeFiles != nil && afterFiles != nil {
-			bSnap := beforeFiles.htpasswdSnapshotFor(bSrvIdx, bLocIdx, bFile)
-			aSnap := afterFiles.htpasswdSnapshotFor(aSrvIdx, aLocIdx, aFile)
-			if cls := classifyHtpasswdContentChange(bSnap, aSnap); cls != "unchanged" {
-				out = append(out, cls)
+	default:
+		if bBasic && aBasic {
+			bFile := strings.TrimSpace(b.Basic.File)
+			aFile := strings.TrimSpace(a.Basic.File)
+			if bFile != aFile {
+				out = append(out, "uncertain")
+			} else if bFile != "" && beforeFiles != nil && afterFiles != nil {
+				bSnap := beforeFiles.htpasswdSnapshotFor(bSrvIdx, bLocIdx, bFile)
+				aSnap := afterFiles.htpasswdSnapshotFor(aSrvIdx, aLocIdx, aFile)
+				if cls := classifyHtpasswdContentChange(bSnap, aSnap); cls != "unchanged" {
+					out = append(out, cls)
+				}
 			}
 		}
-	case bJWT && aJWT:
-		if !reflect.DeepEqual(b.JWT, a.JWT) {
-			out = append(out, "uncertain")
+		if bJWT && aJWT {
+			if strings.TrimSpace(b.JWT.JWKSURL) != strings.TrimSpace(a.JWT.JWKSURL) ||
+				strings.TrimSpace(b.JWT.Issuer) != strings.TrimSpace(a.JWT.Issuer) ||
+				strings.TrimSpace(b.JWT.Audience) != strings.TrimSpace(a.JWT.Audience) ||
+				!publishStringSetsEqual(b.JWT.Algorithms, a.JWT.Algorithms) ||
+				!config.AuthUpstreamDependencyEqual(beforeEff, afterEff, b.JWT.JWKSURL, a.JWT.JWKSURL) {
+				out = append(out, "uncertain")
+			}
 		}
-	case bFwd && aFwd:
-		if !reflect.DeepEqual(b.ForwardAuth, a.ForwardAuth) {
-			out = append(out, "uncertain")
+		if bFwd && aFwd {
+			if strings.TrimSpace(b.ForwardAuth.URL) != strings.TrimSpace(a.ForwardAuth.URL) ||
+				!publishStringSetsEqual(b.ForwardAuth.AuthResponseHeaders, a.ForwardAuth.AuthResponseHeaders) ||
+				!config.AuthUpstreamDependencyEqual(beforeEff, afterEff, b.ForwardAuth.URL, a.ForwardAuth.URL) {
+				out = append(out, "uncertain")
+			}
 		}
 	}
 	return out
@@ -1536,11 +1594,17 @@ func classifyPublishWAF(
 	if bMode == aMode {
 		return "unchanged"
 	}
+	bLower := strings.ToLower(bw.InlineRules)
+	aLower := strings.ToLower(aw.InlineRules)
 	noEngineCtrl := len(bw.DirectivesFiles) == 0 && len(aw.DirectivesFiles) == 0 &&
-		!strings.Contains(strings.ToLower(bw.InlineRules), "ctl:ruleengine") &&
-		!strings.Contains(strings.ToLower(aw.InlineRules), "ctl:ruleengine") &&
-		!strings.Contains(strings.ToLower(bw.InlineRules), "include ") &&
-		!strings.Contains(strings.ToLower(aw.InlineRules), "include ")
+		!strings.Contains(bLower, "ctl:ruleengine") &&
+		!strings.Contains(aLower, "ctl:ruleengine") &&
+		!strings.Contains(bLower, "include ") &&
+		!strings.Contains(aLower, "include ") &&
+		!strings.Contains(bLower, "include\t") &&
+		!strings.Contains(aLower, "include\t") &&
+		!strings.Contains(bLower, "@pmfromfile") &&
+		!strings.Contains(aLower, "@pmfromfile")
 	switch {
 	case bMode == "disabled" && aMode == "block":
 		return "narrowed"
@@ -1572,8 +1636,8 @@ func publishTargetAndUpstreamEqual(before, after *config.Config, bLoc, aLoc conf
 		!reflect.DeepEqual(bLoc.BackendTLS, aLoc.BackendTLS) {
 		return false
 	}
-	bUp := publishUpstreamName(bLoc)
-	aUp := publishUpstreamName(aLoc)
+	bUp := config.ResolveLocationUpstreamName(before, bLoc)
+	aUp := config.ResolveLocationUpstreamName(after, aLoc)
 	if bUp != aUp {
 		return false
 	}
@@ -1604,29 +1668,6 @@ func publishTargetAndUpstreamEqual(before, after *config.Config, bLoc, aLoc conf
 		}
 	}
 	return true
-}
-
-func publishUpstreamName(loc config.LocationConfig) string {
-	target := strings.TrimSpace(loc.ProxyPass)
-	if loc.GRPCTranscode != nil && strings.TrimSpace(loc.GRPCTranscode.Target) != "" {
-		target = strings.TrimSpace(loc.GRPCTranscode.Target)
-	}
-	for _, pfx := range []string{"http://", "https://", "grpc://", "grpcs://"} {
-		if strings.HasPrefix(strings.ToLower(target), pfx) {
-			host := target[len(pfx):]
-			if slash := strings.IndexByte(host, '/'); slash >= 0 {
-				host = host[:slash]
-			}
-			if !strings.Contains(host, ":") && !strings.Contains(host, ".") {
-				return host
-			}
-			return ""
-		}
-	}
-	if target != "" && !strings.Contains(target, ":") && !strings.Contains(target, "/") {
-		return target
-	}
-	return ""
 }
 
 // Keep unused bytes import satisfied if needed by future helpers.

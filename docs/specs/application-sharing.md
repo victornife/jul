@@ -639,7 +639,7 @@ application. Each is shown with its blast radius.
 
 *Accepted (SD-07, SD-08, SD-09, 2026-10-18; mechanism, schema and bound settled
 by the [ADR 0026 #642 amendment](../adr/0026-application-sharing-contract.md#amendment--complete-withdrawal-outermost-withdrawal-gate-and-retirement-on-narrowing-642-with-563-and-562)
-in #652 (`801bb862`, 2026-10-19); runtime implementation delivered in #653 for #642, #563, and #562).*
+in #652 (`801bb862`, 2026-10-19); runtime implementation delivered in #653 (2026-10-20; see PR #653 completion record for merged SHA and per-protocol evidence across `internal/router/withdrawal_gate_test.go`, `internal/server/sharing_retirement_test.go`, `internal/server/grpc_retirement_test.go`, `internal/handler/proxy_stream_test.go`, `internal/respwriter/exchange_test.go`, and `internal/app/factory_test.go`) for #642, #563, and #562).*
 
 | Aspect | Requirement |
 | --- | --- |

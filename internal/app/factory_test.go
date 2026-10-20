@@ -7,11 +7,25 @@
 package app
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -554,5 +568,721 @@ func TestPrepareCapturesSnapshotsAfterCommit(t *testing.T) {
 	}
 	if len(snapshots2[key].Backends()) != 2 {
 		t.Errorf("second snapshot has %d backends, want 2", len(snapshots2[key].Backends()))
+	}
+}
+
+func TestFifth653DottedUpstreamAndMixedCORSRuntime(t *testing.T) {
+	freeAddr := func(t *testing.T) string {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		_ = ln.Close()
+		return addr
+	}
+
+	startSSEBackend := func(t *testing.T, label string) (*httptest.Server, <-chan struct{}, <-chan error) {
+		t.Helper()
+		entered := make(chan struct{}, 8)
+		closed := make(chan error, 8)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/stream" {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", label)
+				if fl, ok := w.(http.Flusher); ok {
+					fl.Flush()
+				}
+				entered <- struct{}{}
+				<-r.Context().Done()
+				closed <- r.Context().Err()
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(label))
+		}))
+		t.Cleanup(ts.Close)
+		return ts, entered, closed
+	}
+
+	t.Run("dotted-upstream-membership-change-must-retire-like-bare-upstream", func(t *testing.T) {
+		runCase := func(t *testing.T, upstreamName string, withShadowURLPool bool) {
+			t.Helper()
+			backOld, enteredOld, _ := startSSEBackend(t, "old")
+			backNew, _, _ := startSSEBackend(t, "new")
+			oldHost := strings.TrimPrefix(backOld.URL, "http://")
+			newHost := strings.TrimPrefix(backNew.URL, "http://")
+
+			addr := freeAddr(t)
+			routeID := "api"
+			makeCfg := func(backendAddr string) *config.Config {
+				ups := []config.UpstreamConfig{{
+					Name:    upstreamName,
+					Servers: []config.UpstreamServer{{Address: backendAddr}},
+				}}
+				if withShadowURLPool {
+					ups = append(ups, config.UpstreamConfig{
+						Name:    "http://" + upstreamName,
+						Servers: []config.UpstreamServer{{Address: oldHost}},
+					})
+				}
+				return &config.Config{
+					Upstreams: ups,
+					Servers: []config.ServerConfig{{
+						Listen: addr,
+						Locations: []config.LocationConfig{{
+							RouteID:   &routeID,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+							ProxyPass: "http://" + upstreamName,
+						}},
+					}},
+				}
+			}
+
+			cfg1 := makeCfg(oldHost)
+			if _, err := config.NewCandidate(cfg1); err != nil {
+				t.Fatalf("cfg1 NewCandidate(%s): %v", upstreamName, err)
+			}
+
+			f, cleanup := minimalFactory(t)
+			defer cleanup()
+			srv := server.New(
+				cfg1,
+				cfg1,
+				lifecycle.ComputeFingerprint(cfg1),
+				observability.NewLogger(io.Discard, "error", "text"),
+				f.Prepare,
+				config.NewTOMLSource(""),
+				func(context.Context, *config.Config) error { return nil },
+			)
+			srv.WAFSourceDigests = f.WAFSourceDigests
+			srv.PluginModuleChanges = f.PluginModuleChanges
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reloadCh := make(chan server.ReloadRequest, 2)
+			runDone := make(chan error, 1)
+			go func() {
+				runDone <- srv.Run(ctx, reloadCh, redact.EmptyState())
+			}()
+			defer func() {
+				cancel()
+				<-runDone
+			}()
+
+			var streamResp *http.Response
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				resp, err := http.Get("http://" + addr + "/stream")
+				if err == nil {
+					streamResp = resp
+					break
+				}
+				time.Sleep(15 * time.Millisecond)
+			}
+			if streamResp == nil {
+				t.Fatal("server never became reachable")
+			}
+			defer streamResp.Body.Close()
+
+			br := bufio.NewReader(streamResp.Body)
+			line, err := br.ReadString('\n')
+			if err != nil || !strings.Contains(line, "old") {
+				t.Fatalf("initial stream line=%q err=%v", line, err)
+			}
+			<-enteredOld
+
+			readDone := make(chan error, 1)
+			go func() {
+				_, rErr := io.ReadAll(br)
+				readDone <- rErr
+			}()
+
+			cfg2 := makeCfg(newHost)
+			cand2, err := config.NewCandidate(cfg2)
+			if err != nil {
+				t.Fatalf("cfg2 NewCandidate(%s): %v", upstreamName, err)
+			}
+			resCh := make(chan server.ReloadResult, 1)
+			reloadCh <- server.ReloadRequest{
+				ID:        "retire-" + upstreamName,
+				Source:    server.ReloadSourceAdmin,
+				Candidate: cand2,
+				Result:    resCh,
+			}
+			res := <-resCh
+			if res.Outcome != server.ReloadAppliedLive {
+				t.Fatalf("reload outcome=%+v", res)
+			}
+
+			checkResp, err := http.Get("http://" + addr + "/check")
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkBody, _ := io.ReadAll(checkResp.Body)
+			_ = checkResp.Body.Close()
+			if string(checkBody) != "new" {
+				t.Fatalf("new request body=%q, want new", string(checkBody))
+			}
+
+			retiredWithinBound := false
+			select {
+			case <-readDone:
+				retiredWithinBound = true
+			case <-time.After(2200 * time.Millisecond):
+			}
+			if !retiredWithinBound || len(res.EntryRetirements) != 1 || res.EntryRetirements[0].EndedExchanges != 1 {
+				t.Fatalf("upstream %q: retiredWithinBound=%v retirements=%+v", upstreamName, retiredWithinBound, res.EntryRetirements)
+			}
+		}
+
+		t.Run("bare-control", func(t *testing.T) {
+			runCase(t, "backend", false)
+		})
+		t.Run("dotted-name", func(t *testing.T) {
+			runCase(t, "backend.local", false)
+		})
+		t.Run("shadow-url-named-pool", func(t *testing.T) {
+			runCase(t, "backend", true)
+		})
+	})
+
+	t.Run("cors-credentials-disabled-with-added-origin-must-retire", func(t *testing.T) {
+		runCase := func(t *testing.T, originsAfter []string) {
+			t.Helper()
+			back, entered, _ := startSSEBackend(t, "cors")
+			addr := freeAddr(t)
+			routeID := "cors-api"
+			makeCfg := func(origins []string, creds bool) *config.Config {
+				return &config.Config{
+					Servers: []config.ServerConfig{{
+						Listen: addr,
+						Locations: []config.LocationConfig{{
+							RouteID:   &routeID,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+							ProxyPass: back.URL,
+							CORS: &config.CORSConfig{
+								Enabled:          true,
+								AllowedOrigins:   origins,
+								AllowCredentials: creds,
+							},
+						}},
+					}},
+				}
+			}
+
+			cfg1 := makeCfg([]string{"https://old.example"}, true)
+			f, cleanup := minimalFactory(t)
+			defer cleanup()
+			srv := server.New(
+				cfg1,
+				cfg1,
+				lifecycle.ComputeFingerprint(cfg1),
+				observability.NewLogger(io.Discard, "error", "text"),
+				f.Prepare,
+				config.NewTOMLSource(""),
+				func(context.Context, *config.Config) error { return nil },
+			)
+			srv.WAFSourceDigests = f.WAFSourceDigests
+			srv.PluginModuleChanges = f.PluginModuleChanges
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			reloadCh := make(chan server.ReloadRequest, 2)
+			runDone := make(chan error, 1)
+			go func() {
+				runDone <- srv.Run(ctx, reloadCh, redact.EmptyState())
+			}()
+			defer func() {
+				cancel()
+				<-runDone
+			}()
+
+			var streamResp *http.Response
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				req, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/stream", nil)
+				req.Header.Set("Origin", "https://old.example")
+				req.Header.Set("Cookie", "sid=secret")
+				resp, err := http.DefaultClient.Do(req)
+				if err == nil {
+					streamResp = resp
+					break
+				}
+				time.Sleep(15 * time.Millisecond)
+			}
+			if streamResp == nil {
+				t.Fatal("server never became reachable")
+			}
+			defer streamResp.Body.Close()
+			if got := streamResp.Header.Get("Access-Control-Allow-Credentials"); got != "true" {
+				t.Fatalf("initial Access-Control-Allow-Credentials=%q, want true", got)
+			}
+
+			br := bufio.NewReader(streamResp.Body)
+			if _, err := br.ReadString('\n'); err != nil {
+				t.Fatal(err)
+			}
+			<-entered
+
+			readDone := make(chan error, 1)
+			go func() {
+				_, rErr := io.ReadAll(br)
+				readDone <- rErr
+			}()
+
+			cfg2 := makeCfg(originsAfter, false)
+			cand2, err := config.NewCandidate(cfg2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resCh := make(chan server.ReloadResult, 1)
+			reloadCh <- server.ReloadRequest{
+				ID:        "cors-change",
+				Source:    server.ReloadSourceAdmin,
+				Candidate: cand2,
+				Result:    resCh,
+			}
+			res := <-resCh
+			if res.Outcome != server.ReloadAppliedLive {
+				t.Fatalf("reload outcome=%+v", res)
+			}
+
+			reqAfter, _ := http.NewRequest(http.MethodGet, "http://"+addr+"/check", nil)
+			reqAfter.Header.Set("Origin", "https://old.example")
+			respAfter, err := http.DefaultClient.Do(reqAfter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = respAfter.Body.Close()
+			if got := respAfter.Header.Get("Access-Control-Allow-Credentials"); got != "" {
+				t.Fatalf("post-reload Access-Control-Allow-Credentials=%q, want empty", got)
+			}
+
+			retiredWithinBound := false
+			select {
+			case <-readDone:
+				retiredWithinBound = true
+			case <-time.After(2200 * time.Millisecond):
+			}
+			if !retiredWithinBound || len(res.EntryRetirements) != 1 || res.EntryRetirements[0].EndedExchanges != 1 {
+				t.Fatalf("originsAfter=%v: retiredWithinBound=%v retirements=%+v", originsAfter, retiredWithinBound, res.EntryRetirements)
+			}
+		}
+
+		t.Run("pure-credential-disable-control", func(t *testing.T) {
+			runCase(t, []string{"https://old.example"})
+		})
+		t.Run("mixed-added-origin-and-disabled-credentials", func(t *testing.T) {
+			runCase(t, []string{"https://old.example", "https://new.example"})
+		})
+	})
+}
+
+func TestSixth653CertificateRotationMustRetire(t *testing.T) {
+	writeSelfSignedCert := func(t *testing.T, dir, prefix, dnsName string) (string, string, []byte) {
+		t.Helper()
+		priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tmpl := &x509.Certificate{
+			SerialNumber: serial,
+			Subject:      pkix.Name{CommonName: prefix + "-" + dnsName},
+			NotBefore:    time.Now().Add(-time.Hour),
+			NotAfter:     time.Now().Add(24 * time.Hour),
+			KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			DNSNames:     []string{dnsName},
+			IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		certPath := filepath.Join(dir, prefix+".crt")
+		keyPath := filepath.Join(dir, prefix+".key")
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+		keyDER, err := x509.MarshalECPrivateKey(priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+		if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return certPath, keyPath, der
+	}
+
+	runCase := func(t *testing.T, alsoWithdraw bool) {
+		t.Helper()
+		dir := t.TempDir()
+		certA, keyA, derA := writeSelfSignedCert(t, dir, "cert-a", "example.test")
+		certB, keyB, derB := writeSelfSignedCert(t, dir, "cert-b", "example.test")
+		certOther, keyOther, _ := writeSelfSignedCert(t, dir, "cert-other", "other.test")
+
+		entered := make(chan struct{}, 2)
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/stream" {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				_, _ = fmt.Fprint(w, "data: open\n\n")
+				if fl, ok := w.(http.Flusher); ok {
+					fl.Flush()
+				}
+				entered <- struct{}{}
+				<-r.Context().Done()
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		}))
+		defer backend.Close()
+
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		_ = ln.Close()
+
+		ln2, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherAddr := ln2.Addr().String()
+		_ = ln2.Close()
+
+		routeID := "tls-api"
+		otherID := "other-api"
+		makeCfg := func(certPath, keyPath string, withdrawn bool) *config.Config {
+			return &config.Config{
+				Servers: []config.ServerConfig{
+					{
+						Listen:      addr,
+						ServerNames: []string{"example.test"},
+						TLS: &config.TLSConfig{
+							Enabled: true,
+							Cert:    certPath,
+							Key:     keyPath,
+						},
+						Locations: []config.LocationConfig{{
+							RouteID:   &routeID,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+							ProxyPass: backend.URL,
+							Withdrawn: withdrawn,
+						}},
+					},
+					{
+						Listen:      otherAddr,
+						ServerNames: []string{"other.test"},
+						TLS: &config.TLSConfig{
+							Enabled: true,
+							Cert:    certOther,
+							Key:     keyOther,
+						},
+						Locations: []config.LocationConfig{{
+							RouteID:   &otherID,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+							ProxyPass: backend.URL,
+						}},
+					},
+				},
+			}
+		}
+
+		cfg1 := makeCfg(certA, keyA, false)
+		f, cleanup := minimalFactory(t)
+		defer cleanup()
+		srv := server.New(
+			cfg1,
+			cfg1,
+			lifecycle.ComputeFingerprint(cfg1),
+			observability.NewLogger(io.Discard, "error", "text"),
+			f.Prepare,
+			config.NewTOMLSource(""),
+			func(context.Context, *config.Config) error { return nil },
+		)
+		srv.WAFSourceDigests = f.WAFSourceDigests
+		srv.PluginModuleChanges = f.PluginModuleChanges
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		reloadCh := make(chan server.ReloadRequest, 2)
+		runDone := make(chan error, 1)
+		go func() {
+			runDone <- srv.Run(ctx, reloadCh, redact.EmptyState())
+		}()
+		defer func() {
+			cancel()
+			<-runDone
+		}()
+
+		client := &http.Client{
+			Transport: &http.Transport{
+				ForceAttemptHTTP2: true,
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+					ServerName:         "example.test",
+					NextProtos:         []string{"h2", "http/1.1"},
+				},
+			},
+		}
+		defer client.CloseIdleConnections()
+
+		var streamResp *http.Response
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			resp, err := client.Get("https://" + addr + "/stream")
+			if err == nil {
+				streamResp = resp
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if streamResp == nil {
+			t.Fatal("TLS listener never became reachable")
+		}
+		defer streamResp.Body.Close()
+		if streamResp.TLS == nil || len(streamResp.TLS.PeerCertificates) == 0 || !bytes.Equal(streamResp.TLS.PeerCertificates[0].Raw, derA) {
+			t.Fatal("initial stream did not present certificate A")
+		}
+
+		br := bufio.NewReader(streamResp.Body)
+		if _, err := br.ReadString('\n'); err != nil {
+			t.Fatal(err)
+		}
+		<-entered
+
+		readDone := make(chan error, 1)
+		go func() {
+			_, rErr := io.ReadAll(br)
+			readDone <- rErr
+		}()
+
+		cfg2 := makeCfg(certB, keyB, alsoWithdraw)
+		cand2, err := config.NewCandidate(cfg2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resCh := make(chan server.ReloadResult, 1)
+		reloadCh <- server.ReloadRequest{
+			ID:        "rotate-cert",
+			Source:    server.ReloadSourceAdmin,
+			Candidate: cand2,
+			Result:    resCh,
+		}
+		res := <-resCh
+		if res.Outcome != server.ReloadAppliedLive {
+			t.Fatalf("reload outcome=%+v", res)
+		}
+
+		freshConn, err := tls.Dial("tcp", addr, &tls.Config{
+			InsecureSkipVerify: true,
+			ServerName:         "example.test",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		peers := freshConn.ConnectionState().PeerCertificates
+		_ = freshConn.Close()
+		if len(peers) == 0 || !bytes.Equal(peers[0].Raw, derB) {
+			t.Fatal("fresh connection after rotation did not present certificate B")
+		}
+
+		retiredWithinBound := false
+		select {
+		case <-readDone:
+			retiredWithinBound = true
+		case <-time.After(2200 * time.Millisecond):
+		}
+		if !retiredWithinBound || len(res.EntryRetirements) != 1 || res.EntryRetirements[0].RouteID != "tls-api" {
+			t.Fatalf("alsoWithdraw=%v: retiredWithinBound=%v retirements=%+v", alsoWithdraw, retiredWithinBound, res.EntryRetirements)
+		}
+	}
+
+	t.Run("certificate-rotation-with-withdrawal-control", func(t *testing.T) {
+		runCase(t, true)
+	})
+	t.Run("certificate-rotation-only", func(t *testing.T) {
+		runCase(t, false)
+	})
+}
+
+func TestR3AuthUpstreamMembershipRetires(t *testing.T) {
+	for _, poolChange := range []bool{false, true} {
+		name := "direct-auth-url-change-control"
+		if poolChange {
+			name = "auth-pool-membership-change-and-shared-fanout"
+		}
+		t.Run(name, func(t *testing.T) {
+			stopped1 := make(chan struct{})
+			stopped2 := make(chan struct{})
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/s1":
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "data: s1\n\n")
+					_ = http.NewResponseController(w).Flush()
+					<-r.Context().Done()
+					close(stopped1)
+				case "/s2":
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = io.WriteString(w, "data: s2\n\n")
+					_ = http.NewResponseController(w).Flush()
+					<-r.Context().Done()
+					close(stopped2)
+				default:
+					_, _ = io.WriteString(w, "ok")
+				}
+			}))
+			defer backend.Close()
+
+			allow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer allow.Close()
+			deny := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusForbidden)
+			}))
+			defer deny.Close()
+
+			addr := freePort(t)
+			rid1 := "private-1"
+			rid2 := "private-2"
+			ridPub := "public-unrelated"
+			authURL := allow.URL + "/check"
+			if poolChange {
+				authURL = "http://authpool/check"
+			}
+			cfg := &config.Config{
+				Upstreams: []config.UpstreamConfig{{
+					Name:    "authpool",
+					Servers: []config.UpstreamServer{{Address: strings.TrimPrefix(allow.URL, "http://")}},
+				}},
+				Servers: []config.ServerConfig{{
+					Listen: addr,
+					Locations: []config.LocationConfig{
+						{
+							RouteID:   &rid1,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/s1"},
+							ProxyPass: backend.URL,
+							Auth:      &config.AuthConfig{ForwardAuth: &config.ForwardAuthConfig{URL: authURL}},
+						},
+						{
+							RouteID:   &rid2,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/s2"},
+							ProxyPass: backend.URL,
+							Auth:      &config.AuthConfig{ForwardAuth: &config.ForwardAuthConfig{URL: authURL}},
+						},
+						{
+							RouteID:   &ridPub,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/pub"},
+							ProxyPass: backend.URL,
+						},
+					},
+				}},
+			}
+			initial, err := config.NewCandidate(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f, cleanup := minimalFactory(t)
+			defer cleanup()
+			srv := server.New(
+				initial.Effective,
+				initial.Raw,
+				lifecycle.ComputeFingerprint(initial.Effective),
+				f.Log,
+				f.Prepare,
+				config.NewTOMLSource(""),
+				func(context.Context, *config.Config) error { return nil },
+			)
+			ready := make(chan struct{})
+			srv.OnInitialGenerationReady = func() { close(ready) }
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			reload := make(chan server.ReloadRequest, 1)
+			go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+			defer func() { cancel(); <-done }()
+			select {
+			case <-ready:
+			case <-time.After(5 * time.Second):
+				t.Fatal("startup timeout")
+			}
+
+			client := &http.Client{Timeout: 15 * time.Second}
+			defer client.CloseIdleConnections()
+			endpoint := "http://" + addr
+
+			old1, err := client.Get(endpoint + "/s1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer old1.Body.Close()
+			if old1.StatusCode != http.StatusOK {
+				t.Fatalf("old1 status=%d", old1.StatusCode)
+			}
+			old2, err := client.Get(endpoint + "/s2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer old2.Body.Close()
+			if old2.StatusCode != http.StatusOK {
+				t.Fatalf("old2 status=%d", old2.StatusCode)
+			}
+
+			next, _ := cfg.Clone()
+			if poolChange {
+				next.Upstreams[0].Servers[0].Address = strings.TrimPrefix(deny.URL, "http://")
+			} else {
+				next.Servers[0].Locations[0].Auth.ForwardAuth.URL = deny.URL + "/check"
+				next.Servers[0].Locations[1].Auth.ForwardAuth.URL = deny.URL + "/check"
+			}
+			candidate, err := config.NewCandidate(next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := make(chan server.ReloadResult, 1)
+			reload <- server.ReloadRequest{Source: server.ReloadSourceAdmin, Candidate: candidate, Result: result}
+			var res server.ReloadResult
+			select {
+			case res = <-result:
+			case <-time.After(6 * time.Second):
+				t.Fatal("reload timeout")
+			}
+			if res.Outcome != server.ReloadAppliedLive {
+				t.Fatalf("reload=%+v", res)
+			}
+
+			fresh, err := client.Get(endpoint + "/s1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = fresh.Body.Close()
+			if fresh.StatusCode != http.StatusForbidden {
+				t.Fatalf("new auth backend not enforcing denial: status=%d", fresh.StatusCode)
+			}
+
+			for idx, ch := range []<-chan struct{}{stopped1, stopped2} {
+				select {
+				case <-ch:
+				case <-time.After(2200 * time.Millisecond):
+					t.Fatalf("stream %d survived >2s after auth dependency change; retirements=%+v", idx+1, res.EntryRetirements)
+				}
+			}
+			if len(res.EntryRetirements) != 2 {
+				t.Fatalf("expected 2 entry retirements (excluding public-unrelated), got %+v", res.EntryRetirements)
+			}
+		})
 	}
 }

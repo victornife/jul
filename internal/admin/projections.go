@@ -119,7 +119,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			default:
 				lp.Action = "unknown"
 			}
-			lp.Upstream = upstreamRef(lp.Target, lp.Action)
+			lp.Upstream = config.ResolveLocationUpstreamName(c, *loc)
 			if loc.WAF != nil {
 				lp.WAF = &LocationWAFState{
 					Enabled:           loc.WAF.Enabled,

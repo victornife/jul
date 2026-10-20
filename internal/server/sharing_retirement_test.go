@@ -1570,3 +1570,273 @@ func fourth653MTLSRotation(t *testing.T, twoReloadRace bool, crlOnly bool) {
 		t.Fatalf("newly staged TLS listener recorded CA %q != bound bundle %q", stagedRecorded, stagedBundle.caDigest)
 	}
 }
+
+func TestFifth653PublishTransitionGaps(t *testing.T) {
+	routeID := func(s string) *string { return &s }
+
+	t.Run("dotted-named-http-upstream", func(t *testing.T) {
+		before := &config.Config{
+			Upstreams: []config.UpstreamConfig{{
+				Name:    "backend.local",
+				Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}},
+			}},
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{
+					{
+						RouteID:   routeID("api"),
+						Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+						ProxyPass: "http://backend.local",
+					},
+					{
+						RouteID: routeID("static-unrelated"),
+						Match:   config.MatchConfig{Type: "prefix", Path: "/health"},
+						Return:  200,
+					},
+				},
+			}},
+		}
+		if _, err := config.NewCandidate(before); err != nil {
+			t.Fatalf("before NewCandidate: %v", err)
+		}
+		after, _ := before.Clone()
+		after.Upstreams[0].Servers[0].Address = "127.0.0.1:9002"
+		if _, err := config.NewCandidate(after); err != nil {
+			t.Fatalf("after NewCandidate: %v", err)
+		}
+		got := ComputePublishEntryTransitions(before, before, nil, after, after, nil, nil, nil)
+		if len(got) != 2 || !got[0].Retire || got[1].Retire {
+			t.Fatalf("expected dotted upstream entry to retire and unrelated entry to stay open, got %+v", got)
+		}
+	})
+
+	t.Run("fastcgi-and-uwsgi-upstream-membership", func(t *testing.T) {
+		before := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "fcgi", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}},
+				{Name: "uwsgi", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9002"}}},
+				{Name: "http", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9003"}}},
+			},
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{
+					{RouteID: routeID("fcgi-route"), Match: config.MatchConfig{Type: "prefix", Path: "/fcgi"}, FastCGIPass: "fcgi"},
+					{RouteID: routeID("uwsgi-route"), Match: config.MatchConfig{Type: "prefix", Path: "/uwsgi"}, UWSGIPass: "uwsgi"},
+					{RouteID: routeID("http-route"), Match: config.MatchConfig{Type: "prefix", Path: "/http"}, ProxyPass: "http://http"},
+				},
+			}},
+		}
+		if _, err := config.NewCandidate(before); err != nil {
+			t.Fatalf("before NewCandidate: %v", err)
+		}
+		after, _ := before.Clone()
+		after.Upstreams[0].Servers[0].Address = "127.0.0.1:9101"
+		after.Upstreams[1].Servers[0].Address = "127.0.0.1:9102"
+		after.Upstreams[2].Servers[0].Address = "127.0.0.1:9103"
+		if _, err := config.NewCandidate(after); err != nil {
+			t.Fatalf("after NewCandidate: %v", err)
+		}
+		got := ComputePublishEntryTransitions(before, before, nil, after, after, nil, nil, nil)
+		if len(got) != 3 || !got[0].Retire || !got[1].Retire || !got[2].Retire {
+			t.Fatalf("expected fcgi, uwsgi, and http upstream changes to retire, got %+v", got)
+		}
+	})
+
+	t.Run("wrap-handlers-and-coordinate-fallback-correlation", func(t *testing.T) {
+		if got := WrapHandlersWithLoadedAccess(nil, nil, "", nil, nil); got != nil {
+			t.Fatalf("expected nil map, got %v", got)
+		}
+		wrapped := WrapHandlersWithLoadedAccess(
+			map[string]http.Handler{
+				"127.0.0.1:8080": http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+				"nil-entry":      nil,
+			},
+			map[[2]int][]byte{{0, 0}: []byte("alice:$2a$04$abcdefghijklmnopqrstuu\n")},
+			"global-waf-dig",
+			map[[2]int]string{{0, 0}: "loc-waf-dig"},
+			map[string]string{"plug": "plug-dig"},
+		)
+		files := captureLoadedAccessFilesFromHandlers(nil, wrapped)
+		if files.globalWAFDigest != "global-waf-dig" || files.wafDigestByLoc[[2]int{0, 0}] != "loc-waf-dig" || files.pluginDigestByName["plug"] != "plug-dig" {
+			t.Fatalf("unexpected captured loaded access files: %+v", files)
+		}
+
+		// Exercise correlateConfigEntries step 2a (route_id added at same key) and step 2b (predicates changed at unique match coordinates).
+		before := &config.Config{
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{
+					{Match: config.MatchConfig{Type: "prefix", Path: "/a"}, Return: 200},
+					{Match: config.MatchConfig{Type: "prefix", Path: "/b", Methods: []string{"GET"}}, Return: 200},
+				},
+			}},
+		}
+		after := &config.Config{
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{
+					{RouteID: routeID("added-id"), Match: config.MatchConfig{Type: "prefix", Path: "/a"}, Return: 200},
+					{Match: config.MatchConfig{Type: "prefix", Path: "/b", Methods: []string{"GET", "POST"}}, Return: 200},
+				},
+			}},
+		}
+		tr := ComputePublishEntryTransitions(before, before, files, after, after, files, nil, nil)
+		if len(tr) != 2 || tr[0].Removed || tr[0].ToRouteID != "added-id" || tr[1].Removed || !tr[1].Retire {
+			t.Fatalf("unexpected transitions for step 2a/2b correlation: %+v", tr)
+		}
+	})
+}
+
+func TestR5AndR8ComputedReplacementAndAltSvcTTL(t *testing.T) {
+	t.Run("computed-transitions-do-not-attribute-removed-exchange-to-replacement", func(t *testing.T) {
+		oldID := "old"
+		repID := "replacement"
+		c1 := &config.Config{
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{{
+					RouteID: &oldID,
+					Match:   config.MatchConfig{Type: "prefix", Path: "/old"},
+					Return:  200,
+				}},
+			}},
+		}
+		c2 := &config.Config{
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{{
+					RouteID: &repID,
+					Match:   config.MatchConfig{Type: "prefix", Path: "/new"},
+					Return:  200,
+				}},
+			}},
+		}
+		c3, _ := c2.Clone()
+		c3.Servers[0].Locations[0].Withdrawn = true
+
+		cand1, err := config.NewCandidate(c1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cand2, err := config.NewCandidate(c2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cand3, err := config.NewCandidate(c3)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		reg := respwriter.NewExchangeRegistry()
+		reg.Grace = 40 * time.Millisecond
+		reg.Bound = 80 * time.Millisecond
+		reg.SetInitialGeneration(1)
+
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8080/old", nil)
+		req.ProtoMajor = 2
+		_, _, _, release := reg.Admit(httptest.NewRecorder(), req, respwriter.EntryCoord{
+			GenID:         1,
+			ListenAddr:    "127.0.0.1:8080",
+			ServerIndex:   0,
+			LocationIndex: 0,
+			RouteID:       "old",
+		})
+		defer release()
+
+		tr12 := ComputePublishEntryTransitions(cand1.Raw, cand1.Effective, nil, cand2.Raw, cand2.Effective, nil, nil, nil)
+		_ = reg.PublishGeneration(1, 2, tr12)()
+
+		tr23 := ComputePublishEntryTransitions(cand2.Raw, cand2.Effective, nil, cand3.Raw, cand3.Effective, nil, nil, nil)
+		wait23 := reg.PublishGeneration(2, 3, tr23)
+		release()
+		res23 := wait23()
+		if len(res23) != 1 || res23[0].EndedExchanges != 0 {
+			t.Fatalf("expected 0 ended exchanges on never-used replacement, got %+v", res23)
+		}
+	})
+
+	t.Run("alt-svc-ttl-only-edit-does-not-retire-h2-stream", func(t *testing.T) {
+		cert, key := writeSelfSigned(t, t.TempDir(), "server", "localhost")
+		addr := freePort(t)
+		rid := "api"
+		cfg := config.ProxyTarget("http://127.0.0.1:9001", addr)
+		cfg.Servers[0].Locations[0].RouteID = &rid
+		cfg.Servers[0].TLS = &config.TLSConfig{Enabled: true, Cert: cert, Key: key}
+		cfg.Servers[0].HTTP3 = &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 300}
+		initial, err := config.NewCandidate(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, _ := cfg.Clone()
+		next.Servers[0].HTTP3.AltSvcMaxAge = 600
+		candidate, err := config.NewCandidate(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pub := ComputePublishEntryTransitions(initial.Raw, initial.Effective, nil, candidate.Raw, candidate.Effective, nil, nil, nil)
+		if len(pub) != 1 || pub[0].Retire {
+			t.Fatalf("expected Retire=false on Alt-Svc TTL-only change, got %+v", pub)
+		}
+		if !http3Compiled {
+			return
+		}
+		srv := New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), quietLogger(), buildTestRouterFactory(t, make(chan struct{}), nil), config.NewTOMLSource(""), func(context.Context, *config.Config) error { return nil })
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		reload := make(chan ReloadRequest, 1)
+		ready := make(chan struct{})
+		srv.OnInitialGenerationReady = func() { close(ready) }
+		go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+		defer func() { cancel(); <-done }()
+		select {
+		case <-ready:
+		case <-time.After(5 * time.Second):
+			t.Fatal("startup timeout")
+		}
+
+		tr := &http.Transport{
+			ForceAttemptHTTP2: true,
+			TLSClientConfig:   &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"h2"}},
+		}
+		defer tr.CloseIdleConnections()
+		client := &http.Client{Transport: tr, Timeout: 10 * time.Second}
+		old, err := client.Get("https://" + addr + "/?stream=1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer old.Body.Close()
+		if old.StatusCode != http.StatusOK || old.ProtoMajor != 2 {
+			t.Fatalf("old=%+v", old)
+		}
+		oldEnded := make(chan error, 1)
+		go func() { _, rErr := io.Copy(io.Discard, old.Body); oldEnded <- rErr }()
+
+		result := make(chan ReloadResult, 1)
+		reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: candidate, Result: result}
+		var res ReloadResult
+		select {
+		case res = <-result:
+		case <-time.After(6 * time.Second):
+			t.Fatal("reload timeout")
+		}
+		if res.Outcome != ReloadAppliedLive {
+			t.Fatalf("reload=%+v", res)
+		}
+		fresh, err := client.Get("https://" + addr + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = fresh.Body.Close()
+		if !strings.Contains(fresh.Header.Get("Alt-Svc"), "ma=600") {
+			t.Fatalf("Alt-Svc header not updated: %q", fresh.Header.Get("Alt-Svc"))
+		}
+		select {
+		case rErr := <-oldEnded:
+			t.Fatalf("Alt-Svc TTL-only edit ended established H2 stream: %v", rErr)
+		case <-time.After(100 * time.Millisecond):
+		}
+		if len(res.EntryRetirements) != 0 {
+			t.Fatalf("expected 0 retirements on Alt-Svc TTL-only edit, got %+v", res.EntryRetirements)
+		}
+	})
+}

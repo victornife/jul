@@ -311,6 +311,9 @@ func loadCABundleWithHash(path string) ([]*x509.Certificate, string, error) {
 }
 
 func readBoundedMTLSFile(path string, limit int64) ([]byte, error) {
+	if preInfo, err := os.Stat(path); err == nil && !preInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("TLS trust file %q must be a regular file", path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

@@ -556,6 +556,199 @@ func TestLintSharingIntentFindings(t *testing.T) {
 			t.Fatal("expected CIDRSetPermitsNone=false when addresses remain permitted")
 		}
 	})
+
+	t.Run("ResolveLocationUpstreamName ClassifyCORSChange and SummarizeListenerAccessInputs", func(t *testing.T) {
+		cfg := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "backend.local"},
+				{Name: "fcgi.pool"},
+				{Name: "uwsgi-pool"},
+				{Name: "grpc.pool"},
+			},
+			Servers: []config.ServerConfig{
+				{
+					Listen:        "127.0.0.1:8443",
+					H2C:           true,
+					HTTP3:         &config.HTTP3Config{Enabled: true, AltSvcMaxAge: 3600},
+					RedirectHTTPS: 308,
+					ProxyProtocol: "v2",
+					ClientAddress: &config.ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8", "${env:TP}"}},
+					TLS: &config.TLSConfig{
+						Enabled:    true,
+						MinVersion: "1.3",
+						Cert:       "/etc/a.crt",
+						Key:        "/etc/a.key",
+						ACME:       &config.ACMEConfig{Enabled: true, Email: "ops@example.com", Domains: []string{"a.example"}},
+						ClientAuth: &config.ClientAuthConfig{
+							Mode:               "require",
+							CAFile:             "/etc/ca.pem",
+							CRLFile:            "${env:CRL_FILE}",
+							VerifySAN:          []string{"spiffe://a", "${env:SAN}"},
+							ForwardCertificate: "header",
+						},
+					},
+				},
+			},
+		}
+
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{ProxyPass: "http://backend.local/api"}); got != "backend.local" {
+			t.Fatalf("expected backend.local, got %q", got)
+		}
+		shadowCfg := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "backend"},
+				{Name: "http://backend"},
+			},
+		}
+		if got := config.ResolveLocationUpstreamName(shadowCfg, config.LocationConfig{ProxyPass: "http://backend"}); got != "backend" {
+			t.Fatalf("expected HTTP proxy_pass to resolve u.Host \"backend\" rather than shadow pool \"http://backend\", got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(nil, config.LocationConfig{ProxyPass: "http://bare-pool/v1"}); got != "bare-pool" {
+			t.Fatalf("expected syntactic bare-pool, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{ProxyPass: "http://127.0.0.1:9001"}); got != "" {
+			t.Fatalf("expected empty upstream for literal host:port, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{ProxyPass: "backend.local"}); got != "backend.local" {
+			t.Fatalf("expected bare backend.local, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{ProxyPass: "http://backend.local", Deny: true}); got != "" {
+			t.Fatalf("expected empty upstream when Deny is set, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{FastCGIPass: "fcgi.pool"}); got != "fcgi.pool" {
+			t.Fatalf("expected fcgi.pool, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(nil, config.LocationConfig{FastCGIPass: "fcgi-bare"}); got != "fcgi-bare" {
+			t.Fatalf("expected syntactic fcgi-bare, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{FastCGIPass: "127.0.0.1:9000"}); got != "" {
+			t.Fatalf("expected empty upstream for literal fastcgi host:port, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{UWSGIPass: "uwsgi-pool"}); got != "uwsgi-pool" {
+			t.Fatalf("expected uwsgi-pool, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{GRPCTranscode: &config.GRPCTranscodeConfig{Target: "grpc.pool"}}); got != "grpc.pool" {
+			t.Fatalf("expected grpc.pool, got %q", got)
+		}
+		if got := config.ResolveLocationUpstreamName(cfg, config.LocationConfig{Return: 200}); got != "" {
+			t.Fatalf("expected empty upstream for Return location, got %q", got)
+		}
+		if got := config.ResolveAuthUpstreamName(cfg, "http://backend.local:8080/check"); got != "backend.local" {
+			t.Fatalf("expected ResolveAuthUpstreamName to resolve u.Hostname() backend.local, got %q", got)
+		}
+		if got := config.ResolveAuthUpstreamName(nil, "https://authpool/jwks"); got != "authpool" {
+			t.Fatalf("expected syntactic authpool, got %q", got)
+		}
+		if got := config.ResolveAuthUpstreamName(cfg, "http://127.0.0.1:9001/check"); got != "" {
+			t.Fatalf("expected empty auth upstream for literal IP:port, got %q", got)
+		}
+		if got := config.ResolveAuthUpstreamName(cfg, ""); got != "" {
+			t.Fatalf("expected empty auth upstream for empty URL, got %q", got)
+		}
+		deps := config.ResolveLocationDependencyUpstreams(cfg, config.LocationConfig{
+			ProxyPass: "http://backend.local",
+			Auth: &config.AuthConfig{
+				ForwardAuth: &config.ForwardAuthConfig{URL: "http://fcgi.pool/auth"},
+				JWT:         &config.JWTAuthConfig{JWKSURL: "https://uwsgi-pool/jwks"},
+			},
+		})
+		if len(deps) != 3 || deps[0] != "backend.local" || deps[1] != "fcgi.pool" || deps[2] != "uwsgi-pool" {
+			t.Fatalf("unexpected ResolveLocationDependencyUpstreams: %v", deps)
+		}
+		authBase := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "backend.local", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}},
+				{Name: "fcgi.pool", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9002"}}},
+			},
+		}
+		cfgAfter := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "backend.local", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}},
+				{Name: "fcgi.pool", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9002"}}},
+			},
+		}
+		if !config.AuthUpstreamDependencyEqual(authBase, cfgAfter, "http://backend.local/check", "http://backend.local/check") {
+			t.Fatal("expected identical auth upstream dependency to be equal")
+		}
+		cfgAfter.Upstreams[0].Servers = []config.UpstreamServer{{Address: "127.0.0.1:9999"}}
+		if config.AuthUpstreamDependencyEqual(authBase, cfgAfter, "http://backend.local/check", "http://backend.local/check") {
+			t.Fatal("expected changed auth upstream servers to be unequal")
+		}
+		cfgHash := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "backend.local", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}, Hash: &config.HashConfig{Key: "header:X-Key"}},
+			},
+		}
+		if config.AuthUpstreamDependencyEqual(authBase, cfgHash, "http://backend.local/check", "http://backend.local/check") {
+			t.Fatal("expected changed auth upstream hash to be unequal")
+		}
+		cfgBTLS := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "backend.local", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}, BackendTLS: &config.BackendTLSConfig{ServerName: "auth.internal"}},
+			},
+		}
+		if config.AuthUpstreamDependencyEqual(authBase, cfgBTLS, "http://backend.local/check", "http://backend.local/check") {
+			t.Fatal("expected changed auth upstream backend_tls to be unequal")
+		}
+		cfgDisc := &config.Config{
+			Upstreams: []config.UpstreamConfig{
+				{Name: "backend.local", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}, Discovery: &config.DiscoveryConfig{Type: "dns"}},
+			},
+		}
+		if config.AuthUpstreamDependencyEqual(authBase, cfgDisc, "http://backend.local/check", "http://backend.local/check") {
+			t.Fatal("expected changed auth upstream discovery to be unequal")
+		}
+		if !config.AuthUpstreamDependencyEqual(cfgDisc, cfgDisc, "http://backend.local/check", "http://backend.local/check") {
+			t.Fatal("expected identical discovery to be equal")
+		}
+		if !config.AuthUpstreamDependencyEqual(authBase, cfgAfter, "http://127.0.0.1:9001/check", "http://127.0.0.1:9001/check") {
+			t.Fatal("expected literal non-pool auth URL to be equal")
+		}
+		if config.AuthUpstreamDependencyEqual(authBase, cfgAfter, "http://backend.local/check", "http://fcgi.pool/check") {
+			t.Fatal("expected different auth upstream names to be unequal")
+		}
+		if config.AuthUpstreamDependencyEqual(authBase, nil, "http://backend.local/check", "http://backend.local/check") {
+			t.Fatal("expected missing after upstream to be unequal")
+		}
+
+		corsCases := []struct {
+			b, a       *config.CORSConfig
+			rejectRefs bool
+			wantCls    string
+			wantNarrow bool
+		}{
+			{nil, nil, true, "unchanged", false},
+			{nil, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, true, "widened", false},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, nil, true, "narrowed", true},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"${env:O}"}}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, true, "uncertain", false},
+			{&config.CORSConfig{Enabled: true, AllowedMethods: []string{"GET"}}, &config.CORSConfig{Enabled: true, AllowedMethods: []string{"GET", "POST"}}, true, "uncertain", false},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, true, "unchanged", false},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://b"}}, true, "uncertain", true},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}, AllowCredentials: true}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://b"}, AllowCredentials: false}, true, "uncertain", true},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a", "*"}}, true, "widened", false},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}, AllowCredentials: true}, true, "widened", false},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}, AllowCredentials: true}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a", "https://b"}, AllowCredentials: true}, true, "widened", false},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a", "https://b"}}, true, "widened", false},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a", "https://b"}}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}}, true, "narrowed", true},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}, AllowCredentials: true}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}, AllowCredentials: false}, true, "narrowed", true},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}, AllowCredentials: true}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a", "https://b"}, AllowCredentials: false}, true, "uncertain", true},
+			{&config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a", "https://b"}, AllowCredentials: false}, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a"}, AllowCredentials: true}, true, "uncertain", true},
+		}
+		for i, tc := range corsCases {
+			cls, _, narrow := config.ClassifyCORSChange(tc.b, tc.a, tc.rejectRefs)
+			if cls != tc.wantCls || narrow != tc.wantNarrow {
+				t.Fatalf("case %d: ClassifyCORSChange = (%q, %v), want (%q, %v)", i, cls, narrow, tc.wantCls, tc.wantNarrow)
+			}
+		}
+
+		if in, ref := config.SummarizeListenerAccessInputs(nil, "127.0.0.1:8443"); in.ClientAuthMode != "none" || ref {
+			t.Fatalf("unexpected nil SummarizeListenerAccessInputs: %+v, %v", in, ref)
+		}
+		in, ref := config.SummarizeListenerAccessInputs(cfg, "127.0.0.1:8443")
+		if !in.TLSEnabled || !in.H2C || in.MinVersion != "1.3" || in.ClientAuthMode != "require" || !ref || in.TLSCertSig == "" || in.HTTP3Sig == "" {
+			t.Fatalf("unexpected SummarizeListenerAccessInputs: %+v, ref=%v", in, ref)
+		}
+	})
 }
 
 // TestHostPatternsOverlapMatchesRealRouter proves the §9.5 host-dispatch

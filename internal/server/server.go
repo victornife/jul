@@ -829,7 +829,11 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		dyn.Set(provider)
 		entry.provider = dyn
 		if !acmeEnabledForAddr(cfg.Servers, addr) {
-			entry.certFingerprint = tlsIdentityFingerprint(bindings)
+			if fp, ok := provider.(*fileCertProvider); ok && fp.fp != "" {
+				entry.certFingerprint = fp.fp
+			} else {
+				entry.certFingerprint = tlsIdentityFingerprint(bindings)
+			}
 		}
 		tlsConf := &tls.Config{
 			GetCertificate: dyn.GetCertificate,

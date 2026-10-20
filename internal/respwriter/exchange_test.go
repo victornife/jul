@@ -58,10 +58,10 @@ func TestWSFrameTrackerAndCloseFrames(t *testing.T) {
 		t.Fatal("expected boundary after 126-length frame")
 	}
 
-	ext127 := make([]byte, 10+8)
+	ext127 := make([]byte, 10+65536)
 	ext127[0] = 0x82
 	ext127[1] = 127
-	binary.BigEndian.PutUint64(ext127[2:10], 8)
+	binary.BigEndian.PutUint64(ext127[2:10], 65536)
 	s2c.feed(ext127)
 	if !s2c.atFrameBoundary() {
 		t.Fatal("expected boundary after 127-length frame")
@@ -697,9 +697,12 @@ func TestUpgradedSessionPreReadMidFrameAndSlowPeerFallback(t *testing.T) {
 		ListenAddr: "127.0.0.1:8080",
 		RouteID:    "slow-h1",
 	})
-	// Arm non-mandatory retirement so the background 40ms grace timer fires triggerStreamAbort(true).
+	// Arm non-mandatory retirement so the background grace timer fires triggerStreamAbort(true).
 	exH1.armRetirement(time.Now().Add(20*time.Millisecond), time.Now().Add(60*time.Millisecond), WSClosePolicyViolation, false, nil)
-	time.Sleep(35 * time.Millisecond)
+	h1Deadline := time.Now().Add(250 * time.Millisecond)
+	for !exH1.IsRetired() && time.Now().Before(h1Deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if !exH1.IsRetired() {
 		t.Fatal("expected grace timer to abort H1 exchange")
 	}
@@ -899,4 +902,361 @@ func TestThird653SamePublishRecomputeCannotRestoreStaleCompletion(t *testing.T) 
 		}
 		release()
 	}
+}
+
+func TestFifth653InvalidCloseRepliesMustNotCountAsGraceful(t *testing.T) {
+	maskClosePayload := func(payload []byte) []byte {
+		mask := [4]byte{1, 2, 3, 4}
+		frame := make([]byte, 2+4+len(payload))
+		frame[0] = 0x88
+		frame[1] = 0x80 | byte(len(payload))
+		copy(frame[2:6], mask[:])
+		for i, b := range payload {
+			frame[6+i] = b ^ mask[i&3]
+		}
+		return frame
+	}
+
+	cases := []struct {
+		name         string
+		rawFrame     []byte
+		payload      []byte
+		fragmented   bool
+		wantGraceful int
+		wantForced   int
+	}{
+		{name: "valid-1000", payload: []byte{0x03, 0xe8}, wantGraceful: 1, wantForced: 0},
+		{name: "valid-empty", payload: []byte{}, wantGraceful: 1, wantForced: 0},
+		{name: "valid-fragmented-reads", payload: []byte{0x03, 0xf0, 'o', 'k'}, fragmented: true, wantGraceful: 1, wantForced: 0},
+		{name: "valid-after-compressed-data-frame", rawFrame: append([]byte{0xc1, 0x81, 0, 0, 0, 0, 'x'}, maskClosePayload([]byte{0x03, 0xe8})...), wantGraceful: 1, wantForced: 0},
+		{name: "one-byte-body", payload: []byte{0x03}, wantGraceful: 0, wantForced: 1},
+		{name: "reserved-1005", payload: []byte{0x03, 0xed}, wantGraceful: 0, wantForced: 1},
+		{name: "reserved-1006", payload: []byte{0x03, 0xee}, wantGraceful: 0, wantForced: 1},
+		{name: "reserved-1015", payload: []byte{0x03, 0xf7}, wantGraceful: 0, wantForced: 1},
+		{name: "invalid-utf8-reason", payload: []byte{0x03, 0xe8, 0xff, 0xfe}, wantGraceful: 0, wantForced: 1},
+		{name: "rsv1-close", rawFrame: []byte{0xc8, 0x82, 0, 0, 0, 0, 0x03, 0xe8}, wantGraceful: 0, wantForced: 1},
+		{name: "rsv2-close", rawFrame: []byte{0xa8, 0x82, 0, 0, 0, 0, 0x03, 0xe8}, wantGraceful: 0, wantForced: 1},
+		{name: "rsv3-close", rawFrame: []byte{0x98, 0x82, 0, 0, 0, 0, 0x03, 0xe8}, wantGraceful: 0, wantForced: 1},
+		{name: "nonminimal-length-126", rawFrame: []byte{0x88, 0xfe, 0x00, 0x02, 0, 0, 0, 0, 0x03, 0xe8}, wantGraceful: 0, wantForced: 1},
+		{name: "nonminimal-length-127", rawFrame: []byte{0x88, 0xff, 0, 0, 0, 0, 0, 0, 0x00, 0x02, 0, 0, 0, 0, 0x03, 0xe8}, wantGraceful: 0, wantForced: 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := NewExchangeRegistry()
+			reg.Grace = 120 * time.Millisecond
+			reg.Bound = 240 * time.Millisecond
+			reg.SetInitialGeneration(1)
+
+			cProxy, cPeer := net.Pipe()
+			defer cProxy.Close()
+			defer cPeer.Close()
+			bProxy, bPeer := net.Pipe()
+			defer bProxy.Close()
+			defer bPeer.Close()
+
+			go func() {
+				_, _ = io.Copy(io.Discard, bPeer)
+			}()
+
+			rec := newHijackableRecorder(cProxy)
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/ws", nil)
+			req.Header.Set("Upgrade", "websocket")
+			w, reqAdmitted, _, release := reg.Admit(rec, req, EntryCoord{
+				GenID:      1,
+				ListenAddr: "127.0.0.1:8080",
+				RouteID:    "ws",
+			})
+			rawBack := AttachUpgradedBackend(reqAdmitted.Context(), bProxy, http.Header{"Upgrade": []string{"websocket"}})
+			hj, ok := w.(http.Hijacker)
+			if !ok {
+				t.Fatal("missing hijacker")
+			}
+			clientConn, _, err := hj.Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				defer release()
+				_, _ = clientConn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"))
+				buf := make([]byte, 64)
+				for {
+					if _, rErr := clientConn.Read(buf); rErr != nil {
+						_ = rawBack.Close()
+						return
+					}
+				}
+			}()
+
+			br := bufio.NewReader(cPeer)
+			for {
+				line, rErr := br.ReadString('\n')
+				if rErr != nil {
+					t.Fatal(rErr)
+				}
+				if line == "\r\n" {
+					break
+				}
+			}
+
+			go func() {
+				var srvClose [4]byte
+				if _, rErr := io.ReadFull(br, srvClose[:]); rErr == nil {
+					wire := tc.rawFrame
+					if wire == nil {
+						wire = maskClosePayload(tc.payload)
+					}
+					if tc.fragmented {
+						for i := range wire {
+							_, _ = cPeer.Write(wire[i : i+1])
+						}
+					} else {
+						_, _ = cPeer.Write(wire)
+					}
+				}
+			}()
+
+			res := reg.PublishGeneration(1, 2, []EntryTransition{{
+				FromRouteID: "ws",
+				ToRouteID:   "ws",
+				Retire:      true,
+				Mandatory:   true,
+			}})()
+			<-done
+
+			if len(res) != 1 || res[0].GracefulCount != tc.wantGraceful || res[0].ForcedCount != tc.wantForced {
+				t.Fatalf("%s: got GracefulCount=%d ForcedCount=%d, want GracefulCount=%d ForcedCount=%d (full=%+v)",
+					tc.name, res[0].GracefulCount, res[0].ForcedCount, tc.wantGraceful, tc.wantForced, res)
+			}
+		})
+	}
+}
+
+func TestSixth653ShutdownShortensExistingRetirementDeadline(t *testing.T) {
+	runCase := func(t *testing.T, preRetire bool, useDrainAddr bool, alreadyCancelled bool) {
+		t.Helper()
+		reg := NewExchangeRegistry()
+		reg.Grace = 1 * time.Second
+		reg.Bound = 2 * time.Second
+		reg.SetInitialGeneration(1)
+
+		cProxy, cPeer := net.Pipe()
+		defer cProxy.Close()
+		defer cPeer.Close()
+		bProxy, bPeer := net.Pipe()
+		defer bProxy.Close()
+		defer bPeer.Close()
+
+		go func() {
+			_, _ = io.Copy(io.Discard, bPeer)
+		}()
+
+		rec := newHijackableRecorder(cProxy)
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/ws", nil)
+		req.Header.Set("Upgrade", "websocket")
+		w, reqAdmitted, _, release := reg.Admit(rec, req, EntryCoord{
+			GenID:      1,
+			ListenAddr: "127.0.0.1:8080",
+			RouteID:    "ws",
+		})
+		rawBack := AttachUpgradedBackend(reqAdmitted.Context(), bProxy, http.Header{"Upgrade": []string{"websocket"}})
+		hj := w.(http.Hijacker)
+		clientConn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		handlerDone := make(chan struct{})
+		go func() {
+			defer close(handlerDone)
+			defer release()
+			_, _ = clientConn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"))
+			buf := make([]byte, 64)
+			for {
+				if _, rErr := clientConn.Read(buf); rErr != nil {
+					_ = rawBack.Close()
+					return
+				}
+			}
+		}()
+
+		br := bufio.NewReader(cPeer)
+		for {
+			line, rErr := br.ReadString('\n')
+			if rErr != nil {
+				t.Fatal(rErr)
+			}
+			if line == "\r\n" {
+				break
+			}
+		}
+
+		sawClose := make(chan struct{}, 1)
+		peerClosed := make(chan error, 1)
+		go func() {
+			var frame [4]byte
+			if _, rErr := io.ReadFull(br, frame[:]); rErr != nil {
+				peerClosed <- rErr
+				return
+			}
+			sawClose <- struct{}{}
+			var extra [1]byte
+			_, rErr := br.Read(extra[:])
+			peerClosed <- rErr
+		}()
+
+		if preRetire {
+			_ = reg.PublishGeneration(1, 2, []EntryTransition{{
+				FromRouteID: "ws",
+				ToRouteID:   "ws",
+				Retire:      true,
+				Mandatory:   true,
+			}})
+			select {
+			case <-sawClose:
+			case <-time.After(300 * time.Millisecond):
+				t.Fatal("did not observe retirement Close frame")
+			}
+		}
+
+		start := time.Now()
+		var shutdownCtx context.Context
+		var cancel context.CancelFunc
+		if alreadyCancelled {
+			shutdownCtx, cancel = context.WithCancel(context.Background())
+			cancel()
+		} else {
+			shutdownCtx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+		}
+		if useDrainAddr {
+			reg.DrainAddr(shutdownCtx, "127.0.0.1:8080")
+		} else {
+			reg.DrainAll(shutdownCtx)
+		}
+
+		time.Sleep(maxDuration(time.Until(start.Add(110*time.Millisecond)), 0))
+		active := reg.ActiveCount()
+		var closedAfterDrain bool
+		select {
+		case <-peerClosed:
+			closedAfterDrain = true
+		default:
+		}
+		if active != 0 || !closedAfterDrain {
+			t.Fatalf("preRetire=%v drainAddr=%v cancelled=%v: active=%d closedAfterDrain=%v",
+				preRetire, useDrainAddr, alreadyCancelled, active, closedAfterDrain)
+		}
+		<-handlerDone
+	}
+
+	t.Run("shutdown-only-control", func(t *testing.T) {
+		runCase(t, false, false, false)
+	})
+	t.Run("already-retiring-then-short-shutdown", func(t *testing.T) {
+		runCase(t, true, false, false)
+	})
+	t.Run("already-retiring-then-short-drain-addr", func(t *testing.T) {
+		runCase(t, true, true, false)
+	})
+	t.Run("already-retiring-then-cancelled-shutdown-ctx", func(t *testing.T) {
+		runCase(t, true, false, true)
+	})
+}
+
+func TestR4AndR5DeadlineAndRemovedExchangeIsolation(t *testing.T) {
+	t.Run("late-completion-after-deadline-is-not-confirmed", func(t *testing.T) {
+		reg := NewExchangeRegistry()
+		reg.Grace = 40 * time.Millisecond
+		reg.Bound = 80 * time.Millisecond
+		reg.SetInitialGeneration(1)
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+		req.ProtoMajor = 2
+		_, _, ex, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1, RouteID: "private"})
+		wait := reg.PublishGeneration(1, 2, []EntryTransition{{FromRouteID: "private", ToRouteID: "private", Retire: true, Mandatory: true}})
+		ex.mu.Lock()
+		deadline := ex.boundDeadline
+		ex.mu.Unlock()
+		if d := time.Until(deadline) + 25*time.Millisecond; d > 0 {
+			time.Sleep(d)
+		}
+		release()
+		results := wait()
+		if len(results) != 1 || results[0].CompletedWithinBound || results[0].Claim == "complete_withdrawal" {
+			t.Fatalf("exchange closed after deadline but reported within bound: %+v", results)
+		}
+	})
+
+	t.Run("overlapping-publish-respects-original-armed-deadline", func(t *testing.T) {
+		reg := NewExchangeRegistry()
+		reg.Grace = 40 * time.Millisecond
+		reg.Bound = 80 * time.Millisecond
+		reg.SetInitialGeneration(1)
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+		req.ProtoMajor = 2
+		_, _, ex, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1, RouteID: "private"})
+		defer release()
+
+		tr := []EntryTransition{{FromRouteID: "private", ToRouteID: "private", Retire: true, Mandatory: true}}
+		first := reg.PublishGeneration(1, 2, tr)()
+		if len(first) != 1 || first[0].CompletedWithinBound {
+			t.Fatalf("expected first publish result to be unconfirmed, got %+v", first)
+		}
+		ex.mu.Lock()
+		original := ex.boundDeadline
+		ex.mu.Unlock()
+
+		wait := reg.PublishGeneration(2, 3, tr)
+		if d := time.Until(original.Add(100 * time.Millisecond)); d > 0 {
+			time.Sleep(d)
+		}
+		release()
+		results := wait()
+		if len(results) != 1 || results[0].CompletedWithinBound || results[0].Claim == "complete_withdrawal" {
+			t.Fatalf("later publish confirmed closure that exceeded original deadline: %+v", results)
+		}
+	})
+
+	t.Run("removed-exchange-does-not-enter-replacement-retirement", func(t *testing.T) {
+		reg := NewExchangeRegistry()
+		reg.Grace = 40 * time.Millisecond
+		reg.Bound = 80 * time.Millisecond
+		reg.SetInitialGeneration(1)
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/old", nil)
+		req.ProtoMajor = 2
+		_, _, old, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1, RouteID: "old"})
+		defer release()
+
+		first := reg.PublishGeneration(1, 2, []EntryTransition{{FromRouteID: "old", Removed: true, Retire: true, Mandatory: true}})()
+		if len(first) != 1 || first[0].CompletedWithinBound {
+			t.Fatalf("expected old request to remain unconfirmed: %+v", first)
+		}
+
+		wait := reg.PublishGeneration(2, 3, []EntryTransition{{FromRouteID: "replacement", ToRouteID: "replacement", Retire: true, Mandatory: true}})
+		release()
+		results := wait()
+		if len(results) != 1 || results[0].EndedExchanges != 0 || old.curCoord.RouteID != "old" {
+			t.Fatalf("removed old request was attributed to replacement route: results=%+v oldCoord=%+v", results, old.curCoord)
+		}
+	})
+
+	t.Run("outcome-boundary-controls", func(t *testing.T) {
+		deadline := time.Now()
+		exTimely := &ActiveExchange{}
+		exTimely.closedAt.Store(deadline.Add(-time.Millisecond).UnixNano())
+		if _, _, within, _ := exTimely.outcome(deadline); !within {
+			t.Fatal("timely closure not confirmed")
+		}
+		exLate := &ActiveExchange{}
+		exLate.closedAt.Store(deadline.Add(time.Millisecond).UnixNano())
+		if _, _, within, _ := exLate.outcome(deadline); within {
+			t.Fatal("late closure confirmed")
+		}
+	})
 }

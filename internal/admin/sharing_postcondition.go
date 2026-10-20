@@ -255,9 +255,21 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc
 		}
 	}
 
-	var referencedUpstream *config.UpstreamConfig
-	if upName := locationUpstreamName(loc); upName != "" {
-		referencedUpstream = findUpstreamByName(rawCfg, upName)
+	var referencedUpstreams map[string]config.UpstreamConfig
+	if upNames := config.ResolveLocationDependencyUpstreams(rawCfg, loc); len(upNames) > 0 {
+		referencedUpstreams = make(map[string]config.UpstreamConfig, len(upNames))
+		for _, upName := range upNames {
+			if up := findUpstreamByName(rawCfg, upName); up != nil {
+				referencedUpstreams[upName] = config.UpstreamConfig{
+					Name:       up.Name,
+					Strategy:   up.Strategy,
+					Hash:       up.Hash,
+					BackendTLS: up.BackendTLS,
+					Servers:    up.Servers,
+					Discovery:  up.Discovery,
+				}
+			}
+		}
 	}
 
 	return map[string]any{
@@ -291,7 +303,7 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc
 		"directory_listing":     loc.DirectoryListing,
 		"allow_hidden":          loc.AllowHidden,
 		"return":                loc.Return,
-		"upstream":              referencedUpstream,
+		"upstream":              referencedUpstreams,
 		"sharing":               loc.Sharing,
 		"waf":                   effWAF,
 	}

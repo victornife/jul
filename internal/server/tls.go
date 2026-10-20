@@ -4,7 +4,9 @@
 package server
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"sort"
@@ -30,6 +32,7 @@ type fileCertProvider struct {
 	byName  map[string]*tls.Certificate // server_name -> cert
 	wild    map[string]*tls.Certificate // ".example.com" -> cert
 	fallbck *tls.Certificate            // first loaded cert
+	fp      string                      // tlsIdentityFingerprint of the exact loaded cert/key bytes
 	// summaries is built once at construction from the certificates actually
 	// loaded here, never by re-reading the configured paths later. It is the
 	// live-status source of truth (#100): LiveCertSummaries reads this instead
@@ -62,8 +65,10 @@ func newFileCertProvider(bindings []certBinding) (*fileCertProvider, error) {
 		wild:   make(map[string]*tls.Certificate),
 	}
 	loaded := make(map[string]*tls.Certificate) // cert+key path -> cert (dedup)
+	loadedHashes := make(map[string][2]string)  // cert+key path -> [certHash, keyHash]
 	namesFor := make(map[string][]string)       // cert+key path -> aggregate configured-case names
 	var order []string                          // cache keys in first-seen order, for deterministic summaries
+	var fpEntries []string
 
 	for _, b := range bindings {
 		if b.tls == nil || !b.tls.Enabled {
@@ -71,19 +76,38 @@ func newFileCertProvider(bindings []certBinding) (*fileCertProvider, error) {
 		}
 		cacheKey := b.tls.Cert + "\x00" + b.tls.Key
 		cert, ok := loaded[cacheKey]
+		hashes := loadedHashes[cacheKey]
 		if !ok {
-			c, err := tls.LoadX509KeyPair(b.tls.Cert, b.tls.Key)
+			certPEM, err := readBoundedMTLSFile(b.tls.Cert, 4<<20)
 			if err != nil {
 				return nil, fmt.Errorf("load cert %q/%q: %w", b.tls.Cert, b.tls.Key, err)
 			}
+			keyPEM, err := readBoundedMTLSFile(b.tls.Key, 4<<20)
+			if err != nil {
+				return nil, fmt.Errorf("load cert %q/%q: %w", b.tls.Cert, b.tls.Key, err)
+			}
+			c, err := tls.X509KeyPair(certPEM, keyPEM)
+			if err != nil {
+				return nil, fmt.Errorf("load cert %q/%q: %w", b.tls.Cert, b.tls.Key, err)
+			}
+			cSum := sha256.Sum256(certPEM)
+			kSum := sha256.Sum256(keyPEM)
+			hashes = [2]string{hex.EncodeToString(cSum[:]), hex.EncodeToString(kSum[:])}
 			cert = &c
 			loaded[cacheKey] = cert
+			loadedHashes[cacheKey] = hashes
 			order = append(order, cacheKey)
 		}
 		if p.fallbck == nil {
 			p.fallbck = cert
 		}
 		namesFor[cacheKey] = append(namesFor[cacheKey], b.names...)
+		normNames := append([]string(nil), b.names...)
+		for i := range normNames {
+			normNames[i] = strings.ToLower(strings.TrimSpace(normNames[i]))
+		}
+		sort.Strings(normNames)
+		fpEntries = append(fpEntries, fmt.Sprintf("names=%s;cert=%s;key=%s", strings.Join(normNames, ","), hashes[0], hashes[1]))
 		for _, name := range b.names {
 			name = strings.ToLower(name)
 			if strings.HasPrefix(name, "*.") {
@@ -96,6 +120,8 @@ func newFileCertProvider(bindings []certBinding) (*fileCertProvider, error) {
 	if p.fallbck == nil {
 		return nil, fmt.Errorf("tls enabled but no certificates loaded")
 	}
+	sort.Strings(fpEntries)
+	p.fp = "file:" + strings.Join(fpEntries, "|")
 	for _, key := range order {
 		p.summaries = append(p.summaries, certSummaryFromCertificate(namesFor[key], loaded[key]))
 	}

@@ -186,10 +186,11 @@ func (s *Server) BuildSharingPlanReport(
 		)
 		if pair.before != nil {
 			openCount := 0
-			if rid := routeID(&pair.before.loc); rid != "" && openByRouteID != nil {
-				openCount = openByRouteID[rid]
-			}
-			if openCount == 0 && openByCoord != nil {
+			if rid := routeID(&pair.before.loc); rid != "" {
+				if openByRouteID != nil {
+					openCount = openByRouteID[rid]
+				}
+			} else if openByCoord != nil {
 				openCount = openByCoord[[2]int{pair.before.srvIdx, pair.before.locIdx}]
 			}
 			delta.OpenExchangesSnapshot = openCount
@@ -890,8 +891,10 @@ func classifyEntryPair(
 	if a.loc.Plugin != "" && hiddenPluginsChanged[a.loc.Plugin] {
 		record(AudienceDeltaUncertain, fmt.Sprintf("plugin %q sets fields hidden without config:raw", a.loc.Plugin))
 	}
-	if upName := locationUpstreamName(a.loc); upName != "" && hiddenUpstreamsChanged[upName] {
-		record(AudienceDeltaUncertain, fmt.Sprintf("upstream %q discovery sets fields hidden without config:raw", upName))
+	for _, upName := range config.ResolveLocationDependencyUpstreams(afterRaw, a.loc) {
+		if hiddenUpstreamsChanged[upName] {
+			record(AudienceDeltaUncertain, fmt.Sprintf("upstream %q discovery sets fields hidden without config:raw", upName))
+		}
 	}
 
 	// 2. Host-dispatch and block-structure expansion (§9.5).
@@ -925,12 +928,14 @@ func classifyEntryPair(
 	if !pluginsEqualForEntry(beforeRaw, afterRaw, b.srv, a.srv, b.loc, a.loc) {
 		record(AudienceDeltaUncertain, "request plugin configuration changed")
 	}
-	if cls, why := classifyCORSChange(b.loc.CORS, a.loc.CORS); cls != AudienceDeltaUnchanged {
+	corsNarrowConstituent := false
+	if cls, why, corsNarrow := config.ClassifyCORSChange(b.loc.CORS, a.loc.CORS, true); cls != AudienceDeltaUnchanged {
 		record(cls, why)
+		corsNarrowConstituent = corsNarrow
 	}
 
 	// 7. Location Auth (CIDR allow/deny and credential checks).
-	for _, item := range classifyAuthChanges(b.loc.Auth, a.loc.Auth) {
+	for _, item := range classifyAuthChangesWithConfig(beforeRaw, afterRaw, b.loc.Auth, a.loc.Auth) {
 		record(item.class, item.reason)
 	}
 
@@ -971,8 +976,9 @@ func classifyEntryPair(
 		afterFindingsByLoc[[2]int{a.srvIdx, a.locIdx}],
 	)
 	requiresAck := finalClass == AudienceDeltaWidened || finalClass == AudienceDeltaUncertain || modeWidened
-	hasNarrowedConstituent := slices.Contains(classes, AudienceDeltaNarrowed) || a.loc.Withdrawn || a.loc.Deny
-	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged || hasNarrowedConstituent
+	hasNarrowedChange := slices.Contains(classes, AudienceDeltaNarrowed) || corsNarrowConstituent
+	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged || hasNarrowedChange
+	hasNarrowedConstituent := hasNarrowedChange || a.loc.Withdrawn || a.loc.Deny
 	// Point 1 (ADR 0026 #642 amendment): keep_open_eligible is defined from
 	// constituent reasons, never from combined class alone. Any mandatory
 	// tightening, withdrawal, or removal overrides keep_open_entries.
@@ -1071,87 +1077,10 @@ func classifyBindChange(beforeListen, afterListen string) (string, string) {
 	return AudienceDeltaUncertain, "listener bind changed between specific addresses"
 }
 
-type listenerEffectiveInputs struct {
-	TLSEnabled      bool   `json:"tls_enabled"`
-	MinVersion      string `json:"min_version,omitempty"`
-	TLSCertSig      string `json:"tls_cert_sig,omitempty"`
-	HTTP3Sig        string `json:"http3_sig,omitempty"`
-	H2C             bool   `json:"h2c,omitempty"`
-	RedirectHTTPS   int    `json:"redirect_https,omitempty"`
-	ProxyProtocol   string `json:"proxy_protocol,omitempty"`
-	ClientAddrSig   string `json:"client_addr_sig,omitempty"`
-	ClientAuthMode  string `json:"client_auth_mode,omitempty"`
-	ClientAuthFiles string `json:"client_auth_files,omitempty"`
-}
+type listenerEffectiveInputs = config.ListenerAccessInputs
 
 func summarizeListenerInputs(c *config.Config, listen string) (listenerEffectiveInputs, bool) {
-	var out listenerEffectiveInputs
-	var caFiles, crlFiles, sans, fwd, certs []string
-	hasSecretRef := false
-	for _, srv := range c.Servers {
-		if srv.Listen != listen {
-			continue
-		}
-		if srv.H2C {
-			out.H2C = true
-		}
-		if srv.HTTP3 != nil && srv.HTTP3.Enabled && out.HTTP3Sig == "" {
-			out.HTTP3Sig = fmt.Sprintf("enabled:%d", srv.HTTP3.AltSvcMaxAge)
-		}
-		if srv.RedirectHTTPS != 0 && out.RedirectHTTPS == 0 {
-			out.RedirectHTTPS = srv.RedirectHTTPS
-		}
-		if srv.ProxyProtocol != "" && out.ProxyProtocol == "" {
-			out.ProxyProtocol = srv.ProxyProtocol
-		}
-		if srv.ClientAddress != nil && out.ClientAddrSig == "" {
-			for _, tp := range srv.ClientAddress.TrustedProxies {
-				if config.ContainsSecretRef(tp) {
-					hasSecretRef = true
-				}
-			}
-			out.ClientAddrSig = fmt.Sprintf("%v|%v|%d", srv.ClientAddress.TrustedProxies, srv.ClientAddress.ForwardedHeaders, srv.ClientAddress.MaxHops)
-		}
-		if srv.TLS != nil && srv.TLS.Enabled {
-			out.TLSEnabled = true
-			if out.MinVersion == "" {
-				out.MinVersion = srv.TLS.MinVersion
-			}
-			acmeSig := ""
-			if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
-				acmeSig = fmt.Sprintf("acme:%s|%s|%s|%v", srv.TLS.ACME.Email, srv.TLS.ACME.CA, srv.TLS.ACME.Challenge, srv.TLS.ACME.Domains)
-			}
-			certs = append(certs, fmt.Sprintf("%s|%s|%s", strings.TrimSpace(srv.TLS.Cert), strings.TrimSpace(srv.TLS.Key), acmeSig))
-			if srv.TLS.ClientAuth != nil && srv.TLS.ClientAuth.Active() {
-				mode := strings.TrimSpace(srv.TLS.ClientAuth.Mode)
-				if config.ContainsSecretRef(mode) || config.ContainsSecretRef(srv.TLS.ClientAuth.CAFile) || config.ContainsSecretRef(srv.TLS.ClientAuth.CRLFile) {
-					hasSecretRef = true
-				}
-				if mode == "require" || out.ClientAuthMode == "" {
-					out.ClientAuthMode = mode
-				}
-				caFiles = append(caFiles, strings.TrimSpace(srv.TLS.ClientAuth.CAFile))
-				crlFiles = append(crlFiles, strings.TrimSpace(srv.TLS.ClientAuth.CRLFile))
-				for _, san := range srv.TLS.ClientAuth.VerifySAN {
-					if config.ContainsSecretRef(san) {
-						hasSecretRef = true
-					}
-					sans = append(sans, strings.TrimSpace(san))
-				}
-				fwd = append(fwd, strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate))
-			}
-		}
-	}
-	if out.ClientAuthMode == "" {
-		out.ClientAuthMode = "none"
-	}
-	sort.Strings(caFiles)
-	sort.Strings(crlFiles)
-	sort.Strings(sans)
-	sort.Strings(fwd)
-	out.TLSCertSig = strings.Join(certs, ";")
-	out.ClientAuthFiles = fmt.Sprintf("ca=%v|crl=%v|san=%v|fwd=%v", caFiles, crlFiles, sans, fwd)
-	return out, hasSecretRef
+	return config.SummarizeListenerAccessInputs(c, listen)
 }
 
 func classifyListenerAndCertChanges(
@@ -1176,11 +1105,8 @@ func classifyListenerAndCertChanges(
 	if bIn.ClientAuthMode != aIn.ClientAuthMode || bIn.ClientAuthFiles != aIn.ClientAuthFiles || bLoc.RequireClientCert != aLoc.RequireClientCert {
 		if bRef || aRef {
 			out = append(out, classReason{AudienceDeltaUncertain, "client_auth comparison involves a secret reference"})
-			return out
-		}
-		if bIn.ClientAuthMode != "none" && aIn.ClientAuthMode != "none" && bIn.ClientAuthFiles != aIn.ClientAuthFiles {
+		} else if bIn.ClientAuthMode != "none" && aIn.ClientAuthMode != "none" && bIn.ClientAuthFiles != aIn.ClientAuthFiles {
 			out = append(out, classReason{AudienceDeltaUncertain, "client_auth CA bundle, CRL, SAN allow-list, or forwarded certificate setting changed"})
-			return out
 		}
 		if bIn.ClientAuthMode != aIn.ClientAuthMode {
 			switch {
@@ -1217,7 +1143,7 @@ func classifyListenerAndCertChanges(
 	return out
 }
 
-func classifyAuthChanges(b, a *config.AuthConfig) []classReason {
+func classifyAuthChangesWithConfig(beforeRaw, afterRaw *config.Config, b, a *config.AuthConfig) []classReason {
 	var out []classReason
 	var bAllow, bDeny, aAllow, aDeny []string
 	if b != nil {
@@ -1229,13 +1155,17 @@ func classifyAuthChanges(b, a *config.AuthConfig) []classReason {
 	if cls, why := classifyCIDRChange(bAllow, bDeny, aAllow, aDeny); cls != AudienceDeltaUnchanged {
 		out = append(out, classReason{cls, why})
 	}
-	if cls, why := classifyCredentialChange(b, a); cls != AudienceDeltaUnchanged {
+	if cls, why := classifyCredentialChangeWithConfig(beforeRaw, afterRaw, b, a); cls != AudienceDeltaUnchanged {
 		out = append(out, classReason{cls, why})
 	}
 	return out
 }
 
 func classifyCredentialChange(b, a *config.AuthConfig) (string, string) {
+	return classifyCredentialChangeWithConfig(nil, nil, b, a)
+}
+
+func classifyCredentialChangeWithConfig(beforeRaw, afterRaw *config.Config, b, a *config.AuthConfig) (string, string) {
 	bHasBasic := b != nil && b.Basic != nil
 	bHasJWT := b != nil && b.JWT != nil
 	bHasFwd := b != nil && b.ForwardAuth != nil
@@ -1267,13 +1197,15 @@ func classifyCredentialChange(b, a *config.AuthConfig) (string, string) {
 		if strings.TrimSpace(b.JWT.JWKSURL) != strings.TrimSpace(a.JWT.JWKSURL) ||
 			strings.TrimSpace(b.JWT.Issuer) != strings.TrimSpace(a.JWT.Issuer) ||
 			strings.TrimSpace(b.JWT.Audience) != strings.TrimSpace(a.JWT.Audience) ||
-			!stringSetsEqual(b.JWT.Algorithms, a.JWT.Algorithms) {
+			!stringSetsEqual(b.JWT.Algorithms, a.JWT.Algorithms) ||
+			!config.AuthUpstreamDependencyEqual(beforeRaw, afterRaw, b.JWT.JWKSURL, a.JWT.JWKSURL) {
 			return AudienceDeltaUncertain, "JWT authentication settings changed"
 		}
 	}
 	if bHasFwd && aHasFwd {
 		if strings.TrimSpace(b.ForwardAuth.URL) != strings.TrimSpace(a.ForwardAuth.URL) ||
-			!stringSetsEqual(b.ForwardAuth.AuthResponseHeaders, a.ForwardAuth.AuthResponseHeaders) {
+			!stringSetsEqual(b.ForwardAuth.AuthResponseHeaders, a.ForwardAuth.AuthResponseHeaders) ||
+			!config.AuthUpstreamDependencyEqual(beforeRaw, afterRaw, b.ForwardAuth.URL, a.ForwardAuth.URL) {
 			return AudienceDeltaUncertain, "forward_auth settings changed"
 		}
 	}
@@ -1285,73 +1217,8 @@ func classifyCIDRChange(bAllow, bDeny, aAllow, aDeny []string) (string, string) 
 }
 
 func classifyCORSChange(b, a *config.CORSConfig) (string, string) {
-	bOn := b != nil && b.Enabled
-	aOn := a != nil && a.Enabled
-	switch {
-	case !bOn && !aOn:
-		return AudienceDeltaUnchanged, ""
-	case !bOn && aOn:
-		return AudienceDeltaWidened, "CORS policy enabled"
-	case bOn && !aOn:
-		return AudienceDeltaNarrowed, "CORS policy disabled"
-	}
-
-	for _, s := range append(append([]string(nil), b.AllowedOrigins...), a.AllowedOrigins...) {
-		if config.ContainsSecretRef(s) {
-			return AudienceDeltaUncertain, "CORS allowed_origins comparison involves a secret reference"
-		}
-	}
-	if !stringSetsEqual(b.AllowedMethods, a.AllowedMethods) || !stringSetsEqual(b.AllowedHeaders, a.AllowedHeaders) {
-		return AudienceDeltaUncertain, "CORS allowed_methods or allowed_headers changed"
-	}
-
-	bOrigins := make(map[string]bool, len(b.AllowedOrigins))
-	for _, o := range b.AllowedOrigins {
-		bOrigins[strings.TrimSpace(o)] = true
-	}
-	aOrigins := make(map[string]bool, len(a.AllowedOrigins))
-	for _, o := range a.AllowedOrigins {
-		aOrigins[strings.TrimSpace(o)] = true
-	}
-
-	added := false
-	removed := false
-	for o := range aOrigins {
-		if !bOrigins[o] {
-			added = true
-		}
-	}
-	for o := range bOrigins {
-		if !aOrigins[o] {
-			removed = true
-		}
-	}
-
-	if !added && !removed && b.AllowCredentials == a.AllowCredentials {
-		return AudienceDeltaUnchanged, ""
-	}
-	if added && removed {
-		return AudienceDeltaUncertain, "CORS allowed_origins added and removed origins"
-	}
-	if aOrigins["*"] && !bOrigins["*"] && !removed && (!b.AllowCredentials || a.AllowCredentials) {
-		return AudienceDeltaWidened, "CORS wildcard origin introduced"
-	}
-	if !b.AllowCredentials && a.AllowCredentials && !removed {
-		return AudienceDeltaWidened, "CORS allow_credentials enabled"
-	}
-	if added && !removed && a.AllowCredentials && b.AllowCredentials {
-		return AudienceDeltaWidened, "CORS origin added while credentials are allowed"
-	}
-	if added && !removed && !a.AllowCredentials && !b.AllowCredentials {
-		return AudienceDeltaWidened, "CORS allowed_origins expanded"
-	}
-	if removed && !added && (b.AllowCredentials == a.AllowCredentials || (b.AllowCredentials && !a.AllowCredentials)) {
-		return AudienceDeltaNarrowed, "CORS allowed_origins narrowed"
-	}
-	if !added && !removed && b.AllowCredentials && !a.AllowCredentials {
-		return AudienceDeltaNarrowed, "CORS allow_credentials disabled"
-	}
-	return AudienceDeltaUncertain, "CORS policy changed"
+	cls, why, _ := config.ClassifyCORSChange(b, a, true)
+	return cls, why
 }
 
 // wafProvablyWithoutEngineControl reports whether w is provably free of
@@ -1524,19 +1391,6 @@ func pluginConfigsEqual(b, a config.PluginConfig) bool {
 	return true
 }
 
-func locationUpstreamName(loc config.LocationConfig) string {
-	switch {
-	case loc.GRPCTranscode != nil:
-		return upstreamRef(loc.GRPCTranscode.Target, "proxy")
-	case loc.GRPC:
-		return upstreamRef(loc.ProxyPass, "grpc")
-	case loc.ProxyPass != "":
-		return upstreamRef(loc.ProxyPass, "proxy")
-	default:
-		return ""
-	}
-}
-
 func entryTargetAndUpstreamEqual(before, after *config.Config, bLoc, aLoc config.LocationConfig) bool {
 	if locationAction(&bLoc) != locationAction(&aLoc) ||
 		locationTarget(&bLoc) != locationTarget(&aLoc) ||
@@ -1551,8 +1405,8 @@ func entryTargetAndUpstreamEqual(before, after *config.Config, bLoc, aLoc config
 		!backendTLSConfigsEqual(bLoc.BackendTLS, aLoc.BackendTLS) {
 		return false
 	}
-	bUp := locationUpstreamName(bLoc)
-	aUp := locationUpstreamName(aLoc)
+	bUp := config.ResolveLocationUpstreamName(before, bLoc)
+	aUp := config.ResolveLocationUpstreamName(after, aLoc)
 	if bUp != aUp {
 		return false
 	}

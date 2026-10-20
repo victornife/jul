@@ -27,6 +27,9 @@ type basicAuth struct {
 // supported; other hash schemes are rejected at load so a misconfiguration is
 // caught at startup rather than silently denying every request.
 func newBasicAuth(file, realm string) (*basicAuth, error) {
+	if preInfo, err := os.Stat(file); err == nil && !preInfo.Mode().IsRegular() {
+		return nil, fmt.Errorf("basic auth: htpasswd %q must be a regular file", file)
+	}
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, fmt.Errorf("basic auth: read htpasswd %q: %w", file, err)

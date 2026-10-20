@@ -276,6 +276,9 @@ type SharingValueResponse struct {
 
 type cachedSharingDerivation struct {
 	snapshotToken string
+	servingGen    uint64
+	initRegGen    uint64
+	exchanges     *respwriter.ExchangeRegistry
 	servingRaw    *config.Config
 	savedRaw      *config.Config
 	savedStatus   string
@@ -340,10 +343,15 @@ func (s *Server) deriveSharingSnapshot() (*cachedSharingDerivation, error) {
 		}
 	}
 
+	var initRegGen uint64
+	if snap.Exchanges != nil {
+		initRegGen, _, _, _ = snap.Exchanges.SnapshotCountsWithGeneration()
+	}
+
 	snapshotToken := fmt.Sprintf("g%d:%s:%s:%s", snap.Generation, rawDigest, desiredVersion, savedRawDigest)
 
 	s.sharingCacheMu.Lock()
-	if s.sharingCache != nil && s.sharingCache.snapshotToken == snapshotToken {
+	if s.sharingCache != nil && s.sharingCache.snapshotToken == snapshotToken && s.sharingCache.initRegGen == initRegGen && (snap.Generation == 0 || initRegGen == 0 || snap.Generation == initRegGen) {
 		cached := s.sharingCache
 		s.sharingCacheMu.Unlock()
 		return cached, nil
@@ -359,6 +367,9 @@ func (s *Server) deriveSharingSnapshot() (*cachedSharingDerivation, error) {
 		authStatus,
 		savedRawBytes,
 	)
+	derived.servingGen = snap.Generation
+	derived.initRegGen = initRegGen
+	derived.exchanges = snap.Exchanges
 
 	s.sharingCacheMu.Lock()
 	s.sharingCache = derived
@@ -483,23 +494,31 @@ func buildLayerBackendGroups(
 			var kind, target string
 			switch {
 			case loc.GRPCTranscode != nil && strings.TrimSpace(loc.GRPCTranscode.Target) != "":
-				up := upstreamRef(loc.GRPCTranscode.Target, "proxy")
+				up := config.ResolveLocationUpstreamName(rawCfg, loc)
 				if up != "" {
 					kind, target = "upstream", up
 				} else {
 					kind, target = "address", strings.TrimSpace(loc.GRPCTranscode.Target)
 				}
 			case loc.ProxyPass != "":
-				up := upstreamRef(loc.ProxyPass, "proxy")
+				up := config.ResolveLocationUpstreamName(rawCfg, loc)
 				if up != "" {
 					kind, target = "upstream", up
 				} else {
 					kind, target = "address", strings.TrimSpace(loc.ProxyPass)
 				}
-			case loc.FastCGIPass != "":
-				kind, target = "address", "fastcgi:"+strings.TrimSpace(loc.FastCGIPass)
 			case loc.UWSGIPass != "":
-				kind, target = "address", "uwsgi:"+strings.TrimSpace(loc.UWSGIPass)
+				if up := config.ResolveLocationUpstreamName(rawCfg, loc); up != "" {
+					kind, target = "upstream", up
+				} else {
+					kind, target = "address", "uwsgi:"+strings.TrimSpace(loc.UWSGIPass)
+				}
+			case loc.FastCGIPass != "":
+				if up := config.ResolveLocationUpstreamName(rawCfg, loc); up != "" {
+					kind, target = "upstream", up
+				} else {
+					kind, target = "address", "fastcgi:"+strings.TrimSpace(loc.FastCGIPass)
+				}
 			case loc.Root != "":
 				kind, target = "static_root", strings.TrimSpace(loc.Root)
 			}
@@ -753,10 +772,12 @@ func buildSingleEntryLayer(
 
 	// 6. action, upstream_ref, controls, withdrawn.
 	act := locationAction(&rawLoc)
-	upRef := locationUpstreamName(rawLoc)
+	upRef := config.ResolveLocationUpstreamName(rawCfg, rawLoc)
 	controls := deriveSharingControls(rawCfg, effCfg, rawLoc, effLoc, isSavedLayer)
 	withdrawn := "no"
-	if isSavedLayer && rawLoc.Auth != nil && hasAnySecretRefInSlice(append(append([]string(nil), rawLoc.Auth.Allow...), rawLoc.Auth.Deny...)) {
+	if rawLoc.Withdrawn || rawLoc.Deny || (!isSavedLayer && isLocationWithdrawnByConfig(effLoc)) {
+		withdrawn = "yes"
+	} else if isSavedLayer && rawLoc.Auth != nil && hasAnySecretRefInSlice(append(append([]string(nil), rawLoc.Auth.Allow...), rawLoc.Auth.Deny...)) {
 		withdrawn = "unknown"
 	} else if isLocationWithdrawnByConfig(effLoc) {
 		withdrawn = "yes"
@@ -1254,9 +1275,64 @@ func entryViewKey(l SharingEntryLayer) string {
 // BuildSharingViewPage returns one bounded page of the sharing projection,
 // validating any revision-bound cursor against the captured snapshot (SH-13).
 func (s *Server) BuildSharingViewPage(cursor string, requestedLimit int) (SharingViewResponse, error) {
-	derived, err := s.deriveSharingSnapshot()
-	if err != nil {
-		return SharingViewResponse{}, err
+	var (
+		derived          *cachedSharingDerivation
+		err              error
+		openByCoord      map[[2]int]int
+		openByRouteID    map[string]int
+		lastRetByCoord   map[[2]int]respwriter.EntryRetirementResult
+		lastRetByRouteID map[string]respwriter.EntryRetirementResult
+	)
+	for attempt := 0; attempt < 4; attempt++ {
+		derived, err = s.deriveSharingSnapshot()
+		if err != nil {
+			return SharingViewResponse{}, err
+		}
+		openByCoord = nil
+		openByRouteID = nil
+		lastRetByCoord = nil
+		lastRetByRouteID = nil
+
+		var regGen uint64
+		var curSnapGen uint64
+		var ex *respwriter.ExchangeRegistry
+		if s.deps.LiveSnapshot != nil {
+			curSnap := s.deps.LiveSnapshot()
+			curSnapGen = curSnap.Generation
+			ex = curSnap.Exchanges
+		}
+		if ex == nil {
+			ex = derived.exchanges
+		}
+		if ex != nil {
+			var lastRets []respwriter.EntryRetirementResult
+			regGen, openByCoord, openByRouteID, lastRets = ex.SnapshotCountsWithGeneration()
+			if len(lastRets) > 0 {
+				lastRetByCoord = make(map[[2]int]respwriter.EntryRetirementResult, len(lastRets))
+				lastRetByRouteID = make(map[string]respwriter.EntryRetirementResult, len(lastRets))
+				for _, lr := range lastRets {
+					if !lr.Removed {
+						lastRetByCoord[[2]int{lr.ServerIndex, lr.LocationIndex}] = lr
+					}
+					if lr.RouteID != "" {
+						lastRetByRouteID[lr.RouteID] = lr
+					}
+				}
+			}
+		}
+		genMismatch := (curSnapGen != 0 && derived.servingGen != 0 && curSnapGen != derived.servingGen) ||
+			(regGen != 0 && derived.servingGen != 0 && regGen != derived.servingGen) ||
+			(regGen != 0 && derived.initRegGen != 0 && regGen != derived.initRegGen)
+		if genMismatch {
+			if strings.TrimSpace(cursor) != "" {
+				return SharingViewResponse{}, &errSharingStaleCursor{message: "the configuration changed; reload the view"}
+			}
+			if attempt < 3 {
+				continue
+			}
+			return SharingViewResponse{}, fmt.Errorf("sharing view: serving snapshot changed during capture; retry")
+		}
+		break
 	}
 
 	startIdx := 0
@@ -1284,29 +1360,6 @@ func (s *Server) BuildSharingViewPage(cursor string, requestedLimit int) (Sharin
 	var pageBlockList []SharingBlockRow
 	var pageGroupList []SharingBackendGroupRow
 
-	var openByCoord map[[2]int]int
-	var openByRouteID map[string]int
-	var lastRetByCoord map[[2]int]respwriter.EntryRetirementResult
-	var lastRetByRouteID map[string]respwriter.EntryRetirementResult
-	if s.deps.LiveSnapshot != nil {
-		if ex := s.deps.LiveSnapshot().Exchanges; ex != nil {
-			openByCoord, openByRouteID = ex.SnapshotCounts()
-			lastRets := ex.LastRetirementResults()
-			if len(lastRets) > 0 {
-				lastRetByCoord = make(map[[2]int]respwriter.EntryRetirementResult, len(lastRets))
-				lastRetByRouteID = make(map[string]respwriter.EntryRetirementResult, len(lastRets))
-				for _, lr := range lastRets {
-					if !lr.Removed {
-						lastRetByCoord[[2]int{lr.ServerIndex, lr.LocationIndex}] = lr
-					}
-					if lr.RouteID != "" {
-						lastRetByRouteID[lr.RouteID] = lr
-					}
-				}
-			}
-		}
-	}
-
 	// Account for the response envelope (including worst-case NextCursor and JSON
 	// framing) plus every referenced block and backend-group row so the complete
 	// serialized SharingViewResponse stays within SharingMaxPageBytes (1 MiB).
@@ -1332,22 +1385,25 @@ func (s *Server) BuildSharingViewPage(cursor string, requestedLimit int) (Sharin
 			if srvCopy.RouteID != nil {
 				rid = srvCopy.RouteID.Literal
 			}
-			if rid != "" && openByRouteID != nil {
-				srvCopy.OpenExchanges = openByRouteID[rid]
-			}
-			if srvCopy.OpenExchanges == 0 && openByCoord != nil {
-				srvCopy.OpenExchanges = openByCoord[coord]
-			}
-			if rid != "" && lastRetByRouteID != nil {
-				if lr, ok := lastRetByRouteID[rid]; ok {
-					lrCopy := lr
-					srvCopy.LastRetirement = &lrCopy
+			if rid != "" {
+				if openByRouteID != nil {
+					srvCopy.OpenExchanges = openByRouteID[rid]
 				}
-			}
-			if srvCopy.LastRetirement == nil && lastRetByCoord != nil {
-				if lr, ok := lastRetByCoord[coord]; ok {
-					lrCopy := lr
-					srvCopy.LastRetirement = &lrCopy
+				if lastRetByRouteID != nil {
+					if lr, ok := lastRetByRouteID[rid]; ok {
+						lrCopy := lr
+						srvCopy.LastRetirement = &lrCopy
+					}
+				}
+			} else {
+				if openByCoord != nil {
+					srvCopy.OpenExchanges = openByCoord[coord]
+				}
+				if lastRetByCoord != nil {
+					if lr, ok := lastRetByCoord[coord]; ok {
+						lrCopy := lr
+						srvCopy.LastRetirement = &lrCopy
+					}
 				}
 			}
 			entry.Serving = &srvCopy
@@ -1458,7 +1514,8 @@ func (s *Server) ReadSharingFullValue(
 	if err != nil {
 		return SharingValueResponse{}, err
 	}
-	if strings.TrimSpace(snapshotToken) == "" || snapshotToken != derived.snapshotToken {
+	if strings.TrimSpace(snapshotToken) == "" || snapshotToken != derived.snapshotToken ||
+		(derived.servingGen != 0 && derived.initRegGen != 0 && derived.servingGen != derived.initRegGen) {
 		return SharingValueResponse{}, &errSharingStaleCursor{message: "the configuration changed; reload the view"}
 	}
 
