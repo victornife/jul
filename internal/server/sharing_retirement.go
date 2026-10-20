@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -137,6 +138,74 @@ func (f *LoadedAccessFiles) applyWAFDigests(global string, byLoc map[[2]int]stri
 	}
 }
 
+func (f *LoadedAccessFiles) applyBasicAuthBytes(byPath map[string][]byte) {
+	if f == nil || len(byPath) == 0 {
+		return
+	}
+	for p, raw := range byPath {
+		if len(raw) > 0 {
+			f.htpasswdByPath[p] = parseHtpasswdBytes(raw)
+		}
+	}
+}
+
+type loadedAccessHandler struct {
+	http.Handler
+	basicByPath   map[string][]byte
+	wafGlobal     string
+	wafByLoc      map[[2]int]string
+	pluginDigests map[string]string
+}
+
+// WrapHandlersWithLoadedAccess attaches the generation-owned loaded access
+// inputs (Basic auth htpasswd bytes, compiled WAF source digests, and compiled
+// WASM plugin digests) directly to the handler map returned by HandlerFactory
+// so Server.Run and ReloadPlan.Prepare consume the exact prepared artifacts
+// without re-reading them from disk (#642, #563).
+func WrapHandlersWithLoadedAccess(
+	handlers map[string]http.Handler,
+	basicByPath map[string][]byte,
+	wafGlobal string,
+	wafByLoc map[[2]int]string,
+	pluginDigests map[string]string,
+) map[string]http.Handler {
+	if len(handlers) == 0 {
+		return handlers
+	}
+	out := make(map[string]http.Handler, len(handlers))
+	for addr, h := range handlers {
+		if h == nil {
+			out[addr] = nil
+			continue
+		}
+		out[addr] = &loadedAccessHandler{
+			Handler:       h,
+			basicByPath:   basicByPath,
+			wafGlobal:     wafGlobal,
+			wafByLoc:      wafByLoc,
+			pluginDigests: pluginDigests,
+		}
+	}
+	return out
+}
+
+func captureLoadedAccessFilesFromHandlers(effCfg *config.Config, handlers map[string]http.Handler) *LoadedAccessFiles {
+	files := captureLoadedAccessFiles(effCfg)
+	for _, h := range handlers {
+		if lah, ok := h.(*loadedAccessHandler); ok && lah != nil {
+			files.applyBasicAuthBytes(lah.basicByPath)
+			files.applyWAFDigests(lah.wafGlobal, lah.wafByLoc)
+			for name, dig := range lah.pluginDigests {
+				if dig != "" {
+					files.pluginDigestByName[name] = dig
+				}
+			}
+			break
+		}
+	}
+	return files
+}
+
 // WithCompiledWAF binds engine-owned external source digests from compiled
 // *waf.Firewall instances onto f so retirement comparison uses the exact bytes
 // read during WAF compilation rather than re-reading files from disk (#642, #563).
@@ -160,6 +229,10 @@ func parseHtpasswdSnapshot(path string) htpasswdSnapshot {
 	if err != nil {
 		return htpasswdSnapshot{}
 	}
+	return parseHtpasswdBytes(data)
+}
+
+func parseHtpasswdBytes(data []byte) htpasswdSnapshot {
 	sum := sha256.Sum256(data)
 	users := make(map[string]string)
 	for _, rawLine := range strings.Split(string(data), "\n") {

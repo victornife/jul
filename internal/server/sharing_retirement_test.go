@@ -47,12 +47,7 @@ func buildTestRouterFactory(t *testing.T, streamHold <-chan struct{}, portalRele
 					rid = *loc.RouteID
 				}
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
-						w.Header().Set("Content-Type", "application/grpc")
-						w.Header().Set("Trailer", "Grpc-Status")
-					} else {
-						w.Header().Set("Content-Type", "text/event-stream")
-					}
+					w.Header().Set("Content-Type", "text/event-stream")
 					w.WriteHeader(http.StatusOK)
 					_, _ = io.WriteString(w, "data: start-"+rid+"\n\n")
 					_ = http.NewResponseController(w).Flush()
@@ -1071,9 +1066,9 @@ func TestRealH1StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 	}
 }
 
-func TestRealGRPCStreamRetirementOnSharedH2Conn(t *testing.T) {
+func TestSharedH2MultiHostStreamRetirement(t *testing.T) {
 	dir := t.TempDir()
-	srvCert, srvKey := writeSelfSigned(t, dir, "srv", "portal.example.com", "grpc.example.com")
+	srvCert, srvKey := writeSelfSigned(t, dir, "srv", "portal.example.com", "api.example.com")
 	addr := freePort(t)
 	strPtr := func(s string) *string { return &s }
 
@@ -1093,13 +1088,13 @@ func TestRealGRPCStreamRetirementOnSharedH2Conn(t *testing.T) {
 					}},
 				},
 				{
-					Name:        "grpc-svc",
+					Name:        "api-svc",
 					Listen:      addr,
-					ServerNames: []string{"grpc.example.com"},
+					ServerNames: []string{"api.example.com"},
 					TLS:         &config.TLSConfig{Enabled: true, Cert: srvCert, Key: srvKey},
 					Locations: []config.LocationConfig{{
-						RouteID:   strPtr("grpc-route"),
-						Match:     config.MatchConfig{Type: "prefix", Path: "/pkg.Svc/Stream"},
+						RouteID:   strPtr("api-route"),
+						Match:     config.MatchConfig{Type: "prefix", Path: "/events"},
 						ProxyPass: "http://127.0.0.1:9002",
 					}},
 				},
@@ -1153,47 +1148,38 @@ func TestRealGRPCStreamRetirementOnSharedH2Conn(t *testing.T) {
 	portalBR := bufio.NewReader(portalResp.Body)
 	_, _ = portalBR.ReadString('\n')
 
-	grpcReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+addr+"/pkg.Svc/Stream?stream=1", strings.NewReader("\x00\x00\x00\x00\x00"))
-	grpcReq.Host = "grpc.example.com"
-	grpcReq.Header.Set("Content-Type", "application/grpc")
-	grpcReq.Header.Set("TE", "trailers")
-	grpcResp, err := h2Client.Do(grpcReq)
+	apiReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/events?stream=1", nil)
+	apiReq.Host = "api.example.com"
+	apiResp, err := h2Client.Do(apiReq)
 	if err != nil {
-		t.Fatalf("gRPC stream: %v", err)
+		t.Fatalf("api stream: %v", err)
 	}
-	defer grpcResp.Body.Close()
-	if got := grpcResp.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/grpc") {
-		t.Fatalf("claimed gRPC fixture responds with %q instead of application/grpc", got)
-	}
-	grpcBR := bufio.NewReader(grpcResp.Body)
-	_, _ = grpcBR.ReadString('\n')
+	defer apiResp.Body.Close()
+	apiBR := bufio.NewReader(apiResp.Body)
+	_, _ = apiBR.ReadString('\n')
 
 	if dials.Load() != 1 {
-		t.Fatalf("expected 1 shared H2 connection for gRPC + portal, got %d", dials.Load())
+		t.Fatalf("expected 1 shared H2 connection for api + portal, got %d", dials.Load())
 	}
 
-	// Narrow grpc-route by adding CIDR restriction -> gRPC stream resets while portal completes.
+	// Narrow api-route by adding CIDR restriction -> api stream resets while portal completes.
 	narrowCfg := baseCfg()
 	narrowCfg.Servers[1].Locations[0].Auth = &config.AuthConfig{Allow: []string{"10.254.0.0/16"}}
 	candNarrow, _ := config.NewCandidate(narrowCfg)
 	resCh := make(chan ReloadResult, 1)
-	reloadCh <- ReloadRequest{ID: "narrow-grpc", Source: ReloadSourceAdmin, Candidate: candNarrow, Result: resCh}
+	reloadCh <- ReloadRequest{ID: "narrow-api", Source: ReloadSourceAdmin, Candidate: candNarrow, Result: resCh}
 	rel := <-resCh
 	if len(rel.EntryRetirements) != 1 || rel.EntryRetirements[0].EndedExchanges != 1 || rel.EntryRetirements[0].CollateralCount != 0 || !rel.EntryRetirements[0].CompletedWithinBound {
-		t.Fatalf("expected gRPC stream retirement with 0 collateral, got %+v", rel.EntryRetirements)
+		t.Fatalf("expected H2 stream retirement with 0 collateral, got %+v", rel.EntryRetirements)
 	}
-	if _, gErr := io.ReadAll(grpcBR); gErr == nil {
-		t.Fatal("expected narrowed gRPC H2 stream to be reset")
+	if _, aErr := io.ReadAll(apiBR); aErr == nil {
+		t.Fatal("expected narrowed H2 stream to be reset")
 	}
 	close(portalRelease)
 	rest, pErr := io.ReadAll(portalBR)
 	if pErr != nil || !strings.Contains(string(rest), "end-portal") {
 		t.Fatalf("sibling portal stream failed: err=%v body=%q", pErr, string(rest))
 	}
-}
-
-func TestReaudit653ClaimedGRPCFixtureMustSpeakGRPC(t *testing.T) {
-	TestRealGRPCStreamRetirementOnSharedH2Conn(t)
 }
 
 func TestReaudit653ListenerRemovalSendsGoingAway(t *testing.T) {

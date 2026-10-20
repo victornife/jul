@@ -20,6 +20,7 @@ import (
 type basicAuth struct {
 	realm string
 	users map[string]string // username -> bcrypt hash
+	raw   []byte
 }
 
 // newBasicAuth loads an htpasswd file. Only bcrypt entries ($2a$/$2b$/$2y$) are
@@ -74,7 +75,7 @@ func newBasicAuth(file, realm string) (*basicAuth, error) {
 	if len(users) == 0 {
 		return nil, fmt.Errorf("basic auth: htpasswd %q has no usable entries", file)
 	}
-	return &basicAuth{realm: realm, users: users}, nil
+	return &basicAuth{realm: realm, users: users, raw: append([]byte(nil), data...)}, nil
 }
 
 func isBcryptHash(h string) bool {

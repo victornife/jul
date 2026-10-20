@@ -548,6 +548,9 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 
 	var pubSeq uint64
 	computeResults := func() []EntryRetirementResult {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
 		results := make([]EntryRetirementResult, 0, len(trackers))
 		for _, et := range trackers {
 			res := EntryRetirementResult{
@@ -565,10 +568,7 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 				res.LocationIndex = et.tr.FromLocationIndex
 				res.RouteID = et.tr.FromRouteID
 			}
-			r.mu.Lock()
-			exList := append([]*ActiveExchange(nil), et.exchanges...)
-			r.mu.Unlock()
-			for _, ex := range exList {
+			for _, ex := range et.exchanges {
 				graceful, forced, withinBound, collateral := ex.outcome(boundDeadline)
 				if graceful {
 					res.GracefulCount++
@@ -594,11 +594,9 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 			results = append(results, res)
 		}
 
-		r.mu.Lock()
 		if r.latestPublishSeq == pubSeq {
 			r.lastResults = results
 		}
-		r.mu.Unlock()
 		return results
 	}
 	recomputeFn := func() {
@@ -793,6 +791,7 @@ type ActiveExchange struct {
 	statusCode    int
 	hijacked      bool
 	upgraded      *upgradedSession
+	upgradedPtr   atomic.Pointer[upgradedSession]
 	upgradedBack  *upgradedBackConn
 	batches       []*retirementBatch
 
@@ -977,10 +976,7 @@ func (ex *ActiveExchange) outcome(boundDeadline time.Time) (graceful bool, force
 	closedTime := time.Unix(0, closedNs)
 	withinBound = !closedTime.After(boundDeadline.Add(50 * time.Millisecond))
 
-	ex.mu.Lock()
-	up := ex.upgraded
-	ex.mu.Unlock()
-	if up != nil {
+	if up := ex.upgradedPtr.Load(); up != nil {
 		if up.completedCleanHandshake() {
 			return true, false, withinBound, 0
 		}
@@ -1052,6 +1048,7 @@ func (w *exchangeResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	up := newUpgradedSession(w.ex, conn, brw, w.ex.upgradedBack, isWS)
 	w.ex.hijacked = true
 	w.ex.upgraded = up
+	w.ex.upgradedPtr.Store(up)
 	retiring := w.ex.retiring
 	grace := w.ex.graceDeadline
 	bound := w.ex.boundDeadline

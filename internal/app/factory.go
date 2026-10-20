@@ -538,6 +538,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// scope, so a misconfiguration (for example, an unreadable htpasswd file)
 	// fails the reload with a clear error instead of surfacing per request.
 	authByScope := make(map[string]*auth.Authenticator)
+	gen.basicByPath = make(map[string][]byte)
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
 			loc := c.Servers[i].Locations[j]
@@ -569,6 +570,13 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			})
 			if err != nil {
 				return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
+			}
+			if loc.Auth.Basic != nil {
+				if p := strings.TrimSpace(loc.Auth.Basic.File); p != "" {
+					if raw := a.BasicFileBytes(); len(raw) > 0 {
+						gen.basicByPath[p] = raw
+					}
+				}
 			}
 			gen.Stage(a)
 			authByScope[key] = a
@@ -797,7 +805,12 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		handlers[addr] = h
 	}
 
-	return handlers, nil
+	pluginDigests := make(map[string]string, len(gen.pluginModules))
+	for name, id := range gen.pluginModules {
+		pluginDigests[name] = strings.TrimPrefix(id.Digest, "sha256:")
+	}
+
+	return server.WrapHandlersWithLoadedAccess(handlers, gen.basicByPath, gen.wafGlobalDigest, gen.wafDigestByLoc, pluginDigests), nil
 }
 
 // globalChain returns the per-listen-address middleware chain, outermost to

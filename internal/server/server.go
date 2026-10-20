@@ -707,7 +707,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	}
 	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
 	s.exchanges.SetInitialGeneration(genID)
-	s.loadedAccessFiles = captureLoadedAccessFiles(s.cfg)
+	s.loadedAccessFiles = captureLoadedAccessFilesFromHandlers(s.cfg, handlers)
 	if s.WAFSourceDigests != nil && s.loadedAccessFiles != nil {
 		gDig, byLoc := s.WAFSourceDigests(genID)
 		s.loadedAccessFiles.applyWAFDigests(gDig, byLoc)

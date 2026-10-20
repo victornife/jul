@@ -778,7 +778,7 @@ flag (#563, #642).
   lifecycle subtests, in [proxy stream tests](../internal/handler/proxy_stream_test.go),
   plus `TestSharedH2StreamRetirementAndPerRequestCertRecheck`,
   `TestRealH1StreamRetirementAndPerRequestCertRecheck`, and
-  `TestRealGRPCStreamRetirementOnSharedH2Conn` in
+  `TestSharedH2MultiHostStreamRetirement` in
   [sharing retirement tests](../internal/server/sharing_retirement_test.go) and
   `TestHTTP3SharedConnStreamRetirementAndPerRequestCertRecheck` in
   [HTTP/3 mTLS tests](../internal/server/http3_mtls_test.go).

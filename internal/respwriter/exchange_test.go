@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -850,5 +851,52 @@ func TestReaudit653LateAdmissionImmediatelyInvalidatesCompletionStatus(t *testin
 	}
 	if got[0].CompletedWithinBound || got[0].Claim == "complete_withdrawal" {
 		t.Fatalf("late active admission absent from completion status: active=%d result=%+v", reg.ActiveCount(), got[0])
+	}
+}
+
+func TestThird653SamePublishRecomputeCannotRestoreStaleCompletion(t *testing.T) {
+	for attempt := 0; attempt < 100; attempt++ {
+		reg := NewExchangeRegistry()
+		reg.SetInitialGeneration(1)
+		releases := make([]func(), 0, 600)
+		for n := 0; n < 600; n++ {
+			_, _, _, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 1, RouteID: "route"})
+			releases = append(releases, release)
+		}
+		wait := reg.PublishGeneration(1, 2, []EntryTransition{{FromRouteID: "route", ToRouteID: "route", Retire: true, Mandatory: true}})
+		for _, release := range releases {
+			release()
+		}
+		wait()
+
+		triggers := make([]func(), 24)
+		for n := range triggers {
+			_, _, _, triggers[n] = reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/other", nil), EntryCoord{GenID: 2, LocationIndex: 1, RouteID: "other"})
+		}
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for _, closeRequest := range triggers {
+			wg.Add(1)
+			go func(release func()) {
+				defer wg.Done()
+				<-start
+				release()
+			}(closeRequest)
+		}
+		close(start)
+		runtime.Gosched()
+		_, _, _, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 1, RouteID: "route"})
+		wg.Wait()
+		got := reg.LastRetirementResults()
+		if len(got) != 1 {
+			release()
+			t.Fatalf("results=%+v", got)
+		}
+		if got[0].CompletedWithinBound || got[0].Claim == "complete_withdrawal" {
+			active := reg.ActiveCount()
+			release()
+			t.Fatalf("same-publish recompute restored stale completion after Admit returned: attempt=%d active=%d results=%+v", attempt, active, got)
+		}
+		release()
 	}
 }

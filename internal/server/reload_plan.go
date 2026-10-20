@@ -253,7 +253,7 @@ func (p *ReloadPlan) Prepare() error {
 		if clientAuth != nil {
 			p.Runtime.add(clientAuth)
 		}
-		p.nextAccessFiles = captureLoadedAccessFiles(p.Candidate.Effective)
+		p.nextAccessFiles = captureLoadedAccessFilesFromHandlers(p.Candidate.Effective, p.Handlers)
 		if clientAuth != nil {
 			p.nextAccessFiles.applyMTLSRotation(clientAuth)
 		}
