@@ -5,6 +5,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/respwriter"
+	"jul/internal/waf"
 )
 
 // LoadedAccessFiles holds the content snapshots of file-backed access inputs
@@ -121,6 +123,38 @@ func (f *LoadedAccessFiles) applyMTLSRotation(c *clientAuthRotationComponent) {
 	}
 }
 
+func (f *LoadedAccessFiles) applyWAFDigests(global string, byLoc map[[2]int]string) {
+	if f == nil {
+		return
+	}
+	if global != "" {
+		f.globalWAFDigest = global
+	}
+	for k, v := range byLoc {
+		if v != "" {
+			f.wafDigestByLoc[k] = v
+		}
+	}
+}
+
+// WithCompiledWAF binds engine-owned external source digests from compiled
+// *waf.Firewall instances onto f so retirement comparison uses the exact bytes
+// read during WAF compilation rather than re-reading files from disk (#642, #563).
+func (f *LoadedAccessFiles) WithCompiledWAF(global *waf.Firewall, byLoc map[[2]int]*waf.Firewall) *LoadedAccessFiles {
+	if f == nil {
+		return nil
+	}
+	if global != nil {
+		f.globalWAFDigest = global.SourceDigest()
+	}
+	for k, fw := range byLoc {
+		if fw != nil {
+			f.wafDigestByLoc[k] = fw.SourceDigest()
+		}
+	}
+	return f
+}
+
 func parseHtpasswdSnapshot(path string) htpasswdSnapshot {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -153,6 +187,15 @@ func parseHtpasswdSnapshot(path string) htpasswdSnapshot {
 func digestWAFDirectiveFiles(w config.WAFConfig) string {
 	if !w.Enabled || (len(w.DirectivesFiles) == 0 && strings.TrimSpace(w.InlineRules) == "") {
 		return ""
+	}
+	if waf.Compiled {
+		if fw, err := waf.New(context.Background(), w, waf.Options{}); err == nil && fw != nil {
+			dig := fw.SourceDigest()
+			_ = fw.Close()
+			if dig != "" {
+				return dig
+			}
+		}
 	}
 	h := sha256.New()
 	visited := make(map[string]bool)
@@ -207,11 +250,11 @@ func digestWAFDirectiveFiles(w config.WAFConfig) string {
 			}
 			for _, op := range []string{"@pmfromfile ", "@pmf ", "@ipmatchfromfile ", "@ipmatchf "} {
 				if idx := strings.Index(lower, op); idx >= 0 {
-					rest := strings.TrimSpace(line[idx+len(op):])
-					if end := strings.IndexAny(rest, `" '	`); end > 0 {
+					rest := line[idx+len(op):]
+					if end := strings.IndexAny(rest, `"'`); end >= 0 {
 						rest = rest[:end]
 					}
-					resolveAndWalk(rest, baseDir)
+					resolveAndWalk(strings.TrimSpace(rest), baseDir)
 				}
 			}
 		}
@@ -410,6 +453,11 @@ func ComputePublishEntryTransitions(
 	for _, pair := range pairs {
 		if pair.before != nil && pair.after == nil {
 			b := pair.before
+			bEffSrv, _ := effectiveSrvLoc(prevEff, b.srvIdx, b.locIdx, b.srv, b.loc)
+			closeCode := respwriter.WSClosePolicyViolation
+			if !listenerExistsInConfig(nextEff, bEffSrv.Listen) {
+				closeCode = respwriter.WSCloseGoingAway
+			}
 			transitions = append(transitions, respwriter.EntryTransition{
 				FromServerIndex:   b.srvIdx,
 				FromLocationIndex: b.locIdx,
@@ -417,6 +465,7 @@ func ComputePublishEntryTransitions(
 				Removed:           true,
 				Retire:            true,
 				Mandatory:         true,
+				CloseCode:         closeCode,
 				DisplayLabel:      formatEntryDisplayLabel(b.srv, b.loc),
 			})
 			continue
@@ -459,6 +508,10 @@ func ComputePublishEntryTransitions(
 				retire = true
 			}
 		}
+		closeCode := respwriter.WSClosePolicyViolation
+		if bEffSrv.Listen != aEffSrv.Listen && !listenerExistsInConfig(nextEff, bEffSrv.Listen) {
+			closeCode = respwriter.WSCloseGoingAway
+		}
 
 		transitions = append(transitions, respwriter.EntryTransition{
 			FromServerIndex:   b.srvIdx,
@@ -470,10 +523,23 @@ func ComputePublishEntryTransitions(
 			Retire:            retire,
 			Mandatory:         hasNarrowed,
 			KeepOpen:          keepOpen,
+			CloseCode:         closeCode,
 			DisplayLabel:      formatEntryDisplayLabel(a.srv, a.loc),
 		})
 	}
 	return transitions
+}
+
+func listenerExistsInConfig(c *config.Config, listen string) bool {
+	if c == nil || strings.TrimSpace(listen) == "" {
+		return false
+	}
+	for _, s := range c.Servers {
+		if s.Listen == listen {
+			return true
+		}
+	}
+	return false
 }
 
 func matchesKeepOpenTarget(keepOpen []string, srvIdx, locIdx int, srv config.ServerConfig, loc config.LocationConfig) bool {

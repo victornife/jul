@@ -86,8 +86,20 @@ type EntryTransition struct {
 	// KeepOpen is true when an eligible uncertain change was exempted via
 	// keep_open_entries (SD-09). It never disarms an already-armed deadline.
 	KeepOpen bool
+	// CloseCode is the RFC 6455 WebSocket status code sent when retiring owned
+	// H1 WebSocket sessions for this transition (1008 Policy Violation on
+	// narrowing/withdrawal, 1001 Going Away when the listener itself is removed;
+	// defaults to WSClosePolicyViolation when 0).
+	CloseCode uint16
 	// DisplayLabel is the human-readable entry label for retirement reporting.
 	DisplayLabel string
+}
+
+func (tr EntryTransition) closeCode() uint16 {
+	if tr.CloseCode != 0 {
+		return tr.CloseCode
+	}
+	return WSClosePolicyViolation
 }
 
 // EntryRetirementResult reports the bounded outcome of retiring one entry's
@@ -186,6 +198,7 @@ type genStep struct {
 	trackersByCoord map[blockLocCoord]*entryTracker
 	trackersByID    map[string]*entryTracker
 	batch           *retirementBatch
+	recompute       func()
 }
 
 type exchangeCtxKey struct{}
@@ -238,8 +251,9 @@ type ExchangeRegistry struct {
 	Grace time.Duration
 	Bound time.Duration
 
-	lastResults     []EntryRetirementResult
-	lastRecomputeFn func()
+	latestPublishSeq uint64
+	lastResults      []EntryRetirementResult
+	lastRecomputeFn  func()
 }
 
 // NewExchangeRegistry constructs a process-lifetime exchange and upgrade registry.
@@ -355,6 +369,7 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 	var immediateBound time.Time
 	var immediateCode uint16
 	var lateBatches []*retirementBatch
+	var lateRecomputes []func()
 
 	r.mu.Lock()
 	r.nextID++
@@ -385,8 +400,8 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 			if immediateBound.IsZero() || b.Before(immediateBound) {
 				immediateBound = b
 			}
-			immediateCode = WSClosePolicyViolation
 			if ok {
+				immediateCode = tr.closeCode()
 				et := step.trackersByCoord[cKey]
 				if et == nil && cur.RouteID != "" {
 					et = step.trackersByID[cur.RouteID]
@@ -394,9 +409,14 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 				if et != nil {
 					et.exchanges = append(et.exchanges, ex)
 				}
+			} else {
+				immediateCode = WSClosePolicyViolation
 			}
 			if step.batch != nil {
 				lateBatches = append(lateBatches, step.batch)
+			}
+			if step.recompute != nil {
+				lateRecomputes = append(lateRecomputes, step.recompute)
 			}
 			if !ok || tr.Removed {
 				removed = true
@@ -413,9 +433,12 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 			}
 		}
 	}
-	// F7 fail-closed invariant: if coord.GenID predates the retained history
-	// window or could not be advanced to r.publishedGen, retire immediately.
-	if !removed && coord.GenID != 0 && r.publishedGen != 0 && cur.GenID != r.publishedGen {
+	// F7 / R2 invariant: if coord.GenID is an older generation (< r.publishedGen)
+	// whose transition chain predates the retained history window and could not
+	// be advanced to r.publishedGen, fail closed immediately. A request carrying
+	// a newly stored handler generation (coord.GenID > r.publishedGen) is
+	// already evaluating the new policy and must not be treated as stale.
+	if !removed && coord.GenID != 0 && r.publishedGen != 0 && cur.GenID < r.publishedGen {
 		immediateRetire = true
 		now := time.Now()
 		if immediateGrace.IsZero() || now.Before(immediateGrace) {
@@ -452,6 +475,9 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 
 	if immediateRetire {
 		ex.armRetirement(immediateGrace, immediateBound, immediateCode, true, lateBatches...)
+		for _, fn := range lateRecomputes {
+			fn()
+		}
 	}
 
 	ew := &exchangeResponseWriter{
@@ -515,70 +541,12 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 	type armItem struct {
 		ex        *ActiveExchange
 		mandatory bool
+		code      uint16
 	}
 	batch := newRetirementBatch()
 	var toArm []armItem
 
-	r.mu.Lock()
-	if fromGen == 0 {
-		fromGen = r.publishedGen
-	}
-	r.publishedGen = toGen
-	r.history = append(r.history, genStep{
-		fromGen:         fromGen,
-		toGen:           toGen,
-		publishTime:     now,
-		grace:           grace,
-		bound:           bound,
-		byCoord:         byCoord,
-		byRouteID:       byRouteID,
-		trackersByCoord: trackerByFromCoord,
-		trackersByID:    trackerByRouteID,
-		batch:           batch,
-	})
-	if len(r.history) > 32 {
-		r.history = append([]genStep(nil), r.history[len(r.history)-32:]...)
-	}
-
-	for _, ex := range r.active {
-		if ex.closed.Load() {
-			continue
-		}
-		cKey := blockLocCoord{ex.curCoord.ServerIndex, ex.curCoord.LocationIndex}
-		tr, ok := byCoord[cKey]
-		if !ok && ex.curCoord.RouteID != "" {
-			tr, ok = byRouteID[ex.curCoord.RouteID]
-		}
-		if !ok {
-			continue
-		}
-		if tr.Retire || tr.Removed {
-			et := trackerByFromCoord[cKey]
-			if et == nil && ex.curCoord.RouteID != "" {
-				et = trackerByRouteID[ex.curCoord.RouteID]
-			}
-			if et != nil {
-				et.exchanges = append(et.exchanges, ex)
-			}
-			toArm = append(toArm, armItem{ex: ex, mandatory: tr.Mandatory || tr.Removed})
-		}
-		if !tr.Removed {
-			ex.curCoord = EntryCoord{
-				GenID:         toGen,
-				ListenAddr:    ex.curCoord.ListenAddr,
-				ServerIndex:   tr.ToServerIndex,
-				LocationIndex: tr.ToLocationIndex,
-				RouteID:       tr.ToRouteID,
-			}
-		}
-	}
-	r.mu.Unlock()
-
-	for _, item := range toArm {
-		immediate := item.mandatory || item.ex.hasWrittenHeader()
-		item.ex.armRetirement(graceDeadline, boundDeadline, WSClosePolicyViolation, immediate, batch)
-	}
-
+	var pubSeq uint64
 	computeResults := func() []EntryRetirementResult {
 		results := make([]EntryRetirementResult, 0, len(trackers))
 		for _, et := range trackers {
@@ -627,16 +595,79 @@ func (r *ExchangeRegistry) PublishGeneration(fromGen, toGen uint64, transitions 
 		}
 
 		r.mu.Lock()
-		r.lastResults = results
+		if r.latestPublishSeq == pubSeq {
+			r.lastResults = results
+		}
 		r.mu.Unlock()
 		return results
 	}
-
-	r.mu.Lock()
-	r.lastRecomputeFn = func() {
+	recomputeFn := func() {
 		_ = computeResults()
 	}
+
+	r.mu.Lock()
+	if fromGen == 0 {
+		fromGen = r.publishedGen
+	}
+	r.publishedGen = toGen
+	r.latestPublishSeq++
+	pubSeq = r.latestPublishSeq
+	r.lastRecomputeFn = recomputeFn
+	r.history = append(r.history, genStep{
+		fromGen:         fromGen,
+		toGen:           toGen,
+		publishTime:     now,
+		grace:           grace,
+		bound:           bound,
+		byCoord:         byCoord,
+		byRouteID:       byRouteID,
+		trackersByCoord: trackerByFromCoord,
+		trackersByID:    trackerByRouteID,
+		batch:           batch,
+		recompute:       recomputeFn,
+	})
+	if len(r.history) > 32 {
+		r.history = append([]genStep(nil), r.history[len(r.history)-32:]...)
+	}
+
+	for _, ex := range r.active {
+		if ex.closed.Load() || (toGen != 0 && ex.curCoord.GenID >= toGen) {
+			continue
+		}
+		cKey := blockLocCoord{ex.curCoord.ServerIndex, ex.curCoord.LocationIndex}
+		tr, ok := byCoord[cKey]
+		if !ok && ex.curCoord.RouteID != "" {
+			tr, ok = byRouteID[ex.curCoord.RouteID]
+		}
+		if !ok {
+			continue
+		}
+		if tr.Retire || tr.Removed {
+			et := trackerByFromCoord[cKey]
+			if et == nil && ex.curCoord.RouteID != "" {
+				et = trackerByRouteID[ex.curCoord.RouteID]
+			}
+			if et != nil {
+				et.exchanges = append(et.exchanges, ex)
+			}
+			toArm = append(toArm, armItem{ex: ex, mandatory: tr.Mandatory || tr.Removed, code: tr.closeCode()})
+		}
+		if !tr.Removed {
+			ex.curCoord = EntryCoord{
+				GenID:         toGen,
+				ListenAddr:    ex.curCoord.ListenAddr,
+				ServerIndex:   tr.ToServerIndex,
+				LocationIndex: tr.ToLocationIndex,
+				RouteID:       tr.ToRouteID,
+			}
+		}
+	}
 	r.mu.Unlock()
+
+	for _, item := range toArm {
+		immediate := item.mandatory || item.ex.hasWrittenHeader()
+		item.ex.armRetirement(graceDeadline, boundDeadline, item.code, immediate, batch)
+	}
 	_ = computeResults()
 
 	return func() []EntryRetirementResult {

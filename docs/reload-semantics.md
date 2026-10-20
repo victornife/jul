@@ -785,11 +785,13 @@ flag (#563, #642).
 - **G-R / G-F / G-S:** `TestLongLivedNativeGRPCReloadAndShutdown`, subtests
   `reload_and_forced_retirement` and `shutdown`, in
   [native gRPC tests](../internal/handler/grpcproxy_test.go), plus
-  `TestRealGRPCStreamRetirementOnSharedH2Conn` in
-  [sharing retirement tests](../internal/server/sharing_retirement_test.go).
+  `TestRealNativeGRPCStreamRetirementAndSiblingContinuity` in
+  [gRPC retirement tests](../internal/server/grpc_retirement_test.go).
 - **T-R / T-F / T-S:** `TestLongLivedTranscodedGRPCReloadAndShutdown`, subtests
   `reload_graceful_completion`, `forced_retirement` and `shutdown`, in
-  [transcoder handler tests](../internal/handler/grpctranscode_accounting_test.go).
+  [transcoder handler tests](../internal/handler/grpctranscode_accounting_test.go),
+  plus `TestRealTranscodedGRPCStreamRetirementAndBackendCancellation` in
+  [gRPC retirement tests](../internal/server/grpc_retirement_test.go).
 - **TLS-1 / TLS-2:** `TestLongLivedMTLSStreamSurvivesClientRevocation`, subtests
   `http1` and `http2`, and `TestReloadRefreshesClientCRLWithoutRestart` in
   [client-auth reload tests](../internal/server/mtls_reload_test.go), plus

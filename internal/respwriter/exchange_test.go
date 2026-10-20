@@ -807,3 +807,48 @@ func TestAudit653IncompleteRetirementDoesNotClaimComplete(t *testing.T) {
 		t.Fatalf("late admission must be waited on and counted in outcome: %+v", res2)
 	}
 }
+
+func TestReaudit653OlderCompletionCannotOverwriteLatestPublish(t *testing.T) {
+	reg := NewExchangeRegistry()
+	reg.Grace = 20 * time.Millisecond
+	reg.Bound = 60 * time.Millisecond
+	reg.SetInitialGeneration(1)
+	_, _, _, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 1, RouteID: "route"})
+	defer release()
+	olderWait := reg.PublishGeneration(1, 2, []EntryTransition{{FromRouteID: "route", ToRouteID: "route", Retire: true}})
+	reg.PublishGeneration(2, 3, []EntryTransition{{FromRouteID: "route", ToRouteID: "route"}})()
+	if current := reg.LastRetirementResults(); len(current) != 0 {
+		t.Fatalf("latest metadata-only publish should have no retirement: %+v", current)
+	}
+	release()
+	_ = olderWait()
+	if current := reg.LastRetirementResults(); len(current) != 0 {
+		t.Fatalf("older asynchronous waiter overwrote latest publish result: %+v", current)
+	}
+}
+
+func TestReaudit653NewGenerationNotRetiredBeforeRegistryPublication(t *testing.T) {
+	reg := NewExchangeRegistry()
+	reg.SetInitialGeneration(1)
+	// ReloadPlan.Publish stores the new handler generation before calling PublishGeneration.
+	_, req, ex, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 2, RouteID: "route"})
+	defer release()
+	if ex.IsRetired() || req.Context().Err() != nil {
+		t.Fatal("request using newly stored handler generation is spuriously aborted before matching registry publication")
+	}
+}
+
+func TestReaudit653LateAdmissionImmediatelyInvalidatesCompletionStatus(t *testing.T) {
+	reg := NewExchangeRegistry()
+	reg.SetInitialGeneration(1)
+	reg.PublishGeneration(1, 2, []EntryTransition{{FromRouteID: "route", ToRouteID: "route", Retire: true, Mandatory: true}})()
+	_, _, _, release := reg.Admit(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/", nil), EntryCoord{GenID: 1, RouteID: "route"})
+	defer release()
+	got := reg.LastRetirementResults()
+	if len(got) != 1 {
+		t.Fatalf("results=%+v", got)
+	}
+	if got[0].CompletedWithinBound || got[0].Claim == "complete_withdrawal" {
+		t.Fatalf("late active admission absent from completion status: active=%d result=%+v", reg.ActiveCount(), got[0])
+	}
+}

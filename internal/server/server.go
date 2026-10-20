@@ -263,6 +263,9 @@ type Server struct {
 	// PluginModuleChanges returns, once, the module content-identity changes
 	// published by generation genID, for the reload result.
 	PluginModuleChanges func(genID uint64) []PluginModuleChange
+	// WAFSourceDigests returns the engine-owned external source digests of the
+	// compiled global and per-location WAF policies for generation genID (#642, #563).
+	WAFSourceDigests func(genID uint64) (string, map[[2]int]string)
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -705,6 +708,10 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
 	s.exchanges.SetInitialGeneration(genID)
 	s.loadedAccessFiles = captureLoadedAccessFiles(s.cfg)
+	if s.WAFSourceDigests != nil && s.loadedAccessFiles != nil {
+		gDig, byLoc := s.WAFSourceDigests(genID)
+		s.loadedAccessFiles.applyWAFDigests(gDig, byLoc)
+	}
 	s.registerRedactionGen(genID, initialRedaction)
 	s.handlers.Store(s.newGeneration(handlers, snapshots, genID))
 

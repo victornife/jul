@@ -77,7 +77,14 @@ type HandlerFactory struct {
 	moduleChanges moduleChangeRecord
 	// liveWAF is the serving generation's compiled WAF policy (#440), also
 	// guarded by moduleMu.
-	liveWAF *admin.WAFEffectivePolicy
+	liveWAF    *admin.WAFEffectivePolicy
+	wafDigests wafDigestRecord
+}
+
+type wafDigestRecord struct {
+	genID  uint64
+	global string
+	byLoc  map[[2]int]string
 }
 
 type moduleChangeRecord struct {
@@ -214,6 +221,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		f.publishPluginModules(0, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAF(0, gen.wafPolicy)
+		f.publishWAFDigests(0, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -282,6 +290,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		f.publishPluginModules(genID, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAF(genID, gen.wafPolicy)
+		f.publishWAFDigests(genID, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		if commitMetricLabels != nil {
 			commitMetricLabels()
 			f.Metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
@@ -585,6 +594,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// rejected the configuration at startup.
 	wafByScope := make(map[string]*waf.Firewall)
 	wafReport := newWAFReport(c)
+	gen.wafDigestByLoc = make(map[[2]int]string)
 	var globalFW *waf.Firewall
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
@@ -611,7 +621,13 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			}
 			wafReport.protected(c.Servers[i], loc, fw.Info())
 			wafByScope[WAFScope(c.Servers[i], loc)] = fw
+			if loc.WAF != nil {
+				gen.wafDigestByLoc[[2]int{i, j}] = fw.SourceDigest()
+			}
 		}
+	}
+	if globalFW != nil {
+		gen.wafGlobalDigest = globalFW.SourceDigest()
 	}
 	gen.wafPolicy = wafReport.finish(time.Now())
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {

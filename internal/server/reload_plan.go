@@ -307,6 +307,10 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// handler generation carries the backend view of the configuration it
 	// represents, not the previous generation's live state.
 	snapshots, retirePrev := p.handlerCommit()
+	if p.s.WAFSourceDigests != nil && p.nextAccessFiles != nil {
+		gDig, byLoc := p.s.WAFSourceDigests(p.GenID)
+		p.nextAccessFiles.applyWAFDigests(gDig, byLoc)
+	}
 	// Register the new generation's redaction state and install the union of
 	// all active generations so in-flight requests on the previous generation
 	// continue to have their secrets masked. The previous generation's retire

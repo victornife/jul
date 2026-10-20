@@ -52,3 +52,53 @@ func TestAudit653CompiledWAFIncludeChangeMustRetire(t *testing.T) {
 		t.Fatalf("compiled WAF changed 200->403, loaded source identity changed, but retirement skipped: %+v", trs)
 	}
 }
+
+func TestReaudit653WAFLoadedDataFilePathWithSpacesMustRetire(t *testing.T) {
+	dir := t.TempDir()
+	child := filepath.Join(dir, "blocked methods.txt")
+	main := filepath.Join(dir, "main.conf")
+	if err := os.WriteFile(main, []byte(`SecRule REMOTE_ADDR "@ipMatchFromFile blocked methods.txt" "id:1001,phase:1,deny,status:403,nolog"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(child, []byte("198.51.100.0/24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := audit653Config()
+	cfg.WAF = config.WAFConfig{Enabled: true, Mode: "block", DirectivesFiles: []string{main}}
+	before, err := waf.New(context.Background(), cfg.WAF, waf.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer before.Close()
+	beforeFiles := captureLoadedAccessFiles(cfg)
+	if err := os.WriteFile(child, []byte("192.0.2.0/24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after, err := waf.New(context.Background(), cfg.WAF, waf.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer after.Close()
+	code := func(f *waf.Firewall) int {
+		rec := httptest.NewRecorder()
+		f.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })).ServeHTTP(rec, httptest.NewRequest("GET", "http://example.com/", nil))
+		return rec.Code
+	}
+	if code(before) != 200 || code(after) != 403 || !before.SourceChanged(after) {
+		t.Fatalf("invalid fixture before=%d after=%d changed=%t", code(before), code(after), before.SourceChanged(after))
+	}
+	// 1. Direct captureLoadedAccessFiles comparison detects the data-file change with space in path.
+	transitions := ComputePublishEntryTransitions(cfg, cfg, beforeFiles, cfg, cfg, captureLoadedAccessFiles(cfg), nil, nil)
+	if len(transitions) != 1 || !transitions[0].Retire {
+		t.Fatalf("valid @ipMatchFromFile with space in its filename changed loaded policy but retirement skipped: %+v", transitions)
+	}
+	// 2. Even if the file on disk is reverted between Prepare (waf.New) and Publish,
+	//    carrying the prepared engine's SourceDigest via WithCompiledWAF / applyWAFDigests still retires!
+	_ = os.WriteFile(child, []byte("198.51.100.0/24\n"), 0o600)
+	afterPrepared := captureLoadedAccessFiles(cfg).WithCompiledWAF(after, map[[2]int]*waf.Firewall{[2]int{0, 0}: after})
+	afterPrepared.applyWAFDigests(after.SourceDigest(), map[[2]int]string{[2]int{0, 0}: after.SourceDigest()})
+	transitionsPrepared := ComputePublishEntryTransitions(cfg, cfg, beforeFiles, cfg, cfg, afterPrepared, nil, nil)
+	if len(transitionsPrepared) != 1 || !transitionsPrepared[0].Retire {
+		t.Fatalf("prepared WAF SourceDigest must govern retirement even if disk file changed after Prepare: %+v", transitionsPrepared)
+	}
+}

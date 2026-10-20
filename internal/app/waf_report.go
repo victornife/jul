@@ -94,6 +94,35 @@ func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy) {
 	f.liveWAF = &cp
 }
 
+func (f *HandlerFactory) publishWAFDigests(genID uint64, global string, byLoc map[[2]int]string) {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	cp := make(map[[2]int]string, len(byLoc))
+	for k, v := range byLoc {
+		cp[k] = v
+	}
+	f.wafDigests = wafDigestRecord{
+		genID:  genID,
+		global: global,
+		byLoc:  cp,
+	}
+}
+
+// WAFSourceDigests returns the engine-owned external source digests of the WAF
+// policies compiled for generation genID (#642, #563).
+func (f *HandlerFactory) WAFSourceDigests(genID uint64) (string, map[[2]int]string) {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	if f.wafDigests.genID != genID {
+		return "", nil
+	}
+	cp := make(map[[2]int]string, len(f.wafDigests.byLoc))
+	for k, v := range f.wafDigests.byLoc {
+		cp[k] = v
+	}
+	return f.wafDigests.global, cp
+}
+
 // WAFEffective returns the serving generation's compiled WAF policy, with the
 // binary's WAF capability. Before the first generation is live only the
 // capability is reported.

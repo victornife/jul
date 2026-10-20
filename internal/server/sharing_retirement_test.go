@@ -6,8 +6,12 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
+	"encoding/binary"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -23,6 +27,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/handler"
 	"jul/internal/lifecycle"
 	"jul/internal/middleware"
 	"jul/internal/redact"
@@ -42,7 +47,12 @@ func buildTestRouterFactory(t *testing.T, streamHold <-chan struct{}, portalRele
 					rid = *loc.RouteID
 				}
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					w.Header().Set("Content-Type", "text/event-stream")
+					if strings.HasPrefix(r.Header.Get("Content-Type"), "application/grpc") {
+						w.Header().Set("Content-Type", "application/grpc")
+						w.Header().Set("Trailer", "Grpc-Status")
+					} else {
+						w.Header().Set("Content-Type", "text/event-stream")
+					}
 					w.WriteHeader(http.StatusOK)
 					_, _ = io.WriteString(w, "data: start-"+rid+"\n\n")
 					_ = http.NewResponseController(w).Flush()
@@ -1152,6 +1162,9 @@ func TestRealGRPCStreamRetirementOnSharedH2Conn(t *testing.T) {
 		t.Fatalf("gRPC stream: %v", err)
 	}
 	defer grpcResp.Body.Close()
+	if got := grpcResp.Header.Get("Content-Type"); !strings.HasPrefix(got, "application/grpc") {
+		t.Fatalf("claimed gRPC fixture responds with %q instead of application/grpc", got)
+	}
 	grpcBR := bufio.NewReader(grpcResp.Body)
 	_, _ = grpcBR.ReadString('\n')
 
@@ -1176,5 +1189,180 @@ func TestRealGRPCStreamRetirementOnSharedH2Conn(t *testing.T) {
 	rest, pErr := io.ReadAll(portalBR)
 	if pErr != nil || !strings.Contains(string(rest), "end-portal") {
 		t.Fatalf("sibling portal stream failed: err=%v body=%q", pErr, string(rest))
+	}
+}
+
+func TestReaudit653ClaimedGRPCFixtureMustSpeakGRPC(t *testing.T) {
+	TestRealGRPCStreamRetirementOnSharedH2Conn(t)
+}
+
+func TestReaudit653ListenerRemovalSendsGoingAway(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, b, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+		sum := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+		_, _ = fmt.Fprintf(b, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", base64.StdEncoding.EncodeToString(sum[:]))
+		_ = b.Flush()
+		_, _ = io.Copy(io.Discard, c)
+	}))
+	defer backend.Close()
+	addr, otherAddr := freePort(t), freePort(t)
+	id := "ws"
+	cfg := &config.Config{
+		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Servers: []config.ServerConfig{
+			{Listen: addr, Locations: []config.LocationConfig{{RouteID: &id, Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: backend.URL}}},
+			{Listen: otherAddr, Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}}},
+		},
+	}
+	var gen uint64
+	factory := func(ctx context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		gen++
+		r, err := router.New(c, map[string]router.Builder{
+			router.ActionProxy: func(s config.ServerConfig, l config.LocationConfig) (http.Handler, error) {
+				return handler.NewProxy(ctx, s, l, nil, nil, nil, nil)
+			},
+		}, nil, nil, quietLogger())
+		if err != nil {
+			return nil, 0, nil, nil, err
+		}
+		hs := make(map[string]http.Handler)
+		for _, s := range c.Servers {
+			hs[s.Listen] = r.For(s.Listen)
+		}
+		return hs, gen, func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+	}
+	src := &stubSource{}
+	src.set(cfg, nil)
+	srv := New(cfg, cfg, lifecycle.ComputeFingerprint(cfg), quietLogger(), factory, src, func(context.Context, *config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	reload := make(chan ReloadRequest, 1)
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	defer func() { cancel(); <-done }()
+	<-ready
+
+	c, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(3 * time.Second))
+	_, _ = fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n")
+	br := bufio.NewReader(c)
+	for {
+		line, err := br.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+
+	next, _ := cfg.Clone()
+	next.Servers = next.Servers[1:]
+	candidate, err := config.NewCandidate(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := make(chan ReloadResult, 1)
+	reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: candidate, Result: res}
+
+	var frame [4]byte
+	if _, err := io.ReadFull(br, frame[:]); err != nil {
+		t.Fatalf("read close frame: %v", err)
+	}
+	if frame[0] != 0x88 || frame[1] != 2 {
+		t.Fatalf("unexpected frame: %x", frame)
+	}
+	code := binary.BigEndian.Uint16(frame[2:4])
+	_, _ = c.Write([]byte{0x88, 0x82, 1, 2, 3, 4, frame[2] ^ 1, frame[3] ^ 2})
+	rr := <-res
+	if code != respwriter.WSCloseGoingAway {
+		t.Fatalf("listener removal emitted Close %d, want %d Going Away; reload=%s", code, respwriter.WSCloseGoingAway, rr.Outcome)
+	}
+}
+
+func TestReaudit653MetadataReloadDoesNotAbortFreshRequests(t *testing.T) {
+	addr := freePort(t)
+	cfg := &config.Config{Servers: []config.ServerConfig{{Listen: addr}}}
+	for i := 0; i < 200; i++ {
+		rid := fmt.Sprintf("r%d", i)
+		cfg.Servers[0].Locations = append(cfg.Servers[0].Locations, config.LocationConfig{RouteID: &rid, Match: config.MatchConfig{Type: "exact", Path: "/" + rid}, ProxyPass: "http://127.0.0.1:9001"})
+	}
+	src := &stubSource{}
+	src.set(cfg, nil)
+	srv := New(cfg, cfg, lifecycle.ComputeFingerprint(cfg), quietLogger(), buildTestRouterFactory(t, nil, nil), src, func(context.Context, *config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	reload := make(chan ReloadRequest, 1)
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	defer func() { cancel(); <-done }()
+	<-ready
+
+	tr := &http.Transport{MaxIdleConns: 24, MaxIdleConnsPerHost: 24}
+	defer tr.CloseIdleConnections()
+	client := &http.Client{Transport: tr, Timeout: 2 * time.Second}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	var attempts, failures atomic.Int32
+	var firstErr atomic.Pointer[string]
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				attempts.Add(1)
+				r, err := client.Get("http://" + addr + "/r0")
+				if err == nil {
+					_, err = io.Copy(io.Discard, r.Body)
+					_ = r.Body.Close()
+					if r.StatusCode != 200 {
+						err = fmt.Errorf("status %d", r.StatusCode)
+					}
+				}
+				if err != nil {
+					failures.Add(1)
+					s := err.Error()
+					firstErr.CompareAndSwap(nil, &s)
+				}
+			}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		next, _ := cfg.Clone()
+		if i%2 == 0 {
+			next.Global.LogLevel = "debug"
+		} else {
+			next.Global.LogLevel = "info"
+		}
+		candidate, err := config.NewCandidate(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := make(chan ReloadResult, 1)
+		reload <- ReloadRequest{Source: ReloadSourceAdmin, Candidate: candidate, Result: result}
+		if r := <-result; r.Outcome != ReloadAppliedLive {
+			t.Fatalf("reload=%+v", r)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	if failures.Load() != 0 {
+		t.Fatalf("metadata-only reload aborted fresh requests (requests=%d failed=%d); first error=%s", attempts.Load(), failures.Load(), *firstErr.Load())
 	}
 }
