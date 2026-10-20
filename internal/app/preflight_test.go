@@ -6,9 +6,11 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -320,12 +322,36 @@ func TestPreflightApplyUsesLiveSnapshotWithoutPrev(t *testing.T) {
 	})
 }
 
+var usedAppFreePorts sync.Map
+
 func freePort(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	lc := &net.ListenConfig{}
+	var held []io.Closer
+	defer func() {
+		for _, c := range held {
+			_ = c.Close()
+		}
+	}()
+	for range 64 {
+		ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		pc, err := lc.ListenPacket(context.Background(), "udp", addr)
+		if err != nil {
+			held = append(held, ln)
+			continue
+		}
+		if _, loaded := usedAppFreePorts.LoadOrStore(addr, struct{}{}); loaded {
+			held = append(held, ln, pc)
+			continue
+		}
+		_ = pc.Close()
+		_ = ln.Close()
+		return addr
 	}
-	defer ln.Close()
-	return ln.Addr().String()
+	t.Fatal("unable to allocate unique free TCP+UDP port")
+	return ""
 }

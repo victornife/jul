@@ -102,15 +102,38 @@ func bodyHandlerFactory(tag *atomic.Pointer[string]) HandlerFactory {
 	}
 }
 
+var usedServerFreePorts sync.Map
+
 func freePort(t *testing.T) string {
 	t.Helper()
-	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	lc := &net.ListenConfig{}
+	var held []io.Closer
+	defer func() {
+		for _, c := range held {
+			_ = c.Close()
+		}
+	}()
+	for range 64 {
+		ln, err := lc.Listen(context.Background(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		pc, err := lc.ListenPacket(context.Background(), "udp", addr)
+		if err != nil {
+			held = append(held, ln)
+			continue
+		}
+		if _, loaded := usedServerFreePorts.LoadOrStore(addr, struct{}{}); loaded {
+			held = append(held, ln, pc)
+			continue
+		}
+		_ = pc.Close()
+		_ = ln.Close()
+		return addr
 	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
+	t.Fatal("unable to allocate unique free TCP+UDP port")
+	return ""
 }
 
 // testTransport disables keep-alives so no client-side connection is pooled

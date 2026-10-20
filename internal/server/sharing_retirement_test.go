@@ -1790,6 +1790,8 @@ func TestR5AndR8ComputedReplacementAndAltSvcTTL(t *testing.T) {
 		defer func() { cancel(); <-done }()
 		select {
 		case <-ready:
+		case err := <-done:
+			t.Fatalf("startup failed: %v", err)
 		case <-time.After(5 * time.Second):
 			t.Fatal("startup timeout")
 		}

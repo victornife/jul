@@ -948,19 +948,8 @@ func TestSixth653CertificateRotationMustRetire(t *testing.T) {
 		}))
 		defer backend.Close()
 
-		ln, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		addr := ln.Addr().String()
-		_ = ln.Close()
-
-		ln2, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		otherAddr := ln2.Addr().String()
-		_ = ln2.Close()
+		addr := freePort(t)
+		otherAddr := freePort(t)
 
 		routeID := "tls-api"
 		otherID := "other-api"
