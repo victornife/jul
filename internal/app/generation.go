@@ -79,9 +79,9 @@ type Generation struct {
 	// digests of the compiled global and per-location WAF policies (#642, #563).
 	wafGlobalDigest string
 	wafDigestByLoc  map[[2]int]string
-	// basicByPath holds the exact htpasswd file bytes loaded by auth.New for
-	// each Basic-authenticated location in this generation (#642, #563).
-	basicByPath map[string][]byte
+	// basicByLoc holds the exact htpasswd file bytes loaded by auth.New for
+	// each Basic-authenticated location (srvIdx, locIdx) in this generation (#642, #563).
+	basicByLoc map[[2]int][]byte
 }
 
 // Begin opens a new staging generation, starting the pool registry's staging

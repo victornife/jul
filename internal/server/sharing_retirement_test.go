@@ -1352,3 +1352,221 @@ func TestReaudit653MetadataReloadDoesNotAbortFreshRequests(t *testing.T) {
 		t.Fatalf("metadata-only reload aborted fresh requests (requests=%d failed=%d); first error=%s", attempts.Load(), failures.Load(), *firstErr.Load())
 	}
 }
+
+func TestFourth653UnchangedMTLSRetainsServingCAAndCRLIdentity(t *testing.T) {
+	t.Run("stable_ca_rotation_control", func(t *testing.T) { fourth653MTLSRotation(t, false, false) })
+	t.Run("two_reload_unchanged_mtls_ca_replaced_after_prepare", func(t *testing.T) { fourth653MTLSRotation(t, true, false) })
+	t.Run("two_reload_unchanged_mtls_crl_replaced_after_prepare", func(t *testing.T) { fourth653MTLSRotation(t, true, true) })
+}
+
+func fourth653MTLSRotation(t *testing.T, twoReloadRace bool, crlOnly bool) {
+	dir := t.TempDir()
+	caA := newCA(t)
+	caB := newNamedCA(t, "Second CA")
+	caFile := writePEM(t, dir, "ca.pem", caA.pem)
+	crlFile := caA.writeCRL(t, dir, "clients.crl")
+	srvCert, srvKey := writeSelfSigned(t, dir, "srv", "dash.example.com")
+	_, clientCertA := caA.clientCert(t, "alice", 303, []string{"alice.example"}, nil)
+
+	addr := freePort(t)
+	strPtr := func(s string) *string { return &s }
+	baseCfg := func() *config.Config {
+		return &config.Config{
+			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Servers: []config.ServerConfig{{
+				Name:        "dash",
+				Listen:      addr,
+				ServerNames: []string{"dash.example.com"},
+				TLS: &config.TLSConfig{
+					Enabled: true,
+					Cert:    srvCert,
+					Key:     srvKey,
+					ClientAuth: &config.ClientAuthConfig{
+						Mode:    "require",
+						CAFile:  caFile,
+						CRLFile: crlFile,
+					},
+				},
+				Locations: []config.LocationConfig{{
+					RouteID:           strPtr("dashboard"),
+					Match:             config.MatchConfig{Type: "prefix", Path: "/"},
+					ProxyPass:         "http://127.0.0.1:9002",
+					RequireClientCert: true,
+				}},
+			}},
+		}
+	}
+
+	streamHold := make(chan struct{})
+	defer close(streamHold)
+	initCfg := baseCfg()
+	src := &stubSource{}
+	src.set(initCfg, nil)
+	srv := New(initCfg, initCfg, lifecycle.ComputeFingerprint(initCfg), quietLogger(), buildTestRouterFactory(t, streamHold, nil), src, func(context.Context, *config.Config) error { return nil })
+	srv.exchanges.Grace = 120 * time.Millisecond
+	srv.exchanges.Bound = 350 * time.Millisecond
+
+	ready := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reloadCh := make(chan ReloadRequest, 1)
+	go func() { _ = srv.Run(ctx, reloadCh, redact.EmptyState()) }()
+	<-ready
+
+	// Verify startup bound mTLS CA identity matches live listener bundle.
+	srv.mu.Lock()
+	liveBundleA := srv.listeners[addr].clientAuth.current.Load()
+	recordedCAStart := srv.loadedAccessFiles.caDigestByAddr[addr]
+	srv.mu.Unlock()
+	if liveBundleA == nil || recordedCAStart == "" || recordedCAStart != liveBundleA.caDigest {
+		t.Fatalf("startup recorded CA digest %q != live bundle digest %q", recordedCAStart, liveBundleA.caDigest)
+	}
+
+	var dials atomic.Int32
+	h2Tr := &http.Transport{
+		ForceAttemptHTTP2: true,
+		DialTLSContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			dials.Add(1)
+			d := &tls.Dialer{
+				Config: &tls.Config{
+					InsecureSkipVerify: true,
+					ServerName:         "dash.example.com",
+					NextProtos:         []string{"h2"},
+					Certificates:       []tls.Certificate{clientCertA},
+				},
+			}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
+	defer h2Tr.CloseIdleConnections()
+	h2Client := &http.Client{Transport: h2Tr, Timeout: 5 * time.Second}
+
+	if twoReloadRace {
+		// Reload 1: metadata-only reload where prepareClientAuthRotation sees CA A / initial CRL (unchanged),
+		// and right after prepareClientAuthRotation returns (before nextAccessFiles capture),
+		// caFile or crlFile on disk is replaced! Because the listener stayed on its initial bundle,
+		// srv.loadedAccessFiles must still equal the live bundle!
+		var swappedInPrepare atomic.Bool
+		afterPrepareClientAuthRotation = func() {
+			if swappedInPrepare.CompareAndSwap(false, true) {
+				if crlOnly {
+					caA.writeCRL(t, "", crlFile, 303)
+				} else {
+					writePEM(t, "", caFile, caB.pem)
+					caB.writeCRL(t, "", crlFile)
+				}
+			}
+		}
+		defer func() { afterPrepareClientAuthRotation = nil }()
+
+		metaCfg := baseCfg()
+		metaCfg.Global.LogLevel = "debug"
+		candMeta, _ := config.NewCandidate(metaCfg)
+		resMeta := make(chan ReloadResult, 1)
+		reloadCh <- ReloadRequest{ID: "meta-1", Source: ReloadSourceAdmin, Candidate: candMeta, Result: resMeta}
+		rel1 := <-resMeta
+		if rel1.Outcome != ReloadAppliedLive {
+			t.Fatalf("meta reload = %+v", rel1)
+		}
+		if len(rel1.EntryRetirements) != 0 {
+			t.Fatalf("metadata-only reload with un-adopted disk CA/CRL must not report retirement, got %+v", rel1.EntryRetirements)
+		}
+
+		srv.mu.Lock()
+		curLive := srv.listeners[addr].clientAuth.current.Load()
+		curRecordedCA := srv.loadedAccessFiles.caDigestByAddr[addr]
+		curRecordedCRLs := srv.loadedAccessFiles.crlsByAddr[addr]
+		srv.mu.Unlock()
+		if curLive == nil || curRecordedCA != curLive.caDigest {
+			t.Fatalf("D2: live CA identity (%q) differs from recorded snapshot (%q) after metadata-only reload", curLive.caDigest, curRecordedCA)
+		}
+		if len(curRecordedCRLs) == 0 || len(curRecordedCRLs[0].revoked) != 0 {
+			t.Fatalf("D2: recorded CRL snapshot after metadata-only reload must have 0 revoked serials, got %+v", curRecordedCRLs)
+		}
+	}
+
+	// Open an H2 stream accepted by CA A on the single shared H2 connection.
+	reqStream, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/?stream=1", nil)
+	reqStream.Host = "dash.example.com"
+	respStream, err := h2Client.Do(reqStream)
+	if err != nil {
+		t.Fatalf("open H2 stream under CA A: %v", err)
+	}
+	defer respStream.Body.Close()
+	br := bufio.NewReader(respStream.Body)
+	if line, rErr := br.ReadString('\n'); rErr != nil || !strings.Contains(line, "start-dashboard") {
+		t.Fatalf("initial H2 frame = %q, err = %v", line, rErr)
+	}
+
+	if !twoReloadRace {
+		writePEM(t, "", caFile, caB.pem)
+		caB.writeCRL(t, "", crlFile)
+	}
+
+	// Reload 2: loads the new CA B or revoked CRL into the listener (and also adds a second TLS listener to verify staged listener bound identity).
+	newAddr := freePort(t)
+	rotCfg := baseCfg()
+	rotCfg.Global.LogLevel = "info"
+	rotCfg.Servers = append(rotCfg.Servers, config.ServerConfig{
+		Name:        "staged-tls",
+		Listen:      newAddr,
+		ServerNames: []string{"dash.example.com"},
+		TLS: &config.TLSConfig{
+			Enabled: true,
+			Cert:    srvCert,
+			Key:     srvKey,
+			ClientAuth: &config.ClientAuthConfig{
+				Mode:    "require",
+				CAFile:  caFile,
+				CRLFile: crlFile,
+			},
+		},
+		Locations: []config.LocationConfig{{
+			RouteID: strPtr("staged-route"),
+			Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+			Return:  200,
+		}},
+	})
+	candRot, _ := config.NewCandidate(rotCfg)
+	resRot := make(chan ReloadResult, 1)
+	var keepOpen []string
+	if crlOnly {
+		// CRL serial addition is a mandatory narrowing and must override keep_open_entries!
+		keepOpen = []string{"dashboard"}
+	}
+	reloadCh <- ReloadRequest{ID: "rot-2", Source: ReloadSourceAdmin, Candidate: candRot, KeepOpenEntries: keepOpen, Result: resRot}
+	rel2 := <-resRot
+	if rel2.Outcome != ReloadAppliedLive {
+		t.Fatalf("rotation reload = %+v", rel2)
+	}
+
+	// New request on the SAME H2 connection (dials == 1) must be rejected 403 by current per-request policy.
+	reqAfter, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+"/", nil)
+	reqAfter.Host = "dash.example.com"
+	respAfter, err := h2Client.Do(reqAfter)
+	if err != nil {
+		t.Fatalf("post-rotation H2 GET failed at transport: %v", err)
+	}
+	_ = respAfter.Body.Close()
+	if respAfter.StatusCode != http.StatusForbidden || dials.Load() != 1 {
+		t.Fatalf("expected 403 on same H2 connection (dials=1), got status=%d dials=%d", respAfter.StatusCode, dials.Load())
+	}
+
+	// Old H2 stream admitted under CA A must have been retired within the 2s bound!
+	if len(rel2.EntryRetirements) != 1 || rel2.EntryRetirements[0].EndedExchanges != 1 || !rel2.EntryRetirements[0].CompletedWithinBound {
+		t.Fatalf("D2: new policy rejects old CA, but open H2 stream retirement was skipped: %+v", rel2.EntryRetirements)
+	}
+	if _, rErr := io.ReadAll(br); rErr == nil {
+		t.Fatal("D2: expected old H2 stream admitted under CA A to be reset")
+	}
+
+	// Verify newly added TLS listener also recorded its bound CA identity in srv.loadedAccessFiles.
+	srv.mu.Lock()
+	stagedBundle := srv.listeners[newAddr].clientAuth.current.Load()
+	stagedRecorded := srv.loadedAccessFiles.caDigestByAddr[newAddr]
+	srv.mu.Unlock()
+	if stagedBundle == nil || stagedRecorded == "" || stagedRecorded != stagedBundle.caDigest {
+		t.Fatalf("newly staged TLS listener recorded CA %q != bound bundle %q", stagedRecorded, stagedBundle.caDigest)
+	}
+}

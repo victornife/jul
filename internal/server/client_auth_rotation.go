@@ -78,11 +78,19 @@ func (c *clientAuthRotationComponent) commit() retirement {
 
 func (c *clientAuthRotationComponent) abort() {}
 
+// afterPrepareClientAuthRotation is an internal test seam invoked right after
+// prepareClientAuthRotation finishes scanning listeners (before ReloadPlan
+// captures nextAccessFiles). Nil in production.
+var afterPrepareClientAuthRotation func()
+
 // prepareClientAuthRotation loads and validates the candidate client-auth
 // policy of every retained TLS listener whose policy or CA/CRL file content
 // changed. A CA or CRL that fails to load or verify aborts the reload, leaving
 // the live policy in place. Newly bound addresses read their policy at bind.
 func (s *Server) prepareClientAuthRotation(next *config.Config) (*clientAuthRotationComponent, error) {
+	if afterPrepareClientAuthRotation != nil {
+		defer afterPrepareClientAuthRotation()
+	}
 	var comp clientAuthRotationComponent
 	for _, addr := range uniqueListenAddrs(next.Servers) {
 		if _, _, tlsOK := tlsBindingsForAddr(next.Servers, addr); !tlsOK {
@@ -102,7 +110,11 @@ func (s *Server) prepareClientAuthRotation(next *config.Config) (*clientAuthRota
 		if err != nil {
 			return nil, fmt.Errorf("client auth for %s: %w", addr, err)
 		}
-		comp.swaps = append(comp.swaps, clientAuthSwap{entry: entry, bundle: bundle, newFP: newFP})
+		loadedFP := "off"
+		if bundle != nil {
+			loadedFP = bundle.fp
+		}
+		comp.swaps = append(comp.swaps, clientAuthSwap{entry: entry, bundle: bundle, newFP: loadedFP})
 	}
 	if len(comp.swaps) == 0 {
 		return nil, nil

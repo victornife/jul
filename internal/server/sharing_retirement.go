@@ -31,6 +31,7 @@ import (
 // ADR 0026 #642 amendment).
 type LoadedAccessFiles struct {
 	htpasswdByPath     map[string]htpasswdSnapshot
+	htpasswdByLoc      map[[2]int]htpasswdSnapshot
 	caDigestByAddr     map[string]string
 	crlsByAddr         map[string][]crlSet
 	wafDigestByLoc     map[[2]int]string
@@ -45,8 +46,13 @@ type htpasswdSnapshot struct {
 }
 
 func captureLoadedAccessFiles(effCfg *config.Config) *LoadedAccessFiles {
+	return captureLoadedAccessFilesOpt(effCfg, false)
+}
+
+func captureLoadedAccessFilesOpt(effCfg *config.Config, skipMTLS bool) *LoadedAccessFiles {
 	out := &LoadedAccessFiles{
 		htpasswdByPath:     make(map[string]htpasswdSnapshot),
+		htpasswdByLoc:      make(map[[2]int]htpasswdSnapshot),
 		caDigestByAddr:     make(map[string]string),
 		crlsByAddr:         make(map[string][]crlSet),
 		wafDigestByLoc:     make(map[[2]int]string),
@@ -67,27 +73,29 @@ func captureLoadedAccessFiles(effCfg *config.Config) *LoadedAccessFiles {
 
 	out.globalWAFDigest = digestWAFDirectiveFiles(effCfg.WAF)
 
-	for _, addr := range uniqueListenAddrs(effCfg.Servers) {
-		var caHashParts []string
-		for _, srv := range effCfg.Servers {
-			if srv.Listen != addr || srv.TLS == nil || !srv.TLS.Enabled || srv.TLS.ClientAuth == nil || !srv.TLS.ClientAuth.Active() {
-				continue
-			}
-			if caPath := strings.TrimSpace(srv.TLS.ClientAuth.CAFile); caPath != "" {
-				if data, err := readBoundedMTLSFile(caPath, 4<<20); err == nil {
-					sum := sha256.Sum256(data)
-					caHashParts = append(caHashParts, hex.EncodeToString(sum[:]))
+	if !skipMTLS {
+		for _, addr := range uniqueListenAddrs(effCfg.Servers) {
+			var caHashParts []string
+			for _, srv := range effCfg.Servers {
+				if srv.Listen != addr || srv.TLS == nil || !srv.TLS.Enabled || srv.TLS.ClientAuth == nil || !srv.TLS.ClientAuth.Active() {
+					continue
+				}
+				if caPath := strings.TrimSpace(srv.TLS.ClientAuth.CAFile); caPath != "" {
+					if data, err := readBoundedMTLSFile(caPath, 4<<20); err == nil {
+						sum := sha256.Sum256(data)
+						caHashParts = append(caHashParts, hex.EncodeToString(sum[:]))
+					}
 				}
 			}
-		}
-		if len(caHashParts) > 0 {
-			sort.Strings(caHashParts)
-			out.caDigestByAddr[addr] = strings.Join(caHashParts, "|")
-		}
-		if bundle, err := clientAuthForAddr(effCfg.Servers, addr, nil); err == nil && bundle != nil {
-			out.crlsByAddr[addr] = bundle.crls
-			if bundle.caDigest != "" {
-				out.caDigestByAddr[addr] = bundle.caDigest
+			if len(caHashParts) > 0 {
+				sort.Strings(caHashParts)
+				out.caDigestByAddr[addr] = strings.Join(caHashParts, "|")
+			}
+			if bundle, err := clientAuthForAddr(effCfg.Servers, addr, nil); err == nil && bundle != nil {
+				out.crlsByAddr[addr] = bundle.crls
+				if bundle.caDigest != "" {
+					out.caDigestByAddr[addr] = bundle.caDigest
+				}
 			}
 		}
 	}
@@ -96,9 +104,12 @@ func captureLoadedAccessFiles(effCfg *config.Config) *LoadedAccessFiles {
 		for j, loc := range srv.Locations {
 			if loc.Auth != nil && loc.Auth.Basic != nil {
 				if p := strings.TrimSpace(loc.Auth.Basic.File); p != "" {
-					if _, seen := out.htpasswdByPath[p]; !seen {
-						out.htpasswdByPath[p] = parseHtpasswdSnapshot(p)
+					snap, seen := out.htpasswdByPath[p]
+					if !seen {
+						snap = parseHtpasswdSnapshot(p)
+						out.htpasswdByPath[p] = snap
 					}
+					out.htpasswdByLoc[[2]int{i, j}] = snap
 				}
 			}
 			if loc.WAF != nil {
@@ -124,6 +135,31 @@ func (f *LoadedAccessFiles) applyMTLSRotation(c *clientAuthRotationComponent) {
 	}
 }
 
+func (f *LoadedAccessFiles) applyLiveMTLSListeners(retained map[string]*listenerEntry, staged map[string]*listenerEntry) {
+	if f == nil || (len(retained) == 0 && len(staged) == 0) {
+		return
+	}
+	clear(f.caDigestByAddr)
+	clear(f.crlsByAddr)
+	applyEntry := func(addr string, entry *listenerEntry) {
+		if entry == nil || entry.clientAuth == nil {
+			return
+		}
+		if b := entry.clientAuth.current.Load(); b != nil {
+			if b.caDigest != "" {
+				f.caDigestByAddr[addr] = b.caDigest
+			}
+			f.crlsByAddr[addr] = b.crls
+		}
+	}
+	for addr, entry := range retained {
+		applyEntry(addr, entry)
+	}
+	for addr, entry := range staged {
+		applyEntry(addr, entry)
+	}
+}
+
 func (f *LoadedAccessFiles) applyWAFDigests(global string, byLoc map[[2]int]string) {
 	if f == nil {
 		return
@@ -138,33 +174,46 @@ func (f *LoadedAccessFiles) applyWAFDigests(global string, byLoc map[[2]int]stri
 	}
 }
 
-func (f *LoadedAccessFiles) applyBasicAuthBytes(byPath map[string][]byte) {
-	if f == nil || len(byPath) == 0 {
+func (f *LoadedAccessFiles) applyBasicAuthByLoc(byLoc map[[2]int][]byte) {
+	if f == nil || len(byLoc) == 0 {
 		return
 	}
-	for p, raw := range byPath {
+	if f.htpasswdByLoc == nil {
+		f.htpasswdByLoc = make(map[[2]int]htpasswdSnapshot, len(byLoc))
+	}
+	for coord, raw := range byLoc {
 		if len(raw) > 0 {
-			f.htpasswdByPath[p] = parseHtpasswdBytes(raw)
+			f.htpasswdByLoc[coord] = parseHtpasswdBytes(raw)
 		}
 	}
 }
 
+func (f *LoadedAccessFiles) htpasswdSnapshotFor(srvIdx, locIdx int, path string) htpasswdSnapshot {
+	if f == nil {
+		return htpasswdSnapshot{}
+	}
+	if snap, ok := f.htpasswdByLoc[[2]int{srvIdx, locIdx}]; ok && snap.rawDigest != "" {
+		return snap
+	}
+	return f.htpasswdByPath[path]
+}
+
 type loadedAccessHandler struct {
 	http.Handler
-	basicByPath   map[string][]byte
+	basicByLoc    map[[2]int][]byte
 	wafGlobal     string
 	wafByLoc      map[[2]int]string
 	pluginDigests map[string]string
 }
 
 // WrapHandlersWithLoadedAccess attaches the generation-owned loaded access
-// inputs (Basic auth htpasswd bytes, compiled WAF source digests, and compiled
-// WASM plugin digests) directly to the handler map returned by HandlerFactory
-// so Server.Run and ReloadPlan.Prepare consume the exact prepared artifacts
-// without re-reading them from disk (#642, #563).
+// inputs (per-location Basic auth htpasswd bytes, compiled WAF source digests,
+// and compiled WASM plugin digests) directly to the handler map returned by
+// HandlerFactory so Server.Run and ReloadPlan.Prepare consume the exact
+// prepared artifacts without re-reading them from disk (#642, #563).
 func WrapHandlersWithLoadedAccess(
 	handlers map[string]http.Handler,
-	basicByPath map[string][]byte,
+	basicByLoc map[[2]int][]byte,
 	wafGlobal string,
 	wafByLoc map[[2]int]string,
 	pluginDigests map[string]string,
@@ -180,7 +229,7 @@ func WrapHandlersWithLoadedAccess(
 		}
 		out[addr] = &loadedAccessHandler{
 			Handler:       h,
-			basicByPath:   basicByPath,
+			basicByLoc:    basicByLoc,
 			wafGlobal:     wafGlobal,
 			wafByLoc:      wafByLoc,
 			pluginDigests: pluginDigests,
@@ -190,10 +239,10 @@ func WrapHandlersWithLoadedAccess(
 }
 
 func captureLoadedAccessFilesFromHandlers(effCfg *config.Config, handlers map[string]http.Handler) *LoadedAccessFiles {
-	files := captureLoadedAccessFiles(effCfg)
+	files := captureLoadedAccessFilesOpt(effCfg, true)
 	for _, h := range handlers {
 		if lah, ok := h.(*loadedAccessHandler); ok && lah != nil {
-			files.applyBasicAuthBytes(lah.basicByPath)
+			files.applyBasicAuthByLoc(lah.basicByLoc)
 			files.applyWAFDigests(lah.wafGlobal, lah.wafByLoc)
 			for name, dig := range lah.pluginDigests {
 				if dig != "" {
@@ -699,7 +748,7 @@ func classifyPublishPair(
 	record(classifyPublishCORS(bLoc.CORS, aLoc.CORS))
 
 	// Auth (CIDR, credentials, and loaded htpasswd content).
-	for _, cls := range classifyPublishAuth(beforeFiles, afterFiles, bLoc.Auth, aLoc.Auth) {
+	for _, cls := range classifyPublishAuthWithCoords(beforeFiles, afterFiles, bSrvIdx, bLocIdx, aSrvIdx, aLocIdx, bLoc.Auth, aLoc.Auth) {
 		record(cls)
 	}
 
@@ -1359,6 +1408,10 @@ func classifyPublishCORS(b, a *config.CORSConfig) string {
 }
 
 func classifyPublishAuth(beforeFiles, afterFiles *LoadedAccessFiles, b, a *config.AuthConfig) []string {
+	return classifyPublishAuthWithCoords(beforeFiles, afterFiles, 0, 0, 0, 0, b, a)
+}
+
+func classifyPublishAuthWithCoords(beforeFiles, afterFiles *LoadedAccessFiles, bSrvIdx, bLocIdx, aSrvIdx, aLocIdx int, b, a *config.AuthConfig) []string {
 	var out []string
 	var bAllow, bDeny, aAllow, aDeny []string
 	if b != nil {
@@ -1392,7 +1445,9 @@ func classifyPublishAuth(beforeFiles, afterFiles *LoadedAccessFiles, b, a *confi
 		if bFile != aFile {
 			out = append(out, "uncertain")
 		} else if bFile != "" && beforeFiles != nil && afterFiles != nil {
-			if cls := classifyHtpasswdContentChange(beforeFiles.htpasswdByPath[bFile], afterFiles.htpasswdByPath[aFile]); cls != "unchanged" {
+			bSnap := beforeFiles.htpasswdSnapshotFor(bSrvIdx, bLocIdx, bFile)
+			aSnap := afterFiles.htpasswdSnapshotFor(aSrvIdx, aLocIdx, aFile)
+			if cls := classifyHtpasswdContentChange(bSnap, aSnap); cls != "unchanged" {
 				out = append(out, cls)
 			}
 		}

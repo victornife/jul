@@ -730,6 +730,11 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 		// is live before any admin/preflight request runs (R10-02).
 		s.publishRuntimeStateDirect(genID)
 	}
+	s.mu.Lock()
+	if s.loadedAccessFiles != nil {
+		s.loadedAccessFiles.applyLiveMTLSListeners(s.listeners, nil)
+	}
+	s.mu.Unlock()
 
 	// All startup listeners bound successfully and the initial generation is
 	// live. Fire the hook so the composition root can reconcile any recovery
@@ -841,7 +846,11 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		}
 		entry.clientAuth = &dynamicClientAuth{}
 		entry.clientAuth.set(ca)
-		entry.clientAuthFP = mtlsConfigFingerprint(cfg.Servers, addr)
+		if ca != nil {
+			entry.clientAuthFP = ca.fp
+		} else {
+			entry.clientAuthFP = "off"
+		}
 		tlsConf.GetConfigForClient = entry.clientAuth.configForClient(tlsConf)
 		ln = tls.NewListener(ln, tlsConf)
 

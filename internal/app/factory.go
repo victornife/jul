@@ -37,6 +37,10 @@ import (
 // newFirewall is waf.New, indirected so tests can count compilations.
 var newFirewall = waf.New
 
+// newAuthenticator is auth.New, indirected so tests can observe per-location
+// credential loading boundaries.
+var newAuthenticator = auth.New
+
 // HandlerFactory holds the process-lifetime dependencies for the per-reload
 // handler-tree builder. All fields are set once at startup and read on every
 // reload; the factory itself is safe for concurrent use via its internal mutex.
@@ -538,7 +542,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// scope, so a misconfiguration (for example, an unreadable htpasswd file)
 	// fails the reload with a clear error instead of surfacing per request.
 	authByScope := make(map[string]*auth.Authenticator)
-	gen.basicByPath = make(map[string][]byte)
+	gen.basicByLoc = make(map[[2]int][]byte)
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
 			loc := c.Servers[i].Locations[j]
@@ -561,7 +565,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if err != nil {
 				return nil, fmt.Errorf("servers[%d].locations[%d]: jwt.jwks_url: %w", i, j, err)
 			}
-			a, err := auth.New(ctx, *loc.Auth, auth.Options{
+			a, err := newAuthenticator(ctx, *loc.Auth, auth.Options{
 				Logger:      f.Log,
 				OnDecision:  f.Metrics.ObserveAuthDecision,
 				DialContext: authDial,
@@ -572,10 +576,8 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
 			}
 			if loc.Auth.Basic != nil {
-				if p := strings.TrimSpace(loc.Auth.Basic.File); p != "" {
-					if raw := a.BasicFileBytes(); len(raw) > 0 {
-						gen.basicByPath[p] = raw
-					}
+				if raw := a.BasicFileBytes(); len(raw) > 0 {
+					gen.basicByLoc[[2]int{i, j}] = raw
 				}
 			}
 			gen.Stage(a)
@@ -810,7 +812,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		pluginDigests[name] = strings.TrimPrefix(id.Digest, "sha256:")
 	}
 
-	return server.WrapHandlersWithLoadedAccess(handlers, gen.basicByPath, gen.wafGlobalDigest, gen.wafDigestByLoc, pluginDigests), nil
+	return server.WrapHandlersWithLoadedAccess(handlers, gen.basicByLoc, gen.wafGlobalDigest, gen.wafDigestByLoc, pluginDigests), nil
 }
 
 // globalChain returns the per-listen-address middleware chain, outermost to

@@ -38,6 +38,8 @@ type clientAuthBundle struct {
 	crls []crlSet
 	// caDigest records the canonical digest of the loaded CA certificate DERs (#642).
 	caDigest string
+	// fp is the mtlsConfigFingerprint of the exact CA/CRL file bytes loaded into this bundle (#642).
+	fp string
 }
 
 // clientAuthMode maps a config mode string to a tls.ClientAuthType. "request"
@@ -68,11 +70,13 @@ func clientAuthMode(mode string) tls.ClientAuthType {
 // certificate.
 func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func(string)) (*clientAuthBundle, error) {
 	var (
-		mode     = tls.NoClientCert
-		pool     *x509.CertPool
-		sanAllow []string
-		crls     []crlSet
-		caCerts  []*x509.Certificate
+		mode        = tls.NoClientCert
+		pool        *x509.CertPool
+		sanAllow    []string
+		crls        []crlSet
+		caCerts     []*x509.Certificate
+		fpCAHashes  []string
+		fpCRLHashes []string
 	)
 	for i := range servers {
 		srv := &servers[i]
@@ -86,9 +90,13 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 		if m := clientAuthMode(ca.Mode); authStrength(m) > authStrength(mode) {
 			mode = m
 		}
-		certs, err := loadCABundle(ca.CAFile)
+		caFile := strings.TrimSpace(ca.CAFile)
+		certs, caFileSum, err := loadCABundleWithHash(ca.CAFile)
 		if err != nil {
 			return nil, fmt.Errorf("server %q ca_file: %w", srv.Listen, err)
+		}
+		if caFile != "" {
+			fpCAHashes = append(fpCAHashes, caFile+":"+caFileSum)
 		}
 		if pool == nil {
 			pool = x509.NewCertPool()
@@ -103,11 +111,12 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 			}
 		}
 		if f := strings.TrimSpace(ca.CRLFile); f != "" {
-			crl, err := loadCRL(f, caCerts)
+			crl, crlFileSum, err := loadCRLWithHash(f, caCerts)
 			if err != nil {
 				return nil, fmt.Errorf("server %q crl_file: %w", srv.Listen, err)
 			}
 			crls = append(crls, crl)
+			fpCRLHashes = append(fpCRLHashes, f+":"+crlFileSum)
 		}
 	}
 	if mode == tls.NoClientCert || pool == nil {
@@ -119,6 +128,12 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 		caHashes = append(caHashes, hex.EncodeToString(sum[:]))
 	}
 	sort.Strings(caHashes)
+	sort.Strings(fpCAHashes)
+	sortedSANs := append([]string(nil), sanAllow...)
+	sort.Strings(sortedSANs)
+	sort.Strings(fpCRLHashes)
+	fp := fmt.Sprintf("mode=%d,ca=%s,san=%s,crl=%s", authStrength(mode),
+		strings.Join(fpCAHashes, "+"), strings.Join(sortedSANs, "+"), strings.Join(fpCRLHashes, "+"))
 	return &clientAuthBundle{
 		mode:       mode,
 		pool:       pool,
@@ -127,6 +142,7 @@ func clientAuthForAddr(servers []config.ServerConfig, addr string, onResult func
 		verifyConn: makeClientConnVerifier(sanAllow, crls, onResult),
 		crls:       crls,
 		caDigest:   strings.Join(caHashes, "|"),
+		fp:         fp,
 	}, nil
 }
 
@@ -261,10 +277,16 @@ func authStrength(m tls.ClientAuthType) int {
 // and returns them parsed. It errors if the file holds no usable certificate so
 // a typo does not silently disable verification.
 func loadCABundle(path string) ([]*x509.Certificate, error) {
+	certs, _, err := loadCABundleWithHash(path)
+	return certs, err
+}
+
+func loadCABundleWithHash(path string) ([]*x509.Certificate, string, error) {
 	pemBytes, err := readBoundedMTLSFile(path, 4<<20)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+	sum := sha256.Sum256(pemBytes)
 	var certs []*x509.Certificate
 	rest := pemBytes
 	for {
@@ -278,14 +300,14 @@ func loadCABundle(path string) ([]*x509.Certificate, error) {
 		}
 		c, err := x509.ParseCertificate(block.Bytes)
 		if err != nil {
-			return nil, fmt.Errorf("parse certificate: %w", err)
+			return nil, "", fmt.Errorf("parse certificate: %w", err)
 		}
 		certs = append(certs, c)
 	}
 	if len(certs) == 0 {
-		return nil, fmt.Errorf("no CERTIFICATE block found in %s", path)
+		return nil, "", fmt.Errorf("no CERTIFICATE block found in %s", path)
 	}
-	return certs, nil
+	return certs, hex.EncodeToString(sum[:]), nil
 }
 
 func readBoundedMTLSFile(path string, limit int64) ([]byte, error) {
@@ -331,20 +353,26 @@ func (c crlSet) revokes(leaf *x509.Certificate) bool {
 // DER). The CRL signature is verified against one of caCerts so a forged list
 // cannot revoke valid certificates; it errors if no CA signed it.
 func loadCRL(path string, caCerts []*x509.Certificate) (crlSet, error) {
+	cs, _, err := loadCRLWithHash(path, caCerts)
+	return cs, err
+}
+
+func loadCRLWithHash(path string, caCerts []*x509.Certificate) (crlSet, string, error) {
 	raw, err := readBoundedMTLSFile(path, 16<<20)
 	if err != nil {
-		return crlSet{}, err
+		return crlSet{}, "", err
 	}
+	sum := sha256.Sum256(raw)
 	der := raw
 	if block, rest := pem.Decode(raw); block != nil {
 		if block.Type != "X509 CRL" || len(bytes.TrimSpace(rest)) != 0 {
-			return crlSet{}, fmt.Errorf("CRL %s must contain exactly one X509 CRL block", path)
+			return crlSet{}, "", fmt.Errorf("CRL %s must contain exactly one X509 CRL block", path)
 		}
 		der = block.Bytes
 	}
 	crl, err := x509.ParseRevocationList(der)
 	if err != nil {
-		return crlSet{}, fmt.Errorf("parse CRL: %w", err)
+		return crlSet{}, "", fmt.Errorf("parse CRL: %w", err)
 	}
 	verified := false
 	for _, ca := range caCerts {
@@ -354,13 +382,13 @@ func loadCRL(path string, caCerts []*x509.Certificate) (crlSet, error) {
 		}
 	}
 	if !verified {
-		return crlSet{}, fmt.Errorf("CRL %s is not signed by any configured CA", path)
+		return crlSet{}, "", fmt.Errorf("CRL %s is not signed by any configured CA", path)
 	}
 	revoked := make(map[string]bool, len(crl.RevokedCertificateEntries))
 	for _, e := range crl.RevokedCertificateEntries {
 		revoked[strings.ToLower(e.SerialNumber.Text(16))] = true
 	}
-	return crlSet{issuer: crl.RawIssuer, revoked: revoked, nextUpdate: crl.NextUpdate}, nil
+	return crlSet{issuer: crl.RawIssuer, revoked: revoked, nextUpdate: crl.NextUpdate}, hex.EncodeToString(sum[:]), nil
 }
 
 var (

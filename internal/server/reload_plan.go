@@ -254,6 +254,9 @@ func (p *ReloadPlan) Prepare() error {
 			p.Runtime.add(clientAuth)
 		}
 		p.nextAccessFiles = captureLoadedAccessFilesFromHandlers(p.Candidate.Effective, p.Handlers)
+		p.s.mu.Lock()
+		p.nextAccessFiles.applyLiveMTLSListeners(p.s.listeners, nil)
+		p.s.mu.Unlock()
 		if clientAuth != nil {
 			p.nextAccessFiles.applyMTLSRotation(clientAuth)
 		}
@@ -321,7 +324,17 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// PreparedRuntime components (e.g. a future certificate provider swap)
 	// commit before the new handler generation becomes reachable, so a new
 	// vhost route can never be selected against a stale candidate mapping.
+	p.s.mu.Lock()
+	if p.s.loadedAccessFiles != nil && len(p.s.listeners) > 0 {
+		p.s.loadedAccessFiles.applyLiveMTLSListeners(p.s.listeners, nil)
+	}
+	p.s.mu.Unlock()
 	p.Runtime.Commit()
+	p.s.mu.Lock()
+	if p.nextAccessFiles != nil && (len(p.s.listeners) > 0 || len(p.stagedListeners) > 0) {
+		p.nextAccessFiles.applyLiveMTLSListeners(p.s.listeners, p.stagedListeners)
+	}
+	p.s.mu.Unlock()
 
 	// #99: publish the candidate root sampling ratio inside the same no-fail
 	// Publish transaction, before candidate handlers/config become reachable.
