@@ -165,8 +165,11 @@ implementation:
      `Cache-Control: public, max-age=…` (or `remove = ["Cache-Control"]`) never
      emits a cacheable `403` when withdrawn.
    - **Sparse repeatable typed patch operation:** `location_set_withdrawn`
-     (`withdrawn: bool`, addressed by `route_selector` or `server_index` +
-     `location_index`, guarded by `base_version`), classified as repeatable
+     (`withdrawn: bool`, addressed by `route_id`, `route_selector`,
+     `server_index` + `location_index`, or top-level
+     `listen`/`server_names`/`match_type`/`path`/`match_ordinal` selector
+     fields; positional `server_index` + `location_index` and `match_ordinal`
+     are guarded by `base_version`), classified as repeatable
      (`IsPatchOpRepeatable == true`) for `§9.4` postcondition recovery.
    - **Delta and projection integration:** Setting `withdrawn` from `false` to
      `true` is classed `narrowed` (triggers `§8.4` retirement); clearing it from

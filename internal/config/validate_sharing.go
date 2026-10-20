@@ -5,8 +5,13 @@ package config
 
 import (
 	"fmt"
+	"math/big"
 	"net"
 	"net/netip"
+	"net/url"
+	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -733,4 +738,613 @@ func lintSharedCacheAcrossEntriesWithRaw(rawCfg, effCfg *Config) []Diagnostic {
 		}
 	}
 	return diags
+}
+
+type cidrInterval struct {
+	start *big.Int
+	end   *big.Int
+}
+
+// ClassifyCIDRChange compares two CIDR allow/deny sets (allow minus deny across
+// IPv4 and IPv6) and returns ("unchanged"|"narrowed"|"widened"|"uncertain", reason).
+// When rejectSecretRefs is true (plan preview), any secret reference in a
+// changed allow/deny list returns "uncertain" without inspecting resolved values.
+func ClassifyCIDRChange(bAllow, bDeny, aAllow, aDeny []string, rejectSecretRefs bool) (string, string) {
+	if slices.Equal(bAllow, aAllow) && slices.Equal(bDeny, aDeny) {
+		return "unchanged", ""
+	}
+	if rejectSecretRefs {
+		for _, list := range [][]string{bAllow, bDeny, aAllow, aDeny} {
+			for _, entry := range list {
+				if ContainsSecretRef(entry) {
+					return "uncertain", "CIDR allow/deny comparison involves a secret reference"
+				}
+			}
+		}
+	}
+	bV4, bV6, ok1 := computePermittedCIDRSet(bAllow, bDeny)
+	aV4, aV6, ok2 := computePermittedCIDRSet(aAllow, aDeny)
+	if !ok1 || !ok2 {
+		return "uncertain", "CIDR allow/deny entries could not be compared"
+	}
+	v4Eq := cidrIntervalsEqual(bV4, aV4)
+	v6Eq := cidrIntervalsEqual(bV6, aV6)
+	if v4Eq && v6Eq {
+		return "unchanged", ""
+	}
+	aSubB := cidrIntervalsSubset(aV4, bV4) && cidrIntervalsSubset(aV6, bV6)
+	bSubA := cidrIntervalsSubset(bV4, aV4) && cidrIntervalsSubset(bV6, aV6)
+	switch {
+	case aSubB && !bSubA:
+		return "narrowed", "CIDR permitted address set strictly shrank"
+	case bSubA && !aSubB:
+		return "widened", "CIDR permitted address set strictly grew"
+	default:
+		return "uncertain", "CIDR permitted address set changed in both directions"
+	}
+}
+
+// CIDRSetPermitsNone reports whether allow minus deny leaves both the IPv4 and
+// IPv6 permitted sets empty.
+func CIDRSetPermitsNone(allow, deny []string) bool {
+	if len(deny) == 0 {
+		return false
+	}
+	v4, v6, ok := computePermittedCIDRSet(allow, deny)
+	return ok && len(v4) == 0 && len(v6) == 0
+}
+
+func computePermittedCIDRSet(allow, deny []string) (v4, v6 []cidrInterval, ok bool) {
+	maxV4 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 32), big.NewInt(1))
+	maxV6 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+
+	if len(allow) == 0 {
+		v4 = []cidrInterval{{big.NewInt(0), maxV4}}
+		v6 = []cidrInterval{{big.NewInt(0), maxV6}}
+	} else {
+		for _, raw := range allow {
+			iv, isV6, valid := parseCIDRInterval(raw)
+			if !valid {
+				return nil, nil, false
+			}
+			if isV6 {
+				v6 = append(v6, iv)
+			} else {
+				v4 = append(v4, iv)
+			}
+		}
+		v4 = normalizeCIDRIntervals(v4)
+		v6 = normalizeCIDRIntervals(v6)
+	}
+
+	for _, raw := range deny {
+		iv, isV6, valid := parseCIDRInterval(raw)
+		if !valid {
+			return nil, nil, false
+		}
+		if isV6 {
+			v6 = subtractCIDRInterval(v6, iv)
+		} else {
+			v4 = subtractCIDRInterval(v4, iv)
+		}
+	}
+	return v4, v6, true
+}
+
+func parseCIDRInterval(raw string) (cidrInterval, bool, bool) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return cidrInterval{}, false, false
+	}
+	var pfx netip.Prefix
+	if strings.Contains(s, "/") {
+		var err error
+		pfx, err = netip.ParsePrefix(s)
+		if err != nil {
+			return cidrInterval{}, false, false
+		}
+		if pfx.Addr().Is4In6() && pfx.Bits() >= 96 {
+			pfx = netip.PrefixFrom(pfx.Addr().Unmap(), pfx.Bits()-96)
+		}
+		pfx = pfx.Masked()
+	} else {
+		addr, err := netip.ParseAddr(s)
+		if err != nil {
+			return cidrInterval{}, false, false
+		}
+		addr = addr.Unmap()
+		pfx = netip.PrefixFrom(addr, addr.BitLen())
+	}
+	addr := pfx.Addr()
+	bits := pfx.Bits()
+	if addr.Is4() {
+		if bits < 0 || bits > 32 {
+			return cidrInterval{}, false, false
+		}
+		b4 := addr.As4()
+		start := new(big.Int).SetBytes(b4[:])
+		hostBits := uint(32 - bits)
+		mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), hostBits), big.NewInt(1))
+		end := new(big.Int).Or(start, mask)
+		return cidrInterval{start: start, end: end}, false, true
+	}
+	if bits < 0 || bits > 128 {
+		return cidrInterval{}, false, false
+	}
+	b16 := addr.As16()
+	start := new(big.Int).SetBytes(b16[:])
+	hostBits := uint(128 - bits)
+	mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), hostBits), big.NewInt(1))
+	end := new(big.Int).Or(start, mask)
+	return cidrInterval{start: start, end: end}, true, true
+}
+
+func normalizeCIDRIntervals(in []cidrInterval) []cidrInterval {
+	if len(in) == 0 {
+		return nil
+	}
+	sorted := make([]cidrInterval, len(in))
+	for i, iv := range in {
+		sorted[i] = cidrInterval{
+			start: new(big.Int).Set(iv.start),
+			end:   new(big.Int).Set(iv.end),
+		}
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		if cmp := sorted[i].start.Cmp(sorted[j].start); cmp != 0 {
+			return cmp < 0
+		}
+		return sorted[i].end.Cmp(sorted[j].end) < 0
+	})
+	out := []cidrInterval{sorted[0]}
+	for _, cur := range sorted[1:] {
+		last := &out[len(out)-1]
+		lastPlusOne := new(big.Int).Add(last.end, big.NewInt(1))
+		if cur.start.Cmp(lastPlusOne) <= 0 {
+			if cur.end.Cmp(last.end) > 0 {
+				last.end = new(big.Int).Set(cur.end)
+			}
+		} else {
+			out = append(out, cur)
+		}
+	}
+	return out
+}
+
+func subtractCIDRInterval(set []cidrInterval, sub cidrInterval) []cidrInterval {
+	var out []cidrInterval
+	for _, iv := range set {
+		if sub.end.Cmp(iv.start) < 0 || sub.start.Cmp(iv.end) > 0 {
+			out = append(out, iv)
+			continue
+		}
+		if sub.start.Cmp(iv.start) > 0 {
+			out = append(out, cidrInterval{
+				start: new(big.Int).Set(iv.start),
+				end:   new(big.Int).Sub(sub.start, big.NewInt(1)),
+			})
+		}
+		if sub.end.Cmp(iv.end) < 0 {
+			out = append(out, cidrInterval{
+				start: new(big.Int).Add(sub.end, big.NewInt(1)),
+				end:   new(big.Int).Set(iv.end),
+			})
+		}
+	}
+	return out
+}
+
+func cidrIntervalsEqual(a, b []cidrInterval) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].start.Cmp(b[i].start) != 0 || a[i].end.Cmp(b[i].end) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func cidrIntervalsSubset(a, b []cidrInterval) bool {
+	for _, iv := range a {
+		rem := []cidrInterval{iv}
+		for _, biv := range b {
+			rem = subtractCIDRInterval(rem, biv)
+			if len(rem) == 0 {
+				break
+			}
+		}
+		if len(rem) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// ResolveLocationUpstreamName returns the configured or syntactic upstream pool
+// name referenced by loc, matching the exact adapter-specific resolution order
+// of the HTTP/gRPC proxy, gRPC-JSON transcode, FastCGI, and uWSGI handlers.
+func ResolveLocationUpstreamName(c *Config, loc LocationConfig) string {
+	if loc.Deny || loc.Redirect != "" || loc.Return != 0 {
+		return ""
+	}
+	hasUpstream := func(name string) bool {
+		if c == nil || name == "" {
+			return false
+		}
+		for i := range c.Upstreams {
+			if c.Upstreams[i].Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	resolveHTTPOrGRPCProxyPass := func(raw string) string {
+		// Production HTTP and native gRPC handlers (internal/handler/proxy.go:242)
+		// parse proxy_pass with url.Parse and look up only u.Host in the upstream
+		// map; they never look up a full URL string (e.g. "http://backend").
+		for _, candidate := range []string{raw, strings.TrimSpace(raw)} {
+			if candidate == "" {
+				continue
+			}
+			if u, err := url.Parse(candidate); err == nil && u.Scheme != "" && u.Host != "" {
+				if hasUpstream(u.Host) {
+					return u.Host
+				}
+				if !strings.Contains(u.Host, ":") && !strings.Contains(u.Host, ".") {
+					return u.Host
+				}
+				return ""
+			}
+			if !strings.Contains(candidate, "://") {
+				if hasUpstream(candidate) {
+					return candidate
+				}
+				if !strings.Contains(candidate, ":") && !strings.Contains(candidate, "/") && !strings.Contains(candidate, ".") {
+					return candidate
+				}
+			}
+		}
+		return ""
+	}
+
+	resolveLiteralTarget := func(raw string) string {
+		// Production gRPC-JSON transcode (internal/handler/grpctranscode.go:69)
+		// and FastCGI/uWSGI (internal/handler/fastcgi.go:63) handlers look up the
+		// configured target string directly in the upstream map.
+		if hasUpstream(raw) {
+			return raw
+		}
+		s := strings.TrimSpace(raw)
+		if hasUpstream(s) {
+			return s
+		}
+		if s != "" && !strings.Contains(s, ":") && !strings.Contains(s, "/") && !strings.Contains(s, ".") {
+			return s
+		}
+		return ""
+	}
+
+	switch {
+	case loc.GRPCTranscode != nil && strings.TrimSpace(loc.GRPCTranscode.Target) != "":
+		return resolveLiteralTarget(loc.GRPCTranscode.Target)
+	case strings.TrimSpace(loc.ProxyPass) != "":
+		return resolveHTTPOrGRPCProxyPass(loc.ProxyPass)
+	case strings.TrimSpace(loc.UWSGIPass) != "":
+		return resolveLiteralTarget(loc.UWSGIPass)
+	case strings.TrimSpace(loc.FastCGIPass) != "":
+		return resolveLiteralTarget(loc.FastCGIPass)
+	default:
+		return ""
+	}
+}
+
+// ResolveAuthUpstreamName returns the configured or syntactic upstream pool
+// name referenced by a forward_auth.url or jwt.jwks_url string, matching
+// HandlerFactory.authDependencyPool (which parses rawURL and looks up
+// u.Hostname() in the configured upstream map).
+func ResolveAuthUpstreamName(c *Config, rawURL string) string {
+	hasUpstream := func(name string) bool {
+		if c == nil || name == "" {
+			return false
+		}
+		for i := range c.Upstreams {
+			if c.Upstreams[i].Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	for _, candidate := range []string{rawURL, strings.TrimSpace(rawURL)} {
+		if candidate == "" {
+			continue
+		}
+		u, err := url.Parse(candidate)
+		if err != nil || u.Host == "" {
+			continue
+		}
+		host := u.Hostname()
+		if host == "" {
+			continue
+		}
+		if hasUpstream(host) {
+			return host
+		}
+		if !strings.Contains(host, ":") && !strings.Contains(host, ".") {
+			return host
+		}
+		return ""
+	}
+	return ""
+}
+
+// ResolveLocationDependencyUpstreams returns the sorted, deduplicated set of
+// upstream pool names that loc depends on across its action target
+// (proxy_pass, grpc_transcode.target, uwsgi_pass, fastcgi_pass) and its
+// authentication subrequests (auth.forward_auth.url, auth.jwt.jwks_url).
+func ResolveLocationDependencyUpstreams(c *Config, loc LocationConfig) []string {
+	var names []string
+	add := func(name string) {
+		if name != "" && !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	add(ResolveLocationUpstreamName(c, loc))
+	if loc.Auth != nil {
+		if loc.Auth.ForwardAuth != nil {
+			add(ResolveAuthUpstreamName(c, loc.Auth.ForwardAuth.URL))
+		}
+		if loc.Auth.JWT != nil {
+			add(ResolveAuthUpstreamName(c, loc.Auth.JWT.JWKSURL))
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// AuthUpstreamDependencyEqual reports whether bRawURL in before and aRawURL in
+// after resolve to the same upstream pool dependency with identical pool
+// access/membership settings.
+func AuthUpstreamDependencyEqual(before, after *Config, bRawURL, aRawURL string) bool {
+	bUp := ResolveAuthUpstreamName(before, bRawURL)
+	aUp := ResolveAuthUpstreamName(after, aRawURL)
+	if bUp != aUp {
+		return false
+	}
+	if aUp == "" {
+		return true
+	}
+	var bu, au *UpstreamConfig
+	if before != nil {
+		for i := range before.Upstreams {
+			if before.Upstreams[i].Name == aUp {
+				bu = &before.Upstreams[i]
+				break
+			}
+		}
+	}
+	if after != nil {
+		for i := range after.Upstreams {
+			if after.Upstreams[i].Name == aUp {
+				au = &after.Upstreams[i]
+				break
+			}
+		}
+	}
+	if (bu == nil) != (au == nil) {
+		return false
+	}
+	if bu != nil && au != nil {
+		if bu.Strategy != au.Strategy ||
+			!reflect.DeepEqual(bu.Hash, au.Hash) ||
+			!authBackendTLSEqual(bu.BackendTLS, au.BackendTLS) ||
+			!slices.Equal(bu.Servers, au.Servers) ||
+			!reflect.DeepEqual(bu.Discovery, au.Discovery) {
+			return false
+		}
+	}
+	return true
+}
+
+func authBackendTLSEqual(b, a *BackendTLSConfig) bool {
+	if b == nil || a == nil {
+		return b == a
+	}
+	return b.CAFile == a.CAFile &&
+		b.CAMode == a.CAMode &&
+		b.ClientCert == a.ClientCert &&
+		b.ClientKey == a.ClientKey &&
+		b.ServerName == a.ServerName &&
+		b.MinVersion == a.MinVersion &&
+		b.InsecureSkipVerify == a.InsecureSkipVerify &&
+		slices.Equal(b.PeerIdentities, a.PeerIdentities)
+}
+
+// ClassifyCORSChange compares two CORS policies and returns
+// (class, reason, hasNarrowingConstituent). It is shared between plan preview
+// and runtime publish so mixed origin/credential mutations cannot drift.
+func ClassifyCORSChange(b, a *CORSConfig, rejectSecretRefs bool) (string, string, bool) {
+	bOn := b != nil && b.Enabled
+	aOn := a != nil && a.Enabled
+	switch {
+	case !bOn && !aOn:
+		return "unchanged", "", false
+	case !bOn && aOn:
+		return "widened", "CORS policy enabled", false
+	case bOn && !aOn:
+		return "narrowed", "CORS policy disabled", true
+	}
+
+	bOrigins := make(map[string]bool, len(b.AllowedOrigins))
+	for _, o := range b.AllowedOrigins {
+		bOrigins[strings.TrimSpace(o)] = true
+	}
+	aOrigins := make(map[string]bool, len(a.AllowedOrigins))
+	for _, o := range a.AllowedOrigins {
+		aOrigins[strings.TrimSpace(o)] = true
+	}
+
+	added := false
+	removed := false
+	for o := range aOrigins {
+		if !bOrigins[o] {
+			added = true
+		}
+	}
+	for o := range bOrigins {
+		if !aOrigins[o] {
+			removed = true
+		}
+	}
+	credsNarrowed := b.AllowCredentials && !a.AllowCredentials
+	credsWidened := !b.AllowCredentials && a.AllowCredentials
+	hasNarrow := removed || credsNarrowed
+
+	if rejectSecretRefs {
+		for _, s := range append(append([]string(nil), b.AllowedOrigins...), a.AllowedOrigins...) {
+			if ContainsSecretRef(s) {
+				return "uncertain", "CORS allowed_origins comparison involves a secret reference", credsNarrowed
+			}
+		}
+	}
+	if !corsStringSetsEqualFold(b.AllowedMethods, a.AllowedMethods) || !corsStringSetsEqualFold(b.AllowedHeaders, a.AllowedHeaders) {
+		return "uncertain", "CORS allowed_methods or allowed_headers changed", hasNarrow
+	}
+	if !added && !removed && b.AllowCredentials == a.AllowCredentials {
+		return "unchanged", "", false
+	}
+	if added && removed {
+		return "uncertain", "CORS allowed_origins added and removed origins", true
+	}
+	if aOrigins["*"] && !bOrigins["*"] && !removed && !credsNarrowed {
+		return "widened", "CORS wildcard origin introduced", false
+	}
+	if credsWidened && !removed {
+		return "widened", "CORS allow_credentials enabled", false
+	}
+	if added && !removed && !credsNarrowed {
+		if a.AllowCredentials && b.AllowCredentials {
+			return "widened", "CORS origin added while credentials are allowed", false
+		}
+		return "widened", "CORS allowed_origins expanded", false
+	}
+	if removed && !added && !credsWidened {
+		return "narrowed", "CORS allowed_origins narrowed", true
+	}
+	if !added && !removed && credsNarrowed {
+		return "narrowed", "CORS allow_credentials disabled", true
+	}
+	return "uncertain", "CORS policy changed", hasNarrow
+}
+
+func corsStringSetsEqualFold(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	sa := make([]string, len(a))
+	sb := make([]string, len(b))
+	for i := range a {
+		sa[i] = strings.ToLower(strings.TrimSpace(a[i]))
+	}
+	for i := range b {
+		sb[i] = strings.ToLower(strings.TrimSpace(b[i]))
+	}
+	sort.Strings(sa)
+	sort.Strings(sb)
+	return slices.Equal(sa, sb)
+}
+
+// ListenerAccessInputs summarizes the effective listener-scoped TLS, protocol,
+// client-address, and mutual-TLS inputs across all server blocks sharing a
+// listen address.
+type ListenerAccessInputs struct {
+	TLSEnabled      bool   `json:"tls_enabled"`
+	MinVersion      string `json:"min_version,omitempty"`
+	TLSCertSig      string `json:"tls_cert_sig,omitempty"`
+	HTTP3Sig        string `json:"http3_sig,omitempty"`
+	H2C             bool   `json:"h2c,omitempty"`
+	RedirectHTTPS   int    `json:"redirect_https,omitempty"`
+	ProxyProtocol   string `json:"proxy_protocol,omitempty"`
+	ClientAddrSig   string `json:"client_addr_sig,omitempty"`
+	ClientAuthMode  string `json:"client_auth_mode,omitempty"`
+	ClientAuthFiles string `json:"client_auth_files,omitempty"`
+}
+
+// SummarizeListenerAccessInputs aggregates listener-scoped access inputs across
+// all server blocks in c sharing listen, and reports whether any compared
+// client_auth or trusted-proxy field contains a secret reference.
+func SummarizeListenerAccessInputs(c *Config, listen string) (ListenerAccessInputs, bool) {
+	var out ListenerAccessInputs
+	if c == nil {
+		out.ClientAuthMode = "none"
+		return out, false
+	}
+	var caFiles, crlFiles, sans, fwd, certs []string
+	hasSecretRef := false
+	for _, srv := range c.Servers {
+		if srv.Listen != listen {
+			continue
+		}
+		if srv.H2C {
+			out.H2C = true
+		}
+		if srv.HTTP3 != nil && srv.HTTP3.Enabled && out.HTTP3Sig == "" {
+			out.HTTP3Sig = "enabled"
+		}
+		if srv.RedirectHTTPS != 0 && out.RedirectHTTPS == 0 {
+			out.RedirectHTTPS = srv.RedirectHTTPS
+		}
+		if srv.ProxyProtocol != "" && out.ProxyProtocol == "" {
+			out.ProxyProtocol = srv.ProxyProtocol
+		}
+		if srv.ClientAddress != nil && out.ClientAddrSig == "" {
+			for _, tp := range srv.ClientAddress.TrustedProxies {
+				if ContainsSecretRef(tp) {
+					hasSecretRef = true
+				}
+			}
+			out.ClientAddrSig = fmt.Sprintf("%v|%v|%d", srv.ClientAddress.TrustedProxies, srv.ClientAddress.ForwardedHeaders, srv.ClientAddress.MaxHops)
+		}
+		if srv.TLS != nil && srv.TLS.Enabled {
+			out.TLSEnabled = true
+			if out.MinVersion == "" {
+				out.MinVersion = srv.TLS.MinVersion
+			}
+			acmeSig := ""
+			if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
+				acmeSig = fmt.Sprintf("acme:%s|%s|%s|%v", srv.TLS.ACME.Email, srv.TLS.ACME.CA, srv.TLS.ACME.Challenge, srv.TLS.ACME.Domains)
+			}
+			certs = append(certs, fmt.Sprintf("%s|%s|%s", strings.TrimSpace(srv.TLS.Cert), strings.TrimSpace(srv.TLS.Key), acmeSig))
+			if srv.TLS.ClientAuth != nil && srv.TLS.ClientAuth.Active() {
+				mode := strings.TrimSpace(srv.TLS.ClientAuth.Mode)
+				if ContainsSecretRef(mode) || ContainsSecretRef(srv.TLS.ClientAuth.CAFile) || ContainsSecretRef(srv.TLS.ClientAuth.CRLFile) {
+					hasSecretRef = true
+				}
+				if mode == "require" || out.ClientAuthMode == "" {
+					out.ClientAuthMode = mode
+				}
+				caFiles = append(caFiles, strings.TrimSpace(srv.TLS.ClientAuth.CAFile))
+				crlFiles = append(crlFiles, strings.TrimSpace(srv.TLS.ClientAuth.CRLFile))
+				for _, san := range srv.TLS.ClientAuth.VerifySAN {
+					if ContainsSecretRef(san) {
+						hasSecretRef = true
+					}
+					sans = append(sans, strings.TrimSpace(san))
+				}
+				fwd = append(fwd, strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate))
+			}
+		}
+	}
+	if out.ClientAuthMode == "" {
+		out.ClientAuthMode = "none"
+	}
+	sort.Strings(caFiles)
+	sort.Strings(crlFiles)
+	sort.Strings(sans)
+	sort.Strings(fwd)
+	out.TLSCertSig = strings.Join(certs, ";")
+	out.ClientAuthFiles = fmt.Sprintf("ca=%v|crl=%v|san=%v|fwd=%v", caFiles, crlFiles, sans, fwd)
+	return out, hasSecretRef
 }

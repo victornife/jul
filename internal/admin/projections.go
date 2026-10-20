@@ -64,6 +64,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				Compression:       c.Compression.IsEnabled(),
 				Secure:            srv.TLS != nil && srv.TLS.Enabled,
 				RequireClientCert: loc.RequireClientCert,
+				Withdrawn:         loc.Withdrawn,
 			}
 			if loc.RateLimit != nil {
 				lp.RateLimitDetail = &RateLimitProjection{
@@ -118,7 +119,7 @@ func projectRoutes(c *config.Config) []RouteProjection {
 			default:
 				lp.Action = "unknown"
 			}
-			lp.Upstream = upstreamRef(lp.Target, lp.Action)
+			lp.Upstream = config.ResolveLocationUpstreamName(c, *loc)
 			if loc.WAF != nil {
 				lp.WAF = &LocationWAFState{
 					Enabled:           loc.WAF.Enabled,

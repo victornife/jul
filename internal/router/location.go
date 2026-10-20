@@ -76,6 +76,47 @@ func denyHandler() http.Handler {
 	})
 }
 
+// buildWithdrawnHandler constructs the stage-0 outermost withdrawal gate handler
+// (ADR 0026 #642 amendment, spec §9.3). It applies any configured location
+// response_headers operations, then unconditionally sets Cache-Control: no-store
+// and removes Expires so conflicting response_headers or expires policies can
+// never make a withdrawn 403 response cacheable.
+func buildWithdrawnHandler(headerOps []config.ResponseHeaderOp) http.Handler {
+	type compiledOp struct {
+		op    string
+		name  string
+		value string
+	}
+	ops := make([]compiledOp, 0, len(headerOps))
+	for _, o := range headerOps {
+		val := ""
+		if o.Value != nil {
+			val = *o.Value
+		}
+		ops = append(ops, compiledOp{
+			op:    o.Op,
+			name:  http.CanonicalHeaderKey(o.Name),
+			value: val,
+		})
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		for _, op := range ops {
+			switch op.op {
+			case "add":
+				h.Add(op.name, op.value)
+			case "set":
+				h.Set(op.name, op.value)
+			case "remove":
+				h.Del(op.name)
+			}
+		}
+		h.Set("Cache-Control", "no-store")
+		h.Del("Expires")
+		http.Error(w, "403 Forbidden", http.StatusForbidden)
+	})
+}
+
 // redirectHandler implements both the "redirect" and "return" actions.
 func redirectHandler(loc config.LocationConfig) http.Handler {
 	code := loc.Return

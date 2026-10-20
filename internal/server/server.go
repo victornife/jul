@@ -93,6 +93,11 @@ type ReloadRequest struct {
 	// processing another reload so a rejected candidate cannot be reloaded from
 	// disk during the restoration window.
 	Finalized <-chan struct{}
+	// KeepOpenEntries lists the entry route_ids or canonical coordinates whose
+	// open exchanges the operator requested to keep open on an uncertain-only
+	// change (SD-09, ADR 0026 #642 amendment). Mandatory tightenings,
+	// withdrawals, and removals always override this list.
+	KeepOpenEntries []string
 	// AdminErr, when set by the caller, is reported as a failed admin
 	// subsystem in the reload result. The app layer uses this to surface RBAC
 	// policy update failures independently of stream-proxy reload status.
@@ -258,6 +263,9 @@ type Server struct {
 	// PluginModuleChanges returns, once, the module content-identity changes
 	// published by generation genID, for the reload result.
 	PluginModuleChanges func(genID uint64) []PluginModuleChange
+	// WAFSourceDigests returns the engine-owned external source digests of the
+	// compiled global and per-location WAF policies for generation genID (#642, #563).
+	WAFSourceDigests func(genID uint64) (string, map[[2]int]string)
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -329,6 +337,9 @@ type Server struct {
 	// accumulating every historical no-op candidate indefinitely.
 	redactGenBases   map[uint64]redact.State
 	retiredRedaction redact.State // union of grace-expired generations
+
+	exchanges         *respwriter.ExchangeRegistry
+	loadedAccessFiles *LoadedAccessFiles
 
 	wg       sync.WaitGroup
 	serveErr chan error
@@ -573,6 +584,17 @@ type LiveSnapshot struct {
 	// admin layer detect whether an asynchronous reload occurred while the
 	// snapshot was being prepared.
 	Generation uint64
+
+	// Exchanges is the process-lifetime active exchange and upgrade registry (#642).
+	Exchanges *respwriter.ExchangeRegistry
+}
+
+// Exchanges returns the server's active exchange and upgrade registry.
+func (s *Server) Exchanges() *respwriter.ExchangeRegistry {
+	if s == nil {
+		return nil
+	}
+	return s.exchanges
 }
 
 // LiveSnapshot returns a read-only snapshot of the server's currently bound
@@ -587,9 +609,10 @@ func (s *Server) LiveSnapshot() LiveSnapshot {
 			RawConfig:        rs.RawConfig,
 			Listeners:        copyListenerMap(rs.Listeners),
 			Generation:       rs.Generation,
+			Exchanges:        s.exchanges,
 		}
 	}
-	return LiveSnapshot{Listeners: map[string]BoundListenerInfo{}}
+	return LiveSnapshot{Listeners: map[string]BoundListenerInfo{}, Exchanges: s.exchanges}
 }
 
 // publishRuntimeStateDirect atomically publishes a runtimeState from the
@@ -646,18 +669,20 @@ func New(cfg *config.Config, rawStartupCfg *config.Config, startupFP lifecycle.F
 		versions = contexts[0]
 	}
 	s := &Server{
-		versions:       versions,
-		log:            log,
-		source:         source,
-		validate:       validate,
-		factory:        factory,
-		cfg:            cfg,
-		rawCfg:         rawStartupCfg,
-		startupFP:      startupFP,
-		listeners:      map[string]*listenerEntry{},
-		redactGens:     make(map[uint64]redact.State),
-		redactGenBases: make(map[uint64]redact.State),
-		serveErr:       make(chan error, 8),
+		versions:          versions,
+		log:               log,
+		source:            source,
+		validate:          validate,
+		factory:           factory,
+		cfg:               cfg,
+		rawCfg:            rawStartupCfg,
+		startupFP:         startupFP,
+		listeners:         map[string]*listenerEntry{},
+		redactGens:        make(map[uint64]redact.State),
+		redactGenBases:    make(map[uint64]redact.State),
+		exchanges:         respwriter.NewExchangeRegistry(),
+		loadedAccessFiles: captureLoadedAccessFiles(cfg),
+		serveErr:          make(chan error, 8),
 	}
 	s.runtimeState.Store(&runtimeState{EffectiveConfig: cfg, EffectiveVersion: versions.Config(cfg), RawConfig: rawStartupCfg, Listeners: map[string]BoundListenerInfo{}})
 	return s
@@ -681,6 +706,12 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 		return fmt.Errorf("build handlers: %w", err)
 	}
 	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
+	s.exchanges.SetInitialGeneration(genID)
+	s.loadedAccessFiles = captureLoadedAccessFilesFromHandlers(s.cfg, handlers)
+	if s.WAFSourceDigests != nil && s.loadedAccessFiles != nil {
+		gDig, byLoc := s.WAFSourceDigests(genID)
+		s.loadedAccessFiles.applyWAFDigests(gDig, byLoc)
+	}
 	s.registerRedactionGen(genID, initialRedaction)
 	s.handlers.Store(s.newGeneration(handlers, snapshots, genID))
 
@@ -699,6 +730,11 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 		// is live before any admin/preflight request runs (R10-02).
 		s.publishRuntimeStateDirect(genID)
 	}
+	s.mu.Lock()
+	if s.loadedAccessFiles != nil {
+		s.loadedAccessFiles.applyLiveMTLSListeners(s.listeners, nil)
+	}
+	s.mu.Unlock()
 
 	// All startup listeners bound successfully and the initial generation is
 	// live. Fire the hook so the composition root can reconcile any recovery
@@ -793,7 +829,11 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		dyn.Set(provider)
 		entry.provider = dyn
 		if !acmeEnabledForAddr(cfg.Servers, addr) {
-			entry.certFingerprint = tlsIdentityFingerprint(bindings)
+			if fp, ok := provider.(*fileCertProvider); ok && fp.fp != "" {
+				entry.certFingerprint = fp.fp
+			} else {
+				entry.certFingerprint = tlsIdentityFingerprint(bindings)
+			}
 		}
 		tlsConf := &tls.Config{
 			GetCertificate: dyn.GetCertificate,
@@ -810,7 +850,11 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		}
 		entry.clientAuth = &dynamicClientAuth{}
 		entry.clientAuth.set(ca)
-		entry.clientAuthFP = mtlsConfigFingerprint(cfg.Servers, addr)
+		if ca != nil {
+			entry.clientAuthFP = ca.fp
+		} else {
+			entry.clientAuthFP = "off"
+		}
 		tlsConf.GetConfigForClient = entry.clientAuth.configForClient(tlsConf)
 		ln = tls.NewListener(ln, tlsConf)
 
@@ -1121,8 +1165,85 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 		// working after ServeHTTP returns (cache stale revalidation) can hold
 		// this generation open instead of escaping its accounting.
 		ctx = background.WithLease(ctx, g)
-		h.ServeHTTP(w, r.WithContext(ctx))
+		ctx = respwriter.WithExchangeRegistry(ctx, s.exchanges, g.genID)
+
+		s.mu.Lock()
+		entry := s.listeners[addr]
+		s.mu.Unlock()
+		var caHolder *dynamicClientAuth
+		if entry != nil {
+			caHolder = entry.clientAuth
+		}
+		certChecked := false
+		if caHolder != nil {
+			ctx = respwriter.WithClientCertVerifier(ctx, func(cs *tls.ConnectionState, locRequire bool) (bool, error) {
+				certChecked = true
+				return caHolder.verifyRequest(cs, locRequire)
+			})
+		}
+
+		reqWithCtx := r.WithContext(ctx)
+		if caHolder != nil {
+			w = wrapBareClientAuthCheck(w, reqWithCtx, caHolder, &certChecked)
+		}
+		h.ServeHTTP(w, reqWithCtx)
+
+		if ex := respwriter.ActiveExchangeFrom(ctx); ex != nil && ex.ShouldAbortStream() {
+			panic(http.ErrAbortHandler)
+		}
 	})
+}
+
+type bareClientAuthWriter struct {
+	http.ResponseWriter
+	req      *http.Request
+	caHolder *dynamicClientAuth
+	checked  *bool
+	decided  bool
+	rejected bool
+}
+
+func wrapBareClientAuthCheck(w http.ResponseWriter, r *http.Request, caHolder *dynamicClientAuth, checked *bool) http.ResponseWriter {
+	bw := &bareClientAuthWriter{
+		ResponseWriter: w,
+		req:            r,
+		caHolder:       caHolder,
+		checked:        checked,
+	}
+	return respwriter.Wrap(bw, w)
+}
+
+func (w *bareClientAuthWriter) checkOnce() bool {
+	if w.decided {
+		return w.rejected
+	}
+	w.decided = true
+	if w.checked != nil && *w.checked {
+		return false
+	}
+	b := w.caHolder.current.Load()
+	if b != nil && b.mode == tls.RequireAndVerifyClientCert {
+		if err := b.verifyPeerChain(w.req.TLS); err != nil {
+			w.rejected = true
+			http.Error(w.ResponseWriter, "client certificate required", http.StatusForbidden)
+			return true
+		}
+	}
+	return false
+}
+
+func (w *bareClientAuthWriter) WriteHeader(code int) {
+	if w.checkOnce() {
+		return
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *bareClientAuthWriter) Write(p []byte) (int, error) {
+	if w.checkOnce() {
+		return len(p), nil
+	}
+	return w.ResponseWriter.Write(p)
 }
 
 // registerRedactionGen adds genID's secrets to the active set and atomically
@@ -1300,6 +1421,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		// config under the same request ID would make its result untruthful.
 		if s.candidateStillValid(req) {
 			plan = s.newReloadPlan(reloadCtx, req.Candidate.Raw, req.Candidate, req.PreparedAdmin)
+			plan.keepOpenEntries = req.KeepOpenEntries
 			preparedOwned = false
 		} else {
 			result.Outcome = ReloadNotApplied
@@ -1321,6 +1443,7 @@ func (s *Server) doReload(req ReloadRequest) {
 			return
 		}
 		plan = s.newReloadPlan(reloadCtx, newCfg, nil, nil)
+		plan.keepOpenEntries = req.KeepOpenEntries
 	}
 	result.StartedAt = plan.start
 
@@ -1482,9 +1605,7 @@ func (s *Server) doReload(req ReloadRequest) {
 		return
 	}
 	result.Published = true
-	if s.PluginModuleChanges != nil {
-		result.PluginModules = s.PluginModuleChanges(plan.GenID)
-	}
+	result.PluginModules = plan.pluginChanges
 
 	// Phases 8–10: activation and post-commit side effects. After Publish we
 	// complete the minimum safe work even if the deadline has expired.
@@ -1496,6 +1617,18 @@ func (s *Server) doReload(req ReloadRequest) {
 	plan.FinalizeRuntimeState()
 	plan.RetirePreparedRuntime()
 	adminErr, onReloadErr := plan.PostCommit()
+	if plan.waitEntryRetirements != nil {
+		if req.Source == ReloadSourceAdmin || !plan.hasDeferredUnaryDrain {
+			result.EntryRetirements = plan.waitEntryRetirements()
+		} else {
+			result.EntryRetirements = s.exchanges.LastRetirementResults()
+			s.wg.Add(1)
+			go func(waitFn func() []respwriter.EntryRetirementResult) {
+				defer s.wg.Done()
+				_ = waitFn()
+			}(plan.waitEntryRetirements)
+		}
+	}
 
 	result.CompletedAt = time.Now()
 	result.DurationMS = time.Since(plan.start).Milliseconds()
@@ -1606,12 +1739,21 @@ func (s *Server) removeListener(addr string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout())
 	defer cancel()
+	var drainWg sync.WaitGroup
+	if s.exchanges != nil {
+		drainWg.Add(1)
+		go func() {
+			defer drainWg.Done()
+			s.exchanges.DrainAddr(ctx, addr)
+		}()
+	}
 	if err := entry.httpd.Shutdown(ctx); err != nil {
 		_ = entry.httpd.Close()
 	}
 	if entry.h3 != nil {
 		_ = entry.h3.Close(ctx)
 	}
+	drainWg.Wait()
 }
 
 // drain gracefully shuts down all listeners within the shutdown timeout.
@@ -1651,6 +1793,14 @@ func (s *Server) shutdownAll(ctx context.Context) {
 		entries = append(entries, e)
 	}
 	s.mu.Unlock()
+	var drainWg sync.WaitGroup
+	if s.exchanges != nil {
+		drainWg.Add(1)
+		go func() {
+			defer drainWg.Done()
+			s.exchanges.DrainAll(ctx)
+		}()
+	}
 	for _, e := range entries {
 		if err := e.httpd.Shutdown(ctx); err != nil {
 			s.log.Warn("graceful shutdown timed out; forcing close", "addr", e.addr, "error", err)
@@ -1660,6 +1810,7 @@ func (s *Server) shutdownAll(ctx context.Context) {
 			_ = e.h3.Close(ctx)
 		}
 	}
+	drainWg.Wait()
 }
 
 func (s *Server) shutdownTimeout() time.Duration {

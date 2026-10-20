@@ -551,4 +551,59 @@ describe("DiffView and ConfigPanel widening acknowledgement gate", () => {
       expect(applyCalled).toBe(true);
     });
   });
+
+  it("renders complete-withdrawal retirement bound, open exchange snapshot, and keep-open eligibility in DiffView", () => {
+    render(
+      <DiffView
+        diff={{
+          summary: "2 modifications",
+          sharing: {
+            entries: [
+              {
+                ref: { kind: "route_id", route_id: "dashboard" },
+                display_label: "dash.example.com / (dashboard)",
+                expect: "present",
+                class: "narrowed",
+                declared_mode_before: "restricted",
+                declared_mode_after: "restricted",
+                declared_mode_widened: false,
+                requires_acknowledgement: false,
+                triggers_retirement: true,
+                keep_open_eligible: false,
+                open_exchanges_snapshot: 3,
+                retirement_bound: "2s",
+                reasons: ["location withdrawal gate enabled"],
+                provider_checklist_required: false,
+              },
+              {
+                ref: { kind: "route_id", route_id: "portal" },
+                display_label: "portal.example.com / (portal)",
+                expect: "present",
+                class: "uncertain",
+                declared_mode_before: "public",
+                declared_mode_after: "public",
+                declared_mode_widened: false,
+                requires_acknowledgement: true,
+                triggers_retirement: true,
+                keep_open_eligible: true,
+                open_exchanges_snapshot: 1,
+                reasons: ["entry target or upstream backend configuration changed"],
+                provider_checklist_required: false,
+              },
+            ],
+            requires_acknowledgement: true,
+            file_backed_entry_count: 0,
+            file_backed_entries_truncated: false,
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/Open connections ended within 2s \(snapshot: 3 open\)/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Open connections ended within 2s \(snapshot: 1 open\) · keep-open exception available/i,
+      ),
+    ).toBeInTheDocument();
+  });
 });

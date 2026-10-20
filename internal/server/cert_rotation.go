@@ -89,7 +89,11 @@ func (s *Server) prepareCertRotation(next *config.Config) (*certRotationComponen
 		if err != nil {
 			return nil, fmt.Errorf("certificate for %s: %w", addr, err)
 		}
-		comp.swaps = append(comp.swaps, certProviderSwap{entry: entry, provider: provider, newFP: newFP})
+		loadedFP := newFP
+		if provider.fp != "" {
+			loadedFP = provider.fp
+		}
+		comp.swaps = append(comp.swaps, certProviderSwap{entry: entry, provider: provider, newFP: loadedFP})
 	}
 	if len(comp.swaps) == 0 {
 		return nil, nil

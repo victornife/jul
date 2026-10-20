@@ -52,6 +52,7 @@ type Route struct {
 	TLS               bool          `json:"tls"`
 	Auth              bool          `json:"auth"`
 	RequireClientCert bool          `json:"require_client_cert"`
+	Withdrawn         bool          `json:"withdrawn"`
 	Cache             bool          `json:"cache"`
 	RateLimit         bool          `json:"rate_limit"`
 	WAF               bool          `json:"waf"`

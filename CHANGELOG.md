@@ -28,6 +28,45 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Complete withdrawal, outermost withdrawal gate, and exact-entry retirement on
+  narrowing (#642 / `SHARE-01B`, bundling #563 and #562; ADR 0026 amendment,
+  `docs/specs/application-sharing.md` §8.4, §9.3):
+  - **Outermost stage-0 withdrawal gate:** adds `withdrawn = true` on
+    `[[servers.locations]]` (`hot_reload` under `servers.locations.withdrawn`,
+    no build tag) and repeatable typed patch operation `location_set_withdrawn`.
+    Evaluated in the router after path canonicalisation and location selection
+    and before location rewrites (`redirect`/`permanent`), request plugins,
+    CORS preflight, client-certificate handling, authentication, WAF, rate
+    limiting, caching, and the location's action; answers `403 Forbidden` with
+    `Cache-Control: no-store` and `Expires` removed (overriding conflicting
+    `response_headers` and `expires` decoration) while preserving the route's
+    configuration in place for single-edit recovery.
+  - **Exact-entry stream retirement on narrowing (#563, `SD-08`, `SD-09`):**
+    retires open HTTP/1.1, HTTP/2, and HTTP/3 requests, SSE, and native/transcoded
+    gRPC streams of narrowed or `uncertain` entries within a fixed **`2s`
+    absolute closure deadline** (`1s` graceful close window + `1s` forced
+    cutoff) from `Publish` without closing shared HTTP/2 or HTTP/3 connections
+    carrying other entries' streams (`collateral_count = 0`). Includes
+    publish-time content classification of `htpasswd`, `client_auth` CRL and CA
+    files, WAF directive files, WASM plugin modules, and `${file:…}` references,
+    atomic admission-or-retire synchronisation with `Publish`, cross-generation
+    exchange tracking, and constituent-reason `keep_open_entries` eligibility
+    (overridden by any mandatory tightening, withdrawal, or removal).
+  - **Per-request client-certificate policy re-check (#563, #642):** re-evaluates
+    `r.TLS` on every HTTP/1.1, HTTP/2, and HTTP/3 request against the listener's
+    current published `clientAuthBundle` (`mode`, CA pool, CRLs, and `verify_san`)
+    and the location's current `require_client_cert`, denying invalidated
+    certificates with `403 Forbidden` per stream without closing shared
+    connections.
+  - **Owned H1 upgraded sessions (#562):** owns both transport legs of `101
+    Switching Protocols` upgrades with `#284` exactly-once admission release,
+    serialized frame-boundary writes, unmasked `Jul -> client` RFC 6455 Close
+    (`1008 Policy Violation` on narrowing; `1001 Going Away` on shutdown or
+    listener removal), masked `Jul -> upstream` Close, RFC 6455 §7.1.4
+    `graceful_count` (completed Close handshake only) vs `forced_count` (EOF
+    without reciprocal Close, mid-frame timeout, or `2s` cutoff), and forced
+    socket closure for non-WebSocket opaque `101` upgrades.
+
 - Application sharing intent and guarded audience changes (#641 / `SHARE-01A`,
   ADR 0026 Decision 2, `docs/specs/application-sharing.md` §4.3, §4.5, §9.4,
   §9.5): adds optional per-location `[servers.locations.sharing]` (`mode`:

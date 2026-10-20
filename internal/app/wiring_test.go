@@ -5,12 +5,24 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
+	"jul/internal/auth"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
+	"jul/internal/redact"
 	"jul/internal/server"
+	"jul/internal/upstream"
 )
 
 func TestRateKeyKind(t *testing.T) {
@@ -305,5 +317,304 @@ func TestValidateRuntimeConfig(t *testing.T) {
 	}
 	if err := ValidateRuntimeConfig(ctx, bad); err == nil {
 		t.Error("ValidateRuntimeConfig(invalid) = nil, want an error")
+	}
+}
+
+func TestListenerClientAuthHelpers(t *testing.T) {
+	srvs := []config.ServerConfig{
+		{
+			Listen: "127.0.0.1:8443",
+			TLS: &config.TLSConfig{
+				Enabled: true,
+				ClientAuth: &config.ClientAuthConfig{
+					Mode:               "require",
+					CAFile:             "ca.pem",
+					ForwardCertificate: "chain",
+				},
+			},
+		},
+		{
+			Listen: "127.0.0.1:8443",
+		},
+	}
+	if !listenerClientAuthRequired(srvs, "127.0.0.1:8443") {
+		t.Fatal("expected listenerClientAuthRequired=true on shared TLS listener")
+	}
+	if listenerClientAuthRequired(srvs, "127.0.0.1:8080") {
+		t.Fatal("expected listenerClientAuthRequired=false on plain listener")
+	}
+	if got := listenerClientCertForward(srvs, "127.0.0.1:8443", srvs[1]); got != "chain" {
+		t.Fatalf("listenerClientCertForward from sibling = %q, want chain", got)
+	}
+	curLeaf := config.ServerConfig{
+		Listen: "127.0.0.1:8443",
+		TLS:    &config.TLSConfig{Enabled: true, ClientAuth: &config.ClientAuthConfig{ForwardCertificate: "leaf"}},
+	}
+	if got := listenerClientCertForward(srvs, "127.0.0.1:8443", curLeaf); got != "leaf" {
+		t.Fatalf("listenerClientCertForward from cur = %q, want leaf", got)
+	}
+	if got := listenerClientCertForward(srvs, "127.0.0.1:8080", config.ServerConfig{}); got != "none" {
+		t.Fatalf("listenerClientCertForward none = %q, want none", got)
+	}
+}
+
+func TestThird653LoadedHtpasswdMustGovernRetirement(t *testing.T) {
+	t.Run("stable_file_control", func(t *testing.T) { third653LoadedHtpasswd(t, false) })
+	t.Run("file_replaced_after_prepare", func(t *testing.T) { third653LoadedHtpasswd(t, true) })
+}
+
+func third653LoadedHtpasswd(t *testing.T, replaceFile bool) {
+	backendCanceled := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("stream") != "1" {
+			w.WriteHeader(200)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: start\n\n")
+		_ = http.NewResponseController(w).Flush()
+		<-r.Context().Done()
+		close(backendCanceled)
+	}))
+	defer backend.Close()
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "users.htpasswd")
+	both := []byte(fmt.Sprintf("alice:%s\nbob:%s\n", hash, hash))
+	onlyAlice := []byte(fmt.Sprintf("alice:%s\n", hash))
+	if err = os.WriteFile(path, both, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.ProxyTarget(backend.URL, freePort(t))
+	rid := "private"
+	cfg.Servers[0].Locations[0].RouteID = &rid
+	cfg.Servers[0].Locations[0].Auth = &config.AuthConfig{Basic: &config.BasicAuthConfig{File: path}}
+	initial, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replaceAfterPrepare atomic.Bool
+	factory := func(ctx context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		handlers, gen, commit, abort, err := f.Prepare(ctx, c)
+		if err == nil && replaceAfterPrepare.Swap(false) {
+			if writeErr := os.WriteFile(path, both, 0o600); writeErr != nil {
+				abort()
+				return nil, 0, nil, nil, writeErr
+			}
+		}
+		return handlers, gen, commit, abort, err
+	}
+	srv := server.New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), f.Log, factory, config.NewTOMLSource(""), func(context.Context, *config.Config) error { return nil })
+	ready := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	reload := make(chan server.ReloadRequest, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	defer func() { cancel(); <-done }()
+	<-ready
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	request := func(query string) (*http.Response, error) {
+		r, _ := http.NewRequest("GET", "http://"+cfg.Servers[0].Listen+"/"+query, nil)
+		r.SetBasicAuth("bob", "pw")
+		return client.Do(r)
+	}
+	oldStream, err := request("?stream=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldStream.Body.Close()
+	if oldStream.StatusCode != 200 {
+		t.Fatalf("before=%d", oldStream.StatusCode)
+	}
+	if err = os.WriteFile(path, onlyAlice, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := cfg.Clone()
+	next.Global.LogLevel = "debug"
+	cand, err := config.NewCandidate(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaceAfterPrepare.Store(replaceFile)
+	result := make(chan server.ReloadResult, 1)
+	// Also pass KeepOpenEntries: ["private"] to prove loaded htpasswd user removal
+	// (narrowed) overrides keep_open_entries even when the disk file is replaced after Prepare!
+	reload <- server.ReloadRequest{Source: server.ReloadSourceAdmin, Candidate: cand, KeepOpenEntries: []string{"private"}, Result: result}
+	rel := <-result
+	if rel.Outcome != server.ReloadAppliedLive {
+		t.Fatalf("reload=%+v", rel)
+	}
+	after, err := request("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = after.Body.Close()
+	if after.StatusCode != 401 {
+		t.Fatalf("fixture: newly loaded authenticator must deny removed bob, got %d", after.StatusCode)
+	}
+	select {
+	case <-backendCanceled:
+	case <-time.After(2200 * time.Millisecond):
+		t.Fatalf("loaded htpasswd removed bob, but his old stream survived the 2s bound; disk recapture hid the loaded change; retirements=%+v", rel.EntryRetirements)
+	}
+	if len(rel.EntryRetirements) != 1 || rel.EntryRetirements[0].EndedExchanges != 1 || rel.EntryRetirements[0].KeepOpen || !rel.EntryRetirements[0].CompletedWithinBound {
+		t.Fatalf("expected 1 retired exchange with keep_open overridden, got %+v", rel.EntryRetirements)
+	}
+}
+
+func TestFourth653SharedHtpasswdPathPerLocationIdentity(t *testing.T) {
+	t.Run("stable_shared_file_control", func(t *testing.T) { fourth653SharedHtpasswd(t, false) })
+	t.Run("file_replaced_between_location_loads", func(t *testing.T) { fourth653SharedHtpasswd(t, true) })
+}
+
+func fourth653SharedHtpasswd(t *testing.T, replaceBetweenLoads bool) {
+	backendCanceled := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("stream") != "1" {
+			w.WriteHeader(200)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: start\n\n")
+		_ = http.NewResponseController(w).Flush()
+		<-r.Context().Done()
+		close(backendCanceled)
+	}))
+	defer backend.Close()
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "users.htpasswd")
+	both := []byte(fmt.Sprintf("alice:%s\nbob:%s\n", hash, hash))
+	onlyAlice := []byte(fmt.Sprintf("alice:%s\n", hash))
+	if err = os.WriteFile(path, both, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.ProxyTarget(backend.URL, freePort(t))
+	ridPriv := "private"
+	ridOther := "other"
+	cfg.Servers[0].Locations = []config.LocationConfig{
+		{
+			RouteID:   &ridPriv,
+			Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+			ProxyPass: backend.URL,
+			Auth:      &config.AuthConfig{Basic: &config.BasicAuthConfig{File: path}},
+		},
+		{
+			RouteID:   &ridOther,
+			Match:     config.MatchConfig{Type: "prefix", Path: "/other"},
+			ProxyPass: backend.URL,
+			Auth:      &config.AuthConfig{Basic: &config.BasicAuthConfig{File: path}},
+		},
+	}
+	initial, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var swapAfterFirstLoad atomic.Bool
+	origNewAuth := newAuthenticator
+	newAuthenticator = func(ctx context.Context, ac config.AuthConfig, opts auth.Options) (*auth.Authenticator, error) {
+		a, aErr := origNewAuth(ctx, ac, opts)
+		if aErr == nil && swapAfterFirstLoad.CompareAndSwap(true, false) {
+			tmp := filepath.Join(dir, "users.htpasswd.tmp")
+			_ = os.WriteFile(tmp, both, 0o600)
+			_ = os.Rename(tmp, path)
+		}
+		return a, aErr
+	}
+	defer func() { newAuthenticator = origNewAuth }()
+
+	srv := server.New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), f.Log,
+		func(ctx context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+			return f.Prepare(ctx, c)
+		}, config.NewTOMLSource(""), func(context.Context, *config.Config) error { return nil })
+	ready := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	reload := make(chan server.ReloadRequest, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	defer func() { cancel(); <-done }()
+	<-ready
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	request := func(p string) (*http.Response, error) {
+		r, _ := http.NewRequest("GET", "http://"+cfg.Servers[0].Listen+p, nil)
+		r.SetBasicAuth("bob", "pw")
+		return client.Do(r)
+	}
+	oldStream, err := request("/?stream=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldStream.Body.Close()
+	if oldStream.StatusCode != 200 {
+		t.Fatalf("before=%d", oldStream.StatusCode)
+	}
+
+	if err = os.WriteFile(path, onlyAlice, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	swapAfterFirstLoad.Store(replaceBetweenLoads)
+
+	next, _ := cfg.Clone()
+	next.Global.LogLevel = "debug"
+	cand, err := config.NewCandidate(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan server.ReloadResult, 1)
+	reload <- server.ReloadRequest{
+		Source:          server.ReloadSourceAdmin,
+		Candidate:       cand,
+		KeepOpenEntries: []string{"private", "other"},
+		Result:          result,
+	}
+	rel := <-result
+	if rel.Outcome != server.ReloadAppliedLive {
+		t.Fatalf("reload=%+v", rel)
+	}
+
+	afterFirst, err := request("/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = afterFirst.Body.Close()
+	afterSecond, err := request("/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = afterSecond.Body.Close()
+
+	if afterFirst.StatusCode != 401 {
+		t.Fatalf("first route must deny removed bob with 401, got %d", afterFirst.StatusCode)
+	}
+	wantSecond := 401
+	if replaceBetweenLoads {
+		wantSecond = 200
+	}
+	if afterSecond.StatusCode != wantSecond {
+		t.Fatalf("second route status = %d, want %d", afterSecond.StatusCode, wantSecond)
+	}
+	select {
+	case <-backendCanceled:
+	case <-time.After(2200 * time.Millisecond):
+		t.Fatalf("D1: shared-path snapshot hid the first route's loaded Bob removal; old stream survived 2s despite new route returning 401; retirements=%+v", rel.EntryRetirements)
+	}
+	if len(rel.EntryRetirements) == 0 || rel.EntryRetirements[0].EndedExchanges != 1 || rel.EntryRetirements[0].KeepOpen || !rel.EntryRetirements[0].CompletedWithinBound {
+		t.Fatalf("expected private route retirement with keep_open overridden, got %+v", rel.EntryRetirements)
 	}
 }

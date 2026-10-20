@@ -52,12 +52,19 @@ type patchRequest struct {
 	// ambiguous targets; pre-#643 ordinals are unsafe even with a current CAS.
 	SelectorVersion string `json:"selector_version,omitempty"`
 
+	// ServerIndex, LocationIndex, and RouteSelector support the ADR 0026 §7
+	// coordinate and nested selector wire shapes for location_set_withdrawn.
+	ServerIndex   *int                  `json:"server_index,omitempty"`
+	LocationIndex *int                  `json:"location_index,omitempty"`
+	RouteSelector *routeSelectorPayload `json:"route_selector,omitempty"`
+
 	// Upstream target (upstream_* ops).
 	Upstream string `json:"upstream,omitempty"`
 
 	// Operation payloads (only the field relevant to Op is read).
 	Target    string          `json:"target,omitempty"`     // route_set_target: new proxy_pass
 	Enabled   *bool           `json:"enabled,omitempty"`    // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c / location_toggle_require_client_cert
+	Withdrawn *bool           `json:"withdrawn,omitempty"`  // location_set_withdrawn: stage-0 withdrawal gate
 	RateLimit *rateLimitPatch `json:"rate_limit,omitempty"` // route_set_rate_limit
 	Address   string          `json:"address,omitempty"`    // upstream_add_backend / upstream_remove_backend
 	Weight    int             `json:"weight,omitempty"`     // upstream_add_backend (defaults to 1)
@@ -194,6 +201,20 @@ type locationSharingPatch struct {
 	Mode             string  `json:"mode"`
 	AudienceLabel    *string `json:"audience_label,omitempty"`
 	ExternalEnforcer *string `json:"external_enforcer,omitempty"`
+}
+
+// routeSelectorPayload is the optional nested route selector object accepted
+// by location_set_withdrawn (ADR 0026 §7).
+type routeSelectorPayload struct {
+	RouteID         *string  `json:"route_id,omitempty"`
+	Listen          string   `json:"listen,omitempty"`
+	ServerNames     []string `json:"server_names,omitempty"`
+	MatchType       string   `json:"match_type,omitempty"`
+	Path            string   `json:"path,omitempty"`
+	MatchOrdinal    *int     `json:"match_ordinal,omitempty"`
+	SelectorVersion string   `json:"selector_version,omitempty"`
+	ServerIndex     *int     `json:"server_index,omitempty"`
+	LocationIndex   *int     `json:"location_index,omitempty"`
 }
 
 // locationPredicates carries the new method/header/query predicate facets for

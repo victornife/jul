@@ -849,6 +849,9 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 	case "location_clear_sharing":
 		return applyLocationSharingClear(c, req)
 
+	case "location_set_withdrawn":
+		return applyLocationWithdrawnSet(c, req)
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}

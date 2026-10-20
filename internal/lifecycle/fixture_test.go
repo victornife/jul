@@ -249,7 +249,8 @@ func fullConfig() *config.Config {
 					StreamMode:     "ndjson",
 					MaxMessageSize: config.Size(4 << 20),
 				},
-				Deny: true,
+				Deny:      true,
+				Withdrawn: true,
 				ResponseHeaders: []config.ResponseHeaderOp{{
 					Op:    "set",
 					Name:  "X-Frame-Options",

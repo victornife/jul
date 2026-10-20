@@ -490,13 +490,24 @@ func restartRequiredMessage(err error) string {
 // an admin request so it can be threaded through to the coordinator's async
 // finalizer for attribution in the terminal audit event (H-05).
 func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext {
+	var keepOpen []string
+	if r != nil && r.URL != nil {
+		for _, raw := range append(r.URL.Query()["keep_open_entries"], r.URL.Query()["keep_open"]...) {
+			for _, part := range strings.Split(raw, ",") {
+				if trimmed := strings.TrimSpace(part); trimmed != "" {
+					keepOpen = append(keepOpen, trimmed)
+				}
+			}
+		}
+	}
 	ctx := ApplyRequestContext{
-		Operation:      op,
-		Resource:       "config",
-		SourceIP:       adminClientIP(r),
-		Idempotency:    v1IdempotencyFromRequest(r),
-		StartedAt:      time.Now().UTC(),
-		RequestContext: r.Context(),
+		Operation:       op,
+		Resource:        "config",
+		SourceIP:        adminClientIP(r),
+		Idempotency:     v1IdempotencyFromRequest(r),
+		KeepOpenEntries: keepOpen,
+		StartedAt:       time.Now().UTC(),
+		RequestContext:  r.Context(),
 	}
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
 		ctx.Actor, ctx.TokenID = auditIdentityFields(id)

@@ -48,6 +48,12 @@ func resolvePatchOpAuditIdentity(c *config.Config, op patchRequest) routeAuditId
 	if id := resolveRouteAuditIdentity(c, op.locationTarget()); id != (routeAuditIdentity{}) {
 		return id
 	}
+	if op.Op == "location_set_withdrawn" {
+		if srv, loc, err := resolveWithdrawnLocation(c, op); err == nil && srv != nil && loc != nil {
+			resID, sel := auditIdentityOf(srv.Listen, srv.ServerNames, loc)
+			return routeAuditIdentity{ResourceID: resID, Selector: sel}
+		}
+	}
 	if op.Op != "location_add" && op.RouteID != nil {
 		if rid := strings.TrimSpace(*op.RouteID); rid != "" {
 			if _, loc, err := findLocationByRouteID(c, rid); err == nil && loc != nil {

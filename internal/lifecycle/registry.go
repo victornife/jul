@@ -642,6 +642,7 @@ func locationEntries() []Entry {
 		hot(loc+"client_max_body_size", SubServerLimits, reasonHandlerRebuild),
 		hot(loc+"send_timeout", SubListenerTimes, reasonHandlerRebuild),
 		hot(loc+"deny", SubAccessControl, reasonHandlerRebuild),
+		hot(loc+"withdrawn", SubAccessControl, reasonHandlerRebuild),
 		hot(loc+"fastcgi_params.*", SubFastCGI, reasonHandlerRebuild),
 		hot(loc+"fastcgi_pass", SubFastCGI, reasonHandlerRebuild),
 		hot(loc+"grpc", SubGRPC, reasonHandlerRebuild),

@@ -35,6 +35,9 @@ func parsePrefixes(cidrs []string) []netip.Prefix {
 	out := make([]netip.Prefix, 0, len(cidrs))
 	for _, c := range cidrs {
 		if p, err := netip.ParsePrefix(c); err == nil {
+			if p.Addr().Is4In6() && p.Bits() >= 96 {
+				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+			}
 			out = append(out, p.Masked())
 		}
 	}

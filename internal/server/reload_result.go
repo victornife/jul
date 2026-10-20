@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 	"jul/internal/versionid"
 )
 
@@ -84,7 +85,10 @@ type ReloadResult struct {
 	// changed in the published generation (added, removed, or new bytes —
 	// including at an unchanged path). Digests only, never module bytes.
 	PluginModules []PluginModuleChange `json:"plugin_modules,omitempty"`
-	Error         string               `json:"error,omitempty"`
+	// EntryRetirements reports the bounded per-entry exchange retirement outcomes
+	// produced by narrowing or uncertain changes in this publish (#642, #563, #562).
+	EntryRetirements []respwriter.EntryRetirementResult `json:"entry_retirements,omitempty"`
+	Error            string                             `json:"error,omitempty"`
 }
 
 // PluginModuleChange is one plugin's module content-identity transition. An

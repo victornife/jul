@@ -37,6 +37,10 @@ import (
 // newFirewall is waf.New, indirected so tests can count compilations.
 var newFirewall = waf.New
 
+// newAuthenticator is auth.New, indirected so tests can observe per-location
+// credential loading boundaries.
+var newAuthenticator = auth.New
+
 // HandlerFactory holds the process-lifetime dependencies for the per-reload
 // handler-tree builder. All fields are set once at startup and read on every
 // reload; the factory itself is safe for concurrent use via its internal mutex.
@@ -77,7 +81,14 @@ type HandlerFactory struct {
 	moduleChanges moduleChangeRecord
 	// liveWAF is the serving generation's compiled WAF policy (#440), also
 	// guarded by moduleMu.
-	liveWAF *admin.WAFEffectivePolicy
+	liveWAF    *admin.WAFEffectivePolicy
+	wafDigests wafDigestRecord
+}
+
+type wafDigestRecord struct {
+	genID  uint64
+	global string
+	byLoc  map[[2]int]string
 }
 
 type moduleChangeRecord struct {
@@ -214,6 +225,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		f.publishPluginModules(0, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAF(0, gen.wafPolicy)
+		f.publishWAFDigests(0, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -282,6 +294,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		f.publishPluginModules(genID, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAF(genID, gen.wafPolicy)
+		f.publishWAFDigests(genID, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		if commitMetricLabels != nil {
 			commitMetricLabels()
 			f.Metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
@@ -529,6 +542,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// scope, so a misconfiguration (for example, an unreadable htpasswd file)
 	// fails the reload with a clear error instead of surfacing per request.
 	authByScope := make(map[string]*auth.Authenticator)
+	gen.basicByLoc = make(map[[2]int][]byte)
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
 			loc := c.Servers[i].Locations[j]
@@ -551,7 +565,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if err != nil {
 				return nil, fmt.Errorf("servers[%d].locations[%d]: jwt.jwks_url: %w", i, j, err)
 			}
-			a, err := auth.New(ctx, *loc.Auth, auth.Options{
+			a, err := newAuthenticator(ctx, *loc.Auth, auth.Options{
 				Logger:      f.Log,
 				OnDecision:  f.Metrics.ObserveAuthDecision,
 				DialContext: authDial,
@@ -560,6 +574,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			})
 			if err != nil {
 				return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
+			}
+			if loc.Auth.Basic != nil {
+				if raw := a.BasicFileBytes(); len(raw) > 0 {
+					gen.basicByLoc[[2]int{i, j}] = raw
+				}
 			}
 			gen.Stage(a)
 			authByScope[key] = a
@@ -585,6 +604,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// rejected the configuration at startup.
 	wafByScope := make(map[string]*waf.Firewall)
 	wafReport := newWAFReport(c)
+	gen.wafDigestByLoc = make(map[[2]int]string)
 	var globalFW *waf.Firewall
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
@@ -611,7 +631,13 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			}
 			wafReport.protected(c.Servers[i], loc, fw.Info())
 			wafByScope[WAFScope(c.Servers[i], loc)] = fw
+			if loc.WAF != nil {
+				gen.wafDigestByLoc[[2]int{i, j}] = fw.SourceDigest()
+			}
 		}
+	}
+	if globalFW != nil {
+		gen.wafGlobalDigest = globalFW.SourceDigest()
 	}
 	gen.wafPolicy = wafReport.finish(time.Now())
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
@@ -665,20 +691,20 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		// without one nothing.
 		cors := middleware.CompileCORS(loc.CORS)
 		pf := middleware.Preflight(cors, locPreflightRateLimit(srv, loc), wf)
-		// Client-certificate handling applies when the server enables mutual
-		// TLS or the location requires a client certificate. It populates the
-		// $ssl_client_* identity for proxied requests and, when the location
-		// sets require_client_cert, rejects a request that arrives without a
-		// verified certificate with 403. It runs just inside the plugins and
-		// outside authentication so the identity is available to auth and the
-		// upstream.
+		// Client-certificate handling applies when any server block on the
+		// listener enables TLS or the location requires a client certificate.
+		// It re-evaluates r.TLS against the listener's current client_auth
+		// policy (mode, CA bundle, CRL, and SAN allow-list) on every request
+		// (#642, #563), populates $ssl_client_* identity for proxied requests,
+		// and rejects a request that lacks a required valid certificate with 403
+		// without closing shared H2/H3 connections.
 		var cc middleware.Middleware
-		if (srv.TLS != nil && srv.TLS.ClientAuth.Active()) || loc.RequireClientCert {
-			forward := middleware.ForwardCertNone
-			if srv.TLS != nil && srv.TLS.ClientAuth != nil {
-				forward = strings.ToLower(strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate))
-			}
-			cc = middleware.ClientCert(loc.RequireClientCert, forward)
+		listenerTLS := AddrServesTLS(c.Servers, srv.Listen)
+		if listenerTLS || (srv.TLS != nil && srv.TLS.ClientAuth.Active()) || loc.RequireClientCert {
+			forward := listenerClientCertForward(c.Servers, srv.Listen, srv)
+			locReqCert := loc.RequireClientCert || listenerClientAuthRequired(c.Servers, srv.Listen)
+			fallbackVerifier, _ := server.BuildClientCertVerifier(c.Servers, srv.Listen)
+			cc = middleware.ClientCertWithVerifier(locReqCert, forward, fallbackVerifier)
 		}
 		var pluginMW []middleware.Middleware
 		for _, name := range srv.Plugins {
@@ -781,7 +807,12 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		handlers[addr] = h
 	}
 
-	return handlers, nil
+	pluginDigests := make(map[string]string, len(gen.pluginModules))
+	for name, id := range gen.pluginModules {
+		pluginDigests[name] = strings.TrimPrefix(id.Digest, "sha256:")
+	}
+
+	return server.WrapHandlersWithLoadedAccess(handlers, gen.basicByLoc, gen.wafGlobalDigest, gen.wafDigestByLoc, pluginDigests), nil
 }
 
 // globalChain returns the per-listen-address middleware chain, outermost to
@@ -864,6 +895,18 @@ func upstreamKeysUsed(c *config.Config, upstreams map[string]config.UpstreamConf
 			}
 			if loc.GRPCTranscode != nil && loc.GRPCTranscode.Target != "" {
 				add(loc.GRPCTranscode.Target, "http")
+			}
+			if loc.Auth != nil {
+				if loc.Auth.ForwardAuth != nil && loc.Auth.ForwardAuth.URL != "" {
+					if u, err := url.Parse(loc.Auth.ForwardAuth.URL); err == nil && u.Host != "" {
+						add(u.Hostname(), u.Scheme)
+					}
+				}
+				if loc.Auth.JWT != nil && loc.Auth.JWT.JWKSURL != "" {
+					if u, err := url.Parse(loc.Auth.JWT.JWKSURL); err == nil && u.Host != "" {
+						add(u.Hostname(), u.Scheme)
+					}
+				}
 			}
 		}
 	}

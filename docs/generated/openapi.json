@@ -3920,6 +3920,13 @@
                             "additionalProperties": false
                           }
                         },
+                        "keep_open_eligible": {
+                          "type": "boolean"
+                        },
+                        "open_exchanges_snapshot": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
                         "provider_checklist_required": {
                           "type": "boolean"
                         },
@@ -3968,6 +3975,9 @@
                         "requires_acknowledgement": {
                           "type": "boolean"
                         },
+                        "retirement_bound": {
+                          "type": "string"
+                        },
                         "triggers_retirement": {
                           "type": "boolean"
                         }
@@ -3979,6 +3989,8 @@
                         "declared_mode_widened",
                         "display_label",
                         "expect",
+                        "keep_open_eligible",
+                        "open_exchanges_snapshot",
                         "provider_checklist_required",
                         "ref",
                         "requires_acknowledgement",
@@ -4919,6 +4931,13 @@
                             "additionalProperties": false
                           }
                         },
+                        "keep_open_eligible": {
+                          "type": "boolean"
+                        },
+                        "open_exchanges_snapshot": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
                         "provider_checklist_required": {
                           "type": "boolean"
                         },
@@ -4967,6 +4986,9 @@
                         "requires_acknowledgement": {
                           "type": "boolean"
                         },
+                        "retirement_bound": {
+                          "type": "string"
+                        },
                         "triggers_retirement": {
                           "type": "boolean"
                         }
@@ -4978,6 +5000,8 @@
                         "declared_mode_widened",
                         "display_label",
                         "expect",
+                        "keep_open_eligible",
+                        "open_exchanges_snapshot",
                         "provider_checklist_required",
                         "ref",
                         "requires_acknowledgement",
@@ -5442,6 +5466,13 @@
                         "additionalProperties": false
                       }
                     },
+                    "keep_open_eligible": {
+                      "type": "boolean"
+                    },
+                    "open_exchanges_snapshot": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
                     "provider_checklist_required": {
                       "type": "boolean"
                     },
@@ -5490,6 +5521,9 @@
                     "requires_acknowledgement": {
                       "type": "boolean"
                     },
+                    "retirement_bound": {
+                      "type": "string"
+                    },
                     "triggers_retirement": {
                       "type": "boolean"
                     }
@@ -5501,6 +5535,8 @@
                     "declared_mode_widened",
                     "display_label",
                     "expect",
+                    "keep_open_eligible",
+                    "open_exchanges_snapshot",
                     "provider_checklist_required",
                     "ref",
                     "requires_acknowledgement",
@@ -6465,6 +6501,12 @@
           "base_version": {
             "type": "string"
           },
+          "keep_open_entries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "ops": {
             "type": "array",
             "items": {
@@ -6885,6 +6927,10 @@
                 "listen": {
                   "type": "string"
                 },
+                "location_index": {
+                  "type": "integer",
+                  "format": "int64"
+                },
                 "match_ordinal": {
                   "type": "integer",
                   "format": "int64"
@@ -7171,8 +7217,51 @@
                 "route_id": {
                   "type": "string"
                 },
+                "route_selector": {
+                  "type": "object",
+                  "properties": {
+                    "listen": {
+                      "type": "string"
+                    },
+                    "location_index": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "match_ordinal": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "match_type": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "route_id": {
+                      "type": "string"
+                    },
+                    "selector_version": {
+                      "type": "string"
+                    },
+                    "server_index": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "server_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "selector_version": {
                   "type": "string"
+                },
+                "server_index": {
+                  "type": "integer",
+                  "format": "int64"
                 },
                 "server_names": {
                   "type": "array",
@@ -7346,6 +7435,9 @@
                 "weight": {
                   "type": "integer",
                   "format": "int64"
+                },
+                "withdrawn": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -7530,6 +7622,13 @@
                             "additionalProperties": false
                           }
                         },
+                        "keep_open_eligible": {
+                          "type": "boolean"
+                        },
+                        "open_exchanges_snapshot": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
                         "provider_checklist_required": {
                           "type": "boolean"
                         },
@@ -7578,6 +7677,9 @@
                         "requires_acknowledgement": {
                           "type": "boolean"
                         },
+                        "retirement_bound": {
+                          "type": "string"
+                        },
                         "triggers_retirement": {
                           "type": "boolean"
                         }
@@ -7589,6 +7691,8 @@
                         "declared_mode_widened",
                         "display_label",
                         "expect",
+                        "keep_open_eligible",
+                        "open_exchanges_snapshot",
                         "provider_checklist_required",
                         "ref",
                         "requires_acknowledgement",
@@ -8054,6 +8158,13 @@
                         "additionalProperties": false
                       }
                     },
+                    "keep_open_eligible": {
+                      "type": "boolean"
+                    },
+                    "open_exchanges_snapshot": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
                     "provider_checklist_required": {
                       "type": "boolean"
                     },
@@ -8102,6 +8213,9 @@
                     "requires_acknowledgement": {
                       "type": "boolean"
                     },
+                    "retirement_bound": {
+                      "type": "string"
+                    },
                     "triggers_retirement": {
                       "type": "boolean"
                     }
@@ -8113,6 +8227,8 @@
                     "declared_mode_widened",
                     "display_label",
                     "expect",
+                    "keep_open_eligible",
+                    "open_exchanges_snapshot",
                     "provider_checklist_required",
                     "ref",
                     "requires_acknowledgement",
@@ -8574,6 +8690,9 @@
           },
           "waf": {
             "type": "boolean"
+          },
+          "withdrawn": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -8584,7 +8703,8 @@
           "require_client_cert",
           "selector",
           "tls",
-          "waf"
+          "waf",
+          "withdrawn"
         ],
         "additionalProperties": false
       },

@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 421
-  schema_leaves: 354
-  registry_entries: 354
+  schema_paths: 422
+  schema_leaves: 355
+  registry_entries: 355
   startup_consumed: 29
   by_class:
-    hot_reload: 311
+    hot_reload: 312
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -1086,6 +1086,10 @@ fields:
     class: hot_reload
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.withdrawn"
+    class: hot_reload
+    subsystem: access_control
+    reason: "the handler tree is rebuilt from the effective config on each successful reload"
   - path: "servers.*.max_header_bytes"
     class: new_listener_only
     subsystem: listener_limits

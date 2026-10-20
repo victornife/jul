@@ -83,4 +83,12 @@ func TestWAFEffectivePublishesServingGeneration(t *testing.T) {
 	if !strings.Contains(string(raw), `"generation":7`) {
 		t.Fatalf("json = %s", raw)
 	}
+
+	f.publishWAFDigests(7, "g-dig", map[[2]int]string{{0, 1}: "loc-dig"})
+	if gDig, byLoc := f.WAFSourceDigests(7); gDig != "g-dig" || byLoc[[2]int{0, 1}] != "loc-dig" {
+		t.Fatalf("WAFSourceDigests(7) = %q, %v", gDig, byLoc)
+	}
+	if gDig, byLoc := f.WAFSourceDigests(999); gDig != "" || byLoc != nil {
+		t.Fatalf("WAFSourceDigests(999) = %q, %v; want empty", gDig, byLoc)
+	}
 }

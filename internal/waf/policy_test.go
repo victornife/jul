@@ -196,8 +196,11 @@ SecRule REQUEST_URI "@contains /admin" "id:20002,phase:1,deny,status:403"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !fwA.SourceChanged(fwChanged) {
+	if !fwA.SourceChanged(fwChanged) || fwA.SourceDigest() == "" || fwChanged.SourceDigest() == "" || fwA.SourceDigest() == fwChanged.SourceDigest() {
 		t.Fatal("changed external bytes reported SourceChanged=false")
+	}
+	if (*Firewall)(nil).SourceDigest() != "" {
+		t.Fatal("expected empty SourceDigest on nil Firewall")
 	}
 
 	// A candidate that fails to compile yields no Firewall, so no info.

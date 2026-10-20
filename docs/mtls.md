@@ -282,25 +282,36 @@ go test -run '^$' -bench 'Handshake|MTLS' -benchmem ./internal/server/
 
 ## Operational notes
 
-- **Hot reload (#486).** `client_auth` (mode, CA bundle, CRL, SAN list) is
-  rebuilt during reload and swapped for new TCP TLS and QUIC handshakes; a file
-  rewritten in place counts as a change. Connections already established keep
-  the certificate they were accepted with. Per-location `require_client_cert` is
-  part of normal routing and applies to the next request, but it checks only
-  that the connection presented a verified certificate at its handshake: a
-  certificate revoked afterwards still satisfies it on that connection. The admin listener's
-  `[admin.tls.client_auth]` is still read when the admin listener starts.
-- **Established streams and revocation.** An HTTP/1 or HTTP/2 stream can keep
-  exchanging data after its certificate is added to the CRL; the next full or
-  resumed handshake is checked against the new policy. This is not immediate
-  connection revocation: there is no maximum connection age or enforced
-  revocation time bound, and asking a client to reconnect cannot enforce one.
-  Jul has no targeted session-termination API. Operators must use their
-  upstream/backend, external load balancer or process termination controls
-  where immediate disconnection is required. A future age policy must close
-  or renew the underlying TLS connection, not merely one HTTP/2 stream. See the
+- **Hot reload and per-request policy re-check (#486, #642, #563).**
+  `client_auth` (`mode`, CA bundle, CRL, `verify_san`) is rebuilt during reload,
+  swapped for new and resumed TCP TLS and QUIC handshakes, **and** re-evaluated
+  on every HTTP/1.1, HTTP/2, and HTTP/3 request arriving on the listener before
+  location checks and the route action run; a file rewritten in place counts as
+  a change. When a reload revokes a client certificate in `crl_file`, removes
+  its issuer from `ca_file`, removes its identity from `verify_san`, raises
+  `client_auth.mode` to `"require"`, or sets `require_client_cert = true` on a
+  location, the next request to a certificate-requiring route on an
+  already-established HTTP/1.1 keep-alive, HTTP/2, or HTTP/3 connection is
+  rejected with `403 Forbidden` on that stream without closing the underlying
+  connection (so sibling routes multiplexed on the same HTTP/2 or HTTP/3
+  connection continue uninterrupted). The admin listener's
+  `[admin.tls.client_auth]` is read when the admin listener starts or reloads.
+- **Established streams and bounded retirement on narrowing (#642, #563, #562).**
+  When a reload narrows effective access for a route (including adding a
+  revoked serial to `crl_file`, raising `client_auth.mode` to `"require"`,
+  setting `require_client_cert = true`, or setting `withdrawn = true`) or makes
+  an `uncertain` access change (such as rotating `ca_file` or changing
+  `verify_san` without a `keep_open_entries` exception), Jul retires active
+  in-flight HTTP/1.1, HTTP/2, and HTTP/3 streams and owned HTTP/1.1 `101`
+  upgraded sessions on the affected entry within a server-enforced **`2s`
+  bound** (`1s` graceful protocol close window + `1s` forced cutoff from
+  `Publish`). On a route where client certificates remain optional
+  (`client_auth.mode = "request"` and `require_client_cert = false`) and no
+  route narrowing occurred, an in-flight stream can continue across a reload
+  (`TLS-1`, `TLS-2`). Jul does not enforce a periodic maximum connection-age
+  timer or expose an ad-hoc session-termination API. See the
   [long-lived connection matrix](reload-semantics.md#long-lived-connection-matrix)
-  for named client-visible tests and the WebSocket/gRPC shutdown boundaries.
+  for named client-visible tests and the WebSocket/gRPC retirement boundaries.
 - **Server vs client certificates are separate.** The server certificate can
   come from ACME or static `cert`/`key`; `ca_file` is only the trust anchor for
   *client* certificates. They do not interfere.

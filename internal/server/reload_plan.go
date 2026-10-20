@@ -13,6 +13,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/observability"
+	"jul/internal/respwriter"
 	"jul/internal/upstream"
 )
 
@@ -92,6 +93,12 @@ type ReloadPlan struct {
 	newAddrs        map[string]struct{}
 	stagedListeners map[string]*listenerEntry
 	bindErrs        []string
+
+	keepOpenEntries       []string
+	nextAccessFiles       *LoadedAccessFiles
+	pluginChanges         []PluginModuleChange
+	waitEntryRetirements  func() []respwriter.EntryRetirementResult
+	hasDeferredUnaryDrain bool
 
 	// published is true once Publish has succeeded; it gates Abort safety.
 	published bool
@@ -246,6 +253,13 @@ func (p *ReloadPlan) Prepare() error {
 		if clientAuth != nil {
 			p.Runtime.add(clientAuth)
 		}
+		p.nextAccessFiles = captureLoadedAccessFilesFromHandlers(p.Candidate.Effective, p.Handlers)
+		p.s.mu.Lock()
+		p.nextAccessFiles.applyLiveMTLSListeners(p.s.listeners, nil)
+		p.s.mu.Unlock()
+		if clientAuth != nil {
+			p.nextAccessFiles.applyMTLSRotation(clientAuth)
+		}
 		return nil
 	})
 }
@@ -296,6 +310,10 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// handler generation carries the backend view of the configuration it
 	// represents, not the previous generation's live state.
 	snapshots, retirePrev := p.handlerCommit()
+	if p.s.WAFSourceDigests != nil && p.nextAccessFiles != nil {
+		gDig, byLoc := p.s.WAFSourceDigests(p.GenID)
+		p.nextAccessFiles.applyWAFDigests(gDig, byLoc)
+	}
 	// Register the new generation's redaction state and install the union of
 	// all active generations so in-flight requests on the previous generation
 	// continue to have their secrets masked. The previous generation's retire
@@ -306,7 +324,17 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// PreparedRuntime components (e.g. a future certificate provider swap)
 	// commit before the new handler generation becomes reachable, so a new
 	// vhost route can never be selected against a stale candidate mapping.
+	p.s.mu.Lock()
+	if p.s.loadedAccessFiles != nil && len(p.s.listeners) > 0 {
+		p.s.loadedAccessFiles.applyLiveMTLSListeners(p.s.listeners, nil)
+	}
+	p.s.mu.Unlock()
 	p.Runtime.Commit()
+	p.s.mu.Lock()
+	if p.nextAccessFiles != nil && (len(p.s.listeners) > 0 || len(p.stagedListeners) > 0) {
+		p.nextAccessFiles.applyLiveMTLSListeners(p.s.listeners, p.stagedListeners)
+	}
+	p.s.mu.Unlock()
 
 	// #99: publish the candidate root sampling ratio inside the same no-fail
 	// Publish transaction, before candidate handlers/config become reachable.
@@ -332,8 +360,33 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	p.s.updateAltSvcState(p.Candidate.Effective)
 
 	prevGen := p.s.handlers.Load()
+	var prevGenID uint64
+	if prevGen != nil {
+		prevGenID = prevGen.genID
+	}
+	if p.s.PluginModuleChanges != nil {
+		p.pluginChanges = p.s.PluginModuleChanges(p.GenID)
+	}
+	transitions := ComputePublishEntryTransitions(
+		p.s.rawCfg, p.s.cfg, p.s.loadedAccessFiles,
+		p.Candidate.Raw, p.Candidate.Effective, p.nextAccessFiles,
+		p.pluginChanges, p.keepOpenEntries,
+	)
+	if p.s.exchanges.ActiveCount() > 0 {
+		for _, tr := range transitions {
+			if tr.Retire && !tr.Mandatory && !tr.Removed {
+				p.hasDeferredUnaryDrain = true
+				break
+			}
+		}
+	}
+
 	newGen := p.s.newGeneration(p.Handlers, snapshots, p.GenID)
 	p.s.handlers.Store(newGen)
+	p.waitEntryRetirements = p.s.exchanges.PublishGeneration(prevGenID, p.GenID, transitions)
+	if p.nextAccessFiles != nil {
+		p.s.loadedAccessFiles = p.nextAccessFiles
+	}
 
 	// Update the authoritative config pointers so code that still reads s.cfg
 	// directly sees the new effective config. Then publish the coherent runtime

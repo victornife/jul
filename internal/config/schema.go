@@ -555,6 +555,15 @@ type LocationConfig struct {
 	// Deny rejects matching requests with 403.
 	Deny bool `toml:"deny"`
 
+	// Withdrawn enables the outermost per-location withdrawal gate (ADR 0026
+	// #642 amendment, spec §8.4/§9.3). When true, requests selecting this
+	// location are answered immediately with 403 Forbidden and
+	// Cache-Control: no-store before location rewrites, request plugins, CORS
+	// preflight, client-certificate handling, authentication, WAF, rate
+	// limiting, caching, and the location's action, while preserving the
+	// route's target and modifiers in place for single-edit recovery.
+	Withdrawn bool `toml:"withdrawn,omitempty"`
+
 	// Headers added/overridden on the upstream request. Values may use
 	// variables such as $host, $remote_addr, $proxy_add_x_forwarded_for.
 	Headers map[string]string `toml:"headers"`

@@ -4,9 +4,13 @@
 package admin
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -16,6 +20,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/rbac"
+	"jul/internal/respwriter"
 	"jul/internal/server"
 )
 
@@ -1821,6 +1826,901 @@ server_names = ["app.example.com"]
 		}
 		if seenEntries != 50 || pages < 2 {
 			t.Fatalf("expected 50 entries across multiple <=1 MiB pages, got %d entries across %d page(s)", seenEntries, pages)
+		}
+	})
+}
+
+func TestCompleteWithdrawalAndKeepOpenEligibility(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+
+	baseCfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen:      "127.0.0.1:8080",
+			ServerNames: []string{"dash.example.com"},
+			Locations: []config.LocationConfig{
+				{
+					RouteID:   strPtrTest("dash"),
+					Match:     config.MatchConfig{Type: "prefix", Path: "/dash"},
+					ProxyPass: "http://127.0.0.1:9001",
+					Sharing:   &config.SharingConfig{Mode: "restricted"},
+				},
+				{
+					Match:     config.MatchConfig{Type: "prefix", Path: "/no-id"},
+					ProxyPass: "http://127.0.0.1:9001",
+				},
+			},
+		}},
+	}
+
+	// 1. location_set_withdrawn is repeatable and works by route_id OR by selector without route_id.
+	if !IsPatchOpRepeatable(patchRequest{Op: "location_set_withdrawn"}) {
+		t.Fatal("location_set_withdrawn must be classified as repeatable")
+	}
+	c1, _ := baseCfg.Clone()
+	msg1, err := applyPatch(c1, patchRequest{
+		Op:        "location_set_withdrawn",
+		RouteID:   strPtrTest("dash"),
+		Withdrawn: boolPtr(true),
+	})
+	if err != nil || !c1.Servers[0].Locations[0].Withdrawn || !strings.Contains(msg1, "withdrawn gate enabled") {
+		t.Fatalf("location_set_withdrawn by route_id failed: msg=%q err=%v", msg1, err)
+	}
+	// Works without route_id using selector coordinates.
+	msg2, err := applyPatch(c1, patchRequest{
+		Op:          "location_set_withdrawn",
+		Listen:      "127.0.0.1:8080",
+		ServerNames: []string{"dash.example.com"},
+		MatchType:   "prefix",
+		Path:        "/no-id",
+		Withdrawn:   boolPtr(true),
+	})
+	if err != nil || !c1.Servers[0].Locations[1].Withdrawn || !strings.Contains(msg2, "withdrawn gate enabled") {
+		t.Fatalf("location_set_withdrawn by selector without route_id failed: msg=%q err=%v", msg2, err)
+	}
+	// Clear withdrawn gate.
+	msg3, err := applyPatch(c1, patchRequest{
+		Op:        "location_set_withdrawn",
+		RouteID:   strPtrTest("dash"),
+		Withdrawn: boolPtr(false),
+	})
+	if err != nil || c1.Servers[0].Locations[0].Withdrawn || !strings.Contains(msg3, "withdrawn gate cleared") {
+		t.Fatalf("location_set_withdrawn(false) failed: msg=%q err=%v", msg3, err)
+	}
+	// Error cases for location_set_withdrawn.
+	if _, err := applyPatch(c1, patchRequest{Op: "location_set_withdrawn", RouteID: strPtrTest("dash")}); err == nil {
+		t.Fatal("expected missing withdrawn payload to be rejected")
+	}
+	if _, err := applyPatch(c1, patchRequest{Op: "location_set_withdrawn", Withdrawn: boolPtr(true)}); err == nil {
+		t.Fatal("expected missing target to be rejected")
+	}
+
+	// 2. Plan delta for withdrawn = true (narrowed, keep_open_eligible = false, retirement_bound = 2s)
+	//    and withdrawn = false (widened, requires_acknowledgement = true).
+	exReg := respwriter.NewExchangeRegistry()
+	exReg.SetInitialGeneration(1)
+	reqDummy, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://dash.example.com/dash", nil)
+	_, _, _, relEx := exReg.Admit(httptest.NewRecorder(), reqDummy, respwriter.EntryCoord{
+		GenID:         1,
+		ListenAddr:    "127.0.0.1:8080",
+		ServerIndex:   0,
+		LocationIndex: 0,
+		RouteID:       "dash",
+	})
+	defer relEx()
+
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{
+				Generation:      1,
+				RawConfig:       baseCfg,
+				EffectiveConfig: baseCfg,
+				Exchanges:       exReg,
+			}
+		},
+	})
+
+	withdrawnCand, _ := baseCfg.Clone()
+	withdrawnCand.Servers[0].Locations[0].Withdrawn = true
+	repWithdraw := s.BuildSharingPlanReport(baseCfg, baseCfg, withdrawnCand, withdrawnCand, true, nil, true)
+	if len(repWithdraw.Entries) != 1 {
+		t.Fatalf("expected 1 delta entry, got %+v", repWithdraw.Entries)
+	}
+	dWithdraw := repWithdraw.Entries[0]
+	if dWithdraw.Class != AudienceDeltaNarrowed || !dWithdraw.TriggersRetirement || dWithdraw.KeepOpenEligible || dWithdraw.RetirementBound != "2s" || dWithdraw.OpenExchangesSnapshot != 1 {
+		t.Fatalf("unexpected withdrawal delta: %+v", dWithdraw)
+	}
+
+	repRestore := s.BuildSharingPlanReport(withdrawnCand, withdrawnCand, baseCfg, baseCfg, true, nil, true)
+	if len(repRestore.Entries) != 1 || repRestore.Entries[0].Class != AudienceDeltaWidened || !repRestore.Entries[0].RequiresAcknowledgement || repRestore.Entries[0].TriggersRetirement {
+		t.Fatalf("unexpected restore delta: %+v", repRestore.Entries)
+	}
+
+	// 3. Point 1: Pure uncertain change (backend target change) sets KeepOpenEligible = true,
+	//    while mixed change (adding CIDR restriction + backend target change) sets
+	//    Class = uncertain AND KeepOpenEligible = false!
+	pureUncertainCand, _ := baseCfg.Clone()
+	pureUncertainCand.Servers[0].Locations[0].ProxyPass = "http://127.0.0.1:9002"
+	repPure := s.BuildSharingPlanReport(baseCfg, baseCfg, pureUncertainCand, pureUncertainCand, true, nil, true)
+	if len(repPure.Entries) != 1 || repPure.Entries[0].Class != AudienceDeltaUncertain || !repPure.Entries[0].TriggersRetirement || !repPure.Entries[0].KeepOpenEligible {
+		t.Fatalf("pure uncertain change must have KeepOpenEligible=true, got %+v", repPure.Entries)
+	}
+
+	mixedCand, _ := pureUncertainCand.Clone()
+	mixedCand.Servers[0].Locations[0].Auth = &config.AuthConfig{Allow: []string{"10.0.0.0/8"}}
+	repMixed := s.BuildSharingPlanReport(baseCfg, baseCfg, mixedCand, mixedCand, true, nil, true)
+	if len(repMixed.Entries) != 1 || repMixed.Entries[0].Class != AudienceDeltaUncertain || !repMixed.Entries[0].TriggersRetirement || repMixed.Entries[0].KeepOpenEligible {
+		t.Fatalf("Point 1: mixed narrowing + uncertain change must have Class=uncertain and KeepOpenEligible=false, got %+v", repMixed.Entries)
+	}
+
+	// 4. diffConfigs covers Withdrawn false->true and true->false (with warning),
+	//    plus location_set_withdrawn error branches and SharingView LastRetirement population.
+	diffWithdraw := diffConfigs(baseCfg, withdrawnCand)
+	if len(diffWithdraw.Modifications) == 0 {
+		t.Fatalf("expected Modifications diff entry when setting Withdrawn=true, got %+v", diffWithdraw)
+	}
+	diffRestore := diffConfigs(withdrawnCand, baseCfg)
+	if len(diffRestore.Modifications) == 0 || len(diffRestore.Warnings) == 0 {
+		t.Fatalf("expected Modifications diff entry and warning when clearing Withdrawn=true, got %+v", diffRestore)
+	}
+
+	// Additional location_set_withdrawn branches (Enabled fallback, mismatched route_id, unknown route_id, bad location target).
+	if _, err := applyPatch(c1, patchRequest{
+		Op:      "location_set_withdrawn",
+		RouteID: strPtrTest("dash"),
+		Enabled: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("location_set_withdrawn via Enabled fallback: %v", err)
+	}
+	if _, err := applyPatch(c1, patchRequest{
+		Op:          "location_set_withdrawn",
+		Listen:      "127.0.0.1:8080",
+		ServerNames: []string{"dash.example.com"},
+		MatchType:   "prefix",
+		Path:        "/dash",
+		RouteID:     strPtrTest("wrong-id"),
+		Withdrawn:   boolPtr(true),
+	}); err == nil {
+		t.Fatal("expected mismatched route_id to fail")
+	}
+	if _, err := applyPatch(c1, patchRequest{
+		Op:        "location_set_withdrawn",
+		RouteID:   strPtrTest("nonexistent-id"),
+		Withdrawn: boolPtr(true),
+	}); err == nil {
+		t.Fatal("expected unknown route_id to fail")
+	}
+	if _, err := applyPatch(c1, patchRequest{
+		Op:        "location_set_withdrawn",
+		Listen:    "127.0.0.1:9999",
+		Path:      "/missing",
+		Withdrawn: boolPtr(true),
+	}); err == nil {
+		t.Fatal("expected missing location target to fail")
+	}
+
+	// Populate LastRetirementResults on exReg and verify BuildSharingViewPage attaches LastRetirement
+	// both by route_id ("dash") and by coordinate (0, 1 for "/no-id").
+	waitRet := exReg.PublishGeneration(1, 2, []respwriter.EntryTransition{
+		{
+			FromServerIndex:   0,
+			FromLocationIndex: 0,
+			FromRouteID:       "dash",
+			ToServerIndex:     0,
+			ToLocationIndex:   0,
+			ToRouteID:         "dash",
+			Retire:            true,
+			Mandatory:         true,
+			DisplayLabel:      "dash",
+		},
+		{
+			FromServerIndex:   0,
+			FromLocationIndex: 1,
+			ToServerIndex:     0,
+			ToLocationIndex:   1,
+			Retire:            true,
+			Mandatory:         true,
+			DisplayLabel:      "/no-id",
+		},
+	})
+	go func() {
+		relEx()
+	}()
+	_ = waitRet()
+
+	sGen2 := newTestServer(t, config.AdminConfig{}, Deps{
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{
+				Generation:      2,
+				RawConfig:       baseCfg,
+				EffectiveConfig: baseCfg,
+				Exchanges:       exReg,
+			}
+		},
+	})
+	viewWithRet, err := sGen2.BuildSharingViewPage("", 50)
+	if err != nil {
+		t.Fatalf("BuildSharingViewPage with LastRetirement: %v", err)
+	}
+	if len(viewWithRet.Entries) != 2 || viewWithRet.Entries[0].Serving.LastRetirement == nil || viewWithRet.Entries[1].Serving.LastRetirement == nil {
+		t.Fatalf("expected LastRetirement on both entries in SharingViewPage, got %+v", viewWithRet.Entries)
+	}
+}
+
+func TestAudit653ADRWithdrawalCoordinatesDecode(t *testing.T) {
+	var req patchApplyRequest
+	body := `{"base_version":"version","ops":[{"op":"location_set_withdrawn","withdrawn":true,"server_index":0,"location_index":0}]}`
+	if err := decodePatchJSON(strings.NewReader(body), &req); err != nil {
+		t.Fatalf("ADR 0026 withdrawal coordinate wire shape rejected: %v", err)
+	}
+	if len(req.Ops) != 1 || req.Ops[0].ServerIndex == nil || *req.Ops[0].ServerIndex != 0 || req.Ops[0].LocationIndex == nil || *req.Ops[0].LocationIndex != 0 {
+		t.Fatalf("unexpected decoded op: %+v", req.Ops)
+	}
+
+	// Verify applyPatch works for both server_index+location_index and route_selector wire shapes.
+	cfg := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: "127.0.0.1:8080",
+			Locations: []config.LocationConfig{{
+				RouteID: strPtrTest("dash"),
+				Match:   config.MatchConfig{Type: "prefix", Path: "/dash"},
+				Return:  200,
+			}},
+		}},
+	}
+	if _, err := applyPatch(cfg, req.Ops[0]); err != nil || !cfg.Servers[0].Locations[0].Withdrawn {
+		t.Fatalf("applyPatch with server_index+location_index failed: %v", err)
+	}
+	if id := resolvePatchOpAuditIdentity(cfg, req.Ops[0]); id.ResourceID != "dash" {
+		t.Fatalf("expected resolvePatchOpAuditIdentity ResourceID=dash, got %+v", id)
+	}
+	if !req.Ops[0].usesPositionalCoordinates() {
+		t.Fatal("expected usesPositionalCoordinates=true for server_index+location_index")
+	}
+
+	var reqSel patchApplyRequest
+	bodySel := `{"base_version":"version","ops":[{"op":"location_set_withdrawn","withdrawn":false,"route_selector":{"route_id":"dash","server_index":0,"location_index":0}}]}`
+	if err := decodePatchJSON(strings.NewReader(bodySel), &reqSel); err != nil {
+		t.Fatalf("ADR 0026 route_selector wire shape rejected: %v", err)
+	}
+	if _, err := applyPatch(cfg, reqSel.Ops[0]); err != nil || cfg.Servers[0].Locations[0].Withdrawn {
+		t.Fatalf("applyPatch with route_selector failed: %v", err)
+	}
+
+	// Out-of-bounds or partial server_index/location_index is rejected cleanly.
+	idxZero := 0
+	idxOOB := 9
+	boolTrue := true
+	if _, err := applyPatch(cfg, patchRequest{Op: "location_set_withdrawn", Withdrawn: &boolTrue, ServerIndex: &idxZero}); err == nil {
+		t.Fatal("expected partial server_index without location_index to fail")
+	}
+	if _, err := applyPatch(cfg, patchRequest{Op: "location_set_withdrawn", Withdrawn: &boolTrue, ServerIndex: &idxOOB, LocationIndex: &idxZero}); err == nil {
+		t.Fatal("expected out-of-range server_index to fail")
+	}
+	if _, err := applyPatch(cfg, patchRequest{Op: "location_set_withdrawn", Withdrawn: &boolTrue, ServerIndex: &idxZero, LocationIndex: &idxOOB}); err == nil {
+		t.Fatal("expected out-of-range location_index to fail")
+	}
+}
+
+func TestFifth653CORSMixedPreview(t *testing.T) {
+	id := "api"
+	before := &config.Config{
+		Servers: []config.ServerConfig{{
+			Listen: "127.0.0.1:8080",
+			Locations: []config.LocationConfig{{
+				RouteID:   &id,
+				Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+				ProxyPass: "http://127.0.0.1:9001",
+				CORS: &config.CORSConfig{
+					Enabled:          true,
+					AllowedOrigins:   []string{"https://old.example"},
+					AllowCredentials: true,
+				},
+			}},
+		}},
+	}
+	after, _ := before.Clone()
+	after.Servers[0].Locations[0].CORS.AllowedOrigins = []string{"https://old.example", "https://new.example"}
+	after.Servers[0].Locations[0].CORS.AllowCredentials = false
+
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	rep := s.BuildSharingPlanReport(before, before, after, after, true, nil, true)
+	if len(rep.Entries) != 1 {
+		t.Fatalf("expected 1 delta entry, got %+v", rep.Entries)
+	}
+	d := rep.Entries[0]
+	if d.Class != AudienceDeltaUncertain || !d.TriggersRetirement || d.KeepOpenEligible || d.RetirementBound != "2s" {
+		t.Fatalf("expected mixed CORS change to be uncertain, triggers_retirement=true, keep_open_eligible=false, got %+v", d)
+	}
+	pub := server.ComputePublishEntryTransitions(before, before, nil, after, after, nil, nil, []string{"api"})
+	if len(pub) != 1 || !pub[0].Retire || !pub[0].Mandatory || pub[0].KeepOpen {
+		t.Fatalf("expected publish transition to enforce mandatory retirement even with keep_open_entries, got %+v", pub)
+	}
+
+	// Reverse mixed direction: remove origin while enabling credentials.
+	repRev := s.BuildSharingPlanReport(after, after, before, before, true, nil, true)
+	if len(repRev.Entries) != 1 || repRev.Entries[0].Class != AudienceDeltaUncertain || !repRev.Entries[0].TriggersRetirement || repRev.Entries[0].KeepOpenEligible {
+		t.Fatalf("expected reverse mixed CORS change to be uncertain with keep_open_eligible=false, got %+v", repRev.Entries)
+	}
+	pubRev := server.ComputePublishEntryTransitions(after, after, nil, before, before, nil, nil, []string{"api"})
+	if len(pubRev) != 1 || !pubRev[0].Retire || !pubRev[0].Mandatory || pubRev[0].KeepOpen {
+		t.Fatalf("expected reverse mixed CORS publish transition to enforce mandatory retirement, got %+v", pubRev)
+	}
+}
+
+func TestSixth653StatusDoesNotMisattributeRemovedExchanges(t *testing.T) {
+	t.Run("removed-entry-and-still-draining-websocket-not-charged-to-replacement-or-idless", func(t *testing.T) {
+		reg := respwriter.NewExchangeRegistry()
+		reg.Grace = 500 * time.Millisecond
+		reg.Bound = 1 * time.Second
+		reg.SetInitialGeneration(1)
+
+		req := httptest.NewRequest(http.MethodGet, "http://example.com/old", nil)
+		_, _, _, releaseHTTP := reg.Admit(httptest.NewRecorder(), req, respwriter.EntryCoord{
+			GenID:         1,
+			ListenAddr:    "127.0.0.1:8080",
+			ServerIndex:   0,
+			LocationIndex: 0,
+			RouteID:       "removed-entry",
+		})
+
+		// Also admit a hijacked WebSocket on a removed ID-less entry at (0, 1) that stays open while draining.
+		cProxy, cPeer := net.Pipe()
+		defer cProxy.Close()
+		defer cPeer.Close()
+		go func() { _, _ = io.Copy(io.Discard, cPeer) }()
+		wsReq := httptest.NewRequest(http.MethodGet, "http://example.com/ws-old", nil)
+		wsReq.Header.Set("Upgrade", "websocket")
+		wWS, _, _, releaseWS := reg.Admit(&adminHijackRecorder{ResponseRecorder: httptest.NewRecorder(), conn: cProxy}, wsReq, respwriter.EntryCoord{
+			GenID:         1,
+			ListenAddr:    "127.0.0.1:8080",
+			ServerIndex:   0,
+			LocationIndex: 1,
+		})
+		if hj, ok := wWS.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = conn.Write([]byte("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"))
+		}
+
+		wait := reg.PublishGeneration(1, 2, []respwriter.EntryTransition{
+			{
+				FromServerIndex:   0,
+				FromLocationIndex: 0,
+				FromRouteID:       "removed-entry",
+				Removed:           true,
+				Retire:            true,
+				Mandatory:         true,
+			},
+			{
+				FromServerIndex:   0,
+				FromLocationIndex: 1,
+				Removed:           true,
+				Retire:            true,
+				Mandatory:         true,
+			},
+		})
+
+		newID := "new-entry"
+		current := &config.Config{
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{
+					{
+						RouteID: &newID,
+						Match:   config.MatchConfig{Type: "prefix", Path: "/new"},
+						Return:  200,
+					},
+					{
+						Match:  config.MatchConfig{Type: "prefix", Path: "/idless-replacement"},
+						Return: 200,
+					},
+				},
+			}},
+		}
+		s := newTestServer(t, config.AdminConfig{}, Deps{
+			LiveSnapshot: func() server.LiveSnapshot {
+				return server.LiveSnapshot{
+					Generation:      2,
+					RawConfig:       current,
+					EffectiveConfig: current,
+					Exchanges:       reg,
+				}
+			},
+		})
+
+		pageWhileRetiring, err := s.BuildSharingViewPage("", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range pageWhileRetiring.Entries {
+			if entry.Serving == nil || entry.Serving.OpenExchanges != 0 {
+				t.Fatalf("expected 0 open exchanges on replacement entries while removed entries drain, got %+v", entry.Serving)
+			}
+		}
+
+		_ = cPeer.Close()
+		releaseWS()
+		releaseHTTP()
+		_ = wait()
+
+		pageAfterRelease, err := s.BuildSharingViewPage("", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range pageAfterRelease.Entries {
+			if entry.Serving == nil || entry.Serving.OpenExchanges != 0 {
+				t.Fatalf("expected 0 open exchanges after release, got %+v", entry.Serving)
+			}
+		}
+	})
+
+	t.Run("route-reorder-id-change-and-idless-surviving-exchanges", func(t *testing.T) {
+		reg := respwriter.NewExchangeRegistry()
+		reg.SetInitialGeneration(1)
+
+		// Admit 1 exchange on route "alpha" at (0, 0), 0 on "beta" at (0, 1), and 1 on id-less "/anon" at (0, 2).
+		_, _, _, relAlpha := reg.Admit(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.com/a", nil), respwriter.EntryCoord{
+			GenID:         1,
+			ListenAddr:    "127.0.0.1:8080",
+			ServerIndex:   0,
+			LocationIndex: 0,
+			RouteID:       "alpha",
+		})
+		defer relAlpha()
+		_, _, _, relAnon := reg.Admit(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.com/anon", nil), respwriter.EntryCoord{
+			GenID:         1,
+			ListenAddr:    "127.0.0.1:8080",
+			ServerIndex:   0,
+			LocationIndex: 2,
+		})
+		defer relAnon()
+
+		// Generation 2 reorders: "beta" moves to (0, 0), "alpha" moves to (0, 2) and is renamed "alpha-v2",
+		// and id-less "/anon" moves to (0, 1).
+		_ = reg.PublishGeneration(1, 2, []respwriter.EntryTransition{
+			{FromServerIndex: 0, FromLocationIndex: 0, FromRouteID: "alpha", ToServerIndex: 0, ToLocationIndex: 2, ToRouteID: "alpha-v2"},
+			{FromServerIndex: 0, FromLocationIndex: 1, FromRouteID: "beta", ToServerIndex: 0, ToLocationIndex: 0, ToRouteID: "beta"},
+			{FromServerIndex: 0, FromLocationIndex: 2, ToServerIndex: 0, ToLocationIndex: 1},
+		})()
+
+		betaID := "beta"
+		alphaV2ID := "alpha-v2"
+		current := &config.Config{
+			Servers: []config.ServerConfig{{
+				Listen: "127.0.0.1:8080",
+				Locations: []config.LocationConfig{
+					{RouteID: &betaID, Match: config.MatchConfig{Type: "prefix", Path: "/b"}, Return: 200},
+					{Match: config.MatchConfig{Type: "prefix", Path: "/anon"}, Return: 200},
+					{RouteID: &alphaV2ID, Match: config.MatchConfig{Type: "prefix", Path: "/a"}, Return: 200},
+				},
+			}},
+		}
+		s := newTestServer(t, config.AdminConfig{}, Deps{
+			LiveSnapshot: func() server.LiveSnapshot {
+				return server.LiveSnapshot{
+					Generation:      2,
+					RawConfig:       current,
+					EffectiveConfig: current,
+					Exchanges:       reg,
+				}
+			},
+		})
+		page, err := s.BuildSharingViewPage("", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotByLocIdx := make(map[int]int)
+		for _, e := range page.Entries {
+			if e.Serving != nil {
+				gotByLocIdx[e.Serving.Position.LocationIndex] = e.Serving.OpenExchanges
+			}
+		}
+		if gotByLocIdx[0] != 0 || gotByLocIdx[1] != 1 || gotByLocIdx[2] != 1 {
+			t.Fatalf("unexpected open exchange attribution after reorder/rename: %+v", gotByLocIdx)
+		}
+	})
+}
+
+type adminHijackRecorder struct {
+	*httptest.ResponseRecorder
+	conn net.Conn
+}
+
+func (r *adminHijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return r.conn, bufio.NewReadWriter(bufio.NewReader(r.conn), bufio.NewWriter(r.conn)), nil
+}
+
+func TestSixth653TLSRotationPreviewRuntimeParity(t *testing.T) {
+	id := "api"
+	siblingID := "sibling"
+	before := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      "127.0.0.1:8443",
+				ServerNames: []string{"a.example.test"},
+				TLS:         &config.TLSConfig{Enabled: true, Cert: "/tmp/a.crt", Key: "/tmp/a.key"},
+				Locations: []config.LocationConfig{{
+					RouteID: &id,
+					Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+					Return:  200,
+				}},
+			},
+			{
+				Listen:      "127.0.0.1:8443",
+				ServerNames: []string{"b.example.test"},
+				TLS:         &config.TLSConfig{Enabled: true, Cert: "/tmp/a.crt", Key: "/tmp/a.key"},
+				Locations: []config.LocationConfig{{
+					RouteID: &siblingID,
+					Match:   config.MatchConfig{Type: "prefix", Path: "/"},
+					Return:  200,
+				}},
+			},
+		},
+	}
+	after, _ := before.Clone()
+	after.Servers[0].TLS.Cert = "/tmp/b.crt"
+	after.Servers[0].TLS.Key = "/tmp/b.key"
+
+	s := newTestServer(t, config.AdminConfig{}, Deps{})
+	plan := s.BuildSharingPlanReport(before, before, after, after, true, nil, true)
+	pub := server.ComputePublishEntryTransitions(before, before, nil, after, after, nil, nil, nil)
+	if len(plan.Entries) != 2 || len(pub) != 2 {
+		t.Fatalf("expected 2 entries in plan and publish, got plan=%+v pub=%+v", plan.Entries, pub)
+	}
+	for i := range 2 {
+		if plan.Entries[i].Class != AudienceDeltaUncertain || !plan.Entries[i].TriggersRetirement || !pub[i].Retire {
+			t.Fatalf("entry %d preview/publish mismatch: plan=%+v pub=%+v", i, plan.Entries[i], pub[i])
+		}
+	}
+}
+
+func TestR1ShadowPoolPreviewAndPublishParity(t *testing.T) {
+	for _, shadow := range []bool{false, true} {
+		name := "ordinary-pool-control"
+		if shadow {
+			name = "pool-named-as-full-proxy-url"
+		}
+		t.Run(name, func(t *testing.T) {
+			cfg := config.ProxyTarget("http://backend", "127.0.0.1:8080")
+			rid := "private"
+			cfg.Servers[0].Locations[0].RouteID = &rid
+			cfg.Upstreams = []config.UpstreamConfig{{
+				Name:    "backend",
+				Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}},
+			}}
+			if shadow {
+				cfg.Upstreams = append(cfg.Upstreams, config.UpstreamConfig{
+					Name:    "http://backend",
+					Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}},
+				})
+			}
+			before, err := config.NewCandidate(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, _ := cfg.Clone()
+			next.Upstreams[0].Servers[0].Address = "127.0.0.1:9002"
+			after, err := config.NewCandidate(next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := newTestServer(t, config.AdminConfig{}, Deps{})
+			rep := s.BuildSharingPlanReport(before.Raw, before.Effective, after.Raw, after.Effective, true, nil, true)
+			pub := server.ComputePublishEntryTransitions(before.Raw, before.Effective, nil, after.Raw, after.Effective, nil, nil, nil)
+			if len(rep.Entries) != 1 || rep.Entries[0].Class != AudienceDeltaUncertain || !rep.Entries[0].TriggersRetirement {
+				t.Fatalf("preview missed upstream membership change (shadow=%v): %+v", shadow, rep.Entries)
+			}
+			if len(pub) != 1 || !pub[0].Retire {
+				t.Fatalf("publish missed upstream membership change (shadow=%v): %+v", shadow, pub)
+			}
+		})
+	}
+}
+
+func TestR3AuthDependencyExpansionPreviewPublishAndIdentity(t *testing.T) {
+	for _, changedName := range []string{"unused", "authpool", "jwkspool"} {
+		t.Run(changedName, func(t *testing.T) {
+			ridFwd := "private-fwd"
+			ridJWT := "private-jwt"
+			ridPub := "public-unrelated"
+			cfg := &config.Config{
+				Upstreams: []config.UpstreamConfig{
+					{Name: "authpool", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}},
+					{Name: "jwkspool", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9002"}}},
+					{Name: "unused", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9011"}}},
+				},
+				Servers: []config.ServerConfig{{
+					Listen: "127.0.0.1:8080",
+					Locations: []config.LocationConfig{
+						{
+							RouteID:   &ridFwd,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/fwd"},
+							ProxyPass: "http://127.0.0.1:9000",
+							Auth:      &config.AuthConfig{ForwardAuth: &config.ForwardAuthConfig{URL: "http://authpool/check"}},
+						},
+						{
+							RouteID:   &ridJWT,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/jwt"},
+							ProxyPass: "http://127.0.0.1:9000",
+							Auth:      &config.AuthConfig{JWT: &config.JWTAuthConfig{JWKSURL: "https://jwkspool/.well-known/jwks.json"}},
+						},
+						{
+							RouteID:   &ridPub,
+							Match:     config.MatchConfig{Type: "prefix", Path: "/pub"},
+							ProxyPass: "http://127.0.0.1:9000",
+						},
+					},
+				}},
+			}
+			before, err := config.NewCandidate(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, _ := cfg.Clone()
+			for i := range next.Upstreams {
+				if next.Upstreams[i].Name == changedName {
+					next.Upstreams[i].Servers[0].Address = "127.0.0.1:9099"
+				}
+			}
+			after, err := config.NewCandidate(next)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			s := newTestServer(t, config.AdminConfig{}, Deps{})
+			rep := s.BuildSharingPlanReport(before.Raw, before.Effective, after.Raw, after.Effective, true, nil, true)
+			pub := server.ComputePublishEntryTransitions(before.Raw, before.Effective, nil, after.Raw, after.Effective, nil, nil, nil)
+
+			fwdFPChanged := s.keyedAccessFingerprint(before.Raw, 0, 0) != s.keyedAccessFingerprint(after.Raw, 0, 0)
+			jwtFPChanged := s.keyedAccessFingerprint(before.Raw, 0, 1) != s.keyedAccessFingerprint(after.Raw, 0, 1)
+			pubFPChanged := s.keyedAccessFingerprint(before.Raw, 0, 2) != s.keyedAccessFingerprint(after.Raw, 0, 2)
+
+			wantFwd := changedName == "authpool"
+			wantJWT := changedName == "jwkspool"
+
+			if pubFPChanged {
+				t.Fatal("unrelated public route access fingerprint must not change")
+			}
+			if fwdFPChanged != wantFwd {
+				t.Fatalf("forward_auth fingerprint changed=%v, want %v", fwdFPChanged, wantFwd)
+			}
+			if jwtFPChanged != wantJWT {
+				t.Fatalf("jwt fingerprint changed=%v, want %v", jwtFPChanged, wantJWT)
+			}
+			if len(pub) != 3 || pub[0].Retire != wantFwd || pub[1].Retire != wantJWT || pub[2].Retire {
+				t.Fatalf("unexpected publish transitions for %s: %+v", changedName, pub)
+			}
+			if !wantFwd && !wantJWT {
+				if len(rep.Entries) != 0 {
+					t.Fatalf("expected 0 plan entries for unused pool change, got %+v", rep.Entries)
+				}
+			} else {
+				if len(rep.Entries) != 1 || rep.Entries[0].Class != AudienceDeltaUncertain || !rep.Entries[0].TriggersRetirement || !rep.Entries[0].KeepOpenEligible {
+					t.Fatalf("unexpected plan entries for %s: %+v", changedName, rep.Entries)
+				}
+				// Verify keep_open_entries is honoured when only the auth pool changed (pure uncertain),
+				// and overridden when combined with a mandatory CIDR narrowing.
+				targetID := ridFwd
+				if wantJWT {
+					targetID = ridJWT
+				}
+				pubKeep := server.ComputePublishEntryTransitions(before.Raw, before.Effective, nil, after.Raw, after.Effective, nil, nil, []string{targetID})
+				idx := 0
+				if wantJWT {
+					idx = 1
+				}
+				if pubKeep[idx].Retire || !pubKeep[idx].KeepOpen {
+					t.Fatalf("expected keep_open_entries to keep pure uncertain %s change open, got %+v", changedName, pubKeep[idx])
+				}
+
+				mixedNext, _ := next.Clone()
+				mixedNext.Servers[0].Locations[idx].Auth.Allow = []string{"10.0.0.0/8"}
+				mixedAfter, err := config.NewCandidate(mixedNext)
+				if err != nil {
+					t.Fatal(err)
+				}
+				repMixed := s.BuildSharingPlanReport(before.Raw, before.Effective, mixedAfter.Raw, mixedAfter.Effective, true, nil, true)
+				pubMixed := server.ComputePublishEntryTransitions(before.Raw, before.Effective, nil, mixedAfter.Raw, mixedAfter.Effective, nil, nil, []string{targetID})
+				if len(repMixed.Entries) != 1 || repMixed.Entries[0].KeepOpenEligible || !pubMixed[idx].Retire || !pubMixed[idx].Mandatory || pubMixed[idx].KeepOpen {
+					t.Fatalf("expected mandatory narrowing to override keep_open_entries on %s: plan=%+v pub=%+v", changedName, repMixed.Entries, pubMixed[idx])
+				}
+			}
+		})
+	}
+}
+
+func TestR6R9R10SharingIsolationMetadataAndSavedWithdrawn(t *testing.T) {
+	t.Run("sharing-snapshot-generation-isolation-on-interleaved-publish", func(t *testing.T) {
+		for _, crossPublish := range []bool{false, true} {
+			name := "stable-generation-control"
+			if crossPublish {
+				name = "publish-between-derivation-and-counts"
+			}
+			t.Run(name, func(t *testing.T) {
+				oldCfg := &config.Config{Servers: []config.ServerConfig{{Listen: "127.0.0.1:8080", Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/old"}, Return: 200}}}}}
+				old, err := config.NewCandidate(oldCfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				newCfg, _ := oldCfg.Clone()
+				newCfg.Servers[0].Locations[0].Match.Path = "/new"
+				next, err := config.NewCandidate(newCfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reg := respwriter.NewExchangeRegistry()
+				reg.SetInitialGeneration(1)
+				calls := 0
+				armed := false
+				release := func() {}
+				defer func() { release() }()
+				s := newTestServer(t, config.AdminConfig{}, Deps{LiveSnapshot: func() server.LiveSnapshot {
+					if !armed {
+						return server.LiveSnapshot{Generation: 1, RawConfig: old.Raw, EffectiveConfig: old.Effective, Exchanges: reg}
+					}
+					calls++
+					if crossPublish && calls >= 3 {
+						if calls == 3 {
+							reg.PublishGeneration(1, 2, []respwriter.EntryTransition{{Removed: true, Retire: true, Mandatory: true}})()
+							_, _, _, release = reg.Admit(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.test/new", nil), respwriter.EntryCoord{GenID: 2})
+						}
+						return server.LiveSnapshot{Generation: 2, RawConfig: next.Raw, EffectiveConfig: next.Effective, Exchanges: reg}
+					}
+					return server.LiveSnapshot{Generation: 1, RawConfig: old.Raw, EffectiveConfig: old.Effective, Exchanges: reg}
+				}})
+				armed = true
+				page, err := s.BuildSharingViewPage("", 50)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(page.Entries) != 1 || page.Entries[0].Serving == nil {
+					t.Fatalf("page=%+v", page)
+				}
+				e := page.Entries[0].Serving
+				if e.Path.Text == "/old" && e.OpenExchanges != 0 {
+					t.Fatalf("generation-1 entry was assigned generation-2 replacement's live exchange: %+v", e)
+				}
+				if crossPublish && (e.Path.Text != "/new" || e.OpenExchanges != 1) {
+					t.Fatalf("expected retried generation-2 projection with /new and open=1, got path=%q open=%d", e.Path.Text, e.OpenExchanges)
+				}
+			})
+		}
+
+		t.Run("paginated-cursor-mismatch-and-retry-exhaustion-never-join-revisions", func(t *testing.T) {
+			r1 := "route-1"
+			r2 := "route-2"
+			oldCfg := &config.Config{
+				Servers: []config.ServerConfig{{
+					Listen: "127.0.0.1:8080",
+					Locations: []config.LocationConfig{
+						{RouteID: &r1, Match: config.MatchConfig{Type: "prefix", Path: "/first"}, Return: 200},
+						{RouteID: &r2, Match: config.MatchConfig{Type: "prefix", Path: "/old"}, Return: 200},
+					},
+				}},
+			}
+			oldCand, err := config.NewCandidate(oldCfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			newCfg, _ := oldCfg.Clone()
+			newCfg.Servers[0].Locations[1].Match.Path = "/new"
+			newCand, err := config.NewCandidate(newCfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// 1. Paginated cursor request where generation 2 publishes between derivation and count capture -> must reject cursor.
+			regPage := respwriter.NewExchangeRegistry()
+			regPage.SetInitialGeneration(1)
+			pageCalls := 0
+			interleaveCursor := false
+			relPage := func() {}
+			defer func() { relPage() }()
+			sPage := newTestServer(t, config.AdminConfig{}, Deps{
+				LiveSnapshot: func() server.LiveSnapshot {
+					if !interleaveCursor {
+						return server.LiveSnapshot{Generation: 1, RawConfig: oldCand.Raw, EffectiveConfig: oldCand.Effective, Exchanges: regPage}
+					}
+					pageCalls++
+					if pageCalls >= 3 {
+						if pageCalls == 3 {
+							tr := server.ComputePublishEntryTransitions(oldCand.Raw, oldCand.Effective, nil, newCand.Raw, newCand.Effective, nil, nil, nil)
+							regPage.PublishGeneration(1, 2, tr)()
+							_, _, _, relPage = regPage.Admit(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.test/new", nil), respwriter.EntryCoord{
+								GenID:         2,
+								ServerIndex:   0,
+								LocationIndex: 1,
+								RouteID:       r2,
+							})
+						}
+						return server.LiveSnapshot{Generation: 2, RawConfig: newCand.Raw, EffectiveConfig: newCand.Effective, Exchanges: regPage}
+					}
+					return server.LiveSnapshot{Generation: 1, RawConfig: oldCand.Raw, EffectiveConfig: oldCand.Effective, Exchanges: regPage}
+				},
+			})
+			page1, err := sPage.BuildSharingViewPage("", 1)
+			if err != nil || page1.NextCursor == "" {
+				t.Fatalf("page1 err=%v next_cursor=%q", err, page1.NextCursor)
+			}
+			interleaveCursor = true
+			if _, err := sPage.BuildSharingViewPage(page1.NextCursor, 1); err == nil || !strings.Contains(err.Error(), "the configuration changed") {
+				t.Fatalf("expected stale-cursor error on mid-page generation change, got %v", err)
+			}
+
+			// 2. Registry ahead of runtime snapshot across all 4 retry attempts -> must return error rather than mixed-generation page.
+			regAhead := respwriter.NewExchangeRegistry()
+			regAhead.SetInitialGeneration(1)
+			tr := server.ComputePublishEntryTransitions(oldCand.Raw, oldCand.Effective, nil, newCand.Raw, newCand.Effective, nil, nil, nil)
+			regAhead.PublishGeneration(1, 2, tr)()
+			_, _, _, relAhead := regAhead.Admit(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.test/new", nil), respwriter.EntryCoord{
+				GenID:         2,
+				ServerIndex:   0,
+				LocationIndex: 1,
+				RouteID:       r2,
+			})
+			defer relAhead()
+			sAhead := newTestServer(t, config.AdminConfig{}, Deps{
+				LiveSnapshot: func() server.LiveSnapshot {
+					return server.LiveSnapshot{Generation: 1, RawConfig: oldCand.Raw, EffectiveConfig: oldCand.Effective, Exchanges: regAhead}
+				},
+			})
+			if _, err := sAhead.BuildSharingViewPage("", 50); err == nil {
+				t.Fatal("expected error when registry generation remains ahead of runtime snapshot across retries")
+			}
+		})
+	})
+
+	t.Run("metadata-only-edit-on-already-withdrawn-entry", func(t *testing.T) {
+		cfg := &config.Config{Servers: []config.ServerConfig{{Listen: "127.0.0.1:8080", Locations: []config.LocationConfig{{RouteID: config.String("private"), Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200, Withdrawn: true, Sharing: &config.SharingConfig{Mode: "restricted"}}}}}}
+		b, err := config.NewCandidate(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, _ := cfg.Clone()
+		next.Servers[0].Locations[0].Sharing.AudienceLabel = config.String("new label")
+		a, err := config.NewCandidate(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newTestServer(t, config.AdminConfig{}, Deps{})
+		rep := s.BuildSharingPlanReport(b.Raw, b.Effective, a.Raw, a.Effective, true, nil, true)
+		pub := server.ComputePublishEntryTransitions(b.Raw, b.Effective, nil, a.Raw, a.Effective, nil, nil, nil)
+		if len(rep.Entries) != 1 || rep.Entries[0].Class != AudienceDeltaMetadataOnly || rep.Entries[0].TriggersRetirement || len(pub) != 1 || pub[0].Retire {
+			t.Fatalf("metadata-only change must not trigger a fresh retirement: plan=%+v pub=%+v", rep.Entries, pub)
+		}
+	})
+
+	t.Run("literal-saved-withdrawal-gate-dominates-unresolved-cidr", func(t *testing.T) {
+		t.Setenv("JUL_ADVERSARIAL653_ALLOW", "10.0.0.0/8")
+		cfg := &config.Config{Servers: []config.ServerConfig{{Listen: "127.0.0.1:8080", Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200, Auth: &config.AuthConfig{Allow: []string{"${env:JUL_ADVERSARIAL653_ALLOW}"}}}}}}}
+		b, err := config.NewCandidate(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, _ := cfg.Clone()
+		next.Servers[0].Locations[0].Withdrawn = true
+		a, err := config.NewCandidate(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := config.Marshal(a.Raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newTestServer(t, config.AdminConfig{}, Deps{
+			LiveSnapshot: func() server.LiveSnapshot {
+				return server.LiveSnapshot{Generation: 1, RawConfig: b.Raw, EffectiveConfig: b.Effective, EffectiveVersion: "serving"}
+			},
+			ReadConfigRaw: func() ([]byte, error) { return raw, nil },
+		})
+		page, err := s.BuildSharingViewPage("", 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Entries) != 1 || page.Entries[0].Saved == nil || page.Entries[0].Saved.Withdrawn != "yes" {
+			t.Fatalf("literal true withdrawal gate was obscured by unrelated CIDR reference: %+v", page.Entries)
 		}
 	})
 }

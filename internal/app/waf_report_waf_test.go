@@ -12,15 +12,22 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
+	"jul/internal/redact"
+	"jul/internal/server"
+	"jul/internal/upstream"
 	"jul/internal/versionid"
 	"jul/internal/waf"
 )
@@ -403,5 +410,107 @@ func TestSecurityEndpointWAFExternalDigestMustNotConfirmOfflineGuess(t *testing.
 	stopB()
 	if effB.Global.ExternalDigest == wantGlobalA2 || versionid.Comparison(effB.Global.ExternalDigest, wantGlobalA2) != "different_context" {
 		t.Fatalf("independent-key restart did not isolate context: got %q vs %q", effB.Global.ExternalDigest, wantGlobalA2)
+	}
+}
+
+func TestThird653PreparedWAFIdentitySurvivesFileReplacement(t *testing.T) {
+	backendCanceled := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("stream") != "1" {
+			w.WriteHeader(200)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: start\n\n")
+		_ = http.NewResponseController(w).Flush()
+		<-r.Context().Done()
+		close(backendCanceled)
+	}))
+	defer backend.Close()
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "blocked clients.txt")
+	rulePath := filepath.Join(dir, "rules.conf")
+	if err := os.WriteFile(rulePath, []byte(`SecRule REMOTE_ADDR "@ipMatchFromFile blocked clients.txt" "id:10953,phase:1,deny,status:403,nolog"`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	both := []byte("203.0.113.0/24\n")
+	onlyAlice := []byte("127.0.0.0/8\n")
+	if err := os.WriteFile(path, both, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.ProxyTarget(backend.URL, freePort(t))
+	rid := "private"
+	cfg.Servers[0].Locations[0].RouteID = &rid
+	cfg.WAF = config.WAFConfig{Enabled: true, Mode: "block", DirectivesFiles: []string{rulePath}}
+	initial, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replaceAfterPrepare atomic.Bool
+	factory := func(ctx context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		handlers, gen, commit, abort, err := f.Prepare(ctx, c)
+		if err == nil && replaceAfterPrepare.Swap(false) {
+			if writeErr := os.WriteFile(path, both, 0o600); writeErr != nil {
+				abort()
+				return nil, 0, nil, nil, writeErr
+			}
+		}
+		return handlers, gen, commit, abort, err
+	}
+	srv := server.New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), f.Log, factory, config.NewTOMLSource(""), func(context.Context, *config.Config) error { return nil })
+	srv.WAFSourceDigests = f.WAFSourceDigests
+	ready := make(chan struct{})
+	srv.OnInitialGenerationReady = func() { close(ready) }
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	reload := make(chan server.ReloadRequest, 1)
+	go func() { done <- srv.Run(ctx, reload, redact.EmptyState()) }()
+	defer func() { cancel(); <-done }()
+	<-ready
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	request := func(query string) (*http.Response, error) {
+		r, _ := http.NewRequest("GET", "http://"+cfg.Servers[0].Listen+"/"+query, nil)
+		r.SetBasicAuth("bob", "pw")
+		return client.Do(r)
+	}
+	oldStream, err := request("?stream=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldStream.Body.Close()
+	if oldStream.StatusCode != 200 {
+		t.Fatalf("before=%d", oldStream.StatusCode)
+	}
+	if err = os.WriteFile(path, onlyAlice, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	next, _ := cfg.Clone()
+	next.Global.LogLevel = "debug"
+	cand, err := config.NewCandidate(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replaceAfterPrepare.Store(true)
+	result := make(chan server.ReloadResult, 1)
+	reload <- server.ReloadRequest{Source: server.ReloadSourceAdmin, Candidate: cand, Result: result}
+	rel := <-result
+	if rel.Outcome != server.ReloadAppliedLive {
+		t.Fatalf("reload=%+v", rel)
+	}
+	after, err := request("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = after.Body.Close()
+	if after.StatusCode != 403 {
+		t.Fatalf("fixture: newly loaded WAF must block the current client, got %d", after.StatusCode)
+	}
+	select {
+	case <-backendCanceled:
+	case <-time.After(2200 * time.Millisecond):
+		t.Fatalf("prepared WAF changed, but its old stream survived the 2s bound despite wired engine identity; retirements=%+v", rel.EntryRetirements)
 	}
 }

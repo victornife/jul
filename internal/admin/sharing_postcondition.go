@@ -255,9 +255,21 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc
 		}
 	}
 
-	var referencedUpstream *config.UpstreamConfig
-	if upName := locationUpstreamName(loc); upName != "" {
-		referencedUpstream = findUpstreamByName(rawCfg, upName)
+	var referencedUpstreams map[string]config.UpstreamConfig
+	if upNames := config.ResolveLocationDependencyUpstreams(rawCfg, loc); len(upNames) > 0 {
+		referencedUpstreams = make(map[string]config.UpstreamConfig, len(upNames))
+		for _, upName := range upNames {
+			if up := findUpstreamByName(rawCfg, upName); up != nil {
+				referencedUpstreams[upName] = config.UpstreamConfig{
+					Name:       up.Name,
+					Strategy:   up.Strategy,
+					Hash:       up.Hash,
+					BackendTLS: up.BackendTLS,
+					Servers:    up.Servers,
+					Discovery:  up.Discovery,
+				}
+			}
+		}
 	}
 
 	return map[string]any{
@@ -278,6 +290,7 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc
 		"cors":                  loc.CORS,
 		"auth":                  loc.Auth,
 		"require_client_cert":   loc.RequireClientCert,
+		"withdrawn":             loc.Withdrawn,
 		"deny":                  loc.Deny,
 		"action":                locationAction(&loc),
 		"target":                locationTarget(&loc),
@@ -290,7 +303,7 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc
 		"directory_listing":     loc.DirectoryListing,
 		"allow_hidden":          loc.AllowHidden,
 		"return":                loc.Return,
-		"upstream":              referencedUpstream,
+		"upstream":              referencedUpstreams,
 		"sharing":               loc.Sharing,
 		"waf":                   effWAF,
 	}
@@ -308,6 +321,7 @@ func IsPatchOpRepeatable(op patchRequest) bool {
 		"location_set_auth",
 		"location_set_sharing",
 		"location_clear_sharing",
+		"location_set_withdrawn",
 		"location_set_action",
 		"location_set_transcode",
 		"location_set_predicates",
@@ -597,14 +611,13 @@ func deriveClientCertCheckKind(c *config.Config, srv config.ServerConfig, loc co
 }
 
 func isLocationWithdrawnByConfig(loc config.LocationConfig) bool {
-	if loc.Deny {
+	if loc.Withdrawn || loc.Deny {
 		return true
 	}
 	if loc.Auth == nil || len(loc.Auth.Deny) == 0 {
 		return false
 	}
-	v4, v6, ok := computePermittedIPSet(loc.Auth.Allow, loc.Auth.Deny)
-	return ok && len(v4) == 0 && len(v6) == 0
+	return config.CIDRSetPermitsNone(loc.Auth.Allow, loc.Auth.Deny)
 }
 
 // EvaluatePostcondition evaluates req against one captured serving snapshot

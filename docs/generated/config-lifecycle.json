@@ -256,12 +256,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 421,
-    "schema_leaves": 354,
-    "registry_entries": 354,
+    "schema_paths": 422,
+    "schema_leaves": 355,
+    "registry_entries": 355,
     "startup_consumed": 29,
     "by_class": {
-      "hot_reload": 311,
+      "hot_reload": 312,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 29,
@@ -3343,6 +3343,19 @@
       "class": "hot_reload",
       "subsystem": "waf",
       "reason": "the WAF policy is rebuilt on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.locations.*.withdrawn",
+      "class": "hot_reload",
+      "subsystem": "access_control",
+      "reason": "the handler tree is rebuilt from the effective config on each successful reload",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

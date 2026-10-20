@@ -108,6 +108,10 @@ type ApplyRequestContext struct {
 	LiveGeneration uint64
 	AuthGeneration string
 
+	// KeepOpenEntries lists the entry route_ids or coordinates the caller
+	// requested to keep open on an uncertain-only change (SD-09, #642).
+	KeepOpenEntries []string
+
 	// StartedAt is the wall-clock time the handler admitted the operation. It
 	// is recorded on the terminal ledger record so a browser can observe when
 	// the transaction began (AC-01/AC-02). Deadline is the absolute transaction

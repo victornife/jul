@@ -386,6 +386,125 @@ func applyLocationSharingClear(c *config.Config, req patchRequest) (string, erro
 	return fmt.Sprintf("route %s%s sharing intent cleared", srv.Listen, loc.Match.Path), nil
 }
 
+func (r patchRequest) usesPositionalCoordinates() bool {
+	if r.MatchOrdinal != nil || r.ServerIndex != nil || r.LocationIndex != nil {
+		return true
+	}
+	if rs := r.RouteSelector; rs != nil {
+		return rs.MatchOrdinal != nil || rs.ServerIndex != nil || rs.LocationIndex != nil
+	}
+	return false
+}
+
+func resolveWithdrawnLocation(c *config.Config, req patchRequest) (*config.ServerConfig, *config.LocationConfig, error) {
+	srvIdxPtr := req.ServerIndex
+	locIdxPtr := req.LocationIndex
+	listen := req.Listen
+	serverNames := req.ServerNames
+	matchType := req.MatchType
+	path := req.Path
+	ordinal := req.MatchOrdinal
+	selectorVer := req.SelectorVersion
+	routeIDPtr := req.RouteID
+
+	if rs := req.RouteSelector; rs != nil {
+		if srvIdxPtr == nil {
+			srvIdxPtr = rs.ServerIndex
+		}
+		if locIdxPtr == nil {
+			locIdxPtr = rs.LocationIndex
+		}
+		if strings.TrimSpace(listen) == "" {
+			listen = rs.Listen
+		}
+		if len(serverNames) == 0 {
+			serverNames = rs.ServerNames
+		}
+		if strings.TrimSpace(matchType) == "" {
+			matchType = rs.MatchType
+		}
+		if strings.TrimSpace(path) == "" {
+			path = rs.Path
+		}
+		if ordinal == nil {
+			ordinal = rs.MatchOrdinal
+		}
+		if selectorVer == "" {
+			selectorVer = rs.SelectorVersion
+		}
+		if routeIDPtr == nil {
+			routeIDPtr = rs.RouteID
+		}
+	}
+
+	var srv *config.ServerConfig
+	var loc *config.LocationConfig
+	switch {
+	case srvIdxPtr != nil || locIdxPtr != nil:
+		if srvIdxPtr == nil || locIdxPtr == nil {
+			return nil, nil, fmt.Errorf("location_set_withdrawn: server_index and location_index must be provided together")
+		}
+		si, li := *srvIdxPtr, *locIdxPtr
+		if c == nil || si < 0 || si >= len(c.Servers) {
+			return nil, nil, fmt.Errorf("location_set_withdrawn: server_index %d out of range", si)
+		}
+		if li < 0 || li >= len(c.Servers[si].Locations) {
+			return nil, nil, fmt.Errorf("location_set_withdrawn: location_index %d out of range on servers[%d]", li, si)
+		}
+		srv = &c.Servers[si]
+		loc = &srv.Locations[li]
+	case strings.TrimSpace(listen) != "" || strings.TrimSpace(path) != "":
+		target := routeTarget{
+			Listen:          listen,
+			ServerNames:     serverNames,
+			MatchType:       matchType,
+			Path:            path,
+			Ordinal:         ordinal,
+			SelectorVersion: selectorVer,
+		}
+		srvIdx, locIdx, err := findLocationIndex(c, target)
+		if err != nil {
+			return nil, nil, err
+		}
+		srv = &c.Servers[srvIdx]
+		loc = &srv.Locations[locIdx]
+	case routeIDPtr != nil && strings.TrimSpace(*routeIDPtr) != "":
+		var err error
+		srv, loc, err = findLocationByRouteID(c, *routeIDPtr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("location_set_withdrawn: %w", err)
+		}
+	default:
+		return nil, nil, fmt.Errorf("location_set_withdrawn: route target requires route_id, route_selector, server_index + location_index, or listen and path")
+	}
+
+	if routeIDPtr != nil && strings.TrimSpace(*routeIDPtr) != "" {
+		if loc.RouteID == nil || *loc.RouteID != strings.TrimSpace(*routeIDPtr) {
+			return nil, nil, fmt.Errorf("location_set_withdrawn: target route does not match route_id %q", strings.TrimSpace(*routeIDPtr))
+		}
+	}
+	return srv, loc, nil
+}
+
+func applyLocationWithdrawnSet(c *config.Config, req patchRequest) (string, error) {
+	val := req.Withdrawn
+	if val == nil {
+		val = req.Enabled
+	}
+	if val == nil {
+		return "", fmt.Errorf("location_set_withdrawn: withdrawn is required")
+	}
+	srv, loc, err := resolveWithdrawnLocation(c, req)
+	if err != nil {
+		return "", err
+	}
+	loc.Withdrawn = *val
+	if *val {
+		return fmt.Sprintf("route %s%s withdrawn gate enabled", srv.Listen, loc.Match.Path), nil
+	}
+	return fmt.Sprintf("route %s%s withdrawn gate cleared", srv.Listen, loc.Match.Path), nil
+}
+
 // stringSetsEqual reports whether a and b contain the same elements regardless
 // of order (multiset equality, so repeated server names are compared exactly).
 func stringSetsEqual(a, b []string) bool {

@@ -6,7 +6,6 @@ package admin
 import (
 	"fmt"
 	"maps"
-	"math/big"
 	"net"
 	"net/netip"
 	"reflect"
@@ -74,7 +73,7 @@ type SharingPlanFinding struct {
 }
 
 // SharingEntryDelta is the per-entry audience-delta classification and intent
-// assessment in a plan response (spec §4.5, §9.5).
+// assessment in a plan response (spec §4.5, §8.4, §9.5, ADR 0026 #642 amendment).
 type SharingEntryDelta struct {
 	Ref                       SharingEntryRef      `json:"ref"`
 	DisplayLabel              string               `json:"display_label"`
@@ -85,6 +84,9 @@ type SharingEntryDelta struct {
 	DeclaredModeWidened       bool                 `json:"declared_mode_widened"`
 	RequiresAcknowledgement   bool                 `json:"requires_acknowledgement"`
 	TriggersRetirement        bool                 `json:"triggers_retirement"`
+	KeepOpenEligible          bool                 `json:"keep_open_eligible"`
+	OpenExchangesSnapshot     int                  `json:"open_exchanges_snapshot"`
+	RetirementBound           string               `json:"retirement_bound,omitempty"`
 	Reasons                   []string             `json:"reasons,omitempty"`
 	IntentFindings            []SharingPlanFinding `json:"intent_findings,omitempty"`
 	ProviderChecklistRequired bool                 `json:"provider_checklist_required"`
@@ -157,6 +159,14 @@ func (s *Server) BuildSharingPlanReport(
 	blockStructureChangedAfter := computeBlockStructureChanged(beforeRaw, afterRaw)
 	hiddenPluginsChanged, hiddenUpstreamsChanged := hiddenOpsTouched(ops, callerHasRaw)
 
+	var openByCoord map[[2]int]int
+	var openByRouteID map[string]int
+	if s != nil && s.deps.LiveSnapshot != nil {
+		if ex := s.deps.LiveSnapshot().Exchanges; ex != nil {
+			openByCoord, openByRouteID = ex.SnapshotCounts()
+		}
+	}
+
 	var allFindings []SharingPlanFinding
 	var ackEntries []string
 	anyProviderChecklist := false
@@ -174,6 +184,17 @@ func (s *Server) BuildSharingPlanReport(
 			beforeFindingsByLoc,
 			afterFindingsByLoc,
 		)
+		if pair.before != nil {
+			openCount := 0
+			if rid := routeID(&pair.before.loc); rid != "" {
+				if openByRouteID != nil {
+					openCount = openByRouteID[rid]
+				}
+			} else if openByCoord != nil {
+				openCount = openByCoord[[2]int{pair.before.srvIdx, pair.before.locIdx}]
+			}
+			delta.OpenExchangesSnapshot = openCount
+		}
 		// Include all entries that either changed, have intent findings, or were
 		// expanded by §9.5.
 		if delta.Class != AudienceDeltaUnchanged || len(delta.IntentFindings) > 0 || delta.DeclaredModeBefore != delta.DeclaredModeAfter {
@@ -833,6 +854,8 @@ func classifyEntryPair(
 			DeclaredModeWidened:       false,
 			RequiresAcknowledgement:   false,
 			TriggersRetirement:        true,
+			KeepOpenEligible:          false,
+			RetirementBound:           "2s",
 			Reasons:                   []string{"entry removed"},
 			ProviderChecklistRequired: entryRequiresProviderChecklist(beforeRaw, beforeEff, b.srvIdx, b.locIdx),
 		}
@@ -868,8 +891,10 @@ func classifyEntryPair(
 	if a.loc.Plugin != "" && hiddenPluginsChanged[a.loc.Plugin] {
 		record(AudienceDeltaUncertain, fmt.Sprintf("plugin %q sets fields hidden without config:raw", a.loc.Plugin))
 	}
-	if upName := locationUpstreamName(a.loc); upName != "" && hiddenUpstreamsChanged[upName] {
-		record(AudienceDeltaUncertain, fmt.Sprintf("upstream %q discovery sets fields hidden without config:raw", upName))
+	for _, upName := range config.ResolveLocationDependencyUpstreams(afterRaw, a.loc) {
+		if hiddenUpstreamsChanged[upName] {
+			record(AudienceDeltaUncertain, fmt.Sprintf("upstream %q discovery sets fields hidden without config:raw", upName))
+		}
 	}
 
 	// 2. Host-dispatch and block-structure expansion (§9.5).
@@ -903,12 +928,14 @@ func classifyEntryPair(
 	if !pluginsEqualForEntry(beforeRaw, afterRaw, b.srv, a.srv, b.loc, a.loc) {
 		record(AudienceDeltaUncertain, "request plugin configuration changed")
 	}
-	if cls, why := classifyCORSChange(b.loc.CORS, a.loc.CORS); cls != AudienceDeltaUnchanged {
+	corsNarrowConstituent := false
+	if cls, why, corsNarrow := config.ClassifyCORSChange(b.loc.CORS, a.loc.CORS, true); cls != AudienceDeltaUnchanged {
 		record(cls, why)
+		corsNarrowConstituent = corsNarrow
 	}
 
 	// 7. Location Auth (CIDR allow/deny and credential checks).
-	for _, item := range classifyAuthChanges(b.loc.Auth, a.loc.Auth) {
+	for _, item := range classifyAuthChangesWithConfig(beforeRaw, afterRaw, b.loc.Auth, a.loc.Auth) {
 		record(item.class, item.reason)
 	}
 
@@ -917,7 +944,14 @@ func classifyEntryPair(
 		record(cls, why)
 	}
 
-	// 9. Action / target / upstream changes.
+	// 9. Outermost withdrawal gate (withdrawn) and action / target / upstream changes.
+	if b.loc.Withdrawn != a.loc.Withdrawn {
+		if a.loc.Withdrawn {
+			record(AudienceDeltaNarrowed, "location withdrawal gate enabled")
+		} else {
+			record(AudienceDeltaWidened, "location withdrawal gate cleared")
+		}
+	}
 	if b.loc.Deny != a.loc.Deny {
 		if a.loc.Deny {
 			record(AudienceDeltaNarrowed, "location deny enabled")
@@ -942,7 +976,17 @@ func classifyEntryPair(
 		afterFindingsByLoc[[2]int{a.srvIdx, a.locIdx}],
 	)
 	requiresAck := finalClass == AudienceDeltaWidened || finalClass == AudienceDeltaUncertain || modeWidened
-	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged
+	hasNarrowedChange := slices.Contains(classes, AudienceDeltaNarrowed) || corsNarrowConstituent
+	triggersRetirement := finalClass == AudienceDeltaNarrowed || finalClass == AudienceDeltaUncertain || targetChanged || hasNarrowedChange
+	hasNarrowedConstituent := hasNarrowedChange || a.loc.Withdrawn || a.loc.Deny
+	// Point 1 (ADR 0026 #642 amendment): keep_open_eligible is defined from
+	// constituent reasons, never from combined class alone. Any mandatory
+	// tightening, withdrawal, or removal overrides keep_open_entries.
+	keepOpenEligible := triggersRetirement && !hasNarrowedConstituent
+	retirementBound := ""
+	if triggersRetirement {
+		retirementBound = "2s"
+	}
 
 	return SharingEntryDelta{
 		Ref:                       ref,
@@ -954,6 +998,8 @@ func classifyEntryPair(
 		DeclaredModeWidened:       modeWidened,
 		RequiresAcknowledgement:   requiresAck,
 		TriggersRetirement:        triggersRetirement,
+		KeepOpenEligible:          keepOpenEligible,
+		RetirementBound:           retirementBound,
 		Reasons:                   reasons,
 		IntentFindings:            findings,
 		ProviderChecklistRequired: entryRequiresProviderChecklist(beforeRaw, beforeEff, b.srvIdx, b.locIdx) || entryRequiresProviderChecklist(afterRaw, afterEff, a.srvIdx, a.locIdx),
@@ -1031,87 +1077,10 @@ func classifyBindChange(beforeListen, afterListen string) (string, string) {
 	return AudienceDeltaUncertain, "listener bind changed between specific addresses"
 }
 
-type listenerEffectiveInputs struct {
-	TLSEnabled      bool   `json:"tls_enabled"`
-	MinVersion      string `json:"min_version,omitempty"`
-	TLSCertSig      string `json:"tls_cert_sig,omitempty"`
-	HTTP3Sig        string `json:"http3_sig,omitempty"`
-	H2C             bool   `json:"h2c,omitempty"`
-	RedirectHTTPS   int    `json:"redirect_https,omitempty"`
-	ProxyProtocol   string `json:"proxy_protocol,omitempty"`
-	ClientAddrSig   string `json:"client_addr_sig,omitempty"`
-	ClientAuthMode  string `json:"client_auth_mode,omitempty"`
-	ClientAuthFiles string `json:"client_auth_files,omitempty"`
-}
+type listenerEffectiveInputs = config.ListenerAccessInputs
 
 func summarizeListenerInputs(c *config.Config, listen string) (listenerEffectiveInputs, bool) {
-	var out listenerEffectiveInputs
-	var caFiles, crlFiles, sans, fwd, certs []string
-	hasSecretRef := false
-	for _, srv := range c.Servers {
-		if srv.Listen != listen {
-			continue
-		}
-		if srv.H2C {
-			out.H2C = true
-		}
-		if srv.HTTP3 != nil && srv.HTTP3.Enabled && out.HTTP3Sig == "" {
-			out.HTTP3Sig = fmt.Sprintf("enabled:%d", srv.HTTP3.AltSvcMaxAge)
-		}
-		if srv.RedirectHTTPS != 0 && out.RedirectHTTPS == 0 {
-			out.RedirectHTTPS = srv.RedirectHTTPS
-		}
-		if srv.ProxyProtocol != "" && out.ProxyProtocol == "" {
-			out.ProxyProtocol = srv.ProxyProtocol
-		}
-		if srv.ClientAddress != nil && out.ClientAddrSig == "" {
-			for _, tp := range srv.ClientAddress.TrustedProxies {
-				if config.ContainsSecretRef(tp) {
-					hasSecretRef = true
-				}
-			}
-			out.ClientAddrSig = fmt.Sprintf("%v|%v|%d", srv.ClientAddress.TrustedProxies, srv.ClientAddress.ForwardedHeaders, srv.ClientAddress.MaxHops)
-		}
-		if srv.TLS != nil && srv.TLS.Enabled {
-			out.TLSEnabled = true
-			if out.MinVersion == "" {
-				out.MinVersion = srv.TLS.MinVersion
-			}
-			acmeSig := ""
-			if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
-				acmeSig = fmt.Sprintf("acme:%s|%s|%s|%v", srv.TLS.ACME.Email, srv.TLS.ACME.CA, srv.TLS.ACME.Challenge, srv.TLS.ACME.Domains)
-			}
-			certs = append(certs, fmt.Sprintf("%s|%s|%s", strings.TrimSpace(srv.TLS.Cert), strings.TrimSpace(srv.TLS.Key), acmeSig))
-			if srv.TLS.ClientAuth != nil && srv.TLS.ClientAuth.Active() {
-				mode := strings.TrimSpace(srv.TLS.ClientAuth.Mode)
-				if config.ContainsSecretRef(mode) || config.ContainsSecretRef(srv.TLS.ClientAuth.CAFile) || config.ContainsSecretRef(srv.TLS.ClientAuth.CRLFile) {
-					hasSecretRef = true
-				}
-				if mode == "require" || out.ClientAuthMode == "" {
-					out.ClientAuthMode = mode
-				}
-				caFiles = append(caFiles, strings.TrimSpace(srv.TLS.ClientAuth.CAFile))
-				crlFiles = append(crlFiles, strings.TrimSpace(srv.TLS.ClientAuth.CRLFile))
-				for _, san := range srv.TLS.ClientAuth.VerifySAN {
-					if config.ContainsSecretRef(san) {
-						hasSecretRef = true
-					}
-					sans = append(sans, strings.TrimSpace(san))
-				}
-				fwd = append(fwd, strings.TrimSpace(srv.TLS.ClientAuth.ForwardCertificate))
-			}
-		}
-	}
-	if out.ClientAuthMode == "" {
-		out.ClientAuthMode = "none"
-	}
-	sort.Strings(caFiles)
-	sort.Strings(crlFiles)
-	sort.Strings(sans)
-	sort.Strings(fwd)
-	out.TLSCertSig = strings.Join(certs, ";")
-	out.ClientAuthFiles = fmt.Sprintf("ca=%v|crl=%v|san=%v|fwd=%v", caFiles, crlFiles, sans, fwd)
-	return out, hasSecretRef
+	return config.SummarizeListenerAccessInputs(c, listen)
 }
 
 func classifyListenerAndCertChanges(
@@ -1136,11 +1105,8 @@ func classifyListenerAndCertChanges(
 	if bIn.ClientAuthMode != aIn.ClientAuthMode || bIn.ClientAuthFiles != aIn.ClientAuthFiles || bLoc.RequireClientCert != aLoc.RequireClientCert {
 		if bRef || aRef {
 			out = append(out, classReason{AudienceDeltaUncertain, "client_auth comparison involves a secret reference"})
-			return out
-		}
-		if bIn.ClientAuthMode != "none" && aIn.ClientAuthMode != "none" && bIn.ClientAuthFiles != aIn.ClientAuthFiles {
+		} else if bIn.ClientAuthMode != "none" && aIn.ClientAuthMode != "none" && bIn.ClientAuthFiles != aIn.ClientAuthFiles {
 			out = append(out, classReason{AudienceDeltaUncertain, "client_auth CA bundle, CRL, SAN allow-list, or forwarded certificate setting changed"})
-			return out
 		}
 		if bIn.ClientAuthMode != aIn.ClientAuthMode {
 			switch {
@@ -1177,7 +1143,7 @@ func classifyListenerAndCertChanges(
 	return out
 }
 
-func classifyAuthChanges(b, a *config.AuthConfig) []classReason {
+func classifyAuthChangesWithConfig(beforeRaw, afterRaw *config.Config, b, a *config.AuthConfig) []classReason {
 	var out []classReason
 	var bAllow, bDeny, aAllow, aDeny []string
 	if b != nil {
@@ -1189,13 +1155,17 @@ func classifyAuthChanges(b, a *config.AuthConfig) []classReason {
 	if cls, why := classifyCIDRChange(bAllow, bDeny, aAllow, aDeny); cls != AudienceDeltaUnchanged {
 		out = append(out, classReason{cls, why})
 	}
-	if cls, why := classifyCredentialChange(b, a); cls != AudienceDeltaUnchanged {
+	if cls, why := classifyCredentialChangeWithConfig(beforeRaw, afterRaw, b, a); cls != AudienceDeltaUnchanged {
 		out = append(out, classReason{cls, why})
 	}
 	return out
 }
 
 func classifyCredentialChange(b, a *config.AuthConfig) (string, string) {
+	return classifyCredentialChangeWithConfig(nil, nil, b, a)
+}
+
+func classifyCredentialChangeWithConfig(beforeRaw, afterRaw *config.Config, b, a *config.AuthConfig) (string, string) {
 	bHasBasic := b != nil && b.Basic != nil
 	bHasJWT := b != nil && b.JWT != nil
 	bHasFwd := b != nil && b.ForwardAuth != nil
@@ -1227,300 +1197,28 @@ func classifyCredentialChange(b, a *config.AuthConfig) (string, string) {
 		if strings.TrimSpace(b.JWT.JWKSURL) != strings.TrimSpace(a.JWT.JWKSURL) ||
 			strings.TrimSpace(b.JWT.Issuer) != strings.TrimSpace(a.JWT.Issuer) ||
 			strings.TrimSpace(b.JWT.Audience) != strings.TrimSpace(a.JWT.Audience) ||
-			!stringSetsEqual(b.JWT.Algorithms, a.JWT.Algorithms) {
+			!stringSetsEqual(b.JWT.Algorithms, a.JWT.Algorithms) ||
+			!config.AuthUpstreamDependencyEqual(beforeRaw, afterRaw, b.JWT.JWKSURL, a.JWT.JWKSURL) {
 			return AudienceDeltaUncertain, "JWT authentication settings changed"
 		}
 	}
 	if bHasFwd && aHasFwd {
 		if strings.TrimSpace(b.ForwardAuth.URL) != strings.TrimSpace(a.ForwardAuth.URL) ||
-			!stringSetsEqual(b.ForwardAuth.AuthResponseHeaders, a.ForwardAuth.AuthResponseHeaders) {
+			!stringSetsEqual(b.ForwardAuth.AuthResponseHeaders, a.ForwardAuth.AuthResponseHeaders) ||
+			!config.AuthUpstreamDependencyEqual(beforeRaw, afterRaw, b.ForwardAuth.URL, a.ForwardAuth.URL) {
 			return AudienceDeltaUncertain, "forward_auth settings changed"
 		}
 	}
 	return AudienceDeltaUnchanged, ""
 }
 
-// ipInterval represents an inclusive [start, end] range of IP addresses as big.Int.
-type ipInterval struct {
-	start *big.Int
-	end   *big.Int
-}
-
 func classifyCIDRChange(bAllow, bDeny, aAllow, aDeny []string) (string, string) {
-	if stringSlicesEqual(bAllow, aAllow) && stringSlicesEqual(bDeny, aDeny) {
-		return AudienceDeltaUnchanged, ""
-	}
-	// RR11 disclosure precedence: if any CIDR entry in a changed allow/deny list
-	// uses a secret reference, classify as uncertain without inspecting resolved values.
-	for _, list := range [][]string{bAllow, bDeny, aAllow, aDeny} {
-		for _, entry := range list {
-			if config.ContainsSecretRef(entry) {
-				return AudienceDeltaUncertain, "CIDR allow/deny comparison involves a secret reference"
-			}
-		}
-	}
-	bV4, bV6, ok1 := computePermittedIPSet(bAllow, bDeny)
-	aV4, aV6, ok2 := computePermittedIPSet(aAllow, aDeny)
-	if !ok1 || !ok2 {
-		return AudienceDeltaUncertain, "CIDR allow/deny entries could not be compared"
-	}
-	v4Eq := intervalsEqual(bV4, aV4)
-	v6Eq := intervalsEqual(bV6, aV6)
-	if v4Eq && v6Eq {
-		return AudienceDeltaUnchanged, ""
-	}
-	aSubB := intervalsSubset(aV4, bV4) && intervalsSubset(aV6, bV6)
-	bSubA := intervalsSubset(bV4, aV4) && intervalsSubset(bV6, aV6)
-	switch {
-	case aSubB && !bSubA:
-		return AudienceDeltaNarrowed, "CIDR permitted address set strictly shrank"
-	case bSubA && !aSubB:
-		return AudienceDeltaWidened, "CIDR permitted address set strictly grew"
-	default:
-		return AudienceDeltaUncertain, "CIDR permitted address set changed in both directions"
-	}
-}
-
-func computePermittedIPSet(allow, deny []string) (v4, v6 []ipInterval, ok bool) {
-	maxV4 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 32), big.NewInt(1))
-	maxV6 := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
-
-	if len(allow) == 0 {
-		v4 = []ipInterval{{big.NewInt(0), maxV4}}
-		v6 = []ipInterval{{big.NewInt(0), maxV6}}
-	} else {
-		for _, raw := range allow {
-			iv, isV6, valid := parseCIDRorIPInterval(raw)
-			if !valid {
-				return nil, nil, false
-			}
-			if isV6 {
-				v6 = append(v6, iv)
-			} else {
-				v4 = append(v4, iv)
-			}
-		}
-		v4 = normalizeIntervals(v4)
-		v6 = normalizeIntervals(v6)
-	}
-
-	for _, raw := range deny {
-		iv, isV6, valid := parseCIDRorIPInterval(raw)
-		if !valid {
-			return nil, nil, false
-		}
-		if isV6 {
-			v6 = subtractInterval(v6, iv)
-		} else {
-			v4 = subtractInterval(v4, iv)
-		}
-	}
-	return v4, v6, true
-}
-
-func parseCIDRorIPInterval(raw string) (ipInterval, bool, bool) {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return ipInterval{}, false, false
-	}
-	var pfx netip.Prefix
-	if strings.Contains(s, "/") {
-		var err error
-		pfx, err = netip.ParsePrefix(s)
-		if err != nil {
-			return ipInterval{}, false, false
-		}
-		pfx = pfx.Masked()
-	} else {
-		addr, err := netip.ParseAddr(s)
-		if err != nil {
-			return ipInterval{}, false, false
-		}
-		addr = addr.Unmap()
-		pfx = netip.PrefixFrom(addr, addr.BitLen())
-	}
-	addr := pfx.Addr().Unmap()
-	bits := pfx.Bits()
-	if addr.Is4() {
-		b4 := addr.As4()
-		start := new(big.Int).SetBytes(b4[:])
-		hostBits := uint(32 - bits)
-		mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), hostBits), big.NewInt(1))
-		end := new(big.Int).Or(start, mask)
-		return ipInterval{start: start, end: end}, false, true
-	}
-	b16 := addr.As16()
-	start := new(big.Int).SetBytes(b16[:])
-	hostBits := uint(128 - bits)
-	mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), hostBits), big.NewInt(1))
-	end := new(big.Int).Or(start, mask)
-	return ipInterval{start: start, end: end}, true, true
-}
-
-func normalizeIntervals(in []ipInterval) []ipInterval {
-	if len(in) == 0 {
-		return nil
-	}
-	sorted := make([]ipInterval, len(in))
-	for i, iv := range in {
-		sorted[i] = ipInterval{
-			start: new(big.Int).Set(iv.start),
-			end:   new(big.Int).Set(iv.end),
-		}
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		if cmp := sorted[i].start.Cmp(sorted[j].start); cmp != 0 {
-			return cmp < 0
-		}
-		return sorted[i].end.Cmp(sorted[j].end) < 0
-	})
-	out := []ipInterval{sorted[0]}
-	for _, cur := range sorted[1:] {
-		last := &out[len(out)-1]
-		lastPlusOne := new(big.Int).Add(last.end, big.NewInt(1))
-		if cur.start.Cmp(lastPlusOne) <= 0 {
-			if cur.end.Cmp(last.end) > 0 {
-				last.end = new(big.Int).Set(cur.end)
-			}
-		} else {
-			out = append(out, cur)
-		}
-	}
-	return out
-}
-
-func subtractInterval(set []ipInterval, sub ipInterval) []ipInterval {
-	var out []ipInterval
-	for _, iv := range set {
-		if sub.end.Cmp(iv.start) < 0 || sub.start.Cmp(iv.end) > 0 {
-			out = append(out, iv)
-			continue
-		}
-		if sub.start.Cmp(iv.start) > 0 {
-			out = append(out, ipInterval{
-				start: new(big.Int).Set(iv.start),
-				end:   new(big.Int).Sub(sub.start, big.NewInt(1)),
-			})
-		}
-		if sub.end.Cmp(iv.end) < 0 {
-			out = append(out, ipInterval{
-				start: new(big.Int).Add(sub.end, big.NewInt(1)),
-				end:   new(big.Int).Set(iv.end),
-			})
-		}
-	}
-	return out
-}
-
-func intervalsEqual(a, b []ipInterval) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].start.Cmp(b[i].start) != 0 || a[i].end.Cmp(b[i].end) != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-// intervalsSubset reports whether every address in a is contained in b.
-func intervalsSubset(a, b []ipInterval) bool {
-	for _, iv := range a {
-		if len(subtractInterval([]ipInterval{iv}, ipIntervalFromSet(b, iv))) > 0 {
-			// Check against all intervals in b sequentially.
-			rem := []ipInterval{iv}
-			for _, biv := range b {
-				rem = subtractInterval(rem, biv)
-				if len(rem) == 0 {
-					break
-				}
-			}
-			if len(rem) > 0 {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func ipIntervalFromSet(b []ipInterval, target ipInterval) ipInterval {
-	for _, biv := range b {
-		if biv.start.Cmp(target.start) <= 0 && biv.end.Cmp(target.end) >= 0 {
-			return biv
-		}
-	}
-	return ipInterval{start: big.NewInt(1), end: big.NewInt(0)}
+	return config.ClassifyCIDRChange(bAllow, bDeny, aAllow, aDeny, true)
 }
 
 func classifyCORSChange(b, a *config.CORSConfig) (string, string) {
-	bOn := b != nil && b.Enabled
-	aOn := a != nil && a.Enabled
-	switch {
-	case !bOn && !aOn:
-		return AudienceDeltaUnchanged, ""
-	case !bOn && aOn:
-		return AudienceDeltaWidened, "CORS policy enabled"
-	case bOn && !aOn:
-		return AudienceDeltaNarrowed, "CORS policy disabled"
-	}
-
-	for _, s := range append(append([]string(nil), b.AllowedOrigins...), a.AllowedOrigins...) {
-		if config.ContainsSecretRef(s) {
-			return AudienceDeltaUncertain, "CORS allowed_origins comparison involves a secret reference"
-		}
-	}
-	if !stringSetsEqual(b.AllowedMethods, a.AllowedMethods) || !stringSetsEqual(b.AllowedHeaders, a.AllowedHeaders) {
-		return AudienceDeltaUncertain, "CORS allowed_methods or allowed_headers changed"
-	}
-
-	bOrigins := make(map[string]bool, len(b.AllowedOrigins))
-	for _, o := range b.AllowedOrigins {
-		bOrigins[strings.TrimSpace(o)] = true
-	}
-	aOrigins := make(map[string]bool, len(a.AllowedOrigins))
-	for _, o := range a.AllowedOrigins {
-		aOrigins[strings.TrimSpace(o)] = true
-	}
-
-	added := false
-	removed := false
-	for o := range aOrigins {
-		if !bOrigins[o] {
-			added = true
-		}
-	}
-	for o := range bOrigins {
-		if !aOrigins[o] {
-			removed = true
-		}
-	}
-
-	if !added && !removed && b.AllowCredentials == a.AllowCredentials {
-		return AudienceDeltaUnchanged, ""
-	}
-	if added && removed {
-		return AudienceDeltaUncertain, "CORS allowed_origins added and removed origins"
-	}
-	if aOrigins["*"] && !bOrigins["*"] && !removed && (!b.AllowCredentials || a.AllowCredentials) {
-		return AudienceDeltaWidened, "CORS wildcard origin introduced"
-	}
-	if !b.AllowCredentials && a.AllowCredentials && !removed {
-		return AudienceDeltaWidened, "CORS allow_credentials enabled"
-	}
-	if added && !removed && a.AllowCredentials && b.AllowCredentials {
-		return AudienceDeltaWidened, "CORS origin added while credentials are allowed"
-	}
-	if added && !removed && !a.AllowCredentials && !b.AllowCredentials {
-		return AudienceDeltaWidened, "CORS allowed_origins expanded"
-	}
-	if removed && !added && (b.AllowCredentials == a.AllowCredentials || (b.AllowCredentials && !a.AllowCredentials)) {
-		return AudienceDeltaNarrowed, "CORS allowed_origins narrowed"
-	}
-	if !added && !removed && b.AllowCredentials && !a.AllowCredentials {
-		return AudienceDeltaNarrowed, "CORS allow_credentials disabled"
-	}
-	return AudienceDeltaUncertain, "CORS policy changed"
+	cls, why, _ := config.ClassifyCORSChange(b, a, true)
+	return cls, why
 }
 
 // wafProvablyWithoutEngineControl reports whether w is provably free of
@@ -1693,19 +1391,6 @@ func pluginConfigsEqual(b, a config.PluginConfig) bool {
 	return true
 }
 
-func locationUpstreamName(loc config.LocationConfig) string {
-	switch {
-	case loc.GRPCTranscode != nil:
-		return upstreamRef(loc.GRPCTranscode.Target, "proxy")
-	case loc.GRPC:
-		return upstreamRef(loc.ProxyPass, "grpc")
-	case loc.ProxyPass != "":
-		return upstreamRef(loc.ProxyPass, "proxy")
-	default:
-		return ""
-	}
-}
-
 func entryTargetAndUpstreamEqual(before, after *config.Config, bLoc, aLoc config.LocationConfig) bool {
 	if locationAction(&bLoc) != locationAction(&aLoc) ||
 		locationTarget(&bLoc) != locationTarget(&aLoc) ||
@@ -1720,8 +1405,8 @@ func entryTargetAndUpstreamEqual(before, after *config.Config, bLoc, aLoc config
 		!backendTLSConfigsEqual(bLoc.BackendTLS, aLoc.BackendTLS) {
 		return false
 	}
-	bUp := locationUpstreamName(bLoc)
-	aUp := locationUpstreamName(aLoc)
+	bUp := config.ResolveLocationUpstreamName(before, bLoc)
+	aUp := config.ResolveLocationUpstreamName(after, aLoc)
 	if bUp != aUp {
 		return false
 	}

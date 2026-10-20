@@ -481,6 +481,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.PluginModulesUnchanged = f.PluginModulesUnchanged
 	srv.PluginModuleChanges = f.PluginModuleChanges
+	srv.WAFSourceDigests = f.WAFSourceDigests
 	srv.OnReloadStart = metrics.ReloadStarted
 	srv.OnReloadComplete = metrics.ObserveReload
 	// C1 (N-04): maintain a durable admin-degraded flag that persists until a

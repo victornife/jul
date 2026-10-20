@@ -113,6 +113,17 @@ func (a *Authenticator) Close() error {
 	return nil
 }
 
+// BasicFileBytes returns a copy of the exact htpasswd bytes loaded when this
+// Authenticator was constructed, or nil when Basic auth is not used (#642, #563).
+func (a *Authenticator) BasicFileBytes() []byte {
+	if a == nil || a.basic == nil || len(a.basic.raw) == 0 {
+		return nil
+	}
+	out := make([]byte, len(a.basic.raw))
+	copy(out, a.basic.raw)
+	return out
+}
+
 // Wrap returns middleware that enforces the policy ahead of next. The CIDR gate
 // runs first (deny wins), then the configured credential method. On success the
 // request proceeds to next, with JWT claims attached to the request context and

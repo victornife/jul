@@ -35,8 +35,10 @@ type locationRoute struct {
 	// or nil when it constrains nothing beyond its path (ADR 0018 §2-§5).
 	predicates          *compiledPredicates
 	rewrites            []compiledRewrite
+	withdrawn           http.Handler
 	handler             http.Handler
 	metricRoute         string
+	routeID             string
 	sendTimeout         time.Duration
 	overrideSendTimeout bool
 	// index is the location's position in its server block's declaration order,
@@ -153,6 +155,9 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 		lr.metricRoute = "_unidentified"
 		if loc.RouteID != nil && *loc.RouteID != "" {
 			lr.metricRoute = *loc.RouteID
+			if !config.ContainsSecretRef(*loc.RouteID) {
+				lr.routeID = *loc.RouteID
+			}
 		}
 		if loc.SendTimeout != nil {
 			lr.sendTimeout = loc.SendTimeout.Std()
@@ -180,6 +185,9 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 			return nil, err
 		}
 		lr.rewrites = rewrites
+		if loc.Withdrawn {
+			lr.withdrawn = buildWithdrawnHandler(loc.ResponseHeaders)
+		}
 
 		action, err := actionOf(loc)
 		if err != nil {
@@ -316,6 +324,21 @@ func (r *Router) For(addr string) http.Handler {
 		w = respwriter.WithRequestSendTimeout(w, req, sendTimeout, absoluteDeadline)
 		if sendTimeout > 0 {
 			defer respwriter.FinishRequestSendTimeout(w, req, sendTimeout, absoluteDeadline)
+		}
+		if loc.withdrawn != nil {
+			loc.withdrawn.ServeHTTP(w, req)
+			return
+		}
+		if reg, genID := respwriter.ExchangeRegistryFrom(req.Context()); reg != nil {
+			var releaseEx func()
+			w, req, _, releaseEx = reg.Admit(w, req, respwriter.EntryCoord{
+				GenID:         genID,
+				ListenAddr:    addr,
+				ServerIndex:   srv.index,
+				LocationIndex: loc.index,
+				RouteID:       loc.routeID,
+			})
+			defer releaseEx()
 		}
 		if applyRewrites(loc.rewrites, w, req) {
 			return
