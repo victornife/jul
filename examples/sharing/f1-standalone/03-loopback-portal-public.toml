@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — Step 3: Declare portal public on loopback (#581, spec §10).
 #
 # Updates portal-home sharing.mode from "preview" to "public" (audience delta

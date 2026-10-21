@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — Step 1: Loopback preview (SHARE-02A, #581, spec §10).
 #
 # All three server blocks bind to 127.0.0.1:443 (loopback only). External lab

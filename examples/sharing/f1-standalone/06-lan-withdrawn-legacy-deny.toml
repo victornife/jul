@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — Step 5b (Legacy Mechanism Variant): Withdrawal via auth.deny in place
 # (spec §9.3, SD-04).
 #

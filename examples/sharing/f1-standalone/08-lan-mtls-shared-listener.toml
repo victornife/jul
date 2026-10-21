@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — mTLS Shared-Listener Variant (spec §10, §8.4, #642/#563).
 #
 # Configures [servers.tls.client_auth] mode = "request" on the shared listener

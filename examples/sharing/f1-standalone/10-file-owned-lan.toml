@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — File-Owned Authority Variant (spec §9.4, §10).
 #
 # Identical data-plane posture to jul.toml under config_authority = "file_owned"

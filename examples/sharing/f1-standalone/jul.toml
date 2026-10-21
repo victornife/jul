@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — Step 4 (Canonical LAN Configuration): Standalone restricted and
 # public sharing on one Jul instance (SHARE-02A, #581, spec §10).
 #

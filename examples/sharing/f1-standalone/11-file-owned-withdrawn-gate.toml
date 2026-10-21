@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — File-Owned Complete Withdrawal Variant (#642, spec §9.3, §9.4).
 #
 # File-owned configuration with withdrawn = true on route_id = "dashboard".

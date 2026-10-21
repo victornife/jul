@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — Intentional dashboard-public transition variant (#581, spec §4.5, §11).
 #
 # Deliberately transitions route_id = "dashboard" from restricted (Basic auth)

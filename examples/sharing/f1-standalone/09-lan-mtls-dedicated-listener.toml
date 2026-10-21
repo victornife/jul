@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — mTLS Dedicated-Listener Variant (spec §10).
 #
 # Separates the public portal (192.0.2.10:443, client_auth off so browsers never

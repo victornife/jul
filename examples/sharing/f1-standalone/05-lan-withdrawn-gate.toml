@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — Step 5a: Complete withdrawal via dedicated outermost gate (#642, #563, #562).
 #
 # Sets withdrawn = true on route_id = "dashboard" (or via repeatable typed patch

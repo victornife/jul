@@ -1,3 +1,6 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
 # Fixture F1 — Step 2: Loopback dashboard Basic check + restricted intent (#581, spec §10).
 #
 # Adds [servers.locations.auth.basic] and declares mode = "restricted" on the
