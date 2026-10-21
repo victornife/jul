@@ -1,0 +1,15 @@
+{
+  "scale": 1.0,
+  "is_full_qualifying_duration": true,
+  "workers": 16,
+  "goroutine_growth_max": 96,
+  "heap_growth_max_mib": 64.0,
+  "fd_growth_tolerance_max": 8,
+  "dashboard_recovery_deadline_s": 10.0,
+  "w3_complete_withdrawal_bound_s": 2.0,
+  "max_jul_cpu_cores": 4.0,
+  "max_jul_rss_mib": 512.0,
+  "max_w1_latency_p95_ms": 150,
+  "max_w1_latency_p99_ms": 250,
+  "min_w1_throughput_rps": 50.0
+}

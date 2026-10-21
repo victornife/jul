@@ -119,7 +119,7 @@ Use our [configuration reference](configuration.md) and [reload semantics](reloa
 | Direct Internet access | Our gateway receives requests on a reachable server. | Network and firewall routing, a hostname where required, trusted TLS certificates and authentication for restricted services. |
 | Public access with Tailscale Funnel | [Funnel](https://tailscale.com/docs/features/tailscale-funnel) can forward public requests to our gateway. | Funnel setup and its protocol and service limits; application or gateway authentication if access must be restricted. Tailnet membership does not restrict public visitors. |
 
-These are composition patterns, rather than a one-click integration we currently provide. Each service retains its own accounts, connectors, identity policies and operating limits. Check that your chosen path carries the protocols you need; an HTTP publishing path does not automatically expose all our protocol capabilities.
+These are composition patterns, rather than a one-click integration we currently provide. Each service retains its own accounts, connectors, identity policies and operating limits. Check that your chosen path carries the protocols you need; an HTTP publishing path does not automatically expose all our protocol capabilities. For a complete standalone restricted and public setup on one instance (Fixture F1, `#581`), see the [standalone sharing runbook](sharing/f1-standalone-runbook.md) and [`examples/sharing/f1-standalone/`](../examples/sharing/f1-standalone/).
 
 ## Share from a homelab with appropriate protection
 

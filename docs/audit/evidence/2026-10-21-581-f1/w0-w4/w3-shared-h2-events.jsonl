@@ -1,0 +1,9 @@
+{"dial_count":1,"event":"h2_conn_established","local_addr":"192.0.2.11:51540","mono_ns":3907897,"proto":"h2","remote_addr":"192.0.2.10:443","t":"2026-10-21T23:34:29.101299697Z"}
+{"event":"portal_stream_headers_sent","host":"portal.lab.test","mono_ns":4210996,"path":"/assets/bundle.bin","t":"2026-10-21T23:34:29.101602796Z"}
+{"event":"dash_sse_headers_sent","host":"dash.lab.test","mono_ns":5555395,"path":"/events","t":"2026-10-21T23:34:29.102947095Z"}
+{"event":"dash_sse_established","mono_ns":107472309,"proto":"HTTP/2.0","status":200,"t":"2026-10-21T23:34:29.204864009Z"}
+{"event":"ws_established","mono_ns":171735255,"proto":"HTTP/1.1","status":101,"t":"2026-10-21T23:34:29.269126855Z"}
+{"event":"dash_sse_closed","mono_ns":370802288,"proto":"HTTP/2.0","t":"2026-10-21T23:34:29.468194188Z"}
+{"event":"ws_closed","graceful":true,"mono_ns":371242587,"t":"2026-10-21T23:34:29.468634387Z","ws_close_code":1008}
+{"bytes":262144,"completed_ok":true,"event":"portal_stream_completed","mono_ns":2009004558,"t":"2026-10-21T23:34:31.106394558Z"}
+{"dash_same_conn_cache_ctl":"no-store","dash_same_conn_status":403,"event":"post_change_same_conn_probes","mono_ns":2014143153,"portal_same_conn_status":200,"t":"2026-10-21T23:34:31.111533053Z"}

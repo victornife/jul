@@ -1142,15 +1142,15 @@ func runF1Mode(opts f1Options) int {
 	defer cancel()
 
 	var (
-		totalReqs, portalHTML, portalAsset, dashAuth, dashExcl int64
-		s2xx, s401, s403, s429, s5xx, errTrans, violations     int64
-		heldOpened, heldClosed                                 int64
+		totalReqs, portalHTML, portalAsset, dashAuth, dashExcl     int64
+		s2xx, s401, s403, s429, s5xx, errTrans, violations         int64
+		heldOpened, heldClosed                                     int64
 		probePortalOK, probePortalFail, probeDashOK, probeDashFail int64
-		protoMu                                                sync.Mutex
-		protos                                                 = map[string]int64{}
-		latMu                                                  sync.Mutex
-		latencies                                              []int64
-		wg                                                     sync.WaitGroup
+		protoMu                                                    sync.Mutex
+		protos                                                     = map[string]int64{}
+		latMu                                                      sync.Mutex
+		latencies                                                  []int64
+		wg                                                         sync.WaitGroup
 	)
 	recordProto := func(p string) {
 		if p == "" {

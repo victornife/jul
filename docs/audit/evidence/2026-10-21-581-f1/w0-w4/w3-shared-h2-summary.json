@@ -1,0 +1,20 @@
+{
+  "dial_count": 1,
+  "local_addr": "192.0.2.11:51540",
+  "remote_addr": "192.0.2.10:443",
+  "negotiated_protocol": "h2",
+  "portal_stream_status": 200,
+  "portal_stream_bytes": 262144,
+  "portal_stream_completed_ok": true,
+  "dash_sse_status": 200,
+  "dash_sse_closed_at_utc": "2026-10-21T23:34:29.468188488Z",
+  "dash_sse_closed_mono_ns": 370796688,
+  "ws_opened": true,
+  "ws_close_code": 1008,
+  "ws_graceful_handshake": true,
+  "ws_closed_at_utc": "2026-10-21T23:34:29.468631287Z",
+  "ws_closed_mono_ns": 371239687,
+  "post_change_portal_same_conn_status": 200,
+  "post_change_dash_same_conn_status": 403,
+  "post_change_dash_cache_control": "no-store"
+}

@@ -28,6 +28,38 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Standalone restricted and public application sharing verification, runbook,
+  and Fixture F1 examples (#581 / `SHARE-02A`,
+  `docs/specs/application-sharing.md` §10–§14, §18, ADR 0026):
+  - **Runnable Fixture F1 configurations and zero-dependency helpers**
+    (`examples/sharing/f1-standalone/`): 11 TOML configurations (`CFG-F1-01`
+    through `CFG-F1-11`) covering the safe loopback-preview to controlled-LAN
+    progression (`127.0.0.1:443` → `192.0.2.10:443`), `managed` and
+    `file_owned` authority modes, `#642` complete withdrawal (`withdrawn = true`
+    and `location_set_withdrawn`), legacy `auth.deny` in-place withdrawal,
+    deliberate `dashboard` → `public` widening and recovery, and shared-listener
+    (`client_auth.mode = "request"`) vs dedicated-listener
+    (`192.0.2.10:8443`, `client_auth.mode = "require"`) mutual TLS (`mTLS`)
+    variants, validated with real generated TLS/CRL/htpasswd/static-root assets
+    and lean-build WAF rejection in `scripts/config-check.sh`.
+  - **Operator runbook, configuration/evidence manifest, and handoff contracts**
+    (`docs/sharing/f1-standalone-runbook.md`,
+    `docs/sharing/f1-configuration-manifest.json`,
+    `docs/sharing/f1-standalone-evidence.md`, and
+    `docs/sharing/f1-handoff-interfaces.json`): complete 48-case acceptance
+    matrix (`CASE-F1-001`..`CASE-F1-048`), full `W0`–`W4` resource and
+    continuity qualification under the hardened `systemd` profile with two
+    routed client namespaces (`lab-client-1`, `lab-client-2`) and an
+    independent continuity-probe namespace (`lab-probe-1`), single-socket
+    shared HTTP/2 connection coalescing and owned HTTP/1.1 `101` WebSocket
+    retirement verification (`collateral_count = 0`), `T1`–`T6` operator
+    dry-run record, and reusable `#634`/`#582`/`#583`/`#613` interfaces.
+  - **Verified-TLS F1 route-mix and shared-H2 retirement harness modes**
+    (`scripts/burn-in-load.go`, `scripts/sharing_f1_lab.py`): adds `-f1` and
+    `-f1SharedH2` modes with verified Root CA TLS, 70/10/20 route mix,
+    excluded-identity probes, held SSE/WebSocket streams, 1 req/s continuity
+    probes, and compact JSONL event logging.
+
 - Complete withdrawal, outermost withdrawal gate, and exact-entry retirement on
   narrowing (#642 / `SHARE-01B`, bundling #563 and #562; ADR 0026 amendment,
   `docs/specs/application-sharing.md` §8.4, §9.3):
