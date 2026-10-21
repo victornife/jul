@@ -49,6 +49,12 @@ cleanup() {
 	if [ "$CLEANUP_BIN" = 1 ]; then
 		rm -f "$BIN"
 	fi
+	if [ -n "${LEAN_CHECK_BIN:-}" ]; then
+		rm -f "$LEAN_CHECK_BIN"
+	fi
+	if [ -n "${f1_dir:-}" ]; then
+		rm -rf "$f1_dir"
+	fi
 }
 trap cleanup EXIT
 
@@ -103,12 +109,60 @@ while IFS= read -r -d '' f; do
 		rm -rf "$guest_dir"
 		continue
 		;;
+	examples/sharing/f1-standalone/*.toml)
+		# Fixture F1 (#581) configs reference generated ephemeral TLS/mTLS chains,
+		# CRLs, bcrypt htpasswd, and the static portal root. Materialize them once
+		# into a temporary directory and run both full-check (including static
+		# roots, TLS/CRL, and htpasswd) and jul lint, plus verify lean-build WAF
+		# rejection before persistence.
+		if [ -z "${f1_dir:-}" ]; then
+			f1_dir="$(mktemp -d "${TMPDIR:-/tmp}/jul-f1-config-check.XXXXXX")"
+			cp -r examples/sharing/f1-standalone/*.toml examples/sharing/f1-standalone/*.py "$f1_dir/"
+			python3 "$f1_dir/generate_lab_assets.py" --out "$f1_dir" --deterministic >/dev/null
+		fi
+		cfg_base="$(basename "$f")"
+		echo "-- examples/sharing/f1-standalone/${cfg_base} (with static roots + TLS + lint)"
+		if ! (
+			cd "$f1_dir" &&
+			JUL_ADMIN_TOKEN=placeholder-token-for-config-check \
+			JUL_F1_AUDITOR_TOKEN=placeholder-auditor-token-for-config-check \
+			JUL_F1_VIEWER_TOKEN=placeholder-viewer-token-for-config-check \
+			JUL_F1_OPERATOR_TOKEN=placeholder-operator-token-for-config-check \
+			"$BIN" check -config "$cfg_base" -quiet &&
+			JUL_ADMIN_TOKEN=placeholder-token-for-config-check \
+			JUL_F1_AUDITOR_TOKEN=placeholder-auditor-token-for-config-check \
+			JUL_F1_VIEWER_TOKEN=placeholder-viewer-token-for-config-check \
+			JUL_F1_OPERATOR_TOKEN=placeholder-operator-token-for-config-check \
+			"$BIN" lint -config "$cfg_base" >/dev/null
+		); then
+			echo "   FAILED: examples/sharing/f1-standalone/${cfg_base}" >&2
+			fail=1
+		fi
+		continue
+		;;
 	*/rust-proxy/Cargo.toml | */rust-proxy/.cargo/config.toml)
 		continue
 		;;
 	esac
 	check "$(basename "$f")" "$(dirname "$f")"
 done < <(find examples -name '*.toml' -print0 | sort -z)
+
+if [ -n "${f1_dir:-}" ]; then
+	echo "-- examples/sharing/f1-standalone/jul.toml (lean build must reject WAF)"
+	LEAN_CHECK_BIN="$(mktemp "${TMPDIR:-/tmp}/jul-lean-config-check.XXXXXX")"
+	go build -o "$LEAN_CHECK_BIN" ./cmd/jul
+	if (
+		cd "$f1_dir" &&
+		JUL_ADMIN_TOKEN=placeholder-token-for-config-check \
+		JUL_F1_AUDITOR_TOKEN=placeholder-auditor-token-for-config-check \
+		JUL_F1_VIEWER_TOKEN=placeholder-viewer-token-for-config-check \
+		JUL_F1_OPERATOR_TOKEN=placeholder-operator-token-for-config-check \
+		"$LEAN_CHECK_BIN" check -config jul.toml -quiet 2>/dev/null
+	); then
+		echo "   FAILED: lean build unexpectedly accepted WAF-enabled examples/sharing/f1-standalone/jul.toml" >&2
+		fail=1
+	fi
+fi
 
 if [ "$fail" -ne 0 ]; then
 	echo "config-check: one or more shipped configs failed to load" >&2

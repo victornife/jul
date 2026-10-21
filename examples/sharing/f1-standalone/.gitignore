@@ -1,0 +1,15 @@
+# Generated ephemeral lab assets — never commit private keys or real credentials.
+tls/
+portal/
+state/
+*.htpasswd
+*.key
+*.pem
+*.crt
+*.crl
+*.csr
+*.ext
+*.srl
+*.token
+*.log
+*.pid
