@@ -96,29 +96,64 @@ explains the alternatives and responsibilities that remain.
 
 ## Current direction
 
-Jul.IA published stable
-[`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0) at
-**2026-10-11T23:49:52Z**, from immutable source
-`b12e051139f652b400cff37d9f063f5637a7d550`. The selected remediation is complete;
-the three bounded #527 contracts are GA/soaked after the
-[source-bound eight-hour #590 review](docs/reviews/2026-10-14-ga-soak-590-results.md),
-including its retained collector failure and authorised supplement.
-All twelve actual release archives passed signed identity/checksum/SPDX and
-native startup/upgrade/rollback checks across six OS/architecture hosts. See
-[published verification](docs/release.md#published-v220-verification).
-Darwin packages require macOS 13+. Seven exact inherited HTTP/3 exceptions
-remain tracked under #569; no complete RFC conformance or blanket soak
-certification is claimed. The two #514 advisories were disclosed after fixed packages verified.
-Historical [v2.1.0 verification](docs/release.md#published-v210-verification)
-and source-bound soak evidence remain intact. These web-documentation updates
-are post-tag and do not modify the immutable archives. No deferred candidate,
-including #434, is activated by publication; partial-audit limits remain explicit.
-Additional features do not inherit the GA status of older capabilities. Fleet, hosted
-cloud, GraphQL composition and AI remain optional horizons or bounded
-experiments; none is required for the single-node product to remain useful. See the
-[operating model](docs/operating-model.md),
-[Core Gateway Completeness](docs/specs/core-gateway-completeness.md), and
-[roadmap](docs/roadmap/README.md).
+**Where we are today:** Jul.IA is a complete, standalone single-node application
+and protocol gateway (latest stable release:
+[`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)). Its
+[core gateway foundation](docs/specs/core-gateway-completeness.md) is in place:
+HTTP/1.1–HTTP/3 serving, TLS/ACME and mTLS, trusted client and backend
+identities, routing and response policy, upstream resilience, authentication,
+WAF, caching, rate limiting, native gRPC and L4 proxying, WASM plugins,
+transactional configuration management, NGINX migration assessment, and an
+embedded operations Console. On `main`, post-`v2.2.0` work has also landed the
+runtime foundation for application sharing (declared route access intent,
+audience-change checks, and in-place route withdrawal with active-stream
+retirement), alongside targeted additions such as single-provider Console OIDC,
+large-object and range-aware caching, and offered-ALPN TCP passthrough routing.
+
+**Where we are going:** Our focus is making powerful gateway controls
+understandable and dependable for people and teams running and sharing several
+useful applications on one machine—bridging the gap between a capable standalone
+gateway and an intentional sharing experience. Active programmes and backlog
+priorities are organized around three tracks:
+
+- **Application sharing ([#579](https://github.com/victornife/jul/issues/579), [contract](docs/specs/application-sharing.md))** —
+  Verifying and documenting how public, private-network (Tailscale),
+  restricted-browser (Cloudflare Tunnel/Access and self-hosted login), and
+  local-preview services coexist safely on one instance; proving recovery and
+  portability across [reproducible application recipes](https://github.com/victornife/jul/issues/613);
+  and using that evidence to build guided sharing, access-summary, and
+  withdrawal workflows in the Console before exploring provider-backed
+  audience and invitation management.
+- **Security operations and access-control clarity ([#629](https://github.com/victornife/jul/issues/629))** —
+  Making day-two protection maintainable without a separate security platform:
+  trustworthy WAF outcome correlation and bounded investigation, candidate
+  policy testing/promotion/rollback, scoped rule exceptions, actionable gateway
+  posture and exposure reviews, and route/protocol isolation verification.
+- **Gateway usability and cache operations ([#620](https://github.com/victornife/jul/issues/620))** —
+  Practical operational depth for multi-application hosts: scoped cache
+  invalidation (by URL, prefix, pattern, or tag), cache decision inspection,
+  route-scoped cache defaults and bypass rules, plain-language effective-behavior
+  summaries in the Console, aggregate download bandwidth controls, and external
+  alerting recipes.
+
+**What stays out of scope:** Correctness and security fixes always take priority
+over feature work, and new capabilities earn their own maturity rather than
+inheriting GA status from older features. Multi-node fleet control planes,
+hosted cloud services, Kubernetes controllers, service meshes, GraphQL
+composition, and AI gateways remain optional horizons or separately gated
+experiments—none is required for the single-node product to remain complete and
+useful on its own.
+
+**Where to check more details:**
+
+- **[Master programme tracker (#62)](https://github.com/victornife/jul/issues/62)** —
+  live backlog, active workstreams, issue sequencing, effort estimates, and blockers.
+- **[Roadmap](docs/roadmap/README.md)** and **[Operating model](docs/operating-model.md)** —
+  durable portfolio sequence, investment lanes, and prioritization rules.
+- **[Public vision](docs/vision/README.md)** and **[Application sharing programme (#579)](https://github.com/victornife/jul/issues/579)** —
+  product direction and how the gateway connects to the longer-term sharing workflow.
+- **[Feature status & GA matrix](docs/status.md)** ([`docs/feature-status.yaml`](docs/feature-status.yaml)), **[Release verification](docs/release.md#published-v220-verification)**, and **[Known limitations](docs/known-limitations.md)** —
+  per-feature maturity (`GA`, `Beta`, `Alpha`) and delivery state, release/soak evidence, and current technical constraints.
 
 ---
 
