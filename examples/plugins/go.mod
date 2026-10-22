@@ -7,4 +7,4 @@
 //	GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o NAME.wasm ./NAME
 module juliaplugins
 
-go 1.27.2
+go 1.27.3
