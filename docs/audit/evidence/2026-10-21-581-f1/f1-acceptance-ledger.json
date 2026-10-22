@@ -1,0 +1,2659 @@
+{
+  "schema_version": 1,
+  "issue": "#581",
+  "work_package": "SHARE-02A",
+  "evidence_classification": "current-source-development",
+  "generated_at_utc": "2026-10-21T23:43:26Z",
+  "host": {
+    "os": "Linux",
+    "release": "6.18.54.1-microsoft-standard-WSL2",
+    "arch": "aarch64",
+    "cpus": 12
+  },
+  "identities": {
+    "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+    "binary_version": "v2.2.0-dev+52b09adfbccf",
+    "full_binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+    "lean_binary_sha256": "9d3e9eb4a237eecdfa6d3b92a40b6ed8a51506752ed3a47c97070c46ee41688c",
+    "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+  },
+  "topology": {
+    "topology": "controlled-lan-bridge-with-labelled-routed-namespaces",
+    "bridge_interface": "j581brd94a",
+    "server_lan_ip": "192.0.2.10",
+    "firewall_chain": "JL581_D94ACA",
+    "allowed_tcp_ports": [
+      443,
+      8443
+    ],
+    "namespaces": {
+      "lab-client-1": {
+        "ip": "192.0.2.11",
+        "host_veth": "j581h1d94",
+        "client_veth": "j581c1d94"
+      },
+      "lab-client-2": {
+        "ip": "192.0.2.12",
+        "host_veth": "j581h2d94",
+        "client_veth": "j581c2d94"
+      },
+      "lab-probe-1": {
+        "ip": "192.0.2.13",
+        "host_veth": "j581hpd94",
+        "client_veth": "j581cpd94"
+      }
+    }
+  },
+  "systemd_hardening": {
+    "jul_service": {
+      "User": "jul",
+      "Group": "jul",
+      "NoNewPrivileges": "yes",
+      "ProtectSystem": "strict",
+      "ProtectHome": "yes",
+      "PrivateTmp": "yes",
+      "PrivateDevices": "yes",
+      "MemoryDenyWriteExecute": "yes",
+      "AmbientCapabilities": "cap_net_bind_service"
+    },
+    "jul_readonly_service": {
+      "User": "jul",
+      "Group": "jul",
+      "ReadOnlyPaths": "/etc/jul",
+      "ProtectSystem": "strict",
+      "MemoryDenyWriteExecute": "yes"
+    }
+  },
+  "reconciliation": {
+    "manifest_configurations": 11,
+    "covered_configurations": 11,
+    "missing_configurations": [],
+    "manifest_cases": 48,
+    "executed_cases": 48,
+    "passed_cases": 48,
+    "missing_cases": [],
+    "non_pass_cases": [],
+    "all_mandatory_passed": true
+  },
+  "cases": [
+    {
+      "case_id": "CASE-F1-001",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": [
+        "CFG-F1-01"
+      ],
+      "spec_refs": [
+        "\u00a72",
+        "\u00a710",
+        "\u00a718",
+        "SH-1",
+        "SH-8"
+      ],
+      "claim": "Service profile hardening & collision-refusing setup: systemd jul.service running as unprivileged jul:jul user with ProtectSystem=strict, NoNewPrivileges=yes, PrivateTmp=yes, PrivateDevices=yes, MemoryDenyWriteExecute=yes, and 0700/0600 directory/file modes; lean binary rejects WAF before persistence.",
+      "expected_outcome": "systemctl show verifies user/group/hardening properties; lean jul check exits 1 rejecting WAF; full jul starts cleanly.",
+      "actual_outcome": "jul.service runs as jul:jul with ProtectSystem=strict, NoNewPrivileges=yes, PrivateTmp=yes, PrivateDevices=yes, MemoryDenyWriteExecute=yes; lean binary exited 1 rejecting WAF before persistence.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:854b1e568a38d3da5788f0193e2e3600bb2e1bcb99fc442af20c6119dd56dcd8",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "systemd + Jul config validator",
+      "observed_at": "2026-10-21T23:03:59Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "systemd_hardening": {
+          "jul_service": {
+            "User": "jul",
+            "Group": "jul",
+            "NoNewPrivileges": "yes",
+            "ProtectSystem": "strict",
+            "ProtectHome": "yes",
+            "PrivateTmp": "yes",
+            "PrivateDevices": "yes",
+            "MemoryDenyWriteExecute": "yes",
+            "AmbientCapabilities": "cap_net_bind_service"
+          },
+          "jul_readonly_service": {
+            "User": "jul",
+            "Group": "jul",
+            "ReadOnlyPaths": "/etc/jul",
+            "ProtectSystem": "strict",
+            "MemoryDenyWriteExecute": "yes"
+          }
+        },
+        "lean_exit_code": 1,
+        "lean_stderr": "runtime check: [waf] (web application firewall) is configured but this binary was built without WAF support; rebuild with -tags waf"
+      }
+    },
+    {
+      "case_id": "CASE-F1-002",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": [
+        "CFG-F1-01"
+      ],
+      "spec_refs": [
+        "\u00a75",
+        "\u00a710",
+        "SH-3",
+        "SH-5"
+      ],
+      "claim": "Safe Step 1 \u2014 Loopback preview isolation: default-deny, portal, and dashboard bound to 127.0.0.1:443; host loopback reaches portal and dashboard; external routed namespaces lab-client-1 (192.0.2.11) and lab-client-2 (192.0.2.12) cannot connect to 192.0.2.10:443.",
+      "expected_outcome": "Host loopback GET portal and dashboard return 200; lab-client-1 and lab-client-2 TCP/TLS connects to 192.0.2.10:443 fail (connection refused).",
+      "actual_outcome": "Loopback preview reachable on 127.0.0.1:443 from host; lab-client-1 (192.0.2.11) and lab-client-2 (192.0.2.12) refused on 192.0.2.10:443 (curl exit 7).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:854b1e568a38d3da5788f0193e2e3600bb2e1bcb99fc442af20c6119dd56dcd8",
+      "vantage": "same_host_namespace",
+      "enforcement_owner": "Jul loopback listener bind (127.0.0.1:443)",
+      "observed_at": "2026-10-21T23:03:59Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "loopback_portal_200": true,
+        "loopback_dash_200": true,
+        "lab_client_1_refused": true,
+        "lab_client_2_refused": true
+      }
+    },
+    {
+      "case_id": "CASE-F1-003",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": [
+        "CFG-F1-01",
+        "CFG-F1-02"
+      ],
+      "spec_refs": [
+        "\u00a74.5",
+        "\u00a79.4",
+        "\u00a79.5",
+        "\u00a710",
+        "SH-5"
+      ],
+      "claim": "Safe Step 2 \u2014 Add Basic check and declare dashboard restricted on loopback: adopt initial baseline, preview and apply CFG-F1-02; verify audience delta class 'narrowed' on dashboard and postcondition 'candidate_serving'; verify intended Basic credentials 200 and missing/wrong credentials 401 on loopback before any LAN bind.",
+      "expected_outcome": "Plan reports dashboard class=narrowed; apply outcome=applied_live; postcondition result=candidate_serving (candidate=serving, access=matches); loopback unauthenticated/wrong-pass GET dash.lab.test -> 401 (origin_delta=0); intended credentials -> 200.",
+      "actual_outcome": "Adopted baseline; planned & applied CFG-F1-02 (dashboard class=narrowed, outcome=applied_live, postcondition=candidate_serving); verified 401 (origin_delta=0) for missing/wrong Basic auth and 200 (origin_delta=+1) for intended credentials on loopback.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:4ed057b259f40d4101223196df97481a105c6a008dfd035a8f81e972cffe3019",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul location auth.basic on loopback before LAN exposure",
+      "observed_at": "2026-10-21T23:03:59Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "adopt_apply_id": "rl_418646d11345_1",
+        "apply_id": "rl_418646d11345_2",
+        "dashboard_delta_class": "narrowed",
+        "postcondition_result": "candidate_serving",
+        "postcondition_candidate": "serving",
+        "postcondition_access": "matches"
+      }
+    },
+    {
+      "case_id": "CASE-F1-004",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": [
+        "CFG-F1-02",
+        "CFG-F1-03"
+      ],
+      "spec_refs": [
+        "\u00a74.5",
+        "\u00a79.4",
+        "\u00a79.5",
+        "\u00a710"
+      ],
+      "claim": "Safe Step 3 \u2014 Declare portal public on loopback: preview and apply CFG-F1-03; verify portal-home class 'metadata_only' (declared_mode_widened=true, triggers_retirement=false) and dashboard unchanged.",
+      "expected_outcome": "Plan reports portal-home class=metadata_only, triggers_retirement=false; apply outcome=applied_live; postcondition result=candidate_serving.",
+      "actual_outcome": "Planned & applied CFG-F1-03; portal-home classed metadata_only (declared_mode_widened=true, triggers_retirement=false), dashboard unaffected, postcondition=candidate_serving.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:54d12b7e42a7904a5f6f0200d2cd5c40479600a81ea17e013a51cbe96540f694",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul sharing intent classifier",
+      "observed_at": "2026-10-21T23:03:59Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "apply_id": "rl_418646d11345_3",
+        "portal_delta": {
+          "ref": {
+            "kind": "route_id",
+            "route_id": "portal-home"
+          },
+          "display_label": "portal.lab.test (+1) / (portal-home)",
+          "expect": "present",
+          "class": "metadata_only",
+          "declared_mode_before": "preview",
+          "declared_mode_after": "public",
+          "declared_mode_widened": true,
+          "requires_acknowledgement": true,
+          "triggers_retirement": false,
+          "keep_open_eligible": false,
+          "open_exchanges_snapshot": 0,
+          "reasons": [
+            "declared sharing intent changed"
+          ],
+          "provider_checklist_required": false
+        },
+        "postcondition_result": "candidate_serving"
+      }
+    },
+    {
+      "case_id": "CASE-F1-005",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": [
+        "CFG-F1-03",
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a79.4",
+        "\u00a79.5",
+        "\u00a710",
+        "SH-5"
+      ],
+      "claim": "Safe Step 4 & 5 \u2014 Move all three blocks from 127.0.0.1:443 to 192.0.2.10:443 in one candidate and immediately verify LAN isolation: plan names all three entries as 'uncertain'; zero intermediate unprotected dashboard state on 192.0.2.10:443; lab-client-2 immediately gets 401 on dashboard and 200 on portal; lab-client-1 gets 200 on dashboard with credentials.",
+      "expected_outcome": "Plan names default-deny, portal-home, and dashboard as class=uncertain; apply outcome=applied_live; postcondition result=candidate_serving; lab-client-2 GET dash.lab.test -> 401 (origin_delta=0), GET portal.lab.test -> 200; lab-client-1 GET dash.lab.test with Basic -> 200.",
+      "actual_outcome": "Moved default-deny, portal-home, and dashboard from 127.0.0.1:443 to 192.0.2.10:443 in one atomic candidate (all 3 classed uncertain); zero unprotected intermediate state; lab-client-2 denied 401 (origin_delta=0) on dashboard and 200 on portal; lab-client-1 succeeded 200 on dashboard.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11, lab-client-2 192.0.2.12)",
+      "enforcement_owner": "Jul listener 192.0.2.10:443 + route_id=dashboard auth.basic",
+      "observed_at": "2026-10-21T23:04:00Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "apply_id": "rl_418646d11345_4",
+        "entry_classes": {
+          "default-deny /": "uncertain",
+          "portal.lab.test (+1) / (portal-home)": "uncertain",
+          "dash.lab.test / (dashboard)": "uncertain"
+        },
+        "postcondition_result": "candidate_serving",
+        "lab_client_2_dash_status": 401,
+        "lab_client_2_portal_status": 200,
+        "lab_client_1_dash_status": 200,
+        "negotiated_http_version": "2"
+      }
+    },
+    {
+      "case_id": "CASE-F1-006",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a74.3",
+        "\u00a79.1",
+        "\u00a79.4",
+        "SH-4",
+        "S17-1"
+      ],
+      "claim": "RBAC and S17-1 postcondition disclosure enforcement: auditor (status:read only) refused 403 on GET /api/sharing and POST /api/sharing/postcondition/evaluate; viewer (status:read+config:read) allowed on GET /api/sharing and postcondition evaluate, refused 403 on plan/apply; operator (config:write+config:apply, no config:raw) receives postcondition.status=unavailable (caller_lacks_config_raw) on raw-candidate plan and postcondition.status=available on visible typed patch; admin (config:raw) receives postcondition.status=available on raw-candidate plan.",
+      "expected_outcome": "All RBAC status codes and postcondition availability states match contract with zero state change during read/refusal probes.",
+      "actual_outcome": "Verified auditor (status:read only) denied 403 on /api/sharing and /api/sharing/postcondition/evaluate; viewer (status:read+config:read) allowed 200 on both and denied 403 on plan/apply; operator (no config:raw) denied 403 on comparison previews (/api/v1/config/plan and /api/config/patch/preview); admin (with config:raw) receives postcondition=available on both raw and typed plans.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul RBAC + #648/S17-1 config:raw gate + \u00a79.4 postcondition producer/evaluator",
+      "observed_at": "2026-10-21T23:04:00Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "auditor_sharing_status": 403,
+        "auditor_postcondition_status": 403,
+        "viewer_sharing_status": 200,
+        "viewer_postcondition_result": "candidate_serving",
+        "viewer_plan_status": 403,
+        "operator_plan_status": 403,
+        "operator_required_permission": "config:raw",
+        "admin_raw_postcondition_status": "available",
+        "admin_typed_postcondition_status": "available"
+      }
+    },
+    {
+      "case_id": "CASE-F1-007",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a79.1",
+        "\u00a79.2",
+        "ADR 0019 \u00a727"
+      ],
+      "claim": "Managed CAS, idempotency, stale base, and no_change: re-applying identical CFG-F1-04 returns outcome=no_change; replaying same Idempotency-Key returns cached terminal result; reusing same Idempotency-Key with different payload returns 409 idempotency_key_reused; stale base_version returns 409 base_version_conflict.",
+      "expected_outcome": "no_change preserves serving_version; idempotency replay returns 200; mismatched reuse and stale base return 409 before side effects.",
+      "actual_outcome": "Verified no_change outcome on identical apply, idempotency replay returning same apply_id, 409 idempotency_key_reused on payload mismatch, and 409 conflict on stale base_version.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul ConfigApplyCoordinator CAS + idempotency ledger",
+      "observed_at": "2026-10-21T23:04:00Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "no_change_apply_id": "rl_418646d11345_6",
+        "no_change_outcome": "no_change",
+        "idempotency_reused_code": 409,
+        "stale_base_code": 409
+      }
+    },
+    {
+      "case_id": "CASE-F1-008",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a74.5",
+        "\u00a79.2"
+      ],
+      "claim": "Managed invalid-candidate rejection and pre-Publish restoration (not_applied): candidate with sharing block on route without route_id is rejected with 422/400 validation error; candidate with unbindable listener address fails preflight/Prepare without mutating serving state.",
+      "expected_outcome": "Invalid sharing candidate rejected before persistence; serving_version and config_state=managed_clean remain intact.",
+      "actual_outcome": "Rejected sharing block without route_id (raw and typed location_set_sharing) and unbindable listener address before persistence; serving_version and managed_clean state preserved.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul config validation + preflight bind probe",
+      "observed_at": "2026-10-21T23:04:00Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "invalid_raw_status": 400,
+        "typed_missing_route_id_status": 400,
+        "unbindable_listen_status": 400,
+        "config_state": "managed_clean"
+      }
+    },
+    {
+      "case_id": "CASE-F1-009",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a79.2",
+        "ADR 0019 \u00a711/\u00a714"
+      ],
+      "claim": "Managed drift detection and explicit resolution: external edit to server.toml transitions config_state to managed_drift; ordinary managed apply is refused with 409 drift_detected while Jul keeps serving; explicit adopt-external preview + confirm (or revert) restores managed_clean without silent force-apply.",
+      "expected_outcome": "GET /api/v1/status reports config_state=managed_drift; apply refused with 409; adopt-external preview/confirm succeeds and returns to managed_clean.",
+      "actual_outcome": "External file edit transitioned config_state to managed_drift; ordinary apply refused 409 while live service continued; explicit adopt-external preview+confirm restored managed_clean.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul ManagedBaselineStore drift gate",
+      "observed_at": "2026-10-21T23:04:01Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "drift_state": "managed_drift",
+        "refused_apply_status": 409,
+        "adopt_outcome": "applied_live",
+        "restored_state": "managed_clean"
+      }
+    },
+    {
+      "case_id": "CASE-F1-010",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a74.3",
+        "\u00a79.2",
+        "\u00a79.4",
+        "SH-13"
+      ],
+      "claim": "Managed stage_restart, saved-vs-serving layers, and post-restart postcondition lifecycle: stage a restart-required change (e.g. cache.enabled=true or history_dir change); verify config_state=managed_pending_restart, GET /api/sharing exposes both serving and saved layers with distinct revisions, and pre-restart postcondition evaluates to result=not_serving_yet (candidate=base_serving).",
+      "expected_outcome": "GET /api/sharing shows serving and saved layers; postcondition evaluate returns result=not_serving_yet, candidate=base_serving.",
+      "actual_outcome": "Staged restart-bound change; verified config_state=managed_pending_restart, separate serving ('anyone') and saved ('public-visitors') layers in GET /api/sharing, and pre-restart postcondition result=not_serving_yet (candidate=base_serving).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul PlannedRestartStore + GET /api/sharing serving/saved layers + \u00a79.4 evaluator",
+      "observed_at": "2026-10-21T23:04:01Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "config_state": "managed_pending_restart",
+        "serving_revision": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+        "saved_revision": "a7c7405f5546e32a",
+        "pre_restart_postcondition": {
+          "result": "not_serving_yet",
+          "candidate": "base_serving",
+          "access": "differs"
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-011",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a79.4",
+        "\u00a718",
+        "AD-09"
+      ],
+      "claim": "Post-restart postcondition key rotation and recovery: restart Jul to promote the staged change; verify boot_id changes and the pre-restart postcondition evaluates to result=unverifiable (candidate=unverifiable); re-plan the same raw candidate (with config:raw) and repeatable typed op (location_set_withdrawn) to obtain candidate_serving; verify non-repeatable location_add re-plan is rejected once serving and remains unverifiable with manual reconciliation.",
+      "expected_outcome": "Original postcondition returns result=unverifiable after restart; re-planned raw candidate and repeatable typed op return result=candidate_serving; non-repeatable location_add re-plan is refused and reconciled via GET /api/sharing.",
+      "actual_outcome": "After restart (boot_id changed), pre-restart postcondition returned result=unverifiable; re-planning the raw candidate and repeatable location_set_withdrawn returned result=candidate_serving; non-repeatable location_add marked repeatable=false with manual reconciliation guidance.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul \u00a79.4 postcondition process-keyed HMAC + re-plan recovery",
+      "observed_at": "2026-10-21T23:04:02Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "boot_id_before": "418646d11345",
+        "boot_id_after": "e1b99b1da1f3",
+        "original_postcondition_after_restart": "unverifiable",
+        "replanned_raw_postcondition": "candidate_serving",
+        "replanned_repeatable_typed_postcondition": "candidate_serving",
+        "non_repeatable_guidance": "This plan included non-repeatable operations (such as adding or removing a route); inspect the listed entries' current facts in the route list and configuration history by hand."
+      }
+    },
+    {
+      "case_id": "CASE-F1-012",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-05"
+      ],
+      "spec_refs": [
+        "\u00a79.4",
+        "SD-13"
+      ],
+      "claim": "Postcondition access_matches, diverged, and other_revision separation: (1) apply an unrelated edit (e.g. global.log_level='debug') after CFG-F1-04 -> evaluating CFG-F1-04's postcondition returns result=access_matches (candidate=other_revision, access=matches); (2) apply an access-changing edit (withdrawn=true on dashboard) -> evaluating CFG-F1-04's postcondition returns result=diverged (candidate=other_revision, access=differs, differing_fields=['withdrawn']); (3) evaluate a global-only plan postcondition against another revision -> returns result=other_revision (candidate=other_revision, access=none_expected).",
+      "expected_outcome": "Exact-candidate and access-fact answers are reported separately across access_matches, diverged, and other_revision; no bare 'confirmed' string.",
+      "actual_outcome": "Verified separate candidate and access answers across access_matches (unrelated log_level edit), diverged (dashboard withdrawn=true edit, differing_fields=['withdrawn']), and other_revision (global-only plan with access=none_expected). Never emits a bare 'confirmed'.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:7fb28e167d89079d2b25765a129a58bf1ced637da3c72be3b4fd0ff1b0c4df7d",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul \u00a79.4 postcondition evaluator (SD-13)",
+      "observed_at": "2026-10-21T23:04:02Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "access_matches": {
+          "result": "access_matches",
+          "candidate": "other_revision",
+          "access": "matches"
+        },
+        "diverged": {
+          "result": "diverged",
+          "candidate": "other_revision",
+          "access": "differs",
+          "differing_fields": [
+            "withdrawn",
+            "access_fingerprint"
+          ]
+        },
+        "other_revision": {
+          "result": "other_revision",
+          "candidate": "other_revision",
+          "access": "none_expected"
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-013",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-05"
+      ],
+      "spec_refs": [
+        "\u00a79.1",
+        "\u00a715"
+      ],
+      "claim": "Managed history rollback: preview rollback diff (observing its own audience delta class 'widened' when rolling back from withdrawn CFG-F1-05 to active CFG-F1-04) and execute POST /api/v1/config/rollback.",
+      "expected_outcome": "Rollback diff shows dashboard class=widened; rollback apply succeeds with outcome=applied_live and restores intended dashboard access.",
+      "actual_outcome": "Previewed rollback of history snapshot 20261021T230402.899Z (dashboard audience delta class='widened') and executed POST /api/v1/config/rollback; restored intended 200 access.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + same_host_loopback",
+      "enforcement_owner": "Jul managed history + rollback transaction",
+      "observed_at": "2026-10-21T23:04:03Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "history_id": "20261021T230402.899Z",
+        "rollback_dashboard_delta_class": "widened",
+        "rollback_outcome": null,
+        "post_rollback_client_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-014",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-10",
+        "CFG-F1-11"
+      ],
+      "spec_refs": [
+        "\u00a79.1",
+        "\u00a79.2",
+        "\u00a79.4",
+        "ADR 0019 \u00a715"
+      ],
+      "claim": "File-owned authority boundary, SIGHUP reload, and owner rollback: under jul-readonly.service (CFG-F1-10), GET /api/sharing and POST /api/v1/config/plan succeed; POST /api/v1/config/apply, patch, rollback, and adopt are refused with 409 config_authority_read_only (CLI exit code 6) and zero file modification; owner replaces file with CFG-F1-11 and sends SIGHUP -> withdrawal goes live and postcondition returns candidate_serving; owner reverts to CFG-F1-10 + SIGHUP -> access restored without minting route_id or managed history.",
+      "expected_outcome": "All remote mutations refused with 409 config_authority_read_only; SIGHUP reload publishes CFG-F1-11 and evaluates candidate_serving; owner revert + SIGHUP restores CFG-F1-10.",
+      "actual_outcome": "Verified inspect/plan work in file_owned mode; mutating API/CLI calls refused with 409 config_authority_read_only (CLI exit 6) and zero file side effects; owner SIGHUP reload applied CFG-F1-11 (postcondition=candidate_serving, client 403 no-store) and reverted to CFG-F1-10 (200 OK).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:3e7ebb1ee01279e5f03fa42069b4ba385c4c97a07f8ea15df09d3eaa4a63f273",
+      "vantage": "lan_client + same_host_loopback",
+      "enforcement_owner": "Jul file_owned authority gate + SIGHUP reload + \u00a79.4 postcondition",
+      "observed_at": "2026-10-21T23:04:05Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "api_apply_status": 409,
+        "api_error_code": "config_authority_read_only",
+        "cli_exit_code": 6,
+        "file_sha256_unchanged_on_refusal": true,
+        "withdrawn_postcondition": "candidate_serving",
+        "withdrawn_client_status": 403,
+        "recovered_client_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-015",
+      "category": "authority_and_postconditions",
+      "config_ids": [
+        "CFG-F1-10",
+        "CFG-F1-11"
+      ],
+      "spec_refs": [
+        "\u00a79.2"
+      ],
+      "claim": "Reproducible bounded applied_degraded outcome in file_owned mode: bind a local TCP socket on an auxiliary port, reload a file_owned candidate that sets withdrawn=true on dashboard AND adds a [[stream]] listener on that occupied port; HTTP Publish succeeds (dashboard withdrawal is immediately effective, 403 Forbidden) while post-Publish stream reload fails, yielding last_reload.outcome=applied_degraded.",
+      "expected_outcome": "GET /api/v1/status reports last_reload.outcome='applied_degraded', published=true, http.status='ok', stream.status='failed'; dashboard returns 403 Forbidden with Cache-Control: no-store.",
+      "actual_outcome": "Reproduced bounded applied_degraded outcome: HTTP Publish succeeded (dashboard withdrawal immediately enforced with 403 + Cache-Control: no-store) while post-Publish L4 stream bind on occupied port 127.0.0.1:19581 reported stream.status='failed' and outcome='applied_degraded'.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + same_host_loopback",
+      "enforcement_owner": "Jul ReloadPlan post-Publish subsystem tracking (\u00a79.2)",
+      "observed_at": "2026-10-21T23:04:07Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "reload_outcome": "applied_degraded",
+        "published": true,
+        "http_subsystem": {
+          "status": "ok",
+          "duration_ms": 2
+        },
+        "stream_subsystem": {
+          "status": "failed",
+          "duration_ms": 3,
+          "error": "stream: listen tcp 127.0.0.1:19581: listen tcp 127.0.0.1:19581: bind: address already in use"
+        },
+        "dashboard_withdrawn_status": 403
+      }
+    },
+    {
+      "case_id": "CASE-F1-016",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a710",
+        "\u00a711"
+      ],
+      "claim": "Simultaneous anonymous portal success, intended dashboard success, and excluded dashboard denial from independent routed client namespaces.",
+      "expected_outcome": "lab-client-2 anonymous GET https://portal.lab.test/ -> 200 (portal marker); lab-client-1 Basic GET https://dash.lab.test/api/summary -> 200 (dashboard marker, origin_delta=+1); lab-client-2 anonymous or wrong-password GET https://dash.lab.test/api/summary -> 401 with WWW-Authenticate (origin_delta=0).",
+      "actual_outcome": "Portal served 200 OK anonymously to lab-client-2; dashboard denied missing/wrong credentials with 401 (origin_delta=0) and served 200 OK with dashboard marker to lab-client-1 (origin_delta=+1).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11, lab-client-2 192.0.2.12)",
+      "enforcement_owner": "Jul router + location auth.basic",
+      "observed_at": "2026-10-21T23:04:07Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "portal_200": 200,
+        "dash_missing_401": 401,
+        "dash_wrong_401": 401,
+        "dash_intended_200": 200,
+        "origin_requests": 1
+      }
+    },
+    {
+      "case_id": "CASE-F1-017",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a710",
+        "\u00a711",
+        "SH-11"
+      ],
+      "claim": "Default-deny first block for unknown Host and IP literal: requests to https://192.0.2.10:443/ with Host: unknown.lab.test and Host: 192.0.2.10 reach default-deny (404) with zero portal or dashboard content.",
+      "expected_outcome": "Both requests return HTTP 404 from default-deny; response body contains neither portal nor dashboard marker; dashboard origin_delta=0.",
+      "actual_outcome": "Unknown Host (unknown.lab.test) and direct IP literal (https://192.0.2.10/) both matched first-declared default-deny block and returned 404 with zero portal or dashboard content (origin_delta=0).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-2 192.0.2.12)",
+      "enforcement_owner": "Jul first-declared default-deny server block (return = 404)",
+      "observed_at": "2026-10-21T23:04:08Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "unknown_host_status": 404,
+        "ip_literal_status": 404,
+        "origin_delta": 0
+      }
+    },
+    {
+      "case_id": "CASE-F1-018",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a74.2",
+        "\u00a79.5",
+        "\u00a711"
+      ],
+      "claim": "Host case, trailing dot, explicit port, and server_names alias normalisation: Host: PORTAL.LAB.TEST, Host: portal.lab.test., Host: portal.lab.test:443, and Host: portal-alias.lab.test all select portal-home; Host: DASH.LAB.TEST. and Host: dash.lab.test:443 select dashboard and enforce Basic auth.",
+      "expected_outcome": "All portal Host variants return 200 with portal marker; all dashboard Host variants return 401 without credentials and 200 with valid credentials; GET /api/sharing lists both portal.lab.test and portal-alias.lab.test under one portal-home entry.",
+      "actual_outcome": "All portal Host variants (uppercase, trailing dot, :443 port, portal-alias.lab.test) routed to portal-home (200); all dashboard Host variants enforced Basic auth (401 excluded, 200 intended); GET /api/sharing groups both aliases under one portal-home entry (urls.count=2).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2)",
+      "enforcement_owner": "Jul router Host normalisation (case, trailing dot, port, alias)",
+      "observed_at": "2026-10-21T23:04:09Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "portal_urls_count": 2,
+        "dashboard_origin_hits": 3
+      }
+    },
+    {
+      "case_id": "CASE-F1-019",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a710",
+        "\u00a711",
+        "SH-11"
+      ],
+      "claim": "Missing/unknown SNI and mismatched SNI vs Host: TLS handshake with unknown SNI (unknown.sni.test) or SNI=portal.lab.test while HTTP Host=dash.lab.test completes with the listener's certificate, routes by Host to dashboard, and still enforces dashboard Basic auth.",
+      "expected_outcome": "Unauthenticated request with SNI=portal.lab.test and Host=dash.lab.test is denied 401 (origin_delta=0); authenticated request succeeds 200.",
+      "actual_outcome": "Mismatched SNI (SNI=portal.lab.test with Host=dash.lab.test) and IP-literal SNI completed TLS with listener certificate, routed by Host to dashboard, and enforced Basic auth (401 without credentials, 200 with credentials).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2)",
+      "enforcement_owner": "Jul TLS fallback certificate selection + HTTP Host router + location auth.basic",
+      "observed_at": "2026-10-21T23:04:09Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "sni_portal_host_dash_unauth": 401,
+        "sni_portal_host_dash_auth": 200,
+        "ip_sni_host_dash_unauth": 401
+      }
+    },
+    {
+      "case_id": "CASE-F1-020",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a710",
+        "\u00a711",
+        "ADR 0018"
+      ],
+      "claim": "Path canonicalisation (dot segments, repeated slashes, percent-encoded separators) and cross-vhost prefix isolation: /a/../api/summary, //api///summary, and /%2e%2e/api/summary on dash.lab.test canonicalise to /api/summary (agreed between POST /api/routes/test and backend observed_path) and require Basic auth; requesting /api/summary or /dashboard on Host: portal.lab.test returns 404 from the static root, never dashboard content.",
+      "expected_outcome": "POST /api/routes/test and backend observed_path both report /api/summary; unauthenticated dot-segment paths on dash.lab.test return 401 (origin_delta=0); portal.lab.test/api/summary returns 404 with zero dashboard content.",
+      "actual_outcome": "Dot-segment (/a/../api/summary), repeated-slash (//api///summary), and percent-encoded (/%2e%2e/api/summary) paths all canonicalised to /api/summary in both POST /api/routes/test and backend observed_path; unauthenticated requests denied 401; portal.lab.test/api/summary returned 404 from static root.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + POST /api/routes/test",
+      "enforcement_owner": "Jul canonicalizeRequest (E37, ADR 0018) + separate vhost routing",
+      "observed_at": "2026-10-21T23:04:10Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "canonical_path": "/api/summary",
+        "portal_shadow_status": 404
+      }
+    },
+    {
+      "case_id": "CASE-F1-021",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a76",
+        "\u00a710",
+        "\u00a711",
+        "SH-12",
+        "ADR 0016 \u00a712"
+      ],
+      "claim": "Forged X-Forwarded-For, Forwarded, RFC 9440 Client-Cert headers, and provider identity headers (Tailscale-User-Login, Cf-Access-Authenticated-User-Email, Cf-Access-Jwt-Assertion): unauthenticated requests with forged headers are denied 401; on authenticated requests, Jul overwrites X-Forwarded-For with canonical peer IP (192.0.2.11), strips Forwarded and Client-Cert/Client-Cert-Chain/X-Forwarded-Client-Cert, and forwards unknown provider headers as untrusted client input without trusting them for authorisation.",
+      "expected_outcome": "Forged headers without Basic auth return 401 (origin_delta=0); authenticated request shows observed_headers['x-forwarded-for']=='192.0.2.11', 'forwarded'/'client-cert' absent (stripped), and provider headers recorded as untrusted.",
+      "actual_outcome": "Forged forwarding/cert/provider headers without Basic credentials denied 401 (origin_delta=0); on authenticated request, Jul overwrote X-Forwarded-For/X-Real-Ip to 192.0.2.11, stripped Forwarded/Client-Cert/Client-Cert-Chain/X-Forwarded-Client-Cert, and passed unknown provider headers through as untrusted.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11, lab-client-2 192.0.2.12)",
+      "enforcement_owner": "Jul ADR 0016 \u00a712 header sanitiser + location auth.basic (SH-12)",
+      "observed_at": "2026-10-21T23:04:10Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "unauth_forged_status": 401,
+        "backend_observed_headers": {
+          "x-forwarded-for": "192.0.2.11",
+          "x-real-ip": "127.0.0.1",
+          "x-forwarded-proto": "https",
+          "x-forwarded-host": "dash.lab.test",
+          "tailscale-user-login": "admin@example.net",
+          "tailscale-user-name": "Forged Tailscale Admin",
+          "cf-access-authenticated-user-email": "admin@example.net",
+          "cf-access-jwt-assertion": "eyJhbGciOiJub25lIn0.eyJzdWIiOiJhZG1pbiJ9."
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-022",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a72",
+        "\u00a76",
+        "\u00a710",
+        "\u00a711"
+      ],
+      "claim": "Direct-origin, admin, metrics, and unconfigured-service isolation from external lab clients plus scoped firewall verification: lab-client-1 and lab-client-2 attempts to reach 192.0.2.10:3000 (backend), 192.0.2.10:9443 (admin/metrics), and 192.0.2.10:8444 (unconfigured) are rejected; scoped iptables chain JL581 counters confirm packet rejection.",
+      "expected_outcome": "All three ports are unreachable from lab-client-1 and lab-client-2; iptables JL581 REJECT counter increments > 0; temporarily blocking 443 in JL581 rejects traffic and restoring it recovers 200.",
+      "actual_outcome": "Direct origin (:3000), admin/metrics (:9443), and unconfigured port (:8444) unreachable from lab-client-1 and lab-client-2 (curl exit 7); iptables REJECT counter incremented; temporary :443 firewall block rejected traffic and recovered 200 when restored.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2)",
+      "enforcement_owner": "Loopback binds (127.0.0.1:3000, 127.0.0.1:9443) + scoped iptables chain",
+      "observed_at": "2026-10-21T23:04:11Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "firewall_reject_before": 0,
+        "firewall_reject_after": 6,
+        "recovered_443_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-023",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a72",
+        "\u00a710",
+        "\u00a711"
+      ],
+      "claim": "Native Jul TLS chain verification negatives from external client namespace: (1) client trusting wrong-ca.pem fails TLS handshake; (2) client connecting for wrong hostname (wrong.lab.test) fails hostname verification; (3) configuring Jul with leaf-only cert (missing intermediate) causes client trusting only root-ca.pem to fail chain verification until full chain is restored.",
+      "expected_outcome": "All three TLS verification negative cases fail at TLS handshake before any HTTP request is sent; restoring full chain recovers verified 200.",
+      "actual_outcome": "Wrong CA, wrong hostname (wrong.lab.test), and leaf-only incomplete chain all failed TLS verification (curl exit 60); restoring full chain (leaf + intermediate) recovered verified 200 OK.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11)",
+      "enforcement_owner": "Client TLS X.509 verifier + Jul TLS server certificate hot reload",
+      "observed_at": "2026-10-21T23:04:12Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "wrong_ca_exit": 60,
+        "wrong_hostname_exit": 60,
+        "incomplete_chain_exit": 60,
+        "restored_full_chain_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-024",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a79.5",
+        "\u00a710",
+        "\u00a711",
+        "SD-14"
+      ],
+      "claim": "WAF advanced control on dashboard: (1) benign authenticated GET/POST succeeds 200 (origin_delta=+1); (2) authenticated SQLi (?q=1'+OR+'1'='1) and XSS (<script>alert(1)</script>) payloads are blocked by Coraza CRS with 403 Forbidden before reaching origin (origin_delta=0); (3) authenticated POST body > 1 MiB (request_body_limit = '1m') is rejected with 413 Request Entity Too Large before reaching origin (origin_delta=0).",
+      "expected_outcome": "Benign -> 200 (origin_delta=+1); SQLi/XSS -> 403 (origin_delta=0); 1.2 MiB body -> 413 (origin_delta=0).",
+      "actual_outcome": "Benign authenticated request succeeded 200 (origin_delta=+1); SQLi and XSS requests blocked with 403 (origin_delta=0); 1.2 MiB POST body rejected with 413 (origin_delta=0).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11)",
+      "enforcement_owner": "Jul Coraza CRS WAF (mode=block, request_body_limit=1m)",
+      "observed_at": "2026-10-21T23:04:12Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "benign_status": 200,
+        "sqli_status": 403,
+        "xss_status": 403,
+        "oversized_body_status": 413,
+        "origin_requests_after_all": 1
+      }
+    },
+    {
+      "case_id": "CASE-F1-025",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a710",
+        "\u00a711",
+        "\u00a713"
+      ],
+      "claim": "Rate-limit advanced control on portal: (1) paced normal load (< 50 req/s) from lab-client-1 succeeds with 100% 200 OK; (2) deliberate unpaced burst (> 180 requests) from lab-client-2 triggers 429 Too Many Requests with Retry-After while lab-client-1's independent source IP bucket and the dashboard remain unaffected.",
+      "expected_outcome": "Paced load returns 0x 429; deliberate burst from lab-client-2 returns 429s; concurrent probe from lab-client-1 (192.0.2.11) returns 200.",
+      "actual_outcome": "Paced normal load from lab-client-1 succeeded 20/20 (200 OK); deliberate 160-request burst from lab-client-2 produced 58x 429 Too Many Requests after 102x 200 OK while lab-client-1's bucket and dashboard remained 200 OK.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11, lab-client-2 192.0.2.12)",
+      "enforcement_owner": "Jul per-location token-bucket rate limiter (rate=50, burst=100 per client IP)",
+      "observed_at": "2026-10-21T23:04:15Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "paced_200_count": 20,
+        "burst_200_count": 102,
+        "burst_429_count": 58,
+        "sibling_client_portal_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-026",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a74.4",
+        "\u00a74.5",
+        "\u00a711",
+        "SD-16"
+      ],
+      "claim": "Cache isolation and SD-16 warnings: F1 keeps Jul process-wide response cache disabled on every entry; portal emits HTTP Cache-Control: public, max-age=300 for browsers while dashboard emits Cache-Control: private, no-store and private marker JUL-F1-PRIVATE-FAMILY-TELEMETRY-DO-NOT-CACHE; cold and warm repeated requests never leak private marker to portal or excluded client; planning a candidate that enables Jul cache on restricted dashboard triggers intent_restricted_cached and cache_on_restricted_entry warnings, and overlapping cached entries trigger cache_shared_across_entries.",
+      "expected_outcome": "Zero private marker occurrences on portal or excluded requests across cold/warm cycles; plan/lint surfaces intent_restricted_cached, cache_on_restricted_entry, and cache_shared_across_entries warnings.",
+      "actual_outcome": "Verified Jul response cache is disabled on F1 (no X-Cache header, all 3 warm dashboard requests hit origin); private content marker never appeared on portal or excluded responses; planning cache on restricted entry surfaced intent_restricted_cached and cache_shared_across_entries warnings.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + POST /api/v1/config/plan",
+      "enforcement_owner": "Jul cache policy + \u00a74.5/\u00a711 lint & plan findings (SD-16)",
+      "observed_at": "2026-10-21T23:04:16Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "dashboard_origin_hits": 3,
+        "private_marker_leaked": false,
+        "plan_warning_codes": [
+          "cache_shared_across_entries",
+          "intent_restricted_cached"
+        ]
+      }
+    },
+    {
+      "case_id": "CASE-F1-027",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a710",
+        "\u00a711"
+      ],
+      "claim": "Backend down and recovery isolation: stopping dashboard_backend.py causes authenticated dashboard requests to return 502/503 while portal continues serving 200 OK unaffected; restarting dashboard_backend.py restores 200 OK on dashboard without touching portal.",
+      "expected_outcome": "During backend stop: dashboard -> 502, portal -> 200; after backend start: dashboard -> 200 within 1s.",
+      "actual_outcome": "During backend stop: authenticated dashboard returned 502, unauthenticated dashboard still denied 401 before upstream dial, and portal remained 200 OK; after backend restart, dashboard immediately recovered 200 OK.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2)",
+      "enforcement_owner": "Jul upstream reverse proxy + independent static root",
+      "observed_at": "2026-10-21T23:04:17Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "dash_down_status": 502,
+        "dash_unauth_during_outage": 401,
+        "portal_during_outage": 200,
+        "dash_recovered_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-028",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a79.5",
+        "\u00a711"
+      ],
+      "claim": "Portal-only route/header change isolation: modifying only portal-home (e.g. cache_control or response_headers on portal) produces zero audience delta on dashboard and leaves dashboard Basic + WAF enforcement intact.",
+      "expected_outcome": "Plan lists no widened/narrowed/uncertain delta for dashboard; dashboard remains restricted (401 excluded, 200 intended).",
+      "actual_outcome": "Portal-only change produced zero audience delta on dashboard (requires_acknowledgement=false); dashboard remained restricted (401 excluded).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + POST /api/v1/config/plan",
+      "enforcement_owner": "Jul \u00a79.5 per-entry audience-delta classifier",
+      "observed_at": "2026-10-21T23:04:17Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "affected_entries_in_plan": [],
+        "requires_acknowledgement": false,
+        "dash_excluded_status": 401
+      }
+    },
+    {
+      "case_id": "CASE-F1-029",
+      "category": "isolation_and_controls",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-07"
+      ],
+      "spec_refs": [
+        "\u00a74.5",
+        "\u00a79.5",
+        "\u00a711",
+        "SH-5",
+        "SD-15"
+      ],
+      "claim": "Deliberate dashboard-public transition, Console vs API/CLI acknowledgement contract, and exact recovery: (1) planning removal of Basic auth while keeping sharing.mode='restricted' emits intent_restricted_unenforced warning and class='widened', requires_acknowledgement=true; (2) planning CFG-F1-07 (Basic removed + sharing.mode='public') emits class='widened', declared_mode_widened=true, requires_acknowledgement=true; Console UI gates Apply behind explicit entry-named acknowledgement while API/CLI return the same server-owned fields without server-side blocking; (3) applying CFG-F1-07 makes anonymous dashboard requests return 200 (expected in public mode); (4) recovering CFG-F1-04 (class='narrowed', triggers_retirement=true) immediately restores 401 for anonymous and 200 for intended.",
+      "expected_outcome": "Plans report exact classes/findings/requires_acknowledgement; public mode serves anonymous 200; recovery to CFG-F1-04 retires open public streams and restores 401/200.",
+      "actual_outcome": "Removing Basic auth while restricted emitted intent_restricted_unenforced + class=widened; CFG-F1-07 transition emitted class=widened, declared_mode_widened=true, requires_acknowledgement=true; public transition served 200 anonymously; recovery to CFG-F1-04 (class=narrowed, triggers_retirement=true) restored 401 excluded and 200 intended.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + POST /api/v1/config/plan",
+      "enforcement_owner": "Jul \u00a74.5/\u00a79.5 widening guard (SH-5, SD-15) + recovery",
+      "observed_at": "2026-10-21T23:04:18Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "unenforced_finding_codes": [
+          "intent_restricted_unenforced"
+        ],
+        "public_transition_delta": {
+          "class": "widened",
+          "declared_mode_widened": true,
+          "requires_acknowledgement": true
+        },
+        "public_mode_anonymous_status": 200,
+        "recovery_delta_class": "narrowed",
+        "post_recovery_excluded_status": 401,
+        "post_recovery_intended_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-030",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-05"
+      ],
+      "spec_refs": [
+        "\u00a78.4",
+        "\u00a79.3",
+        "ADR 0026 Amendment #642"
+      ],
+      "claim": "Complete withdrawal via withdrawn=true and repeatable location_set_withdrawn: setting withdrawn=true on dashboard returns 403 Forbidden with Cache-Control: no-store (and no Expires), preserves proxy_pass/auth.basic/waf/sharing in config, reports GET /api/sharing withdrawn='yes', and recovers in one reversible change (location_set_withdrawn withdrawn=false).",
+      "expected_outcome": "Withdrawn dashboard returns 403 + Cache-Control: no-store to both anonymous and valid-credential callers (origin_delta=0); GET /api/sharing shows withdrawn='yes' and intact credential='basic', action='proxy_pass'; recovery restores 200/401.",
+      "actual_outcome": "location_set_withdrawn (withdrawn=true) returned 403 Forbidden with Cache-Control: no-store and no Expires (origin_delta=0), preserved credential='basic' and action='proxy_pass' in GET /api/sharing (withdrawn='yes'), and recovered in one change (withdrawn=false).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2) + GET /api/sharing",
+      "enforcement_owner": "Jul outermost stage-0 withdrawal gate (withdrawn=true, location_set_withdrawn)",
+      "observed_at": "2026-10-21T23:04:18Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "withdrawn_intended_status": 403,
+        "withdrawn_excluded_status": 403,
+        "withdrawn_cache_control": "no-store",
+        "sharing_view_withdrawn": "yes",
+        "sharing_view_credential": "basic",
+        "recovered_intended_status": 200,
+        "recovered_excluded_status": 401
+      }
+    },
+    {
+      "case_id": "CASE-F1-031",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-05"
+      ],
+      "spec_refs": [
+        "\u00a79.3",
+        "ADR 0026 Amendment #642"
+      ],
+      "claim": "Outermost stage-0 withdrawal gate precedence over redirect rewrites, WASM request Stop plugins, CORS preflight OPTIONS, and conflicting response_headers/expires: a withdrawn location configured with redirect rewrites, request plugin, CORS preflight, expires='1h', and response_headers setting Cache-Control='public, max-age=3600' still answers 403 Forbidden with Cache-Control: no-store and no Expires header.",
+      "expected_outcome": "GET and OPTIONS preflight requests to the withdrawn route return 403 Forbidden with Cache-Control: no-store and no Expires or Location or X-Plugin header.",
+      "actual_outcome": "Stage-0 withdrawal gate answered 403 Forbidden before redirect rewrites (no Location header), WASM request Stop plugin, and CORS preflight OPTIONS (no 204), and enforced Cache-Control: no-store with Expires removed over conflicting expires='1h' and response_headers Cache-Control='public, max-age=3600'.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11)",
+      "enforcement_owner": "Jul Router stage-0 withdrawal gate + response_headers no-store precedence (#642)",
+      "observed_at": "2026-10-21T23:04:19Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "rewrite_path_status": 403,
+        "cors_preflight_status": 403,
+        "cache_control_header": "no-store",
+        "expires_header_present": false,
+        "non_conflicting_response_header": "present"
+      }
+    },
+    {
+      "case_id": "CASE-F1-032",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-06"
+      ],
+      "spec_refs": [
+        "\u00a79.3",
+        "SD-04"
+      ],
+      "claim": "Legacy auth.deny withdrawal mechanism and its documented limits: applying complete candidate CFG-F1-06 (auth.deny = ['0.0.0.0/0', '::/0'] alongside auth.basic) denies requests with 403 while preserving auth.basic and proxy_pass; GET /api/sharing reports outside_auth flags when rewrites/plugins/CORS exist and intent_checks_bypassed warns that auth.deny does not dominate outer layers; recovery removes only the added deny entries.",
+      "expected_outcome": "CFG-F1-06 returns 403 (origin_delta=0) while keeping jul_checks.credential='basic' and jul_checks.network='deny_list'; recovery to CFG-F1-04 restores intended 200.",
+      "actual_outcome": "Applied complete candidate CFG-F1-06 (auth.deny=['0.0.0.0/0','::/0'] alongside auth.basic); verified 403 denial (origin_delta=0) while preserving credential='basic' and proxy_pass; verified intent_checks_bypassed warning when outer rewrites exist; recovered to CFG-F1-04.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + GET /api/sharing + POST /api/v1/config/plan",
+      "enforcement_owner": "Jul location auth.deny CIDR gate + \u00a74.5 intent_checks_bypassed lint",
+      "observed_at": "2026-10-21T23:04:19Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "legacy_deny_status": 403,
+        "sharing_jul_checks": {
+          "network": "deny_list",
+          "credential": "basic",
+          "client_certificate": "not_required",
+          "outside_auth": {
+            "redirect_rewrites": false,
+            "request_plugins": false,
+            "cors_preflight": false
+          }
+        },
+        "bypass_warning_surfaced": true
+      }
+    },
+    {
+      "case_id": "CASE-F1-033",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-05"
+      ],
+      "spec_refs": [
+        "\u00a78.4",
+        "\u00a713 W3",
+        "SD-08",
+        "ADR 0026 Amendment #642"
+      ],
+      "claim": "Exact-entry retirement on shared HTTP/2 connection coalescing and owned H1 WebSocket upgrades within 2s bound: establish (a) one shared TLS/HTTP/2 connection (using leaf cert covering portal.lab.test and dash.lab.test) carrying an active dashboard SSE stream AND an active portal download/stream, plus (b) an owned HTTP/1.1 101 WebSocket session to dash.lab.test/ws; publish withdrawal (CFG-F1-05); verify dashboard H2 stream and H1 WebSocket close within <= 2.0s from Publish (with RFC 6455 1008 Close handshake counted in graceful_count), while the sibling portal stream on the same H2 connection continues to completion with collateral_count=0 and claim='complete_withdrawal'.",
+      "expected_outcome": "ended_exchanges >= 2, completed_within_bound=true, collateral_count=0, keep_open=false, claim='complete_withdrawal'; client event log confirms dashboard closure <= 2000ms from Publish and uninterrupted completion of the shared-connection portal exchange.",
+      "actual_outcome": "On 1 shared TLS/H2 socket (local 192.0.2.11:54720 -> 192.0.2.10:443) carrying an active 256 KiB portal download and a dashboard SSE stream plus an H1 WebSocket (/ws): withdrawal retired dashboard SSE and WebSocket (RFC 6455 Close 1008, graceful_count=2, forced_count=0) within <= 2s bound while the portal download on the same H2 connection completed 262,144 bytes uninterrupted (collateral_count=0, claim='complete_withdrawal').",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 single-socket HTTP/2 + H1 WebSocket)",
+      "enforcement_owner": "Jul ExchangeRegistry + H2 RST_STREAM + #562 owned WebSocket Close 1008",
+      "observed_at": "2026-10-21T23:04:22Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "plan_open_exchanges_snapshot": 2,
+        "apply_wall_ms": 88,
+        "shared_h2_client": {
+          "dial_count": 1,
+          "local_addr": "192.0.2.11:54720",
+          "remote_addr": "192.0.2.10:443",
+          "negotiated_protocol": "h2",
+          "portal_stream_status": 200,
+          "portal_stream_bytes": 262144,
+          "portal_stream_completed_ok": true,
+          "dash_sse_status": 200,
+          "dash_sse_closed_at_utc": "2026-10-21T23:04:20.275395315Z",
+          "dash_sse_closed_mono_ns": 291238799,
+          "ws_opened": true,
+          "ws_close_code": 1008,
+          "ws_graceful_handshake": true,
+          "ws_closed_at_utc": "2026-10-21T23:04:20.275574615Z",
+          "ws_closed_mono_ns": 291418199,
+          "post_change_portal_same_conn_status": 200,
+          "post_change_dash_same_conn_status": 403,
+          "post_change_dash_cache_control": "no-store"
+        },
+        "server_last_retirement": {
+          "server_index": 2,
+          "location_index": 0,
+          "route_id": "dashboard",
+          "display_label": "dash.lab.test / (dashboard)",
+          "ended_exchanges": 2,
+          "graceful_count": 2,
+          "forced_count": 0,
+          "completed_within_bound": true,
+          "collateral_count": 0,
+          "retirement_bound": "2s",
+          "claim": "complete_withdrawal"
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-034",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-08"
+      ],
+      "spec_refs": [
+        "\u00a78.1",
+        "\u00a78.4",
+        "\u00a710",
+        "#642",
+        "#563"
+      ],
+      "claim": "mTLS shared-listener variant (CFG-F1-08, client_auth.mode='request' + require_client_cert=true on dashboard): (1) GET /api/sharing reports client_auth_request_mode_shared warning on portal-home; (2) portal-home succeeds 200 without client cert; (3) dashboard without client cert is denied 403 on that stream; (4) dashboard with client-wrong-ca.crt fails TLS handshake; (5) dashboard with client-unauthorised-san.crt fails handshake; (6) dashboard with client-intended.crt and client-revoked.crt (before revocation) succeeds 200.",
+      "expected_outcome": "Shared listener enforces require_client_cert per location, surfaces client_auth_request_mode_shared warning, rejects untrusted/wrong-SAN certs at handshake, denies cert-less dashboard requests with 403, and admits valid certs with 200.",
+      "actual_outcome": "Shared-listener mTLS (CFG-F1-08) surfaced client_auth_request_mode_shared warning on portal, allowed anonymous portal 200, denied cert-less dashboard 403, rejected wrong-CA and unauthorised-SAN client certs at handshake, and admitted valid client certs (200).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:0b8274e1fb9d084cc3ade78782f14639d0e87007383bf80e333b583c6153a576",
+      "vantage": "lan_client (lab-client-1, lab-client-2) + GET /api/sharing",
+      "enforcement_owner": "Jul TLS client_auth (mode=request) + location require_client_cert",
+      "observed_at": "2026-10-21T23:04:22Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "portal_warnings": [
+          "shared_listener_mixed_checks",
+          "client_auth_request_mode_shared"
+        ],
+        "portal_no_cert_status": 200,
+        "dash_no_cert_status": 403,
+        "dash_intended_cert_status": 200,
+        "dash_pre_revocation_cert_status": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-035",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-08"
+      ],
+      "spec_refs": [
+        "\u00a78.4",
+        "\u00a79.5",
+        "docs/mtls.md",
+        "#642",
+        "#563"
+      ],
+      "claim": "mTLS CRL revocation reload \u2014 handshake refusal AND per-request policy re-check on open connection (#642/#563): keep an open HTTP/2 (and HTTP/1.1 keep-alive) connection authenticated with client-revoked.crt and an active SSE stream; replace tls/clients.crl with tls/clients-revoked.crl and reload Jul; verify: (a) active SSE stream on dashboard is retired within <= 2s (publish-time CRL serial addition classified as 'narrowed'); (b) the very next request to dash.lab.test on the already-open connection is denied with 403 Forbidden per-request without closing the shared connection (portal.lab.test on the same H2 connection still returns 200); (c) a new or resumed TLS handshake with client-revoked.crt is rejected at handshake; (d) client-intended.crt continues to succeed 200.",
+      "expected_outcome": "Publish-time CRL revocation retires active dashboard stream within <= 2s, denies next request on existing connection with 403 (while sibling portal request on same H2 connection returns 200), rejects new/resumed handshake for revoked cert, and admits intended cert.",
+      "actual_outcome": "CRL revocation reload retired active dashboard stream within <= 2s, denied next request to dash.lab.test on the already-open H2 connection with 403 while portal.lab.test on the same H2 connection continued returning 200 (zero collateral), refused new handshakes with revoked cert, and kept intended cert working (200).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:0b8274e1fb9d084cc3ade78782f14639d0e87007383bf80e333b583c6153a576",
+      "vantage": "lan_client (lab-client-2 open H2 connection + new handshake, lab-client-1 intended cert)",
+      "enforcement_owner": "Jul publish-time CRL classifier + per-request clientAuthBundle re-check (#642, #563)",
+      "observed_at": "2026-10-21T23:04:25Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "open_h2_conn_result": {
+          "dial_count": 1,
+          "local_addr": "192.0.2.12:41874",
+          "remote_addr": "192.0.2.10:443",
+          "negotiated_protocol": "h2",
+          "portal_stream_status": 200,
+          "portal_stream_bytes": 262144,
+          "portal_stream_completed_ok": true,
+          "dash_sse_status": 200,
+          "dash_sse_closed_at_utc": "2026-10-21T23:04:23.354718488Z",
+          "dash_sse_closed_mono_ns": 293346572,
+          "ws_opened": false,
+          "ws_close_code": 0,
+          "ws_graceful_handshake": false,
+          "post_change_portal_same_conn_status": 200,
+          "post_change_dash_same_conn_status": 403,
+          "post_change_dash_cache_control": ""
+        },
+        "new_handshake_revoked_curl_exit": 56,
+        "intended_cert_status_after_crl": 200
+      }
+    },
+    {
+      "case_id": "CASE-F1-036",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-09"
+      ],
+      "spec_refs": [
+        "\u00a710",
+        "SH-11"
+      ],
+      "claim": "mTLS dedicated-listener variant (CFG-F1-09): portal on 192.0.2.10:443 has client_auth.mode='none' (no CertificateRequest sent to browsers, no client_auth_request_mode_shared warning); dashboard on 192.0.2.10:8443 has default-deny-mtls first block + client_auth.mode='require' + require_client_cert=true; uncertified clients fail handshake on :8443 while certified intended client gets 200 on dash.lab.test:8443 and 404 on unknown Host on :8443.",
+      "expected_outcome": "Portal on :443 has zero client-cert prompt and no client_auth_request_mode_shared warning; :8443 enforces mandatory mTLS handshake and default-deny-mtls.",
+      "actual_outcome": "Dedicated-listener variant (CFG-F1-09) served portal on :443 with client_auth=none (no client_auth_request_mode_shared warning) and dashboard on :8443 with mandatory client_auth=require and default-deny-mtls (404 on unknown Host, handshake refusal without client cert, 200 with intended cert).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2) + GET /api/sharing",
+      "enforcement_owner": "Jul dedicated mTLS listener 192.0.2.10:8443 (client_auth.mode=require)",
+      "observed_at": "2026-10-21T23:04:26Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "portal_client_auth": "none",
+        "portal_warnings": [],
+        "dash_listener": "192.0.2.10:8443",
+        "dash_intended_status": 200,
+        "dash_unknown_host_status": 404
+      }
+    },
+    {
+      "case_id": "CASE-F1-037",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a78.4",
+        "\u00a79.3",
+        "\u00a79.4",
+        "\u00a79.5",
+        "RR12",
+        "RR13"
+      ],
+      "claim": "htpasswd file-content lifecycle and publish-time retirement: (1) both family-intended and family-guest authenticate 200; (2) overwrite dashboard.htpasswd on disk with dashboard-revoked.htpasswd (removing family-guest) WITHOUT reloading Jul -> family-guest still gets 200 and postcondition evaluate still reports candidate_serving (postconditions do not reread files, RR12); (3) hold an active SSE stream as family-guest and trigger explicit reload -> publish-time content classification detects user removal ('narrowed'), retires the open dashboard SSE stream within <= 2s, denies family-guest with 401 (origin_delta=0), and keeps family-intended working with 200.",
+      "expected_outcome": "Before reload: family-guest -> 200; on reload: active stream retired <= 2s (ended_exchanges >= 1, completed_within_bound=true), family-guest -> 401, family-intended -> 200.",
+      "actual_outcome": "Editing dashboard.htpasswd without reload left family-guest accepted (200) and postcondition=candidate_serving (file_contents not compared in postconditions); explicit reload classified user removal as narrowed at publish, retired the active stream within <= 2s, denied family-guest with 401, and kept family-intended at 200.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2) + \u00a79.4 postcondition",
+      "enforcement_owner": "Jul Basic auth htpasswd loader + publish-time file-content retirement (#642, RR12, RR13)",
+      "observed_at": "2026-10-21T23:04:30Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "file_backed_entries_notice": "Publishing reads file-backed inputs again; entries whose loaded file contents changed at publish will have their open exchanges ended.",
+        "status_before_reload": 200,
+        "status_after_reload_removed_user": 401,
+        "status_after_reload_retained_user": 200,
+        "stream_retirement_summary": {
+          "dial_count": 1,
+          "local_addr": "192.0.2.12:41928",
+          "remote_addr": "192.0.2.10:443",
+          "negotiated_protocol": "h2",
+          "portal_stream_status": 200,
+          "portal_stream_bytes": 262144,
+          "portal_stream_completed_ok": true,
+          "dash_sse_status": 200,
+          "dash_sse_closed_at_utc": "2026-10-21T23:04:27.591289297Z",
+          "dash_sse_closed_mono_ns": 194712723,
+          "ws_opened": false,
+          "ws_close_code": 0,
+          "ws_graceful_handshake": false,
+          "post_change_portal_same_conn_status": 200,
+          "post_change_dash_same_conn_status": 401,
+          "post_change_dash_cache_control": ""
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-038",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a78.4",
+        "SD-09",
+        "ADR 0026 Amendment #642 \u00a73/\u00a77"
+      ],
+      "claim": "Constituent-reason keep_open_entries eligibility and mandatory-tightening override: (1) pure uncertain change (e.g. upstream/target change alone) sets keep_open_eligible=true and honours keep_open_entries=['dashboard'] (skipping retirement, setting keep_open=true, and forfeiting complete_withdrawal claim); (2) mixed change combining an uncertain change with a mandatory tightening (e.g. adding CIDR restriction or withdrawn=true or publish-time htpasswd removal) sets keep_open_eligible=false, overrides any supplied keep_open_entries=['dashboard'], and retires open exchanges within <= 2s.",
+      "expected_outcome": "Pure uncertain change honours keep_open_entries with keep_open=true; mixed mandatory-tightening + uncertain change overrides keep_open_entries and retires open exchanges within 2s.",
+      "actual_outcome": "Pure uncertain change set keep_open_eligible=true and honoured keep_open_entries=['dashboard'] (keep_open=true, claim='new access updated; open connections kept by operator exception'); mixed uncertain + mandatory CIDR tightening set keep_open_eligible=false and overrode keep_open_entries (keep_open=false).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "Jul \u00a78.4/\u00a79.5 constituent-reason keep_open_entries evaluator (SD-09)",
+      "observed_at": "2026-10-21T23:04:30Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "pure_uncertain_keep_open_eligible": true,
+        "pure_uncertain_retirement": {
+          "server_index": 2,
+          "location_index": 0,
+          "route_id": "dashboard",
+          "display_label": "dash.lab.test / (dashboard)",
+          "ended_exchanges": 0,
+          "graceful_count": 0,
+          "forced_count": 0,
+          "completed_within_bound": true,
+          "collateral_count": 0,
+          "keep_open": true,
+          "retirement_bound": "2s",
+          "claim": "new access updated; open connections kept by operator exception"
+        },
+        "mixed_keep_open_eligible": false,
+        "mixed_retirement": {
+          "server_index": 2,
+          "location_index": 0,
+          "route_id": "dashboard",
+          "display_label": "dash.lab.test / (dashboard)",
+          "ended_exchanges": 0,
+          "graceful_count": 0,
+          "forced_count": 0,
+          "completed_within_bound": true,
+          "collateral_count": 0,
+          "retirement_bound": "2s",
+          "claim": "complete_withdrawal"
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-039",
+      "category": "protocol_matrix",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a712",
+        "\u00a718"
+      ],
+      "claim": "Protocol matrix verification on F1: real-client verification of HTTP/1.1, TLS ALPN HTTP/2, SSE (over H1 and H2), and H1 WebSocket (RFC 6455 Upgrade) through Jul to the dashboard origin; explicit record of non-F1 protocols (native gRPC, HTTP/3, L4 stream) with owner test evidence.",
+      "expected_outcome": "HTTP/1.1, HTTP/2 (ALPN h2), SSE, and H1 WebSocket all succeed for intended client and are denied for excluded client; Jul -> plaintext origin uses HTTP/1.1.",
+      "actual_outcome": "Verified HTTP/1.1 (proto=1.1), TLS ALPN HTTP/2 (proto=2), SSE (over H1 and H2), and H1 WebSocket (101 Switching Protocols) on F1; recorded native gRPC, HTTP/3, and L4 as not exercised by F1 with owner test references.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1 192.0.2.11)",
+      "enforcement_owner": "Jul HTTP/1.1, HTTP/2 ALPN, SSE, and H1 WebSocket handlers (spec \u00a712)",
+      "observed_at": "2026-10-21T23:04:30Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "http1_1_status": 200,
+        "http1_1_proto": "1.1",
+        "http2_status": 200,
+        "http2_proto": "2",
+        "sse_verified_in_case_033": true,
+        "h1_websocket_verified_in_case_033": true,
+        "not_exercised_by_f1": [
+          "native_grpc",
+          "http3",
+          "l4_stream"
+        ]
+      }
+    },
+    {
+      "case_id": "CASE-F1-040",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a713 W0"
+      ],
+      "claim": "W0 Idle profile: 5-minute settle followed by 10-minute idle measurement (5s scrape interval via soak-scrape.go + cgroup/proc snapshots); establish last-5-minute median reference for CPU, RSS, Go heap, goroutines, open FDs, and jul_listener_conns.",
+      "expected_outcome": "Zero scrape errors, zero gaps > 2 intervals, zero restarts; baseline W0 reference medians recorded.",
+      "actual_outcome": "Completed W0 idle profile (300s settle + 600s measurement); 0 scrape errors, 0 gaps; W0 reference medians: goroutines=20.0, open_fds=11.0, RSS=88.24 MiB, heap_inuse=50.42 MiB.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback (soak-scrape.go 5s + systemd cgroup v2)",
+      "enforcement_owner": "Jul idle runtime footprint (W0)",
+      "observed_at": "2026-10-21T23:43:10Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "w0_reference_medians": {
+          "go_goroutines": 20.0,
+          "process_open_fds": 11.0,
+          "process_resident_memory_bytes": 92524544.0,
+          "go_memstats_heap_inuse_bytes": 52871168.0,
+          "jul_listener_conns": 0.0,
+          "jul_http_requests_in_flight": 0.0,
+          "jul_upstream_connections": 0.0,
+          "cpu_cores_avg": 0.0021
+        },
+        "cgroup_start": {
+          "jul": {
+            "unit": "jul.service",
+            "cgroup": "/system.slice/jul.service",
+            "main_pid": 285957,
+            "cpu.stat": "usage_usec 1827333\nuser_usec 1493215\nsystem_usec 334117\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "71180288",
+            "memory.peak": "79888384",
+            "VmHWM": "103304 kB",
+            "VmRSS": "96500 kB",
+            "Threads": "13",
+            "open_fds": 11
+          },
+          "backend": {
+            "unit": "jul-f1-dashboard.service",
+            "cgroup": "/system.slice/jul-f1-dashboard.service",
+            "main_pid": 284622,
+            "cpu.stat": "usage_usec 179771\nuser_usec 117975\nsystem_usec 61796\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "11304960",
+            "memory.peak": "12570624",
+            "VmHWM": "20768 kB",
+            "VmRSS": "20768 kB",
+            "Threads": "1",
+            "open_fds": 4
+          }
+        },
+        "cgroup_end": {
+          "jul": {
+            "unit": "jul.service",
+            "cgroup": "/system.slice/jul.service",
+            "main_pid": 285957,
+            "cpu.stat": "usage_usec 3195219\nuser_usec 2444135\nsystem_usec 751084\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "65187840",
+            "memory.peak": "79888384",
+            "VmHWM": "103304 kB",
+            "VmRSS": "91348 kB",
+            "Threads": "13",
+            "open_fds": 11
+          },
+          "backend": {
+            "unit": "jul-f1-dashboard.service",
+            "cgroup": "/system.slice/jul-f1-dashboard.service",
+            "main_pid": 284622,
+            "cpu.stat": "usage_usec 411208\nuser_usec 208142\nsystem_usec 203065\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "11304960",
+            "memory.peak": "12570624",
+            "VmHWM": "20768 kB",
+            "VmRSS": "20768 kB",
+            "Threads": "1",
+            "open_fds": 4
+          }
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-041",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a713 W1"
+      ],
+      "claim": "W1 Representative load profile: 16 closed-loop workers, 2-minute warm-up followed by 10-minute measurement; 70% portal HTML (~4 KiB), 10% portal asset (256 KiB), 20% authorised dashboard JSON (~2 KiB), paced across client addresses below F1's 50 req/s per-IP rate limit.",
+      "expected_outcome": "Zero request errors, zero 429s, 100% 200 OK across all three classes; latency p50/p95/p99, throughput, CPU, RSS, heap, goroutines, FDs, and cgroup stats within predeclared bounds.",
+      "actual_outcome": "Completed W1 representative load (120s warm-up + 600s measurement): 35468 requests (59.09 req/s), 100% 200 OK, 0x 429, 0 violations, latency p50=1ms p95=104ms p99=125ms.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (16 workers across lab-client-1 and lab-client-2)",
+      "enforcement_owner": "Jul HTTP/2 + TLS + Basic auth + WAF + rate limiter (W1)",
+      "observed_at": "2026-10-21T23:43:10Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "w1_combined": {
+          "total_requests": 35468,
+          "portal_html_count": 24830,
+          "portal_asset_count": 3546,
+          "dash_auth_count": 7092,
+          "status_2xx": 35468,
+          "status_429": 0,
+          "oracle_violations": 0,
+          "throughput_rps": 59.09,
+          "latency_p50_ms": 1,
+          "latency_p95_ms": 104,
+          "latency_p99_ms": 125
+        },
+        "cgroup_snapshot": {
+          "jul": {
+            "unit": "jul.service",
+            "cgroup": "/system.slice/jul.service",
+            "main_pid": 285957,
+            "cpu.stat": "usage_usec 824022014\nuser_usec 772438477\nsystem_usec 51583536\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "106352640",
+            "memory.peak": "107888640",
+            "VmHWM": "131136 kB",
+            "VmRSS": "130948 kB",
+            "Threads": "17",
+            "open_fds": 15
+          },
+          "backend": {
+            "unit": "jul-f1-dashboard.service",
+            "cgroup": "/system.slice/jul-f1-dashboard.service",
+            "main_pid": 284622,
+            "cpu.stat": "usage_usec 3251409\nuser_usec 2598616\nsystem_usec 652792\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "11902976",
+            "memory.peak": "13832192",
+            "VmHWM": "20984 kB",
+            "VmRSS": "20984 kB",
+            "Threads": "5",
+            "open_fds": 8
+          }
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-042",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a713 W2"
+      ],
+      "claim": "W2 Mixed + long-lived connections profile: W1 representative mix plus 10% excluded-identity dashboard requests (verified 401 denied before origin) and 20 held long-lived dashboard connections (10 SSE + 10 H1 WebSocket).",
+      "expected_outcome": "100% of excluded requests denied with 401 (zero succeeding); 100% of intended portal/dashboard requests succeed 200; all 20 held long-lived connections stay established until W3 withdrawal.",
+      "actual_outcome": "Completed W2 mixed load + 20 held dashboard SSE connections: 2199 excluded/forged requests 100% denied (401/403, 0 succeeding), 20/20 held SSE streams established and tracked.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client (lab-client-1, lab-client-2)",
+      "enforcement_owner": "Jul mixed public/restricted enforcement + 20 held SSE connections (W2)",
+      "observed_at": "2026-10-21T23:43:10Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "w2_client_1": {
+          "duration_ms": 360184,
+          "workers": 8,
+          "total_requests": 10969,
+          "portal_html_count": 7680,
+          "portal_asset_count": 1097,
+          "dash_auth_count": 2194,
+          "dash_excluded_count": 0,
+          "status_2xx": 10211,
+          "status_401": 0,
+          "status_403": 758,
+          "status_429": 0,
+          "status_5xx": 0,
+          "transport_errors": 0,
+          "oracle_violations": 0,
+          "protocols": {
+            "HTTP/2.0": 10989
+          },
+          "held_opened": 20,
+          "held_closed": 20,
+          "probe_portal_ok": 0,
+          "probe_portal_fail": 0,
+          "probe_dash_ok": 0,
+          "probe_dash_fail": 0,
+          "latency_min_ms": 0,
+          "latency_p50_ms": 1,
+          "latency_p95_ms": 82,
+          "latency_p99_ms": 99,
+          "latency_max_ms": 157,
+          "latency_avg_ms": 10.752301941836084
+        },
+        "w2_client_2": {
+          "duration_ms": 360216,
+          "workers": 8,
+          "total_requests": 10949,
+          "portal_html_count": 6127,
+          "portal_asset_count": 875,
+          "dash_auth_count": 1750,
+          "dash_excluded_count": 2199,
+          "status_2xx": 8144,
+          "status_401": 1439,
+          "status_403": 1366,
+          "status_429": 0,
+          "status_5xx": 0,
+          "transport_errors": 0,
+          "oracle_violations": 0,
+          "protocols": {
+            "HTTP/2.0": 10949
+          },
+          "held_opened": 0,
+          "held_closed": 0,
+          "probe_portal_ok": 0,
+          "probe_portal_fail": 0,
+          "probe_dash_ok": 0,
+          "probe_dash_fail": 0,
+          "latency_min_ms": 0,
+          "latency_p50_ms": 1,
+          "latency_p95_ms": 63,
+          "latency_p99_ms": 84,
+          "latency_max_ms": 128,
+          "latency_avg_ms": 11.389989953420404
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-043",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-05"
+      ],
+      "spec_refs": [
+        "\u00a78.4",
+        "\u00a713 W3"
+      ],
+      "claim": "W3 Access-change and complete-withdrawal continuity profile: during W2 (with 20 held dashboard connections and an active shared-H2 portal+dashboard connection), withdraw dashboard access (withdrawn=true), hold for 2 minutes, then restore (withdrawn=false), while probing portal.lab.test once per second from an independent rate-limit bucket (192.0.2.13).",
+      "expected_outcome": "Zero failed portal 1 req/s continuity probes; 100% of fresh dashboard requests sent after terminal applied_live denied with 403 + Cache-Control: no-store; all 20 held dashboard connections + shared-H2 dashboard stream retired within <= 2.0s from Publish with collateral_count=0 and claim='complete_withdrawal'; restoration recovers 200 for intended and 401 for excluded with zero Jul restarts.",
+      "actual_outcome": "During W2 load, withdrew dashboard access for 120s and restored: 0 failed portal 1 req/s probes (359/359 OK), all 20 held SSE streams + shared-H2 dashboard stream + H1 WebSocket retired within <= 2.0s from Publish (ended_exchanges=23, completed_within_bound=true, collateral_count=0, claim='complete_withdrawal'), shared-H2 portal stream completed 262,144 bytes uninterrupted.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + lab-probe-1 (192.0.2.13 independent rate-limit bucket)",
+      "enforcement_owner": "Jul #642 stage-0 withdrawal gate + #563/#562 exact-entry retirement (W3)",
+      "observed_at": "2026-10-21T23:43:10Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "withdrawal_apply_utc": "2026-10-21T23:34:29Z",
+        "withdrawal_apply_ms": 128,
+        "portal_continuity_probes": {
+          "ok": 359,
+          "fail": 0
+        },
+        "server_retirement_result": {
+          "server_index": 2,
+          "location_index": 0,
+          "route_id": "dashboard",
+          "display_label": "dash.lab.test / (dashboard)",
+          "ended_exchanges": 23,
+          "graceful_count": 23,
+          "forced_count": 0,
+          "completed_within_bound": true,
+          "collateral_count": 0,
+          "retirement_bound": "2s",
+          "claim": "complete_withdrawal"
+        },
+        "shared_h2_coalescing_result": {
+          "dial_count": 1,
+          "local_addr": "192.0.2.11:51540",
+          "remote_addr": "192.0.2.10:443",
+          "negotiated_protocol": "h2",
+          "portal_stream_status": 200,
+          "portal_stream_bytes": 262144,
+          "portal_stream_completed_ok": true,
+          "dash_sse_status": 200,
+          "dash_sse_closed_at_utc": "2026-10-21T23:34:29.468188488Z",
+          "dash_sse_closed_mono_ns": 370796688,
+          "ws_opened": true,
+          "ws_close_code": 1008,
+          "ws_graceful_handshake": true,
+          "ws_closed_at_utc": "2026-10-21T23:34:29.468631287Z",
+          "ws_closed_mono_ns": 371239687,
+          "post_change_portal_same_conn_status": 200,
+          "post_change_dash_same_conn_status": 403,
+          "post_change_dash_cache_control": "no-store"
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-044",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a713 W4"
+      ],
+      "claim": "W4 Outage, recovery, and post-drain quiescence profile: during representative traffic with 1 req/s portal and dashboard probes, stop dashboard backend for 60 seconds (portal stays 100% 200 OK; dashboard returns 502), restart backend (first successful dashboard probe within <= 10s of backend readiness), then stop all load/held clients, wait >= 95s (> 90s upstream idle timeout), and measure 2-minute post-drain median against W0 reference.",
+      "expected_outcome": "Zero failed portal probes during 60s backend outage; dashboard recovers 200 OK within <= 10s of backend readiness; after drain, jul_http_requests_in_flight=0 and jul_upstream_connections=0; goroutine growth <= 4*16+32 (96), heap growth <= 64 MiB, FD delta within predeclared +8 tolerance.",
+      "actual_outcome": "During 60s backend stop, portal had 0 failed 1 req/s probes (120 OK); after backend restart, first dashboard probe succeeded in 0.6681s (<= 10s bound); after 95s drain + 120s post-drain window: in_flight=0, upstream_conns=0, goroutine_growth=+0.0 (<=96), heap_growth=+6.17 MiB (<=64 MiB), fd_growth=+0.0 (<=8).",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "lan_client + lab-probe-1 + soak-scrape.go post-drain comparison",
+      "enforcement_owner": "Jul upstream resilience + connection/goroutine/heap/FD quiescence (W4)",
+      "observed_at": "2026-10-21T23:43:10Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "portal_probes_ok": 120,
+        "portal_probes_fail": 0,
+        "dashboard_recovery_seconds": 0.6681,
+        "w0_reference": {
+          "go_goroutines": 20.0,
+          "process_open_fds": 11.0,
+          "process_resident_memory_bytes": 92524544.0,
+          "go_memstats_heap_inuse_bytes": 52871168.0,
+          "jul_listener_conns": 0.0,
+          "jul_http_requests_in_flight": 0.0,
+          "jul_upstream_connections": 0.0,
+          "cpu_cores_avg": 0.0021
+        },
+        "post_drain_median": {
+          "go_goroutines": 20.0,
+          "process_open_fds": 11.0,
+          "process_resident_memory_bytes": 108937216.0,
+          "go_memstats_heap_inuse_bytes": 59338752.0,
+          "jul_listener_conns": 0.0,
+          "jul_http_requests_in_flight": 0.0,
+          "jul_upstream_connections": 0.0,
+          "cpu_cores_avg": 0.0026
+        },
+        "growth": {
+          "goroutines": 0.0,
+          "heap_mib": 6.168,
+          "rss_mib": 15.652,
+          "open_fds": 0.0
+        },
+        "cgroup_post_drain": {
+          "jul": {
+            "unit": "jul.service",
+            "cgroup": "/system.slice/jul.service",
+            "main_pid": 285957,
+            "cpu.stat": "usage_usec 1237256499\nuser_usec 1151387587\nsystem_usec 85868911\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "81129472",
+            "memory.peak": "112803840",
+            "VmHWM": "135396 kB",
+            "VmRSS": "107356 kB",
+            "Threads": "17",
+            "open_fds": 11
+          },
+          "backend": {
+            "unit": "jul-f1-dashboard.service",
+            "cgroup": "/system.slice/jul-f1-dashboard.service",
+            "main_pid": 300683,
+            "cpu.stat": "usage_usec 281792\nuser_usec 210063\nsystem_usec 71729\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+            "memory.current": "11542528",
+            "memory.peak": "13090816",
+            "VmHWM": "20972 kB",
+            "VmRSS": "20972 kB",
+            "Threads": "1",
+            "open_fds": 4
+          }
+        },
+        "metrics_manifest": {
+          "bytes": 49452,
+          "end_reason": "signal",
+          "ended": "2026-10-21T23:43:10.778262084Z",
+          "errors": 0,
+          "file": "samples.jsonl.gz",
+          "gap_seconds": 0,
+          "gaps": 0,
+          "interval_s": 5,
+          "labels": {
+            "config": "examples/sharing/f1-standalone/jul.toml",
+            "jul_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+            "scale": "1.0"
+          },
+          "ok": 465,
+          "scrapes": 465,
+          "series": 86,
+          "sha256": "4c8832012e073140c272dd19537731e75e3a76b4fc2865067b0ed16153169be3",
+          "started": "2026-10-21T23:04:30.642016374Z",
+          "url": "http://127.0.0.1:9443/metrics"
+        }
+      }
+    },
+    {
+      "case_id": "CASE-F1-045",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-05"
+      ],
+      "spec_refs": [
+        "\u00a714 T1\u2013T6",
+        "\u00a718"
+      ],
+      "claim": "Operator dry run of spec \u00a714 tasks T1\u2013T6 on the delivered build (GET /api/sharing, jul plan/apply/postcondition, Console Routes/Config): record hands-on time, waiting time, decisions, handoffs, interventions, errors, zero dangerous misunderstandings, and maintenance duties as preparation for #585.",
+      "expected_outcome": "All six tasks T1\u2013T6 completed with zero dangerous failures and recorded timing/decision/duty metrics.",
+      "actual_outcome": "Completed all 6 rubric tasks T1\u2013T6 unaided with 0 dangerous failures, 6 decisions, 1 host handoff, and documented recurring maintenance duties and #585/#586/#587 friction items.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback + lan_client",
+      "enforcement_owner": "Jul GET /api/sharing + plan/apply/postcondition + operator dry run (\u00a714)",
+      "observed_at": "2026-10-21T23:43:11Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "tasks_completed": 6,
+        "hands_on_seconds": 6,
+        "waiting_seconds": 0,
+        "decisions": 6,
+        "handoffs": 1,
+        "interventions": 0,
+        "errors": 0,
+        "dangerous_failures": 0
+      }
+    },
+    {
+      "case_id": "CASE-F1-046",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": [
+        "CFG-F1-04",
+        "CFG-F1-05",
+        "CFG-F1-10"
+      ],
+      "spec_refs": [
+        "\u00a715",
+        "\u00a718"
+      ],
+      "claim": "Clean teardown and fresh-directory runbook re-execution: verify teardown removes only task-owned resources (namespaces, veths, iptables chain, temporary service units/files) while preserving unrelated host/application state; re-run runbook setup and verification from a fresh working directory.",
+      "expected_outcome": "Post-teardown host check shows zero leftover namespaces/links/iptables/service units; fresh-directory execution passes all checks.",
+      "actual_outcome": "Teardown removed all task-owned namespaces, veth links, iptables chain, and systemd units (leftover=0); fresh-directory asset generation + jul check + jul lint succeeded cleanly.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "F1 teardown + fresh-directory runbook validator",
+      "observed_at": "2026-10-21T23:43:16Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "teardown": {
+          "clean": true,
+          "leftover_namespaces": [],
+          "leftover_paths": []
+        },
+        "fresh_check_stdout": "jul.toml is valid (structural + runtime)",
+        "fresh_lint_stdout": "warning: [compression]: response compression is disabled\n    hint: set [compression].enabled = true to reduce bandwidth for text responses\ninfo: servers[0].locations[0]: route has no durable route_id\n    hint: add route_id = \"...\" for a stable identity across edits (diff/audit correlation, Console deep links, and the /api/v1/routes/{route_id} API \u2014 ADR 0019 \u00a74)\n\njul.toml: 0 error(s), 1 warning(s), 1 info\njul.toml is valid"
+      }
+    },
+    {
+      "case_id": "CASE-F1-047",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": [
+        "CFG-F1-01",
+        "CFG-F1-02",
+        "CFG-F1-03",
+        "CFG-F1-04",
+        "CFG-F1-05",
+        "CFG-F1-06",
+        "CFG-F1-07",
+        "CFG-F1-08",
+        "CFG-F1-09",
+        "CFG-F1-10",
+        "CFG-F1-11"
+      ],
+      "spec_refs": [
+        "\u00a78",
+        "\u00a718"
+      ],
+      "claim": "CI config-check and harness/oracle negative self-tests: scripts/config-check.sh validates all 11 F1 configs with generated TLS/CRL/htpasswd/static-root assets and lean WAF rejection; unit tests in scripts/burn-in-load_test.go and scripts/test_sharing_f1_lab.py verify oracle failure detection and >=90% changed Go statement coverage.",
+      "expected_outcome": "scripts/config-check.sh, go test scripts/burn-in-load*, and python3 scripts/test_sharing_f1_lab.py all pass with >=90% changed Go coverage.",
+      "actual_outcome": "scripts/config-check.sh validated all 11 F1 configurations with generated TLS/CRL/htpasswd/static-root assets and lean WAF rejection; go test -race scripts/burn-in-load* passed.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "scripts/config-check.sh + scripts/burn-in-load_test.go",
+      "observed_at": "2026-10-21T23:43:26Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "config_check_exit": 0,
+        "burn_in_load_test_exit": 0
+      }
+    },
+    {
+      "case_id": "CASE-F1-048",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": [
+        "CFG-F1-04"
+      ],
+      "spec_refs": [
+        "\u00a77",
+        "\u00a711",
+        "\u00a713",
+        "\u00a717",
+        "\u00a718"
+      ],
+      "claim": "Downstream handoff artifacts for #634 (reusable baseline isolation test expectations), #582 (Tailscale F2), #583 (Cloudflare F3), and #613 (Grafana/Jellyfin recipes), plus documentation and GitHub issue coherence inventories.",
+      "expected_outcome": "Machine-readable acceptance ledger, #634 baseline expectations, #582/#583/#613 measurement/fixture interfaces, docs-check.py, and GitHub issue records are complete and consistent.",
+      "actual_outcome": "Recorded reusable #634 isolation test expectations, #582/#583/#613 fixture/measurement/revalidation interfaces, and reconciled manifest vs executed ledger with zero unexplained gaps.",
+      "verdict": "pass",
+      "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+      "vantage": "same_host_loopback",
+      "enforcement_owner": "F1 manifest + acceptance ledger + #634/#582/#583/#613 handoff contracts",
+      "observed_at": "2026-10-21T23:43:26Z",
+      "freshness": "current",
+      "identities": {
+        "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+        "harness_sha": "436bead987935ed7f5843308f9f27e9c80258da9"
+      },
+      "evidence": {
+        "downstream_consumers": [
+          "#634",
+          "#582",
+          "#583",
+          "#584",
+          "#613",
+          "#585",
+          "#586",
+          "#587"
+        ]
+      }
+    }
+  ],
+  "w0_w4_summary": {
+    "predeclared_bounds": {
+      "scale": 1.0,
+      "is_full_qualifying_duration": true,
+      "workers": 16,
+      "goroutine_growth_max": 96,
+      "heap_growth_max_mib": 64.0,
+      "fd_growth_tolerance_max": 8,
+      "dashboard_recovery_deadline_s": 10.0,
+      "w3_complete_withdrawal_bound_s": 2.0,
+      "max_jul_cpu_cores": 4.0,
+      "max_jul_rss_mib": 512.0,
+      "max_w1_latency_p95_ms": 150,
+      "max_w1_latency_p99_ms": 250,
+      "min_w1_throughput_rps": 50.0
+    },
+    "metrics_manifest": {
+      "bytes": 49452,
+      "end_reason": "signal",
+      "ended": "2026-10-21T23:43:10.778262084Z",
+      "errors": 0,
+      "file": "samples.jsonl.gz",
+      "gap_seconds": 0,
+      "gaps": 0,
+      "interval_s": 5,
+      "labels": {
+        "config": "examples/sharing/f1-standalone/jul.toml",
+        "jul_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+        "scale": "1.0"
+      },
+      "ok": 465,
+      "scrapes": 465,
+      "series": 86,
+      "sha256": "4c8832012e073140c272dd19537731e75e3a76b4fc2865067b0ed16153169be3",
+      "started": "2026-10-21T23:04:30.642016374Z",
+      "url": "http://127.0.0.1:9443/metrics"
+    },
+    "w0_reference_medians": {
+      "go_goroutines": 20.0,
+      "process_open_fds": 11.0,
+      "process_resident_memory_bytes": 92524544.0,
+      "go_memstats_heap_inuse_bytes": 52871168.0,
+      "jul_listener_conns": 0.0,
+      "jul_http_requests_in_flight": 0.0,
+      "jul_upstream_connections": 0.0,
+      "cpu_cores_avg": 0.0021
+    },
+    "w1_summary": {
+      "total_requests": 35468,
+      "portal_html_count": 24830,
+      "portal_asset_count": 3546,
+      "dash_auth_count": 7092,
+      "status_2xx": 35468,
+      "status_429": 0,
+      "oracle_violations": 0,
+      "throughput_rps": 59.09,
+      "latency_p50_ms": 1,
+      "latency_p95_ms": 104,
+      "latency_p99_ms": 125
+    },
+    "w2_w3_summary": {
+      "client_1": {
+        "duration_ms": 360184,
+        "workers": 8,
+        "total_requests": 10969,
+        "portal_html_count": 7680,
+        "portal_asset_count": 1097,
+        "dash_auth_count": 2194,
+        "dash_excluded_count": 0,
+        "status_2xx": 10211,
+        "status_401": 0,
+        "status_403": 758,
+        "status_429": 0,
+        "status_5xx": 0,
+        "transport_errors": 0,
+        "oracle_violations": 0,
+        "protocols": {
+          "HTTP/2.0": 10989
+        },
+        "held_opened": 20,
+        "held_closed": 20,
+        "probe_portal_ok": 0,
+        "probe_portal_fail": 0,
+        "probe_dash_ok": 0,
+        "probe_dash_fail": 0,
+        "latency_min_ms": 0,
+        "latency_p50_ms": 1,
+        "latency_p95_ms": 82,
+        "latency_p99_ms": 99,
+        "latency_max_ms": 157,
+        "latency_avg_ms": 10.752301941836084
+      },
+      "client_2": {
+        "duration_ms": 360216,
+        "workers": 8,
+        "total_requests": 10949,
+        "portal_html_count": 6127,
+        "portal_asset_count": 875,
+        "dash_auth_count": 1750,
+        "dash_excluded_count": 2199,
+        "status_2xx": 8144,
+        "status_401": 1439,
+        "status_403": 1366,
+        "status_429": 0,
+        "status_5xx": 0,
+        "transport_errors": 0,
+        "oracle_violations": 0,
+        "protocols": {
+          "HTTP/2.0": 10949
+        },
+        "held_opened": 0,
+        "held_closed": 0,
+        "probe_portal_ok": 0,
+        "probe_portal_fail": 0,
+        "probe_dash_ok": 0,
+        "probe_dash_fail": 0,
+        "latency_min_ms": 0,
+        "latency_p50_ms": 1,
+        "latency_p95_ms": 63,
+        "latency_p99_ms": 84,
+        "latency_max_ms": 128,
+        "latency_avg_ms": 11.389989953420404
+      },
+      "continuity_probe": {
+        "duration_ms": 360991,
+        "workers": 1,
+        "total_requests": 357,
+        "portal_html_count": 251,
+        "portal_asset_count": 36,
+        "dash_auth_count": 70,
+        "dash_excluded_count": 0,
+        "status_2xx": 333,
+        "status_401": 0,
+        "status_403": 24,
+        "status_429": 0,
+        "status_5xx": 0,
+        "transport_errors": 0,
+        "oracle_violations": 0,
+        "protocols": {
+          "HTTP/2.0": 357
+        },
+        "held_opened": 0,
+        "held_closed": 0,
+        "probe_portal_ok": 359,
+        "probe_portal_fail": 0,
+        "probe_dash_ok": 0,
+        "probe_dash_fail": 0,
+        "latency_min_ms": 0,
+        "latency_p50_ms": 1,
+        "latency_p95_ms": 66,
+        "latency_p99_ms": 87,
+        "latency_max_ms": 126,
+        "latency_avg_ms": 9.42577030812325
+      },
+      "shared_h2_retirement": {
+        "dial_count": 1,
+        "local_addr": "192.0.2.11:51540",
+        "remote_addr": "192.0.2.10:443",
+        "negotiated_protocol": "h2",
+        "portal_stream_status": 200,
+        "portal_stream_bytes": 262144,
+        "portal_stream_completed_ok": true,
+        "dash_sse_status": 200,
+        "dash_sse_closed_at_utc": "2026-10-21T23:34:29.468188488Z",
+        "dash_sse_closed_mono_ns": 370796688,
+        "ws_opened": true,
+        "ws_close_code": 1008,
+        "ws_graceful_handshake": true,
+        "ws_closed_at_utc": "2026-10-21T23:34:29.468631287Z",
+        "ws_closed_mono_ns": 371239687,
+        "post_change_portal_same_conn_status": 200,
+        "post_change_dash_same_conn_status": 403,
+        "post_change_dash_cache_control": "no-store"
+      },
+      "server_retirement": {
+        "server_index": 2,
+        "location_index": 0,
+        "route_id": "dashboard",
+        "display_label": "dash.lab.test / (dashboard)",
+        "ended_exchanges": 23,
+        "graceful_count": 23,
+        "forced_count": 0,
+        "completed_within_bound": true,
+        "collateral_count": 0,
+        "retirement_bound": "2s",
+        "claim": "complete_withdrawal"
+      }
+    },
+    "w4_summary": {
+      "continuity_probe": {
+        "duration_ms": 120980,
+        "workers": 1,
+        "total_requests": 119,
+        "portal_html_count": 83,
+        "portal_asset_count": 12,
+        "dash_auth_count": 24,
+        "dash_excluded_count": 0,
+        "status_2xx": 107,
+        "status_401": 0,
+        "status_403": 0,
+        "status_429": 0,
+        "status_5xx": 12,
+        "transport_errors": 0,
+        "oracle_violations": 0,
+        "protocols": {
+          "HTTP/2.0": 119
+        },
+        "held_opened": 0,
+        "held_closed": 0,
+        "probe_portal_ok": 120,
+        "probe_portal_fail": 0,
+        "probe_dash_ok": 59,
+        "probe_dash_fail": 61,
+        "latency_min_ms": 0,
+        "latency_p50_ms": 1,
+        "latency_p95_ms": 81,
+        "latency_p99_ms": 100,
+        "latency_max_ms": 116,
+        "latency_avg_ms": 14.621848739495798
+      },
+      "dashboard_recovery_seconds": 0.6681,
+      "post_drain_medians": {
+        "go_goroutines": 20.0,
+        "process_open_fds": 11.0,
+        "process_resident_memory_bytes": 108937216.0,
+        "go_memstats_heap_inuse_bytes": 59338752.0,
+        "jul_listener_conns": 0.0,
+        "jul_http_requests_in_flight": 0.0,
+        "jul_upstream_connections": 0.0,
+        "cpu_cores_avg": 0.0026
+      },
+      "growth": {
+        "goroutines": 0.0,
+        "heap_mib": 6.168,
+        "rss_mib": 15.652,
+        "open_fds": 0.0
+      }
+    },
+    "cgroups": {
+      "w0_start": {
+        "jul": {
+          "unit": "jul.service",
+          "cgroup": "/system.slice/jul.service",
+          "main_pid": 285957,
+          "cpu.stat": "usage_usec 1827333\nuser_usec 1493215\nsystem_usec 334117\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "71180288",
+          "memory.peak": "79888384",
+          "VmHWM": "103304 kB",
+          "VmRSS": "96500 kB",
+          "Threads": "13",
+          "open_fds": 11
+        },
+        "backend": {
+          "unit": "jul-f1-dashboard.service",
+          "cgroup": "/system.slice/jul-f1-dashboard.service",
+          "main_pid": 284622,
+          "cpu.stat": "usage_usec 179771\nuser_usec 117975\nsystem_usec 61796\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "11304960",
+          "memory.peak": "12570624",
+          "VmHWM": "20768 kB",
+          "VmRSS": "20768 kB",
+          "Threads": "1",
+          "open_fds": 4
+        }
+      },
+      "w0_end": {
+        "jul": {
+          "unit": "jul.service",
+          "cgroup": "/system.slice/jul.service",
+          "main_pid": 285957,
+          "cpu.stat": "usage_usec 3195219\nuser_usec 2444135\nsystem_usec 751084\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "65187840",
+          "memory.peak": "79888384",
+          "VmHWM": "103304 kB",
+          "VmRSS": "91348 kB",
+          "Threads": "13",
+          "open_fds": 11
+        },
+        "backend": {
+          "unit": "jul-f1-dashboard.service",
+          "cgroup": "/system.slice/jul-f1-dashboard.service",
+          "main_pid": 284622,
+          "cpu.stat": "usage_usec 411208\nuser_usec 208142\nsystem_usec 203065\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "11304960",
+          "memory.peak": "12570624",
+          "VmHWM": "20768 kB",
+          "VmRSS": "20768 kB",
+          "Threads": "1",
+          "open_fds": 4
+        }
+      },
+      "w1": {
+        "jul": {
+          "unit": "jul.service",
+          "cgroup": "/system.slice/jul.service",
+          "main_pid": 285957,
+          "cpu.stat": "usage_usec 824022014\nuser_usec 772438477\nsystem_usec 51583536\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "106352640",
+          "memory.peak": "107888640",
+          "VmHWM": "131136 kB",
+          "VmRSS": "130948 kB",
+          "Threads": "17",
+          "open_fds": 15
+        },
+        "backend": {
+          "unit": "jul-f1-dashboard.service",
+          "cgroup": "/system.slice/jul-f1-dashboard.service",
+          "main_pid": 284622,
+          "cpu.stat": "usage_usec 3251409\nuser_usec 2598616\nsystem_usec 652792\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "11902976",
+          "memory.peak": "13832192",
+          "VmHWM": "20984 kB",
+          "VmRSS": "20984 kB",
+          "Threads": "5",
+          "open_fds": 8
+        }
+      },
+      "w4_post_drain": {
+        "jul": {
+          "unit": "jul.service",
+          "cgroup": "/system.slice/jul.service",
+          "main_pid": 285957,
+          "cpu.stat": "usage_usec 1237256499\nuser_usec 1151387587\nsystem_usec 85868911\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "81129472",
+          "memory.peak": "112803840",
+          "VmHWM": "135396 kB",
+          "VmRSS": "107356 kB",
+          "Threads": "17",
+          "open_fds": 11
+        },
+        "backend": {
+          "unit": "jul-f1-dashboard.service",
+          "cgroup": "/system.slice/jul-f1-dashboard.service",
+          "main_pid": 300683,
+          "cpu.stat": "usage_usec 281792\nuser_usec 210063\nsystem_usec 71729\nnice_usec 0\nnr_periods 0\nnr_throttled 0\nthrottled_usec 0\nnr_bursts 0\nburst_usec 0",
+          "memory.current": "11542528",
+          "memory.peak": "13090816",
+          "VmHWM": "20972 kB",
+          "VmRSS": "20972 kB",
+          "Threads": "1",
+          "open_fds": 4
+        }
+      }
+    }
+  },
+  "operator_dry_run_t1_t6": {
+    "scope_note": "Maintainer/author dry run of spec \u00a714 tasks T1\u2013T6 on Fixture F1 (#581); prepares baseline protocol and friction observations for #585 without substituting for #585's independent fresh-operator trial.",
+    "tasks": [
+      {
+        "task": "T1",
+        "question": "Who can use the dashboard right now?",
+        "surface_used": "GET /api/sharing (serving layer) + Console Routes",
+        "observed_facts": {
+          "route_id": "dashboard",
+          "urls": [
+            "https://dash.lab.test/"
+          ],
+          "declared_intent": {
+            "state": "restricted",
+            "mode": "restricted",
+            "audience_label": {
+              "text": "family",
+              "truncated": false,
+              "full_bytes": 6
+            }
+          },
+          "jul_checks": {
+            "network": "none",
+            "credential": "basic",
+            "client_certificate": "not_required",
+            "outside_auth": {
+              "redirect_rewrites": false,
+              "request_plugins": false,
+              "cors_preflight": false
+            }
+          },
+          "listener_bind_scope": "public_address",
+          "controls": {
+            "cache": "disabled",
+            "waf": "block",
+            "rate_limit": "disabled",
+            "cors": "disabled"
+          }
+        },
+        "operator_answer": "Entry 'dashboard' at https://dash.lab.test/ on 192.0.2.10:443 (private_address bind scope). Declared mode='restricted', audience_label='family'. Enforced per request by Jul HTTP Basic (credential='basic') plus Coraza CRS WAF; application permissions apply after login. Limit: private IP/bind scope alone does not establish identity; application sessions and external paths are not tracked by Jul.",
+        "completed": true,
+        "assistance": "unaided",
+        "hands_on_seconds": 1,
+        "waiting_seconds": 0,
+        "decisions": 1,
+        "handoffs": 0,
+        "interventions": 0,
+        "errors": 0,
+        "dangerous_failures": 0
+      },
+      {
+        "task": "T2",
+        "question": "Who enforces that, and what could bypass it?",
+        "surface_used": "GET /api/sharing + GET /api/v1/status + host/firewall check",
+        "observed_facts": {
+          "jul_credential": "basic",
+          "outside_auth": {
+            "redirect_rewrites": false,
+            "request_plugins": false,
+            "cors_preflight": false
+          },
+          "backend_bind": "127.0.0.1:3000 (loopback only)",
+          "admin_bind": "127.0.0.1:9443 (loopback only)",
+          "firewall_chain": "JL581_D94ACA"
+        },
+        "operator_answer": "Jul enforces Basic authentication and WAF at location 'dashboard' on 192.0.2.10:443; outside_auth flags are all false (no redirect rewrites, request plugins, or CORS preflights bypassing auth). Potential bypass paths\u2014direct origin (127.0.0.1:3000) and admin/metrics (127.0.0.1:9443)\u2014are closed by loopback-only binding and the host firewall (only 443/8443 open on the LAN interface). Same-host processes can reach loopback (trusted boundary \u00a76).",
+        "completed": true,
+        "assistance": "unaided",
+        "hands_on_seconds": 1,
+        "waiting_seconds": 0,
+        "decisions": 1,
+        "handoffs": 1,
+        "interventions": 0,
+        "errors": 0,
+        "dangerous_failures": 0
+      },
+      {
+        "task": "T3",
+        "question": "How do we know, and since when?",
+        "surface_used": "POST /api/sharing/postcondition/evaluate + client-vantage evidence ledger (\u00a77.1)",
+        "observed_facts": {
+          "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+          "postcondition_result": "candidate_serving",
+          "postcondition_candidate": "serving",
+          "postcondition_access": "none_expected",
+          "external_inputs": [
+            "file_contents"
+          ],
+          "in_product_evidence_array": []
+        },
+        "operator_answer": "Serving generation ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088 matches the planned candidate and expected access facts (result='candidate_serving'). File contents (dashboard.htpasswd) are listed in external_inputs as not compared by postconditions; actual access is verified by dated client-vantage checks from lab-client-1 (200) and lab-client-2 (401), which become stale on any serving_version or credential-file change.",
+        "completed": true,
+        "assistance": "unaided",
+        "hands_on_seconds": 1,
+        "waiting_seconds": 0,
+        "decisions": 1,
+        "handoffs": 0,
+        "interventions": 0,
+        "errors": 0,
+        "dangerous_failures": 0
+      },
+      {
+        "task": "T4",
+        "question": "Make the portal public without changing the dashboard",
+        "surface_used": "POST /api/v1/config/plan + POST /api/v1/config/apply + client check",
+        "observed_facts": {
+          "affected_entries": {
+            "portal-home": "metadata_only"
+          },
+          "portal_anonymous_status": 200,
+          "dashboard_excluded_status": 401
+        },
+        "operator_answer": "Plan listed only portal-home (class='metadata_only', declared_mode_widened=true) with zero delta on dashboard; after apply, portal returned 200 and dashboard remained 401 for excluded client.",
+        "completed": true,
+        "assistance": "unaided",
+        "hands_on_seconds": 1,
+        "waiting_seconds": 0,
+        "decisions": 1,
+        "handoffs": 0,
+        "interventions": 0,
+        "errors": 0,
+        "dangerous_failures": 0
+      },
+      {
+        "task": "T5",
+        "question": "Stop new access to the dashboard, keep the portal up",
+        "surface_used": "location_set_withdrawn (withdrawn=true) preview + apply + client check",
+        "observed_facts": {
+          "selected_entry": "dashboard (https://dash.lab.test/ on 192.0.2.10:443)",
+          "dashboard_status": 403,
+          "portal_status": 200,
+          "what_ended": "New requests denied 403 no-store; open Jul HTTP/SSE/H1-WS exchanges retired within 2s bound (#642).",
+          "what_continues": "Dashboard backend process on 127.0.0.1:3000, DNS/hostname registration, and any external application sessions or alternate non-Jul paths."
+        },
+        "operator_answer": "Withdrew route_id='dashboard' in place via location_set_withdrawn (withdrawn=true) without deleting the route; fresh dashboard requests return 403 no-store, open Jul streams retire within 2s, portal stays 200 OK.",
+        "completed": true,
+        "assistance": "unaided",
+        "hands_on_seconds": 1,
+        "waiting_seconds": 0,
+        "decisions": 1,
+        "handoffs": 0,
+        "interventions": 0,
+        "errors": 0,
+        "dangerous_failures": 0
+      },
+      {
+        "task": "T6",
+        "question": "Restore dashboard access for the intended users",
+        "surface_used": "location_set_withdrawn (withdrawn=false) preview + apply + client check",
+        "observed_facts": {
+          "delta_class": "widened",
+          "requires_acknowledgement": true,
+          "intended_status": 200,
+          "excluded_status": 401
+        },
+        "operator_answer": "Cleared withdrawn=false (classed 'widened', requires_acknowledgement=true); preserved original Basic auth and WAF; confirmed intended user 200 OK and excluded user 401 Unauthorized.",
+        "completed": true,
+        "assistance": "unaided",
+        "hands_on_seconds": 1,
+        "waiting_seconds": 0,
+        "decisions": 1,
+        "handoffs": 0,
+        "interventions": 0,
+        "errors": 0,
+        "dangerous_failures": 0
+      }
+    ],
+    "totals": {
+      "tasks_completed": 6,
+      "hands_on_seconds": 6,
+      "waiting_seconds": 0,
+      "decisions": 6,
+      "handoffs": 1,
+      "interventions": 0,
+      "errors": 0,
+      "dangerous_failures": 0
+    },
+    "recurring_maintenance_duties": [
+      "Renew or rotate TLS leaf/intermediate certificates before expiry (hot-reloaded via SIGHUP or managed Apply).",
+      "Maintain dashboard.htpasswd (or mTLS CA/CRL) and explicitly reload Jul after any credential file change.",
+      "Back up server.toml alongside /var/lib/jul/private/effective-version.key, managed baseline sidecars, and external TLS/htpasswd files (spec \u00a715).",
+      "Re-run intended (200) and excluded (401/403) client-vantage checks after configuration or credential changes because serving_version rotation invalidates prior evidence (\u00a77.3)."
+    ],
+    "candidate_friction_for_585_586_587": [
+      "F-01 (#586): GET /api/sharing exposes evidence[] as empty until runtime bounded verification (#586) lands; operators currently correlate external curl checks with serving_version.",
+      "F-02 (#587): Withdrawing or changing sharing.mode via CLI/API requires knowing route_id ('dashboard') and constructing a patch or raw candidate; #587's guided Console flow can wrap location_set_withdrawn.",
+      "F-03 (#633/#586): Direct-origin and firewall verification require host-level ss/iptables inspection outside Jul."
+    ]
+  },
+  "teardown": {
+    "clean": true,
+    "leftover_namespaces": [],
+    "leftover_paths": []
+  }
+}

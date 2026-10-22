@@ -1,0 +1,671 @@
+{
+  "manifest_version": 1,
+  "issue": "#581",
+  "work_package": "SHARE-02A",
+  "title": "Standalone restricted and public sharing without a hosted control plane (Fixture F1)",
+  "programme": {
+    "master_tracker": "#62",
+    "epic": "#579",
+    "design_authority": "#580",
+    "runtime_prerequisites": ["#649", "#641", "#642", "#563", "#562"],
+    "immediate_successor": "#582",
+    "downstream_consumers": ["#582", "#583", "#584", "#613", "#585", "#586", "#587", "#634"],
+    "execution_owner": "victornife (maintainer-selected current-main execution)",
+    "revalidation_owner": "victornife (maintainer; re-run affected rows on protocol/auth/trust/lifecycle release changes and on first published release package containing #641/#642/#581)"
+  },
+  "authorities": [
+    "docs/specs/application-sharing.md",
+    "docs/adr/0026-application-sharing-contract.md",
+    "docs/adr/0012-oss-open-core-boundary.md",
+    "docs/adr/0013-project-operating-model-and-completeness.md",
+    "docs/adr/0014-operability-surfaces.md",
+    "docs/adr/0016-inbound-identity-and-backend-peer-trust.md",
+    "docs/adr/0018-bounded-route-matching-and-response-policy.md",
+    "docs/adr/0019-configuration-authority-generated-contracts-and-resource-identity.md"
+  ],
+  "baseline": {
+    "selection_decision": "current_merged_main_full_profile",
+    "evidence_classification": "current-source-development",
+    "release_package_note": "Locally built development distribution from pinned merged main (52b09adfbccfc3b14a86ce48a2de06395a7fae70). Not a published or Sigstore-attested release archive; released-product claims require revalidation on the eventual published release containing #641, #642, and #581.",
+    "historical_published_baseline": {
+      "tag": "v2.2.0",
+      "commit_sha": "b12e051139f652b400cff37d9f063f5637a7d550",
+      "disposition": "historical_context_only",
+      "reason": "Published v2.2.0 predates #641 (declared intent, §9.5 audience-delta classes, §9.4 postconditions) and #642 (#563/#562 complete withdrawal and exact-entry retirement)."
+    },
+    "product_source_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+    "source_archive": {
+      "file": "source-52b09adfbccf.tar.gz",
+      "sha256": "064ea879be7914329fc9dcb35ecaa57dad95f6013ee5193541d58fb182c356ae"
+    },
+    "prerequisite_ancestry": [
+      {
+        "issue": "#580",
+        "pr": "#640",
+        "merge_sha": "9a6f875d3efae0a907df97fe7cf25598559ac2ed",
+        "reviewed_head": "d58baeec98827e5f873732c20a33dc5b0931d6b2",
+        "verified_ancestor_of_main": true
+      },
+      {
+        "issue": "#649",
+        "pr": "#650",
+        "merge_sha": "7ebfbc5e6f637086fe9846d758d50c10036872c1",
+        "reviewed_head": "d39315b62fb98be91b61d14b340ef0913d7691fb",
+        "verified_ancestor_of_main": true
+      },
+      {
+        "issue": "#641",
+        "pr": "#651",
+        "merge_sha": "7280e255373a088540c9981008ab1b265ce2b4df",
+        "reviewed_head": "6d6ad7920740a667dc6ca0ba61b18eb03c1b0219",
+        "verified_ancestor_of_main": true
+      },
+      {
+        "issue": "#642 (Design)",
+        "pr": "#652",
+        "merge_sha": "801bb862650603148f040b82d5725e3c58693391",
+        "reviewed_head": "d877aeb09f74e8be6c858df0215ec15eb5ee50aa",
+        "verified_ancestor_of_main": true
+      },
+      {
+        "issue": "#642 / #563 / #562 (Runtime)",
+        "pr": "#653",
+        "merge_sha": "e7e5cfbc0171de33e90a7b645ba4786370699219",
+        "reviewed_head": "bd86bfca2d03f96f57c7dcc7e4c321b992e9258c",
+        "verified_ancestor_of_main": true
+      }
+    ],
+    "build": {
+      "command": "CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags \"-s -w -X main.version=v2.2.0-dev+52b09adfbccf\" -tags \"brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf\" -o jul ./cmd/jul",
+      "toolchain": "go1.27.2 linux/arm64",
+      "platform": "linux/arm64",
+      "version": "v2.2.0-dev+52b09adfbccf",
+      "full_tags": [
+        "brotli", "zstd", "acme", "console", "otel", "grpc", "http3",
+        "importer", "wasmplugins", "stream", "consul", "kubernetes", "waf"
+      ],
+      "full_binary_sha256": "25d9419186fd6958ea758922455fff72fed13b34b9b215076a989f8c343a5e48",
+      "full_archive": "jul_v2.2.0-dev+52b09adfbccf_linux_arm64_full.tar.gz",
+      "full_archive_sha256": "8c0e6efc32ba08a751678286eb86dee2be71cac966e3c46ee8ee73f75f9bb4d7",
+      "lean_binary_sha256": "9d3e9eb4a237eecdfa6d3b92a40b6ed8a51506752ed3a47c97070c46ee41688c",
+      "lean_archive": "jul_v2.2.0-dev+52b09adfbccf_linux_arm64_lean.tar.gz",
+      "lean_archive_sha256": "ec11cf4b588fd2f42c897d6a903f8989e8ef20321099cc9f43aba5a13ef5eab5"
+    }
+  },
+  "dimensions_and_applicability": {
+    "authority": ["managed", "file_owned"],
+    "authentication": [
+      {
+        "id": "basic",
+        "description": "HTTP Basic (bcrypt htpasswd) + WAF on dashboard; anonymous + rate-limit on portal; shared listener 192.0.2.10:443"
+      },
+      {
+        "id": "mtls_shared_listener",
+        "description": "TLS client_auth.mode = 'request' on shared 192.0.2.10:443 + require_client_cert = true and Basic on dashboard (composed); emits client_auth_request_mode_shared warning because browsers with client certs may prompt on portal"
+      },
+      {
+        "id": "mtls_dedicated_listener",
+        "description": "Portal on 192.0.2.10:443 (client_auth off) and dashboard on separate listener 192.0.2.10:8443 with default-deny-mtls + client_auth.mode = 'require' + require_client_cert = true"
+      }
+    ],
+    "exposure": [
+      "loopback_preview",
+      "controlled_lan_public_portal_restricted_dashboard",
+      "intentional_dashboard_public_transition_and_recovery"
+    ],
+    "withdrawal": [
+      "live_serving",
+      "dedicated_gate_withdrawn_true",
+      "legacy_auth_deny_in_place",
+      "recovered_serving"
+    ],
+    "lifecycle": [
+      "fresh_setup_and_adoption",
+      "accepted_hot_apply",
+      "no_change_apply",
+      "rejected_invalid_or_stale_change",
+      "authority_specific_rollback",
+      "saved_not_serving_stage_restart",
+      "process_restart_and_reconciliation",
+      "file_owned_degraded_reload"
+    ],
+    "protocol": [
+      {
+        "id": "http1_1",
+        "status": "tested_in_f1",
+        "hops": ["client_to_jul_tls", "jul_to_origin_http1_1"]
+      },
+      {
+        "id": "http2_tls_alpn",
+        "status": "tested_in_f1",
+        "hops": ["client_to_jul_tls_h2"],
+        "notes": "Jul -> plaintext origin uses HTTP/1.1 by contract (spec §12)."
+      },
+      {
+        "id": "sse_long_lived",
+        "status": "tested_in_f1",
+        "hops": ["client_to_jul_h1_and_h2", "jul_to_origin_http1_1"]
+      },
+      {
+        "id": "h1_websocket_long_lived",
+        "status": "tested_in_f1",
+        "hops": ["client_to_jul_h1_upgrade", "jul_to_origin_h1_upgrade"],
+        "not_applicable_combinations": [
+          {
+            "combination": "websocket_over_http2_or_http3",
+            "disposition": "not_applicable",
+            "reason": "Contractual protocol boundary (ADR 0018 §17, spec §12): Jul implements RFC 6455 HTTP/1.1 Upgrade only and does not implement RFC 8441 / RFC 9220 Extended CONNECT."
+          }
+        ]
+      },
+      {
+        "id": "native_grpc_http3_l4",
+        "status": "not_exercised_by_f1_fixture",
+        "disposition": "not_applicable_to_f1",
+        "reason": "Spec §12 and §18 explicitly classify native gRPC, HTTP/3, and L4 [[stream]] as outside mandatory F1 fixture traffic; covered by existing owner suites (TestLongLivedNativeGRPCReloadAndShutdown, internal/server/grpc_retirement_test.go, internal/server/http3_mtls_test.go)."
+      }
+    ],
+    "resource_qualification_policy": {
+      "full_w0_w4_configurations": ["CFG-F1-04", "CFG-F1-05"],
+      "rationale_for_reuse_across_authority_and_auth_variants": "Full W0–W4 resource and continuity qualification (15m W0 idle, 12m W1 representative 70/10/20 mix, W2 mixed + 10% excluded + 20 held long-lived dashboard streams, W3 2m complete withdrawal + 1 req/s portal continuity probe, W4 60s backend outage + recovery + >=90s drain + 2m post-drain comparison) is executed on CFG-F1-04/CFG-F1-05 under the hardened systemd service profile on the pinned full-profile binary. File-owned authority (CFG-F1-10/CFG-F1-11) differs only in the control-plane desired-state writer (SIGHUP/file-watcher vs /api/v1/config/apply) and compiles the exact same runtime handler tree (router, TLS, bcrypt Basic auth, Coraza CRS WAF, rate limiter, reverse proxy, and ExchangeRegistry). Resource reuse never substitutes for functional, security, isolation, retirement, or recovery verification: all authority and mTLS variants execute their own real-client functional, security, retirement, and recovery checks."
+    }
+  },
+  "configurations": [
+    {
+      "config_id": "CFG-F1-01",
+      "file": "examples/sharing/f1-standalone/01-loopback-preview.toml",
+      "authority": "managed",
+      "auth_variant": "none_loopback_preview",
+      "exposure": "loopback_preview",
+      "withdrawal": "live_serving",
+      "listeners": ["127.0.0.1:443", "127.0.0.1:9443"],
+      "resource_qualification": "not_required_transition_stage"
+    },
+    {
+      "config_id": "CFG-F1-02",
+      "file": "examples/sharing/f1-standalone/02-loopback-dashboard-restricted.toml",
+      "authority": "managed",
+      "auth_variant": "basic",
+      "exposure": "loopback_preview",
+      "withdrawal": "live_serving",
+      "listeners": ["127.0.0.1:443", "127.0.0.1:9443"],
+      "resource_qualification": "not_required_transition_stage"
+    },
+    {
+      "config_id": "CFG-F1-03",
+      "file": "examples/sharing/f1-standalone/03-loopback-portal-public.toml",
+      "authority": "managed",
+      "auth_variant": "basic",
+      "exposure": "loopback_preview",
+      "withdrawal": "live_serving",
+      "listeners": ["127.0.0.1:443", "127.0.0.1:9443"],
+      "resource_qualification": "not_required_transition_stage"
+    },
+    {
+      "config_id": "CFG-F1-04",
+      "file": "examples/sharing/f1-standalone/jul.toml",
+      "authority": "managed",
+      "auth_variant": "basic",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "live_serving",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "executes_full_w0_w1_w2_w4"
+    },
+    {
+      "config_id": "CFG-F1-05",
+      "file": "examples/sharing/f1-standalone/05-lan-withdrawn-gate.toml",
+      "authority": "managed",
+      "auth_variant": "basic",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "dedicated_gate_withdrawn_true",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "executes_full_w3"
+    },
+    {
+      "config_id": "CFG-F1-06",
+      "file": "examples/sharing/f1-standalone/06-lan-withdrawn-legacy-deny.toml",
+      "authority": "managed",
+      "auth_variant": "basic",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "legacy_auth_deny_in_place",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "reuses_cfg_f1_05_with_functional_and_retirement_proof"
+    },
+    {
+      "config_id": "CFG-F1-07",
+      "file": "examples/sharing/f1-standalone/07-lan-dashboard-public-transition.toml",
+      "authority": "managed",
+      "auth_variant": "public_transition",
+      "exposure": "intentional_dashboard_public_transition_and_recovery",
+      "withdrawal": "live_serving",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "not_required_transition_stage"
+    },
+    {
+      "config_id": "CFG-F1-08",
+      "file": "examples/sharing/f1-standalone/08-lan-mtls-shared-listener.toml",
+      "authority": "managed",
+      "auth_variant": "mtls_shared_listener",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "live_serving",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "reuses_cfg_f1_04_with_mtls_functional_and_retirement_proof"
+    },
+    {
+      "config_id": "CFG-F1-09",
+      "file": "examples/sharing/f1-standalone/09-lan-mtls-dedicated-listener.toml",
+      "authority": "managed",
+      "auth_variant": "mtls_dedicated_listener",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "live_serving",
+      "listeners": ["192.0.2.10:443", "192.0.2.10:8443", "127.0.0.1:9443"],
+      "resource_qualification": "reuses_cfg_f1_04_with_dedicated_listener_mtls_proof"
+    },
+    {
+      "config_id": "CFG-F1-10",
+      "file": "examples/sharing/f1-standalone/10-file-owned-lan.toml",
+      "authority": "file_owned",
+      "auth_variant": "basic",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "live_serving",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "reuses_cfg_f1_04_same_dataplane_with_file_owned_proof"
+    },
+    {
+      "config_id": "CFG-F1-11",
+      "file": "examples/sharing/f1-standalone/11-file-owned-withdrawn-gate.toml",
+      "authority": "file_owned",
+      "auth_variant": "basic",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "dedicated_gate_withdrawn_true",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "reuses_cfg_f1_05_same_dataplane_with_file_owned_proof"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "CASE-F1-001",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": ["CFG-F1-01"],
+      "spec_refs": ["§2", "§10", "§18", "SH-1", "SH-8"],
+      "description": "Service profile hardening & collision-refusing setup: systemd jul.service running as unprivileged jul:jul user with ProtectSystem=strict, NoNewPrivileges=yes, PrivateTmp=yes, PrivateDevices=yes, MemoryDenyWriteExecute=yes, and 0700/0600 directory/file modes; lean binary rejects WAF before persistence.",
+      "expected_outcome": "systemctl show verifies user/group/hardening properties; lean jul check exits 1 rejecting WAF; full jul starts cleanly."
+    },
+    {
+      "case_id": "CASE-F1-002",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": ["CFG-F1-01"],
+      "spec_refs": ["§5", "§10", "SH-3", "SH-5"],
+      "description": "Safe Step 1 — Loopback preview isolation: default-deny, portal, and dashboard bound to 127.0.0.1:443; host loopback reaches portal and dashboard; external routed namespaces lab-client-1 (192.0.2.11) and lab-client-2 (192.0.2.12) cannot connect to 192.0.2.10:443.",
+      "expected_outcome": "Host loopback GET portal and dashboard return 200; lab-client-1 and lab-client-2 TCP/TLS connects to 192.0.2.10:443 fail (connection refused)."
+    },
+    {
+      "case_id": "CASE-F1-003",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": ["CFG-F1-01", "CFG-F1-02"],
+      "spec_refs": ["§4.5", "§9.4", "§9.5", "§10", "SH-5"],
+      "description": "Safe Step 2 — Add Basic check and declare dashboard restricted on loopback: adopt initial baseline, preview and apply CFG-F1-02; verify audience delta class 'narrowed' on dashboard and postcondition 'candidate_serving'; verify intended Basic credentials 200 and missing/wrong credentials 401 on loopback before any LAN bind.",
+      "expected_outcome": "Plan reports dashboard class=narrowed; apply outcome=applied_live; postcondition result=candidate_serving (candidate=serving, access=matches); loopback unauthenticated/wrong-pass GET dash.lab.test -> 401 (origin_delta=0); intended credentials -> 200."
+    },
+    {
+      "case_id": "CASE-F1-004",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": ["CFG-F1-02", "CFG-F1-03"],
+      "spec_refs": ["§4.5", "§9.4", "§9.5", "§10"],
+      "description": "Safe Step 3 — Declare portal public on loopback: preview and apply CFG-F1-03; verify portal-home class 'metadata_only' (declared_mode_widened=true, triggers_retirement=false) and dashboard unchanged.",
+      "expected_outcome": "Plan reports portal-home class=metadata_only, triggers_retirement=false; apply outcome=applied_live; postcondition result=candidate_serving."
+    },
+    {
+      "case_id": "CASE-F1-005",
+      "category": "deployment_and_safe_sequence",
+      "config_ids": ["CFG-F1-03", "CFG-F1-04"],
+      "spec_refs": ["§9.4", "§9.5", "§10", "SH-5"],
+      "description": "Safe Step 4 & 5 — Move all three blocks from 127.0.0.1:443 to 192.0.2.10:443 in one candidate and immediately verify LAN isolation: plan names all three entries as 'uncertain'; zero intermediate unprotected dashboard state on 192.0.2.10:443; lab-client-2 immediately gets 401 on dashboard and 200 on portal; lab-client-1 gets 200 on dashboard with credentials.",
+      "expected_outcome": "Plan names default-deny, portal-home, and dashboard as class=uncertain; apply outcome=applied_live; postcondition result=candidate_serving; lab-client-2 GET dash.lab.test -> 401 (origin_delta=0), GET portal.lab.test -> 200; lab-client-1 GET dash.lab.test with Basic -> 200."
+    },
+    {
+      "case_id": "CASE-F1-006",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§4.3", "§9.1", "§9.4", "SH-4", "S17-1"],
+      "description": "RBAC and S17-1 postcondition disclosure enforcement: auditor (status:read only) refused 403 on GET /api/sharing and POST /api/sharing/postcondition/evaluate; viewer (status:read+config:read) allowed on GET /api/sharing and postcondition evaluate, refused 403 on plan/apply; operator (config:write+config:apply, no config:raw) receives postcondition.status=unavailable (caller_lacks_config_raw) on raw-candidate plan and postcondition.status=available on visible typed patch; admin (config:raw) receives postcondition.status=available on raw-candidate plan.",
+      "expected_outcome": "All RBAC status codes and postcondition availability states match contract with zero state change during read/refusal probes."
+    },
+    {
+      "case_id": "CASE-F1-007",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§9.1", "§9.2", "ADR 0019 §27"],
+      "description": "Managed CAS, idempotency, stale base, and no_change: re-applying identical CFG-F1-04 returns outcome=no_change; replaying same Idempotency-Key returns cached terminal result; reusing same Idempotency-Key with different payload returns 409 idempotency_key_reused; stale base_version returns 409 base_version_conflict.",
+      "expected_outcome": "no_change preserves serving_version; idempotency replay returns 200; mismatched reuse and stale base return 409 before side effects."
+    },
+    {
+      "case_id": "CASE-F1-008",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§4.5", "§9.2"],
+      "description": "Managed invalid-candidate rejection and pre-Publish restoration (not_applied): candidate with sharing block on route without route_id is rejected with 422/400 validation error; candidate with unbindable listener address fails preflight/Prepare without mutating serving state.",
+      "expected_outcome": "Invalid sharing candidate rejected before persistence; serving_version and config_state=managed_clean remain intact."
+    },
+    {
+      "case_id": "CASE-F1-009",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§9.2", "ADR 0019 §11/§14"],
+      "description": "Managed drift detection and explicit resolution: external edit to server.toml transitions config_state to managed_drift; ordinary managed apply is refused with 409 drift_detected while Jul keeps serving; explicit adopt-external preview + confirm (or revert) restores managed_clean without silent force-apply.",
+      "expected_outcome": "GET /api/v1/status reports config_state=managed_drift; apply refused with 409; adopt-external preview/confirm succeeds and returns to managed_clean."
+    },
+    {
+      "case_id": "CASE-F1-010",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§4.3", "§9.2", "§9.4", "SH-13"],
+      "description": "Managed stage_restart, saved-vs-serving layers, and post-restart postcondition lifecycle: stage a restart-required change (e.g. cache.enabled=true or history_dir change); verify config_state=managed_pending_restart, GET /api/sharing exposes both serving and saved layers with distinct revisions, and pre-restart postcondition evaluates to result=not_serving_yet (candidate=base_serving).",
+      "expected_outcome": "GET /api/sharing shows serving and saved layers; postcondition evaluate returns result=not_serving_yet, candidate=base_serving."
+    },
+    {
+      "case_id": "CASE-F1-011",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§9.4", "§18", "AD-09"],
+      "description": "Post-restart postcondition key rotation and recovery: restart Jul to promote the staged change; verify boot_id changes and the pre-restart postcondition evaluates to result=unverifiable (candidate=unverifiable); re-plan the same raw candidate (with config:raw) and repeatable typed op (location_set_withdrawn) to obtain candidate_serving; verify non-repeatable location_add re-plan is rejected once serving and remains unverifiable with manual reconciliation.",
+      "expected_outcome": "Original postcondition returns result=unverifiable after restart; re-planned raw candidate and repeatable typed op return result=candidate_serving; non-repeatable location_add re-plan is refused and reconciled via GET /api/sharing."
+    },
+    {
+      "case_id": "CASE-F1-012",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04", "CFG-F1-05"],
+      "spec_refs": ["§9.4", "SD-13"],
+      "description": "Postcondition access_matches, diverged, and other_revision separation: (1) apply an unrelated edit (e.g. global.log_level='debug') after CFG-F1-04 -> evaluating CFG-F1-04's postcondition returns result=access_matches (candidate=other_revision, access=matches); (2) apply an access-changing edit (withdrawn=true on dashboard) -> evaluating CFG-F1-04's postcondition returns result=diverged (candidate=other_revision, access=differs, differing_fields=['withdrawn']); (3) evaluate a global-only plan postcondition against another revision -> returns result=other_revision (candidate=other_revision, access=none_expected).",
+      "expected_outcome": "Exact-candidate and access-fact answers are reported separately across access_matches, diverged, and other_revision; no bare 'confirmed' string."
+    },
+    {
+      "case_id": "CASE-F1-013",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-04", "CFG-F1-05"],
+      "spec_refs": ["§9.1", "§15"],
+      "description": "Managed history rollback: preview rollback diff (observing its own audience delta class 'widened' when rolling back from withdrawn CFG-F1-05 to active CFG-F1-04) and execute POST /api/v1/config/rollback.",
+      "expected_outcome": "Rollback diff shows dashboard class=widened; rollback apply succeeds with outcome=applied_live and restores intended dashboard access."
+    },
+    {
+      "case_id": "CASE-F1-014",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-10", "CFG-F1-11"],
+      "spec_refs": ["§9.1", "§9.2", "§9.4", "ADR 0019 §15"],
+      "description": "File-owned authority boundary, SIGHUP reload, and owner rollback: under jul-readonly.service (CFG-F1-10), GET /api/sharing and POST /api/v1/config/plan succeed; POST /api/v1/config/apply, patch, rollback, and adopt are refused with 409 config_authority_read_only (CLI exit code 6) and zero file modification; owner replaces file with CFG-F1-11 and sends SIGHUP -> withdrawal goes live and postcondition returns candidate_serving; owner reverts to CFG-F1-10 + SIGHUP -> access restored without minting route_id or managed history.",
+      "expected_outcome": "All remote mutations refused with 409 config_authority_read_only; SIGHUP reload publishes CFG-F1-11 and evaluates candidate_serving; owner revert + SIGHUP restores CFG-F1-10."
+    },
+    {
+      "case_id": "CASE-F1-015",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-10", "CFG-F1-11"],
+      "spec_refs": ["§9.2"],
+      "description": "Reproducible bounded applied_degraded outcome in file_owned mode: bind a local TCP socket on an auxiliary port, reload a file_owned candidate that sets withdrawn=true on dashboard AND adds a [[stream]] listener on that occupied port; HTTP Publish succeeds (dashboard withdrawal is immediately effective, 403 Forbidden) while post-Publish stream reload fails, yielding last_reload.outcome=applied_degraded.",
+      "expected_outcome": "GET /api/v1/status reports last_reload.outcome='applied_degraded', published=true, http.status='ok', stream.status='failed'; dashboard returns 403 Forbidden with Cache-Control: no-store."
+    },
+    {
+      "case_id": "CASE-F1-016",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§10", "§11"],
+      "description": "Simultaneous anonymous portal success, intended dashboard success, and excluded dashboard denial from independent routed client namespaces.",
+      "expected_outcome": "lab-client-2 anonymous GET https://portal.lab.test/ -> 200 (portal marker); lab-client-1 Basic GET https://dash.lab.test/api/summary -> 200 (dashboard marker, origin_delta=+1); lab-client-2 anonymous or wrong-password GET https://dash.lab.test/api/summary -> 401 with WWW-Authenticate (origin_delta=0)."
+    },
+    {
+      "case_id": "CASE-F1-017",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§10", "§11", "SH-11"],
+      "description": "Default-deny first block for unknown Host and IP literal: requests to https://192.0.2.10:443/ with Host: unknown.lab.test and Host: 192.0.2.10 reach default-deny (404) with zero portal or dashboard content.",
+      "expected_outcome": "Both requests return HTTP 404 from default-deny; response body contains neither portal nor dashboard marker; dashboard origin_delta=0."
+    },
+    {
+      "case_id": "CASE-F1-018",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§4.2", "§9.5", "§11"],
+      "description": "Host case, trailing dot, explicit port, and server_names alias normalisation: Host: PORTAL.LAB.TEST, Host: portal.lab.test., Host: portal.lab.test:443, and Host: portal-alias.lab.test all select portal-home; Host: DASH.LAB.TEST. and Host: dash.lab.test:443 select dashboard and enforce Basic auth.",
+      "expected_outcome": "All portal Host variants return 200 with portal marker; all dashboard Host variants return 401 without credentials and 200 with valid credentials; GET /api/sharing lists both portal.lab.test and portal-alias.lab.test under one portal-home entry."
+    },
+    {
+      "case_id": "CASE-F1-019",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§10", "§11", "SH-11"],
+      "description": "Missing/unknown SNI and mismatched SNI vs Host: TLS handshake with unknown SNI (unknown.sni.test) or SNI=portal.lab.test while HTTP Host=dash.lab.test completes with the listener's certificate, routes by Host to dashboard, and still enforces dashboard Basic auth.",
+      "expected_outcome": "Unauthenticated request with SNI=portal.lab.test and Host=dash.lab.test is denied 401 (origin_delta=0); authenticated request succeeds 200."
+    },
+    {
+      "case_id": "CASE-F1-020",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§10", "§11", "ADR 0018"],
+      "description": "Path canonicalisation (dot segments, repeated slashes, percent-encoded separators) and cross-vhost prefix isolation: /a/../api/summary, //api///summary, and /%2e%2e/api/summary on dash.lab.test canonicalise to /api/summary (agreed between POST /api/routes/test and backend observed_path) and require Basic auth; requesting /api/summary or /dashboard on Host: portal.lab.test returns 404 from the static root, never dashboard content.",
+      "expected_outcome": "POST /api/routes/test and backend observed_path both report /api/summary; unauthenticated dot-segment paths on dash.lab.test return 401 (origin_delta=0); portal.lab.test/api/summary returns 404 with zero dashboard content."
+    },
+    {
+      "case_id": "CASE-F1-021",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§6", "§10", "§11", "SH-12", "ADR 0016 §12"],
+      "description": "Forged X-Forwarded-For, Forwarded, RFC 9440 Client-Cert headers, and provider identity headers (Tailscale-User-Login, Cf-Access-Authenticated-User-Email, Cf-Access-Jwt-Assertion): unauthenticated requests with forged headers are denied 401; on authenticated requests, Jul overwrites X-Forwarded-For with canonical peer IP (192.0.2.11), strips Forwarded and Client-Cert/Client-Cert-Chain/X-Forwarded-Client-Cert, and forwards unknown provider headers as untrusted client input without trusting them for authorisation.",
+      "expected_outcome": "Forged headers without Basic auth return 401 (origin_delta=0); authenticated request shows observed_headers['x-forwarded-for']=='192.0.2.11', 'forwarded'/'client-cert' absent (stripped), and provider headers recorded as untrusted."
+    },
+    {
+      "case_id": "CASE-F1-022",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§2", "§6", "§10", "§11"],
+      "description": "Direct-origin, admin, metrics, and unconfigured-service isolation from external lab clients plus scoped firewall verification: lab-client-1 and lab-client-2 attempts to reach 192.0.2.10:3000 (backend), 192.0.2.10:9443 (admin/metrics), and 192.0.2.10:8444 (unconfigured) are rejected; scoped iptables chain JL581 counters confirm packet rejection.",
+      "expected_outcome": "All three ports are unreachable from lab-client-1 and lab-client-2; iptables JL581 REJECT counter increments > 0; temporarily blocking 443 in JL581 rejects traffic and restoring it recovers 200."
+    },
+    {
+      "case_id": "CASE-F1-023",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§2", "§10", "§11"],
+      "description": "Native Jul TLS chain verification negatives from external client namespace: (1) client trusting wrong-ca.pem fails TLS handshake; (2) client connecting for wrong hostname (wrong.lab.test) fails hostname verification; (3) configuring Jul with leaf-only cert (missing intermediate) causes client trusting only root-ca.pem to fail chain verification until full chain is restored.",
+      "expected_outcome": "All three TLS verification negative cases fail at TLS handshake before any HTTP request is sent; restoring full chain recovers verified 200."
+    },
+    {
+      "case_id": "CASE-F1-024",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§9.5", "§10", "§11", "SD-14"],
+      "description": "WAF advanced control on dashboard: (1) benign authenticated GET/POST succeeds 200 (origin_delta=+1); (2) authenticated SQLi (?q=1'+OR+'1'='1) and XSS (<script>alert(1)</script>) payloads are blocked by Coraza CRS with 403 Forbidden before reaching origin (origin_delta=0); (3) authenticated POST body > 1 MiB (request_body_limit = '1m') is rejected with 413 Request Entity Too Large before reaching origin (origin_delta=0).",
+      "expected_outcome": "Benign -> 200 (origin_delta=+1); SQLi/XSS -> 403 (origin_delta=0); 1.2 MiB body -> 413 (origin_delta=0)."
+    },
+    {
+      "case_id": "CASE-F1-025",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§10", "§11", "§13"],
+      "description": "Rate-limit advanced control on portal: (1) paced normal load (< 50 req/s) from lab-client-1 succeeds with 100% 200 OK; (2) deliberate unpaced burst (> 180 requests) from lab-client-2 triggers 429 Too Many Requests with Retry-After while lab-client-1's independent source IP bucket and the dashboard remain unaffected.",
+      "expected_outcome": "Paced load returns 0x 429; deliberate burst from lab-client-2 returns 429s; concurrent probe from lab-client-1 (192.0.2.11) returns 200."
+    },
+    {
+      "case_id": "CASE-F1-026",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§4.4", "§4.5", "§11", "SD-16"],
+      "description": "Cache isolation and SD-16 warnings: F1 keeps Jul process-wide response cache disabled on every entry; portal emits HTTP Cache-Control: public, max-age=300 for browsers while dashboard emits Cache-Control: private, no-store and private marker JUL-F1-PRIVATE-FAMILY-TELEMETRY-DO-NOT-CACHE; cold and warm repeated requests never leak private marker to portal or excluded client; planning a candidate that enables Jul cache on restricted dashboard triggers intent_restricted_cached and cache_on_restricted_entry warnings, and overlapping cached entries trigger cache_shared_across_entries.",
+      "expected_outcome": "Zero private marker occurrences on portal or excluded requests across cold/warm cycles; plan/lint surfaces intent_restricted_cached, cache_on_restricted_entry, and cache_shared_across_entries warnings."
+    },
+    {
+      "case_id": "CASE-F1-027",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§10", "§11"],
+      "description": "Backend down and recovery isolation: stopping dashboard_backend.py causes authenticated dashboard requests to return 502/503 while portal continues serving 200 OK unaffected; restarting dashboard_backend.py restores 200 OK on dashboard without touching portal.",
+      "expected_outcome": "During backend stop: dashboard -> 502, portal -> 200; after backend start: dashboard -> 200 within 1s."
+    },
+    {
+      "case_id": "CASE-F1-028",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§9.5", "§11"],
+      "description": "Portal-only route/header change isolation: modifying only portal-home (e.g. cache_control or response_headers on portal) produces zero audience delta on dashboard and leaves dashboard Basic + WAF enforcement intact.",
+      "expected_outcome": "Plan lists no widened/narrowed/uncertain delta for dashboard; dashboard remains restricted (401 excluded, 200 intended)."
+    },
+    {
+      "case_id": "CASE-F1-029",
+      "category": "isolation_and_controls",
+      "config_ids": ["CFG-F1-04", "CFG-F1-07"],
+      "spec_refs": ["§4.5", "§9.5", "§11", "SH-5", "SD-15"],
+      "description": "Deliberate dashboard-public transition, Console vs API/CLI acknowledgement contract, and exact recovery: (1) planning removal of Basic auth while keeping sharing.mode='restricted' emits intent_restricted_unenforced warning and class='widened', requires_acknowledgement=true; (2) planning CFG-F1-07 (Basic removed + sharing.mode='public') emits class='widened', declared_mode_widened=true, requires_acknowledgement=true; Console UI gates Apply behind explicit entry-named acknowledgement while API/CLI return the same server-owned fields without server-side blocking; (3) applying CFG-F1-07 makes anonymous dashboard requests return 200 (expected in public mode); (4) recovering CFG-F1-04 (class='narrowed', triggers_retirement=true) immediately restores 401 for anonymous and 200 for intended.",
+      "expected_outcome": "Plans report exact classes/findings/requires_acknowledgement; public mode serves anonymous 200; recovery to CFG-F1-04 retires open public streams and restores 401/200."
+    },
+    {
+      "case_id": "CASE-F1-030",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-04", "CFG-F1-05"],
+      "spec_refs": ["§8.4", "§9.3", "ADR 0026 Amendment #642"],
+      "description": "Complete withdrawal via withdrawn=true and repeatable location_set_withdrawn: setting withdrawn=true on dashboard returns 403 Forbidden with Cache-Control: no-store (and no Expires), preserves proxy_pass/auth.basic/waf/sharing in config, reports GET /api/sharing withdrawn='yes', and recovers in one reversible change (location_set_withdrawn withdrawn=false).",
+      "expected_outcome": "Withdrawn dashboard returns 403 + Cache-Control: no-store to both anonymous and valid-credential callers (origin_delta=0); GET /api/sharing shows withdrawn='yes' and intact credential='basic', action='proxy_pass'; recovery restores 200/401."
+    },
+    {
+      "case_id": "CASE-F1-031",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-05"],
+      "spec_refs": ["§9.3", "ADR 0026 Amendment #642"],
+      "description": "Outermost stage-0 withdrawal gate precedence over redirect rewrites, WASM request Stop plugins, CORS preflight OPTIONS, and conflicting response_headers/expires: a withdrawn location configured with redirect rewrites, request plugin, CORS preflight, expires='1h', and response_headers setting Cache-Control='public, max-age=3600' still answers 403 Forbidden with Cache-Control: no-store and no Expires header.",
+      "expected_outcome": "GET and OPTIONS preflight requests to the withdrawn route return 403 Forbidden with Cache-Control: no-store and no Expires or Location or X-Plugin header."
+    },
+    {
+      "case_id": "CASE-F1-032",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-04", "CFG-F1-06"],
+      "spec_refs": ["§9.3", "SD-04"],
+      "description": "Legacy auth.deny withdrawal mechanism and its documented limits: applying complete candidate CFG-F1-06 (auth.deny = ['0.0.0.0/0', '::/0'] alongside auth.basic) denies requests with 403 while preserving auth.basic and proxy_pass; GET /api/sharing reports outside_auth flags when rewrites/plugins/CORS exist and intent_checks_bypassed warns that auth.deny does not dominate outer layers; recovery removes only the added deny entries.",
+      "expected_outcome": "CFG-F1-06 returns 403 (origin_delta=0) while keeping jul_checks.credential='basic' and jul_checks.network='deny_list'; recovery to CFG-F1-04 restores intended 200."
+    },
+    {
+      "case_id": "CASE-F1-033",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-04", "CFG-F1-05"],
+      "spec_refs": ["§8.4", "§13 W3", "SD-08", "ADR 0026 Amendment #642"],
+      "description": "Exact-entry retirement on shared HTTP/2 connection coalescing and owned H1 WebSocket upgrades within 2s bound: establish (a) one shared TLS/HTTP/2 connection (using leaf cert covering portal.lab.test and dash.lab.test) carrying an active dashboard SSE stream AND an active portal download/stream, plus (b) an owned HTTP/1.1 101 WebSocket session to dash.lab.test/ws; publish withdrawal (CFG-F1-05); verify dashboard H2 stream and H1 WebSocket close within <= 2.0s from Publish (with RFC 6455 1008 Close handshake counted in graceful_count), while the sibling portal stream on the same H2 connection continues to completion with collateral_count=0 and claim='complete_withdrawal'.",
+      "expected_outcome": "ended_exchanges >= 2, completed_within_bound=true, collateral_count=0, keep_open=false, claim='complete_withdrawal'; client event log confirms dashboard closure <= 2000ms from Publish and uninterrupted completion of the shared-connection portal exchange."
+    },
+    {
+      "case_id": "CASE-F1-034",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-08"],
+      "spec_refs": ["§8.1", "§8.4", "§10", "#642", "#563"],
+      "description": "mTLS shared-listener variant (CFG-F1-08, client_auth.mode='request' + require_client_cert=true on dashboard): (1) GET /api/sharing reports client_auth_request_mode_shared warning on portal-home; (2) portal-home succeeds 200 without client cert; (3) dashboard without client cert is denied 403 on that stream; (4) dashboard with client-wrong-ca.crt fails TLS handshake; (5) dashboard with client-unauthorised-san.crt fails handshake; (6) dashboard with client-intended.crt and client-revoked.crt (before revocation) succeeds 200.",
+      "expected_outcome": "Shared listener enforces require_client_cert per location, surfaces client_auth_request_mode_shared warning, rejects untrusted/wrong-SAN certs at handshake, denies cert-less dashboard requests with 403, and admits valid certs with 200."
+    },
+    {
+      "case_id": "CASE-F1-035",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-08"],
+      "spec_refs": ["§8.4", "§9.5", "docs/mtls.md", "#642", "#563"],
+      "description": "mTLS CRL revocation reload — handshake refusal AND per-request policy re-check on open connection (#642/#563): keep an open HTTP/2 (and HTTP/1.1 keep-alive) connection authenticated with client-revoked.crt and an active SSE stream; replace tls/clients.crl with tls/clients-revoked.crl and reload Jul; verify: (a) active SSE stream on dashboard is retired within <= 2s (publish-time CRL serial addition classified as 'narrowed'); (b) the very next request to dash.lab.test on the already-open connection is denied with 403 Forbidden per-request without closing the shared connection (portal.lab.test on the same H2 connection still returns 200); (c) a new or resumed TLS handshake with client-revoked.crt is rejected at handshake; (d) client-intended.crt continues to succeed 200.",
+      "expected_outcome": "Publish-time CRL revocation retires active dashboard stream within <= 2s, denies next request on existing connection with 403 (while sibling portal request on same H2 connection returns 200), rejects new/resumed handshake for revoked cert, and admits intended cert."
+    },
+    {
+      "case_id": "CASE-F1-036",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-09"],
+      "spec_refs": ["§10", "SH-11"],
+      "description": "mTLS dedicated-listener variant (CFG-F1-09): portal on 192.0.2.10:443 has client_auth.mode='none' (no CertificateRequest sent to browsers, no client_auth_request_mode_shared warning); dashboard on 192.0.2.10:8443 has default-deny-mtls first block + client_auth.mode='require' + require_client_cert=true; uncertified clients fail handshake on :8443 while certified intended client gets 200 on dash.lab.test:8443 and 404 on unknown Host on :8443.",
+      "expected_outcome": "Portal on :443 has zero client-cert prompt and no client_auth_request_mode_shared warning; :8443 enforces mandatory mTLS handshake and default-deny-mtls."
+    },
+    {
+      "case_id": "CASE-F1-037",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§8.4", "§9.3", "§9.4", "§9.5", "RR12", "RR13"],
+      "description": "htpasswd file-content lifecycle and publish-time retirement: (1) both family-intended and family-guest authenticate 200; (2) overwrite dashboard.htpasswd on disk with dashboard-revoked.htpasswd (removing family-guest) WITHOUT reloading Jul -> family-guest still gets 200 and postcondition evaluate still reports candidate_serving (postconditions do not reread files, RR12); (3) hold an active SSE stream as family-guest and trigger explicit reload -> publish-time content classification detects user removal ('narrowed'), retires the open dashboard SSE stream within <= 2s, denies family-guest with 401 (origin_delta=0), and keeps family-intended working with 200.",
+      "expected_outcome": "Before reload: family-guest -> 200; on reload: active stream retired <= 2s (ended_exchanges >= 1, completed_within_bound=true), family-guest -> 401, family-intended -> 200."
+    },
+    {
+      "case_id": "CASE-F1-038",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§8.4", "SD-09", "ADR 0026 Amendment #642 §3/§7"],
+      "description": "Constituent-reason keep_open_entries eligibility and mandatory-tightening override: (1) pure uncertain change (e.g. upstream/target change alone) sets keep_open_eligible=true and honours keep_open_entries=['dashboard'] (skipping retirement, setting keep_open=true, and forfeiting complete_withdrawal claim); (2) mixed change combining an uncertain change with a mandatory tightening (e.g. adding CIDR restriction or withdrawn=true or publish-time htpasswd removal) sets keep_open_eligible=false, overrides any supplied keep_open_entries=['dashboard'], and retires open exchanges within <= 2s.",
+      "expected_outcome": "Pure uncertain change honours keep_open_entries with keep_open=true; mixed mandatory-tightening + uncertain change overrides keep_open_entries and retires open exchanges within 2s."
+    },
+    {
+      "case_id": "CASE-F1-039",
+      "category": "protocol_matrix",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§12", "§18"],
+      "description": "Protocol matrix verification on F1: real-client verification of HTTP/1.1, TLS ALPN HTTP/2, SSE (over H1 and H2), and H1 WebSocket (RFC 6455 Upgrade) through Jul to the dashboard origin; explicit record of non-F1 protocols (native gRPC, HTTP/3, L4 stream) with owner test evidence.",
+      "expected_outcome": "HTTP/1.1, HTTP/2 (ALPN h2), SSE, and H1 WebSocket all succeed for intended client and are denied for excluded client; Jul -> plaintext origin uses HTTP/1.1."
+    },
+    {
+      "case_id": "CASE-F1-040",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§13 W0"],
+      "description": "W0 Idle profile: 5-minute settle followed by 10-minute idle measurement (5s scrape interval via soak-scrape.go + cgroup/proc snapshots); establish last-5-minute median reference for CPU, RSS, Go heap, goroutines, open FDs, and jul_listener_conns.",
+      "expected_outcome": "Zero scrape errors, zero gaps > 2 intervals, zero restarts; baseline W0 reference medians recorded."
+    },
+    {
+      "case_id": "CASE-F1-041",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§13 W1"],
+      "description": "W1 Representative load profile: 16 closed-loop workers, 2-minute warm-up followed by 10-minute measurement; 70% portal HTML (~4 KiB), 10% portal asset (256 KiB), 20% authorised dashboard JSON (~2 KiB), paced across client addresses below F1's 50 req/s per-IP rate limit.",
+      "expected_outcome": "Zero request errors, zero 429s, 100% 200 OK across all three classes; latency p50/p95/p99, throughput, CPU, RSS, heap, goroutines, FDs, and cgroup stats within predeclared bounds."
+    },
+    {
+      "case_id": "CASE-F1-042",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§13 W2"],
+      "description": "W2 Mixed + long-lived connections profile: W1 representative mix plus 10% excluded-identity dashboard requests (verified 401 denied before origin) and 20 held long-lived dashboard connections (10 SSE + 10 H1 WebSocket).",
+      "expected_outcome": "100% of excluded requests denied with 401 (zero succeeding); 100% of intended portal/dashboard requests succeed 200; all 20 held long-lived connections stay established until W3 withdrawal."
+    },
+    {
+      "case_id": "CASE-F1-043",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": ["CFG-F1-04", "CFG-F1-05"],
+      "spec_refs": ["§8.4", "§13 W3"],
+      "description": "W3 Access-change and complete-withdrawal continuity profile: during W2 (with 20 held dashboard connections and an active shared-H2 portal+dashboard connection), withdraw dashboard access (withdrawn=true), hold for 2 minutes, then restore (withdrawn=false), while probing portal.lab.test once per second from an independent rate-limit bucket (192.0.2.13).",
+      "expected_outcome": "Zero failed portal 1 req/s continuity probes; 100% of fresh dashboard requests sent after terminal applied_live denied with 403 + Cache-Control: no-store; all 20 held dashboard connections + shared-H2 dashboard stream retired within <= 2.0s from Publish with collateral_count=0 and claim='complete_withdrawal'; restoration recovers 200 for intended and 401 for excluded with zero Jul restarts."
+    },
+    {
+      "case_id": "CASE-F1-044",
+      "category": "resource_and_continuity_w0_w4",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§13 W4"],
+      "description": "W4 Outage, recovery, and post-drain quiescence profile: during representative traffic with 1 req/s portal and dashboard probes, stop dashboard backend for 60 seconds (portal stays 100% 200 OK; dashboard returns 502), restart backend (first successful dashboard probe within <= 10s of backend readiness), then stop all load/held clients, wait >= 95s (> 90s upstream idle timeout), and measure 2-minute post-drain median against W0 reference.",
+      "expected_outcome": "Zero failed portal probes during 60s backend outage; dashboard recovers 200 OK within <= 10s of backend readiness; after drain, jul_http_requests_in_flight=0 and jul_upstream_connections=0; goroutine growth <= 4*16+32 (96), heap growth <= 64 MiB, FD delta within predeclared +8 tolerance."
+    },
+    {
+      "case_id": "CASE-F1-045",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": ["CFG-F1-04", "CFG-F1-05"],
+      "spec_refs": ["§14 T1–T6", "§18"],
+      "description": "Operator dry run of spec §14 tasks T1–T6 on the delivered build (GET /api/sharing, jul plan/apply/postcondition, Console Routes/Config): record hands-on time, waiting time, decisions, handoffs, interventions, errors, zero dangerous misunderstandings, and maintenance duties as preparation for #585.",
+      "expected_outcome": "All six tasks T1–T6 completed with zero dangerous failures and recorded timing/decision/duty metrics."
+    },
+    {
+      "case_id": "CASE-F1-046",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": ["CFG-F1-04", "CFG-F1-05", "CFG-F1-10"],
+      "spec_refs": ["§15", "§18"],
+      "description": "Clean teardown and fresh-directory runbook re-execution: verify teardown removes only task-owned resources (namespaces, veths, iptables chain, temporary service units/files) while preserving unrelated host/application state; re-run runbook setup and verification from a fresh working directory.",
+      "expected_outcome": "Post-teardown host check shows zero leftover namespaces/links/iptables/service units; fresh-directory execution passes all checks."
+    },
+    {
+      "case_id": "CASE-F1-047",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": ["CFG-F1-01", "CFG-F1-02", "CFG-F1-03", "CFG-F1-04", "CFG-F1-05", "CFG-F1-06", "CFG-F1-07", "CFG-F1-08", "CFG-F1-09", "CFG-F1-10", "CFG-F1-11"],
+      "spec_refs": ["§8", "§18"],
+      "description": "CI config-check and harness/oracle negative self-tests: scripts/config-check.sh validates all 11 F1 configs with generated TLS/CRL/htpasswd/static-root assets and lean WAF rejection; unit tests in scripts/burn-in-load_test.go and scripts/test_sharing_f1_lab.py verify oracle failure detection and >=90% changed Go statement coverage.",
+      "expected_outcome": "scripts/config-check.sh, go test scripts/burn-in-load*, and python3 scripts/test_sharing_f1_lab.py all pass with >=90% changed Go coverage."
+    },
+    {
+      "case_id": "CASE-F1-048",
+      "category": "operator_usability_and_handoffs",
+      "config_ids": ["CFG-F1-04"],
+      "spec_refs": ["§7", "§11", "§13", "§17", "§18"],
+      "description": "Downstream handoff artifacts for #634 (reusable baseline isolation test expectations), #582 (Tailscale F2), #583 (Cloudflare F3), and #613 (Grafana/Jellyfin recipes), plus documentation and GitHub issue coherence inventories.",
+      "expected_outcome": "Machine-readable acceptance ledger, #634 baseline expectations, #582/#583/#613 measurement/fixture interfaces, docs-check.py, and GitHub issue records are complete and consistent."
+    }
+  ]
+}

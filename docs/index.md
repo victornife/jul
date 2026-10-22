@@ -57,6 +57,11 @@ inside the immutable release archives. They do not close the partial-audit ledge
 
 - **[Deployment](deployment.md)** — systemd, Windows service, Docker and log
   rotation.
+- **[Standalone restricted & public sharing runbook (Fixture F1, #581)](sharing/f1-standalone-runbook.md)**
+  and **[F1 qualifying evidence report](sharing/f1-standalone-evidence.md)** —
+  reproducible single-instance public portal and restricted dashboard setup,
+  `managed` and `file_owned` authority workflows, `#642` complete withdrawal,
+  `mTLS` variants, and `W0`–`W4` resource measurements.
 - **[Reload, staging, authority and rollback](reload-semantics.md)** —
   transactional reload, planned restart, managed/file-owned authority and
   generation lifetimes.

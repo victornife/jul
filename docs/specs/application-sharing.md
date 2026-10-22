@@ -2,10 +2,20 @@
 
 > **Status: Accepted — the maintainer accepted the whole contract on
 > 2026-10-19 under [#580](https://github.com/victornife/jul/issues/580).**
-> Nothing here is a shipped capability. Decisions marked *Accepted* record
-> individual maintainer answers (SD-01 to SD-16); the rest, including author
-> decisions AD-02 to AD-09, was accepted with the whole contract (review packet
-> §3, answer 14). Runtime work belongs to the successor owners named in §17. Source
+> Decisions marked *Accepted* record individual maintainer answers (SD-01 to
+> SD-16); the rest, including author decisions AD-02 to AD-09, was accepted with
+> the whole contract (review packet §3, answer 14). Both selected runtime
+> tranches are now delivered on `main`: **#641 (`SHARE-01A`)** merged via
+> [PR #651](https://github.com/victornife/jul/pull/651) at
+> [`7280e255373a088540c9981008ab1b265ce2b4df`](https://github.com/victornife/jul/commit/7280e255373a088540c9981008ab1b265ce2b4df)
+> and **#642 (`SHARE-01B`, bundling #563/#562)** merged via
+> [PR #652](https://github.com/victornife/jul/pull/652) (`801bb862`) and
+> [PR #653](https://github.com/victornife/jul/pull/653) at
+> [`e7e5cfbc0171de33e90a7b645ba4786370699219`](https://github.com/victornife/jul/commit/e7e5cfbc0171de33e90a7b645ba4786370699219).
+> **#581 (`SHARE-02A`, Fixture F1)** standalone restricted/public sharing is
+> verified on merged `main` (`52b09adfbccfc3b14a86ce48a2de06395a7fae70`); see
+> the [F1 runbook](../sharing/f1-standalone-runbook.md) and
+> [qualifying evidence report](../sharing/f1-standalone-evidence.md). Design
 > baseline: `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a`; published
 > package baseline v2.2.0. Evidence, decision log, adversarial review and
 > traceability live in the
@@ -611,7 +621,7 @@ new generation.
 | Remove a Basic user (htpasswd + explicit reload) | denied | denied (credential checked per request) | unaffected | continues | continues | unchanged |
 | JWT: change `issuer`/`audience` in Jul | non-matching tokens denied | same | unaffected | continues | continues | unchanged |
 | JWT: issuer removes a signing key | denied once Jul refreshes its key set: on the first request after the cached set is 15 min old (at most one fetch per 30 s), or after a reload. If the key endpoint is unreachable, the old key stays usable for up to 1 h. Otherwise valid tokens last until `exp` + 60 s | same | unaffected | continues | continues | unchanged |
-| Revoke a client certificate (CRL + explicit reload) | **denied at handshake** | **still accepted** — identity is fixed per TLS connection (probe P1) | denied (full and resumed) | continues | continues | unchanged |
+| Revoke a client certificate (CRL + explicit reload) | **denied at handshake** | **denied per request (`403 Forbidden`) on that stream without closing the shared connection** (`#642`/`#563` re-evaluates `r.TLS` against the current `clientAuthBundle` on every request; prior to `#642`, probe P1 observed acceptance on an open connection) | denied (full and resumed) | **retired within `<= 2s`** (`narrowed` publish-time CRL classification in `#642`/`#563`) | **retired within `<= 2s`** (`#562`/`#642`) | unchanged |
 | Provider removes a user or group, logout, provider token expiry | provider-dependent; Jul sees only what reaches it | provider-dependent | provider-dependent | provider-dependent | provider-dependent | provider-owned |
 | Stop the connector | provider path stops | provider-path connections end | — | provider-path streams end | provider-path sockets end | URL stays registered |
 | Restart or stop Jul | served again after restart | all connections end | — | cut | dropped without a WebSocket close handshake | every entry on the instance is interrupted |
@@ -1890,8 +1900,17 @@ bounds, and host-dependent bounds declared before the run.
 protocol (SSE or H1 WebSocket). Native gRPC and HTTP/3 are not in F1 and are
 recorded as not exercised.
 
-**Outputs.** Versioned evidence; measured support envelope; §14 dry-run notes for
-#585; #634 baseline cases; defects filed with their exact owners.
+**Outputs.** Versioned evidence ([`docs/sharing/f1-standalone-evidence.md`](../sharing/f1-standalone-evidence.md), [`docs/sharing/f1-configuration-manifest.json`](../sharing/f1-configuration-manifest.json), and [`docs/sharing/f1-handoff-interfaces.json`](../sharing/f1-handoff-interfaces.json)); executable runbook ([`docs/sharing/f1-standalone-runbook.md`](../sharing/f1-standalone-runbook.md)) and configurations ([`examples/sharing/f1-standalone/`](../../examples/sharing/f1-standalone/)); measured support envelope; §14 dry-run notes for #585; #634 baseline cases; defects filed with their exact owners.
+
+> **#581 Execution Record (2026-10-21):** Maintainer selected current merged
+> `main` (`52b09adfbccfc3b14a86ce48a2de06395a7fae70`, containing both `#641` at
+> `7280e255` and `#642`/`#563`/`#562` at `e7e5cfbc`) in the full build profile
+> as the qualifying baseline, recording all results as **current-source
+> development evidence** (to be revalidated on the first published release
+> package containing `#641`, `#642`, and `#581`). Complete withdrawal (`§8.4`,
+> `withdrawn = true` / `location_set_withdrawn`, `2s` stream and WebSocket
+> retirement with zero collateral on a shared HTTP/2 connection) was included
+> directly in the initial `W3` run.
 
 ## 19. NGINX migration disposition
 

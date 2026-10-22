@@ -1,0 +1,21 @@
+{
+  "bytes": 49452,
+  "end_reason": "signal",
+  "ended": "2026-10-21T23:43:10.778262084Z",
+  "errors": 0,
+  "file": "samples.jsonl.gz",
+  "gap_seconds": 0,
+  "gaps": 0,
+  "interval_s": 5,
+  "labels": {
+    "config": "examples/sharing/f1-standalone/jul.toml",
+    "jul_sha": "52b09adfbccfc3b14a86ce48a2de06395a7fae70",
+    "scale": "1.0"
+  },
+  "ok": 465,
+  "scrapes": 465,
+  "series": 86,
+  "sha256": "4c8832012e073140c272dd19537731e75e3a76b4fc2865067b0ed16153169be3",
+  "started": "2026-10-21T23:04:30.642016374Z",
+  "url": "http://127.0.0.1:9443/metrics"
+}

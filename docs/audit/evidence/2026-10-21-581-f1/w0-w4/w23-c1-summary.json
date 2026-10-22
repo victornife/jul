@@ -1,0 +1,31 @@
+{
+  "duration_ms": 360184,
+  "workers": 8,
+  "total_requests": 10969,
+  "portal_html_count": 7680,
+  "portal_asset_count": 1097,
+  "dash_auth_count": 2194,
+  "dash_excluded_count": 0,
+  "status_2xx": 10211,
+  "status_401": 0,
+  "status_403": 758,
+  "status_429": 0,
+  "status_5xx": 0,
+  "transport_errors": 0,
+  "oracle_violations": 0,
+  "protocols": {
+    "HTTP/2.0": 10989
+  },
+  "held_opened": 20,
+  "held_closed": 20,
+  "probe_portal_ok": 0,
+  "probe_portal_fail": 0,
+  "probe_dash_ok": 0,
+  "probe_dash_fail": 0,
+  "latency_min_ms": 0,
+  "latency_p50_ms": 1,
+  "latency_p95_ms": 82,
+  "latency_p99_ms": 99,
+  "latency_max_ms": 157,
+  "latency_avg_ms": 10.752301941836084
+}
