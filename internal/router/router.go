@@ -52,9 +52,12 @@ type serverRoute struct {
 	metricHost string
 	locations  []*locationRoute
 	// The four selection tiers, precomputed so no ordering decision is made per
-	// request: exact, regex and root in declaration order, non-root prefixes by
-	// descending path length with ties in declaration order (ADR 0018 §6).
+	// request: exact in declaration order (indexed by path once the tier grows
+	// past exactMapThreshold), regex and root in declaration order, non-root
+	// prefixes by descending path length with ties in declaration order
+	// (ADR 0018 §6).
 	exactLocations  []*locationRoute
+	exactByPath     map[string][]*locationRoute
 	prefixLocations []*locationRoute
 	regexLocations  []*locationRoute
 	rootLocations   []*locationRoute
@@ -251,11 +254,19 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 	return sr, nil
 }
 
+// exactMapThreshold is the number of exact locations above which tier-1
+// switches from a flat slice scan to a path-keyed map lookup. For 0–4 exact
+// routes a contiguous slice comparison (len+memcmp) beats runtime.mapaccess1_faststr;
+// above that, O(1) map lookup prevents large exact tables from slowing down
+// every request that falls through to prefix/regex/root tiers.
+const exactMapThreshold = 4
+
 // indexLocations derives the selection tiers from the declaration-ordered
 // location list. It runs once per handler generation, so no ordering decision is
 // ever made per request (ADR 0018 §6).
 func (s *serverRoute) indexLocations() {
-	s.exactLocations, s.prefixLocations = nil, nil
+	s.exactLocations, s.exactByPath = nil, nil
+	s.prefixLocations = nil
 	s.regexLocations, s.rootLocations = nil, nil
 	for _, lr := range s.locations {
 		switch {
@@ -267,6 +278,12 @@ func (s *serverRoute) indexLocations() {
 			s.rootLocations = append(s.rootLocations, lr)
 		default:
 			s.prefixLocations = append(s.prefixLocations, lr)
+		}
+	}
+	if len(s.exactLocations) > exactMapThreshold {
+		s.exactByPath = make(map[string][]*locationRoute, len(s.exactLocations))
+		for _, lr := range s.exactLocations {
+			s.exactByPath[lr.path] = append(s.exactByPath[lr.path], lr)
 		}
 	}
 	// Longest prefix first, ties in declaration order. SliceStable is what makes
