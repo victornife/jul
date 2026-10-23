@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
 	"testing"
 
 	"jul/internal/config"
@@ -97,4 +98,50 @@ func BenchmarkProxyRoundTripParallel(b *testing.B) {
 			h.ServeHTTP(rec, req)
 		}
 	})
+}
+
+func BenchmarkCompiledProxyHeaders(b *testing.B) {
+	compiled := compileProxyHeaders(map[string]string{
+		"Host":              "$host",
+		"X-Real-IP":         "$remote_addr",
+		"X-Forwarded-For":   "$proxy_add_x_forwarded_for",
+		"X-Forwarded-Proto": "$scheme",
+		"X-Static-Token":    "bearer-static-token",
+	})
+	in := httptest.NewRequest(http.MethodGet, "http://edge.example/api/v1/users", nil)
+	in.Host = "edge.example"
+	out := in.Clone(in.Context())
+	pr := &httputil.ProxyRequest{In: in, Out: out}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		vars := proxyVarContext{in: pr.In}
+		setCanonicalXForwardedWithVars(pr, &vars)
+		applyCompiledProxyHeaders(pr, compiled, &vars)
+	}
+}
+
+func BenchmarkExpandProxyVar(b *testing.B) {
+	req := httptest.NewRequest(http.MethodGet, "https://edge.example/api/v1/users", nil)
+	req.Host = "edge.example"
+	cases := []struct {
+		name string
+		tmpl string
+	}{
+		{"static", "bearer-static-token"},
+		{"single_host", "$host"},
+		{"single_remote_addr", "$remote_addr"},
+		{"composite", "host=$host;ip=$remote_addr;proto=$scheme"},
+	}
+	for _, c := range cases {
+		compiled := compileProxyTemplate(c.tmpl)
+		b.Run(c.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				vars := proxyVarContext{in: req}
+				_ = compiled.eval(&vars)
+			}
+		})
+	}
 }

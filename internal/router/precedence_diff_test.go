@@ -81,7 +81,7 @@ func legacyFallback(s *serverRoute) *locationRoute {
 // upstreams, roots and sockets do not exist on this machine.
 func matchServerRoute(t testing.TB, srv config.ServerConfig) *serverRoute {
 	t.Helper()
-	sr := &serverRoute{names: srv.ServerNames}
+	sr := &serverRoute{names: normalizeServerNames(srv.ServerNames)}
 	for i, loc := range srv.Locations {
 		lr := &locationRoute{matchType: loc.Match.Type, path: loc.Match.Path, index: i}
 		if loc.Match.Type == "regex" {

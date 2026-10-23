@@ -15,6 +15,7 @@ import (
 	"net/http/httputil"
 	"net/netip"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,9 +79,11 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 	// discovery-backed pool can legitimately have zero backends at build time,
 	// so indexing a backend here would panic.
 	target := &url.URL{Scheme: scheme, Path: basePath}
+	compiledHeaders := compileProxyHeaders(loc.Headers)
 
 	rp := &httputil.ReverseProxy{
 		FlushInterval: proxyFlushInterval(loc),
+		BufferPool:    defaultProxyBufferPool,
 		Transport: &balancingTransport{
 			pool:          pool,
 			base:          transport,
@@ -96,8 +99,9 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 			pr.SetURL(target)
 			// Secure defaults: clears client-supplied X-Forwarded-* and sets
 			// them from Jul's own trusted view of the request.
-			setCanonicalXForwarded(pr)
-			applyProxyHeaders(pr, loc)
+			vars := proxyVarContext{in: pr.In}
+			setCanonicalXForwardedWithVars(pr, &vars)
+			applyCompiledProxyHeaders(pr, compiledHeaders, &vars)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			code := proxyErrorStatus(err, r.Context())
@@ -610,16 +614,302 @@ func (c *timeoutConn) Write(b []byte) (int, error) {
 	return c.Conn.Write(b)
 }
 
-// applyProxyHeaders applies the Host override and custom headers with variable
-// expansion. It runs after SetXForwarded so explicit config wins.
-func applyProxyHeaders(pr *httputil.ProxyRequest, loc config.LocationConfig) {
-	for name, tmpl := range loc.Headers {
-		val := expandProxyVar(tmpl, pr.In)
-		if strings.EqualFold(name, "Host") {
+const proxyCopyBufferSize = 32 * 1024
+
+// proxyBufferPool reuses the 32 KiB response-copy buffers httputil.ReverseProxy
+// otherwise allocates on every proxied request. Storing a pointer to the
+// fixed-size backing array avoids interface-boxing allocations on Put.
+type proxyBufferPool struct {
+	pool sync.Pool
+}
+
+var defaultProxyBufferPool = &proxyBufferPool{
+	pool: sync.Pool{
+		New: func() any {
+			return new([proxyCopyBufferSize]byte)
+		},
+	},
+}
+
+func (p *proxyBufferPool) Get() []byte {
+	buf := p.pool.Get().(*[proxyCopyBufferSize]byte)
+	return buf[:]
+}
+
+func (p *proxyBufferPool) Put(b []byte) {
+	if cap(b) < proxyCopyBufferSize {
+		return
+	}
+	p.pool.Put((*[proxyCopyBufferSize]byte)(b[:proxyCopyBufferSize]))
+}
+
+type proxyVarKind uint8
+
+const (
+	proxyVarLiteral proxyVarKind = iota
+	proxyVarForwardedFor
+	proxyVarRealIPRemoteAddr
+	proxyVarRemoteAddr
+	proxyVarHost
+	proxyVarScheme
+	proxyVarSSLClientSDN
+	proxyVarSSLClientIDN
+	proxyVarSSLClientCN
+	proxyVarSSLClientSerial
+	proxyVarSSLClientFingerprint
+	proxyVarSSLClientSAN
+	proxyVarSSLClientVerify
+)
+
+type proxyVarSpec struct {
+	token string
+	kind  proxyVarKind
+}
+
+// proxyVarSpecs lists the supported NGINX-style proxy header variables.
+var proxyVarSpecs = [...]proxyVarSpec{
+	{"$proxy_add_x_forwarded_for", proxyVarForwardedFor},
+	{"$realip_remote_addr", proxyVarRealIPRemoteAddr},
+	{"$remote_addr", proxyVarRemoteAddr},
+	{"$host", proxyVarHost},
+	{"$scheme", proxyVarScheme},
+	{"$ssl_client_s_dn", proxyVarSSLClientSDN},
+	{"$ssl_client_i_dn", proxyVarSSLClientIDN},
+	{"$ssl_client_cn", proxyVarSSLClientCN},
+	{"$ssl_client_serial", proxyVarSSLClientSerial},
+	{"$ssl_client_fingerprint", proxyVarSSLClientFingerprint},
+	{"$ssl_client_san", proxyVarSSLClientSAN},
+	{"$ssl_client_verify", proxyVarSSLClientVerify},
+}
+
+type proxyTemplatePart struct {
+	kind    proxyVarKind
+	literal string
+}
+
+// compiledProxyTemplate is a header value template parsed once at handler
+// build time so per-request expansion never constructs a strings.Replacer.
+type compiledProxyTemplate struct {
+	raw       string
+	singleVar proxyVarKind
+	parts     []proxyTemplatePart
+}
+
+type compiledProxyHeader struct {
+	name   string
+	isHost bool
+	tmpl   compiledProxyTemplate
+}
+
+// proxyVarContext lazily computes and caches request-derived variable values
+// across a single request's X-Forwarded-* and custom header evaluation.
+type proxyVarContext struct {
+	in         *http.Request
+	addrsReady bool
+	client     string
+	peer       string
+	chainReady bool
+	chain      string
+	sslReady   bool
+	ssl        *middleware.PeerCertIdentity
+}
+
+func (c *proxyVarContext) ensureAddrs() (string, string) {
+	if !c.addrsReady {
+		c.client, c.peer = forwardedAddrs(c.in)
+		c.addrsReady = true
+	}
+	return c.client, c.peer
+}
+
+func (c *proxyVarContext) forwardedChain() string {
+	if !c.chainReady {
+		client, peer := c.ensureAddrs()
+		c.chain = forwardedChain(client, peer)
+		c.chainReady = true
+	}
+	return c.chain
+}
+
+func (c *proxyVarContext) peerIdentity() *middleware.PeerCertIdentity {
+	if !c.sslReady {
+		c.ssl = middleware.PeerCertIdentityFrom(c.in.Context())
+		c.sslReady = true
+	}
+	return c.ssl
+}
+
+func (c *proxyVarContext) resolve(kind proxyVarKind) string {
+	switch kind {
+	case proxyVarForwardedFor:
+		return c.forwardedChain()
+	case proxyVarRealIPRemoteAddr:
+		_, peer := c.ensureAddrs()
+		return peer
+	case proxyVarRemoteAddr:
+		client, _ := c.ensureAddrs()
+		return client
+	case proxyVarHost:
+		return c.in.Host
+	case proxyVarScheme:
+		if c.in.TLS != nil {
+			return "https"
+		}
+		return "http"
+	case proxyVarSSLClientVerify:
+		if c.peerIdentity() != nil {
+			return "SUCCESS"
+		}
+		return "NONE"
+	}
+	id := c.peerIdentity()
+	if id == nil {
+		return ""
+	}
+	switch kind {
+	case proxyVarSSLClientSDN:
+		return id.SubjectDN
+	case proxyVarSSLClientIDN:
+		return id.IssuerDN
+	case proxyVarSSLClientCN:
+		return id.CN
+	case proxyVarSSLClientSerial:
+		return id.Serial
+	case proxyVarSSLClientFingerprint:
+		return id.Fingerprint
+	default:
+		return id.SANs
+	}
+}
+
+func compileProxyHeaders(headers map[string]string) []compiledProxyHeader {
+	if len(headers) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]compiledProxyHeader, 0, len(names))
+	for _, name := range names {
+		out = append(out, compiledProxyHeader{
+			name:   http.CanonicalHeaderKey(name),
+			isHost: strings.EqualFold(name, "Host"),
+			tmpl:   compileProxyTemplate(headers[name]),
+		})
+	}
+	return out
+}
+
+func compileProxyTemplate(tmpl string) compiledProxyTemplate {
+	if !strings.Contains(tmpl, "$") {
+		return compiledProxyTemplate{raw: tmpl}
+	}
+	var stackParts [8]proxyTemplatePart
+	parts := parseProxyTemplateParts(tmpl, stackParts[:0])
+	if len(parts) == 0 {
+		return compiledProxyTemplate{raw: tmpl}
+	}
+	if len(parts) == 1 && parts[0].kind != proxyVarLiteral {
+		return compiledProxyTemplate{raw: tmpl, singleVar: parts[0].kind}
+	}
+	owned := make([]proxyTemplatePart, len(parts))
+	copy(owned, parts)
+	return compiledProxyTemplate{raw: tmpl, parts: owned}
+}
+
+func parseProxyTemplateParts(tmpl string, dst []proxyTemplatePart) []proxyTemplatePart {
+	parts := dst
+	litStart := 0
+	for cur := 0; cur < len(tmpl); {
+		idx := strings.IndexByte(tmpl[cur:], '$')
+		if idx < 0 {
+			break
+		}
+		pos := cur + idx
+		var matched proxyVarSpec
+		for _, spec := range proxyVarSpecs {
+			if strings.HasPrefix(tmpl[pos:], spec.token) {
+				matched = spec
+				break
+			}
+		}
+		if matched.kind == proxyVarLiteral {
+			cur = pos + 1
+			continue
+		}
+		if pos > litStart {
+			parts = append(parts, proxyTemplatePart{
+				kind:    proxyVarLiteral,
+				literal: tmpl[litStart:pos],
+			})
+		}
+		parts = append(parts, proxyTemplatePart{kind: matched.kind})
+		cur = pos + len(matched.token)
+		litStart = cur
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	if litStart < len(tmpl) {
+		parts = append(parts, proxyTemplatePart{
+			kind:    proxyVarLiteral,
+			literal: tmpl[litStart:],
+		})
+	}
+	return parts
+}
+
+func (t *compiledProxyTemplate) eval(vars *proxyVarContext) string {
+	if t.singleVar != proxyVarLiteral {
+		return vars.resolve(t.singleVar)
+	}
+	if len(t.parts) == 0 {
+		return t.raw
+	}
+	return evalProxyParts(t.parts, vars)
+}
+
+func evalProxyParts(parts []proxyTemplatePart, vars *proxyVarContext) string {
+	var stackVals [8]string
+	var vals []string
+	if len(parts) <= len(stackVals) {
+		vals = stackVals[:len(parts)]
+	} else {
+		vals = make([]string, len(parts))
+	}
+	totalLen := 0
+	for i, p := range parts {
+		var s string
+		if p.kind == proxyVarLiteral {
+			s = p.literal
+		} else {
+			s = vars.resolve(p.kind)
+		}
+		vals[i] = s
+		totalLen += len(s)
+	}
+	if totalLen == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(totalLen)
+	for _, s := range vals {
+		b.WriteString(s)
+	}
+	return b.String()
+}
+
+func applyCompiledProxyHeaders(pr *httputil.ProxyRequest, headers []compiledProxyHeader, vars *proxyVarContext) {
+	for i := range headers {
+		h := &headers[i]
+		val := h.tmpl.eval(vars)
+		if h.isHost {
 			pr.Out.Host = val
 			continue
 		}
-		pr.Out.Header.Set(name, val)
+		pr.Out.Header[h.name] = []string{val}
 	}
 }
 
@@ -634,51 +924,9 @@ func expandProxyVar(tmpl string, in *http.Request) string {
 	if !strings.Contains(tmpl, "$") {
 		return tmpl
 	}
-	client, peer := forwardedAddrs(in)
-	scheme := "http"
-	if in.TLS != nil {
-		scheme = "https"
-	}
-	pairs := []string{
-		"$proxy_add_x_forwarded_for", forwardedChain(client, peer),
-		"$realip_remote_addr", peer,
-		"$remote_addr", client,
-		"$host", in.Host,
-		"$scheme", scheme,
-	}
-	if strings.Contains(tmpl, "$ssl_client") {
-		pairs = append(pairs, sslClientPairs(in)...)
-	}
-	return strings.NewReplacer(pairs...).Replace(tmpl)
-}
-
-// sslClientPairs returns the old/new replacement pairs for the $ssl_client_*
-// variables, carrying the verified mutual-TLS client identity from the request
-// context onto upstream headers. When no client certificate was presented every
-// value is empty except $ssl_client_verify, which is "NONE" (and "SUCCESS" when
-// an identity is present), mirroring NGINX semantics.
-func sslClientPairs(in *http.Request) []string {
-	id := middleware.PeerCertIdentityFrom(in.Context())
-	if id == nil {
-		return []string{
-			"$ssl_client_s_dn", "",
-			"$ssl_client_i_dn", "",
-			"$ssl_client_cn", "",
-			"$ssl_client_serial", "",
-			"$ssl_client_fingerprint", "",
-			"$ssl_client_san", "",
-			"$ssl_client_verify", "NONE",
-		}
-	}
-	return []string{
-		"$ssl_client_s_dn", id.SubjectDN,
-		"$ssl_client_i_dn", id.IssuerDN,
-		"$ssl_client_cn", id.CN,
-		"$ssl_client_serial", id.Serial,
-		"$ssl_client_fingerprint", id.Fingerprint,
-		"$ssl_client_san", id.SANs,
-		"$ssl_client_verify", "SUCCESS",
-	}
+	compiled := compileProxyTemplate(tmpl)
+	vars := proxyVarContext{in: in}
+	return compiled.eval(&vars)
 }
 
 // proxyErrorStatus maps a transport error to a gateway status code.
@@ -714,12 +962,16 @@ func proxyErrorStatus(err error, inbound context.Context) int {
 // canonical identity, because the standard library derives it from RemoteAddr
 // and therefore cannot know about trusted proxies.
 func setCanonicalXForwarded(pr *httputil.ProxyRequest) {
+	vars := proxyVarContext{in: pr.In}
+	setCanonicalXForwardedWithVars(pr, &vars)
+}
+
+func setCanonicalXForwardedWithVars(pr *httputil.ProxyRequest, vars *proxyVarContext) {
 	pr.SetXForwarded()
-	client, peer := forwardedAddrs(pr.In)
-	if chain := forwardedChain(client, peer); chain != "" {
+	if chain := vars.forwardedChain(); chain != "" {
 		pr.Out.Header.Set("X-Forwarded-For", chain)
 	}
-	setClientCertHeaders(pr)
+	setClientCertHeadersWithVars(pr, vars)
 }
 
 // certAssertionHeaders are the channels that convey a client certificate to a
@@ -730,17 +982,17 @@ func setCanonicalXForwarded(pr *httputil.ProxyRequest) {
 // widely deployed pre-standard spelling and is stripped on the same terms.
 var certAssertionHeaders = []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"}
 
-// setClientCertHeaders sanitizes the certificate-assertion channel and, when the
-// listener asks for it, emits Jul's own assertion.
+// setClientCertHeadersWithVars sanitizes the certificate-assertion channel and,
+// when the listener asks for it, emits Jul's own assertion.
 //
 // Sanitizing is unconditional, mirroring how X-Forwarded-* is cleared and
 // rebuilt on every request: the guarantee must be a property of the code, not of
 // the operator having remembered to list a header.
-func setClientCertHeaders(pr *httputil.ProxyRequest) {
+func setClientCertHeadersWithVars(pr *httputil.ProxyRequest, vars *proxyVarContext) {
 	for _, h := range certAssertionHeaders {
-		pr.Out.Header.Del(h)
+		delete(pr.Out.Header, h)
 	}
-	id := middleware.PeerCertIdentityFrom(pr.In.Context())
+	id := vars.peerIdentity()
 	if id == nil || len(id.Raw) == 0 {
 		return
 	}
