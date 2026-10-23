@@ -6,6 +6,7 @@ package observability
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -92,7 +93,11 @@ func TestSanitizePath(t *testing.T) {
 		"/a/b":                    "/a/b",
 		"/a?x=1":                  "/a",
 		"/a#frag":                 "/a",
+		"12345":                   ":id",
+		strings.Repeat("9", 300):  ":id",
+		strings.Repeat("x", 300):  strings.Repeat("x", samplePathMaxLen),
 		strings.Repeat("/x", 200): strings.Repeat("/x", 200)[:samplePathMaxLen],
+		"/users/12345/" + strings.Repeat("x", 300): ("/users/:id/" + strings.Repeat("x", 300))[:samplePathMaxLen],
 	}
 	for in, want := range cases {
 		if got := SanitizePath(in); got != want {
@@ -101,21 +106,118 @@ func TestSanitizePath(t *testing.T) {
 	}
 }
 
+func TestRedactSegmentParityWithRegex(t *testing.T) {
+	reUUID := regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	reEmail := regexp.MustCompile(`^[^@\s/]+@[^@\s/]+\.[^@\s/]+$`)
+	reHex := regexp.MustCompile(`^[0-9a-fA-F]{16,}$`)
+	reNum := regexp.MustCompile(`^\d{3,}$`)
+	reMixed := regexp.MustCompile(`^[A-Za-z0-9._-]{20,}$`)
+	reHasD := regexp.MustCompile(`\d`)
+	reHasA := regexp.MustCompile(`[A-Za-z]`)
+
+	legacyRedact := func(seg string) string {
+		switch {
+		case seg == "":
+			return seg
+		case reEmail.MatchString(seg):
+			return ":email"
+		case reUUID.MatchString(seg):
+			return ":id"
+		case reNum.MatchString(seg):
+			return ":id"
+		case reHex.MatchString(seg):
+			return ":id"
+		case reMixed.MatchString(seg) && reHasD.MatchString(seg) && reHasA.MatchString(seg):
+			return ":token"
+		default:
+			return seg
+		}
+	}
+
+	inputs := []string{
+		"", "api", "v1", "users", "99", "100", "123a",
+		"a@b.c", "a@b.c.", "a@.b.c", "@b.c", "a@b", "a@b.", "a@b@c.d", "a b@c.d", "a/b@c.d",
+		"550e8400-e29b-41d4-a716-446655440000",
+		"550e8400-e29b-41d4-a716-44665544000g",
+		"0123456789abcdef", "0123456789abcdefg",
+		"abcdefghijklmnopqrst",
+		"abcdefghijklmnopqrst1",
+		"12345678901234567890_",
+		"sk-live-AbC123dEf456GhI789jkl",
+		"sk-live-AbC123dEf456GhI789jkl!bad",
+	}
+	for _, seg := range inputs {
+		got := redactSegment(seg)
+		want := legacyRedact(seg)
+		if got != want {
+			t.Errorf("redactSegment(%q) = %q, want %q", seg, got, want)
+		}
+	}
+}
+
 func TestUserAgentFamily(t *testing.T) {
 	cases := map[string]string{
 		"":                          "",
+		"x":                         "other",
 		"curl/8.4.0":                "curl",
 		"Wget/1.21":                 "wget",
 		"Googlebot/2.1":             "bot",
 		"... Edg/120 ...":           "Edge",
+		"... OPR/105 ...":           "Opera",
 		"... Firefox/121 ...":       "Firefox",
 		"... Chrome/120 Safari ...": "Chrome",
 		"... Version/17 Safari ...": "Safari",
+		"Go-http-client/2.0":        "Go",
+		"python-requests/2.31":      "Python",
 	}
 	for in, want := range cases {
 		if got := userAgentFamily(in); got != want {
 			t.Errorf("userAgentFamily(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestStatusLabel(t *testing.T) {
+	if got := statusLabel(http.StatusOK); got != "200" {
+		t.Fatalf("statusLabel(200) = %q, want 200", got)
+	}
+	if got := statusLabel(499); got != "499" {
+		t.Fatalf("statusLabel(499) = %q, want 499", got)
+	}
+	if got := statusLabel(999); got != "999" {
+		t.Fatalf("statusLabel(999) = %q, want 999", got)
+	}
+}
+
+func BenchmarkSanitizePath(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		path string
+	}{
+		{"static_clean", "/api/v1/users/profile"},
+		{"with_id_and_uuid", "/api/v1/users/12345/files/550e8400-e29b-41d4-a716-446655440000"},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				_ = SanitizePath(tc.path)
+			}
+		})
+	}
+}
+
+func BenchmarkMetricsMiddleware(b *testing.B) {
+	m := NewMetrics()
+	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "http://edge.example/api/v1/users", nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/120.0.0.0 Safari/537.36")
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
 	}
 }
 

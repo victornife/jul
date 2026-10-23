@@ -119,6 +119,66 @@ func TestClaimsFromEmptyContext(t *testing.T) {
 	}
 }
 
+func TestRequestScopeSharesAndIsolatesChildOverrides(t *testing.T) {
+	var ran bool
+	sink := &captureSink{}
+	chain := Chain(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ran = true
+			r, outerLabels := WithHTTPMetricLabels(r)
+			SetHTTPMetricLabels(r, "edge.example", "route-a")
+			SetUpstreamReason(r.Context(), "upstream_timeout")
+
+			// A second WithHTTPMetricLabels or WithUpstreamReason on a child
+			// request/context must isolate its own copy without clobbering the
+			// parent requestScope.
+			childReq, childLabels := WithHTTPMetricLabels(r)
+			SetHTTPMetricLabels(childReq, "child.example", "route-b")
+			if h, rt := childLabels.Values(); h != "child.example" || rt != "route-b" {
+				t.Fatalf("child labels = (%q, %q)", h, rt)
+			}
+			if h, rt := outerLabels.Values(); h != "edge.example" || rt != "route-a" {
+				t.Fatalf("outer labels clobbered = (%q, %q)", h, rt)
+			}
+
+			childCtx := WithUpstreamReason(r.Context())
+			SetUpstreamReason(childCtx, "circuit_open")
+			if got := UpstreamReasonFrom(childCtx); got != "circuit_open" {
+				t.Fatalf("child upstream reason = %q, want circuit_open", got)
+			}
+			if got := UpstreamReasonFrom(r.Context()); got != "upstream_timeout" {
+				t.Fatalf("outer upstream reason clobbered = %q, want upstream_timeout", got)
+			}
+
+			overrideIDCtx := WithRequestID(r.Context(), "child-id")
+			if got := RequestIDFrom(overrideIDCtx); got != "child-id" {
+				t.Fatalf("child request id = %q, want child-id", got)
+			}
+			if got := RequestIDFrom(r.Context()); got != "scoped-id" {
+				t.Fatalf("outer request id clobbered = %q, want scoped-id", got)
+			}
+
+			markGeneratedResponse(r)
+			w.WriteHeader(http.StatusNoContent)
+		}),
+		RequestID(),
+		AccessLog(sink),
+		ResponsePolicy(nil, &CORSPolicy{}),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "http://edge.example/", nil)
+	req.Header.Set(HeaderRequestID, "scoped-id")
+	w := httptest.NewRecorder()
+	chain.ServeHTTP(w, req)
+
+	if !ran {
+		t.Fatal("handler did not run")
+	}
+	if len(sink.records) != 1 || sink.records[0].RequestID != "scoped-id" || sink.records[0].UpstreamReason != "upstream_timeout" {
+		t.Fatalf("access records = %+v", sink.records)
+	}
+}
+
 func TestNewIDLength(t *testing.T) {
 	id := newID()
 	if len(id) != 16 {

@@ -115,8 +115,8 @@ func (l *listener) handleTCP(client net.Conn) {
 	// The wait is bounded by the server context and by pending_timeout, not by a
 	// request context — a TCP client has no way to signal that it gave up short
 	// of closing, and a closed socket is only observed once we try to read it.
-	release, err := pool.Admission().Admit(s.ctx, nil)
-	if err != nil {
+	adm := pool.Admission()
+	if err := adm.Acquire(s.ctx, nil); err != nil {
 		// There is no status code to send on a raw socket; closing is the only
 		// signal L4 has. The rejection is still counted.
 		s.dialFailure("tcp", upstream.ClassifyAdmissionError(err))
@@ -125,7 +125,7 @@ func (l *listener) handleTCP(client net.Conn) {
 		}
 		return
 	}
-	defer release()
+	defer adm.Release()
 
 	backend, b, err := l.dialBackend(pool, "tcp", r.connectTimeout, pool.AffinityKeyForAddr(clientAddr))
 	if err != nil {
@@ -179,10 +179,20 @@ func (l *listener) relayTCP(client, backend net.Conn, clientReader io.Reader, id
 	wg.Wait()
 }
 
+const streamCopyBufferSize = 32 * 1024
+
+var streamCopyBufferPool = sync.Pool{
+	New: func() any {
+		return new([streamCopyBufferSize]byte)
+	},
+}
+
 // copyStream copies src->dst, refreshing the idle read deadline on srcConn each
 // iteration and reporting relayed bytes. It returns when either side errors.
 func (l *listener) copyStream(dst io.Writer, src io.Reader, srcConn net.Conn, idle time.Duration, dir string) {
-	buf := make([]byte, 32*1024)
+	bufPtr := streamCopyBufferPool.Get().(*[streamCopyBufferSize]byte)
+	defer streamCopyBufferPool.Put(bufPtr)
+	buf := bufPtr[:]
 	for {
 		if idle > 0 {
 			_ = srcConn.SetReadDeadline(time.Now().Add(idle))

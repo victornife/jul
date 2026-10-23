@@ -94,34 +94,39 @@ func newTrafficTracker() *trafficTracker {
 	}
 }
 
-// record folds one request into the rollups. host is the request Host header;
-// origin and referer are the corresponding request headers (possibly empty);
-// method is the HTTP method. Only hostnames/origins are retained — never full
-// URLs, query strings, or credentials.
-func (t *trafficTracker) record(host, origin, referer, method string) {
+// record folds one request into the rollups and returns the normalized Origin
+// suitable for RequestSample.Origin (empty when no Origin was supplied). host
+// is the request Host header; origin and referer are the corresponding request
+// headers (possibly empty); method is the HTTP method. Only hostnames/origins
+// are retained — never full URLs, query strings, or credentials.
+func (t *trafficTracker) record(host, origin, referer, method string) string {
 	h := normalizeHost(host)
-	o := normalizeOrigin(origin)
+	o, origHost := normalizeOriginAndHost(origin)
 	ref := normalizeRefererHost(referer)
 
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	t.hosts.add(h)
 	t.origins.add(o)
 	t.referers.add(ref)
 
-	if strings.EqualFold(method, "OPTIONS") {
+	if method == "OPTIONS" || strings.EqualFold(method, "OPTIONS") {
 		t.preflight++
 	}
 	// Only classify same/cross origin when an Origin header is actually present;
 	// a request without one is neither (e.g. a top-level navigation).
 	if origin != "" {
-		if originHost(origin) == h {
+		if origHost == h {
 			t.sameOrigin++
 		} else {
 			t.crossOrigin++
 		}
 	}
+	t.mu.Unlock()
+
+	if o == "(none)" {
+		return ""
+	}
+	return o
 }
 
 // snapshot returns a point-in-time copy of the traffic-source rollups.
@@ -145,40 +150,61 @@ func normalizeHost(host string) string {
 	if host == "" {
 		return "(none)"
 	}
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+	if strings.IndexByte(host, ':') >= 0 {
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
 	}
-	host = strings.ToLower(host)
+	if hasUpperASCII(host) {
+		host = strings.ToLower(host)
+	}
 	return capLen(host)
+}
+
+func hasUpperASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' || s[i] >= 0x80 {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeOrigin reduces an Origin header to scheme://host (no path, query, or
 // port), lower-cased, mapping empty to "(none)".
 func normalizeOrigin(origin string) string {
+	o, _ := normalizeOriginAndHost(origin)
+	return o
+}
+
+// normalizeOriginAndHost parses an Origin header once, returning both the
+// normalized scheme://host projection and the lower-cased hostname for
+// same/cross-origin comparison.
+func normalizeOriginAndHost(origin string) (string, string) {
 	origin = strings.TrimSpace(origin)
 	if origin == "" {
-		return "(none)"
+		return "(none)", ""
 	}
 	u, err := url.Parse(origin)
 	if err != nil || u.Host == "" {
-		return capLen(strings.ToLower(origin))
+		if hasUpperASCII(origin) {
+			origin = strings.ToLower(origin)
+		}
+		return capLen(origin), ""
 	}
-	scheme := strings.ToLower(u.Scheme)
-	host := strings.ToLower(u.Hostname()) // Hostname() drops the port
+	scheme := u.Scheme
+	if hasUpperASCII(scheme) {
+		scheme = strings.ToLower(scheme)
+	}
+	host := u.Hostname() // Hostname() drops the port
+	if hasUpperASCII(host) {
+		host = strings.ToLower(host)
+	}
+	cappedHost := capLen(host)
 	if scheme == "" {
-		return capLen(host)
+		return cappedHost, cappedHost
 	}
-	return capLen(scheme + "://" + host)
-}
-
-// originHost extracts just the lower-cased host from an Origin header for the
-// same/cross-origin comparison.
-func originHost(origin string) string {
-	u, err := url.Parse(strings.TrimSpace(origin))
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	return capLen(strings.ToLower(u.Hostname()))
+	return capLen(scheme + "://" + host), cappedHost
 }
 
 // normalizeRefererHost keeps only the host of a Referer URL — never the path or
@@ -192,7 +218,11 @@ func normalizeRefererHost(referer string) string {
 	if err != nil || u.Host == "" {
 		return "(none)"
 	}
-	return capLen(strings.ToLower(u.Hostname()))
+	host := u.Hostname()
+	if hasUpperASCII(host) {
+		host = strings.ToLower(host)
+	}
+	return capLen(host)
 }
 
 // capLen truncates s to trafficKeyMaxLen runes-by-bytes so a hostile header

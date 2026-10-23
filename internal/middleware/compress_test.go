@@ -445,6 +445,22 @@ func TestParseAcceptEncoding(t *testing.T) {
 	if q["*"] != 0.1 {
 		t.Errorf("* q = %v, want 0.1", q["*"])
 	}
+	// Overflow beyond the 16-entry stack array must still honor explicit q=0
+	// refusal and lowest-wins duplicate resolution.
+	longHeader := "c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,*;q=1,gzip;q=0.5,gzip;q=0"
+	qOverflow := parseAcceptEncoding(longHeader)
+	if qOverflow["gzip"] != 0 {
+		t.Errorf("overflow gzip q = %v, want 0", qOverflow["gzip"])
+	}
+	if AcceptsEncoding(longHeader, "gzip") {
+		t.Errorf("AcceptsEncoding(longHeader, gzip) = true, want false due to gzip;q=0")
+	}
+	if !AcceptsEncoding(longHeader, "br") {
+		t.Errorf("AcceptsEncoding(longHeader, br) = false, want true via *;q=1")
+	}
+	if AcceptsEncoding(" , ", "gzip") {
+		t.Errorf("AcceptsEncoding(blank tokens) = true, want false")
+	}
 }
 
 func TestNegotiatePreference(t *testing.T) {
@@ -462,6 +478,9 @@ func TestNegotiatePreference(t *testing.T) {
 	}
 	if ep := c.negotiate(req("identity")); ep != nil {
 		t.Fatalf("no acceptable coding should return nil, got %v", epName(ep))
+	}
+	if ep := c.negotiate(req(" , ")); ep != nil {
+		t.Fatalf("blank coding list should return nil, got %v", epName(ep))
 	}
 }
 

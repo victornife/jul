@@ -57,8 +57,10 @@ func newRouteFailureTracker(maxKeys int) *routeFailureTracker {
 // record folds one request outcome into the rollup. path is normalized and
 // length-capped; status is the HTTP status code; durationMs is the latency.
 func (t *routeFailureTracker) record(path string, status int, durationMs float64) {
-	key := SanitizePath(path)
+	t.recordSanitized(SanitizePath(path), status, durationMs)
+}
 
+func (t *routeFailureTracker) recordSanitized(key string, status int, durationMs float64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 

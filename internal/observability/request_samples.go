@@ -4,7 +4,6 @@
 package observability
 
 import (
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +61,13 @@ func (b *requestSampleBuffer) record(s RequestSample) {
 	if s.Origin == "(none)" {
 		s.Origin = ""
 	}
+	b.recordSanitized(s)
+}
+
+// recordSanitized stores a sample whose Path and Origin have already been
+// normalized, avoiding duplicate SanitizePath and normalizeOrigin calls when
+// the caller also records traffic sources and route failures.
+func (b *requestSampleBuffer) recordSanitized(s RequestSample) {
 	s.UserAgent = userAgentFamily(s.UserAgent)
 
 	b.mu.Lock()
@@ -92,24 +98,12 @@ func (b *requestSampleBuffer) snapshot() []RequestSample {
 	return out
 }
 
-// Path-segment redaction patterns (P2-11). Poorly designed APIs embed IDs,
+// Path-segment redaction rules (P2-11). Poorly designed APIs embed IDs,
 // emails, tokens, and tenant names directly in the path, so even with the query
 // string removed a raw path can carry PII or secrets. We normalize high-entropy
 // or obviously-sensitive segments to coarse placeholders, which also collapses
 // per-entity paths into a single template (e.g. /users/:id) — better for the
 // failing-routes rollup and far safer to display in an admin console.
-var (
-	reUUID  = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
-	reEmail = regexp.MustCompile(`^[^@\s/]+@[^@\s/]+\.[^@\s/]+$`)
-	reHex   = regexp.MustCompile(`^[0-9a-fA-F]{16,}$`)
-	reNum   = regexp.MustCompile(`^\d{3,}$`)
-	// A token-ish segment: long and mixing letters and digits (e.g. API keys,
-	// session ids, base64-ish blobs). Kept conservative to avoid masking normal
-	// resource names like "dashboard" or "settings".
-	reMixed = regexp.MustCompile(`^[A-Za-z0-9._-]{20,}$`)
-	reHasD  = regexp.MustCompile(`\d`)
-	reHasA  = regexp.MustCompile(`[A-Za-z]`)
-)
 
 // redactSegment maps a single path segment to a placeholder when it looks like
 // an identifier, email, or token; otherwise it returns the segment unchanged.
@@ -117,19 +111,113 @@ func redactSegment(seg string) string {
 	switch {
 	case seg == "":
 		return seg
-	case reEmail.MatchString(seg):
+	case isEmailSegment(seg):
 		return ":email"
-	case reUUID.MatchString(seg):
+	case isUUIDSegment(seg):
 		return ":id"
-	case reNum.MatchString(seg):
+	case isNumSegment(seg):
 		return ":id"
-	case reHex.MatchString(seg):
+	case isHexSegment(seg):
 		return ":id"
-	case reMixed.MatchString(seg) && reHasD.MatchString(seg) && reHasA.MatchString(seg):
+	case isMixedTokenSegment(seg):
 		return ":token"
 	default:
 		return seg
 	}
+}
+
+func isHexByte(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// isEmailSegment matches `^[^@\s/]+@[^@\s/]+\.[^@\s/]+$`.
+func isEmailSegment(seg string) bool {
+	at := strings.IndexByte(seg, '@')
+	if at <= 0 || at >= len(seg)-3 {
+		return false
+	}
+	hasInteriorDot := false
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch c {
+		case ' ', '\t', '\n', '\f', '\r', '/':
+			return false
+		case '@':
+			if i != at {
+				return false
+			}
+		case '.':
+			if i > at+1 && i < len(seg)-1 {
+				hasInteriorDot = true
+			}
+		}
+	}
+	return hasInteriorDot
+}
+
+// isUUIDSegment matches `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`.
+func isUUIDSegment(seg string) bool {
+	if len(seg) != 36 || seg[8] != '-' || seg[13] != '-' || seg[18] != '-' || seg[23] != '-' {
+		return false
+	}
+	for i := 0; i < 36; i++ {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			continue
+		}
+		if !isHexByte(seg[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isNumSegment matches `^\d{3,}$`.
+func isNumSegment(seg string) bool {
+	if len(seg) < 3 {
+		return false
+	}
+	for i := 0; i < len(seg); i++ {
+		if seg[i] < '0' || seg[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isHexSegment matches `^[0-9a-fA-F]{16,}$`.
+func isHexSegment(seg string) bool {
+	if len(seg) < 16 {
+		return false
+	}
+	for i := 0; i < len(seg); i++ {
+		if !isHexByte(seg[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isMixedTokenSegment matches `^[A-Za-z0-9._-]{20,}$` with at least one ASCII
+// digit and at least one ASCII letter.
+func isMixedTokenSegment(seg string) bool {
+	if len(seg) < 20 {
+		return false
+	}
+	hasDigit := false
+	hasAlpha := false
+	for i := 0; i < len(seg); i++ {
+		c := seg[i]
+		switch {
+		case c >= '0' && c <= '9':
+			hasDigit = true
+		case (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'):
+			hasAlpha = true
+		case c == '.', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return hasDigit && hasAlpha
 }
 
 // SanitizePath strips any query string (defense in depth — r.URL.Path already
@@ -144,19 +232,47 @@ func SanitizePath(path string) string {
 	if path == "" {
 		return "/"
 	}
-	if strings.Contains(path, "/") {
-		segs := strings.Split(path, "/")
-		for i, seg := range segs {
-			segs[i] = redactSegment(seg)
-		}
-		path = strings.Join(segs, "/")
-	} else {
+	if !strings.Contains(path, "/") {
 		path = redactSegment(path)
+		if len(path) > samplePathMaxLen {
+			return path[:samplePathMaxLen]
+		}
+		return path
 	}
-	if len(path) > samplePathMaxLen {
-		return path[:samplePathMaxLen]
+	needsRedact := false
+	for rest := path; ; {
+		seg, tail, ok := strings.Cut(rest, "/")
+		if redactSegment(seg) != seg {
+			needsRedact = true
+			break
+		}
+		if !ok {
+			break
+		}
+		rest = tail
 	}
-	return path
+	if !needsRedact {
+		if len(path) > samplePathMaxLen {
+			return path[:samplePathMaxLen]
+		}
+		return path
+	}
+	var b strings.Builder
+	b.Grow(min(len(path), samplePathMaxLen))
+	for rest := path; ; {
+		seg, tail, ok := strings.Cut(rest, "/")
+		b.WriteString(redactSegment(seg))
+		if !ok {
+			break
+		}
+		b.WriteByte('/')
+		rest = tail
+	}
+	out := b.String()
+	if len(out) > samplePathMaxLen {
+		return out[:samplePathMaxLen]
+	}
+	return out
 }
 
 // userAgentFamily reduces a raw User-Agent header to a coarse family so the
@@ -167,29 +283,63 @@ func userAgentFamily(ua string) string {
 	if ua == "" {
 		return ""
 	}
-	l := strings.ToLower(ua)
 	switch {
-	case strings.Contains(l, "bot"), strings.Contains(l, "crawler"), strings.Contains(l, "spider"):
+	case containsFoldASCII(ua, "bot"), containsFoldASCII(ua, "crawler"), containsFoldASCII(ua, "spider"):
 		return "bot"
-	case strings.Contains(l, "curl"):
+	case containsFoldASCII(ua, "curl"):
 		return "curl"
-	case strings.Contains(l, "wget"):
+	case containsFoldASCII(ua, "wget"):
 		return "wget"
-	case strings.Contains(l, "edg/"), strings.Contains(l, "edge"):
+	case containsFoldASCII(ua, "edg/"), containsFoldASCII(ua, "edge"):
 		return "Edge"
-	case strings.Contains(l, "opr/"), strings.Contains(l, "opera"):
+	case containsFoldASCII(ua, "opr/"), containsFoldASCII(ua, "opera"):
 		return "Opera"
-	case strings.Contains(l, "firefox"):
+	case containsFoldASCII(ua, "firefox"):
 		return "Firefox"
-	case strings.Contains(l, "chrome"), strings.Contains(l, "chromium"):
+	case containsFoldASCII(ua, "chrome"), containsFoldASCII(ua, "chromium"):
 		return "Chrome"
-	case strings.Contains(l, "safari"):
+	case containsFoldASCII(ua, "safari"):
 		return "Safari"
-	case strings.Contains(l, "go-http-client"):
+	case containsFoldASCII(ua, "go-http-client"):
 		return "Go"
-	case strings.Contains(l, "python"):
+	case containsFoldASCII(ua, "python"):
 		return "Python"
 	default:
 		return "other"
 	}
+}
+
+// containsFoldASCII reports whether s contains subLower (an all-lowercase ASCII
+// pattern) under ASCII case-insensitivity without allocating a lowercased copy.
+func containsFoldASCII(s, subLower string) bool {
+	n := len(subLower)
+	if len(s) < n {
+		return false
+	}
+	first := subLower[0]
+	limit := len(s) - n
+	for i := 0; i <= limit; i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != first {
+			continue
+		}
+		match := true
+		for j := 1; j < n; j++ {
+			sc := s[i+j]
+			if sc >= 'A' && sc <= 'Z' {
+				sc += 'a' - 'A'
+			}
+			if sc != subLower[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return true
+		}
+	}
+	return false
 }

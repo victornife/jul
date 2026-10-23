@@ -56,11 +56,20 @@ func TestNormalizeHelpersStripSensitiveParts(t *testing.T) {
 	if got := normalizeHost("API.Example.com:8443"); got != "api.example.com" {
 		t.Errorf("normalizeHost = %q, want api.example.com", got)
 	}
-	if got := normalizeOrigin("https://App.Example.com:443"); got != "https://app.example.com" {
+	if got := normalizeOrigin("HTTPS://App.Example.com:443"); got != "https://app.example.com" {
 		t.Errorf("normalizeOrigin = %q, want https://app.example.com", got)
 	}
+	if got := normalizeOrigin("//App.Example.com:443"); got != "app.example.com" {
+		t.Errorf("normalizeOrigin schemeless = %q, want app.example.com", got)
+	}
+	if got := normalizeOrigin("NULL"); got != "null" {
+		t.Errorf("normalizeOrigin hostless = %q, want null", got)
+	}
 	// Referer path and query must be discarded.
-	if got := normalizeRefererHost("https://app.example.com/secret?token=abc"); got != "app.example.com" {
+	if got := normalizeRefererHost("https://App.Example.com/secret?token=abc"); got != "app.example.com" {
 		t.Errorf("normalizeRefererHost = %q, want app.example.com", got)
+	}
+	if got := normalizeRefererHost("not-a-url"); got != "(none)" {
+		t.Errorf("normalizeRefererHost invalid = %q, want (none)", got)
 	}
 }

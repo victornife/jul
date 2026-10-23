@@ -29,19 +29,13 @@ type responseHeaderOp struct {
 	value string
 }
 
-// policyWriterCtxKey is the unexported context key carrying the *policyWriter
-// for this request, so the preflight terminator further down the chain can
-// mark its own generated response without needing to unwrap the
-// capability-masked http.ResponseWriter respwriter.Wrap returns.
-type policyWriterCtxKey struct{}
-
 // markGeneratedResponse tells this request's response-policy wrapper that the
 // response about to be written is already exactly right — a Jul-generated
 // preflight 204 — so neither the generic response_headers operations nor the
 // CORS response-header injection should touch it (ADR 0018 §8b).
 func markGeneratedResponse(r *http.Request) {
-	if pw, ok := r.Context().Value(policyWriterCtxKey{}).(*policyWriter); ok {
-		pw.skip = true
+	if scope := requestScopeFrom(r.Context()); scope != nil && scope.policyWriter != nil {
+		scope.policyWriter.skip = true
 	}
 }
 
@@ -78,7 +72,14 @@ func ResponsePolicyWithExpires(headerOps []config.ResponseHeaderOp, cors *CORSPo
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			pw := &policyWriter{ResponseWriter: w, ops: ops, cors: cors, req: r, expires: duration}
-			ctx := context.WithValue(r.Context(), policyWriterCtxKey{}, pw)
+			if scope := requestScopeFrom(r.Context()); scope != nil && scope.policyWriter == nil {
+				scope.policyWriter = pw
+				next.ServeHTTP(pw.Writer(), r)
+				return
+			}
+			scope := cloneRequestScope(r.Context())
+			scope.policyWriter = pw
+			ctx := context.WithValue(r.Context(), requestScopeKey{}, scope)
 			next.ServeHTTP(pw.Writer(), r.WithContext(ctx))
 		})
 	}

@@ -51,7 +51,7 @@ export const ReloadResultSchema = z.object({
   timed_out: z.boolean().optional(),
   timed_out_phase: z.string().optional(),
   failed_phase: z.string().optional(),
-  phase_durations_ms: z.record(z.number()).optional(),
+  phase_durations_ms: z.record(z.string(), z.number()).optional(),
   http: ReloadSubsystemResultSchema.optional(),
   stream: ReloadSubsystemResultSchema.optional(),
   admin: ReloadSubsystemResultSchema.optional(),
@@ -439,8 +439,8 @@ export const StatsSnapshotSchema = z.object({
   routeMetrics: z.array(HTTPRouteStatsSchema).optional(),
   generationRetirements: z
     .object({
-      graceful: z.number().finite().nonnegative(),
-      forced: z.number().finite().nonnegative(),
+      graceful: z.number().nonnegative(),
+      forced: z.number().nonnegative(),
     })
     .optional(),
   cacheTiers: z.array(CacheTierOccupancySchema).optional(),
@@ -2323,8 +2323,8 @@ export const PatchResultSchema = z.object({
   // preview payloads. A legacy/misconfigured server cannot surface raw TOML.
   candidate: z
     .unknown()
-    .optional()
-    .transform((): undefined => undefined),
+    .transform((): undefined => undefined)
+    .optional(),
   diff: ConfigDiffSchema,
   // Optional in the parser for compatibility with old fixtures/servers; #77
   // responses always include the authoritative current editable version.

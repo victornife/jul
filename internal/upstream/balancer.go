@@ -37,12 +37,24 @@ func newBalancer(strategy, fallback string) Balancer {
 
 // pickFor chooses among available for one request. A hashed key is placed by
 // rendezvous ranking when the balancer hashes; everything else — keyless
-// requests and non-hashing strategies — takes the ordinary pick.
+// requests and non-hashing strategies — takes the ordinary pick. Dispatching
+// on the concrete balancer types lets the caller's stack-backed candidate slice
+// stay on the stack instead of escaping through an interface call.
 func pickFor(bal Balancer, available []*Backend, key affinity.Key) *Backend {
-	if r, ok := bal.(*rendezvous); ok && key.Hashed() {
-		return r.pickKey(available, key.Sum())
+	switch b := bal.(type) {
+	case *roundRobin:
+		return b.pick(available)
+	case *leastConn:
+		return b.pick(available)
+	case *weightedRR:
+		return b.pick(available)
+	default:
+		r := b.(*rendezvous)
+		if key.Hashed() {
+			return r.pickKey(available, key.Sum())
+		}
+		return r.pick(available)
 	}
-	return bal.pick(available)
 }
 
 // rendezvous is strategy = "consistent_hash": weighted rendezvous hashing
@@ -58,7 +70,7 @@ type rendezvous struct {
 	fallback Balancer
 }
 
-func (r *rendezvous) pick(a []*Backend) *Backend { return r.fallback.pick(a) }
+func (r *rendezvous) pick(a []*Backend) *Backend { return pickFor(r.fallback, a, affinity.Key{}) }
 
 func (r *rendezvous) updateBackends(bs []*Backend) { r.fallback.updateBackends(bs) }
 

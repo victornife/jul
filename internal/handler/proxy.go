@@ -181,15 +181,14 @@ type proxyHandler struct {
 // WAF and authentication cost for requests it then rejects. Accounting
 // correctness outranks CPU savings on the rejection path.
 func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	release, err := admitTraced(r, h.admission, h.retire)
-	if err != nil {
+	if err := admitTraced(r, h.admission, h.retire); err != nil {
 		writeAdmissionError(w, err)
 		return
 	}
 	// ReverseProxy.ServeHTTP returns only once the response body has been copied,
 	// and for a 101 upgrade only once the spliced connection closes, so the slot
 	// spans the request's real lifetime including WebSocket and SSE streams.
-	defer release()
+	defer h.admission.Release()
 	if respwriter.ActiveExchangeFrom(r.Context()) == nil {
 		if reg, genID := respwriter.ExchangeRegistryFrom(r.Context()); reg != nil {
 			var releaseEx func()

@@ -21,8 +21,6 @@ type HTTPMetricLabels struct {
 	route string
 }
 
-type httpMetricLabelsKey struct{}
-
 func CanonicalHTTPHost(host string) string {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if strings.HasPrefix(host, "[") {
@@ -61,15 +59,23 @@ func validHTTPHostPort(port string) bool {
 }
 
 func WithHTTPMetricLabels(request *http.Request) (*http.Request, *HTTPMetricLabels) {
-	labels := &HTTPMetricLabels{host: "_other", route: "_unmatched"}
-	return request.WithContext(context.WithValue(request.Context(), httpMetricLabelsKey{}, labels)), labels
+	ctx := request.Context()
+	if scope := requestScopeFrom(ctx); scope != nil && scope.labels == nil {
+		scope.labelsBuf = HTTPMetricLabels{host: "_other", route: "_unmatched"}
+		scope.labels = &scope.labelsBuf
+		return request, scope.labels
+	}
+	scope := cloneRequestScope(ctx)
+	scope.labelsBuf = HTTPMetricLabels{host: "_other", route: "_unmatched"}
+	scope.labels = &scope.labelsBuf
+	return request.WithContext(context.WithValue(ctx, requestScopeKey{}, scope)), scope.labels
 }
 
 func SetHTTPMetricLabels(request *http.Request, host, route string) {
-	if labels, ok := request.Context().Value(httpMetricLabelsKey{}).(*HTTPMetricLabels); ok {
-		labels.mu.Lock()
-		labels.host, labels.route = host, route
-		labels.mu.Unlock()
+	if scope := requestScopeFrom(request.Context()); scope != nil && scope.labels != nil {
+		scope.labels.mu.Lock()
+		scope.labels.host, scope.labels.route = host, route
+		scope.labels.mu.Unlock()
 	}
 }
 

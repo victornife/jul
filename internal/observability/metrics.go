@@ -677,73 +677,103 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		rec := middleware.NewRecorder(w)
 		next.ServeHTTP(rec.Writer(), r)
 
-		host, route := "_other", "_unmatched"
-		if labels != nil {
-			host, route = labels.Values()
-		}
-		m.labelInventoryMu.RLock()
-		if m.labelInventoryReady {
-			if !m.metricHosts[host] {
-				host = "_other"
-			}
-			if !m.metricRoutes[route] {
-				route = "_unidentified"
-			}
-		}
-		if !hostLabelEnabled {
-			// Opt-out (default): collapse the client-controlled Host to a single
-			// empty series so per-host cardinality cannot grow unbounded.
-			host = ""
-		}
+		status := rec.Status()
+		codeLabel := statusLabel(status)
+		elapsed := time.Since(start)
+		elapsedSeconds := elapsed.Seconds()
+		bytesWritten := float64(rec.Bytes())
 		// The request method is client-controlled — HTTP permits arbitrary
 		// method tokens — so it is normalized to a fixed set before it becomes a
 		// label; anything unrecognized collapses to "other" so a flood of bogus
 		// methods cannot explode cardinality (see the metric label policy in
 		// docs/core-http.md).
 		method := methodLabel(r.Method)
-		m.aggregateRequests.WithLabelValues(method, strconv.Itoa(rec.Status())).Inc()
-		m.aggregateDuration.WithLabelValues(method).Observe(time.Since(start).Seconds())
-		if m.routeLabelEnabled {
-			m.requests.WithLabelValues(method, host, route, strconv.Itoa(rec.Status())).Inc()
-			m.duration.WithLabelValues(method, host, route).Observe(time.Since(start).Seconds())
-			m.routeResponseBytes.WithLabelValues(method, host, route).Add(float64(rec.Bytes()))
+		m.aggregateRequests.WithLabelValues(method, codeLabel).Inc()
+		m.aggregateDuration.WithLabelValues(method).Observe(elapsedSeconds)
+		m.httpResponseBytes.Add(bytesWritten)
+
+		if !hostLabelEnabled && !m.routeLabelEnabled {
+			// Default fast path: host collapses to "" and route labels are off,
+			// so no configured host/route series can be recreated and
+			// labelInventoryMu is not needed.
+			m.requests.WithLabelValues(method, "", codeLabel).Inc()
+			m.duration.WithLabelValues(method, "").Observe(elapsedSeconds)
 		} else {
-			m.requests.WithLabelValues(method, host, strconv.Itoa(rec.Status())).Inc()
-			m.duration.WithLabelValues(method, host).Observe(time.Since(start).Seconds())
+			host, route := "_other", "_unmatched"
+			if labels != nil {
+				host, route = labels.Values()
+			}
+			m.labelInventoryMu.RLock()
+			if m.labelInventoryReady {
+				if !m.metricHosts[host] {
+					host = "_other"
+				}
+				if !m.metricRoutes[route] {
+					route = "_unidentified"
+				}
+			}
+			if !hostLabelEnabled {
+				// Opt-out (default): collapse the client-controlled Host to a single
+				// empty series so per-host cardinality cannot grow unbounded.
+				host = ""
+			}
+			if m.routeLabelEnabled {
+				m.requests.WithLabelValues(method, host, route, codeLabel).Inc()
+				m.duration.WithLabelValues(method, host, route).Observe(elapsedSeconds)
+				m.routeResponseBytes.WithLabelValues(method, host, route).Add(bytesWritten)
+			} else {
+				m.requests.WithLabelValues(method, host, codeLabel).Inc()
+				m.duration.WithLabelValues(method, host).Observe(elapsedSeconds)
+			}
+			m.labelInventoryMu.RUnlock()
 		}
-		m.httpResponseBytes.Add(float64(rec.Bytes()))
-		m.labelInventoryMu.RUnlock()
-		if state := rec.Header().Get("X-Cache"); state != "" {
-			m.cacheEvents.WithLabelValues(state).Inc()
+		cacheState := rec.Header().Get("X-Cache")
+		if cacheState != "" {
+			m.cacheEvents.WithLabelValues(cacheState).Inc()
 		}
 		// Fold the request into the bounded traffic-source rollups. Only the Host
 		// and the Origin/Referer hostnames are retained — never the path, query
 		// string, or any credential header (Console v2 Milestone 1.4).
-		m.traffic.record(r.Host, r.Header.Get("Origin"), r.Header.Get("Referer"), r.Method)
+		normOrigin := m.traffic.record(r.Host, r.Header.Get("Origin"), r.Header.Get("Referer"), r.Method)
 
 		// Capture a privacy-preserving sample of the request and fold its outcome
 		// into the per-path failure rollup (Console v2 Milestones 5.1 and 5.2).
-		durationMs := time.Since(start).Seconds() * 1000
-		status := rec.Status()
+		durationMs := elapsedSeconds * 1000
 		sampleHost := ""
 		if hostLabelEnabled {
 			sampleHost = hostLabel(r.Host)
 		}
-		m.samples.record(RequestSample{
+		sanitizedPath := SanitizePath(r.URL.Path)
+		m.samples.recordSanitized(RequestSample{
 			Time:        start.UTC(),
 			Method:      r.Method,
-			Path:        r.URL.Path,
+			Path:        sanitizedPath,
 			Host:        sampleHost,
 			Status:      status,
 			DurationMs:  durationMs,
-			CacheState:  rec.Header().Get("X-Cache"),
+			CacheState:  cacheState,
 			Compressed:  rec.Header().Get("Content-Encoding") != "",
 			RateLimited: status == http.StatusTooManyRequests,
-			Origin:      r.Header.Get("Origin"),
+			Origin:      normOrigin,
 			UserAgent:   r.Header.Get("User-Agent"),
 		})
-		m.routeFailures.record(r.URL.Path, status, durationMs)
+		m.routeFailures.recordSanitized(sanitizedPath, status, durationMs)
 	})
+}
+
+var httpStatusLabels [600]string
+
+func init() {
+	for i := 100; i < len(httpStatusLabels); i++ {
+		httpStatusLabels[i] = strconv.Itoa(i)
+	}
+}
+
+func statusLabel(code int) string {
+	if code >= 100 && code < len(httpStatusLabels) {
+		return httpStatusLabels[code]
+	}
+	return strconv.Itoa(code)
 }
 
 // RequestSamples returns the bounded ring buffer of recent requests, newest

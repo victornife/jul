@@ -16,10 +16,41 @@ const HeaderRequestID = "X-Request-ID"
 type ctxKey int
 
 const (
-	requestIDKey ctxKey = iota
-	traceIDKey
+	traceIDKey ctxKey = iota
 	claimsKey
 )
+
+type requestScopeKey struct{}
+
+// requestScope bundles the per-request state populated across the entry
+// middleware chain (RequestID, Metrics, AccessLog, and ResponsePolicy) into a
+// single allocation attached by RequestID's initial r.WithContext call, avoiding
+// repeated http.Request and context.valueCtx clones down the hot path.
+type requestScope struct {
+	requestID      string
+	labels         *HTTPMetricLabels
+	upstreamReason *upstreamReasonHolder
+	policyWriter   *policyWriter
+	labelsBuf      HTTPMetricLabels
+	reasonBuf      upstreamReasonHolder
+}
+
+func requestScopeFrom(ctx context.Context) *requestScope {
+	s, _ := ctx.Value(requestScopeKey{}).(*requestScope)
+	return s
+}
+
+func cloneRequestScope(ctx context.Context) *requestScope {
+	if prev := requestScopeFrom(ctx); prev != nil {
+		return &requestScope{
+			requestID:      prev.requestID,
+			labels:         prev.labels,
+			upstreamReason: prev.upstreamReason,
+			policyWriter:   prev.policyWriter,
+		}
+	}
+	return &requestScope{}
+}
 
 // RequestID returns middleware that ensures every request has an id. If the
 // client supplied one via X-Request-ID it is preserved; otherwise a new random
@@ -40,7 +71,8 @@ func RequestID() Middleware {
 			// Remove ambiguous or unbounded client field lines before routing.
 			r.Header.Set(HeaderRequestID, id)
 			w.Header().Set(HeaderRequestID, id)
-			ctx := context.WithValue(r.Context(), requestIDKey, id)
+			scope := &requestScope{requestID: id}
+			ctx := context.WithValue(r.Context(), requestScopeKey{}, scope)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -50,13 +82,15 @@ func RequestID() Middleware {
 // the background-lease seam to carry the id onto work that continues after the
 // request returns, so its logs stay correlated with the request that started it.
 func WithRequestID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, requestIDKey, id)
+	scope := cloneRequestScope(ctx)
+	scope.requestID = id
+	return context.WithValue(ctx, requestScopeKey{}, scope)
 }
 
 // RequestIDFrom returns the request id stored in ctx, or "" if absent.
 func RequestIDFrom(ctx context.Context) string {
-	if v, ok := ctx.Value(requestIDKey).(string); ok {
-		return v
+	if scope := requestScopeFrom(ctx); scope != nil {
+		return scope.requestID
 	}
 	return ""
 }
