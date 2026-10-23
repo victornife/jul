@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { z } from "zod";
+import { z } from "zod/v3";
 
 // ── Shared reload-result schema ──────────────────────────────────────────────
 //
