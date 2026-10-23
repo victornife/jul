@@ -92,8 +92,9 @@ func (s *serverRoute) selectLocation(r *http.Request) *locationRoute {
 // Two properties are load-bearing. Path specificity always outranks predicates:
 // predicates filter candidates within a tier and never promote one across tiers
 // or across prefix lengths, so no scoring exists anywhere. And declaration order
-// is the only tie-breaker, at every tier — the tier slices are built once, in
-// declaration order, and no map is iterated in selection.
+// is the only tie-breaker, at every tier — the candidate slices (including each
+// path's exact-match slice) are built once, in declaration order, and no map is
+// iterated in selection.
 //
 // ADR 0018 §6 folds `prefix "/"` into tier 2 on the stated grounds that a
 // candidate of length 1 sorts last among prefixes and therefore "behaves
@@ -113,9 +114,17 @@ func (s *serverRoute) selectLocation(r *http.Request) *locationRoute {
 // this one, and is answered with the router's ordinary 404. §2 depends on that
 // property for its CONNECT rule.
 func (s *serverRoute) eachCandidate(path string, visit func(tier int, loc *locationRoute) bool) {
-	for _, loc := range s.exactLocations {
-		if loc.path == path && visit(1, loc) {
-			return
+	if s.exactByPath != nil {
+		for _, loc := range s.exactByPath[path] {
+			if visit(1, loc) {
+				return
+			}
+		}
+	} else {
+		for _, loc := range s.exactLocations {
+			if loc.path == path && visit(1, loc) {
+				return
+			}
 		}
 	}
 	for _, loc := range s.prefixLocations {

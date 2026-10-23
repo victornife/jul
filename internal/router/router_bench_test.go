@@ -4,6 +4,7 @@
 package router
 
 import (
+	"fmt"
 	"regexp"
 	"testing"
 )
@@ -65,6 +66,37 @@ func BenchmarkSelectLocation(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				_ = sr.selectLocation(req)
+			}
+		})
+	}
+}
+
+func BenchmarkSelectLocationManyExact(b *testing.B) {
+	locs := make([]*locationRoute, 0, 260)
+	for i := 0; i < 256; i++ {
+		locs = append(locs, &locationRoute{matchType: "exact", path: fmt.Sprintf("/exact/route-%03d", i)})
+	}
+	locs = append(locs,
+		&locationRoute{matchType: "prefix", path: "/api/v1"},
+		&locationRoute{matchType: "prefix", path: "/"},
+	)
+	sr := testServerRoute(locs...)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"exact_last", "/exact/route-255"},
+		{"prefix_after_256_exact", "/api/v1/users"},
+	}
+	for _, c := range cases {
+		req := selectRequest(c.path, "")
+		b.Run(c.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if sr.selectLocation(req) == nil {
+					b.Fatal("expected match")
+				}
 			}
 		})
 	}

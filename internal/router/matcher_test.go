@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"regexp"
 	"testing"
+
+	"jul/internal/config"
 )
 
 // testServerRoute assembles a server block from declaration-ordered locations
@@ -39,17 +41,55 @@ func selectPath(s *serverRoute, path string) *locationRoute {
 }
 
 func TestSelectLocationExact(t *testing.T) {
+	firstUsers := &locationRoute{matchType: "exact", path: "/api/users"}
+	secondUsers := &locationRoute{matchType: "exact", path: "/api/users"}
 	s := testServerRoute(
 		&locationRoute{matchType: "exact", path: "/api"},
-		&locationRoute{matchType: "exact", path: "/api/users"},
+		firstUsers,
+		secondUsers,
 		&locationRoute{matchType: "prefix", path: "/"},
 	)
 
 	if loc := selectPath(s, "/api"); loc == nil || loc.path != "/api" {
 		t.Fatalf("expected exact match /api, got %v", loc)
 	}
-	if loc := selectPath(s, "/api/users"); loc == nil || loc.path != "/api/users" {
-		t.Fatalf("expected exact match /api/users, got %v", loc)
+	if loc := selectPath(s, "/api/users"); loc != firstUsers {
+		t.Fatalf("expected first declared exact match /api/users, got %v", loc)
+	}
+}
+
+func TestSelectLocationExactMapThresholdAndFallthrough(t *testing.T) {
+	postOnly, err := compilePredicates(config.LocationConfig{
+		Match: config.MatchConfig{Type: "exact", Path: "/exact-4", Methods: []string{http.MethodPost}},
+	})
+	if err != nil {
+		t.Fatalf("compilePredicates: %v", err)
+	}
+	getFallback := &locationRoute{matchType: "exact", path: "/exact-4"}
+	prefixFallback := &locationRoute{matchType: "prefix", path: "/exact-"}
+
+	s := testServerRoute(
+		&locationRoute{matchType: "exact", path: "/exact-0"},
+		&locationRoute{matchType: "exact", path: "/exact-1"},
+		&locationRoute{matchType: "exact", path: "/exact-2"},
+		&locationRoute{matchType: "exact", path: "/exact-3"},
+		&locationRoute{matchType: "exact", path: "/exact-4", predicates: postOnly},
+		getFallback,
+		&locationRoute{matchType: "exact", path: "/exact-5", predicates: postOnly},
+		prefixFallback,
+	)
+	if s.exactByPath == nil {
+		t.Fatal("expected exactByPath map to be populated above exactMapThreshold")
+	}
+	// GET /exact-4 rejects the first POST-only exact route and selects the second
+	// exact route on the same path in declaration order.
+	if loc := selectPath(s, "/exact-4"); loc != getFallback {
+		t.Fatalf("GET /exact-4 selected %v, want second exact candidate", loc)
+	}
+	// GET /exact-5 rejects the only exact candidate on /exact-5 and falls through
+	// to tier 2 (/exact- prefix).
+	if loc := selectPath(s, "/exact-5"); loc != prefixFallback {
+		t.Fatalf("GET /exact-5 selected %v, want prefix fallback", loc)
 	}
 }
 
