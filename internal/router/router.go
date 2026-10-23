@@ -48,8 +48,9 @@ type locationRoute struct {
 }
 
 type serverRoute struct {
-	names     []string
-	locations []*locationRoute
+	names      []string
+	metricHost string
+	locations  []*locationRoute
 	// The four selection tiers, precomputed so no ordering decision is made per
 	// request: exact, regex and root in declaration order, non-root prefixes by
 	// descending path length with ties in declaration order (ADR 0018 §6).
@@ -65,7 +66,7 @@ type serverRoute struct {
 	index int
 }
 
-func (s *serverRoute) score(host string) int { return hostScore(s.names, host) }
+func (s *serverRoute) score(host string) int { return normalizedHostScore(s.names, host) }
 
 type addrRouter struct {
 	servers []*serverRoute
@@ -73,8 +74,9 @@ type addrRouter struct {
 }
 
 // match selects the server block for a host, falling back to the default
-// server when no server_name matches.
-func (ar *addrRouter) match(host string) *serverRoute {
+// server when no server_name matches. The boolean reports whether the winning
+// server matched by server_name (score > 0) rather than by default fallback.
+func (ar *addrRouter) match(host string) (*serverRoute, bool) {
 	h := normalizeHost(host)
 	best := ar.def
 	bestScore := 0
@@ -84,7 +86,7 @@ func (ar *addrRouter) match(host string) *serverRoute {
 			best = s
 		}
 	}
-	return best
+	return best, bestScore > 0
 }
 
 // Router holds the compiled routing tables, keyed by listen address.
@@ -146,7 +148,17 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 }
 
 func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback Builder, locModifier LocationModifier, log *slog.Logger) (*serverRoute, error) {
-	sr := &serverRoute{names: srv.ServerNames, redirectHTTPS: srv.RedirectHTTPS, sendTimeout: srv.SendTimeout.Std(), writeTimeout: srv.WriteTimeout.Std()}
+	var metricHost string
+	if len(srv.ServerNames) > 0 {
+		metricHost = normalizeHost(srv.ServerNames[0])
+	}
+	sr := &serverRoute{
+		names:         normalizeServerNames(srv.ServerNames),
+		metricHost:    metricHost,
+		redirectHTTPS: srv.RedirectHTTPS,
+		sendTimeout:   srv.SendTimeout.Std(),
+		writeTimeout:  srv.WriteTimeout.Std(),
+	}
 
 	bodyLimit := srv.ClientMaxBodySize.Bytes()
 	for i, loc := range srv.Locations {
@@ -284,14 +296,14 @@ func (r *Router) For(addr string) http.Handler {
 			http.NotFound(w, req)
 			return
 		}
-		srv := ar.match(req.Host)
+		srv, matchedHost := ar.match(req.Host)
 		if srv == nil {
 			http.NotFound(w, req)
 			return
 		}
 		metricHost := "_other"
-		if srv.score(normalizeHost(req.Host)) > 0 && len(srv.names) > 0 {
-			metricHost = normalizeHost(srv.names[0])
+		if matchedHost && len(srv.names) > 0 {
+			metricHost = srv.metricHost
 		}
 		middleware.SetHTTPMetricLabels(req, metricHost, "_unmatched")
 		var absoluteDeadline time.Time

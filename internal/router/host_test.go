@@ -99,4 +99,7 @@ func TestHostScoreEmptyNames(t *testing.T) {
 	if score != 0 {
 		t.Fatalf("score = %d, want 0", score)
 	}
+	if score := hostScore([]string{""}, "example.com"); score != 0 {
+		t.Fatalf("score for blank server_name = %d, want 0", score)
+	}
 }

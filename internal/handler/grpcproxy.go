@@ -58,12 +58,14 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 	// bound concurrency; the request limit is what binds on this path, and
 	// setting the field on a gRPC route is a lint warning.
 	transport := newGRPCTransport(loc, tlsBackend, policy)
+	compiledHeaders := compileProxyHeaders(loc.Headers)
 
 	rp := &httputil.ReverseProxy{
 		// FlushInterval -1 flushes every write immediately: gRPC streaming
 		// frames (and unary trailers) must not be buffered, or a server-stream
 		// would stall until the whole call completed.
 		FlushInterval: -1,
+		BufferPool:    defaultProxyBufferPool,
 		Transport: &grpcBalancingTransport{
 			pool:       pool,
 			base:       transport,
@@ -73,8 +75,9 @@ func NewGRPCProxy(ctx context.Context, _ config.ServerConfig, loc config.Locatio
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(target)
-			setCanonicalXForwarded(pr)
-			applyProxyHeaders(pr, loc)
+			vars := proxyVarContext{in: pr.In}
+			setCanonicalXForwardedWithVars(pr, &vars)
+			applyCompiledProxyHeaders(pr, compiledHeaders, &vars)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			code := proxyErrorStatus(err, r.Context())

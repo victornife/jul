@@ -450,6 +450,99 @@ func TestExpandProxyVarSSLClientAbsent(t *testing.T) {
 	if got := expandProxyVar("$ssl_client_cn", req); got != "" {
 		t.Errorf("$ssl_client_cn without a cert = %q, want empty", got)
 	}
+	if got := expandProxyVar("$ssl_client_cn$ssl_client_san", req); got != "" {
+		t.Errorf("multi-var empty without a cert = %q, want empty", got)
+	}
+	if got := expandProxyVar("literal-$unknown-$host-end", req); got != "literal-$unknown-edge-end" {
+		t.Errorf("mixed literal/unknown/known = %q, want literal-$unknown-edge-end", got)
+	}
+	if got := expandProxyVar("$unknown_only", req); got != "$unknown_only" {
+		t.Errorf("unknown var = %q, want $unknown_only", got)
+	}
+}
+
+func TestCompileProxyTemplateEdgeCases(t *testing.T) {
+	id := &middleware.PeerCertIdentity{
+		Verified:    true,
+		SubjectDN:   "CN=alice,O=Jul",
+		IssuerDN:    "CN=Issuer",
+		CN:          "alice",
+		Serial:      "1234",
+		Fingerprint: "abcd",
+		SANs:        "alice.example.com",
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://edge.example:8443/path", nil)
+	req.Host = "edge.example:8443"
+	req.RemoteAddr = "198.51.100.7:54321"
+	req = req.WithContext(middleware.WithPeerCertIdentity(req.Context(), id))
+
+	legacyExpand := func(tmpl string, in *http.Request) string {
+		if !strings.Contains(tmpl, "$") {
+			return tmpl
+		}
+		client, peer := forwardedAddrs(in)
+		scheme := "http"
+		if in.TLS != nil {
+			scheme = "https"
+		}
+		pairs := []string{
+			"$proxy_add_x_forwarded_for", forwardedChain(client, peer),
+			"$realip_remote_addr", peer,
+			"$remote_addr", client,
+			"$host", in.Host,
+			"$scheme", scheme,
+			"$ssl_client_s_dn", id.SubjectDN,
+			"$ssl_client_i_dn", id.IssuerDN,
+			"$ssl_client_cn", id.CN,
+			"$ssl_client_serial", id.Serial,
+			"$ssl_client_fingerprint", id.Fingerprint,
+			"$ssl_client_san", id.SANs,
+			"$ssl_client_verify", "SUCCESS",
+		}
+		return strings.NewReplacer(pairs...).Replace(tmpl)
+	}
+
+	templates := []string{
+		"",
+		"static-value",
+		"$",
+		"$$",
+		"$$host",
+		"$host$",
+		"$unknown",
+		"$ssl_client",
+		"$ssl_client_unknown",
+		"$host",
+		"$scheme",
+		"$remote_addr",
+		"$realip_remote_addr",
+		"$proxy_add_x_forwarded_for",
+		"$ssl_client_s_dn|$ssl_client_i_dn|$ssl_client_cn|$ssl_client_serial|$ssl_client_fingerprint|$ssl_client_san|$ssl_client_verify",
+		// > 8 parts to exercise stack-buffer overflow path in both parse and eval:
+		"$host/$scheme/$remote_addr/$realip_remote_addr/$ssl_client_cn/$ssl_client_serial/$ssl_client_fingerprint/$ssl_client_san/$ssl_client_verify",
+	}
+
+	for _, tmpl := range templates {
+		want := legacyExpand(tmpl, req)
+		if got := expandProxyVar(tmpl, req); got != want {
+			t.Errorf("expandProxyVar(%q) = %q, want %q", tmpl, got, want)
+		}
+		compiled := compileProxyTemplate(tmpl)
+		vars := proxyVarContext{in: req}
+		if got := compiled.eval(&vars); got != want {
+			t.Errorf("compileProxyTemplate(%q).eval() = %q, want %q", tmpl, got, want)
+		}
+	}
+}
+
+func TestProxyBufferPool(t *testing.T) {
+	buf := defaultProxyBufferPool.Get()
+	if len(buf) != proxyCopyBufferSize {
+		t.Fatalf("len(buf) = %d, want %d", len(buf), proxyCopyBufferSize)
+	}
+	defaultProxyBufferPool.Put(buf[:10])
+	// Putting an undersized slice must be safely ignored.
+	defaultProxyBufferPool.Put(make([]byte, 16))
 }
 
 // TestClientCancellationRecords499 pins the intentional compatibility change.
