@@ -61,12 +61,11 @@ func newAdmittedHandler(next http.Handler, adm *upstream.Admission, closer func(
 }
 
 func (h *admittedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	release, err := admitTraced(r, h.admission, h.retire)
-	if err != nil {
+	if err := admitTraced(r, h.admission, h.retire); err != nil {
 		writeAdmissionError(w, err)
 		return
 	}
-	defer release()
+	defer h.admission.Release()
 	h.next.ServeHTTP(w, r)
 }
 
@@ -76,17 +75,17 @@ func (h *admittedHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // account for it: the trace shows a gap before the upstream call and nothing
 // explaining it. The seam is a no-op without the otel build, so this costs
 // nothing in a lean binary.
-func admitTraced(r *http.Request, adm *upstream.Admission, retire chan struct{}) (func(), error) {
+func admitTraced(r *http.Request, adm *upstream.Admission, retire chan struct{}) error {
 	ctx, span := tracing.Active().Start(r.Context(), "upstream.admission")
 	defer span.End()
-	release, err := adm.Admit(ctx, retire)
+	err := adm.Acquire(ctx, retire)
 	if err != nil {
 		reason := upstream.ReasonFor(err, r.Context())
 		span.SetString("upstream.reason", string(reason))
 		span.RecordError(err)
 		middleware.SetUpstreamReason(r.Context(), string(reason))
 	}
-	return release, err
+	return err
 }
 
 // Close wakes this generation's parked requests, then releases the handler's own

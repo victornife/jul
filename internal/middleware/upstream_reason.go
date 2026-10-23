@@ -5,6 +5,7 @@ package middleware
 
 import (
 	"context"
+	"net/http"
 	"sync/atomic"
 )
 
@@ -12,16 +13,22 @@ import (
 // middleware installs it on the way in and reads it on the way out, while the
 // proxy handler deeper in the chain is the one that knows the reason. A plain
 // context value cannot travel back up.
-type upstreamReasonKeyType struct{}
-
-var upstreamReasonKey upstreamReasonKeyType
-
 type upstreamReasonHolder struct{ v atomic.Pointer[string] }
+
+func enableUpstreamReason(r *http.Request) *http.Request {
+	if scope := requestScopeFrom(r.Context()); scope != nil && scope.upstreamReason == nil {
+		scope.upstreamReason = &scope.reasonBuf
+		return r
+	}
+	return r.WithContext(WithUpstreamReason(r.Context()))
+}
 
 // WithUpstreamReason returns a context that can carry an upstream failure
 // reason set by a handler further down the chain.
 func WithUpstreamReason(ctx context.Context) context.Context {
-	return context.WithValue(ctx, upstreamReasonKey, &upstreamReasonHolder{})
+	scope := cloneRequestScope(ctx)
+	scope.upstreamReason = &scope.reasonBuf
+	return context.WithValue(ctx, requestScopeKey{}, scope)
 }
 
 // SetUpstreamReason records the bounded reason an upstream call failed. It is a
@@ -36,18 +43,18 @@ func SetUpstreamReason(ctx context.Context, reason string) {
 	if reason == "" {
 		return
 	}
-	if h, ok := ctx.Value(upstreamReasonKey).(*upstreamReasonHolder); ok {
-		h.v.Store(&reason)
+	if scope := requestScopeFrom(ctx); scope != nil && scope.upstreamReason != nil {
+		scope.upstreamReason.v.Store(&reason)
 	}
 }
 
 // UpstreamReasonFrom returns the reason recorded for this request, or "".
 func UpstreamReasonFrom(ctx context.Context) string {
-	h, ok := ctx.Value(upstreamReasonKey).(*upstreamReasonHolder)
-	if !ok {
+	scope := requestScopeFrom(ctx)
+	if scope == nil || scope.upstreamReason == nil {
 		return ""
 	}
-	if v := h.v.Load(); v != nil {
+	if v := scope.upstreamReason.v.Load(); v != nil {
 		return *v
 	}
 	return ""

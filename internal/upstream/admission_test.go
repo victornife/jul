@@ -59,6 +59,16 @@ func TestAdmissionUnlimitedByDefault(t *testing.T) {
 	if got := a.Active(); got != 0 {
 		t.Fatalf("active after release = %d, want 0", got)
 	}
+	if err := a.Acquire(context.Background(), nil); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	if got := a.Active(); got != 1 {
+		t.Fatalf("active after Acquire = %d, want 1", got)
+	}
+	a.Release()
+	if got := a.Active(); got != 0 {
+		t.Fatalf("active after Release = %d, want 0", got)
+	}
 }
 
 // TestAdmissionCapBoundary checks the exact boundary rather than a value well

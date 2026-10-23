@@ -175,14 +175,22 @@ func (p *Pool) candidates(ctx context.Context) []*Backend {
 // the key's next-ranked backend.
 func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded map[BackendIdentity]struct{}, key affinity.Key) (Attempt, error) {
 	now := time.Now().UnixNano()
-	avail := make([]*Backend, 0, len(backends))
+	var stackAvail [32]*Backend
+	var avail []*Backend
+	if len(backends) <= len(stackAvail) {
+		avail = stackAvail[:0]
+	} else {
+		avail = make([]*Backend, 0, len(backends))
+	}
 	saturated := false
 	for _, b := range backends {
 		if !b.available(now) {
 			continue
 		}
-		if _, ok := excluded[b.Identity()]; ok {
-			continue
+		if len(excluded) > 0 {
+			if _, ok := excluded[b.Identity()]; ok {
+				continue
+			}
 		}
 		if perBackend > 0 && b.inflight.Load() >= perBackend {
 			saturated = true
@@ -215,7 +223,9 @@ func selectBackend(backends []*Backend, bal Balancer, perBackend int64, excluded
 func removeBackend(s []*Backend, b *Backend) []*Backend {
 	for i, c := range s {
 		if c == b {
-			return append(s[:i:i], s[i+1:]...)
+			copy(s[i:], s[i+1:])
+			s[len(s)-1] = nil
+			return s[:len(s)-1]
 		}
 	}
 	return s

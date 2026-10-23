@@ -157,15 +157,21 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 // negotiate selects the best registered encoder for the request, honoring
 // Accept-Encoding q-values with server preference as the tie-break.
 func (c *compression) negotiate(r *http.Request) *encoderPool {
-	header := strings.Join(r.Header.Values("Accept-Encoding"), ",")
-	if header == "" {
+	values := r.Header.Values("Accept-Encoding")
+	if len(values) == 0 {
 		return nil
 	}
-	q := parseAcceptEncoding(header)
+	var set acceptEncodingSet
+	for _, v := range values {
+		set.parseHeader(v)
+	}
+	if set.n == 0 {
+		return nil
+	}
 	var best *encoderPool
 	bestQ := 0.0
 	for _, ep := range c.pools {
-		cq, ok := clientQuality(q, ep.name)
+		cq, ok := set.quality(ep.name)
 		if !ok || cq <= 0 {
 			continue
 		}
@@ -425,21 +431,83 @@ func addVary(h http.Header, value string) {
 	h.Add("Vary", value)
 }
 
-// parseAcceptEncoding parses an Accept-Encoding header into coding->q-value,
-// lowercasing coding names. A missing q defaults to 1.0.
-func parseAcceptEncoding(header string) map[string]float64 {
-	out := make(map[string]float64)
-	for _, part := range strings.Split(header, ",") {
+type acceptEncodingEntry struct {
+	name string
+	q    float64
+}
+
+// acceptEncodingSet holds parsed Accept-Encoding q-values on the stack for
+// request-time negotiation without allocating a map or splitting slices.
+// Headers with more than 16 distinct codings spill to overflow so an explicit
+// refusal (e.g. "gzip;q=0") after many unknown codings is still honored.
+type acceptEncodingSet struct {
+	entries  [16]acceptEncodingEntry
+	n        int
+	overflow map[string]float64
+}
+
+func (s *acceptEncodingSet) record(name string, q float64) {
+	for i := 0; i < s.n; i++ {
+		if strings.EqualFold(s.entries[i].name, name) {
+			// An explicit refusal or malformed duplicate must not be
+			// overridden by a later field line.
+			if q < s.entries[i].q {
+				s.entries[i].q = q
+			}
+			return
+		}
+	}
+	if s.n < len(s.entries) {
+		s.entries[s.n] = acceptEncodingEntry{name: name, q: q}
+		s.n++
+		return
+	}
+	if s.overflow == nil {
+		s.overflow = make(map[string]float64, 4)
+	}
+	key := strings.ToLower(name)
+	if old, ok := s.overflow[key]; !ok || q < old {
+		s.overflow[key] = q
+	}
+}
+
+func (s *acceptEncodingSet) quality(name string) (float64, bool) {
+	if q, ok := s.exactQuality(name); ok {
+		return q, true
+	}
+	return s.exactQuality("*")
+}
+
+func (s *acceptEncodingSet) exactQuality(name string) (float64, bool) {
+	for i := 0; i < s.n; i++ {
+		if strings.EqualFold(s.entries[i].name, name) {
+			return s.entries[i].q, true
+		}
+	}
+	if s.overflow != nil {
+		if q, ok := s.overflow[strings.ToLower(name)]; ok {
+			return q, true
+		}
+	}
+	return 0, false
+}
+
+func (s *acceptEncodingSet) parseHeader(header string) {
+	for rest := header; rest != ""; {
+		var part string
+		part, rest, _ = strings.Cut(rest, ",")
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		name := part
+		name, params, hasParams := strings.Cut(part, ";")
 		q := 1.0
-		if i := strings.IndexByte(part, ';'); i >= 0 {
-			name = strings.TrimSpace(part[:i])
+		if hasParams {
+			name = strings.TrimSpace(name)
 			seenWeight := false
-			for _, p := range strings.Split(part[i+1:], ";") {
+			for pRest := params; pRest != ""; {
+				var p string
+				p, pRest, _ = strings.Cut(pRest, ";")
 				p = strings.TrimSpace(p)
 				if !strings.HasPrefix(p, "q=") || seenWeight {
 					q = 0
@@ -454,12 +522,21 @@ func parseAcceptEncoding(header string) map[string]float64 {
 				q = v
 			}
 		}
-		name = strings.ToLower(name)
-		if old, ok := out[name]; !ok || q < old {
-			// An explicit refusal or malformed duplicate must not be
-			// overridden by a later field line.
-			out[name] = q
-		}
+		s.record(name, q)
+	}
+}
+
+// parseAcceptEncoding parses an Accept-Encoding header into coding->q-value,
+// lowercasing coding names. A missing q defaults to 1.0.
+func parseAcceptEncoding(header string) map[string]float64 {
+	var set acceptEncodingSet
+	set.parseHeader(header)
+	out := make(map[string]float64, set.n+len(set.overflow))
+	for i := 0; i < set.n; i++ {
+		out[strings.ToLower(set.entries[i].name)] = set.entries[i].q
+	}
+	for k, v := range set.overflow {
+		out[k] = v
 	}
 	return out
 }
@@ -479,7 +556,9 @@ func clientQuality(q map[string]float64, name string) (float64, bool) {
 // AcceptsEncoding applies the same strict coding negotiation used by dynamic
 // compression to precompressed static representations.
 func AcceptsEncoding(header, name string) bool {
-	q, ok := clientQuality(parseAcceptEncoding(header), name)
+	var set acceptEncodingSet
+	set.parseHeader(header)
+	q, ok := set.quality(name)
 	return ok && q > 0
 }
 

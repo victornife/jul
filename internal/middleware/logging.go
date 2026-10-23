@@ -121,7 +121,7 @@ func AccessLog(sinks ...AccessSink) Middleware {
 			start := time.Now()
 			rec := NewRecorder(w)
 
-			r = r.WithContext(WithUpstreamReason(r.Context()))
+			r = enableUpstreamReason(r)
 			next.ServeHTTP(rec.Writer(), r)
 
 			record := AccessRecord{

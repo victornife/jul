@@ -4,6 +4,7 @@
 package upstream
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -154,4 +155,17 @@ func TestPoolName(t *testing.T) {
 	if p.Name() != "test" {
 		t.Errorf("name = %q, want test", p.Name())
 	}
+}
+
+func TestPoolPickLargeBackendSet(t *testing.T) {
+	servers := make([]config.UpstreamServer, 36)
+	for i := range servers {
+		servers[i] = config.UpstreamServer{Address: fmt.Sprintf("10.0.0.%d:80", i+1), Weight: 1}
+	}
+	p := pool(t, "round_robin", servers...)
+	at, err := p.Pick()
+	if err != nil {
+		t.Fatalf("Pick on 36-backend pool: %v", err)
+	}
+	p.Release(at.Backend)
 }

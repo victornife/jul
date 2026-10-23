@@ -407,7 +407,7 @@ func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopRea
 		}()
 	}
 
-	tried := make(map[BackendIdentity]struct{})
+	var tried map[BackendIdentity]struct{}
 	var lastErr error
 	for n := 1; ; n++ {
 		b, err := p.PickKeyed(deadline, rr.Key, tried)
@@ -419,7 +419,6 @@ func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopRea
 			}
 			return StopNoBackend, err
 		}
-		tried[b.Identity()] = struct{}{}
 		if n == 1 {
 			p.budget.Primary()
 		}
@@ -438,6 +437,10 @@ func (p *Pool) Do(ctx context.Context, rr RetryRequest, fn AttemptFunc) (StopRea
 		}
 		p.Release(b.Backend)
 		lastErr = res.Err
+		if tried == nil {
+			tried = make(map[BackendIdentity]struct{}, 2)
+		}
+		tried[b.Identity()] = struct{}{}
 
 		remaining := remainingFor(deadline)
 		d := Decision{

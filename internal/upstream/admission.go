@@ -126,8 +126,9 @@ func (a *Admission) Active() int64 { return a.active.Load() }
 func (a *Admission) Pending() int64 { return a.pending.Load() }
 
 // Admit acquires one admission slot, returning a release closure that is safe
-// to call exactly once from any path — success, transport failure, cancellation
-// or panic recovery.
+// to call from any path — success, transport failure, cancellation or panic
+// recovery. Callers that release via a single local defer may use Acquire and
+// Release instead to avoid allocating the closure.
 //
 // retire is the caller's generation-retirement signal. It is closed when the
 // handler generation that owns the transport is torn down, so a parked request
@@ -135,10 +136,19 @@ func (a *Admission) Pending() int64 { return a.pending.Load() }
 // forever in select, which is exactly the right no-op for callers that have no
 // generation, and the fast path never touches it.
 func (a *Admission) Admit(ctx context.Context, retire <-chan struct{}) (func(), error) {
+	if err := a.Acquire(ctx, retire); err != nil {
+		return nil, err
+	}
+	return a.releaser(), nil
+}
+
+// Acquire claims one admission slot without allocating a release closure. The
+// caller must call Release exactly once when the admitted work finishes.
+func (a *Admission) Acquire(ctx context.Context, retire <-chan struct{}) error {
 	limit := a.policy.Load().MaxActiveRequests()
 	if limit <= 0 {
 		a.active.Add(1)
-		return a.releaser(), nil
+		return nil
 	}
 	for {
 		cur := a.active.Load()
@@ -146,13 +156,18 @@ func (a *Admission) Admit(ctx context.Context, retire <-chan struct{}) (func(), 
 			return a.park(ctx, retire)
 		}
 		if a.active.CompareAndSwap(cur, cur+1) {
-			return a.releaser(), nil
+			return nil
 		}
 	}
 }
 
+// Release returns one slot claimed with Acquire.
+func (a *Admission) Release() {
+	a.release()
+}
+
 // park queues the caller behind the limit, or rejects it when there is no room.
-func (a *Admission) park(ctx context.Context, retire <-chan struct{}) (func(), error) {
+func (a *Admission) park(ctx context.Context, retire <-chan struct{}) error {
 	pol := a.policy.Load()
 
 	a.mu.Lock()
@@ -170,14 +185,14 @@ func (a *Admission) park(ctx context.Context, retire <-chan struct{}) (func(), e
 			}
 			if a.active.CompareAndSwap(cur, cur+1) {
 				a.mu.Unlock()
-				return a.releaser(), nil
+				return nil
 			}
 		}
 	}
 	maxPending := pol.MaxPendingRequests()
 	if maxPending <= 0 || a.waiters.Len() >= maxPending {
 		a.mu.Unlock()
-		return nil, ErrOverloaded
+		return ErrOverloaded
 	}
 	w := &waiter{ch: make(chan struct{}, 1)}
 	w.elem = a.waiters.PushBack(w)
@@ -197,15 +212,15 @@ func (a *Admission) park(ctx context.Context, retire <-chan struct{}) (func(), e
 	select {
 	case <-w.ch:
 		if w.state == waiterGranted {
-			return a.releaser(), nil
+			return nil
 		}
-		return nil, ErrRetired
+		return ErrRetired
 	case <-ctx.Done():
-		return nil, a.abandon(w, ctx.Err())
+		return a.abandon(w, ctx.Err())
 	case <-timeout:
-		return nil, a.abandon(w, ErrOverloaded)
+		return a.abandon(w, ErrOverloaded)
 	case <-retire:
-		return nil, a.abandon(w, ErrRetired)
+		return a.abandon(w, ErrRetired)
 	}
 }
 
@@ -228,10 +243,16 @@ func (a *Admission) abandon(w *waiter, err error) error {
 }
 
 // releaser returns a release closure bound to this admission, guarded so a
-// double call from two teardown paths cannot double-decrement.
+// double call from two teardown paths cannot double-decrement. Using an atomic
+// flag inside the closure instead of once.Do(a.release) avoids a second heap
+// allocation for the a.release method value.
 func (a *Admission) releaser() func() {
-	var once sync.Once
-	return func() { once.Do(a.release) }
+	var done atomic.Bool
+	return func() {
+		if done.CompareAndSwap(false, true) {
+			a.Release()
+		}
+	}
 }
 
 // release returns one slot, preferring a direct handoff to the FIFO head over a
