@@ -1,9 +1,7 @@
 # Jul.IA
 
-**Build Anything. Share It on Your Terms.**
-
 <p align="center">
-  <img src="docs/assets/logo.png" alt="Jul.IA logo" width="320" />
+  <img src="docs/assets/logo.png" alt="Jul.IA — Build Anything. Share It on Your Terms." width="320" />
 </p>
 
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](https://github.com/victornife/jul)
