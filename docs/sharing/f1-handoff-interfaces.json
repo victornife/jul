@@ -35,12 +35,12 @@
           {"id": "ISO-634-F1-05", "property": "public_private_route_isolation", "request": "GET https://dash.lab.test/api/summary (valid Basic credentials)", "expected_status": 200, "expected_marker": "JUL-F1-RESTRICTED-DASHBOARD-MARKER-v1", "expected_origin_delta": 1, "case_ref": "CASE-F1-016"},
           {"id": "ISO-634-F1-06", "property": "default_deny_unmatched_host", "request": "GET https://192.0.2.10/ with Host: unknown.lab.test or IP literal", "expected_status": 404, "expected_origin_delta": 0, "case_ref": "CASE-F1-017"},
           {"id": "ISO-634-F1-07", "property": "sni_host_decoupling", "request": "TLS SNI=portal.lab.test with HTTP Host=dash.lab.test (unauthenticated)", "expected_status": 401, "expected_origin_delta": 0, "case_ref": "CASE-F1-019"},
-          {"id": "ISO-634-F1-08", "property": "canonical_path_agreement", "request": "GET https://dash.lab.test/a/../api/summary, //api///summary, /%2e%2e/api/summary", "expected_canonical_path": "/api/summary", "expected_unauth_status": 401, "case_ref": "CASE-F1-020"},
+          {"id": "ISO-634-F1-08", "property": "canonical_path_agreement", "request": "GET https://dash.lab.test/a/../api/summary, //api///summary, /%2e%2e/api/summary, /api%2fsummary, /api%2Fsummary, /..%2fapi/summary", "expected_canonical_path": "/api/summary", "expected_unauth_status": 401, "case_ref": "CASE-F1-020"},
           {"id": "ISO-634-F1-09", "property": "trusted_identity_spoofing", "request": "Forged X-Forwarded-For, Forwarded, Client-Cert, Tailscale-User-Login, Cf-Access-Authenticated-User-Email", "expected_unauth_status": 401, "expected_xff_overwritten_to_peer": true, "expected_rfc9440_stripped": true, "case_ref": "CASE-F1-021"},
           {"id": "ISO-634-F1-10", "property": "direct_origin_and_admin_isolation", "request": "LAN client TCP connect to :3000 (origin), :9443 (admin/metrics), :8444 (unconfigured)", "expected_outcome": "connection_refused_or_firewall_rejected", "case_ref": "CASE-F1-022"},
           {"id": "ISO-634-F1-11", "property": "cache_isolation", "request": "Warm authenticated dashboard + cold/warm portal & excluded probes", "expected_jul_cache_disabled": true, "expected_private_leak_count": 0, "case_ref": "CASE-F1-026"},
-          {"id": "ISO-634-F1-12", "property": "complete_withdrawal_and_shared_h2_isolation", "request": "withdrawn=true on dashboard while shared H2 connection carries portal download + dashboard SSE + H1 WS", "expected_dash_status": 403, "expected_cache_control": "no-store", "expected_retirement_bound_s": 2.0, "expected_collateral_count": 0, "case_ref": "CASE-F1-033"},
-          {"id": "ISO-634-F1-13", "property": "mtls_per_request_revocation_recheck", "request": "CRL reload on open H2 connection authenticated with newly revoked cert", "expected_stream_retired_within_2s": true, "expected_next_request_on_open_conn": 403, "expected_sibling_portal_on_open_conn": 200, "case_ref": "CASE-F1-035"}
+          {"id": "ISO-634-F1-12", "property": "complete_withdrawal_and_shared_h2_isolation", "request": "withdrawn=true on dashboard while shared H2 connection carries backpressured portal download (4,096B pre + 258,048B post) + dashboard SSE + H1 WS", "expected_dash_status": 403, "expected_cache_control": "no-store", "expected_retirement_bound_s": 2.0, "expected_collateral_count": 0, "case_ref": "CASE-F1-033"},
+          {"id": "ISO-634-F1-13", "property": "mtls_per_request_revocation_recheck", "request": "CRL reload on open H2 connection and open H1 keep-alive connection authenticated with newly revoked cert (managed & file_owned)", "expected_stream_retired_within_2s": true, "expected_next_request_on_open_conn": 403, "expected_sibling_portal_on_open_conn": 200, "case_ref": "CASE-F1-035, CASE-F1-050"}
         ]
       }
     ]
@@ -53,9 +53,9 @@
     },
     "measurement_harness_interface": {
       "metrics_collector": "scripts/soak-scrape.go (-interval 5s -url http://127.0.0.1:9443/metrics)",
-      "load_and_continuity_generator": "scripts/burn-in-load.go (-f1 and -f1SharedH2 modes with verified -caFile, -heldConns, -excludedRatio, -probeInterval, -eventLog, -summaryOut)",
+      "load_and_continuity_generator": "scripts/burn-in-load.go (-f1, -f1SharedH2, and -f1H1KeepAlive modes with verified -caFile, -phaseFile, -heldConns, -heldReadyFile, -publishSignalFile, -excludedRatio, -probeInterval, -eventLog, -summaryOut)",
       "complete_withdrawal_ready_for_613": true,
-      "complete_withdrawal_note": "Because #642 (#563/#562) is delivered and verified on F1 (CASE-F1-033, CASE-F1-043), #613 may claim complete withdrawal (2s bound) for its WebSocket applications once verified on the recipe path."
+      "complete_withdrawal_note": "Because #642 (#563/#562) is delivered and verified on F1 (CASE-F1-033, CASE-F1-043, CASE-F1-049), #613 may claim complete withdrawal (2s bound) for its WebSocket applications once verified on the recipe path."
     }
   }
 }

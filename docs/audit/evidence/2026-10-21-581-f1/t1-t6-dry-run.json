@@ -1,10 +1,13 @@
 {
-  "scope_note": "Maintainer/author dry run of spec \u00a714 tasks T1\u2013T6 on Fixture F1 (#581); prepares baseline protocol and friction observations for #585 without substituting for #585's independent fresh-operator trial.",
+  "execution_mode": "automated_surface_rehearsal",
+  "is_human_operator_observation": false,
+  "human_effort_measured": false,
+  "scope_note": "Automated surface rehearsal of spec \u00a714 tasks T1\u2013T6 on Fixture F1 (#581); verifies that GET /api/sharing, plan/apply, and postcondition evaluate expose all required facts. Human effort is explicitly unmeasured in this automated script output; see t1-t6-author-rehearsal.json for the separate observed author dry run. Neither substitutes for #585's independent fresh-operator study.",
   "tasks": [
     {
       "task": "T1",
       "question": "Who can use the dashboard right now?",
-      "surface_used": "GET /api/sharing (serving layer) + Console Routes",
+      "surface_used": "GET /api/sharing (serving layer)",
       "observed_facts": {
         "route_id": "dashboard",
         "urls": [
@@ -39,14 +42,15 @@
       },
       "operator_answer": "Entry 'dashboard' at https://dash.lab.test/ on 192.0.2.10:443 (private_address bind scope). Declared mode='restricted', audience_label='family'. Enforced per request by Jul HTTP Basic (credential='basic') plus Coraza CRS WAF; application permissions apply after login. Limit: private IP/bind scope alone does not establish identity; application sessions and external paths are not tracked by Jul.",
       "completed": true,
-      "assistance": "unaided",
-      "hands_on_seconds": 1,
+      "assistance": "unmeasured_automated_check",
+      "hands_on_seconds": null,
       "waiting_seconds": 0,
       "decisions": 1,
       "handoffs": 0,
       "interventions": 0,
       "errors": 0,
-      "dangerous_failures": 0
+      "dangerous_failures": 0,
+      "automation_wall_ms": 1000
     },
     {
       "task": "T2",
@@ -61,25 +65,26 @@
         },
         "backend_bind": "127.0.0.1:3000 (loopback only)",
         "admin_bind": "127.0.0.1:9443 (loopback only)",
-        "firewall_chain": "JL581_D94ACA"
+        "firewall_chain": "JL581_7A3F07"
       },
       "operator_answer": "Jul enforces Basic authentication and WAF at location 'dashboard' on 192.0.2.10:443; outside_auth flags are all false (no redirect rewrites, request plugins, or CORS preflights bypassing auth). Potential bypass paths\u2014direct origin (127.0.0.1:3000) and admin/metrics (127.0.0.1:9443)\u2014are closed by loopback-only binding and the host firewall (only 443/8443 open on the LAN interface). Same-host processes can reach loopback (trusted boundary \u00a76).",
       "completed": true,
-      "assistance": "unaided",
-      "hands_on_seconds": 1,
+      "assistance": "unmeasured_automated_check",
+      "hands_on_seconds": null,
       "waiting_seconds": 0,
       "decisions": 1,
       "handoffs": 1,
       "interventions": 0,
       "errors": 0,
-      "dangerous_failures": 0
+      "dangerous_failures": 0,
+      "automation_wall_ms": 1000
     },
     {
       "task": "T3",
       "question": "How do we know, and since when?",
       "surface_used": "POST /api/sharing/postcondition/evaluate + client-vantage evidence ledger (\u00a77.1)",
       "observed_facts": {
-        "serving_version": "ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088",
+        "serving_version": "ev1:8363a0d8c4966cc68252e261041c008c:1a69b5a0cb3fac20d8763f3c0155c5c37de07beaaae16abbbaaf1a2d0fd32705",
         "postcondition_result": "candidate_serving",
         "postcondition_candidate": "serving",
         "postcondition_access": "none_expected",
@@ -88,16 +93,17 @@
         ],
         "in_product_evidence_array": []
       },
-      "operator_answer": "Serving generation ev1:71badb681a48699d31a00cc413795a89:e44ef0273de0f7e4d3773f5e2cc0fab50b29850befd93f27adc03aea959ae088 matches the planned candidate and expected access facts (result='candidate_serving'). File contents (dashboard.htpasswd) are listed in external_inputs as not compared by postconditions; actual access is verified by dated client-vantage checks from lab-client-1 (200) and lab-client-2 (401), which become stale on any serving_version or credential-file change.",
+      "operator_answer": "Serving generation ev1:8363a0d8c4966cc68252e261041c008c:1a69b5a0cb3fac20d8763f3c0155c5c37de07beaaae16abbbaaf1a2d0fd32705 matches the planned candidate and expected access facts (result='candidate_serving'). File contents (dashboard.htpasswd) are listed in external_inputs as not compared by postconditions; actual access is verified by dated client-vantage checks from lab-client-1 (200) and lab-client-2 (401), which become stale on any serving_version or credential-file change.",
       "completed": true,
-      "assistance": "unaided",
-      "hands_on_seconds": 1,
+      "assistance": "unmeasured_automated_check",
+      "hands_on_seconds": null,
       "waiting_seconds": 0,
       "decisions": 1,
       "handoffs": 0,
       "interventions": 0,
       "errors": 0,
-      "dangerous_failures": 0
+      "dangerous_failures": 0,
+      "automation_wall_ms": 1000
     },
     {
       "task": "T4",
@@ -112,14 +118,15 @@
       },
       "operator_answer": "Plan listed only portal-home (class='metadata_only', declared_mode_widened=true) with zero delta on dashboard; after apply, portal returned 200 and dashboard remained 401 for excluded client.",
       "completed": true,
-      "assistance": "unaided",
-      "hands_on_seconds": 1,
+      "assistance": "unmeasured_automated_check",
+      "hands_on_seconds": null,
       "waiting_seconds": 0,
       "decisions": 1,
       "handoffs": 0,
       "interventions": 0,
       "errors": 0,
-      "dangerous_failures": 0
+      "dangerous_failures": 0,
+      "automation_wall_ms": 1000
     },
     {
       "task": "T5",
@@ -134,14 +141,15 @@
       },
       "operator_answer": "Withdrew route_id='dashboard' in place via location_set_withdrawn (withdrawn=true) without deleting the route; fresh dashboard requests return 403 no-store, open Jul streams retire within 2s, portal stays 200 OK.",
       "completed": true,
-      "assistance": "unaided",
-      "hands_on_seconds": 1,
+      "assistance": "unmeasured_automated_check",
+      "hands_on_seconds": null,
       "waiting_seconds": 0,
       "decisions": 1,
       "handoffs": 0,
       "interventions": 0,
       "errors": 0,
-      "dangerous_failures": 0
+      "dangerous_failures": 0,
+      "automation_wall_ms": 1000
     },
     {
       "task": "T6",
@@ -155,26 +163,26 @@
       },
       "operator_answer": "Cleared withdrawn=false (classed 'widened', requires_acknowledgement=true); preserved original Basic auth and WAF; confirmed intended user 200 OK and excluded user 401 Unauthorized.",
       "completed": true,
-      "assistance": "unaided",
-      "hands_on_seconds": 1,
+      "assistance": "unmeasured_automated_check",
+      "hands_on_seconds": null,
       "waiting_seconds": 0,
       "decisions": 1,
       "handoffs": 0,
       "interventions": 0,
       "errors": 0,
-      "dangerous_failures": 0
+      "dangerous_failures": 0,
+      "automation_wall_ms": 1000
     }
   ],
   "totals": {
     "tasks_completed": 6,
-    "hands_on_seconds": 6,
-    "waiting_seconds": 0,
-    "decisions": 6,
-    "handoffs": 1,
-    "interventions": 0,
-    "errors": 0,
+    "automation_wall_ms": 6000,
+    "hands_on_seconds": null,
+    "waiting_seconds": null,
+    "human_effort_measured": false,
     "dangerous_failures": 0
   },
+  "author_rehearsal_ref": "t1-t6-author-rehearsal.json",
   "recurring_maintenance_duties": [
     "Renew or rotate TLS leaf/intermediate certificates before expiry (hot-reloaded via SIGHUP or managed Apply).",
     "Maintain dashboard.htpasswd (or mTLS CA/CRL) and explicitly reload Jul after any credential file change.",

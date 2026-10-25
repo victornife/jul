@@ -99,9 +99,16 @@ configuration exists on the host:
 
 ```bash
 for p in /usr/local/bin/jul /etc/jul /var/lib/jul /var/cache/jul /var/log/jul \
-         /etc/systemd/system/jul.service /etc/systemd/system/jul-readonly.service; do
+         /etc/systemd/system/jul.service /etc/systemd/system/jul-readonly.service \
+         /etc/systemd/system/jul-f1-dashboard.service; do
   if [ -e "$p" ]; then
     echo "STOP: existing resource $p found; do not overwrite" >&2
+    exit 1
+  fi
+done
+for u in jul.service jul-readonly.service jul-f1-dashboard.service; do
+  if systemctl is-active --quiet "$u"; then
+    echo "STOP: systemd unit $u is already active" >&2
     exit 1
   fi
 done
@@ -120,14 +127,85 @@ cp -r examples/sharing/f1-standalone/* "$WORKDIR/"
 python3 "$WORKDIR/generate_lab_assets.py" --out "$WORKDIR" --lan-ip 192.0.2.10
 ```
 
-Provision the durable private effective-version key (`#644`,
+Install the full-profile `jul` binary, create the unprivileged `jul` system
+account, stage the generated TLS/htpasswd/portal assets and initial loopback
+configuration (`01-loopback-preview.toml` → `/etc/jul/server.toml`), and
+provision the durable private effective-version key (`#644`,
 [effective-versions.md](../effective-versions.md)) before starting `jul.service`:
 
 ```bash
+sudo install -m0755 ./jul_v2.2.0-dev+52b09adfbccf_linux_arm64_full/jul /usr/local/bin/jul
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin jul
-sudo install -d -o jul -g jul -m0700 /etc/jul /var/lib/jul /var/lib/jul/private /etc/jul/private /var/lib/jul/config-history /var/cache/jul /var/log/jul
+sudo install -d -o jul -g jul -m0700 \
+  /etc/jul /etc/jul/tls /etc/jul/portal /etc/jul/portal/assets \
+  /var/lib/jul /var/lib/jul/private /etc/jul/private /var/lib/jul/config-history \
+  /var/cache/jul /var/log/jul
+
+# Stage TLS chains/CRLs, bcrypt htpasswd, static portal root, and initial loopback config:
+sed -i 's|history_dir = "state/config-history"|history_dir = "/var/lib/jul/config-history"|g' "$WORKDIR"/*.toml
+sudo install -o jul -g jul -m0600 "$WORKDIR"/tls/* /etc/jul/tls/
+sudo install -o jul -g jul -m0600 "$WORKDIR/dashboard.htpasswd" /etc/jul/dashboard.htpasswd
+sudo install -o jul -g jul -m0644 "$WORKDIR/portal/index.html" /etc/jul/portal/index.html
+sudo install -o jul -g jul -m0644 "$WORKDIR/portal/assets/bundle.bin" /etc/jul/portal/assets/bundle.bin
+sudo install -o root -g root -m0755 "$WORKDIR/dashboard_backend.py" /etc/jul/dashboard_backend.py
+sudo install -o jul -g jul -m0600 "$WORKDIR/01-loopback-preview.toml" /etc/jul/server.toml
+
+# Initialize the durable effective-version HMAC key for both managed and file_owned paths:
 sudo -u jul /usr/local/bin/jul version-key init --file /var/lib/jul/private/effective-version.key
 sudo install -o jul -g jul -m0400 /var/lib/jul/private/effective-version.key /etc/jul/private/effective-version.key
+
+# Generate least-privilege admin/operator/viewer/auditor tokens and store admin.token for CLI calls:
+ADMIN_TOK="$(openssl rand -hex 24)"
+OPERATOR_TOK="$(openssl rand -hex 24)"
+VIEWER_TOK="$(openssl rand -hex 24)"
+AUDITOR_TOK="$(openssl rand -hex 24)"
+printf '%s\n' "$ADMIN_TOK" > "$WORKDIR/admin.token"
+chmod 0600 "$WORKDIR/admin.token"
+sudo tee /etc/jul/jul.env >/dev/null <<EOF
+JUL_ADMIN_TOKEN=${ADMIN_TOK}
+JUL_F1_OPERATOR_TOKEN=${OPERATOR_TOK}
+JUL_F1_VIEWER_TOKEN=${VIEWER_TOK}
+JUL_F1_AUDITOR_TOKEN=${AUDITOR_TOK}
+EOF
+sudo chown root:jul /etc/jul/jul.env
+sudo chmod 0640 /etc/jul/jul.env
+
+# Validate and lint the staged configuration before starting services:
+sudo -u jul bash -c 'set -a; source /etc/jul/jul.env; set +a; cd /etc/jul && /usr/local/bin/jul check -config /etc/jul/server.toml && /usr/local/bin/jul lint -config /etc/jul/server.toml'
+
+# Install and start the loopback dashboard backend and Jul systemd units:
+sudo cp deploy/systemd/jul.service deploy/systemd/jul-readonly.service /etc/systemd/system/
+sudo install -d -m0755 /etc/systemd/system/jul.service.d /etc/systemd/system/jul-readonly.service.d
+sudo tee /etc/systemd/system/jul.service.d/f1.conf /etc/systemd/system/jul-readonly.service.d/f1.conf >/dev/null <<'EOF'
+[Service]
+WorkingDirectory=/etc/jul
+EnvironmentFile=/etc/jul/jul.env
+EOF
+sudo tee /etc/systemd/system/jul-f1-dashboard.service >/dev/null <<'EOF'
+[Unit]
+Description=Jul F1 Restricted Dashboard Backend (Loopback Only)
+After=network.target
+
+[Service]
+Type=simple
+User=jul
+Group=jul
+ExecStart=/usr/bin/python3 /etc/jul/dashboard_backend.py --listen 127.0.0.1:3000
+Restart=on-failure
+RestartSec=1s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl start jul-f1-dashboard.service jul.service
+curl -fsS http://127.0.0.1:3000/healthz
+curl -fsS -H "Authorization: Bearer ${ADMIN_TOK}" http://127.0.0.1:9443/api/v1/status | jq '{state, authority: .config_authority, config_state}'
 ```
 
 ---
@@ -149,41 +227,46 @@ becomes reachable on the LAN (`SH-5`). Never bind `0.0.0.0:443` as a shortcut.
 
 ```bash
 export JUL_ENDPOINT="http://127.0.0.1:9443"
+TOKEN_FILE="$WORKDIR/admin.token"
+INTENDED_USER="$(jq -r '.intended_user' "$WORKDIR/.lab-credentials.json")"
+INTENDED_PASS="$(jq -r '.intended_password' "$WORKDIR/.lab-credentials.json")"
+cd "$WORKDIR"
 
 # Step 1: Adopt the initial loopback baseline
-jul apply --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
-  --adopt-external --idempotency-key f1-step1-adopt --json
+BASE_VER="$(jul status --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" --json | jq -r '.serving_version')"
+jul apply --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
+  --adopt-external --base-version "$BASE_VER" --idempotency-key f1-step1-adopt --json
 
 # Step 2: Plan, apply, and verify postcondition for 02-loopback-dashboard-restricted.toml
-BASE_VER="$(jul status --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token --json | jq -r '.persisted_version')"
-jul plan --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+BASE_VER="$(jul status --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" --json | jq -r '.persisted_version')"
+jul plan --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --config 02-loopback-dashboard-restricted.toml --base-version "$BASE_VER" --json > step2-plan.json
 jq '{entries: .sharing.entries, requires_ack: .sharing.requires_acknowledgement}' step2-plan.json
 
-jul apply --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+jul apply --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --config 02-loopback-dashboard-restricted.toml --base-version "$BASE_VER" \
   --idempotency-key f1-step2-restrict --json
-jul postcondition --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+jul postcondition --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --file step2-plan.json --json
 
 # Step 3: Declare portal public on loopback (03-loopback-portal-public.toml)
-BASE_VER="$(jul status --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token --json | jq -r '.persisted_version')"
-jul plan --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+BASE_VER="$(jul status --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" --json | jq -r '.persisted_version')"
+jul plan --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --config 03-loopback-portal-public.toml --base-version "$BASE_VER" --json > step3-plan.json
-jul apply --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+jul apply --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --config 03-loopback-portal-public.toml --base-version "$BASE_VER" \
   --idempotency-key f1-step3-portal-public --json
-jul postcondition --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+jul postcondition --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --file step3-plan.json --json
 
 # Step 4: Move all three blocks to 192.0.2.10:443 in one candidate (jul.toml)
-BASE_VER="$(jul status --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token --json | jq -r '.persisted_version')"
-jul plan --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+BASE_VER="$(jul status --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" --json | jq -r '.persisted_version')"
+jul plan --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --config jul.toml --base-version "$BASE_VER" --json > step4-plan.json
-jul apply --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+jul apply --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --config jul.toml --base-version "$BASE_VER" \
   --idempotency-key f1-step4-lan-move --json
-jul postcondition --endpoint "$JUL_ENDPOINT" --token-file /path/to/admin.token \
+jul postcondition --endpoint "$JUL_ENDPOINT" --token-file "$TOKEN_FILE" \
   --file step4-plan.json --json
 
 # Step 5: Immediately verify from excluded and intended LAN clients
@@ -230,10 +313,10 @@ curl -fsS --cacert tls/root-ca.pem --user "$INTENDED_USER:$INTENDED_PASS" \
 
 Retained as a separately labelled mechanism verification (`spec §9.3`): adding `deny = ["0.0.0.0/0", "::/0"]` to `[servers.locations.auth]` in a complete candidate denies requests at the CIDR stage while preserving `auth.basic` and `proxy_pass`. Never use `location_set_auth` (which replaces auth wholesale and drops `auth.basic`) or the `deny` action (which removes `proxy_pass`). Unlike `withdrawn = true`, `auth.deny` runs **after** redirect rewrites, request plugins, and CORS preflights (flagged by `intent_checks_bypassed`).
 
-### Mutual TLS (`mTLS`) variants (`08-lan-mtls-shared-listener.toml` & `09-lan-mtls-dedicated-listener.toml`)
+### Mutual TLS (`mTLS`) variants (`08` / `09` managed; `12` / `13` `file_owned`)
 
-- **Shared listener (`CFG-F1-08`):** Configures `[servers.tls.client_auth] mode = "request"` on `192.0.2.10:443` and `require_client_cert = true` on `dashboard`. Because `client_auth.mode` is listener-wide, TLS handshakes to `portal.lab.test` also receive a `CertificateRequest` (surfaced as `client_auth_request_mode_shared` in `GET /api/sharing` because browsers holding client certificates may prompt).
-- **Dedicated listener (`CFG-F1-09`):** Keeps `portal` on `192.0.2.10:443` with `client_auth` off and moves `dashboard` (plus a first-declared `default-deny-mtls` block) to `192.0.2.10:8443` with `client_auth.mode = "require"`.
+- **Shared listener (`CFG-F1-08` managed, `CFG-F1-12` `file_owned`):** Configures `[servers.tls.client_auth] mode = "request"` on `192.0.2.10:443` and `require_client_cert = true` on `dashboard`. Because `client_auth.mode` is listener-wide, TLS handshakes to `portal.lab.test` also receive a `CertificateRequest` (surfaced as `client_auth_request_mode_shared` in `GET /api/sharing` because browsers holding client certificates may prompt).
+- **Dedicated listener (`CFG-F1-09` managed, `CFG-F1-13` `file_owned`):** Keeps `portal` on `192.0.2.10:443` with `client_auth` off and moves `dashboard` (plus a first-declared `default-deny-mtls` block) to `192.0.2.10:8443` with `client_auth.mode = "require"`.
 - **CRL revocation on reload (`#642`, `#563`):** Updating `crl_file` on disk has no effect until Jul reloads. On explicit reload, Jul (a) classifies newly added revoked serials as `narrowed` at publish and retires active streams on `dashboard` within `<= 2s`, (b) re-evaluates `r.TLS` against the live `clientAuthBundle` on every request so the very next request to `dash.lab.test` over an already-open HTTP/1.1 or HTTP/2 connection is rejected with `403 Forbidden` on that stream without closing sibling `portal` streams on the same connection, and (c) rejects new and resumed TLS handshakes presenting the revoked certificate.
 
 ---
@@ -260,9 +343,19 @@ Teardown removes only task-owned resources while preserving any unrelated host o
 # If running the automated F1 lab harness, teardown runs automatically in a finally block.
 # For manual service/network cleanup of the F1 lab:
 sudo systemctl stop jul.service jul-readonly.service jul-f1-dashboard.service 2>/dev/null || true
-sudo rm -f /etc/systemd/system/jul.service /etc/systemd/system/jul-readonly.service /etc/systemd/system/jul-f1-dashboard.service
+sudo rm -rf /etc/systemd/system/jul.service /etc/systemd/system/jul-readonly.service /etc/systemd/system/jul-f1-dashboard.service \
+            /etc/systemd/system/jul.service.d /etc/systemd/system/jul-readonly.service.d
 sudo systemctl daemon-reload
-sudo systemctl reset-failed
-sudo rm -rf /usr/local/bin/jul /etc/jul /var/lib/jul /var/cache/jul /var/log/jul
+sudo systemctl reset-failed jul.service jul-readonly.service jul-f1-dashboard.service 2>/dev/null || true
+sudo rm -rf /usr/local/bin/jul /etc/jul /var/lib/jul /var/cache/jul /var/log/jul "$WORKDIR"
 sudo userdel jul 2>/dev/null || true
+
+# Verify clean post-teardown state:
+for p in /usr/local/bin/jul /etc/jul /var/lib/jul /var/cache/jul /var/log/jul \
+         /etc/systemd/system/jul.service /etc/systemd/system/jul-readonly.service \
+         /etc/systemd/system/jul-f1-dashboard.service \
+         /etc/systemd/system/jul.service.d /etc/systemd/system/jul-readonly.service.d; do
+  [ ! -e "$p" ] || { echo "FAIL: leftover path $p" >&2; exit 1; }
+done
+! getent passwd jul >/dev/null || { echo "FAIL: leftover user jul" >&2; exit 1; }
 ```

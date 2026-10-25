@@ -128,19 +128,30 @@ def build_ws_frame(opcode: int, payload: bytes = b"") -> bytes:
 
 
 def read_ws_frame(conn: socket.socket) -> tuple[int, bytes] | None:
-    def recv_exact(n: int) -> bytes | None:
+    def recv_exact(n: int, idle_ok_on_first_byte: bool = False) -> bytes | None:
         buf = bytearray()
+        frame_deadline: float | None = None
         while len(buf) < n:
             try:
                 chunk = conn.recv(n - len(buf))
+            except TimeoutError:
+                if len(buf) == 0 and idle_ok_on_first_byte:
+                    continue
+                if frame_deadline is None:
+                    frame_deadline = time.monotonic() + 5.0
+                if time.monotonic() < frame_deadline:
+                    continue
+                return None
             except OSError:
                 return None
             if not chunk:
                 return None
             buf.extend(chunk)
+            if frame_deadline is None:
+                frame_deadline = time.monotonic() + 5.0
         return bytes(buf)
 
-    first2 = recv_exact(2)
+    first2 = recv_exact(2, idle_ok_on_first_byte=True)
     if first2 is None:
         return None
     opcode = first2[0] & 0x0F

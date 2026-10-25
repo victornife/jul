@@ -701,6 +701,8 @@ jobs:
         run: python scripts/test_strip_moved_lines.py
       - name: run conformance reporter unit tests
         run: python scripts/conformance/test_run.py
+      - name: run F1 sharing lab and validator unit tests (#581)
+        run: python scripts/test_sharing_f1_lab.py
 
   config-check:
     name: config-check
@@ -713,6 +715,8 @@ jobs:
           cache: true
       - name: validate every shipped config loads (JUL-AUD-002)
         run: FULL_TAGS="${{ env.FULL_TAGS }}" scripts/config-check.sh
+      - name: run F1 load generator and oracle unit tests (#581)
+        run: go test -race -count=1 scripts/burn-in-load.go scripts/burn-in-load_test.go
 
   full-tags-sync:
     name: full-tags-sync
