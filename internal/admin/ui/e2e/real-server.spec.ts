@@ -40,9 +40,33 @@ import {
   ValidationResultSchema,
   PendingRestartStatusSchema,
   IdentitySchema,
-  CachePurgePreviewResponseSchema,
-  CachePurgeResponseSchema,
 } from "../src/api/client.ts";
+
+const CachePurgePreviewResponseSchema = z.object({
+  api_version: z.string(),
+  cache_enabled: z.boolean(),
+  tag_ingestion_enabled: z.boolean(),
+  selector: z.object({
+    kind: z.string(),
+    host: z.string().optional(),
+    prefix: z.string().optional(),
+  }),
+  selector_digest: z.string(),
+  preview_token: z.string(),
+  matched_resources: z.number().int().nonnegative(),
+  matched_representations: z.number().int().nonnegative(),
+});
+
+const CachePurgeResponseSchema = z.object({
+  api_version: z.string(),
+  operation_id: z.string(),
+  state: z.string(),
+  terminal: z.boolean(),
+  outcome: z.string(),
+  invalidation_effective: z.string(),
+  invalidated_resources: z.number().int().nonnegative(),
+  invalidated_representations: z.number().int().nonnegative(),
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

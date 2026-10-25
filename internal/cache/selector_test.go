@@ -506,11 +506,27 @@ func TestRedactedSummaryAndDeriveRouteCutoverSelectors(t *testing.T) {
 		{Kind: SelectorGlob, RouteID: routeID, Pattern: "/articles/*"},
 		{Kind: SelectorTag, RouteID: routeID, Tags: []string{"article:42"}},
 		{Kind: SelectorHost, RouteID: routeID},
+		{Kind: SelectorExactURL, URL: "https://portal.example.com", Host: "portal.example.com"},
+		{Kind: SelectorKey, Key: "GET\nportal.example.com\n/articles/42?secret=1"},
 	} {
-		if _, err := ParseSelector(s, beforeCfg); err != nil {
-			t.Errorf("ParseSelector(%+v) with RouteID failed: %v", s, err)
+		norm, err := ParseSelector(s, beforeCfg)
+		if err != nil {
+			t.Errorf("ParseSelector(%+v) failed: %v", s, err)
+		} else {
+			_ = norm.RedactedSummary()
 		}
 	}
+	for _, badURL := range []Selector{
+		{Kind: SelectorExactURL, URL: "https://portal.example.com?q=1"},
+		{Kind: SelectorExactURL, URL: "https://portal.example.com/a", Host: "other.example.com"},
+		{Kind: SelectorExactURL, URL: "https://portal.example.com/a", Host: "bad host"},
+		{Kind: SelectorExactURL, URL: "https://" + strings.Repeat("a", MaxSelectorURIBytes+MaxSelectorHostBytes+20)},
+	} {
+		if _, err := ParseSelector(badURL, beforeCfg); err == nil {
+			t.Errorf("expected ParseSelector(%+v) to fail", badURL)
+		}
+	}
+	_ = DeriveRouteCutoverSelectors(nil, upAfter)
 }
 
 func TestTagValidationAndHeaderExtraction(t *testing.T) {
