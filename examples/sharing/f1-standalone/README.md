@@ -34,6 +34,9 @@ record, see:
 | `09-lan-mtls-dedicated-listener.toml` | `CFG-F1-09` | `managed` | `192.0.2.10:443`, `192.0.2.10:8443` | mTLS variant on dedicated listener (`:443` portal without cert prompt; `:8443` `client_auth.mode = "require"` for `dashboard`) |
 | `10-file-owned-lan.toml` | `CFG-F1-10` | `file_owned` | `192.0.2.10:443` | Read-only `file_owned` authority equivalent of `jul.toml` (`deploy/systemd/jul-readonly.service`) |
 | `11-file-owned-withdrawn-gate.toml` | `CFG-F1-11` | `file_owned` | `192.0.2.10:443` | Read-only `file_owned` complete withdrawal via `withdrawn = true` + `SIGHUP` |
+| `12-file-owned-mtls-shared-listener.toml` | `CFG-F1-12` | `file_owned` | `192.0.2.10:443` | Read-only `file_owned` mTLS variant on shared listener (`client_auth.mode = "request"` + `require_client_cert = true` on `dashboard`) |
+| `13-file-owned-mtls-dedicated-listener.toml` | `CFG-F1-13` | `file_owned` | `192.0.2.10:443`, `192.0.2.10:8443` | Read-only `file_owned` mTLS variant on dedicated `:8443` listener (`client_auth.mode = "require"`) |
+| `14-lan-managed-no-opaque-noop.toml` | `CFG-F1-14` | `managed` | `192.0.2.10:443` | Opaque-input-free (`auth.allow`) managed candidate for deterministic `no_change` audience-delta verification (`§9.5`) |
 
 ## Quick local validation (no Go or Docker required for a downloaded binary)
 

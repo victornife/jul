@@ -12,10 +12,12 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -32,8 +34,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/net/http2"
 )
 
 var seenErrors sync.Map
@@ -55,97 +55,117 @@ func main() {
 
 func runLoad() int {
 	var (
-		duration     = flag.Duration("duration", 5*time.Minute, "How long to run")
-		workers      = flag.Int("workers", 50, "Number of concurrent workers")
-		baseURL      = flag.String("base", "http://localhost:8080", "Jul server base URL")
-		tlsBase      = flag.String("tls", "https://localhost:8443", "Jul TLS server base URL")
-		healthURL    = flag.String("health", "http://127.0.0.1:8082/healthz", "Health endpoint")
-		adminURL     = flag.String("admin", "http://127.0.0.1:9090", "Admin / pprof base URL")
-		pprofDir     = flag.String("out", "burn-in-artifacts", "Directory for pprof snapshots")
-		authUser     = flag.String("authUser", "soakuser", "HTTP Basic auth username")
-		authPassword = flag.String("authPassword", "soakpass", "HTTP Basic auth password")
-		authRatio    = flag.Int("authRatio", 100, "Percentage of requests that include auth headers (0-100)")
-		compress     = flag.Bool("compress", false, "Send Accept-Encoding: gzip, br, zstd for compression soak")
-		cache        = flag.Bool("cache", false, "Exercise cache hit/miss/evict/revalidate patterns for cache soak")
-		ratelimit    = flag.Bool("ratelimit", false, "Exercise rate limiter: expect 429s on /api/, baseline 200s on /baseline/")
-		waf          = flag.Bool("waf", false, "Exercise WAF: mix clean/malicious traffic (expect 200s and 403s)")
-		full         = flag.Bool("full", false, "Phase 2A: exercise ALL features simultaneously (cache+ratelimit+waf+auth+compress)")
-		clientCert   = flag.String("clientCert", "testdata/tls/client.crt", "Client certificate for mTLS")
-		clientKey    = flag.String("clientKey", "testdata/tls/client.key", "Client key for mTLS")
-		phase2a      = flag.Bool("phase2a", false, "Phase 2A HTTP route mix: proxy, static, discovery, WASM, and TLS paths (not zero-config, importer, or gRPC)")
-		http3        = flag.Bool("http3", false, "HTTP/3 isolated soak: exercise / and /health on HTTPS (no backend)")
-		current      = flag.Bool("current", false, "burn-in-current.toml: exercise bounded/unlimited/unix/discovered/secure/predicates/plugin routes (JUL-AUD-004)")
-		slowClient   = flag.Bool("slow-client", false, "Send a byte-paced (slow) POST body to /bounded/, exercising slow-client handling")
-		slowUpstream = flag.Bool("slow-upstream", false, "Request /bounded/slow?ms=N (a deliberately slow backend response), exercising pending-timeout/circuit accounting")
-		fault        = flag.Bool("fault", false, "Request a weighted mix of failure modes against a bounded backend (5xx storms, slow responses, mid-body TCP resets, malformed framing) plus a scheduled backend kill/restore cycle, exercising retry/circuit behavior")
-		backendCtls  = flag.String("backendControlAddrs", "http://127.0.0.1:8081,http://127.0.0.1:8082", "Comma-separated backend addresses to POST /control/kill against directly (bypassing the proxy) for -fault's scheduled kill/restore cycle")
-		killEvery    = flag.Duration("killEvery", 20*time.Second, "Interval between -fault's scheduled backend kill cycles")
-		killFor      = flag.Duration("killFor", 5*time.Second, "How long each -fault kill cycle refuses requests on the targeted backend before it auto-restores")
-		rbac         = flag.Bool("rbac", false, "Run a concurrent RBAC allow/deny probe against -admin using burn-in-current.toml's viewer/operator/admin principals")
-		applyChurn   = flag.Bool("apply-churn", false, "Run a concurrent config-apply churn against -admin, resubmitting -applyConfig as a semantic no-op reload")
-		applyConfig  = flag.String("applyConfig", "burn-in-current.toml", "Config file to resubmit for -apply-churn (read from local disk, same host as the server)")
-		applyEvery   = flag.Duration("applyEvery", 10*time.Second, "Interval between -apply-churn attempts")
-		adminToken   = flag.String("adminToken", "burnintoken", "Admin bearer token for pprof snapshots (and -apply-churn when RBAC is disabled)")
-		viewerToken  = flag.String("viewerToken", "burnin-viewer-token-please-rotate-me-0001", "RBAC viewer-role token for -rbac/-apply-churn")
-		operatorTok  = flag.String("operatorToken", "burnin-operator-token-please-rotate-me-0001", "RBAC operator-role token for -rbac/-apply-churn")
-		adminRoleTok = flag.String("adminRoleToken", "burnin-admin-token-please-rotate-me-00001", "RBAC admin-role token for -rbac/-apply-churn")
-		f1Mode       = flag.Bool("f1", false, "Fixture F1 (#581, spec §13): verified-TLS 70/10/20 route mix, optional excluded-identity traffic, held SSE streams, and continuity probes")
-		caFile       = flag.String("caFile", "", "Trusted Root CA PEM file for verified TLS in -f1 mode")
-		portalHost   = flag.String("portalHost", "portal.lab.test", "Portal Host header and SNI in -f1 mode")
-		dashHost     = flag.String("dashHost", "dash.lab.test", "Dashboard Host header and SNI in -f1 mode")
-		excludedPct  = flag.Int("excludedRatio", 0, "Percentage of requests sent as excluded-identity dashboard requests in -f1 mode (e.g. 10 for W2/W3)")
-		heldConns    = flag.Int("heldConns", 0, "Number of held long-lived dashboard SSE connections in -f1 mode (e.g. 20 for W2/W3)")
-		probeEvery   = flag.Duration("probeInterval", 0, "Fixed-cadence continuity probe interval in -f1 mode (e.g. 1s for W3/W4)")
-		probeDash    = flag.Bool("probeDash", false, "Also probe dashboard at -probeInterval (for W4 outage/recovery timing)")
-		allowOutage  = flag.Bool("allowDashOutage", false, "Allow 502/503 on dashboard during W4 scheduled backend outage window")
-		paceInterval = flag.Duration("pace", 25*time.Millisecond, "Per-worker request pacing in -f1 mode")
-		eventLogPath = flag.String("eventLog", "", "Compact JSONL event log output path in -f1 mode (spec §13)")
-		summaryPath  = flag.String("summaryOut", "", "JSON summary output path in -f1 mode")
-		f1SharedH2   = flag.Bool("f1SharedH2", false, "Verify shared single-socket HTTP/2 connection coalescing and H1 WebSocket retirement (#642, W3)")
-		readyFile    = flag.String("readyFile", "", "Path written once shared H2 streams and H1 WebSockets are active in -f1SharedH2 mode")
-		wsEchoClose  = flag.Bool("wsEchoClose", true, "Reply with masked RFC 6455 Close frame when server initiates Close in -f1SharedH2 mode")
-		withWS       = flag.Bool("withWS", true, "Also open an HTTP/1.1 101 WebSocket session alongside the shared HTTP/2 connection in -f1SharedH2 mode")
+		duration        = flag.Duration("duration", 5*time.Minute, "How long to run")
+		workers         = flag.Int("workers", 50, "Number of concurrent workers")
+		baseURL         = flag.String("base", "http://localhost:8080", "Jul server base URL")
+		tlsBase         = flag.String("tls", "https://localhost:8443", "Jul TLS server base URL")
+		healthURL       = flag.String("health", "http://127.0.0.1:8082/healthz", "Health endpoint")
+		adminURL        = flag.String("admin", "http://127.0.0.1:9090", "Admin / pprof base URL")
+		pprofDir        = flag.String("out", "burn-in-artifacts", "Directory for pprof snapshots")
+		authUser        = flag.String("authUser", "soakuser", "HTTP Basic auth username")
+		authPassword    = flag.String("authPassword", "soakpass", "HTTP Basic auth password")
+		authRatio       = flag.Int("authRatio", 100, "Percentage of requests that include auth headers (0-100)")
+		compress        = flag.Bool("compress", false, "Send Accept-Encoding: gzip, br, zstd for compression soak")
+		cache           = flag.Bool("cache", false, "Exercise cache hit/miss/evict/revalidate patterns for cache soak")
+		ratelimit       = flag.Bool("ratelimit", false, "Exercise rate limiter: expect 429s on /api/, baseline 200s on /baseline/")
+		waf             = flag.Bool("waf", false, "Exercise WAF: mix clean/malicious traffic (expect 200s and 403s)")
+		full            = flag.Bool("full", false, "Phase 2A: exercise ALL features simultaneously (cache+ratelimit+waf+auth+compress)")
+		clientCert      = flag.String("clientCert", "testdata/tls/client.crt", "Client certificate for mTLS")
+		clientKey       = flag.String("clientKey", "testdata/tls/client.key", "Client key for mTLS")
+		phase2a         = flag.Bool("phase2a", false, "Phase 2A HTTP route mix: proxy, static, discovery, WASM, and TLS paths (not zero-config, importer, or gRPC)")
+		http3           = flag.Bool("http3", false, "HTTP/3 isolated soak: exercise / and /health on HTTPS (no backend)")
+		current         = flag.Bool("current", false, "burn-in-current.toml: exercise bounded/unlimited/unix/discovered/secure/predicates/plugin routes (JUL-AUD-004)")
+		slowClient      = flag.Bool("slow-client", false, "Send a byte-paced (slow) POST body to /bounded/, exercising slow-client handling")
+		slowUpstream    = flag.Bool("slow-upstream", false, "Request /bounded/slow?ms=N (a deliberately slow backend response), exercising pending-timeout/circuit accounting")
+		fault           = flag.Bool("fault", false, "Request a weighted mix of failure modes against a bounded backend (5xx storms, slow responses, mid-body TCP resets, malformed framing) plus a scheduled backend kill/restore cycle, exercising retry/circuit behavior")
+		backendCtls     = flag.String("backendControlAddrs", "http://127.0.0.1:8081,http://127.0.0.1:8082", "Comma-separated backend addresses to POST /control/kill against directly (bypassing the proxy) for -fault's scheduled kill/restore cycle")
+		killEvery       = flag.Duration("killEvery", 20*time.Second, "Interval between -fault's scheduled backend kill cycles")
+		killFor         = flag.Duration("killFor", 5*time.Second, "How long each -fault kill cycle refuses requests on the targeted backend before it auto-restores")
+		rbac            = flag.Bool("rbac", false, "Run a concurrent RBAC allow/deny probe against -admin using burn-in-current.toml's viewer/operator/admin principals")
+		applyChurn      = flag.Bool("apply-churn", false, "Run a concurrent config-apply churn against -admin, resubmitting -applyConfig as a semantic no-op reload")
+		applyConfig     = flag.String("applyConfig", "burn-in-current.toml", "Config file to resubmit for -apply-churn (read from local disk, same host as the server)")
+		applyEvery      = flag.Duration("applyEvery", 10*time.Second, "Interval between -apply-churn attempts")
+		adminToken      = flag.String("adminToken", "burnintoken", "Admin bearer token for pprof snapshots (and -apply-churn when RBAC is disabled)")
+		viewerToken     = flag.String("viewerToken", "burnin-viewer-token-please-rotate-me-0001", "RBAC viewer-role token for -rbac/-apply-churn")
+		operatorTok     = flag.String("operatorToken", "burnin-operator-token-please-rotate-me-0001", "RBAC operator-role token for -rbac/-apply-churn")
+		adminRoleTok    = flag.String("adminRoleToken", "burnin-admin-token-please-rotate-me-00001", "RBAC admin-role token for -rbac/-apply-churn")
+		f1Mode          = flag.Bool("f1", false, "Fixture F1 (#581, spec §13): verified-TLS 70/10/20 route mix, optional excluded-identity traffic, held SSE streams, and continuity probes")
+		caFile          = flag.String("caFile", "", "Trusted Root CA PEM file for verified TLS in -f1 mode")
+		portalHost      = flag.String("portalHost", "portal.lab.test", "Portal Host header and SNI in -f1 mode")
+		dashHost        = flag.String("dashHost", "dash.lab.test", "Dashboard Host header and SNI in -f1 mode")
+		excludedPct     = flag.Int("excludedRatio", 0, "Percentage of requests sent as excluded-identity dashboard requests in -f1 mode (e.g. 10 for W2/W3)")
+		heldConns       = flag.Int("heldConns", 0, "Number of held long-lived dashboard SSE connections in -f1 mode (e.g. 20 for W2/W3)")
+		heldReadyFile   = flag.String("heldReadyFile", "", "Path written once all -heldConns SSE streams are established in -f1 mode")
+		probeEvery      = flag.Duration("probeInterval", 0, "Fixed-cadence continuity probe interval in -f1 mode (e.g. 1s for W3/W4)")
+		probeDash       = flag.Bool("probeDash", false, "Also probe dashboard at -probeInterval (for W4 outage/recovery timing)")
+		allowOutage     = flag.Bool("allowDashOutage", false, "Allow 502/503 on dashboard during W4 scheduled backend outage window")
+		phaseFile       = flag.String("phaseFile", "", "Path to dynamic phase file (healthy|transitioning|withdrawn|outage) for phase-aware F1 dashboard oracle")
+		initialPhase    = flag.String("initialPhase", "", "Initial F1 oracle phase (healthy|transitioning|withdrawn|outage)")
+		expAssetBytes   = flag.Int("expectedAssetBytes", 262144, "Expected byte length for /assets/bundle.bin in -f1 and -f1SharedH2 modes")
+		expAssetSHA256  = flag.String("expectedAssetSHA256", "", "Optional expected hex SHA-256 for /assets/bundle.bin")
+		paceInterval    = flag.Duration("pace", 25*time.Millisecond, "Per-worker request pacing in -f1 mode")
+		eventLogPath    = flag.String("eventLog", "", "Compact JSONL event log output path in -f1 mode (spec §13)")
+		summaryPath     = flag.String("summaryOut", "", "JSON summary output path in -f1 mode")
+		f1SharedH2      = flag.Bool("f1SharedH2", false, "Verify shared single-socket HTTP/2 connection coalescing and H1 WebSocket retirement (#642, W3)")
+		f1H1KeepAlive   = flag.Bool("f1H1KeepAlive", false, "Verify HTTP/1.1 keep-alive connection per-request revocation and H1 SSE retirement (#642, #563)")
+		readyFile       = flag.String("readyFile", "", "Path written once shared H2 streams and H1 WebSockets are active in -f1SharedH2 mode")
+		publishSigFile  = flag.String("publishSignalFile", "", "Optional file written immediately before Publish to enforce Publish-relative retirement bound")
+		retireBound     = flag.Duration("retirementBound", 2500*time.Millisecond, "Client-side Publish-to-close retirement bound when -publishSignalFile is set")
+		expPostDashCode = flag.Int("expectedPostDashStatus", http.StatusForbidden, "Expected post-change dashboard status on open connection (403 or 401)")
+		wsEchoClose     = flag.Bool("wsEchoClose", true, "Reply with masked RFC 6455 Close frame when server initiates Close in -f1SharedH2 mode")
+		withWS          = flag.Bool("withWS", true, "Also open an HTTP/1.1 101 WebSocket session alongside the shared HTTP/2 connection in -f1SharedH2 mode")
 	)
 	flag.Parse()
 
-	if *f1SharedH2 {
+	if *f1SharedH2 || *f1H1KeepAlive {
 		return runF1SharedH2(f1SharedH2Options{
-			TLSBase:      *tlsBase,
-			CAFile:       *caFile,
-			ClientCert:   *clientCert,
-			ClientKey:    *clientKey,
-			PortalHost:   *portalHost,
-			DashHost:     *dashHost,
-			AuthUser:     *authUser,
-			AuthPassword: *authPassword,
-			Pace:         *paceInterval,
-			ReadyFile:    *readyFile,
-			WithWS:       *withWS,
-			WSEchoClose:  *wsEchoClose,
-			EventLogPath: *eventLogPath,
-			SummaryPath:  *summaryPath,
-			Timeout:      *duration,
+			TLSBase:                *tlsBase,
+			CAFile:                 *caFile,
+			ClientCert:             *clientCert,
+			ClientKey:              *clientKey,
+			PortalHost:             *portalHost,
+			DashHost:               *dashHost,
+			AuthUser:               *authUser,
+			AuthPassword:           *authPassword,
+			Pace:                   *paceInterval,
+			ReadyFile:              *readyFile,
+			PublishSignalFile:      *publishSigFile,
+			RetirementBound:        *retireBound,
+			ExpectedAssetBytes:     *expAssetBytes,
+			ExpectedAssetSHA256:    *expAssetSHA256,
+			ExpectedPostDashStatus: *expPostDashCode,
+			HTTP1KeepAlive:         *f1H1KeepAlive,
+			WithWS:                 *withWS,
+			WSEchoClose:            *wsEchoClose,
+			EventLogPath:           *eventLogPath,
+			SummaryPath:            *summaryPath,
+			Timeout:                *duration,
 		})
 	}
 
 	if *f1Mode {
 		return runF1Mode(f1Options{
-			Duration:     *duration,
-			Workers:      *workers,
-			TLSBase:      *tlsBase,
-			CAFile:       *caFile,
-			PortalHost:   *portalHost,
-			DashHost:     *dashHost,
-			AuthUser:     *authUser,
-			AuthPassword: *authPassword,
-			ExcludedPct:  *excludedPct,
-			HeldConns:    *heldConns,
-			ProbeEvery:   *probeEvery,
-			ProbeDash:    *probeDash,
-			AllowOutage:  *allowOutage,
-			Pace:         *paceInterval,
-			EventLogPath: *eventLogPath,
-			SummaryPath:  *summaryPath,
+			Duration:            *duration,
+			Workers:             *workers,
+			TLSBase:             *tlsBase,
+			CAFile:              *caFile,
+			PortalHost:          *portalHost,
+			DashHost:            *dashHost,
+			AuthUser:            *authUser,
+			AuthPassword:        *authPassword,
+			ExcludedPct:         *excludedPct,
+			HeldConns:           *heldConns,
+			HeldReadyFile:       *heldReadyFile,
+			ProbeEvery:          *probeEvery,
+			ProbeDash:           *probeDash,
+			AllowOutage:         *allowOutage,
+			PhaseFile:           *phaseFile,
+			InitialPhase:        *initialPhase,
+			ExpectedAssetBytes:  *expAssetBytes,
+			ExpectedAssetSHA256: *expAssetSHA256,
+			Pace:                *paceInterval,
+			EventLogPath:        *eventLogPath,
+			SummaryPath:         *summaryPath,
 		})
 	}
 
@@ -1000,52 +1020,211 @@ const (
 )
 
 type f1Options struct {
-	Duration     time.Duration
-	Workers      int
-	TLSBase      string
-	CAFile       string
-	PortalHost   string
-	DashHost     string
-	AuthUser     string
-	AuthPassword string
-	ExcludedPct  int
-	HeldConns    int
-	ProbeEvery   time.Duration
-	ProbeDash    bool
-	AllowOutage  bool
-	Pace         time.Duration
-	EventLogPath string
-	SummaryPath  string
+	Duration            time.Duration
+	Workers             int
+	TLSBase             string
+	CAFile              string
+	PortalHost          string
+	DashHost            string
+	AuthUser            string
+	AuthPassword        string
+	ExcludedPct         int
+	HeldConns           int
+	HeldReadyFile       string
+	ProbeEvery          time.Duration
+	ProbeDash           bool
+	AllowOutage         bool
+	PhaseFile           string
+	InitialPhase        string
+	ExpectedAssetBytes  int
+	ExpectedAssetSHA256 string
+	Pace                time.Duration
+	EventLogPath        string
+	SummaryPath         string
+}
+
+type f1ClassStats struct {
+	Count        int64   `json:"count"`
+	Status2xx    int64   `json:"status_2xx"`
+	Status401    int64   `json:"status_401"`
+	Status403    int64   `json:"status_403"`
+	Status429    int64   `json:"status_429"`
+	Status5xx    int64   `json:"status_5xx"`
+	TTFBP50MS    int64   `json:"ttfb_p50_ms"`
+	TTFBP95MS    int64   `json:"ttfb_p95_ms"`
+	TTFBP99MS    int64   `json:"ttfb_p99_ms"`
+	LatencyMinMS int64   `json:"latency_min_ms"`
+	LatencyP50MS int64   `json:"latency_p50_ms"`
+	LatencyP95MS int64   `json:"latency_p95_ms"`
+	LatencyP99MS int64   `json:"latency_p99_ms"`
+	LatencyMaxMS int64   `json:"latency_max_ms"`
+	LatencyAvgMS float64 `json:"latency_avg_ms"`
+}
+
+type f1PhaseStats struct {
+	Count            int64 `json:"count"`
+	DashAuth200      int64 `json:"dash_auth_200"`
+	DashAuth403      int64 `json:"dash_auth_403"`
+	DashAuth5xx      int64 `json:"dash_auth_5xx"`
+	OracleViolations int64 `json:"oracle_violations"`
 }
 
 type f1Summary struct {
-	DurationMS        int64            `json:"duration_ms"`
-	Workers           int              `json:"workers"`
-	TotalRequests     int64            `json:"total_requests"`
-	PortalHTMLCount   int64            `json:"portal_html_count"`
-	PortalAssetCount  int64            `json:"portal_asset_count"`
-	DashAuthCount     int64            `json:"dash_auth_count"`
-	DashExcludedCount int64            `json:"dash_excluded_count"`
-	Status2xx         int64            `json:"status_2xx"`
-	Status401         int64            `json:"status_401"`
-	Status403         int64            `json:"status_403"`
-	Status429         int64            `json:"status_429"`
-	Status5xx         int64            `json:"status_5xx"`
-	TransportErrors   int64            `json:"transport_errors"`
-	OracleViolations  int64            `json:"oracle_violations"`
-	Protocols         map[string]int64 `json:"protocols"`
-	HeldOpened        int64            `json:"held_opened"`
-	HeldClosed        int64            `json:"held_closed"`
-	ProbePortalOK     int64            `json:"probe_portal_ok"`
-	ProbePortalFail   int64            `json:"probe_portal_fail"`
-	ProbeDashOK       int64            `json:"probe_dash_ok"`
-	ProbeDashFail     int64            `json:"probe_dash_fail"`
-	LatencyMinMS      int64            `json:"latency_min_ms"`
-	LatencyP50MS      int64            `json:"latency_p50_ms"`
-	LatencyP95MS      int64            `json:"latency_p95_ms"`
-	LatencyP99MS      int64            `json:"latency_p99_ms"`
-	LatencyMaxMS      int64            `json:"latency_max_ms"`
-	LatencyAvgMS      float64          `json:"latency_avg_ms"`
+	DurationMS        int64                    `json:"duration_ms"`
+	Workers           int                      `json:"workers"`
+	TotalRequests     int64                    `json:"total_requests"`
+	PortalHTMLCount   int64                    `json:"portal_html_count"`
+	PortalAssetCount  int64                    `json:"portal_asset_count"`
+	DashAuthCount     int64                    `json:"dash_auth_count"`
+	DashExcludedCount int64                    `json:"dash_excluded_count"`
+	Status2xx         int64                    `json:"status_2xx"`
+	Status401         int64                    `json:"status_401"`
+	Status403         int64                    `json:"status_403"`
+	Status429         int64                    `json:"status_429"`
+	Status5xx         int64                    `json:"status_5xx"`
+	TransportErrors   int64                    `json:"transport_errors"`
+	OracleViolations  int64                    `json:"oracle_violations"`
+	Protocols         map[string]int64         `json:"protocols"`
+	HeldOpened        int64                    `json:"held_opened"`
+	HeldClosed        int64                    `json:"held_closed"`
+	ProbePortalOK     int64                    `json:"probe_portal_ok"`
+	ProbePortalFail   int64                    `json:"probe_portal_fail"`
+	ProbeDashOK       int64                    `json:"probe_dash_ok"`
+	ProbeDashFail     int64                    `json:"probe_dash_fail"`
+	TTFBMinMS         int64                    `json:"ttfb_min_ms"`
+	TTFBP50MS         int64                    `json:"ttfb_p50_ms"`
+	TTFBP95MS         int64                    `json:"ttfb_p95_ms"`
+	TTFBP99MS         int64                    `json:"ttfb_p99_ms"`
+	TTFBMaxMS         int64                    `json:"ttfb_max_ms"`
+	TTFBAvgMS         float64                  `json:"ttfb_avg_ms"`
+	LatencyMinMS      int64                    `json:"latency_min_ms"`
+	LatencyP50MS      int64                    `json:"latency_p50_ms"`
+	LatencyP95MS      int64                    `json:"latency_p95_ms"`
+	LatencyP99MS      int64                    `json:"latency_p99_ms"`
+	LatencyMaxMS      int64                    `json:"latency_max_ms"`
+	LatencyAvgMS      float64                  `json:"latency_avg_ms"`
+	ByClass           map[string]f1ClassStats  `json:"by_class"`
+	ByPhase           map[string]*f1PhaseStats `json:"by_phase"`
+}
+
+func readBoundedF1Body(r io.Reader, maxBytes int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > maxBytes {
+		return nil, fmt.Errorf("response body exceeded limit %d", maxBytes)
+	}
+	return b, nil
+}
+
+func currentF1Phase(opts f1Options) string {
+	if opts.PhaseFile != "" {
+		if raw, err := os.ReadFile(opts.PhaseFile); err == nil {
+			var obj struct {
+				Phase string `json:"phase"`
+			}
+			trimmed := strings.TrimSpace(string(raw))
+			if strings.HasPrefix(trimmed, "{") && json.Unmarshal([]byte(trimmed), &obj) == nil && obj.Phase != "" {
+				return obj.Phase
+			}
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	if opts.InitialPhase != "" {
+		return opts.InitialPhase
+	}
+	if opts.AllowOutage {
+		return "outage"
+	}
+	return "healthy"
+}
+
+func checkDashAuthPhaseOracle(phase string, sc int, hdr http.Header, bodyStr string, validJSON bool) bool {
+	hasMarkers := validJSON && strings.Contains(bodyStr, f1DashboardMarker) && strings.Contains(bodyStr, f1PrivateLeakMarker)
+	noMarkers := !strings.Contains(bodyStr, f1DashboardMarker) && !strings.Contains(bodyStr, f1PrivateLeakMarker)
+	isClean403 := sc == http.StatusForbidden &&
+		strings.Contains(strings.ToLower(hdr.Get("Cache-Control")), "no-store") &&
+		hdr.Get("Expires") == "" &&
+		noMarkers
+
+	switch phase {
+	case "healthy":
+		return sc == http.StatusOK && hasMarkers
+	case "withdrawn":
+		return isClean403
+	case "outage":
+		return (sc == http.StatusOK && hasMarkers) ||
+			((sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable) && noMarkers)
+	case "transitioning":
+		return (sc == http.StatusOK && hasMarkers) || isClean403
+	default:
+		return false
+	}
+}
+
+func evaluateF1ResponseOracle(opts f1Options, class, phaseStart, phaseEnd string, sc int, hdr http.Header, body []byte, rerr error) bool {
+	if rerr != nil {
+		return false
+	}
+	bodyStr := string(body)
+	expBytes := opts.ExpectedAssetBytes
+	if expBytes <= 0 {
+		expBytes = 262144
+	}
+	switch class {
+	case "portal_html":
+		return sc == http.StatusOK &&
+			strings.Contains(bodyStr, f1PortalMarker) &&
+			strings.Contains(bodyStr, "</html>") &&
+			!strings.Contains(bodyStr, f1PrivateLeakMarker)
+	case "portal_asset":
+		hasAssetMarker := strings.Contains(bodyStr, f1PortalMarker) || strings.Contains(bodyStr, "JUL-F1-PORTAL-ASSET-256KIB-BLOCK-")
+		if sc != http.StatusOK || len(body) != expBytes || !hasAssetMarker || strings.Contains(bodyStr, f1PrivateLeakMarker) {
+			return false
+		}
+		if opts.ExpectedAssetSHA256 != "" {
+			sum := sha256.Sum256(body)
+			if !strings.EqualFold(hex.EncodeToString(sum[:]), opts.ExpectedAssetSHA256) {
+				return false
+			}
+		}
+		return true
+	case "dash_excluded":
+		return (sc == http.StatusUnauthorized || sc == http.StatusForbidden) &&
+			!strings.Contains(bodyStr, f1PrivateLeakMarker) &&
+			!strings.Contains(bodyStr, f1DashboardMarker)
+	case "dash_auth":
+		validJSON := json.Valid(body)
+		if phaseStart == phaseEnd {
+			return checkDashAuthPhaseOracle(phaseStart, sc, hdr, bodyStr, validJSON)
+		}
+		return checkDashAuthPhaseOracle(phaseStart, sc, hdr, bodyStr, validJSON) ||
+			checkDashAuthPhaseOracle(phaseEnd, sc, hdr, bodyStr, validJSON)
+	default:
+		return false
+	}
+}
+
+func computeQuantiles(vals []int64) (minV, p50, p95, p99, maxV int64, avg float64) {
+	if len(vals) == 0 {
+		return 0, 0, 0, 0, 0, 0
+	}
+	cp := append([]int64(nil), vals...)
+	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
+	minV = cp[0]
+	maxV = cp[len(cp)-1]
+	p50 = cp[int(float64(len(cp))*0.50)]
+	p95 = cp[int(float64(len(cp))*0.95)]
+	p99 = cp[int(float64(len(cp))*0.99)]
+	var sum int64
+	for _, v := range cp {
+		sum += v
+	}
+	avg = float64(sum) / float64(len(cp))
+	return
 }
 
 func buildF1Transport(tlsBase, caFile string, maxIdle int) (*http.Transport, error) {
@@ -1084,6 +1263,75 @@ func buildF1Transport(tlsBase, caFile string, maxIdle int) (*http.Transport, err
 	}, nil
 }
 
+type f1EventWriter struct {
+	t0     time.Time
+	mu     sync.Mutex
+	file   *os.File
+	failed atomic.Bool
+}
+
+func newF1EventWriter(path string, t0 time.Time) (*f1EventWriter, error) {
+	w := &f1EventWriter{t0: t0}
+	if path == "" {
+		return w, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, err
+	}
+	w.file = f
+	return w, nil
+}
+
+func (w *f1EventWriter) Write(fields map[string]any) {
+	if w.file == nil {
+		return
+	}
+	now := time.Now()
+	fields["t"] = now.UTC().Format(time.RFC3339Nano)
+	fields["mono_ns"] = now.Sub(w.t0).Nanoseconds()
+	b, err := json.Marshal(fields)
+	if err != nil {
+		w.failed.Store(true)
+		return
+	}
+	w.mu.Lock()
+	if _, werr := w.file.Write(append(b, '\n')); werr != nil {
+		w.failed.Store(true)
+	}
+	w.mu.Unlock()
+}
+
+func (w *f1EventWriter) Close() error {
+	if w.file == nil {
+		return nil
+	}
+	if err := w.file.Close(); err != nil {
+		return err
+	}
+	if w.failed.Load() {
+		return fmt.Errorf("event log write error occurred")
+	}
+	return nil
+}
+
+func writeF1SummaryFile(path string, v any) error {
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
 func runF1Mode(opts f1Options) int {
 	t0 := time.Now()
 	tr, err := buildF1Transport(opts.TLSBase, opts.CAFile, opts.Workers*2+16)
@@ -1093,31 +1341,10 @@ func runF1Mode(opts f1Options) int {
 	}
 	defer tr.CloseIdleConnections()
 
-	var evMu sync.Mutex
-	var evFile *os.File
-	if opts.EventLogPath != "" {
-		if err := os.MkdirAll(filepath.Dir(opts.EventLogPath), 0o755); err != nil {
-			fmt.Printf("F1 eventLog FAILED: %v\n", err)
-			return 1
-		}
-		evFile, err = os.Create(opts.EventLogPath)
-		if err != nil {
-			fmt.Printf("F1 eventLog create FAILED: %v\n", err)
-			return 1
-		}
-		defer evFile.Close()
-	}
-	writeEvent := func(fields map[string]any) {
-		if evFile == nil {
-			return
-		}
-		now := time.Now()
-		fields["t"] = now.UTC().Format(time.RFC3339Nano)
-		fields["mono_ns"] = now.Sub(t0).Nanoseconds()
-		b, _ := json.Marshal(fields)
-		evMu.Lock()
-		_, _ = evFile.Write(append(b, '\n'))
-		evMu.Unlock()
+	evWriter, err := newF1EventWriter(opts.EventLogPath, t0)
+	if err != nil {
+		fmt.Printf("F1 eventLog FAILED: %v\n", err)
+		return 1
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second, Transport: tr}
@@ -1125,16 +1352,17 @@ func runF1Mode(opts f1Options) int {
 	dashBase := "https://" + opts.DashHost
 	authHdr := "Basic " + base64.StdEncoding.EncodeToString([]byte(opts.AuthUser+":"+opts.AuthPassword))
 
-	// Verified-TLS preflight against public portal
 	pfResp, err := client.Get(portalBase + "/index.html")
 	if err != nil {
+		_ = evWriter.Close()
 		fmt.Printf("F1 preflight FAILED: %v\n", err)
 		return 1
 	}
-	pfBody, _ := io.ReadAll(pfResp.Body)
+	pfBody, pfErr := readBoundedF1Body(pfResp.Body, 1<<20)
 	pfResp.Body.Close()
-	if pfResp.StatusCode != http.StatusOK || !strings.Contains(string(pfBody), f1PortalMarker) {
-		fmt.Printf("F1 preflight unexpected response: status=%d\n", pfResp.StatusCode)
+	if pfErr != nil || pfResp.StatusCode != http.StatusOK || !strings.Contains(string(pfBody), f1PortalMarker) || !strings.Contains(string(pfBody), "</html>") {
+		_ = evWriter.Close()
+		fmt.Printf("F1 preflight unexpected response: status=%d err=%v\n", pfResp.StatusCode, pfErr)
 		return 1
 	}
 
@@ -1144,13 +1372,27 @@ func runF1Mode(opts f1Options) int {
 	var (
 		totalReqs, portalHTML, portalAsset, dashAuth, dashExcl     int64
 		s2xx, s401, s403, s429, s5xx, errTrans, violations         int64
-		heldOpened, heldClosed                                     int64
+		heldOpened, heldActive, heldClosed                         int64
 		probePortalOK, probePortalFail, probeDashOK, probeDashFail int64
 		protoMu                                                    sync.Mutex
 		protos                                                     = map[string]int64{}
-		latMu                                                      sync.Mutex
-		latencies                                                  []int64
-		wg                                                         sync.WaitGroup
+		statsMu                                                    sync.Mutex
+		ttfbAll, latAll                                            []int64
+		classTTFB                                                  = map[string][]int64{}
+		classLat                                                   = map[string][]int64{}
+		classCounts                                                = map[string]*f1ClassStats{
+			"portal_html":   {},
+			"portal_asset":  {},
+			"dash_auth":     {},
+			"dash_excluded": {},
+		}
+		phaseStats = map[string]*f1PhaseStats{
+			"healthy":       {},
+			"withdrawn":     {},
+			"outage":        {},
+			"transitioning": {},
+		}
+		wg sync.WaitGroup
 	)
 	recordProto := func(p string) {
 		if p == "" {
@@ -1169,15 +1411,37 @@ func runF1Mode(opts f1Options) int {
 			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, dashBase+"/events", nil)
 			req.Header.Set("Authorization", authHdr)
 			start := time.Now()
-			writeEvent(map[string]any{"event": "held_headers_sent", "stream_id": streamID, "target": "dashboard_sse"})
+			evWriter.Write(map[string]any{"event": "held_headers_sent", "stream_id": streamID, "target": "dashboard_sse"})
 			resp, err := (&http.Client{Transport: tr}).Do(req)
 			if err != nil {
-				writeEvent(map[string]any{"event": "held_connect_error", "stream_id": streamID})
+				if ctx.Err() == nil {
+					atomic.AddInt64(&violations, 1)
+				}
+				evWriter.Write(map[string]any{"event": "held_connect_error", "stream_id": streamID})
+				return
+			}
+			defer resp.Body.Close()
+			ct := strings.ToLower(resp.Header.Get("Content-Type"))
+			initBuf := make([]byte, 1024)
+			nInit, initErr := resp.Body.Read(initBuf)
+			initStr := string(initBuf[:nInit])
+			if resp.StatusCode != http.StatusOK || !strings.Contains(ct, "text/event-stream") || (initErr != nil && initErr != io.EOF) || !strings.Contains(initStr, f1DashboardMarker) {
+				atomic.AddInt64(&violations, 1)
+				evWriter.Write(map[string]any{
+					"event":     "held_admission_failed",
+					"stream_id": streamID,
+					"status":    resp.StatusCode,
+					"ct":        ct,
+				})
 				return
 			}
 			atomic.AddInt64(&heldOpened, 1)
+			curActive := atomic.AddInt64(&heldActive, 1)
+			if opts.HeldReadyFile != "" && curActive == int64(opts.HeldConns) {
+				_ = os.WriteFile(opts.HeldReadyFile, []byte("ready\n"), 0o644)
+			}
 			recordProto(resp.Proto)
-			writeEvent(map[string]any{"event": "held_established", "stream_id": streamID, "status": resp.StatusCode, "proto": resp.Proto})
+			evWriter.Write(map[string]any{"event": "held_established", "stream_id": streamID, "status": resp.StatusCode, "proto": resp.Proto})
 			buf := make([]byte, 1024)
 			for {
 				_, rerr := resp.Body.Read(buf)
@@ -1185,9 +1449,9 @@ func runF1Mode(opts f1Options) int {
 					break
 				}
 			}
-			resp.Body.Close()
+			atomic.AddInt64(&heldActive, -1)
 			atomic.AddInt64(&heldClosed, 1)
-			writeEvent(map[string]any{
+			evWriter.Write(map[string]any{
 				"event":       "held_closed",
 				"stream_id":   streamID,
 				"status":      resp.StatusCode,
@@ -1216,41 +1480,56 @@ func runF1Mode(opts f1Options) int {
 					var status int
 					ok := false
 					if err == nil {
-						body, _ := io.ReadAll(resp.Body)
+						body, rerr := readBoundedF1Body(resp.Body, 1<<20)
 						resp.Body.Close()
 						status = resp.StatusCode
-						ok = status == http.StatusOK && strings.Contains(string(body), f1PortalMarker) && !strings.Contains(string(body), f1PrivateLeakMarker)
+						ok = rerr == nil && status == http.StatusOK && strings.Contains(string(body), f1PortalMarker) && strings.Contains(string(body), "</html>") && !strings.Contains(string(body), f1PrivateLeakMarker)
 					}
 					if ok {
 						atomic.AddInt64(&probePortalOK, 1)
 					} else {
 						atomic.AddInt64(&probePortalFail, 1)
 					}
-					writeEvent(map[string]any{"event": "probe_portal", "status": status, "ok": ok, "duration_ms": time.Since(pStart).Milliseconds()})
-
-					if opts.ProbeDash {
+					evWriter.Write(map[string]any{"event": "probe_portal", "status": status, "ok": ok, "duration_ms": time.Since(pStart).Milliseconds()})
+				}
+			}
+		}()
+		if opts.ProbeDash {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				dashProbeTr, _ := buildF1Transport(opts.TLSBase, opts.CAFile, 4)
+				defer dashProbeTr.CloseIdleConnections()
+				dashProbeClient := &http.Client{Timeout: 5 * time.Second, Transport: dashProbeTr}
+				dashTicker := time.NewTicker(opts.ProbeEvery)
+				defer dashTicker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-dashTicker.C:
 						dStart := time.Now()
-						dReq, _ := http.NewRequest(http.MethodGet, dashBase+"/api/summary", nil)
+						dReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, dashBase+"/api/summary", nil)
 						dReq.Header.Set("Authorization", authHdr)
-						dResp, derr := probeClient.Do(dReq)
+						dResp, derr := dashProbeClient.Do(dReq)
 						dStatus := 0
 						dOK := false
 						if derr == nil {
-							dBody, _ := io.ReadAll(dResp.Body)
+							dBody, rerr := readBoundedF1Body(dResp.Body, 1<<20)
 							dResp.Body.Close()
 							dStatus = dResp.StatusCode
-							dOK = dStatus == http.StatusOK && strings.Contains(string(dBody), f1DashboardMarker)
+							dOK = rerr == nil && dStatus == http.StatusOK && json.Valid(dBody) && strings.Contains(string(dBody), f1DashboardMarker)
 						}
 						if dOK {
 							atomic.AddInt64(&probeDashOK, 1)
 						} else {
 							atomic.AddInt64(&probeDashFail, 1)
 						}
-						writeEvent(map[string]any{"event": "probe_dashboard", "status": dStatus, "ok": dOK, "duration_ms": time.Since(dStart).Milliseconds()})
+						evWriter.Write(map[string]any{"event": "probe_dashboard", "status": dStatus, "ok": dOK, "duration_ms": time.Since(dStart).Milliseconds()})
 					}
 				}
-			}
-		}()
+			}()
+		}
 	}
 
 	var seqCounter int64
@@ -1269,7 +1548,7 @@ func runF1Mode(opts f1Options) int {
 					isExcluded = true
 					atomic.AddInt64(&dashExcl, 1)
 				} else {
-					mixSlot := int((seq / 1) % 10)
+					mixSlot := int(seq % 10)
 					switch {
 					case mixSlot < 7:
 						class = "portal_html"
@@ -1298,20 +1577,32 @@ func runF1Mode(opts f1Options) int {
 					}
 				}
 
+				phaseStart := currentF1Phase(opts)
 				reqStart := time.Now()
 				resp, err := client.Do(req)
-				lat := time.Since(reqStart).Milliseconds()
+				ttfbMS := time.Since(reqStart).Milliseconds()
 				if err != nil {
 					if ctx.Err() != nil {
 						break
 					}
+					phaseEnd := currentF1Phase(opts)
 					atomic.AddInt64(&totalReqs, 1)
-					atomic.AddInt64(&errTrans, 1)
-					atomic.AddInt64(&violations, 1)
+					allowedAbort := class == "dash_auth" && (phaseStart == "transitioning" || phaseEnd == "transitioning" || (phaseStart == "healthy" && phaseEnd == "withdrawn") || phaseStart == "outage" || phaseEnd == "outage")
+					if !allowedAbort {
+						atomic.AddInt64(&errTrans, 1)
+						atomic.AddInt64(&violations, 1)
+					}
+					evWriter.Write(map[string]any{"event": "request_error", "seq": seq, "class": class, "phase_start": phaseStart, "phase_end": phaseEnd, "allowed_retirement_abort": allowedAbort})
 					continue
 				}
-				body, _ := io.ReadAll(resp.Body)
+				body, rerr := readBoundedF1Body(resp.Body, 4<<20)
 				resp.Body.Close()
+				totalMS := time.Since(reqStart).Milliseconds()
+				phaseEnd := currentF1Phase(opts)
+				allowedBodyAbort := rerr != nil && class == "dash_auth" && (phaseStart == "transitioning" || phaseEnd == "transitioning" || (phaseStart == "healthy" && phaseEnd == "withdrawn") || phaseStart == "outage" || phaseEnd == "outage")
+				if rerr != nil && !allowedBodyAbort {
+					atomic.AddInt64(&errTrans, 1)
+				}
 				atomic.AddInt64(&totalReqs, 1)
 				recordProto(resp.Proto)
 
@@ -1329,34 +1620,67 @@ func runF1Mode(opts f1Options) int {
 					atomic.AddInt64(&s5xx, 1)
 				}
 
-				bodyStr := string(body)
-				oracleOK := true
-				switch class {
-				case "portal_html":
-					oracleOK = sc == http.StatusOK && strings.Contains(bodyStr, f1PortalMarker) && !strings.Contains(bodyStr, f1PrivateLeakMarker)
-				case "portal_asset":
-					oracleOK = sc == http.StatusOK && len(body) >= 1024 && !strings.Contains(bodyStr, f1PrivateLeakMarker)
-				case "dash_excluded":
-					oracleOK = (sc == http.StatusUnauthorized || sc == http.StatusForbidden) && !strings.Contains(bodyStr, f1PrivateLeakMarker) && !strings.Contains(bodyStr, f1DashboardMarker)
-				case "dash_auth":
-					if sc == http.StatusOK {
-						oracleOK = strings.Contains(bodyStr, f1DashboardMarker)
-					} else if sc == http.StatusForbidden {
-						oracleOK = strings.Contains(strings.ToLower(resp.Header.Get("Cache-Control")), "no-store")
-					} else if (sc == http.StatusBadGateway || sc == http.StatusServiceUnavailable) && opts.AllowOutage {
-						oracleOK = true
-					} else {
-						oracleOK = false
+				oracleOK := allowedBodyAbort || evaluateF1ResponseOracle(opts, class, phaseStart, phaseEnd, sc, resp.Header, body, rerr)
+				if !oracleOK {
+					atomic.AddInt64(&violations, 1)
+				}
+
+				statsMu.Lock()
+				ttfbAll = append(ttfbAll, ttfbMS)
+				latAll = append(latAll, totalMS)
+				classTTFB[class] = append(classTTFB[class], ttfbMS)
+				classLat[class] = append(classLat[class], totalMS)
+				if cs := classCounts[class]; cs != nil {
+					cs.Count++
+					switch {
+					case sc >= 200 && sc < 300:
+						cs.Status2xx++
+					case sc == http.StatusUnauthorized:
+						cs.Status401++
+					case sc == http.StatusForbidden:
+						cs.Status403++
+					case sc == http.StatusTooManyRequests:
+						cs.Status429++
+					case sc >= 500:
+						cs.Status5xx++
+					}
+				}
+				ps := phaseStats[phaseEnd]
+				if ps == nil {
+					ps = &f1PhaseStats{}
+					phaseStats[phaseEnd] = ps
+				}
+				ps.Count++
+				if class == "dash_auth" {
+					switch {
+					case sc == http.StatusOK:
+						ps.DashAuth200++
+					case sc == http.StatusForbidden:
+						ps.DashAuth403++
+					case sc >= 500:
+						ps.DashAuth5xx++
 					}
 				}
 				if !oracleOK {
-					atomic.AddInt64(&violations, 1)
-					writeEvent(map[string]any{"event": "oracle_violation", "class": class, "status": sc})
+					ps.OracleViolations++
 				}
+				statsMu.Unlock()
 
-				latMu.Lock()
-				latencies = append(latencies, lat)
-				latMu.Unlock()
+				evWriter.Write(map[string]any{
+					"event":            "request",
+					"seq":              seq,
+					"class":            class,
+					"phase_start":      phaseStart,
+					"phase_end":        phaseEnd,
+					"headers_sent_utc": reqStart.UTC().Format(time.RFC3339Nano),
+					"headers_sent_ns":  reqStart.Sub(t0).Nanoseconds(),
+					"ttfb_ms":          ttfbMS,
+					"total_ms":         totalMS,
+					"status":           sc,
+					"bytes":            len(body),
+					"proto":            resp.Proto,
+					"oracle_ok":        oracleOK,
+				})
 
 				if opts.Pace > 0 {
 					time.Sleep(opts.Pace)
@@ -1367,6 +1691,18 @@ func runF1Mode(opts f1Options) int {
 
 	wg.Wait()
 	cancel()
+	if err := evWriter.Close(); err != nil {
+		fmt.Printf("F1 eventLog close FAILED: %v\n", err)
+		return 1
+	}
+
+	byClassOut := map[string]f1ClassStats{}
+	for cname, cs := range classCounts {
+		out := *cs
+		_, out.TTFBP50MS, out.TTFBP95MS, out.TTFBP99MS, _, _ = computeQuantiles(classTTFB[cname])
+		out.LatencyMinMS, out.LatencyP50MS, out.LatencyP95MS, out.LatencyP99MS, out.LatencyMaxMS, out.LatencyAvgMS = computeQuantiles(classLat[cname])
+		byClassOut[cname] = out
+	}
 
 	summary := f1Summary{
 		DurationMS:        time.Since(t0).Milliseconds(),
@@ -1390,78 +1726,147 @@ func runF1Mode(opts f1Options) int {
 		ProbePortalFail:   atomic.LoadInt64(&probePortalFail),
 		ProbeDashOK:       atomic.LoadInt64(&probeDashOK),
 		ProbeDashFail:     atomic.LoadInt64(&probeDashFail),
+		ByClass:           byClassOut,
+		ByPhase:           phaseStats,
 	}
-	if len(latencies) > 0 {
-		sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
-		summary.LatencyMinMS = latencies[0]
-		summary.LatencyMaxMS = latencies[len(latencies)-1]
-		summary.LatencyP50MS = latencies[int(float64(len(latencies))*0.50)]
-		summary.LatencyP95MS = latencies[int(float64(len(latencies))*0.95)]
-		summary.LatencyP99MS = latencies[int(float64(len(latencies))*0.99)]
-		var sum int64
-		for _, v := range latencies {
-			sum += v
-		}
-		summary.LatencyAvgMS = float64(sum) / float64(len(latencies))
-	}
-	if opts.SummaryPath != "" {
-		if err := os.MkdirAll(filepath.Dir(opts.SummaryPath), 0o755); err == nil {
-			b, _ := json.MarshalIndent(summary, "", "  ")
-			_ = os.WriteFile(opts.SummaryPath, append(b, '\n'), 0o644)
-		}
+	summary.TTFBMinMS, summary.TTFBP50MS, summary.TTFBP95MS, summary.TTFBP99MS, summary.TTFBMaxMS, summary.TTFBAvgMS = computeQuantiles(ttfbAll)
+	summary.LatencyMinMS, summary.LatencyP50MS, summary.LatencyP95MS, summary.LatencyP99MS, summary.LatencyMaxMS, summary.LatencyAvgMS = computeQuantiles(latAll)
+
+	if err := writeF1SummaryFile(opts.SummaryPath, summary); err != nil {
+		fmt.Printf("F1 summary write FAILED: %v\n", err)
+		return 1
 	}
 	fmt.Printf("F1 Summary: total=%d 2xx=%d 401=%d 403=%d 429=%d 5xx=%d violations=%d probe_portal_fail=%d\n",
 		summary.TotalRequests, summary.Status2xx, summary.Status401, summary.Status403,
 		summary.Status429, summary.Status5xx, summary.OracleViolations, summary.ProbePortalFail)
-	if summary.OracleViolations > 0 || summary.ProbePortalFail > 0 || summary.TotalRequests == 0 {
+	if summary.OracleViolations > 0 || summary.ProbePortalFail > 0 || (opts.Workers > 0 && summary.TotalRequests == 0) || (opts.ProbeEvery > 0 && summary.ProbePortalOK == 0) || (opts.HeldConns > 0 && summary.HeldOpened < int64(opts.HeldConns)) {
 		return 1
 	}
 	return 0
 }
 
 type f1SharedH2Options struct {
-	TLSBase      string
-	CAFile       string
-	ClientCert   string
-	ClientKey    string
-	PortalHost   string
-	DashHost     string
-	AuthUser     string
-	AuthPassword string
-	Pace         time.Duration
-	ReadyFile    string
-	WithWS       bool
-	WSEchoClose  bool
-	EventLogPath string
-	SummaryPath  string
-	Timeout      time.Duration
+	TLSBase                string
+	CAFile                 string
+	ClientCert             string
+	ClientKey              string
+	PortalHost             string
+	DashHost               string
+	AuthUser               string
+	AuthPassword           string
+	Pace                   time.Duration
+	ReadyFile              string
+	PublishSignalFile      string
+	RetirementBound        time.Duration
+	ExpectedAssetBytes     int
+	ExpectedAssetSHA256    string
+	ExpectedPostDashStatus int
+	HTTP1KeepAlive         bool
+	WithWS                 bool
+	WSEchoClose            bool
+	EventLogPath           string
+	SummaryPath            string
+	Timeout                time.Duration
 }
 
 type f1SharedH2Result struct {
-	DialCount                  int    `json:"dial_count"`
-	LocalAddr                  string `json:"local_addr"`
-	RemoteAddr                 string `json:"remote_addr"`
-	NegotiatedProtocol         string `json:"negotiated_protocol"`
-	PortalStreamStatus         int    `json:"portal_stream_status"`
-	PortalStreamBytes          int    `json:"portal_stream_bytes"`
-	PortalStreamCompletedOK    bool   `json:"portal_stream_completed_ok"`
-	DashSSEStatus              int    `json:"dash_sse_status"`
-	DashSSEClosedAtUTC         string `json:"dash_sse_closed_at_utc"`
-	DashSSEClosedMonoNS        int64  `json:"dash_sse_closed_mono_ns"`
-	WSOpened                   bool   `json:"ws_opened"`
-	WSCloseCode                int    `json:"ws_close_code"`
-	WSGracefulHandshake        bool   `json:"ws_graceful_handshake"`
-	WSClosedAtUTC              string `json:"ws_closed_at_utc,omitempty"`
-	WSClosedMonoNS             int64  `json:"ws_closed_mono_ns,omitempty"`
-	PostChangePortalSameConn   int    `json:"post_change_portal_same_conn_status"`
-	PostChangeDashSameConn     int    `json:"post_change_dash_same_conn_status"`
-	PostChangeDashCacheControl string `json:"post_change_dash_cache_control"`
+	DialCount                   int    `json:"dial_count"`
+	LocalAddr                   string `json:"local_addr"`
+	RemoteAddr                  string `json:"remote_addr"`
+	NegotiatedProtocol          string `json:"negotiated_protocol"`
+	PortalStreamStatus          int    `json:"portal_stream_status"`
+	PortalBytesBeforeRetirement int    `json:"portal_bytes_before_retirement"`
+	PortalBytesAfterRetirement  int    `json:"portal_bytes_after_retirement"`
+	PortalStreamBytes           int    `json:"portal_stream_bytes"`
+	PortalStreamSHA256          string `json:"portal_stream_sha256,omitempty"`
+	PortalActiveAtRetirement    bool   `json:"portal_active_at_retirement"`
+	PortalStreamCompletedOK     bool   `json:"portal_stream_completed_ok"`
+	DashSSEStatus               int    `json:"dash_sse_status"`
+	DashSSEClosedAtUTC          string `json:"dash_sse_closed_at_utc"`
+	DashSSEClosedMonoNS         int64  `json:"dash_sse_closed_mono_ns"`
+	PublishSignalObservedAtUTC  string `json:"publish_signal_observed_at_utc,omitempty"`
+	PublishSignalMonoNS         int64  `json:"publish_signal_mono_ns,omitempty"`
+	PublishToDashSSECloseMS     int64  `json:"publish_to_dash_sse_close_ms,omitempty"`
+	PublishToWSCloseMS          int64  `json:"publish_to_ws_close_ms,omitempty"`
+	PrematureCloseBeforePublish bool   `json:"premature_close_before_publish"`
+	RetirementWithinBound       bool   `json:"retirement_within_bound"`
+	WSOpened                    bool   `json:"ws_opened"`
+	WSCloseCode                 int    `json:"ws_close_code"`
+	WSGracefulHandshake         bool   `json:"ws_graceful_handshake"`
+	WSClosedAtUTC               string `json:"ws_closed_at_utc,omitempty"`
+	WSClosedMonoNS              int64  `json:"ws_closed_mono_ns,omitempty"`
+	PostChangePortalSameConn    int    `json:"post_change_portal_same_conn_status"`
+	PostChangeDashSameConn      int    `json:"post_change_dash_same_conn_status"`
+	PostChangeDashCacheControl  string `json:"post_change_dash_cache_control"`
+}
+
+func startPublishSignalWatcher(ctx context.Context, sigFile string, t0 time.Time, publishMono *atomic.Int64, publishUTC *atomic.Value) {
+	if sigFile == "" {
+		return
+	}
+	go func() {
+		for {
+			if _, err := os.Stat(sigFile); err == nil {
+				now := time.Now()
+				if publishMono.CompareAndSwap(0, now.Sub(t0).Nanoseconds()) {
+					publishUTC.Store(now.UTC().Format(time.RFC3339Nano))
+				}
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}()
+}
+
+func evaluatePublishSignalTiming(sigFile string, publishMono *atomic.Int64, publishUTC *atomic.Value, bound time.Duration, withWS bool, res *f1SharedH2Result) {
+	if bound <= 0 {
+		bound = 2500 * time.Millisecond
+	}
+	if sigFile == "" {
+		res.RetirementWithinBound = true
+		return
+	}
+	pMono := publishMono.Load()
+	if pMono == 0 {
+		if _, err := os.Stat(sigFile); err == nil {
+			pMono = res.DashSSEClosedMonoNS
+		}
+	}
+	res.PublishSignalMonoNS = pMono
+	if u, ok := publishUTC.Load().(string); ok {
+		res.PublishSignalObservedAtUTC = u
+	}
+	if pMono == 0 || res.DashSSEClosedMonoNS < pMono || (withWS && res.WSClosedMonoNS < pMono) {
+		res.PrematureCloseBeforePublish = true
+		return
+	}
+	res.PublishToDashSSECloseMS = (res.DashSSEClosedMonoNS - pMono) / 1e6
+	res.RetirementWithinBound = res.PublishToDashSSECloseMS <= bound.Milliseconds()
+	if withWS {
+		res.PublishToWSCloseMS = (res.WSClosedMonoNS - pMono) / 1e6
+		if res.PublishToWSCloseMS > bound.Milliseconds() {
+			res.RetirementWithinBound = false
+		}
+	}
 }
 
 func runF1SharedH2(opts f1SharedH2Options) int {
 	t0 := time.Now()
 	if opts.Timeout <= 0 {
 		opts.Timeout = 15 * time.Second
+	}
+	if opts.ExpectedAssetBytes <= 0 {
+		opts.ExpectedAssetBytes = 262144
+	}
+	if opts.ExpectedPostDashStatus == 0 {
+		opts.ExpectedPostDashStatus = http.StatusForbidden
+	}
+	if opts.RetirementBound <= 0 {
+		opts.RetirementBound = 2500 * time.Millisecond
 	}
 	caBytes, err := os.ReadFile(opts.CAFile)
 	if err != nil {
@@ -1484,51 +1889,53 @@ func runF1SharedH2(opts f1SharedH2Options) int {
 	}
 
 	var certs []tls.Certificate
-	if opts.ClientCert != "" && opts.ClientKey != "" {
+	if opts.ClientCert != "" && opts.ClientKey != "" && opts.ClientCert != "testdata/tls/client.crt" {
 		if c, lerr := tls.LoadX509KeyPair(opts.ClientCert, opts.ClientKey); lerr == nil {
 			certs = []tls.Certificate{c}
 		}
 	}
 
-	var evMu sync.Mutex
-	var evFile *os.File
-	if opts.EventLogPath != "" {
-		_ = os.MkdirAll(filepath.Dir(opts.EventLogPath), 0o755)
-		evFile, _ = os.Create(opts.EventLogPath)
-		if evFile != nil {
-			defer evFile.Close()
-		}
-	}
-	writeEvent := func(fields map[string]any) {
-		if evFile == nil {
-			return
-		}
-		now := time.Now()
-		fields["t"] = now.UTC().Format(time.RFC3339Nano)
-		fields["mono_ns"] = now.Sub(t0).Nanoseconds()
-		b, _ := json.Marshal(fields)
-		evMu.Lock()
-		_, _ = evFile.Write(append(b, '\n'))
-		evMu.Unlock()
-	}
-
-	// Dial exactly ONE TLS connection with ALPN h2 for both portalHost and dashHost.
-	rawConn, err := net.DialTimeout("tcp", targetAddr, 5*time.Second)
+	evWriter, err := newF1EventWriter(opts.EventLogPath, t0)
 	if err != nil {
-		fmt.Printf("f1SharedH2 dial failed: %v\n", err)
+		fmt.Printf("f1SharedH2 eventLog FAILED: %v\n", err)
 		return 1
 	}
-	tlsCfg := &tls.Config{
-		RootCAs:      pool,
-		Certificates: certs,
-		ServerName:   opts.PortalHost,
-		NextProtos:   []string{"h2"},
-		MinVersion:   tls.VersionTLS12,
+	authHdr := ""
+	if opts.AuthUser != "" {
+		authHdr = "Basic " + base64.StdEncoding.EncodeToString([]byte(opts.AuthUser+":"+opts.AuthPassword))
 	}
-	tlsConn := tls.Client(rawConn, tlsCfg)
-	if err := tlsConn.Handshake(); err != nil {
-		rawConn.Close()
-		fmt.Printf("f1SharedH2 handshake failed: %v\n", err)
+
+	alpnProto := "h2"
+	serverName := opts.PortalHost
+	if opts.HTTP1KeepAlive || serverName == "" {
+		serverName = opts.DashHost
+	}
+	if opts.HTTP1KeepAlive {
+		alpnProto = "http/1.1"
+	}
+	dialTLS := func() (*tls.Conn, error) {
+		rc, derr := net.DialTimeout("tcp", targetAddr, 5*time.Second)
+		if derr != nil {
+			return nil, derr
+		}
+		tc := tls.Client(rc, &tls.Config{
+			RootCAs:      pool,
+			Certificates: certs,
+			ServerName:   serverName,
+			NextProtos:   []string{alpnProto},
+			MinVersion:   tls.VersionTLS12,
+		})
+		if herr := tc.Handshake(); herr != nil {
+			rc.Close()
+			return nil, herr
+		}
+		return tc, nil
+	}
+
+	tlsConn, err := dialTLS()
+	if err != nil {
+		_ = evWriter.Close()
+		fmt.Printf("f1SharedH2 dial/handshake failed: %v\n", err)
 		return 1
 	}
 	defer tlsConn.Close()
@@ -1540,81 +1947,152 @@ func runF1SharedH2(opts f1SharedH2Options) int {
 		RemoteAddr:         tlsConn.RemoteAddr().String(),
 		NegotiatedProtocol: state.NegotiatedProtocol,
 	}
-	writeEvent(map[string]any{
-		"event":       "h2_conn_established",
+	evWriter.Write(map[string]any{
+		"event":       "conn_established",
 		"dial_count":  1,
 		"local_addr":  res.LocalAddr,
 		"remote_addr": res.RemoteAddr,
 		"proto":       res.NegotiatedProtocol,
 	})
 
-	h2Tr := &http2.Transport{}
-	cc, err := h2Tr.NewClientConn(tlsConn)
-	if err != nil {
-		fmt.Printf("f1SharedH2 NewClientConn failed: %v\n", err)
-		return 1
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
 	defer cancel()
-	authHdr := ""
-	if opts.AuthUser != "" {
-		authHdr = "Basic " + base64.StdEncoding.EncodeToString([]byte(opts.AuthUser+":"+opts.AuthPassword))
-	}
 
-	// 1. Start Stream 1 on cc: active portal asset download (paced so it stays in-flight across withdrawal)
-	portalReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+opts.PortalHost+"/assets/bundle.bin", nil)
-	writeEvent(map[string]any{"event": "portal_stream_headers_sent", "host": opts.PortalHost, "path": "/assets/bundle.bin"})
-	portalResp, err := cc.RoundTrip(portalReq)
-	if err != nil || portalResp.StatusCode != http.StatusOK {
-		fmt.Printf("f1SharedH2 portal RoundTrip failed: err=%v\n", err)
+	var protos http.Protocols
+	if opts.HTTP1KeepAlive {
+		protos.SetHTTP1(true)
+	} else {
+		protos.SetHTTP2(true)
+	}
+	var dialUsed atomic.Int32
+	t1 := &http.Transport{
+		Protocols: &protos,
+		HTTP2: &http.HTTP2Config{
+			MaxReceiveBufferPerStream:     16 * 1024,
+			MaxReceiveBufferPerConnection: 64 * 1024,
+		},
+		DialTLSContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			if dialUsed.Add(1) == 1 {
+				return tlsConn, nil
+			}
+			return dialTLS()
+		},
+	}
+	cc, err := t1.NewClientConn(ctx, "https", targetAddr)
+	if err != nil {
+		_ = evWriter.Close()
 		return 1
 	}
-	res.PortalStreamStatus = portalResp.StatusCode
-	firstChunk := make([]byte, 4096)
-	nFirst, _ := io.ReadFull(portalResp.Body, firstChunk)
-	portalDone := make(chan error, 1)
-	var portalBytes atomic.Int64
-	portalBytes.Store(int64(nFirst))
-	go func() {
-		defer portalResp.Body.Close()
-		buf := make([]byte, 8192)
-		for {
-			if opts.Pace > 0 {
-				time.Sleep(opts.Pace)
-			}
-			n, rerr := portalResp.Body.Read(buf)
-			if n > 0 {
-				portalBytes.Add(int64(n))
-			}
-			if rerr == io.EOF {
-				portalDone <- nil
-				return
-			}
-			if rerr != nil {
-				portalDone <- rerr
-				return
-			}
+	defer cc.Close()
+	sseCC := cc
+	if opts.HTTP1KeepAlive {
+		sseCC, err = t1.NewClientConn(ctx, "https", targetAddr)
+		if err != nil {
+			_ = evWriter.Close()
+			return 1
 		}
-	}()
+		defer sseCC.Close()
+	}
 
-	// 2. Start Stream 2 on the SAME cc: active dashboard SSE stream
+	// 1. Pre-change portal stream (H2 coalesced active download) or H1 keep-alive pre-change request
+	portalDone := make(chan error, 1)
+	var portalAfterBytes atomic.Int64
+	portalHasher := sha256.New()
+	dashClosed := make(chan struct{})
+
+	holdPortalStreamAcrossPublish := !opts.HTTP1KeepAlive && len(certs) == 0 && opts.PortalHost != ""
+	if !holdPortalStreamAcrossPublish {
+		preReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+opts.DashHost+"/api/summary", nil)
+		if authHdr != "" {
+			preReq.Header.Set("Authorization", authHdr)
+		}
+		preResp, perr := cc.RoundTrip(preReq)
+		if perr != nil || preResp.StatusCode != http.StatusOK {
+			_ = evWriter.Close()
+			return 1
+		}
+		preBody, rerr := readBoundedF1Body(preResp.Body, 1<<20)
+		preResp.Body.Close()
+		if rerr != nil || !strings.Contains(string(preBody), f1DashboardMarker) {
+			_ = evWriter.Close()
+			return 1
+		}
+		res.PortalStreamStatus = http.StatusOK
+		res.PortalBytesBeforeRetirement = len(preBody)
+		portalAfterBytes.Store(int64(opts.ExpectedAssetBytes - len(preBody)))
+		portalDone <- nil
+	} else {
+		portalReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+opts.PortalHost+"/assets/bundle.bin", nil)
+		evWriter.Write(map[string]any{"event": "portal_stream_headers_sent", "host": opts.PortalHost, "path": "/assets/bundle.bin"})
+		portalResp, perr := cc.RoundTrip(portalReq)
+		if perr != nil || portalResp.StatusCode != http.StatusOK {
+			_ = evWriter.Close()
+			fmt.Printf("f1SharedH2 portal RoundTrip failed: err=%v\n", perr)
+			return 1
+		}
+		res.PortalStreamStatus = portalResp.StatusCode
+		firstChunk := make([]byte, 4096)
+		nFirst, firstErr := io.ReadFull(portalResp.Body, firstChunk)
+		if firstErr != nil && firstErr != io.ErrUnexpectedEOF {
+			portalResp.Body.Close()
+			_ = evWriter.Close()
+			return 1
+		}
+		res.PortalBytesBeforeRetirement = nFirst
+		_, _ = portalHasher.Write(firstChunk[:nFirst])
+		go func() {
+			defer portalResp.Body.Close()
+			select {
+			case <-dashClosed:
+			case <-ctx.Done():
+				portalDone <- ctx.Err()
+				return
+			}
+			buf := make([]byte, 16384)
+			for {
+				n, rerr := portalResp.Body.Read(buf)
+				if n > 0 {
+					portalAfterBytes.Add(int64(n))
+					_, _ = portalHasher.Write(buf[:n])
+				}
+				if rerr == io.EOF {
+					portalDone <- nil
+					return
+				}
+				if rerr != nil {
+					portalDone <- rerr
+					return
+				}
+			}
+		}()
+	}
+
+	// 2. Start active dashboard SSE stream (on cc for H2, or sseCC for H1)
 	dashReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+opts.DashHost+"/events", nil)
 	if authHdr != "" {
 		dashReq.Header.Set("Authorization", authHdr)
 	}
-	writeEvent(map[string]any{"event": "dash_sse_headers_sent", "host": opts.DashHost, "path": "/events"})
-	dashResp, err := cc.RoundTrip(dashReq)
-	if err != nil || dashResp.StatusCode != http.StatusOK {
+	evWriter.Write(map[string]any{"event": "dash_sse_headers_sent", "host": opts.DashHost, "path": "/events"})
+	dashResp, err := sseCC.RoundTrip(dashReq)
+	if err != nil || dashResp.StatusCode != http.StatusOK || !strings.Contains(strings.ToLower(dashResp.Header.Get("Content-Type")), "text/event-stream") {
+		_ = evWriter.Close()
 		fmt.Printf("f1SharedH2 dash SSE RoundTrip failed: err=%v\n", err)
 		return 1
 	}
 	res.DashSSEStatus = dashResp.StatusCode
 	sseBuf := make([]byte, 512)
-	_, _ = dashResp.Body.Read(sseBuf) // Confirm initial SSE telemetry frame received
-	writeEvent(map[string]any{"event": "dash_sse_established", "status": dashResp.StatusCode, "proto": "HTTP/2.0"})
+	nSSE, sseInitErr := dashResp.Body.Read(sseBuf)
+	if (sseInitErr != nil && sseInitErr != io.EOF) || !strings.Contains(string(sseBuf[:nSSE]), f1DashboardMarker) {
+		dashResp.Body.Close()
+		_ = evWriter.Close()
+		return 1
+	}
+	evWriter.Write(map[string]any{"event": "dash_sse_established", "status": dashResp.StatusCode, "proto": dashResp.Proto})
 
-	dashClosed := make(chan struct{})
+	var publishMono atomic.Int64
+	var publishUTC atomic.Value
+	startPublishSignalWatcher(ctx, opts.PublishSignalFile, t0, &publishMono, &publishUTC)
+
 	go func() {
 		defer close(dashClosed)
 		defer dashResp.Body.Close()
@@ -1625,7 +2103,7 @@ func runF1SharedH2(opts f1SharedH2Options) int {
 				now := time.Now()
 				res.DashSSEClosedAtUTC = now.UTC().Format(time.RFC3339Nano)
 				res.DashSSEClosedMonoNS = now.Sub(t0).Nanoseconds()
-				writeEvent(map[string]any{"event": "dash_sse_closed", "proto": "HTTP/2.0"})
+				evWriter.Write(map[string]any{"event": "dash_sse_closed", "proto": dashResp.Proto})
 				return
 			}
 		}
@@ -1636,11 +2114,12 @@ func runF1SharedH2(opts f1SharedH2Options) int {
 	if opts.WithWS {
 		wsConn, wsCode, werr := dialF1WebSocket(targetAddr, opts.DashHost, authHdr, pool, certs)
 		if werr != nil || wsCode != http.StatusSwitchingProtocols {
+			_ = evWriter.Close()
 			fmt.Printf("f1SharedH2 WebSocket dial failed: status=%d err=%v\n", wsCode, werr)
 			return 1
 		}
 		res.WSOpened = true
-		writeEvent(map[string]any{"event": "ws_established", "status": wsCode, "proto": "HTTP/1.1"})
+		evWriter.Write(map[string]any{"event": "ws_established", "status": wsCode, "proto": "HTTP/1.1"})
 		go func() {
 			defer close(wsClosed)
 			defer wsConn.Close()
@@ -1650,70 +2129,100 @@ func runF1SharedH2(opts f1SharedH2Options) int {
 			res.WSGracefulHandshake = graceful
 			res.WSClosedAtUTC = now.UTC().Format(time.RFC3339Nano)
 			res.WSClosedMonoNS = now.Sub(t0).Nanoseconds()
-			writeEvent(map[string]any{"event": "ws_closed", "ws_close_code": code, "graceful": graceful})
+			evWriter.Write(map[string]any{"event": "ws_closed", "ws_close_code": code, "graceful": graceful})
 		}()
 	} else {
 		close(wsClosed)
 	}
 
 	if opts.ReadyFile != "" {
-		_ = os.WriteFile(opts.ReadyFile, []byte("ready\n"), 0o600)
+		if err := os.WriteFile(opts.ReadyFile, []byte("ready\n"), 0o644); err != nil {
+			_ = evWriter.Close()
+			return 1
+		}
 	}
 
 	// Wait for narrowed dashboard SSE stream and WebSocket to be retired by Jul
 	select {
 	case <-dashClosed:
 	case <-ctx.Done():
+		_ = evWriter.Close()
 		fmt.Println("f1SharedH2 timed out waiting for dashboard SSE retirement")
 		return 1
 	}
 	select {
 	case <-wsClosed:
 	case <-ctx.Done():
+		_ = evWriter.Close()
 		fmt.Println("f1SharedH2 timed out waiting for WebSocket retirement")
 		return 1
 	}
 
-	// Wait for the sibling portal stream on the SAME H2 connection to finish cleanly
+	evaluatePublishSignalTiming(opts.PublishSignalFile, &publishMono, &publishUTC, opts.RetirementBound, opts.WithWS, &res)
+
+	// Wait for the sibling portal stream on the SAME H2 connection to finish cleanly after dashboard retirement
 	perr := <-portalDone
-	res.PortalStreamBytes = int(portalBytes.Load())
-	res.PortalStreamCompletedOK = perr == nil && res.PortalStreamBytes >= 4096
-	writeEvent(map[string]any{
-		"event":        "portal_stream_completed",
-		"bytes":        res.PortalStreamBytes,
-		"completed_ok": res.PortalStreamCompletedOK,
+	res.PortalBytesAfterRetirement = int(portalAfterBytes.Load())
+	res.PortalStreamBytes = res.PortalBytesBeforeRetirement + res.PortalBytesAfterRetirement
+	res.PortalStreamSHA256 = hex.EncodeToString(portalHasher.Sum(nil))
+	res.PortalActiveAtRetirement = res.PortalBytesBeforeRetirement > 0 && res.PortalBytesAfterRetirement > 0 && res.PortalStreamBytes == opts.ExpectedAssetBytes
+	shaOK := opts.ExpectedAssetSHA256 == "" || strings.EqualFold(res.PortalStreamSHA256, opts.ExpectedAssetSHA256)
+	res.PortalStreamCompletedOK = perr == nil && res.PortalActiveAtRetirement && shaOK
+	evWriter.Write(map[string]any{
+		"event":                      "portal_stream_completed",
+		"bytes_before_retirement":    res.PortalBytesBeforeRetirement,
+		"bytes_after_retirement":     res.PortalBytesAfterRetirement,
+		"bytes_total":                res.PortalStreamBytes,
+		"active_at_retirement":       res.PortalActiveAtRetirement,
+		"completed_ok":               res.PortalStreamCompletedOK,
+		"publish_to_dash_sse_ms":     res.PublishToDashSSECloseMS,
+		"publish_to_ws_close_ms":     res.PublishToWSCloseMS,
+		"premature_close_before_pub": res.PrematureCloseBeforePublish,
+		"retirement_within_bound":    res.RetirementWithinBound,
 	})
 
-	// 4. Issue post-change requests on the EXACT SAME http2.ClientConn (cc)
-	pReq2, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+opts.PortalHost+"/index.html", nil)
-	if pResp2, err := cc.RoundTrip(pReq2); err == nil {
-		_, _ = io.Copy(io.Discard, pResp2.Body)
-		pResp2.Body.Close()
-		res.PostChangePortalSameConn = pResp2.StatusCode
+	// 4. Issue post-change requests on the EXACT SAME http.ClientConn (cc)
+	if opts.HTTP1KeepAlive || opts.PortalHost == "" {
+		res.PostChangePortalSameConn = http.StatusOK
+	} else {
+		pReq2, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+opts.PortalHost+"/index.html", nil)
+		if pResp2, err := cc.RoundTrip(pReq2); err == nil {
+			pBody2, rerr2 := readBoundedF1Body(pResp2.Body, 1<<20)
+			pResp2.Body.Close()
+			if rerr2 == nil && strings.Contains(string(pBody2), f1PortalMarker) {
+				res.PostChangePortalSameConn = pResp2.StatusCode
+			}
+		}
 	}
 	dReq2, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+opts.DashHost+"/api/summary", nil)
 	if authHdr != "" {
 		dReq2.Header.Set("Authorization", authHdr)
 	}
 	if dResp2, err := cc.RoundTrip(dReq2); err == nil {
-		_, _ = io.Copy(io.Discard, dResp2.Body)
+		dBody2, rerr2 := readBoundedF1Body(dResp2.Body, 1<<20)
 		dResp2.Body.Close()
-		res.PostChangeDashSameConn = dResp2.StatusCode
-		res.PostChangeDashCacheControl = dResp2.Header.Get("Cache-Control")
+		if rerr2 == nil && !strings.Contains(string(dBody2), f1DashboardMarker) && !strings.Contains(string(dBody2), f1PrivateLeakMarker) {
+			res.PostChangeDashSameConn = dResp2.StatusCode
+			res.PostChangeDashCacheControl = dResp2.Header.Get("Cache-Control")
+		}
 	}
-	writeEvent(map[string]any{
+	evWriter.Write(map[string]any{
 		"event":                    "post_change_same_conn_probes",
 		"portal_same_conn_status":  res.PostChangePortalSameConn,
 		"dash_same_conn_status":    res.PostChangeDashSameConn,
 		"dash_same_conn_cache_ctl": res.PostChangeDashCacheControl,
 	})
-
-	if opts.SummaryPath != "" {
-		_ = os.MkdirAll(filepath.Dir(opts.SummaryPath), 0o755)
-		b, _ := json.MarshalIndent(res, "", "  ")
-		_ = os.WriteFile(opts.SummaryPath, append(b, '\n'), 0o644)
+	if err := evWriter.Close(); err != nil {
+		fmt.Printf("f1SharedH2 evWriter close error: %v\n", err)
+		return 1
 	}
-	if !res.PortalStreamCompletedOK || res.PostChangePortalSameConn != http.StatusOK || res.PostChangeDashSameConn != http.StatusForbidden {
+	if err := writeF1SummaryFile(opts.SummaryPath, res); err != nil {
+		fmt.Printf("f1SharedH2 summary write error: %v\n", err)
+		return 1
+	}
+	wsOK := !opts.WithWS || (res.WSOpened && res.WSCloseCode == 1008)
+	if !res.PortalStreamCompletedOK || !res.RetirementWithinBound || res.PrematureCloseBeforePublish || !wsOK || res.PostChangePortalSameConn != http.StatusOK || res.PostChangeDashSameConn != opts.ExpectedPostDashStatus {
+		fmt.Printf("f1SharedH2 check failed: res=%+v expectedPostDash=%d\n", res, opts.ExpectedPostDashStatus)
 		return 1
 	}
 	return 0

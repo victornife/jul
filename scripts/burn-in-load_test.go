@@ -262,45 +262,68 @@ func TestF1TransportValidation(t *testing.T) {
 }
 
 func TestF1RouteMixAndOracles(t *testing.T) {
+	validHTML := "<!doctype html><html><body>" + f1PortalMarker + "</body></html>"
+	validAsset := []byte(f1PortalMarker + strings.Repeat("A", 8192-len(f1PortalMarker)))
+	validDashJSON := fmt.Sprintf(`{"marker":%q,"private":%q}`, f1DashboardMarker, f1PrivateLeakMarker)
+
 	for _, tc := range []struct {
 		name     string
-		dashMode string
-		allowOut bool
+		mode     string
+		phase    string
 		wantCode int
 	}{
-		{name: "healthy_and_withdrawn", dashMode: "ok_and_withdrawn", allowOut: true, wantCode: 0},
-		{name: "excluded_leak_violation", dashMode: "excluded_200", allowOut: false, wantCode: 1},
-		{name: "preflight_failure", dashMode: "preflight_500", allowOut: false, wantCode: 1},
+		{name: "healthy_control", mode: "healthy", phase: "healthy", wantCode: 0},
+		{name: "withdrawn_control", mode: "withdrawn_ok", phase: "withdrawn", wantCode: 0},
+		{name: "outage_control", mode: "outage_ok", phase: "outage", wantCode: 0},
+		{name: "transitioning_control", mode: "transition_mix", phase: "transitioning", wantCode: 0},
+		{name: "healthy_phase_403_violation", mode: "withdrawn_ok", phase: "healthy", wantCode: 1},
+		{name: "withdrawn_phase_200_leak_violation", mode: "healthy", phase: "withdrawn", wantCode: 1},
+		{name: "withdrawn_403_private_marker_leak_violation", mode: "withdrawn_leak", phase: "withdrawn", wantCode: 1},
+		{name: "recovered_phase_502_violation", mode: "outage_ok", phase: "healthy", wantCode: 1},
+		{name: "excluded_leak_violation", mode: "excluded_200", phase: "healthy", wantCode: 1},
+		{name: "truncated_asset_violation", mode: "short_asset", phase: "healthy", wantCode: 1},
+		{name: "truncated_html_violation", mode: "truncated_html", phase: "healthy", wantCode: 1},
+		{name: "held_sse_bad_admission_violation", mode: "bad_sse", phase: "healthy", wantCode: 1},
+		{name: "preflight_failure", mode: "preflight_500", phase: "healthy", wantCode: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var reqIdx int64
 			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				idx := atomic.AddInt64(&reqIdx, 1)
-				switch {
-				case r.URL.Path == "/index.html":
-					if tc.dashMode == "preflight_500" {
+				switch r.URL.Path {
+				case "/index.html":
+					if tc.mode == "preflight_500" {
 						w.WriteHeader(http.StatusInternalServerError)
 						return
 					}
-					if tc.dashMode == "excluded_200" && idx > 3 {
-						w.WriteHeader(http.StatusServiceUnavailable)
+					if tc.mode == "truncated_html" && idx > 1 {
+						w.WriteHeader(http.StatusOK)
+						fmt.Fprint(w, f1PortalMarker+" truncated before closing html")
 						return
 					}
 					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, f1PortalMarker+" portal body")
-				case r.URL.Path == "/assets/bundle.bin":
+					fmt.Fprint(w, validHTML)
+				case "/assets/bundle.bin":
 					w.WriteHeader(http.StatusOK)
-					fmt.Fprint(w, strings.Repeat("A", 1500))
-				case r.URL.Path == "/events":
+					if tc.mode == "short_asset" {
+						_, _ = w.Write(validAsset[:1024])
+						return
+					}
+					_, _ = w.Write(validAsset)
+				case "/events":
+					if tc.mode == "bad_sse" {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
 					w.Header().Set("Content-Type", "text/event-stream")
 					w.WriteHeader(http.StatusOK)
 					fmt.Fprint(w, "data: "+f1DashboardMarker+"\n\n")
-				case r.URL.Path == "/api/summary":
+				case "/api/summary":
 					auth := r.Header.Get("Authorization")
 					if !strings.HasPrefix(auth, "Basic ") || strings.Contains(r.Header.Get("Tailscale-User-Login"), "forged") {
-						if tc.dashMode == "excluded_200" {
-							w.WriteHeader(http.StatusOK)
-							fmt.Fprint(w, f1DashboardMarker)
+						if tc.mode == "excluded_200" {
+							w.WriteHeader(http.StatusUnauthorized)
+							fmt.Fprint(w, f1PrivateLeakMarker)
 							return
 						}
 						if idx%2 == 0 {
@@ -310,22 +333,27 @@ func TestF1RouteMixAndOracles(t *testing.T) {
 						}
 						return
 					}
-					switch idx % 4 {
-					case 0:
+					switch tc.mode {
+					case "withdrawn_ok":
 						w.Header().Set("Cache-Control", "no-store")
 						w.WriteHeader(http.StatusForbidden)
-					case 1:
-						if tc.allowOut {
-							w.WriteHeader(http.StatusBadGateway)
+					case "withdrawn_leak":
+						w.Header().Set("Cache-Control", "no-store")
+						w.WriteHeader(http.StatusForbidden)
+						fmt.Fprint(w, f1PrivateLeakMarker)
+					case "outage_ok":
+						w.WriteHeader(http.StatusBadGateway)
+					case "transition_mix":
+						if idx%2 == 0 {
+							w.Header().Set("Cache-Control", "no-store")
+							w.WriteHeader(http.StatusForbidden)
 						} else {
 							w.WriteHeader(http.StatusOK)
-							fmt.Fprint(w, f1DashboardMarker)
+							fmt.Fprint(w, validDashJSON)
 						}
-					case 2:
-						w.WriteHeader(http.StatusTooManyRequests)
 					default:
 						w.WriteHeader(http.StatusOK)
-						fmt.Fprint(w, f1DashboardMarker)
+						fmt.Fprint(w, validDashJSON)
 					}
 				}
 			}))
@@ -337,8 +365,11 @@ func TestF1RouteMixAndOracles(t *testing.T) {
 			if err := os.WriteFile(caPath, pemBytes, 0o600); err != nil {
 				t.Fatal(err)
 			}
+			phasePath := filepath.Join(dir, "phase.json")
+			_ = os.WriteFile(phasePath, []byte(fmt.Sprintf(`{"phase":%q}`, tc.phase)), 0o600)
 			evPath := filepath.Join(dir, "events.jsonl")
 			sumPath := filepath.Join(dir, "summary.json")
+			heldReady := filepath.Join(dir, "held.ready")
 
 			args, flags := os.Args, flag.CommandLine
 			defer func() { os.Args, flag.CommandLine = args, flags }()
@@ -354,20 +385,22 @@ func TestF1RouteMixAndOracles(t *testing.T) {
 				"-dashHost=example.com",
 				"-authUser=soakuser",
 				"-authPassword=soakpass",
-				"-excludedRatio=30",
+				"-excludedRatio=25",
 				"-heldConns=2",
-				"-probeInterval=40ms",
+				"-heldReadyFile=" + heldReady,
+				"-probeInterval=35ms",
 				"-probeDash",
-				fmt.Sprintf("-allowDashOutage=%v", tc.allowOut),
-				"-pace=5ms",
+				"-phaseFile=" + phasePath,
+				"-expectedAssetBytes=8192",
+				"-pace=4ms",
 				"-eventLog=" + evPath,
 				"-summaryOut=" + sumPath,
 			}
-			// Notice buildF1Transport handles 429 as oracle violation for dash_auth when not expected;
-			// only test 429 in excluded/violation or keep dash_auth returning 200/403/502 in healthy mode.
 			code := runLoad()
-			if tc.name == "healthy_and_withdrawn" {
-				// Because reqIdx % 4 == 2 returned 429 above, let's verify summary.json was written:
+			if code != tc.wantCode {
+				t.Fatalf("%s: got code %d, want %d", tc.name, code, tc.wantCode)
+			}
+			if tc.wantCode == 0 {
 				b, err := os.ReadFile(sumPath)
 				if err != nil {
 					t.Fatalf("missing summary.json: %v", err)
@@ -376,62 +409,22 @@ func TestF1RouteMixAndOracles(t *testing.T) {
 				if err := json.Unmarshal(b, &s); err != nil {
 					t.Fatal(err)
 				}
-				if s.TotalRequests == 0 || s.HeldOpened == 0 || s.ProbePortalOK == 0 {
+				if s.TotalRequests == 0 || s.OracleViolations != 0 || s.HeldOpened != 2 || s.ProbePortalOK == 0 || len(s.ByClass) == 0 {
 					t.Fatalf("unexpected summary counts: %+v", s)
 				}
-			} else if code != tc.wantCode {
-				t.Fatalf("got code %d, want %d", code, tc.wantCode)
 			}
 		})
 	}
 
-	// Clean zero-violation run
+	// Error paths: missing CA, invalid eventLog path, invalid summaryOut path, and unreachable preflight
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/index.html":
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, f1PortalMarker)
-		case "/assets/bundle.bin":
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, strings.Repeat("B", 2048))
-		case "/events":
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "data: "+f1DashboardMarker+"\n\n")
-		case "/api/summary":
-			if strings.Contains(r.Header.Get("Tailscale-User-Login"), "forged") {
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, f1DashboardMarker)
-		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, validHTML)
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
 	caPath := filepath.Join(dir, "ca.pem")
 	_ = os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)
-	code := runF1Mode(f1Options{
-		Duration:     150 * time.Millisecond,
-		Workers:      2,
-		TLSBase:      srv.URL,
-		CAFile:       caPath,
-		PortalHost:   "example.com",
-		DashHost:     "example.com",
-		AuthUser:     "soakuser",
-		AuthPassword: "soakpass",
-		ExcludedPct:  20,
-		HeldConns:    1,
-		ProbeEvery:   40 * time.Millisecond,
-		ProbeDash:    true,
-		Pace:         5 * time.Millisecond,
-		EventLogPath: filepath.Join(dir, "ev.jsonl"),
-		SummaryPath:  filepath.Join(dir, "sum.json"),
-	})
-	if code != 0 {
-		t.Fatalf("expected clean F1 run to return 0, got %d", code)
-	}
-
-	// Error paths: missing CA, invalid eventLog path, and unreachable preflight
 	if got := runF1Mode(f1Options{TLSBase: srv.URL, CAFile: ""}); got != 1 {
 		t.Fatalf("expected missing CA to return 1, got %d", got)
 	}
@@ -447,21 +440,21 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 	var withdrawn atomic.Bool
 	sseClose := make(chan struct{})
 	wsClose := make(chan struct{})
+	assetPayload := []byte(f1PortalMarker + strings.Repeat("P", 8192-len(f1PortalMarker)))
 
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/assets/bundle.bin":
 			w.WriteHeader(http.StatusOK)
-			for i := 0; i < 4; i++ {
-				_, _ = w.Write([]byte(strings.Repeat("P", 2048)))
-				if fl, ok := w.(http.Flusher); ok {
-					fl.Flush()
-				}
-				time.Sleep(15 * time.Millisecond)
+			_, _ = w.Write(assetPayload[:4096])
+			if fl, ok := w.(http.Flusher); ok {
+				fl.Flush()
 			}
+			time.Sleep(15 * time.Millisecond)
+			_, _ = w.Write(assetPayload[4096:])
 		case "/index.html":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(f1PortalMarker))
+			_, _ = w.Write([]byte("<!doctype html><html><body>" + f1PortalMarker + "</body></html>"))
 		case "/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.WriteHeader(http.StatusOK)
@@ -483,10 +476,8 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 			defer conn.Close()
 			_, _ = rw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
 			_ = rw.Flush()
-			// Send one text frame (opcode 0x1, length 4)
 			_, _ = conn.Write([]byte{0x81, 0x04, 't', 'e', 's', 't'})
 			<-wsClose
-			// Send unmasked Close 1008 frame (0x03 0xF0 = 1008)
 			_, _ = conn.Write([]byte{0x88, 0x02, 0x03, 0xF0})
 			buf := make([]byte, 32)
 			_ = conn.SetReadDeadline(time.Now().Add(80 * time.Millisecond))
@@ -498,7 +489,7 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 				return
 			}
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(f1DashboardMarker))
+			_, _ = w.Write([]byte(`{"marker":"` + f1DashboardMarker + `","private":"` + f1PrivateLeakMarker + `"}`))
 		}
 	}))
 	srv.EnableHTTP2 = true
@@ -509,6 +500,7 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 	caPath := filepath.Join(dir, "ca.pem")
 	_ = os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)
 	readyPath := filepath.Join(dir, "ready.txt")
+	pubSigPath := filepath.Join(dir, "publish.sig")
 	evPath := filepath.Join(dir, "h2-events.jsonl")
 	sumPath := filepath.Join(dir, "h2-summary.json")
 
@@ -519,6 +511,8 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
+		_ = os.WriteFile(pubSigPath, []byte("publish\n"), 0o600)
+		time.Sleep(15 * time.Millisecond)
 		withdrawn.Store(true)
 		close(sseClose)
 		close(wsClose)
@@ -537,8 +531,11 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 		"-dashHost=example.com",
 		"-authUser=soakuser",
 		"-authPassword=soakpass",
+		"-expectedAssetBytes=8192",
 		"-pace=10ms",
 		"-readyFile=" + readyPath,
+		"-publishSignalFile=" + pubSigPath,
+		"-retirementBound=2s",
 		"-withWS=true",
 		"-wsEchoClose=true",
 		"-eventLog=" + evPath,
@@ -555,8 +552,45 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 	if err := json.Unmarshal(b, &res); err != nil {
 		t.Fatal(err)
 	}
-	if res.DialCount != 1 || res.NegotiatedProtocol != "h2" || !res.PortalStreamCompletedOK || res.WSCloseCode != 1008 || !res.WSGracefulHandshake {
+	if res.DialCount != 1 || res.NegotiatedProtocol != "h2" || !res.PortalStreamCompletedOK || !res.PortalActiveAtRetirement || res.PortalBytesBeforeRetirement != 4096 || res.PortalBytesAfterRetirement != 4096 || !res.RetirementWithinBound || res.PrematureCloseBeforePublish || res.WSCloseCode != 1008 || !res.WSGracefulHandshake {
 		t.Fatalf("unexpected shared H2 result: %+v", res)
+	}
+
+	// Test HTTP/1.1 keep-alive retirement and revocation mode (-f1H1KeepAlive)
+	withdrawn.Store(false)
+	h1SSEClose := make(chan struct{})
+	sseClose = h1SSEClose
+	h1Ready := filepath.Join(dir, "h1.ready")
+	h1Pub := filepath.Join(dir, "h1.pub")
+	h1Sum := filepath.Join(dir, "h1-summary.json")
+	go func() {
+		for {
+			if _, err := os.Stat(h1Ready); err == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_ = os.WriteFile(h1Pub, []byte("pub\n"), 0o600)
+		time.Sleep(15 * time.Millisecond)
+		withdrawn.Store(true)
+		close(h1SSEClose)
+	}()
+	if code := runF1SharedH2(f1SharedH2Options{
+		TLSBase:                srv.URL,
+		CAFile:                 caPath,
+		PortalHost:             "example.com",
+		DashHost:               "example.com",
+		AuthUser:               "soakuser",
+		AuthPassword:           "soakpass",
+		ReadyFile:              h1Ready,
+		PublishSignalFile:      h1Pub,
+		RetirementBound:        2 * time.Second,
+		ExpectedPostDashStatus: http.StatusForbidden,
+		HTTP1KeepAlive:         true,
+		SummaryPath:            h1Sum,
+		Timeout:                3 * time.Second,
+	}); code != 0 {
+		t.Fatalf("expected HTTP1KeepAlive run to return 0, got %d", code)
 	}
 
 	// Test forced close (wsEchoClose = false) and error branches
@@ -566,26 +600,28 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 	sseClose = c1
 	wsClose = c2
 	if code := runF1SharedH2(f1SharedH2Options{
-		TLSBase:      srv.URL,
-		CAFile:       caPath,
-		ClientCert:   "testdata/tls/client.crt",
-		ClientKey:    "testdata/tls/client.key",
-		PortalHost:   "example.com",
-		DashHost:     "example.com",
-		AuthUser:     "soakuser",
-		AuthPassword: "soakpass",
-		WithWS:       true,
-		WSEchoClose:  false,
-		Timeout:      3 * time.Second,
+		TLSBase:            srv.URL,
+		CAFile:             caPath,
+		ClientCert:         "testdata/tls/client.crt",
+		ClientKey:          "testdata/tls/client.key",
+		PortalHost:         "example.com",
+		DashHost:           "example.com",
+		AuthUser:           "soakuser",
+		AuthPassword:       "soakpass",
+		ExpectedAssetBytes: 8192,
+		WithWS:             true,
+		WSEchoClose:        false,
+		Timeout:            3 * time.Second,
 	}); code != 0 {
 		t.Fatalf("expected wsEchoClose=false run to return 0, got %d", code)
 	}
 	if code := runF1SharedH2(f1SharedH2Options{
-		TLSBase:    srv.URL,
-		CAFile:     caPath,
-		PortalHost: "example.com",
-		DashHost:   "example.com",
-		WithWS:     false,
+		TLSBase:            srv.URL,
+		CAFile:             caPath,
+		PortalHost:         "example.com",
+		DashHost:           "example.com",
+		ExpectedAssetBytes: 8192,
+		WithWS:             false,
 	}); code != 0 {
 		t.Fatalf("expected WithWS=false run to return 0, got %d", code)
 	}
@@ -613,8 +649,8 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 		t.Fatalf("expected unreachable dial to fail, got %d", code)
 	}
 
-	// Test portal 500, dash SSE 500, ws 403, and timeout/post-change failure branches
-	for _, failStage := range []string{"portal500", "sse500", "ws403", "post200"} {
+	// Test portal already completed before retirement (only 4096 bytes so 0 bytes after retirement), portal 500, dash SSE 500, ws 403, and post-change 200 failure branches
+	for _, failStage := range []string{"portal_already_complete", "portal500", "sse500", "ws403", "post200"} {
 		s2 := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/assets/bundle.bin":
@@ -629,8 +665,9 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 					w.WriteHeader(http.StatusInternalServerError)
 					return
 				}
+				w.Header().Set("Content-Type", "text/event-stream")
 				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte("data: ok\n\n"))
+				_, _ = w.Write([]byte("data: " + f1DashboardMarker + "\n\n"))
 			case "/ws":
 				if failStage == "ws403" {
 					w.WriteHeader(http.StatusForbidden)
@@ -638,8 +675,14 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 				}
 			case "/index.html":
 				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(f1PortalMarker))
 			case "/api/summary":
-				w.WriteHeader(http.StatusOK) // Not 403 -> triggers final check failure
+				if failStage == "portal_already_complete" {
+					w.Header().Set("Cache-Control", "no-store")
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
 			}
 		}))
 		s2.EnableHTTP2 = true
@@ -647,16 +690,212 @@ func TestF1SharedH2AndWebSocketRetirement(t *testing.T) {
 		ca2 := filepath.Join(dir, "ca-"+failStage+".pem")
 		_ = os.WriteFile(ca2, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: s2.Certificate().Raw}), 0o600)
 		got := runF1SharedH2(f1SharedH2Options{
-			TLSBase:    s2.URL,
-			CAFile:     ca2,
-			PortalHost: "example.com",
-			DashHost:   "example.com",
-			WithWS:     failStage == "ws403",
-			Timeout:    200 * time.Millisecond,
+			TLSBase:            s2.URL,
+			CAFile:             ca2,
+			PortalHost:         "example.com",
+			DashHost:           "example.com",
+			ExpectedAssetBytes: 4096,
+			WithWS:             failStage == "ws403",
+			Timeout:            200 * time.Millisecond,
 		})
 		s2.Close()
 		if got != 1 {
 			t.Fatalf("stage %s: expected code 1, got %d", failStage, got)
 		}
+	}
+}
+
+func TestF1HelpersAndEdgeCases(t *testing.T) {
+	dir := t.TempDir()
+
+	// readBoundedF1Body oversize and read error
+	if _, err := readBoundedF1Body(strings.NewReader("123456"), 4); err == nil {
+		t.Fatal("expected oversize readBoundedF1Body to fail")
+	}
+
+	// currentF1Phase plain-text, InitialPhase, AllowOutage, and default healthy
+	plainPhase := filepath.Join(dir, "plain.phase")
+	_ = os.WriteFile(plainPhase, []byte("withdrawn\n"), 0o600)
+	if got := currentF1Phase(f1Options{PhaseFile: plainPhase}); got != "withdrawn" {
+		t.Fatalf("expected plain phase withdrawn, got %q", got)
+	}
+	if got := currentF1Phase(f1Options{InitialPhase: "outage"}); got != "outage" {
+		t.Fatalf("expected InitialPhase outage, got %q", got)
+	}
+	if got := currentF1Phase(f1Options{AllowOutage: true}); got != "outage" {
+		t.Fatalf("expected AllowOutage -> outage, got %q", got)
+	}
+	if got := currentF1Phase(f1Options{}); got != "healthy" {
+		t.Fatalf("expected default healthy, got %q", got)
+	}
+
+	// evaluateF1ResponseOracle branches: rerr != nil, default expBytes, ExpectedAssetSHA256 mismatch, phaseStart != phaseEnd, unknown class/phase
+	hdr := http.Header{"Cache-Control": []string{"no-store"}}
+	validDash := []byte(`{"marker":"` + f1DashboardMarker + `","private":"` + f1PrivateLeakMarker + `"}`)
+	if evaluateF1ResponseOracle(f1Options{}, "portal_html", "healthy", "healthy", 200, hdr, []byte("x"), io.ErrUnexpectedEOF) {
+		t.Fatal("expected rerr != nil to fail oracle")
+	}
+	if evaluateF1ResponseOracle(f1Options{ExpectedAssetBytes: len(f1PortalMarker), ExpectedAssetSHA256: "deadbeef"}, "portal_asset", "healthy", "healthy", 200, hdr, []byte(f1PortalMarker), nil) {
+		t.Fatal("expected SHA256 mismatch to fail oracle")
+	}
+	if !evaluateF1ResponseOracle(f1Options{}, "dash_auth", "healthy", "withdrawn", 403, hdr, nil, nil) {
+		t.Fatal("expected cross-phase healthy->withdrawn 403 to pass oracle")
+	}
+	if !evaluateF1ResponseOracle(f1Options{}, "dash_auth", "healthy", "withdrawn", 200, hdr, validDash, nil) {
+		t.Fatal("expected cross-phase healthy->withdrawn 200 to pass oracle")
+	}
+	if evaluateF1ResponseOracle(f1Options{}, "dash_auth", "unknown_phase", "unknown_phase", 200, hdr, validDash, nil) {
+		t.Fatal("expected unknown phase to fail oracle")
+	}
+	if evaluateF1ResponseOracle(f1Options{}, "unknown_class", "healthy", "healthy", 200, hdr, validDash, nil) {
+		t.Fatal("expected unknown class to fail oracle")
+	}
+
+	// computeQuantiles empty
+	if minV, p50, p95, p99, maxV, avg := computeQuantiles(nil); minV != 0 || p50 != 0 || p95 != 0 || p99 != 0 || maxV != 0 || avg != 0 {
+		t.Fatal("expected zero quantiles on empty slice")
+	}
+
+	// f1EventWriter marshal error and writeF1SummaryFile directory error
+	evPath := filepath.Join(dir, "err-ev.jsonl")
+	ew, err := newF1EventWriter(evPath, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ew.Write(map[string]any{"unmarshalable": make(chan int)})
+	if err := ew.Close(); err == nil {
+		t.Fatal("expected Close error after failed Write")
+	}
+	if err := writeF1SummaryFile(dir, map[string]int{"a": 1}); err == nil {
+		t.Fatal("expected writeF1SummaryFile on directory to fail")
+	}
+
+	// evaluatePublishSignalTiming branches: default bound, fallback Stat on existing sigFile, and late WS close
+	sigFile := filepath.Join(dir, "existing.sig")
+	_ = os.WriteFile(sigFile, []byte("ok\n"), 0o600)
+	var pMono atomic.Int64
+	var pUTC atomic.Value
+	res := f1SharedH2Result{
+		DashSSEClosedMonoNS: int64(10 * time.Millisecond),
+		WSClosedMonoNS:      int64(5000 * time.Millisecond),
+	}
+	evaluatePublishSignalTiming(sigFile, &pMono, &pUTC, 0, true, &res)
+	if res.RetirementWithinBound {
+		t.Fatal("expected late WS close to set RetirementWithinBound=false")
+	}
+
+	// runF1Mode with 429 response and SummaryPath write error
+	srv429 := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/index.html" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("<!doctype html><html><body>" + f1PortalMarker + "</body></html>"))
+			return
+		}
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv429.Close()
+	ca429 := filepath.Join(dir, "ca429.pem")
+	_ = os.WriteFile(ca429, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv429.Certificate().Raw}), 0o600)
+	if got := runF1Mode(f1Options{
+		Duration:    60 * time.Millisecond,
+		Workers:     1,
+		TLSBase:     srv429.URL,
+		CAFile:      ca429,
+		PortalHost:  "example.com",
+		DashHost:    "example.com",
+		SummaryPath: dir,
+	}); got != 1 {
+		t.Fatalf("expected SummaryPath=dir to return 1, got %d", got)
+	}
+
+	// runF1SharedH2 with sse missing marker and HTTP1KeepAlive pre-change 500
+	srvBadSSE := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/assets/bundle.bin":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(strings.Repeat("P", 4096)))
+		case "/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("data: wrong-marker\n\n"))
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	}))
+	srvBadSSE.EnableHTTP2 = true
+	srvBadSSE.StartTLS()
+	defer srvBadSSE.Close()
+	caBadSSE := filepath.Join(dir, "ca-bad-sse.pem")
+	_ = os.WriteFile(caBadSSE, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvBadSSE.Certificate().Raw}), 0o600)
+	if got := runF1SharedH2(f1SharedH2Options{TLSBase: srvBadSSE.URL, CAFile: caBadSSE, PortalHost: "example.com", DashHost: "example.com"}); got != 1 {
+		t.Fatalf("expected missing SSE marker to return 1, got %d", got)
+	}
+	if got := runF1SharedH2(f1SharedH2Options{TLSBase: srvBadSSE.URL, CAFile: caBadSSE, PortalHost: "example.com", DashHost: "example.com", HTTP1KeepAlive: true}); got != 1 {
+		t.Fatalf("expected H1 keepalive pre-change 500 to return 1, got %d", got)
+	}
+	if got := runF1SharedH2(f1SharedH2Options{TLSBase: srvBadSSE.URL, CAFile: caBadSSE, EventLogPath: dir}); got != 1 {
+		t.Fatalf("expected EventLogPath=dir to return 1, got %d", got)
+	}
+
+	// Test timeout waiting for SSE retirement and ReadyFile=dir
+	srvHangSSE := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/assets/bundle.bin":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(f1PortalMarker + strings.Repeat("P", 4096)))
+			if fl, ok := w.(http.Flusher); ok {
+				fl.Flush()
+			}
+			<-r.Context().Done()
+		case "/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("data: " + f1DashboardMarker + "\n\n"))
+			if fl, ok := w.(http.Flusher); ok {
+				fl.Flush()
+			}
+			<-r.Context().Done()
+		}
+	}))
+	srvHangSSE.EnableHTTP2 = true
+	srvHangSSE.StartTLS()
+	defer srvHangSSE.Close()
+	caHang := filepath.Join(dir, "ca-hang.pem")
+	_ = os.WriteFile(caHang, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvHangSSE.Certificate().Raw}), 0o600)
+	if got := runF1SharedH2(f1SharedH2Options{TLSBase: srvHangSSE.URL, CAFile: caHang, PortalHost: "example.com", DashHost: "example.com", ReadyFile: dir, WithWS: false, Timeout: 80 * time.Millisecond}); got != 1 {
+		t.Fatalf("expected ReadyFile=dir to return 1, got %d", got)
+	}
+	if got := runF1SharedH2(f1SharedH2Options{TLSBase: srvHangSSE.URL, CAFile: caHang, PortalHost: "example.com", DashHost: "example.com", WithWS: false, Timeout: 80 * time.Millisecond}); got != 1 {
+		t.Fatalf("expected SSE timeout to return 1, got %d", got)
+	}
+
+	// runF1H1KeepAlive failure branches (unreachable dial, premature close before publish)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/summary":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(validDash)
+		case "/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("data: " + f1DashboardMarker + "\n\n"))
+		case "/index.html":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("<!doctype html><html><body>" + f1PortalMarker + "</body></html>"))
+		}
+	}))
+	defer srv.Close()
+	caPath := filepath.Join(dir, "ca.pem")
+	_ = os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600)
+	if got := runF1SharedH2(f1SharedH2Options{
+		TLSBase:           srv.URL,
+		CAFile:            caPath,
+		PortalHost:        "example.com",
+		DashHost:          "example.com",
+		PublishSignalFile: filepath.Join(dir, "never-created.sig"),
+		HTTP1KeepAlive:    true,
+		Timeout:           200 * time.Millisecond,
+	}); got != 1 {
+		t.Fatalf("expected H1 keepalive with missing publish signal (premature close) to return 1, got %d", got)
 	}
 }

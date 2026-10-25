@@ -1,0 +1,140 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
+# Fixture F1 — File-Owned mTLS Shared-Listener Variant (spec §9.4, §10, #642/#563).
+#
+# Combines config_authority = "file_owned" (jul-readonly.service) with the
+# shared-listener mTLS posture ([servers.tls.client_auth] mode = "request" on
+# 192.0.2.10:443 and require_client_cert = true on route_id = "dashboard").
+# Mutating API/CLI calls are refused with 409 config_authority_read_only; the
+# file owner updates files on disk and triggers SIGHUP reload.
+
+[global]
+config_authority = "file_owned"
+log_level = "info"
+
+[[servers]]
+name = "default-deny"
+listen = "192.0.2.10:443"
+send_timeout = "30s"
+
+  [servers.tls]
+  enabled = true
+  cert = "tls/lab.crt"
+  key = "tls/lab.key"
+  min_version = "1.2"
+
+    [servers.tls.client_auth]
+    mode = "request"
+    ca_file = "tls/client-ca.pem"
+    crl_file = "tls/clients.crl"
+    verify_san = ["intended-client.lab.test", "revoked-client.lab.test"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  return = 404
+
+[[servers]]
+name = "portal"
+listen = "192.0.2.10:443"
+server_names = ["portal.lab.test", "portal-alias.lab.test"]
+send_timeout = "30s"
+
+  [servers.tls]
+  enabled = true
+  cert = "tls/lab.crt"
+  key = "tls/lab.key"
+  min_version = "1.2"
+
+    [servers.tls.client_auth]
+    mode = "request"
+    ca_file = "tls/client-ca.pem"
+    crl_file = "tls/clients.crl"
+    verify_san = ["intended-client.lab.test", "revoked-client.lab.test"]
+
+  [[servers.locations]]
+  route_id = "portal-home"
+  match = { type = "prefix", path = "/" }
+  root = "portal"
+  index = ["index.html"]
+  cache_control = "public, max-age=300"
+
+    [servers.locations.rate_limit]
+    enabled = true
+    rate = 50
+    burst = 100
+
+    [servers.locations.sharing]
+    mode = "public"
+    audience_label = "anyone"
+
+[[servers]]
+name = "dashboard"
+listen = "192.0.2.10:443"
+server_names = ["dash.lab.test"]
+send_timeout = "30s"
+
+  [servers.tls]
+  enabled = true
+  cert = "tls/lab.crt"
+  key = "tls/lab.key"
+  min_version = "1.2"
+
+    [servers.tls.client_auth]
+    mode = "request"
+    ca_file = "tls/client-ca.pem"
+    crl_file = "tls/clients.crl"
+    verify_san = ["intended-client.lab.test", "revoked-client.lab.test"]
+
+  [[servers.locations]]
+  route_id = "dashboard"
+  match = { type = "prefix", path = "/" }
+  require_client_cert = true
+  proxy_pass = "http://dashboard"
+  proxy_read_timeout = "60s"
+  proxy_send_timeout = "60s"
+
+    [servers.locations.auth.basic]
+    file = "dashboard.htpasswd"
+    realm = "Dashboard"
+
+    [servers.locations.waf]
+    enabled = true
+    mode = "block"
+    crs_enabled = true
+    request_body_limit = "1m"
+
+    [servers.locations.sharing]
+    mode = "restricted"
+    audience_label = "family"
+
+[[upstreams]]
+name = "dashboard"
+servers = [{ address = "127.0.0.1:3000" }]
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9443"
+
+  [admin.rbac]
+  enabled = true
+
+  [[admin.rbac.principals]]
+  name = "f1-auditor"
+  role = "auditor"
+  token = "${env:JUL_F1_AUDITOR_TOKEN}"
+
+  [[admin.rbac.principals]]
+  name = "f1-viewer"
+  role = "viewer"
+  token = "${env:JUL_F1_VIEWER_TOKEN}"
+
+  [[admin.rbac.principals]]
+  name = "f1-operator"
+  role = "operator"
+  token = "${env:JUL_F1_OPERATOR_TOKEN}"
+
+  [[admin.rbac.principals]]
+  name = "f1-admin"
+  role = "admin"
+  token = "${env:JUL_ADMIN_TOKEN}"

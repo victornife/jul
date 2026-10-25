@@ -148,8 +148,9 @@ while IFS= read -r -d '' f; do
 done < <(find examples -name '*.toml' -print0 | sort -z)
 
 if [ -n "${f1_dir:-}" ]; then
-	echo "-- examples/sharing/f1-standalone/jul.toml (lean build must reject WAF)"
+	echo "-- examples/sharing/f1-standalone/jul.toml (lean build must reject WAF with specific diagnostic)"
 	LEAN_CHECK_BIN="$(mktemp "${TMPDIR:-/tmp}/jul-lean-config-check.XXXXXX")"
+	LEAN_ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/jul-lean-config-err.XXXXXX")"
 	go build -o "$LEAN_CHECK_BIN" ./cmd/jul
 	if (
 		cd "$f1_dir" &&
@@ -157,11 +158,16 @@ if [ -n "${f1_dir:-}" ]; then
 		JUL_F1_AUDITOR_TOKEN=placeholder-auditor-token-for-config-check \
 		JUL_F1_VIEWER_TOKEN=placeholder-viewer-token-for-config-check \
 		JUL_F1_OPERATOR_TOKEN=placeholder-operator-token-for-config-check \
-		"$LEAN_CHECK_BIN" check -config jul.toml -quiet 2>/dev/null
+		"$LEAN_CHECK_BIN" check -config jul.toml -quiet >"$LEAN_ERR_FILE" 2>&1
 	); then
 		echo "   FAILED: lean build unexpectedly accepted WAF-enabled examples/sharing/f1-standalone/jul.toml" >&2
 		fail=1
+	elif ! grep -qi "waf" "$LEAN_ERR_FILE" || ! grep -qiE "built without waf support|rebuild with -tags waf|build tag|not compiled|unsupported|disabled" "$LEAN_ERR_FILE"; then
+		echo "   FAILED: lean build failed without expected WAF unsupported-capability diagnostic:" >&2
+		cat "$LEAN_ERR_FILE" >&2
+		fail=1
 	fi
+	rm -f "$LEAN_CHECK_BIN" "$LEAN_ERR_FILE"
 fi
 
 if [ "$fail" -ne 0 ]; then

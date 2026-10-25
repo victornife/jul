@@ -167,7 +167,7 @@
     ],
     "resource_qualification_policy": {
       "full_w0_w4_configurations": ["CFG-F1-04", "CFG-F1-05"],
-      "rationale_for_reuse_across_authority_and_auth_variants": "Full W0–W4 resource and continuity qualification (15m W0 idle, 12m W1 representative 70/10/20 mix, W2 mixed + 10% excluded + 20 held long-lived dashboard streams, W3 2m complete withdrawal + 1 req/s portal continuity probe, W4 60s backend outage + recovery + >=90s drain + 2m post-drain comparison) is executed on CFG-F1-04/CFG-F1-05 under the hardened systemd service profile on the pinned full-profile binary. File-owned authority (CFG-F1-10/CFG-F1-11) differs only in the control-plane desired-state writer (SIGHUP/file-watcher vs /api/v1/config/apply) and compiles the exact same runtime handler tree (router, TLS, bcrypt Basic auth, Coraza CRS WAF, rate limiter, reverse proxy, and ExchangeRegistry). Resource reuse never substitutes for functional, security, isolation, retirement, or recovery verification: all authority and mTLS variants execute their own real-client functional, security, retirement, and recovery checks."
+      "rationale_for_reuse_across_authority_and_auth_variants": "Full W0–W4 resource and continuity qualification (15m W0 idle, 12m W1 representative 70/10/20 mix, W2 mixed + 10% excluded + 20 held long-lived dashboard streams, W3 2m complete withdrawal + 1 req/s portal continuity probe, W4 60s backend outage + recovery + >=90s drain + 2m post-drain comparison) is executed on CFG-F1-04/CFG-F1-05 under the hardened systemd service profile on the pinned full-profile binary. (1) Authority equivalence: file-owned configurations (CFG-F1-10, CFG-F1-11, CFG-F1-12, CFG-F1-13) differ only in the control-plane desired-state writer (SIGHUP/file-watcher vs /api/v1/config/apply) and compile the exact same runtime handler tree. (2) Authentication & listener cost dominance: CFG-F1-04 executes per-request HTTP Basic bcrypt verification plus Coraza OWASP CRS WAF inspection on every dashboard request, which strictly dominates per-request CPU and heap allocation compared to mTLS (CFG-F1-08/CFG-F1-12 shared listener and CFG-F1-09/CFG-F1-13 dedicated :8443 listener, where X.509 chain verification runs once per TLS handshake and per-request enforcement is an in-memory atomic pointer + serial-map CRL lookup in clientAuthBundle; a second listener on :8443 adds 1 accept goroutine and 1 socket FD). Resource reuse never substitutes for functional, security, isolation, retirement, or recovery verification: all authority and mTLS variants execute their own real-client functional, security, held-stream retirement, recovery, and cgroup/RSS/FD snapshot checks."
     }
   },
   "configurations": [
@@ -280,6 +280,36 @@
       "withdrawal": "dedicated_gate_withdrawn_true",
       "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
       "resource_qualification": "reuses_cfg_f1_05_same_dataplane_with_file_owned_proof"
+    },
+    {
+      "config_id": "CFG-F1-12",
+      "file": "examples/sharing/f1-standalone/12-file-owned-mtls-shared-listener.toml",
+      "authority": "file_owned",
+      "auth_variant": "mtls_shared_listener",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "live_serving",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "reuses_cfg_f1_04_with_file_owned_mtls_shared_proof"
+    },
+    {
+      "config_id": "CFG-F1-13",
+      "file": "examples/sharing/f1-standalone/13-file-owned-mtls-dedicated-listener.toml",
+      "authority": "file_owned",
+      "auth_variant": "mtls_dedicated_listener",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "live_serving",
+      "listeners": ["192.0.2.10:443", "192.0.2.10:8443", "127.0.0.1:9443"],
+      "resource_qualification": "reuses_cfg_f1_04_with_file_owned_mtls_dedicated_proof"
+    },
+    {
+      "config_id": "CFG-F1-14",
+      "file": "examples/sharing/f1-standalone/14-lan-managed-no-opaque-noop.toml",
+      "authority": "managed",
+      "auth_variant": "none_withdrawn_noop",
+      "exposure": "controlled_lan_public_portal_restricted_dashboard",
+      "withdrawal": "dedicated_gate_withdrawn_true",
+      "listeners": ["192.0.2.10:443", "127.0.0.1:9443"],
+      "resource_qualification": "not_required_transition_stage"
     }
   ],
   "cases": [
@@ -334,10 +364,10 @@
     {
       "case_id": "CASE-F1-007",
       "category": "authority_and_postconditions",
-      "config_ids": ["CFG-F1-04"],
+      "config_ids": ["CFG-F1-04", "CFG-F1-14"],
       "spec_refs": ["§9.1", "§9.2", "ADR 0019 §27"],
-      "description": "Managed CAS, idempotency, stale base, and no_change: re-applying identical CFG-F1-04 returns outcome=no_change; replaying same Idempotency-Key returns cached terminal result; reusing same Idempotency-Key with different payload returns 409 idempotency_key_reused; stale base_version returns 409 base_version_conflict.",
-      "expected_outcome": "no_change preserves serving_version; idempotency replay returns 200; mismatched reuse and stale base return 409 before side effects."
+      "description": "Managed CAS, idempotency, stale base, opaque-input reload, and no_change: re-applying opaque-input-free candidate CFG-F1-14 returns outcome=no_change while re-applying file-backed CFG-F1-04 returns outcome=applied_live (re-reading dashboard.htpasswd per hasOpaqueReloadInputs); replaying same Idempotency-Key returns cached terminal result; reusing same Idempotency-Key with different payload returns 409 idempotency_key_reused; stale base_version returns 409 base_version_conflict.",
+      "expected_outcome": "CFG-F1-14 identical re-apply returns outcome=no_change; CFG-F1-04 re-apply returns outcome=applied_live; idempotency replay returns 200 with same apply_id; mismatched reuse and stale base return 409 before side effects."
     },
     {
       "case_id": "CASE-F1-008",
@@ -368,8 +398,8 @@
       "category": "authority_and_postconditions",
       "config_ids": ["CFG-F1-04"],
       "spec_refs": ["§9.4", "§18", "AD-09"],
-      "description": "Post-restart postcondition key rotation and recovery: restart Jul to promote the staged change; verify boot_id changes and the pre-restart postcondition evaluates to result=unverifiable (candidate=unverifiable); re-plan the same raw candidate (with config:raw) and repeatable typed op (location_set_withdrawn) to obtain candidate_serving; verify non-repeatable location_add re-plan is rejected once serving and remains unverifiable with manual reconciliation.",
-      "expected_outcome": "Original postcondition returns result=unverifiable after restart; re-planned raw candidate and repeatable typed op return result=candidate_serving; non-repeatable location_add re-plan is refused and reconciled via GET /api/sharing."
+      "description": "Post-restart postcondition key rotation, open long-lived connection shutdown, and recovery: restart Jul while holding an active SSE stream and H1 WebSocket connection; verify clean connection termination on restart, boot_id rotation, and pre-restart postcondition evaluating to result=unverifiable (candidate=unverifiable); re-plan the same raw candidate (with config:raw) and repeatable typed op (location_set_withdrawn) to obtain candidate_serving; verify non-repeatable location_add postcondition reports repeatable=false with manual reconciliation guidance.",
+      "expected_outcome": "Held SSE/WS connections close cleanly on restart; original postcondition returns result=unverifiable after restart; re-planned raw candidate and repeatable typed op return result=candidate_serving; non-repeatable location_add postcondition reports repeatable=false and manual reconciliation guidance."
     },
     {
       "case_id": "CASE-F1-012",
@@ -384,16 +414,16 @@
       "category": "authority_and_postconditions",
       "config_ids": ["CFG-F1-04", "CFG-F1-05"],
       "spec_refs": ["§9.1", "§15"],
-      "description": "Managed history rollback: preview rollback diff (observing its own audience delta class 'widened' when rolling back from withdrawn CFG-F1-05 to active CFG-F1-04) and execute POST /api/v1/config/rollback.",
-      "expected_outcome": "Rollback diff shows dashboard class=widened; rollback apply succeeds with outcome=applied_live and restores intended dashboard access."
+      "description": "Managed history rollback: preview rollback diff (observing its own audience delta class 'widened' when rolling back from withdrawn CFG-F1-05 to active CFG-F1-04) and execute POST /api/config/rollback.",
+      "expected_outcome": "Rollback diff shows dashboard class=widened; POST /api/config/rollback succeeds and restores intended dashboard 200 access."
     },
     {
       "case_id": "CASE-F1-014",
       "category": "authority_and_postconditions",
       "config_ids": ["CFG-F1-10", "CFG-F1-11"],
       "spec_refs": ["§9.1", "§9.2", "§9.4", "ADR 0019 §15"],
-      "description": "File-owned authority boundary, SIGHUP reload, and owner rollback: under jul-readonly.service (CFG-F1-10), GET /api/sharing and POST /api/v1/config/plan succeed; POST /api/v1/config/apply, patch, rollback, and adopt are refused with 409 config_authority_read_only (CLI exit code 6) and zero file modification; owner replaces file with CFG-F1-11 and sends SIGHUP -> withdrawal goes live and postcondition returns candidate_serving; owner reverts to CFG-F1-10 + SIGHUP -> access restored without minting route_id or managed history.",
-      "expected_outcome": "All remote mutations refused with 409 config_authority_read_only; SIGHUP reload publishes CFG-F1-11 and evaluates candidate_serving; owner revert + SIGHUP restores CFG-F1-10."
+      "description": "File-owned authority boundary, all mutation refusals, SIGHUP reload, and owner rollback: under jul-readonly.service (CFG-F1-10), GET /api/sharing and POST /api/v1/config/plan succeed; POST /api/v1/config/apply, POST /api/config/patch/apply, POST /api/v1/config/rollback, POST /api/config/rollback, POST /api/v1/config/adopt-external, and CLI jul apply are all refused with 409 config_authority_read_only (CLI exit code 6) and zero file modification; owner replaces file with CFG-F1-11 and sends SIGHUP -> withdrawal goes live and postcondition returns candidate_serving; owner reverts to CFG-F1-10 + SIGHUP -> access restored without minting route_id or managed history.",
+      "expected_outcome": "All remote mutations (apply, patch, rollback, adopt, CLI apply) refused with 409 config_authority_read_only; SIGHUP reload publishes CFG-F1-11 and evaluates candidate_serving; owner revert + SIGHUP restores CFG-F1-10."
     },
     {
       "case_id": "CASE-F1-015",
@@ -440,8 +470,8 @@
       "category": "isolation_and_controls",
       "config_ids": ["CFG-F1-04"],
       "spec_refs": ["§10", "§11", "ADR 0018"],
-      "description": "Path canonicalisation (dot segments, repeated slashes, percent-encoded separators) and cross-vhost prefix isolation: /a/../api/summary, //api///summary, and /%2e%2e/api/summary on dash.lab.test canonicalise to /api/summary (agreed between POST /api/routes/test and backend observed_path) and require Basic auth; requesting /api/summary or /dashboard on Host: portal.lab.test returns 404 from the static root, never dashboard content.",
-      "expected_outcome": "POST /api/routes/test and backend observed_path both report /api/summary; unauthenticated dot-segment paths on dash.lab.test return 401 (origin_delta=0); portal.lab.test/api/summary returns 404 with zero dashboard content."
+      "description": "Path canonicalisation (dot segments, repeated slashes, percent-encoded dot segments, and percent-encoded separators %2f/%2F) and cross-vhost prefix isolation: /a/../api/summary, //api///summary, /%2e%2e/api/summary, /api%2fsummary, /api%2Fsummary, and /..%2fapi/summary on dash.lab.test require Basic auth and never bypass location auth; static root escape /..%2f..%2fetc/passwd on portal.lab.test is rejected; requesting /api/summary or /dashboard on Host: portal.lab.test returns 404 from the static root, never dashboard content.",
+      "expected_outcome": "POST /api/routes/test and backend observed_path agree on canonical /api/summary; unauthenticated dot-segment and %2f/%2F encoded-separator paths on dash.lab.test return 401 (origin_delta=0); portal.lab.test/api/summary and /..%2f..%2fetc/passwd return 404/400 with zero dashboard or host-file content."
     },
     {
       "case_id": "CASE-F1-021",
@@ -504,8 +534,8 @@
       "category": "isolation_and_controls",
       "config_ids": ["CFG-F1-04"],
       "spec_refs": ["§9.5", "§11"],
-      "description": "Portal-only route/header change isolation: modifying only portal-home (e.g. cache_control or response_headers on portal) produces zero audience delta on dashboard and leaves dashboard Basic + WAF enforcement intact.",
-      "expected_outcome": "Plan lists no widened/narrowed/uncertain delta for dashboard; dashboard remains restricted (401 excluded, 200 intended)."
+      "description": "Portal-only route/target/header change, rejection, rollback, and restart isolation: apply a portal route/location change (adding a portal sub-route and updating cache_control), reject an invalid portal edit, roll back, and restart while verifying that dashboard's audience delta is absent/unchanged (requires_acknowledgement=false) and dashboard stays restricted throughout.",
+      "expected_outcome": "Plan lists no widened/narrowed/uncertain delta for dashboard; dashboard remains restricted (401 excluded, 200 intended) across portal route apply, rejection, rollback, and restart."
     },
     {
       "case_id": "CASE-F1-029",
@@ -528,16 +558,16 @@
       "category": "withdrawal_mtls_and_continuity",
       "config_ids": ["CFG-F1-05"],
       "spec_refs": ["§9.3", "ADR 0026 Amendment #642"],
-      "description": "Outermost stage-0 withdrawal gate precedence over redirect rewrites, WASM request Stop plugins, CORS preflight OPTIONS, and conflicting response_headers/expires: a withdrawn location configured with redirect rewrites, request plugin, CORS preflight, expires='1h', and response_headers setting Cache-Control='public, max-age=3600' still answers 403 Forbidden with Cache-Control: no-store and no Expires header.",
-      "expected_outcome": "GET and OPTIONS preflight requests to the withdrawn route return 403 Forbidden with Cache-Control: no-store and no Expires or Location or X-Plugin header."
+      "description": "Outermost stage-0 withdrawal gate precedence over redirect rewrites, WASM request Stop plugin (testdata/plugins/request-block.wasm with X-Block: 1) and header-inject plugin, CORS preflight OPTIONS, and conflicting response_headers/expires: verify first when withdrawn=false that X-Block: 1 triggers request-block.wasm sdk.Stop body ('blocked by request-block plugin'), then when withdrawn=true verify the stage-0 gate answers 403 Forbidden with Cache-Control: no-store, empty body (no plugin body), no Location, no X-Plugin, and no Expires header.",
+      "expected_outcome": "When withdrawn=true, GET (with X-Block: 1 and /old rewrite) and OPTIONS preflight return stage-0 403 Forbidden with Cache-Control: no-store and no plugin body, Location, X-Plugin, or Expires header."
     },
     {
       "case_id": "CASE-F1-032",
       "category": "withdrawal_mtls_and_continuity",
       "config_ids": ["CFG-F1-04", "CFG-F1-06"],
       "spec_refs": ["§9.3", "SD-04"],
-      "description": "Legacy auth.deny withdrawal mechanism and its documented limits: applying complete candidate CFG-F1-06 (auth.deny = ['0.0.0.0/0', '::/0'] alongside auth.basic) denies requests with 403 while preserving auth.basic and proxy_pass; GET /api/sharing reports outside_auth flags when rewrites/plugins/CORS exist and intent_checks_bypassed warns that auth.deny does not dominate outer layers; recovery removes only the added deny entries.",
-      "expected_outcome": "CFG-F1-06 returns 403 (origin_delta=0) while keeping jul_checks.credential='basic' and jul_checks.network='deny_list'; recovery to CFG-F1-04 restores intended 200."
+      "description": "Legacy auth.deny withdrawal mechanism, held-stream retirement, and documented limits: holding active dashboard SSE + H1 WebSocket streams and applying complete candidate CFG-F1-06 (auth.deny = ['0.0.0.0/0', '::/0'] alongside auth.basic) classifies dashboard as narrowed, retires open streams within <= 2.0s while preserving active sibling portal stream on the same H2 connection, denies fresh requests with 403 while preserving auth.basic and proxy_pass, surfaces intent_checks_bypassed when outer rewrites exist, and recovers to CFG-F1-04.",
+      "expected_outcome": "CFG-F1-06 retires held dashboard streams within <= 2.0s (completed_within_bound=true, collateral_count=0), returns 403 (origin_delta=0) while keeping jul_checks.credential='basic' and jul_checks.network='deny_list', surfaces intent_checks_bypassed when rewrites exist, and recovers to CFG-F1-04 (200)."
     },
     {
       "case_id": "CASE-F1-033",
@@ -560,16 +590,16 @@
       "category": "withdrawal_mtls_and_continuity",
       "config_ids": ["CFG-F1-08"],
       "spec_refs": ["§8.4", "§9.5", "docs/mtls.md", "#642", "#563"],
-      "description": "mTLS CRL revocation reload — handshake refusal AND per-request policy re-check on open connection (#642/#563): keep an open HTTP/2 (and HTTP/1.1 keep-alive) connection authenticated with client-revoked.crt and an active SSE stream; replace tls/clients.crl with tls/clients-revoked.crl and reload Jul; verify: (a) active SSE stream on dashboard is retired within <= 2s (publish-time CRL serial addition classified as 'narrowed'); (b) the very next request to dash.lab.test on the already-open connection is denied with 403 Forbidden per-request without closing the shared connection (portal.lab.test on the same H2 connection still returns 200); (c) a new or resumed TLS handshake with client-revoked.crt is rejected at handshake; (d) client-intended.crt continues to succeed 200.",
-      "expected_outcome": "Publish-time CRL revocation retires active dashboard stream within <= 2s, denies next request on existing connection with 403 (while sibling portal request on same H2 connection returns 200), rejects new/resumed handshake for revoked cert, and admits intended cert."
+      "description": "mTLS CRL revocation reload — handshake refusal AND per-request policy re-check on both open HTTP/2 and open HTTP/1.1 keep-alive connections (#642/#563): keep both an open shared HTTP/2 connection (with active backpressured 256 KiB portal stream + dashboard SSE stream) AND an open HTTP/1.1 keep-alive connection + H1 SSE stream authenticated with client-revoked.crt; replace tls/clients.crl with tls/clients-revoked.crl and reload Jul; verify: (a) active H2 and H1 SSE streams on dashboard are retired within <= 2.0s from Publish (completed_within_bound=true, collateral_count=0); (b) the next request to dash.lab.test on BOTH the already-open H2 connection and the already-open H1 keep-alive connection is denied with 403 Forbidden per-request without a new handshake, while the active 256 KiB portal stream and post-reload portal requests on the same H2 connection succeed 200; (c) a new TLS handshake with client-revoked.crt is rejected at handshake; (d) client-intended.crt continues to succeed 200.",
+      "expected_outcome": "Publish-time CRL revocation retires active H2 and H1 dashboard streams within <= 2.0s (completed_within_bound=true), denies next request on existing H2 and H1 keep-alive connections with 403 while active sibling H2 portal stream completes 262,144 bytes, rejects new handshake for revoked cert, and admits intended cert."
     },
     {
       "case_id": "CASE-F1-036",
       "category": "withdrawal_mtls_and_continuity",
       "config_ids": ["CFG-F1-09"],
       "spec_refs": ["§10", "SH-11"],
-      "description": "mTLS dedicated-listener variant (CFG-F1-09): portal on 192.0.2.10:443 has client_auth.mode='none' (no CertificateRequest sent to browsers, no client_auth_request_mode_shared warning); dashboard on 192.0.2.10:8443 has default-deny-mtls first block + client_auth.mode='require' + require_client_cert=true; uncertified clients fail handshake on :8443 while certified intended client gets 200 on dash.lab.test:8443 and 404 on unknown Host on :8443.",
-      "expected_outcome": "Portal on :443 has zero client-cert prompt and no client_auth_request_mode_shared warning; :8443 enforces mandatory mTLS handshake and default-deny-mtls."
+      "description": "mTLS dedicated-listener variant (CFG-F1-09) admission, default-deny, held-stream retirement, and recovery: portal on 192.0.2.10:443 has client_auth.mode='none' (no CertificateRequest sent to browsers, no client_auth_request_mode_shared warning); dashboard on 192.0.2.10:8443 has default-deny-mtls first block + client_auth.mode='require' + require_client_cert=true; uncertified clients fail handshake on :8443 while certified intended client gets 200 on dash.lab.test:8443 and 404 on unknown Host on :8443; holding an active SSE + H1 WebSocket session on :8443 and withdrawing dashboard retires open streams within <= 2.0s (completed_within_bound=true) and recovers cleanly.",
+      "expected_outcome": "Portal on :443 has zero client-cert prompt and no client_auth_request_mode_shared warning; :8443 enforces mandatory mTLS handshake, default-deny-mtls, and <= 2.0s held-stream retirement on withdrawal + recovery."
     },
     {
       "case_id": "CASE-F1-037",
@@ -592,8 +622,8 @@
       "category": "protocol_matrix",
       "config_ids": ["CFG-F1-04"],
       "spec_refs": ["§12", "§18"],
-      "description": "Protocol matrix verification on F1: real-client verification of HTTP/1.1, TLS ALPN HTTP/2, SSE (over H1 and H2), and H1 WebSocket (RFC 6455 Upgrade) through Jul to the dashboard origin; explicit record of non-F1 protocols (native gRPC, HTTP/3, L4 stream) with owner test evidence.",
-      "expected_outcome": "HTTP/1.1, HTTP/2 (ALPN h2), SSE, and H1 WebSocket all succeed for intended client and are denied for excluded client; Jul -> plaintext origin uses HTTP/1.1."
+      "description": "Protocol matrix verification on F1: real-client verification of HTTP/1.1, TLS ALPN HTTP/2, SSE over HTTP/1.1 AND SSE over HTTP/2, and H1 WebSocket (RFC 6455 Upgrade, including idle stability past 0.55s and Close 1008 retirement) through Jul to the dashboard origin; explicit record of non-F1 protocols (native gRPC, HTTP/3, L4 stream) with owner test evidence.",
+      "expected_outcome": "HTTP/1.1, HTTP/2 (ALPN h2), SSE over HTTP/1.1, SSE over HTTP/2, and H1 WebSocket all succeed for intended client and are denied for excluded client; Jul -> plaintext origin uses HTTP/1.1."
     },
     {
       "case_id": "CASE-F1-040",
@@ -640,32 +670,48 @@
       "category": "operator_usability_and_handoffs",
       "config_ids": ["CFG-F1-04", "CFG-F1-05"],
       "spec_refs": ["§14 T1–T6", "§18"],
-      "description": "Operator dry run of spec §14 tasks T1–T6 on the delivered build (GET /api/sharing, jul plan/apply/postcondition, Console Routes/Config): record hands-on time, waiting time, decisions, handoffs, interventions, errors, zero dangerous misunderstandings, and maintenance duties as preparation for #585.",
-      "expected_outcome": "All six tasks T1–T6 completed with zero dangerous failures and recorded timing/decision/duty metrics."
+      "description": "Spec §14 T1–T6 automated surface rehearsal and author dry-run record: (a) automated task verification confirming GET /api/sharing, plan/apply, and postcondition evaluate expose all required facts for T1–T6 (labeled as automated rehearsal with human effort marked unmeasured); (b) separate observed author dry run (t1-t6-author-rehearsal.json) recording actual author task execution times, decisions, handoffs, and recurring maintenance duties without claiming #585 independent fresh-operator study completion.",
+      "expected_outcome": "Automated surface verification and separate author dry-run record both pass with explicit provenance separation between script automation, author rehearsal, and #585 independent operator study."
     },
     {
       "case_id": "CASE-F1-046",
       "category": "operator_usability_and_handoffs",
-      "config_ids": ["CFG-F1-04", "CFG-F1-05", "CFG-F1-10"],
+      "config_ids": ["CFG-F1-01", "CFG-F1-02", "CFG-F1-03", "CFG-F1-04", "CFG-F1-05", "CFG-F1-10"],
       "spec_refs": ["§15", "§18"],
-      "description": "Clean teardown and fresh-directory runbook re-execution: verify teardown removes only task-owned resources (namespaces, veths, iptables chain, temporary service units/files) while preserving unrelated host/application state; re-run runbook setup and verification from a fresh working directory.",
-      "expected_outcome": "Post-teardown host check shows zero leftover namespaces/links/iptables/service units; fresh-directory execution passes all checks."
+      "description": "Clean-host operator runbook rehearsal and verified scoped teardown: verify teardown checks command exit statuses, scopes reset-failed strictly to owned units, verifies every resource class (namespaces, links, firewall jump/chain, systemd units, user, paths), and executes the documented downloaded-binary clean-host runbook sequence end-to-end plus fresh-directory check/lint.",
+      "expected_outcome": "Post-teardown verification confirms clean=true with zero cleanup/verification errors and zero leftovers across all resource classes; clean-host runbook rehearsal and fresh-directory check/lint succeed."
     },
     {
       "case_id": "CASE-F1-047",
-      "category": "operator_usability_and_handoffs",
-      "config_ids": ["CFG-F1-01", "CFG-F1-02", "CFG-F1-03", "CFG-F1-04", "CFG-F1-05", "CFG-F1-06", "CFG-F1-07", "CFG-F1-08", "CFG-F1-09", "CFG-F1-10", "CFG-F1-11"],
+      "category": "ci_gate",
+      "config_ids": ["CFG-F1-01", "CFG-F1-02", "CFG-F1-03", "CFG-F1-04", "CFG-F1-05", "CFG-F1-06", "CFG-F1-07", "CFG-F1-08", "CFG-F1-09", "CFG-F1-10", "CFG-F1-11", "CFG-F1-12", "CFG-F1-13", "CFG-F1-14"],
       "spec_refs": ["§8", "§18"],
-      "description": "CI config-check and harness/oracle negative self-tests: scripts/config-check.sh validates all 11 F1 configs with generated TLS/CRL/htpasswd/static-root assets and lean WAF rejection; unit tests in scripts/burn-in-load_test.go and scripts/test_sharing_f1_lab.py verify oracle failure detection and >=90% changed Go statement coverage.",
-      "expected_outcome": "scripts/config-check.sh, go test scripts/burn-in-load*, and python3 scripts/test_sharing_f1_lab.py all pass with >=90% changed Go coverage."
+      "description": "CI config-check and harness/oracle negative self-tests: scripts/config-check.sh validates all 14 F1 configs with generated TLS/CRL/htpasswd/static-root assets and verifies lean WAF rejection diagnostic; unit tests in scripts/burn-in-load_test.go and scripts/test_sharing_f1_lab.py (wired into CI) verify positive and negative oracle/resource/teardown/provenance failure detection and >=90% changed Go statement coverage.",
+      "expected_outcome": "scripts/config-check.sh, go test -race scripts/burn-in-load*, and python3 scripts/test_sharing_f1_lab.py all pass with >=90% changed Go coverage."
     },
     {
       "case_id": "CASE-F1-048",
-      "category": "operator_usability_and_handoffs",
+      "category": "documentation",
       "config_ids": ["CFG-F1-04"],
       "spec_refs": ["§7", "§11", "§13", "§17", "§18"],
-      "description": "Downstream handoff artifacts for #634 (reusable baseline isolation test expectations), #582 (Tailscale F2), #583 (Cloudflare F3), and #613 (Grafana/Jellyfin recipes), plus documentation and GitHub issue coherence inventories.",
-      "expected_outcome": "Machine-readable acceptance ledger, #634 baseline expectations, #582/#583/#613 measurement/fixture interfaces, docs-check.py, and GitHub issue records are complete and consistent."
+      "description": "Downstream handoff artifacts (#634, #582, #583, #613) and validated documentation/issue disposition inventories: verify docs/sharing/f1-handoff-interfaces.json, docs/sharing/f1-standalone-runbook.md, docs/sharing/f1-standalone-evidence.md, docs-check.py, and explicit affected-document and affected-issue disposition inventories.",
+      "expected_outcome": "All required documentation files, handoff interfaces, and document/issue disposition inventories are validated and pass docs-check.py."
+    },
+    {
+      "case_id": "CASE-F1-049",
+      "category": "authority_and_postconditions",
+      "config_ids": ["CFG-F1-10", "CFG-F1-11"],
+      "spec_refs": ["§8.4", "§9.2", "§9.4", "ADR 0026 Amendment #642"],
+      "description": "File-owned SIGHUP held-stream retirement and file-owned restart postcondition lifecycle: under jul-readonly.service (CFG-F1-10), hold active shared-H2 portal (backpressured 256 KiB) + dashboard SSE stream + H1 WebSocket session; install CFG-F1-11 (withdrawn=true) on disk and send SIGHUP -> verify dashboard SSE and H1 WebSocket retire within <= 2.0s (completed_within_bound=true, collateral_count=0, claim='complete_withdrawal') while the active portal stream on the same H2 connection completes all 262,144 bytes; then restart jul-readonly.service -> verify boot_id changes, pre-restart postcondition evaluates to unverifiable, and re-plan evaluates to candidate_serving.",
+      "expected_outcome": "File-owned SIGHUP withdrawal retires held SSE + H1 WebSocket within <= 2.0s while active sibling H2 portal stream completes 262,144 bytes; file-owned restart rotates boot_id, marks pre-restart postcondition unverifiable, and confirms candidate_serving on re-plan."
+    },
+    {
+      "case_id": "CASE-F1-050",
+      "category": "withdrawal_mtls_and_continuity",
+      "config_ids": ["CFG-F1-12", "CFG-F1-13"],
+      "spec_refs": ["§8.4", "§9.1", "§9.4", "§10", "#642", "#563"],
+      "description": "File-owned mTLS shared-listener (CFG-F1-12) and dedicated-listener (CFG-F1-13) verification: under jul-readonly.service, verify (1) CFG-F1-12 shared-listener mTLS admission (anonymous portal 200, cert-less dashboard 403, intended/pre-revoked cert 200), mutating API refusal (409 config_authority_read_only), and SIGHUP CRL revocation reload retiring active held stream within <= 2.0s and denying open connection with 403; (2) CFG-F1-13 dedicated-listener mTLS (:8443) startup under jul-readonly.service, portal :443 client_auth='none', dashboard :8443 mandatory mTLS admission and default-deny-mtls, and cgroup/RSS/FD snapshot.",
+      "expected_outcome": "Both file-owned mTLS configurations (CFG-F1-12 and CFG-F1-13) enforce read-only authority (409 on API mutations), verify mTLS admission/denial, and retire active streams within <= 2.0s on SIGHUP CRL reload."
     }
   ]
 }
