@@ -473,7 +473,10 @@ Labels fall into three classes by what bounds them:
 | `jul_cache_revalidations_total` | `outcome` | fixed (`stored`/`not_modified`/`uncacheable`/`origin_error`/`canceled`/`panic`/`no_lease`/`deduplicated`) |
 | `jul_cache_capture_skipped_total` | `reason` | fixed (`oversize`/`budget`) |
 | `jul_cache_fill_locks_total` | `outcome` | fixed (`wait`/`reused`/`not_reusable`/`uncacheable`/`timeout`/`canceled`) |
+| `jul_cache_invalidation_entries_total` | `tier` | fixed (`memory`/`disk`) |
+| `jul_cache_invalidations_total` | `selector`, `outcome` | fixed (`exact_url`/`prefix`/`glob`/`tag`/`host`/`key`/`all`) × fixed (`succeeded`/`succeeded_no_matches`/`partial_failure`/`failed`/`canceled`/`cache_disabled`) |
 | `jul_cache_range_requests_total` | `outcome` | fixed (`hit`/`fill`/`fallback`/`if_range_full`/`unsatisfiable`/`invalid`) |
+| `jul_cache_tag_ingest_skipped_total` | `reason` | fixed (`invalid`/`oversize`/`index_limit`) |
 | `jul_cache_bytes`, `jul_cache_max_bytes`, `jul_cache_entries`, `jul_cache_evictions_total` | `tier` | fixed (`memory`/`disk`) |
 | `jul_storage_bytes` | `category`, `kind` | fixed (7 Jul-owned storage categories × `available`/`total`; never a path, mount or device) |
 | `jul_http_response_compressed_total` | `encoding` | fixed content codings |

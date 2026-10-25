@@ -56,6 +56,9 @@ var operations = []Operation{
 	{ID: "rollbackConfig", Method: http.MethodPost, Path: "/api/v1/config/rollback", ContentType: "application/json", Mutation: true},
 	{ID: "previewAdoptExternal", Method: http.MethodPost, Path: "/api/v1/config/adopt-external/preview", ContentType: "application/json"},
 	{ID: "adoptExternal", Method: http.MethodPost, Path: "/api/v1/config/adopt-external", ContentType: "application/json", Mutation: true},
+	{ID: "previewCachePurge", Method: http.MethodPost, Path: "/api/v1/cache/purge/preview", ContentType: "application/json"},
+	{ID: "purgeCache", Method: http.MethodPost, Path: "/api/v1/cache/purge", ContentType: "application/json", Mutation: true},
+	{ID: "getCachePurgeOperation", Method: http.MethodGet, Path: "/api/v1/cache/purges/{operation_id}"},
 }
 
 // Operations returns a defensive copy for the OpenAPI drift guard.
@@ -418,6 +421,62 @@ func (c *Client) History(ctx context.Context, limit int, cursor string) (adminap
 
 func (c *Client) Export(ctx context.Context) (RawResponse, error) {
 	return c.do(ctx, operation("exportConfig"), nil, nil, nil, "", "")
+}
+
+// CachePurgePreview runs a non-destructive scoped cache invalidation preview.
+func (c *Client) CachePurgePreview(ctx context.Context, req adminapi.CachePurgePreviewRequest) (adminapi.CachePurgePreviewResponse, RawResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return adminapi.CachePurgePreviewResponse{}, RawResponse{}, err
+	}
+	r, err := c.do(ctx, operation("previewCachePurge"), nil, nil, body, "application/json", "")
+	if err != nil {
+		return adminapi.CachePurgePreviewResponse{}, r, err
+	}
+	v, err := decode[adminapi.CachePurgePreviewResponse](r)
+	return v, r, err
+}
+
+// CachePurge executes a scoped cache invalidation operation.
+func (c *Client) CachePurge(ctx context.Context, req adminapi.CachePurgeRequest, idemKey string) (adminapi.CachePurgeResponse, RawResponse, error) {
+	if idemKey != "" && !ValidIdempotencyKey(idemKey) {
+		return adminapi.CachePurgeResponse{}, RawResponse{}, errors.New("invalid idempotency key")
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		return adminapi.CachePurgeResponse{}, RawResponse{}, err
+	}
+	r, err := c.do(ctx, operation("purgeCache"), nil, nil, body, "application/json", idemKey)
+	if err != nil {
+		return adminapi.CachePurgeResponse{}, r, err
+	}
+	v, err := decode[adminapi.CachePurgeResponse](r)
+	return v, r, err
+}
+
+// CachePurgeOperation retrieves the status and outcome of a cache purge operation.
+func (c *Client) CachePurgeOperation(ctx context.Context, operationID string) (adminapi.CachePurgeResponse, RawResponse, error) {
+	r, err := c.do(ctx, operation("getCachePurgeOperation"), map[string]string{"operation_id": operationID}, nil, nil, "", "")
+	if err != nil {
+		return adminapi.CachePurgeResponse{}, r, err
+	}
+	v, err := decode[adminapi.CachePurgeResponse](r)
+	return v, r, err
+}
+
+// CachePurgeExit maps a CachePurgeResponse to the stable ADR 0019 §33 exit code.
+func CachePurgeExit(resp adminapi.CachePurgeResponse) int {
+	if resp.InvalidationEffective == "uncertain" {
+		return 5
+	}
+	switch resp.State {
+	case "succeeded":
+		return 0
+	case "partial":
+		return 4
+	default:
+		return 9
+	}
 }
 
 // EvaluatePostcondition evaluates a §9.4 plan postcondition against the live

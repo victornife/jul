@@ -28,6 +28,41 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Scoped URL, prefix, bounded anchored glob, origin grouping-tag, and hostname
+  cache invalidation with non-destructive preview (#621 / `CACHE-OPS-01`,
+  [ADR 0027](docs/adr/0027-scoped-cache-invalidation.md)):
+  - **Engine selectors, linearization fences, and crash-consistent disk deletion**
+    (`internal/cache/`): supports `exact_url`, segment-bounded `prefix`,
+    linear-time anchored `glob` (`*` and standalone `**`), per-host origin
+    grouping `tag` (`any` union or `all` intersection), and `host` selectors
+    while preserving legacy `key` and `all` compatibility. Installs monotonic
+    selector fences in `genSeq` so pre-invalidation cold misses, coalesced
+    singleflight fills, synchronous `304` validations, background
+    `stale-while-revalidate` refreshes, and retired-generation work cannot
+    publish stale representations after a purge (including cold misses absent at
+    preview or carrying tags first learned when origin headers arrive), while
+    already-admitted downstream readers finish streaming uninterrupted. Persists
+    keys and tags in `JULDCH02` metadata, writes `.jul-cache-tombstones` before
+    unlinking disk files, and prunes orphan `Vary` variants on startup
+    rehydration.
+  - **Opt-in trusted origin grouping tags** (`[cache].tag_headers` and
+    `[cache].strip_tag_headers`, `hot_reload`): ingests up to 32 validated
+    visible-ASCII tags (`<= 128` B each, `<= 1024` B total) from 1–8 configured
+    non-reserved origin response headers, strips configured tag headers from
+    downstream responses by default, rejects credential-like tag values, and
+    skips caching (preserving the client response) when tag headers are
+    malformed, oversize, or exceed the 65,536-link index cap
+    (`jul_cache_tag_ingest_skipped_total`).
+  - **Versioned `/api/v1` endpoints, remote CLI (`jul cache purge`), Full
+    Console workflow, and deployment script:** adds
+    `POST /api/v1/cache/purge/preview`, `POST /api/v1/cache/purge`, and
+    `GET /api/v1/cache/purges/{operation_id}` (operational in both `managed` and
+    `file_owned` authority modes), `jul cache purge`, the Console **Select Scope
+    → Preview → Confirm → Execute → Observe Result / Recover** workflow in
+    **Global & Traffic Controls → Cache**, bounded metrics
+    `jul_cache_invalidations_total` and `jul_cache_invalidation_entries_total`,
+    and [`examples/cache-invalidation/purge-on-deploy.sh`](examples/cache-invalidation/purge-on-deploy.sh).
+
 - Standalone restricted and public application sharing verification, runbook,
   and Fixture F1 examples (#581 / `SHARE-02A`,
   `docs/specs/application-sharing.md` §10–§14, §18, ADR 0026):

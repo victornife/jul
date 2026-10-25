@@ -44,8 +44,12 @@ discovered correctness/security findings still pre-empt the roadmap.
 - **Remaining operational boundaries:** Unix-domain upstreams support named
   plaintext HTTP/1.1 pools, not TLS, HTTP/2 or direct Unix `proxy_pass`.
   Resilience keeps client/Jul-owned cancellation neutral while backend
-  transport/protocol faults affect the circuit. Selected hot reload does not
-  remove structural restart requirements. See the feature guides below.
+  transport/protocol faults affect the circuit. Scoped cache invalidation (#621)
+  is local to one Jul instance, uses bounded selectors (no arbitrary regex or
+  unauthenticated data-plane `PURGE`), and leaves already-admitted downstream
+  readers to finish streaming while new requests miss and refetch. Selected hot
+  reload does not remove structural restart requirements. See the feature guides
+  below.
 
 ## Deliberate product boundaries
 

@@ -80,6 +80,10 @@ type Entry struct {
 	// written by an older Jul has no Variants, so it fails closed — a one-time
 	// miss per Vary URL after an upgrade, never a stale or orphaned hit.
 	Variants []string
+
+	// Tags holds the sorted, deduplicated grouping tags ingested from
+	// configured trusted origin response headers (#621, ADR 0027).
+	Tags []string
 }
 
 // maxVariantsPerResource caps one base resource's membership list. A pathological
@@ -112,6 +116,9 @@ func (e *Entry) Clone() *Entry {
 	}
 	if e.Variants != nil {
 		cp.Variants = append([]string(nil), e.Variants...)
+	}
+	if e.Tags != nil {
+		cp.Tags = append([]string(nil), e.Tags...)
 	}
 	return &cp
 }
@@ -160,6 +167,9 @@ func (e *Entry) Size() int64 {
 	}
 	for _, key := range e.Variants {
 		n += int64(len(key))
+	}
+	for _, tag := range e.Tags {
+		n += int64(len(tag))
 	}
 	n += int64(len(e.ETag) + len(e.LastModified))
 	return n

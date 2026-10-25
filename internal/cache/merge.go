@@ -38,6 +38,18 @@ var notModifiedExcluded = []string{"Content-Length", "X-Cache"}
 // from the merged result. A stale entry that comes back from a 304 as a
 // no-cache or must-revalidate entry must behave that way immediately.
 func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry, mergeAction) {
+	pol := c.Policy()
+	var tags304 []string
+	var present304 bool
+	if pol.TagHeaderCount > 0 {
+		var skipReason string
+		tags304, present304, skipReason = extractOriginTags(h304, pol.TagHeaderSlice())
+		if skipReason != "" {
+			c.tagSkipped(skipReason)
+			return nil, mergeDiscard
+		}
+	}
+
 	merged := cloneHeader(stored.Header)
 	// Warning is obsolete (RFC 9111 §5.5) and a warn-code attached to the old
 	// response must not survive a refresh that may have invalidated it.
@@ -51,6 +63,9 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	for name, values := range update {
 		merged[name] = append([]string(nil), values...)
 	}
+	if pol.StripTagHeaders && pol.TagHeaderCount > 0 {
+		stripConfiguredTagHeaders(merged, pol.TagHeaderSlice())
+	}
 
 	// A 304 that changes Vary changes which key this representation belongs
 	// under. Publishing it at the old key would leave an entry reachable
@@ -61,7 +76,7 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	}
 
 	p := parseResponsePolicy(merged)
-	ttl, swr, ok := c.freshness(stored.Status, merged, p, now)
+	ttl, swr, ok := c.freshnessWithPolicy(stored.Status, merged, p, now, pol)
 	if !ok {
 		// The refreshed metadata says this must no longer be stored (no-store,
 		// private, an expired Expires, a Set-Cookie added by the 304).
@@ -88,5 +103,10 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	refreshed.SharedAuthReuse = p.sharedAuthReuse()
 	refreshed.StaleIfError = p.SIE
 	refreshed.HasStaleIfError = p.HasSIE
+	if pol.TagHeaderCount == 0 {
+		refreshed.Tags = nil
+	} else if present304 {
+		refreshed.Tags = tags304
+	}
 	return refreshed, mergeReplace
 }

@@ -119,6 +119,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
 | Large-object fill lock, disk streaming, and Option A range caching | [cache.md](cache.md) | `Beta` / `merged` |
+| Scoped URL, prefix, pattern, tag, and hostname cache invalidation | [cache.md](cache.md#scoped-cache-invalidation-and-origin-grouping-tags) | `Beta` / `implemented` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
 | Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `released` |
 | Per-route HTTP metrics and bounded hosts | [observability.md](observability.md#per-route-http-metrics) | `Beta` / `released` |

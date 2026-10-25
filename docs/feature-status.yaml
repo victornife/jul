@@ -967,6 +967,26 @@ features:
     9: true
   notes: 'Unreleased #525 (Part 1 cold-miss fill lock, Part 2 disk-streamed large-object capture under ADR 0023) and #442 (opt-in Option A complete-object range caching under ADR 0024). Separate from the historical core-cache GA/soaked record and published v2.2.0 packages. Complete-object storage only; no 206 fragment caching. Long-running GA soak remains open.'
 
+- id: CACHE-OPS-01
+  name: Scoped URL, prefix, pattern, tag, and hostname cache invalidation
+  tags:
+  - core
+  - console
+  maturity: Beta
+  delivery: implemented
+  doc: cache.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: true
+    5: false
+    6: true
+    7: true
+    8: true
+    9: true
+  notes: 'Implemented on PR for #621 (ADR 0027): preview-confirmed scoped invalidation across memory and disk by exact URL, segment-bounded path prefix, bounded anchored glob, trusted origin grouping tag ([cache].tag_headers / [cache].strip_tag_headers), and hostname via /api/v1/cache/purge*, jul cache purge, and the Full Console. Separate from the historical core-cache GA/soaked record; awaiting merge, release, and long-running GA soak.'
+
 - id: L4-ALPN
   name: Offered-ALPN TCP passthrough routing
   tags:

@@ -109,6 +109,19 @@ while IFS= read -r -d '' f; do
 		rm -rf "$guest_dir"
 		continue
 		;;
+	examples/cache-invalidation/jul.toml)
+		echo "-- examples/cache-invalidation/jul.toml"
+		if ! (
+			cd examples/cache-invalidation &&
+			JUL_ADMIN_TOKEN=placeholder-admin-token-for-config-check \
+			JUL_CACHE_PURGE_TOKEN=placeholder-purge-token-for-config-check \
+			"$BIN" check -config jul.toml -quiet -skip-static-roots
+		); then
+			echo "   FAILED: examples/cache-invalidation/jul.toml" >&2
+			fail=1
+		fi
+		continue
+		;;
 	examples/sharing/f1-standalone/*.toml)
 		# Fixture F1 (#581) configs reference generated ephemeral TLS/mTLS chains,
 		# CRLs, bcrypt htpasswd, and the static portal root. Materialize them once

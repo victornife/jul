@@ -305,6 +305,22 @@
       "active_when": "always"
     },
     {
+      "go_field": "CacheConfig.StripTagHeaders",
+      "path": "cache.strip_tag_headers",
+      "kind": "boolean",
+      "constraint": "must not be true when cache.tag_headers is empty",
+      "zero_semantics": "omitted defaults to true when cache.tag_headers is non-empty, false otherwise",
+      "active_when": "cache.enabled = true and cache.tag_headers is non-empty"
+    },
+    {
+      "go_field": "CacheConfig.TagHeaders",
+      "path": "cache.tag_headers",
+      "kind": "grammar_list",
+      "constraint": "at most 8 unique 1..64-byte HTTP header token names; reserved protocol, framing, validator, and credential headers are rejected",
+      "zero_semantics": "omitted or empty disables origin grouping-tag ingestion",
+      "active_when": "cache.enabled = true"
+    },
+    {
       "go_field": "ClientAddressConfig.ForwardedHeaders",
       "path": "servers[].client_address.forwarded_headers",
       "kind": "enum_list",

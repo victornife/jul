@@ -5,6 +5,7 @@ package cache
 
 import (
 	"container/list"
+	"math"
 	"sync"
 )
 
@@ -54,14 +55,20 @@ func (m *memStore) hasKey(key string) bool {
 }
 
 func (m *memStore) get(key string) (*Entry, bool) {
+	e, _, ok := m.getWithGen(key)
+	return e, ok
+}
+
+func (m *memStore) getWithGen(key string) (*Entry, uint64, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	el, ok := m.items[key]
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
 	m.ll.MoveToFront(el)
-	return el.Value.(*memItem).entry, true
+	it := el.Value.(*memItem)
+	return it.entry, it.gen, true
 }
 
 func (m *memStore) putWithGen(key string, e *Entry, gen uint64) []*memItem {
@@ -138,14 +145,23 @@ func (m *memStore) stats() (curBytes, maxBytes int64, entries int, evictions int
 }
 
 func (m *memStore) del(key string) {
+	m.delIfGenAtMost(key, math.MaxUint64)
+}
+
+func (m *memStore) delIfGenAtMost(key string, maxGen uint64) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if el, ok := m.items[key]; ok {
 		it := el.Value.(*memItem)
+		if maxGen != math.MaxUint64 && it.gen > maxGen {
+			return false
+		}
 		m.ll.Remove(el)
 		delete(m.items, it.key)
 		m.curBytes -= it.size
+		return true
 	}
+	return false
 }
 
 func (m *memStore) purge() {

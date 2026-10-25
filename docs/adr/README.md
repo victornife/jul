@@ -46,6 +46,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 
 | [0025](0025-effective-version-confidentiality.md) | Confidential effective configuration versions | Accepted — #644 / #647 | 2026-10-19 |
 | [0026](0026-application-sharing-contract.md) | Application-sharing contract: derived view, declared intent and complete withdrawal | Accepted | 2026-10-18 |
+| [0027](0027-scoped-cache-invalidation.md) | Scoped cache invalidation, trusted origin tags, and selector fences | Accepted — Beta/unreleased | 2026-10-25 |
 
 ## Reading order
 

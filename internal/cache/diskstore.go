@@ -56,9 +56,13 @@ type diskEntryMeta struct {
 	VaryValues         map[string]string
 	IsVaryStub         bool
 	Variants           []string
+	Key                string
+	BaseKey            string
+	Gen                uint64
+	Tags               []string
 }
 
-func encodeDiskTrailerAndMeta(e *Entry, bodyLen int64) ([]byte, error) {
+func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLen int64) ([]byte, error) {
 	meta := diskEntryMeta{
 		Status:             e.Status,
 		Header:             e.Header,
@@ -76,6 +80,10 @@ func encodeDiskTrailerAndMeta(e *Entry, bodyLen int64) ([]byte, error) {
 		VaryValues:         e.VaryValues,
 		IsVaryStub:         e.IsVaryStub,
 		Variants:           e.Variants,
+		Key:                key,
+		BaseKey:            baseKeyOf(key),
+		Gen:                gen,
+		Tags:               e.Tags,
 	}
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(&meta); err != nil {
@@ -94,50 +102,81 @@ func encodeDiskTrailerAndMeta(e *Entry, bodyLen int64) ([]byte, error) {
 }
 
 func readDiskEntryMeta(path string) (entry *Entry, bodyLen, fileSize int64, err error) {
+	entry, _, bodyLen, fileSize, err = readDiskEntryMetaWithKey(path)
+	return entry, bodyLen, fileSize, err
+}
+
+func readDiskEntryMetaWithKey(path string) (entry *Entry, key string, bodyLen, fileSize int64, err error) {
+	entry, key, _, bodyLen, fileSize, err = readDiskEntryMetaWithKeyGen(path)
+	return entry, key, bodyLen, fileSize, err
+}
+
+func readDiskEntryMetaWithKeyGen(path string) (entry *Entry, key string, gen uint64, bodyLen, fileSize int64, err error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, "", 0, 0, 0, err
 	}
 	defer func() { _ = f.Close() }()
-	return readDiskEntryMetaFile(f)
+	return readDiskEntryMetaFileWithKeyGen(f)
 }
 
 func readDiskEntryMetaFile(f *os.File) (entry *Entry, bodyLen, fileSize int64, err error) {
+	entry, _, _, bodyLen, fileSize, err = readDiskEntryMetaFileWithKeyGen(f)
+	return entry, bodyLen, fileSize, err
+}
+
+func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen uint64, bodyLen, fileSize int64, err error) {
 	info, err := f.Stat()
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, "", 0, 0, 0, err
 	}
 	fileSize = info.Size()
 	if fileSize < diskTrailerSize {
-		return nil, 0, 0, errCorruptDiskEntry
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	var trailer [diskTrailerSize]byte
 	if _, err := f.ReadAt(trailer[:], fileSize-diskTrailerSize); err != nil {
-		return nil, 0, 0, err
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	if string(trailer[16:24]) != diskFormatMagic {
-		return nil, 0, 0, errCorruptDiskEntry
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	metaLenU := binary.BigEndian.Uint64(trailer[0:8])
 	bodyLenU := binary.BigEndian.Uint64(trailer[8:16])
 	if metaLenU == 0 || metaLenU > maxDiskMetaBytes {
-		return nil, 0, 0, errCorruptDiskEntry
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	if bodyLenU > uint64(math.MaxInt64-diskTrailerSize-int64(metaLenU)) {
-		return nil, 0, 0, errCorruptDiskEntry
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	bodyLen = int64(bodyLenU)
 	metaLen := int64(metaLenU)
 	if bodyLen+metaLen+diskTrailerSize != fileSize {
-		return nil, 0, 0, errCorruptDiskEntry
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	metaBuf := make([]byte, metaLen)
 	if _, err := f.ReadAt(metaBuf, bodyLen); err != nil {
-		return nil, 0, 0, err
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	var meta diskEntryMeta
 	if err := gob.NewDecoder(bytes.NewReader(metaBuf)).Decode(&meta); err != nil {
-		return nil, 0, 0, errCorruptDiskEntry
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
+	}
+	if meta.BaseKey != "" && meta.BaseKey != baseKeyOf(meta.Key) {
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
+	}
+	if len(meta.Tags) > MaxTagsPerEntry {
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
+	}
+	totalTagBytes := 0
+	for _, t := range meta.Tags {
+		if ValidateTag(t) != nil {
+			return nil, "", 0, 0, 0, errCorruptDiskEntry
+		}
+		totalTagBytes += len(t)
+		if totalTagBytes > MaxTagBytesPerEntry {
+			return nil, "", 0, 0, 0, errCorruptDiskEntry
+		}
 	}
 	return &Entry{
 		Status:             meta.Status,
@@ -156,7 +195,8 @@ func readDiskEntryMetaFile(f *os.File) (entry *Entry, bodyLen, fileSize int64, e
 		VaryValues:         meta.VaryValues,
 		IsVaryStub:         meta.IsVaryStub,
 		Variants:           meta.Variants,
-	}, bodyLen, fileSize, nil
+		Tags:               meta.Tags,
+	}, meta.Key, meta.Gen, bodyLen, fileSize, nil
 }
 
 // diskStore is the overflow and large-object tier: a size-bounded,
@@ -168,8 +208,9 @@ func readDiskEntryMetaFile(f *os.File) (entry *Entry, bodyLen, fileSize int64, e
 // or eviction removal failed so startup rehydration can retry removing them
 // and never resurrect invalidated or evicted entries across restarts.
 const (
-	diskTombstoneFile  = ".jul-cache-tombstones"
-	diskTombstoneMagic = "JULTOMB1"
+	diskTombstoneFile   = ".jul-cache-tombstones"
+	diskTombstoneMagic  = "JULTOMB1"
+	diskPurgeLedgerFile = ".jul-cache-purge-ledger"
 )
 
 type diskStore struct {
@@ -201,6 +242,7 @@ type diskStore struct {
 	onSkip                    func(reason string)
 	checkGen                  func(key string, gen uint64) bool
 	onKeyDiskState            func(key string, inDisk bool)
+	onRehydrate               func(items []diskItemSnapshot)
 	unrecoverableInvalidation atomic.Bool
 
 	// Test hooks for deterministic fault and concurrency-window injection.
@@ -238,7 +280,26 @@ type diskItem struct {
 	metaLen    int64
 	isVaryStub bool
 	variants   []string
+	tags       []string
+	createdAt  time.Time
+	expiresAt  time.Time
+	staleUntil time.Time
+	varyFields []string
 	blob       *diskBlob
+}
+
+type diskItemSnapshot struct {
+	Key        string
+	Gen        uint64
+	FileSize   int64
+	BodyLen    int64
+	IsVaryStub bool
+	Variants   []string
+	Tags       []string
+	CreatedAt  time.Time
+	ExpiresAt  time.Time
+	StaleUntil time.Time
+	VaryFields []string
 }
 
 func (it *diskItem) effectiveSize(maxBytes int64) int64 {
@@ -701,11 +762,18 @@ func (d *diskStore) rehydrate() {
 	}
 	type fi struct {
 		hash       string
+		key        string
+		gen        uint64
 		size       int64
 		bodyLen    int64
 		mod        int64
 		isVaryStub bool
 		variants   []string
+		tags       []string
+		createdAt  time.Time
+		expiresAt  time.Time
+		staleUntil time.Time
+		varyFields []string
 	}
 	var files []fi
 	var foreign int
@@ -714,7 +782,7 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		name := e.Name()
-		if name == diskTombstoneFile {
+		if name == diskTombstoneFile || name == diskPurgeLedgerFile {
 			continue
 		}
 		if isCacheTempFile(name) {
@@ -736,18 +804,25 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		fullPath := d.path(name)
-		entryMeta, bodyLen, fileSize, err := readDiskEntryMeta(fullPath)
-		if err != nil {
+		entryMeta, entryKey, entryGen, bodyLen, fileSize, err := readDiskEntryMetaWithKeyGen(fullPath)
+		if err != nil || entryKey == "" || hashKey(entryKey) != name {
 			_ = d.removePath(fullPath)
 			continue
 		}
 		files = append(files, fi{
 			hash:       name,
+			key:        entryKey,
+			gen:        entryGen,
 			size:       fileSize,
 			bodyLen:    bodyLen,
 			mod:        info.ModTime().UnixNano(),
 			isVaryStub: entryMeta.IsVaryStub,
 			variants:   entryMeta.Variants,
+			tags:       entryMeta.Tags,
+			createdAt:  entryMeta.CreatedAt,
+			expiresAt:  entryMeta.ExpiresAt,
+			staleUntil: entryMeta.StaleUntil,
+			varyFields: entryMeta.Vary,
 		})
 	}
 	if foreign > 0 {
@@ -760,11 +835,18 @@ func (d *diskStore) rehydrate() {
 		blob := d.newBlob(f.hash, d.path(f.hash), f.bodyLen, f.size)
 		it := &diskItem{
 			hash:       f.hash,
+			key:        f.key,
+			gen:        f.gen,
 			fileSize:   f.size,
 			bodyLen:    f.bodyLen,
 			metaLen:    f.size - f.bodyLen,
 			isVaryStub: f.isVaryStub,
 			variants:   f.variants,
+			tags:       f.tags,
+			createdAt:  f.createdAt,
+			expiresAt:  f.expiresAt,
+			staleUntil: f.staleUntil,
+			varyFields: f.varyFields,
 			blob:       blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
@@ -772,9 +854,37 @@ func (d *diskStore) rehydrate() {
 		d.items[f.hash] = el
 		d.curBytes += it.size
 		d.physBytes += it.fileSize
+		d.rememberHashKeyLocked(f.hash, f.key)
 	}
 	d.pruneOrphanedVaryStubsLocked()
 	d.evictLocked()
+	if d.onRehydrate != nil {
+		d.onRehydrate(d.snapshotItemsLocked())
+	}
+}
+
+func (d *diskStore) snapshotItemsLocked() []diskItemSnapshot {
+	out := make([]diskItemSnapshot, 0, len(d.items))
+	for el := d.ll.Front(); el != nil; el = el.Next() {
+		it := el.Value.(*diskItem)
+		if it.key == "" {
+			continue
+		}
+		out = append(out, diskItemSnapshot{
+			Key:        it.key,
+			Gen:        it.gen,
+			FileSize:   it.fileSize,
+			BodyLen:    it.bodyLen,
+			IsVaryStub: it.isVaryStub,
+			Variants:   append([]string(nil), it.variants...),
+			Tags:       append([]string(nil), it.tags...),
+			CreatedAt:  it.createdAt,
+			ExpiresAt:  it.expiresAt,
+			StaleUntil: it.staleUntil,
+			VaryFields: append([]string(nil), it.varyFields...),
+		})
+	}
+	return out
 }
 
 func hashKey(key string) string {
@@ -1083,7 +1193,7 @@ func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapt
 	if s == nil || s.closed {
 		return nil, false
 	}
-	tail, err := encodeDiskTrailerAndMeta(e, s.bodyLen)
+	tail, err := encodeDiskTrailerAndMetaWithKeyGen(key, gen, e, s.bodyLen)
 	if err != nil {
 		return nil, false
 	}
@@ -1212,6 +1322,11 @@ func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapt
 		it.metaLen = int64(len(tail))
 		it.isVaryStub = e.IsVaryStub
 		it.variants = append([]string(nil), e.Variants...)
+		it.tags = append([]string(nil), e.Tags...)
+		it.createdAt = e.CreatedAt
+		it.expiresAt = e.ExpiresAt
+		it.staleUntil = e.StaleUntil
+		it.varyFields = append([]string(nil), e.Vary...)
 		it.size = it.effectiveSize(d.maxBytes)
 		it.blob = blob
 		d.curBytes += it.size
@@ -1227,6 +1342,11 @@ func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapt
 			metaLen:    int64(len(tail)),
 			isVaryStub: e.IsVaryStub,
 			variants:   append([]string(nil), e.Variants...),
+			tags:       append([]string(nil), e.Tags...),
+			createdAt:  e.CreatedAt,
+			expiresAt:  e.ExpiresAt,
+			staleUntil: e.StaleUntil,
+			varyFields: append([]string(nil), e.Vary...),
 			blob:       blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
@@ -1259,18 +1379,53 @@ func (d *diskStore) recomputeSizesLocked() {
 }
 
 func (d *diskStore) pruneOrphanedVaryStubsLocked() {
+	// First prune any variant entry whose base Vary stub is missing or does not
+	// claim the variant (ADR 0027 §4).
+	for el := d.ll.Back(); el != nil; {
+		prev := el.Prev()
+		it := el.Value.(*diskItem)
+		if !it.isVaryStub && it.key != "" {
+			if nul := strings.IndexByte(it.key, 0x00); nul > 0 {
+				baseKey := it.key[:nul]
+				stubEl, ok := d.items[hashKey(baseKey)]
+				claimed := false
+				if ok {
+					stubIt := stubEl.Value.(*diskItem)
+					if stubIt.isVaryStub {
+						for _, vk := range stubIt.variants {
+							if vk == it.key {
+								claimed = true
+								break
+							}
+						}
+					}
+				}
+				if !claimed {
+					if err := d.retireBlobLocked(it.hash, it.blob); err == nil {
+						d.ll.Remove(el)
+						delete(d.items, it.hash)
+						d.curBytes -= it.size
+						d.physBytes -= it.fileSize
+						d.notifyKeyDiskStateLocked(it.key, it.hash)
+					}
+				}
+			}
+		}
+		el = prev
+	}
+	// Next prune any Vary stub that has no live variants on disk.
 	for el := d.ll.Back(); el != nil; {
 		prev := el.Prev()
 		it := el.Value.(*diskItem)
 		if it.isVaryStub && len(it.variants) > 0 {
-			hasLive := false
+			live := make([]string, 0, len(it.variants))
 			for _, vk := range it.variants {
 				if _, ok := d.items[hashKey(vk)]; ok {
-					hasLive = true
-					break
+					live = append(live, vk)
 				}
 			}
-			if !hasLive {
+			it.variants = live
+			if len(live) == 0 {
 				if err := d.retireBlobLocked(it.hash, it.blob); err == nil {
 					d.ll.Remove(el)
 					delete(d.items, it.hash)
@@ -1380,6 +1535,131 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 
 func (d *diskStore) del(key string) {
 	d.delIfOlderGen(key, math.MaxUint64)
+}
+
+// deleteBatchAtMostGen performs a crash-consistent prepare/commit deletion for
+// a set of keys whose stored generation is at most maxGen (ADR 0027 §4).
+//
+// It writes target hashes to the durable tombstone manifest before unlinking
+// files, retires active reader leases to .jul-cache-retired-* files, and
+// reports exact removed, retired-reader, failed, and uncertainty outcomes.
+func (d *diskStore) deleteBatchAtMostGen(keys []string, maxGen uint64) (removedEntries, retiredReaders, failedEntries int, uncertain bool) {
+	if d == nil || len(keys) == 0 {
+		return 0, 0, 0, false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
+
+	type batchTarget struct {
+		key  string
+		hash string
+		item *diskItem
+	}
+	targets := make([]batchTarget, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		hash := hashKey(key)
+		if _, ok := seen[hash]; ok {
+			continue
+		}
+		seen[hash] = struct{}{}
+		if el, ok := d.items[hash]; ok {
+			it := el.Value.(*diskItem)
+			if maxGen != math.MaxUint64 && it.gen > maxGen {
+				continue
+			}
+			if it.key == "" {
+				it.key = key
+			}
+			targets = append(targets, batchTarget{key: key, hash: hash, item: it})
+		} else if d.pinned[hash] != nil {
+			targets = append(targets, batchTarget{key: key, hash: hash})
+		}
+	}
+	if len(targets) == 0 {
+		return 0, 0, 0, d.unrecoverableInvalidation.Load()
+	}
+
+	// Step 1: Prepare durable tombstones before dropping visibility or unlinking.
+	if d.tombstones == nil {
+		d.tombstones = make(map[string]int64, len(targets))
+	}
+	addedTombSize := make(map[string]int64, len(targets))
+	for _, tgt := range targets {
+		d.rememberHashKeyLocked(tgt.hash, tgt.key)
+		var sz int64
+		if tgt.item != nil {
+			sz = tgt.item.fileSize
+		}
+		if prev, exists := d.tombstones[tgt.hash]; exists {
+			d.tombstoneBytes -= prev
+		}
+		d.tombstones[tgt.hash] = sz
+		d.tombstoneBytes += sz
+		addedTombSize[tgt.hash] = sz
+	}
+	prePersistErr := d.persistTombstonesLocked()
+	if prePersistErr != nil {
+		// Corrupt any existing tombstone manifest in place so startup recovery
+		// triggers purgeAllCacheFilesOnCorruptTombstoneLocked if the process crashes,
+		// and mark the batch outcome uncertain fail-closed (ADR 0027 §4.3).
+		_ = d.truncatePath(filepath.Join(d.dir, diskTombstoneFile), 0)
+		d.recordWriteFailure(prePersistErr)
+		d.unrecoverableInvalidation.Store(true)
+		uncertain = true
+	}
+
+	// Step 2: Drop indexed entries and retire/unlink backing files.
+	for _, tgt := range targets {
+		if tgt.item != nil {
+			d.dropIndexedHashLocked(tgt.hash)
+			hadReaders := tgt.item.blob != nil && tgt.item.blob.hasActiveReaders()
+			if err := d.retireBlobLocked(tgt.hash, tgt.item.blob); err != nil {
+				failedEntries++
+				d.recordWriteFailure(err)
+				if hadReaders {
+					d.unrecoverableInvalidation.Store(true)
+					uncertain = true
+				} else if tErr := d.truncatePath(d.path(tgt.hash), 0); (tErr != nil && !os.IsNotExist(tErr)) || prePersistErr != nil {
+					d.unrecoverableInvalidation.Store(true)
+					uncertain = true
+				}
+			} else {
+				removedEntries++
+				if hadReaders {
+					retiredReaders++
+				}
+				if tgt.item.blob == nil || !tgt.item.blob.isPinning(d.path(tgt.hash)) {
+					if sz, exists := d.tombstones[tgt.hash]; exists {
+						delete(d.tombstones, tgt.hash)
+						d.tombstoneBytes -= sz
+					}
+				} else if prePersistErr != nil {
+					d.unrecoverableInvalidation.Store(true)
+					uncertain = true
+				}
+			}
+			d.notifyKeyDiskStateLocked(tgt.key, tgt.hash)
+			continue
+		}
+		// Pinned blob without indexed entry.
+		if prePersistErr != nil {
+			d.unrecoverableInvalidation.Store(true)
+			uncertain = true
+			failedEntries++
+		} else {
+			removedEntries++
+		}
+		d.notifyKeyDiskStateLocked(tgt.key, tgt.hash)
+	}
+
+	// Step 3: Commit cleaned-up tombstone manifest.
+	d.syncTombstoneStateLocked()
+	if d.unrecoverableInvalidation.Load() {
+		uncertain = true
+	}
+	return removedEntries, retiredReaders, failedEntries, uncertain
 }
 
 func (d *diskStore) purge() {

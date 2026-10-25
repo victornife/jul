@@ -79,6 +79,8 @@ func dispatchRemoteSubcommand(args []string) (handled bool, code int) {
 		return true, cmdRemotePostcondition(args[1:])
 	case "diagnostics":
 		return true, cmdRemoteDiagnostics(args[1:])
+	case "cache":
+		return true, cmdRemoteCache(args[1:])
 	default:
 		return false, 0
 	}
@@ -600,6 +602,177 @@ func renderRawSuccess(common remoteCommon, command string, r adminclient.RawResp
 		fmt.Fprintf(stderr, "operation=%s request_id=%s\n", command, r.RequestID)
 	}
 	return 0
+}
+
+type multiStringFlag []string
+
+func (m *multiStringFlag) String() string { return strings.Join(*m, ",") }
+
+func (m *multiStringFlag) Set(val string) error {
+	for _, part := range strings.Split(val, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			*m = append(*m, part)
+		}
+	}
+	return nil
+}
+
+func cmdRemoteCache(args []string) int {
+	if len(args) > 0 && args[0] == "purge" {
+		args = args[1:]
+	}
+	fs := flag.NewFlagSet("cache", flag.ContinueOnError)
+	var common remoteCommon
+	preview := fs.Bool("preview", false, "non-destructively preview the cache invalidation scope")
+	fs.BoolVar(preview, "preview-only", false, "alias for --preview")
+	operationID := fs.String("operation-id", "", "look up a cache invalidation operation by id")
+	kind := fs.String("kind", "", "explicit selector kind (exact_url, prefix, glob, tag, host, key, all)")
+	urlFlag := fs.String("url", "", "exact public URL (http(s)://host[:port]/path[?query])")
+	hostFlag := fs.String("host", "", "target host authority (host[:port])")
+	uriFlag := fs.String("uri", "", "exact origin-form /path[?query] (with --host)")
+	prefixFlag := fs.String("prefix", "", "segment-bounded path prefix starting with '/' (with --host)")
+	globFlag := fs.String("glob", "", "bounded anchored path glob starting with '/' (with --host)")
+	var tags multiStringFlag
+	fs.Var(&tags, "tag", "grouping tag (repeatable or comma-separated; with --host)")
+	tagMatch := fs.String("tag-match", "", "multi-tag match mode: any (default) or all")
+	routeID := fs.String("route-id", "", "optional durable route_id scope")
+	keyFlag := fs.String("key", "", "legacy exact internal cache key (METHOD\\nhost\\nrequest_uri)")
+	allFlag := fs.Bool("all", false, "purge the entire node cache")
+	previewToken := fs.String("preview-token", "", "bind execution to a reviewed preview_token")
+	confirmBroad := fs.Bool("confirm-broad", false, "explicitly confirm a broad (host or all) cache purge")
+	retryOpID := fs.String("retry-operation-id", "", "retry an incomplete/canceled operation at its original fence")
+	idem := fs.String("idempotency-key", "", "optional 8-128 byte [A-Za-z0-9_-] automation key")
+	includeSamples := fs.Bool("include-samples", false, "include bounded resource samples in preview")
+	maxScan := fs.Int("max-scan-entries", 0, "optional preview scan limit")
+	timeoutMS := fs.Int("operation-timeout-ms", 0, "optional server operation timeout in milliseconds")
+
+	client, code, ok := parseRemote(fs, args, &common)
+	if !ok {
+		return code
+	}
+	if fs.NArg() != 0 {
+		return renderUsageError(common.json, "cache", "unexpected positional arguments")
+	}
+
+	ctx, cancel := remoteContext()
+	defer cancel()
+
+	if strings.TrimSpace(*operationID) != "" {
+		if *preview || *urlFlag != "" || *hostFlag != "" || *uriFlag != "" || *prefixFlag != "" || *globFlag != "" || len(tags) > 0 || *keyFlag != "" || *allFlag {
+			return renderUsageError(common.json, "cache", "--operation-id cannot be combined with selector or --preview flags")
+		}
+		v, r, err := client.CachePurgeOperation(ctx, strings.TrimSpace(*operationID))
+		if err != nil {
+			return renderRemoteError(common.json, "cache", err, r.RequestID)
+		}
+		exit := adminclient.CachePurgeExit(v)
+		if common.json {
+			return renderCacheJSON("cache", exit == 0 || exit == 4, exit, r.Body)
+		}
+		renderCachePurgeHuman(v)
+		return exit
+	}
+
+	resolvedKind := strings.ToLower(strings.TrimSpace(*kind))
+	if resolvedKind == "" {
+		switch {
+		case *allFlag:
+			resolvedKind = "all"
+		case *keyFlag != "":
+			resolvedKind = "key"
+		case *urlFlag != "" || *uriFlag != "":
+			resolvedKind = "exact_url"
+		case *prefixFlag != "":
+			resolvedKind = "prefix"
+		case *globFlag != "":
+			resolvedKind = "glob"
+		case len(tags) > 0:
+			resolvedKind = "tag"
+		case *hostFlag != "" || *routeID != "":
+			resolvedKind = "host"
+		default:
+			return renderUsageError(common.json, "cache", "a cache selector is required (--url, --host with --prefix/--glob/--tag, --host, --key, or --all)")
+		}
+	}
+
+	sel := adminapi.CacheSelector{
+		Kind:     resolvedKind,
+		Host:     *hostFlag,
+		URL:      *urlFlag,
+		URI:      *uriFlag,
+		Prefix:   *prefixFlag,
+		Pattern:  *globFlag,
+		Tags:     tags,
+		TagMatch: *tagMatch,
+		Key:      *keyFlag,
+		RouteID:  *routeID,
+		All:      *allFlag || resolvedKind == "all",
+	}
+
+	if *preview {
+		v, r, err := client.CachePurgePreview(ctx, adminapi.CachePurgePreviewRequest{
+			Selector:       sel,
+			MaxScanEntries: *maxScan,
+			IncludeSamples: *includeSamples,
+		})
+		if err != nil {
+			return renderRemoteError(common.json, "cache", err, r.RequestID)
+		}
+		if common.json {
+			return renderCacheJSON("cache", true, 0, r.Body)
+		}
+		fmt.Fprintf(stdout, "cache purge preview: kind=%s host=%s matched_resources=%d matched_representations=%d (accuracy=%s)\n",
+			v.Selector.Kind, emptyDash(v.Selector.Host), v.MatchedResources, v.MatchedRepresentations, v.CountAccuracy)
+		fmt.Fprintf(stdout, "tiers: memory=%d (%d B) disk=%d (%d B) inflight_fills=%d broad=%t\n",
+			v.MemoryEntries, v.MemoryBytes, v.DiskEntries, v.DiskBytes, v.InflightFillsMatched, v.BroadScope)
+		fmt.Fprintf(stdout, "preview_token: %s\n", v.PreviewToken)
+		for _, w := range v.Warnings {
+			fmt.Fprintf(stdout, "warning [%s/%s]: %s\n", w.Severity, w.Code, w.Summary)
+		}
+		return 0
+	}
+
+	v, r, err := client.CachePurge(ctx, adminapi.CachePurgeRequest{
+		Selector:         sel,
+		PreviewToken:     *previewToken,
+		ConfirmBroad:     *confirmBroad,
+		RetryOperationID: *retryOpID,
+		TimeoutMS:        *timeoutMS,
+	}, *idem)
+	if err != nil {
+		return renderRemoteError(common.json, "cache", err, r.RequestID)
+	}
+	exit := adminclient.CachePurgeExit(v)
+	if common.json {
+		return renderCacheJSON("cache", exit == 0 || exit == 4, exit, r.Body)
+	}
+	renderCachePurgeHuman(v)
+	return exit
+}
+
+func renderCacheJSON(command string, ok bool, exitCode int, raw []byte) int {
+	var obj map[string]any
+	if len(raw) != 0 {
+		_ = json.Unmarshal(raw, &obj)
+	}
+	if obj == nil {
+		obj = map[string]any{}
+	}
+	obj["command"] = command
+	obj["ok"] = ok
+	obj["error"] = nil
+	return writeJSON(obj, exitCode)
+}
+
+func renderCachePurgeHuman(v adminapi.CachePurgeResponse) {
+	fmt.Fprintf(stdout, "cache purge %s: state=%s outcome=%s effective=%s\n",
+		v.OperationID, v.State, v.Outcome, v.InvalidationEffective)
+	fmt.Fprintf(stdout, "invalidated: resources=%d representations=%d memory_entries=%d disk_entries=%d failed=%d remaining=%d\n",
+		v.InvalidatedResources, v.InvalidatedRepresentations, v.MemoryEntriesRemoved, v.DiskEntriesRemoved, v.FailedEntries, v.RemainingEntries)
+	if v.RecoveryGuidance != "" {
+		fmt.Fprintf(stdout, "recovery: %s\n", v.RecoveryGuidance)
+	}
 }
 
 func renderJSONMap(command string, ok bool, raw []byte, errObj any) int {

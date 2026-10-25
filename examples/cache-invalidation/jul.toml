@@ -1,0 +1,72 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
+# Scoped cache invalidation example (#621 / ADR 0027).
+#
+# Demonstrates:
+# - Two-tier response caching with trusted origin grouping tags (Cache-Tag)
+#   stripped before downstream client delivery;
+# - Least-privilege RBAC principal ("content-publisher") granted only
+#   cache:purge for automated content-update / deployment invalidation;
+# - Authoritative route_id ("portal-articles") for scoped invalidation.
+
+[global]
+log_level = "info"
+log_format = "json"
+config_authority = "file_owned"
+
+[cache]
+enabled = true
+memory_max_size = "64m"
+disk_path = "./jul-data/cache"
+disk_max_size = "512m"
+max_entry_size = "32m"
+default_ttl = "5m"
+stale_while_revalidate = "30s"
+stale_if_error = "5m"
+lock = true
+lock_timeout = "5s"
+range_enabled = true
+max_ranges = 1
+tag_headers = ["Cache-Tag"]
+strip_tag_headers = true
+
+[admin]
+enabled = true
+listen = "127.0.0.1:9090"
+token = "${env:JUL_ADMIN_TOKEN}"
+
+[admin.rbac]
+enabled = true
+default_role = "admin"
+
+[[admin.rbac.roles]]
+name = "cache_purger"
+permissions = ["cache:purge"]
+
+[[admin.rbac.principals]]
+name = "content-publisher"
+role = "cache_purger"
+token = "${env:JUL_CACHE_PURGE_TOKEN}"
+
+[[upstreams]]
+name = "portal_backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:8081"]
+
+[[servers]]
+name = "portal"
+listen = "127.0.0.1:8080"
+server_names = ["portal.example.com"]
+
+  [[servers.locations]]
+  route_id = "portal-articles"
+  match = { type = "prefix", path = "/articles/" }
+  proxy_pass = "http://portal_backend"
+  cache = true
+
+  [[servers.locations]]
+  route_id = "portal-root"
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://portal_backend"
+  cache = true

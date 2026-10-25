@@ -119,11 +119,13 @@ type cacheWriter struct {
 	// noStore marks a response that can never be stored whatever its headers
 	// say: the connection was hijacked, the status is a protocol switch, or the
 	// body is a live event stream.
-	noStore     bool
-	hijacked    bool
-	writeErr    error
-	headerCheck func(code int, h http.Header) bool
-	onAbandon   func()
+	noStore         bool
+	hijacked        bool
+	writeErr        error
+	headerCheck     func(code int, h http.Header) bool
+	onAbandon       func()
+	tagHeaders      []string
+	stripTagHeaders bool
 	// snapshot is the multiset difference between the response header map at
 	// WriteHeader and entrySnapshot, taken before delegating to the outer
 	// ResponseWriter. Every wrapper from here to the real connection shares one
@@ -308,6 +310,9 @@ func (w *cacheWriter) WriteHeader(code int) {
 	} else if !w.noStore {
 		captureInitDiskStream(cl, w.effMemLimit(), w.disk, w.acct.onSkip, &w.diskStream, w.abandonCapture, w.dropCapture)
 	}
+	if w.stripTagHeaders && len(w.tagHeaders) > 0 {
+		stripOriginTagHeadersFromResponse(w.Header(), w.entrySnapshot, w.tagHeaders)
+	}
 	w.ResponseWriter.WriteHeader(code)
 }
 
@@ -424,9 +429,11 @@ type recorder struct {
 	acct           captureAccount
 	// noStore marks a response that can never be stored whatever its headers
 	// say: an interim/protocol-switch status, or a live event stream.
-	noStore     bool
-	headerCheck func(code int, h http.Header) bool
-	onAbandon   func()
+	noStore         bool
+	headerCheck     func(code int, h http.Header) bool
+	onAbandon       func()
+	tagHeaders      []string
+	stripTagHeaders bool
 }
 
 func (r *recorder) notifyAbandon() {

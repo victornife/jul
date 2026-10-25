@@ -104,9 +104,11 @@ describe("reviewed Console write inventory", () => {
     }
     visit(source);
     expect(writes).toEqual({
- logoutOIDC: ["POST"],
+      logoutOIDC: ["POST"],
       testRoute: ["POST"],
       purgeCache: ["POST"],
+      previewCachePurge: ["POST"],
+      executeCachePurge: ["POST"],
       rollback: ["POST"],
       discardPendingRestart: ["POST"],
       diffConfig: ["POST"],

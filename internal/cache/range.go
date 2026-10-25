@@ -489,6 +489,9 @@ func varyCompatibleWithModifiedRequest(h http.Header, modifiedReq, origReq *http
 // so an unbounded response is not downloaded in full.
 func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base string, pol CachePolicy, onAbandon func()) *Entry {
 	c.observeRange(rangeOutcomeFill)
+	opID, startGen := c.beginInflightOriginOp()
+	defer c.endInflightOriginOp(opID)
+
 	fillCtx, cancelFill := context.WithCancel(origReq.Context())
 	defer cancelFill()
 
@@ -505,8 +508,15 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 		}
 	}
 
+	var tagSkipReason string
 	rec := c.newRecorder(pol)
 	rec.headerCheck = func(code int, h http.Header) bool {
+		if pol.TagHeaderCount > 0 {
+			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
+				tagSkipReason = skip
+				return false
+			}
+		}
 		return code == http.StatusOK &&
 			c.headerStorable(fillReq, code, h, c.clock(), pol) &&
 			varyCompatibleWithModifiedRequest(h, fillReq, origReq)
@@ -515,13 +525,17 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 	defer rec.releaseCapture()
 
 	next.ServeHTTP(rec, fillReq)
+	if tagSkipReason != "" {
+		c.tagSkipped(tagSkipReason)
+		return nil
+	}
 	if origReq.Context().Err() != nil || !rec.storable() || rec.status != http.StatusOK {
 		return nil
 	}
 
 	now := c.clock()
 	e := c.buildEntryFromCapture(fillReq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-	if e == nil || !e.matchesVary(origReq) || !c.storeCaptured(base, fillReq, e, rec.diskStream) {
+	if e == nil || !e.matchesVary(origReq) || !c.storeCapturedWithStartGen(base, fillReq, e, rec.diskStream, startGen, true) {
 		return nil
 	}
 	return e
@@ -545,6 +559,7 @@ func (c *Cache) serveRangeResponse(w http.ResponseWriter, e *Entry, spec byteRan
 	totalLen := e.BodyLen()
 	start, length, ok := resolveByteRange(spec, totalLen)
 	h := w.Header()
+	pol := c.Policy()
 	if !ok {
 		c.observeRange(rangeOutcomeUnsatisfiable)
 		for k, vs := range e.Header {
@@ -558,6 +573,9 @@ func (c *Cache) serveRangeResponse(w http.ResponseWriter, e *Entry, spec byteRan
 					h.Add(k, v)
 				}
 			}
+		}
+		if pol.StripTagHeaders && pol.TagHeaderCount > 0 {
+			stripConfiguredTagHeaders(h, pol.TagHeaderSlice())
 		}
 		h.Set("Accept-Ranges", "bytes")
 		h.Set("Content-Range", fmt.Sprintf("bytes */%d", totalLen))
@@ -580,6 +598,9 @@ func (c *Cache) serveRangeResponse(w http.ResponseWriter, e *Entry, spec byteRan
 				h.Add(k, v)
 			}
 		}
+	}
+	if pol.StripTagHeaders && pol.TagHeaderCount > 0 {
+		stripConfiguredTagHeaders(h, pol.TagHeaderSlice())
 	}
 	h.Set("Accept-Ranges", "bytes")
 	h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, totalLen))

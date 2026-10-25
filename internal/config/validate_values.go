@@ -273,6 +273,85 @@ func validateCacheValues(c CacheConfig) []error {
 			errs = append(errs, fmt.Errorf("[cache].max_ranges: %d must be at most 16", c.MaxRanges))
 		}
 	}
+	errs = append(errs, validateCacheTagHeaders(c)...)
+	return errs
+}
+
+var forbiddenCacheTagHeaders = map[string]bool{
+	"age":                 true,
+	"authorization":       true,
+	"cache-control":       true,
+	"cdn-cache-control":   true,
+	"connection":          true,
+	"content-encoding":    true,
+	"content-length":      true,
+	"content-location":    true,
+	"content-range":       true,
+	"content-type":        true,
+	"date":                true,
+	"etag":                true,
+	"expires":             true,
+	"keep-alive":          true,
+	"last-modified":       true,
+	"location":            true,
+	"proxy-authenticate":  true,
+	"proxy-authorization": true,
+	"set-cookie":          true,
+	"te":                  true,
+	"trailer":             true,
+	"transfer-encoding":   true,
+	"upgrade":             true,
+	"vary":                true,
+	"www-authenticate":    true,
+	"x-cache":             true,
+	"x-request-id":        true,
+}
+
+func isValidHTTPTokenName(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			continue
+		}
+		switch ch {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validateCacheTagHeaders(c CacheConfig) []error {
+	var errs []error
+	if len(c.TagHeaders) > 8 {
+		errs = append(errs, fmt.Errorf("[cache].tag_headers: %d headers exceeds maximum of 8", len(c.TagHeaders)))
+	}
+	seen := make(map[string]int, len(c.TagHeaders))
+	for i, raw := range c.TagHeaders {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || trimmed != raw || !isValidHTTPTokenName(trimmed) {
+			errs = append(errs, fmt.Errorf("[cache].tag_headers[%d]: %q must be a non-empty HTTP header token (1..64 bytes, no surrounding whitespace)", i, raw))
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if forbiddenCacheTagHeaders[lower] {
+			errs = append(errs, fmt.Errorf("[cache].tag_headers[%d]: %q is a reserved HTTP or cache header and cannot be used for grouping tags", i, raw))
+			continue
+		}
+		if prevIdx, dup := seen[lower]; dup {
+			errs = append(errs, fmt.Errorf("[cache].tag_headers[%d]: %q duplicates [cache].tag_headers[%d]", i, raw, prevIdx))
+			continue
+		}
+		seen[lower] = i
+	}
+	if c.StripTagHeaders != nil && *c.StripTagHeaders && len(c.TagHeaders) == 0 {
+		errs = append(errs, fmt.Errorf("[cache].strip_tag_headers: true requires non-empty [cache].tag_headers"))
+	}
 	return errs
 }
 

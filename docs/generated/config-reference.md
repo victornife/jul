@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 355 configurable leaves.
+Coverage: 357 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -857,6 +857,37 @@ StaleWhileRevalidate serves stale entries for this grace period after expiry whi
 | Constraint | non-negative |
 | Zero/empty semantics | 0 disables that optional window/default |
 | Active when | always |
+
+## `cache.strip_tag_headers` {#cache-strip_tag_headers}
+
+StripTagHeaders removes the configured tag_headers from downstream client responses and stored response headers so internal grouping metadata is not exposed to clients.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| Default (conditional) | true (when cache.tag_headers is set) |
+| Constraint | must not be true when cache.tag_headers is empty |
+| Zero/empty semantics | omitted defaults to true when cache.tag_headers is non-empty, false otherwise |
+| Active when | cache.enabled = true and cache.tag_headers is non-empty |
+
+## `cache.tag_headers` {#cache-tag_headers}
+
+TagHeaders lists trusted origin response header names from which Jul ingests grouping tags for scoped tag invalidation (#621, ADR 0027; for example ["Cache-Tag"] or ["Cache-Tag", "Surrogate-Key"]).
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| Constraint | at most 8 unique 1..64-byte HTTP header token names; reserved protocol, framing, validator, and credential headers are rejected |
+| Zero/empty semantics | omitted or empty disables origin grouping-tag ingestion |
+| Active when | cache.enabled = true |
 
 ## `compression.enabled` {#compression-enabled}
 

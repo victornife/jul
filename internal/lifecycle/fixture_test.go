@@ -361,6 +361,8 @@ func fullConfig() *config.Config {
 			LockTimeout:          config.Duration(5 * time.Second),
 			RangeEnabled:         true,
 			MaxRanges:            1,
+			TagHeaders:           []string{"Cache-Tag"},
+			StripTagHeaders:      config.Bool(true),
 		},
 		Compression: config.CompressionConfig{
 			Enabled:       config.Bool(true),

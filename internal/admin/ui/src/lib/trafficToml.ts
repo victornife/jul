@@ -8,6 +8,7 @@ import type {
   CompressionDraft,
   RateLimitDraft,
 } from "@/lib/trafficPatchBuilders.ts";
+import type { CacheSelector, CacheSelectorKind } from "@/api/client.ts";
 
 export type { CacheDraft, CompressionDraft, RateLimitDraft } from "@/lib/trafficPatchBuilders.ts";
 
@@ -67,6 +68,56 @@ export function isValidCacheMaxRanges(draft: CacheDraft): boolean {
   return Boolean(draft.rangeEnabled) || maxRanges === 0;
 }
 
+const FORBIDDEN_CACHE_TAG_HEADERS = new Set([
+  "age",
+  "authorization",
+  "cache-control",
+  "cdn-cache-control",
+  "connection",
+  "content-encoding",
+  "content-length",
+  "content-location",
+  "content-range",
+  "content-type",
+  "date",
+  "etag",
+  "expires",
+  "keep-alive",
+  "last-modified",
+  "location",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "set-cookie",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "vary",
+  "www-authenticate",
+  "x-cache",
+  "x-request-id",
+]);
+
+const HTTP_TOKEN_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,64}$/;
+
+export function isValidCacheTagHeaders(draft: CacheDraft): boolean {
+  const headers = draft.tagHeaders ?? [];
+  if (headers.length > 8) return false;
+  const seen = new Set<string>();
+  for (const raw of headers) {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed !== raw || !HTTP_TOKEN_RE.test(trimmed)) {
+      return false;
+    }
+    const lower = trimmed.toLowerCase();
+    if (FORBIDDEN_CACHE_TAG_HEADERS.has(lower) || seen.has(lower)) {
+      return false;
+    }
+    seen.add(lower);
+  }
+  return true;
+}
+
 /**
  * Generates the complete current [cache] table. Values are emitted independently
  * of enabled so dormant disk/TTL/stale settings survive disable/enable cycles.
@@ -111,7 +162,182 @@ export function generateCacheToml(draft: CacheDraft): string {
       lines.push(`max_ranges = ${String(maxRanges)}`);
     }
   }
+  const tagHeaders = (draft.tagHeaders ?? []).map((h) => h.trim()).filter((h) => h !== "");
+  if (tagHeaders.length > 0) {
+    if (!isValidCacheTagHeaders({ ...draft, tagHeaders })) {
+      throw new Error("cache.tag_headers must contain 1 to 8 unique non-reserved HTTP header token names.");
+    }
+    lines.push(`tag_headers = [${tagHeaders.map(tomlString).join(", ")}]`);
+    lines.push(`strip_tag_headers = ${String(draft.stripTagHeaders ?? true)}`);
+  }
   return lines.join("\n");
+}
+
+export function buildSelectorFromDraft(draft: {
+  readonly kind: CacheSelectorKind;
+  readonly host: string;
+  readonly url: string;
+  readonly uri: string;
+  readonly prefix: string;
+  readonly pattern: string;
+  readonly tagsText: string;
+  readonly tagMatch: "any" | "all";
+  readonly routeId: string;
+}): { readonly selector?: CacheSelector; readonly error?: string } {
+  const host = draft.host.trim();
+  const routeId = draft.routeId.trim() || undefined;
+  switch (draft.kind) {
+    case "exact_url": {
+      const url = draft.url.trim();
+      const uri = draft.uri.trim();
+      if (url !== "") {
+        return {
+          selector: {
+            kind: "exact_url",
+            url,
+            ...(host !== "" ? { host } : {}),
+            ...(routeId ? { route_id: routeId } : {}),
+          },
+        };
+      }
+      if (host === "" || uri === "") {
+        return {
+          error:
+            "Enter either a full http(s):// URL or both a target hostname and a request URI starting with /.",
+        };
+      }
+      return {
+        selector: {
+          kind: "exact_url",
+          host,
+          uri,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "prefix": {
+      const prefix = draft.prefix.trim();
+      if (host === "" || prefix === "") {
+        return {
+          error:
+            "Both hostname and an anchored path prefix starting with / are required.",
+        };
+      }
+      return {
+        selector: {
+          kind: "prefix",
+          host,
+          prefix,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "glob": {
+      const pattern = draft.pattern.trim();
+      if (host === "" || pattern === "") {
+        return {
+          error:
+            "Both hostname and an anchored glob pattern starting with / are required.",
+        };
+      }
+      return {
+        selector: {
+          kind: "glob",
+          host,
+          pattern,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "tag": {
+      const tags = draft.tagsText
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t !== "");
+      if (host === "" || tags.length === 0) {
+        return {
+          error:
+            "Both hostname and at least one grouping tag (e.g. article:42) are required.",
+        };
+      }
+      return {
+        selector: {
+          kind: "tag",
+          host,
+          tags,
+          tag_match: draft.tagMatch,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "host": {
+      if (host === "") {
+        return { error: "Target hostname is required for a host-scoped invalidation." };
+      }
+      return {
+        selector: {
+          kind: "host",
+          host,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "all":
+      return { selector: { kind: "all", all: true } };
+    case "key":
+      return { error: "Use one of the structured selectors in the Console." };
+  }
+}
+
+export function buildCliCommandSnippet(
+  selector: CacheSelector,
+  broadScope: boolean,
+): string {
+  const args: string[] = [
+    "jul cache purge",
+    "--endpoint https://admin.example.com:9090",
+    "--token-file /etc/jul/admin.token",
+  ];
+  switch (selector.kind) {
+    case "exact_url":
+      if (selector.url) {
+        args.push(`--url ${JSON.stringify(selector.url)}`);
+      } else {
+        if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+        if (selector.uri) args.push(`--uri ${JSON.stringify(selector.uri)}`);
+      }
+      break;
+    case "prefix":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      if (selector.prefix) args.push(`--prefix ${JSON.stringify(selector.prefix)}`);
+      break;
+    case "glob":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      if (selector.pattern) args.push(`--glob ${JSON.stringify(selector.pattern)}`);
+      break;
+    case "tag":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      for (const tag of selector.tags ?? []) {
+        args.push(`--tag ${JSON.stringify(tag)}`);
+      }
+      if (selector.tag_match === "all") {
+        args.push("--tag-match all");
+      }
+      break;
+    case "host":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      break;
+    case "all":
+      args.push("--all");
+      break;
+    case "key":
+      if (selector.key) args.push(`--key ${JSON.stringify(selector.key)}`);
+      break;
+  }
+  if (broadScope) {
+    args.push("--confirm-broad");
+  }
+  return args.join(" \\\n  ");
 }
 
 export function compressionWarnings(draft: CompressionDraft): string[] {

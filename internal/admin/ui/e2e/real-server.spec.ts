@@ -40,6 +40,8 @@ import {
   ValidationResultSchema,
   PendingRestartStatusSchema,
   IdentitySchema,
+  CachePurgePreviewResponseSchema,
+  CachePurgeResponseSchema,
 } from "../src/api/client.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1071,5 +1073,58 @@ test(
       }),
     });
     if (failure) throw failure;
+  },
+);
+
+test(
+  "POST /api/v1/cache/purge/preview, POST /api/v1/cache/purge, and GET /api/v1/cache/purges/{id} match client schemas (#621)",
+  async ({ request }) => {
+    const previewResp = await request.post("/api/v1/cache/purge/preview", {
+      headers: { "Content-Type": "application/json" },
+      data: JSON.stringify({
+        selector: {
+          kind: "prefix",
+          host: "localhost",
+          prefix: "/articles/",
+        },
+        include_samples: true,
+      }),
+    });
+    expect(previewResp.status()).toBe(200);
+    const preview = assertShape(
+      CachePurgePreviewResponseSchema,
+      await previewResp.json(),
+      "/api/v1/cache/purge/preview",
+    );
+    expect(preview.preview_token).toBeTruthy();
+
+    const purgeResp = await request.post("/api/v1/cache/purge", {
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "e2e-real-server-purge-621",
+      },
+      data: JSON.stringify({
+        selector: preview.selector,
+        preview_token: preview.preview_token,
+      }),
+    });
+    expect(purgeResp.status()).toBe(200);
+    const purge = assertShape(
+      CachePurgeResponseSchema,
+      await purgeResp.json(),
+      "/api/v1/cache/purge",
+    );
+    expect(purge.operation_id).toMatch(/^cp_/);
+
+    const statusResp = await request.get(
+      `/api/v1/cache/purges/${encodeURIComponent(purge.operation_id)}`,
+    );
+    expect(statusResp.status()).toBe(200);
+    const status = assertShape(
+      CachePurgeResponseSchema,
+      await statusResp.json(),
+      "/api/v1/cache/purges/{id}",
+    );
+    expect(status.operation_id).toBe(purge.operation_id);
   },
 );

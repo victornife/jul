@@ -76,6 +76,32 @@ const TRAFFIC_CONTROLS = {
     rotate_max_mb: 100,
     rotate_keep: 7,
   },
+  cache: {
+    enabled: true,
+    memory_max_size: "64m",
+    disk_path: "/var/cache/jul",
+    disk_max_size: "1g",
+    max_entry_size: "16m",
+    default_ttl: "60s",
+    stale_while_revalidate: "10s",
+    stale_if_error: "30s",
+    lock: false,
+    lock_timeout: "",
+    range_enabled: false,
+    max_ranges: 0,
+    tag_headers: ["Cache-Tag"],
+    strip_tag_headers: true,
+  },
+  servers: [
+    {
+      listen: ":8080",
+      server_names: ["portal.example.com"],
+      client_max_body_size: "10m",
+      read_timeout: "15s",
+      write_timeout: "15s",
+      idle_timeout: "60s",
+    },
+  ],
 };
 
 const PATCH_CANDIDATE = `[[servers]]\nlisten = ":8080"\n\n  [[servers.locations]]\n  match = { type = "prefix", path = "/" }\n  proxy_pass = "http://new-app:4000"\n`;
@@ -221,6 +247,90 @@ async function setupApiMocks(page: Page): Promise<void> {
   );
   await page.route("/api/config/patch/apply", (route) => json(route, PATCH_APPLY_RESULT));
   await page.route("/api/config/rollback", (route) => json(route, { ok: true }));
+  await page.route("/api/v1/cache/purge/preview", (route) =>
+    json(route, {
+      api_version: "v1",
+      cache_enabled: true,
+      tag_ingestion_enabled: true,
+      selector: {
+        kind: "tag",
+        host: "portal.example.com",
+        tags: ["article:42"],
+        tag_match: "any",
+      },
+      selector_digest: "smoke-digest-42",
+      preview_token: "v1.smoke.token",
+      matched_resources: 2,
+      matched_representations: 4,
+      memory_entries: 4,
+      disk_entries: 2,
+      matched_bytes: 8192,
+      memory_bytes: 4096,
+      disk_bytes: 4096,
+      inflight_fills_matched: 0,
+      count_accuracy: "exact",
+      truncated: false,
+      scan_limit: 10000,
+      scanned_entries: 8,
+      source: "live_cache_index",
+      as_of: "2026-10-25T12:00:00Z",
+      cache_sequence: 11,
+      execution_mode_contract: "reevaluate_selector_with_fence",
+      broad_scope: false,
+      warnings: [
+        {
+          code: "JUL_LOCAL_SCOPE_ONLY",
+          severity: "info",
+          scope: "cache",
+          summary: "Cache invalidation applies only to this Jul instance.",
+        },
+      ],
+      samples: [
+        {
+          host: "portal.example.com",
+          path: "/articles/42",
+          methods: ["GET", "HEAD"],
+          representations: 2,
+          tiers: ["memory", "disk"],
+          body_bytes: 2048,
+          tags: ["article:42"],
+          freshness_state: "fresh",
+        },
+      ],
+      config_authority: "managed",
+    }),
+  );
+  await page.route("/api/v1/cache/purge", (route) =>
+    json(route, {
+      api_version: "v1",
+      operation_id: "cp_1_smoke42",
+      state: "succeeded",
+      terminal: true,
+      outcome: "succeeded",
+      invalidation_effective: "effective",
+      selector: {
+        kind: "tag",
+        host: "portal.example.com",
+        tags: ["article:42"],
+        tag_match: "any",
+      },
+      selector_digest: "smoke-digest-42",
+      fence_sequence: 12,
+      invalidated_resources: 2,
+      invalidated_representations: 4,
+      memory_entries_removed: 4,
+      disk_entries_removed: 2,
+      active_readers_retired: 0,
+      fenced_inflight_ops: 0,
+      failed_entries: 0,
+      remaining_entries: 0,
+      started_at: "2026-10-25T12:00:01Z",
+      completed_at: "2026-10-25T12:00:01Z",
+      warnings: [],
+      boot_id: "boot-smoke",
+      config_authority: "managed",
+    }),
+  );
 
   // Silence the console-health poller that fires on every page mount.
   await page.route("/api/admin/health", (route) => json(route, { status: "ok", latency_ms: 1 }));
@@ -583,5 +693,52 @@ test.describe("Configuration comparison confidentiality", () => {
     await expect(page.getByRole("dialog", { name: "Admin token required" })).toBeVisible();
     await expect(page.getByLabel("Token", { exact: true })).toBeEditable();
     await expect(page.getByRole("heading", { name: "Overview" })).not.toBeVisible();
+  });
+
+  test("scoped cache invalidation workflow: select scope -> preview -> confirm -> execute and viewer RBAC gating (#621)", async ({
+    page,
+  }) => {
+    await setupApiMocks(page);
+    await page.goto("/traffic");
+    await expect(
+      page.getByRole("heading", { name: "Global & Traffic Controls" }),
+    ).toBeVisible();
+
+    const cacheHeading = page.getByText("Cache", { exact: true }).first();
+    await cacheHeading.locator("..").getByRole("button", { name: "Edit" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Edit cache" });
+    await expect(dialog).toBeVisible();
+
+    await dialog.getByLabel("Invalidation selector kind").selectOption("tag");
+    await dialog.getByLabel("Origin grouping tags").fill("article:42");
+    await dialog.getByRole("button", { name: "Preview invalidation scope" }).click();
+
+    const previewRegion = dialog.getByRole("region", { name: "Invalidation preview" });
+    await expect(previewRegion).toBeVisible();
+    await expect(previewRegion).toContainText("portal.example.com/articles/42");
+
+    await previewRegion.getByRole("button", { name: "Confirm & invalidate" }).click();
+
+    const resultBanner = dialog.getByLabel("Invalidation execution result");
+    await expect(resultBanner).toBeVisible();
+    await expect(resultBanner).toContainText("cp_1_smoke42");
+    await expect(resultBanner).toContainText("effective");
+
+    // Verify viewer identity cannot preview or execute purge (requires cache:purge).
+    await mockIdentity(page, VIEWER_IDENTITY);
+    await page.goto("/traffic");
+    await page
+      .getByText("Cache", { exact: true })
+      .first()
+      .locator("..")
+      .getByRole("button", { name: "Edit" })
+      .click();
+    const viewerDialog = page.getByRole("dialog", { name: "Edit cache" });
+    await viewerDialog.getByLabel("Invalidation selector kind").selectOption("tag");
+    await viewerDialog.getByLabel("Origin grouping tags").fill("article:42");
+    await expect(
+      viewerDialog.getByRole("button", { name: "Preview invalidation scope" }),
+    ).toBeDisabled();
   });
 });

@@ -49,6 +49,7 @@ func Build() (*Document, error) {
 		Tags: []Tag{
 			{Name: "health", Description: "Unauthenticated liveness and readiness probes."},
 			{Name: "observability", Description: "Metrics exposition."},
+			{Name: "cache", Description: "Scoped response-cache preview, invalidation, and operation status."},
 		},
 	}
 
@@ -335,6 +336,8 @@ func tagsFor(pattern string) []string {
 		return []string{"listeners"}
 	case strings.HasPrefix(pattern, "/api/v1/streams"):
 		return []string{"streams"}
+	case strings.HasPrefix(pattern, "/api/v1/cache"):
+		return []string{"cache"}
 	default:
 		return []string{"status"}
 	}

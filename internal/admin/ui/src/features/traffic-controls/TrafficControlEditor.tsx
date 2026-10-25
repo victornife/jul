@@ -10,6 +10,7 @@ import { Drawer } from "@/components/Drawer.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
 import { captureAdminIdentity,
+  fetchOverview,
   fetchPendingRestart,
   fetchRawConfig,
   fetchRoutes,
@@ -46,6 +47,7 @@ import {
   generateCacheToml,
   generateLimitsToml,
   isValidCacheMaxRanges,
+  isValidCacheTagHeaders,
   limitsWarnings,
   rateLimitWarnings,
   upsertTopLevelTable,
@@ -53,6 +55,7 @@ import {
 } from "@/lib/trafficToml.ts";
 import { describePatchBatchError, useRunPatchBatch } from "@/lib/useRunPatchBatch.ts";
 import { AffectedRoutes, CheckboxGroup, NumberField, TextField, Toggle } from "./TrafficFormFields.tsx";
+import { CacheInvalidationPanel } from "./CacheInvalidationPanel.tsx";
 
 export type TrafficEditorKind = "compression" | "cache" | "rate_limit" | "limits";
 
@@ -111,6 +114,8 @@ function affectedPaths(
 }
 
 function equalCache(left: CacheDraft, right: CacheDraft): boolean {
+  const leftTags = (left.tagHeaders ?? []).join(",");
+  const rightTags = (right.tagHeaders ?? []).join(",");
   return (
     left.enabled === right.enabled &&
     left.memoryMaxSize === right.memoryMaxSize &&
@@ -123,7 +128,10 @@ function equalCache(left: CacheDraft, right: CacheDraft): boolean {
     Boolean(left.lock) === Boolean(right.lock) &&
     (left.lockTimeout ?? "") === (right.lockTimeout ?? "") &&
     Boolean(left.rangeEnabled) === Boolean(right.rangeEnabled) &&
-    (left.maxRanges ?? 0) === (right.maxRanges ?? 0)
+    (left.maxRanges ?? 0) === (right.maxRanges ?? 0) &&
+    leftTags === rightTags &&
+    (left.stripTagHeaders ?? leftTags !== "") ===
+      (right.stripTagHeaders ?? rightTags !== "")
   );
 }
 
@@ -146,6 +154,11 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
   const [cacheReviewing, setCacheReviewing] = useState(false);
 
   const routes = useQuery({ queryKey: ["routes"], queryFn: fetchRoutes });
+  const overview = useQuery({
+    queryKey: ["overview"],
+    queryFn: fetchOverview,
+    enabled: kind === "cache",
+  });
   const stats = useQuery({
     queryKey: ["stats"],
     queryFn: fetchStats,
@@ -209,6 +222,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
       : null;
   const cacheDirty = !equalCache(cacheInitial.current, cache);
   const cacheMaxRangesValid = isValidCacheMaxRanges(cache);
+  const cacheTagHeadersValid = isValidCacheTagHeaders(cache);
 
   const warnings = useMemo(() => {
     switch (kind) {
@@ -327,7 +341,13 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
     busy ||
     !canWrite ||
     (kind === "cache"
-      ? !cacheDirty || !cacheMaxRangesValid || !canRaw || cacheBase.isLoading || cacheBase.isFetching || cacheBase.isError
+      ? !cacheDirty ||
+        !cacheMaxRangesValid ||
+        !cacheTagHeadersValid ||
+        !canRaw ||
+        cacheBase.isLoading ||
+        cacheBase.isFetching ||
+        cacheBase.isError
       : typedOperation === null);
 
   const toggleListValue = (
@@ -584,12 +604,55 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 Maximum ranges must be an integer between 0 and 16 (and 0 when range-aware caching is disabled).
               </p>
             )}
+            <TextField
+              label="Trusted origin tag headers"
+              hint="Comma-separated origin response headers for tag invalidation (e.g. Cache-Tag, Surrogate-Key). Max 8."
+              placeholder="Cache-Tag, Surrogate-Key"
+              value={(cache.tagHeaders ?? []).join(", ")}
+              onChange={(raw) => {
+                const tagHeaders = raw
+                  .split(",")
+                  .map((h) => h.trim())
+                  .filter((h) => h !== "");
+                setCache((previous) => ({
+                  ...previous,
+                  tagHeaders,
+                  stripTagHeaders:
+                    tagHeaders.length > 0 ? (previous.stripTagHeaders ?? true) : false,
+                }));
+                clearErrors();
+              }}
+            />
+            {!cacheTagHeadersValid && (
+              <p className="text-xs text-jul-danger">
+                Tag headers must be 1 to 8 unique, non-reserved HTTP header token names (not ETag or Cache-Control).
+              </p>
+            )}
+            {(cache.tagHeaders?.length ?? 0) > 0 && (
+              <Toggle
+                label="Strip configured tag headers from client responses"
+                checked={cache.stripTagHeaders ?? true}
+                onChange={(stripTagHeaders) => {
+                  setCache((previous) => ({ ...previous, stripTagHeaders }));
+                  clearErrors();
+                }}
+              />
+            )}
             <AffectedRoutes title="Cached routes" paths={affected} emptyHint="No locations currently opt into caching." />
             {stats.data && (
               <p className="text-xs text-jul-muted">
                 Current cache hit ratio: {(stats.data.cacheHitRatio * 100).toFixed(1)}%
               </p>
             )}
+            <CacheInvalidationPanel
+              cacheEnabled={current.cache?.enabled ?? cache.enabled}
+              tagHeaders={current.cache?.tag_headers ?? cache.tagHeaders ?? []}
+              serverNames={unique(
+                (current.servers ?? []).flatMap((s) => s.server_names ?? []),
+              )}
+              routes={allRoutes}
+              authorityMode={overview.data?.authority?.config_authority}
+            />
             <div className="flex items-center gap-2">
               <button
                 type="button"

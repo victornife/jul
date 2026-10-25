@@ -749,6 +749,14 @@ type Server struct {
 	// derivation cache (§4.3).
 	sharingCacheMu sync.Mutex
 	sharingCache   *cachedSharingDerivation
+
+	// Scoped cache invalidation ledger, preview HMAC key, and active operation
+	// admission counter (#621, ADR 0027 §5).
+	purgeLedgerOnce    sync.Once
+	purgeLedger        *cachePurgeLedger
+	cachePurgeInflight atomic.Int32
+	previewKeyOnce     sync.Once
+	previewKey         []byte
 }
 
 // RecordManagedApplyOutcome records the terminal async outcome of a managed

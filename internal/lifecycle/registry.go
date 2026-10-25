@@ -397,6 +397,8 @@ func cacheEntries() []Entry {
 		"cache.range_enabled",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",
+		"cache.strip_tag_headers",
+		"cache.tag_headers",
 	)...)
 	return out
 }

@@ -1258,8 +1258,9 @@ Enable `[cache].enabled` globally, then opt individual locations in with
 `cache = true`. Cache entries survive config reloads but are lost on restart
 unless `disk_path` is configured. `memory_max_size`, `max_entry_size`,
 `disk_max_size`, `default_ttl`, `stale_while_revalidate`, `stale_if_error`,
-`lock`, `lock_timeout`, `range_enabled`, and `max_ranges` are all
-hot-reloadable (#92, #525, #442): a change applies
+`lock`, `lock_timeout`, `range_enabled`, `max_ranges`, `tag_headers`, and
+`strip_tag_headers` are all
+hot-reloadable (#92, #525, #442, #621): a change applies
 atomically at the next successful reload, resizing the memory/disk stores in
 place (evicting strict LRU entries/files immediately if a cap is lowered)
 without resetting counters or rebuilding the cache. `enabled` and `disk_path`
@@ -1279,6 +1280,8 @@ lock = true
 lock_timeout = "5s"
 range_enabled = true
 max_ranges = 1
+tag_headers = ["Cache-Tag", "Surrogate-Key"]
+strip_tag_headers = true
 ```
 
 | Key | Type | Description |
@@ -1295,6 +1298,8 @@ max_ranges = 1
 | `lock_timeout` | duration | Maximum wait for an active cold-miss fill before falling through to an uncached origin request (defaults to `5s` when `lock = true`; setting a positive value with `lock = false` is rejected) |
 | `range_enabled` | bool | Opt-in Option A range-aware caching (#442, [ADR 0024](adr/0024-range-aware-cache-option-a.md)): satisfy single byte-range `GET` requests (`206`/`416`) from complete stored representations and coordinate complete-object fills on eligible range misses (default `false`, preserving D05 bypass) |
 | `max_ranges` | int | Maximum comma-separated range specs accepted when `range_enabled = true` (defaults to `1` when `range_enabled = true`, maximum `16`; setting a positive value with `range_enabled = false` is rejected) |
+| `tag_headers` | list | Opt-in list of 1 to 8 unique, non-reserved HTTP origin response header names from which Jul extracts grouping tags for tag-scoped invalidation (#621, [ADR 0027](adr/0027-scoped-cache-invalidation.md); e.g. `["Cache-Tag", "Surrogate-Key"]`; default `[]`) |
+| `strip_tag_headers` | bool | Remove configured `tag_headers` from downstream client responses and stored headers (defaults to `true` when `tag_headers` is non-empty, `false` otherwise; setting `strip_tag_headers = true` when `tag_headers` is empty is rejected) |
 
 Per-location caching also requires `cache = true` on the location. See
 [docs/cache.md](cache.md) for the two-tier model, on-disk format, and

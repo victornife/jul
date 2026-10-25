@@ -59,19 +59,21 @@ type GlobalRateLimitProjection struct {
 // memory_max compatibility alias remains for one release while the canonical
 // memory_max_size name is adopted by the guided editor.
 type CompleteCacheProjection struct {
-	Enabled              bool   `json:"enabled"`
-	MemoryMaxSize        string `json:"memory_max_size"`
-	MemoryMax            string `json:"memory_max,omitempty"`
-	DiskPath             string `json:"disk_path"`
-	DiskMaxSize          string `json:"disk_max_size"`
-	MaxEntrySize         string `json:"max_entry_size"`
-	DefaultTTL           string `json:"default_ttl"`
-	StaleWhileRevalidate string `json:"stale_while_revalidate"`
-	StaleIfError         string `json:"stale_if_error"`
-	Lock                 bool   `json:"lock"`
-	LockTimeout          string `json:"lock_timeout"`
-	RangeEnabled         bool   `json:"range_enabled"`
-	MaxRanges            int    `json:"max_ranges"`
+	Enabled              bool     `json:"enabled"`
+	MemoryMaxSize        string   `json:"memory_max_size"`
+	MemoryMax            string   `json:"memory_max,omitempty"`
+	DiskPath             string   `json:"disk_path"`
+	DiskMaxSize          string   `json:"disk_max_size"`
+	MaxEntrySize         string   `json:"max_entry_size"`
+	DefaultTTL           string   `json:"default_ttl"`
+	StaleWhileRevalidate string   `json:"stale_while_revalidate"`
+	StaleIfError         string   `json:"stale_if_error"`
+	Lock                 bool     `json:"lock"`
+	LockTimeout          string   `json:"lock_timeout"`
+	RangeEnabled         bool     `json:"range_enabled"`
+	MaxRanges            int      `json:"max_ranges"`
+	TagHeaders           []string `json:"tag_headers,omitempty"`
+	StripTagHeaders      bool     `json:"strip_tag_headers"`
 }
 
 // ServerLimitsProjection is the smallest adjacent safe projection needed to
@@ -176,6 +178,8 @@ func projectCacheSettings(c *config.Config) *CompleteCacheProjection {
 		LockTimeout:          string(mustMarshal(c.Cache.LockTimeout.MarshalText())),
 		RangeEnabled:         c.Cache.RangeEnabled,
 		MaxRanges:            c.Cache.MaxRanges,
+		TagHeaders:           append([]string(nil), c.Cache.TagHeaders...),
+		StripTagHeaders:      c.Cache.StripTagHeadersEnabled(),
 	}
 }
 

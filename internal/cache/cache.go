@@ -6,6 +6,7 @@ package cache
 import (
 	"context"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -63,11 +64,22 @@ type Cache struct {
 	// overwrite a newer disk entry. Entries in keyGen are reference-counted by
 	// in-flight operations and tier residency (inMem/inDisk), and are reclaimed
 	// in O(1) time once a key is idle and absent from both tiers.
-	genMu           sync.Mutex
-	genSeq          atomic.Uint64
-	keyGen          map[string]*keyGenState
-	purgeGen        uint64
-	onBeforeReclaim func(key string)
+	genMu               sync.Mutex
+	genSeq              atomic.Uint64
+	keyGen              map[string]*keyGenState
+	purgeGen            uint64
+	byHost              map[string]map[string]struct{}
+	baseVariants        map[string]map[string]struct{}
+	tagIndex            map[string]map[string]map[string]struct{}
+	baseIndexedTags     map[string][]string
+	totalTagLinks       int
+	fences              []selectorFence
+	fenceFloorGen       uint64
+	latestFenceGen      atomic.Uint64
+	originOpSeq         uint64
+	inflightOps         map[uint64]uint64
+	onBeforeReclaim     func(key string)
+	onAfterFenceInstall func(sel NormalizedSelector, fenceGen uint64)
 
 	// observe, when set, receives one bounded outcome per revalidation
 	// decision. It is installed by the composition root so the cache does not
@@ -79,6 +91,8 @@ type Cache struct {
 	// was streamed without being captured.
 	capture       captureBudget
 	onCaptureSkip func(reason string)
+	onTagSkip     func(reason string)
+	onInvalidate  func(selector, outcome string, memRemoved, diskRemoved int)
 	// captureSkipLog bounds the debug line: the sizes and concurrency that
 	// trigger a skip are chosen by clients and origins.
 	captureSkipLog logthrottle.Limiter
@@ -152,7 +166,12 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		d.onSkip = c.captureSkipped
 		d.checkGen = c.isGenCurrent
 		d.onKeyDiskState = c.setKeyDiskState
+		d.onRehydrate = c.onDiskRehydrated
 		c.disk = d
+		d.mu.Lock()
+		rehydrated := d.snapshotItemsLocked()
+		d.mu.Unlock()
+		c.onDiskRehydrated(rehydrated)
 	}
 	c.mem = newMemStore(cfg.MemoryMaxSize.Bytes(), nil)
 	c.mem.pinVictims = func(victims []*memItem) {
@@ -161,7 +180,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		c.genMu.Unlock()
 	}
 	c.mem.onEvictItem = func(it *memItem) {
-		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) {
+		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) && !c.isEntryFenced(it.gen, it.key, it.entry) {
 			c.disk.setWithGen(it.key, it.entry, it.gen)
 		}
 		if it.pinnedState != nil {
@@ -199,6 +218,30 @@ func (c *Cache) SetCaptureSkipObserver(fn func(reason string)) {
 	c.onCaptureSkip = fn
 }
 
+// SetTagSkipObserver installs a bounded counter for responses whose origin tag
+// metadata was invalid, oversize, or exceeded the tag index limit (#621).
+func (c *Cache) SetTagSkipObserver(fn func(reason string)) {
+	if c == nil {
+		return
+	}
+	c.onTagSkip = fn
+}
+
+func (c *Cache) tagSkipped(reason string) {
+	if c != nil && c.onTagSkip != nil && reason != "" {
+		c.onTagSkip(reason)
+	}
+}
+
+// SetInvalidationObserver installs a bounded counter for cache invalidation
+// operations and per-tier removed entries (#621).
+func (c *Cache) SetInvalidationObserver(fn func(selector, outcome string, memRemoved, diskRemoved int)) {
+	if c == nil {
+		return
+	}
+	c.onInvalidate = fn
+}
+
 // newCaptureAccount binds one capture to the cache-wide in-flight budget.
 func (c *Cache) newCaptureAccount() captureAccount {
 	return captureAccount{budget: &c.capture, onSkip: c.captureSkipped}
@@ -216,11 +259,27 @@ func (c *Cache) captureSkipped(reason string) {
 }
 
 type keyGenState struct {
-	key      string
-	gen      uint64
-	inflight int32
-	inMem    bool
-	inDisk   bool
+	key        string
+	baseKey    string
+	host       string
+	requestURI string
+	method     string
+	isVariant  bool
+	isVaryStub bool
+	variants   []string
+	tags       []string
+	bodyBytes  int64
+	memBytes   int64
+	diskBytes  int64
+	createdAt  time.Time
+	expiresAt  time.Time
+	staleUntil time.Time
+	varyFields []string
+	gen        uint64
+	inflight   int32
+	inMem      bool
+	inDisk     bool
+	indexed    bool
 }
 
 func (c *Cache) beginNextGenLocked(key string) (st *keyGenState, gen, prevGen uint64, hadPrev bool) {
@@ -259,6 +318,7 @@ func (c *Cache) maybeReclaimLocked(st *keyGenState) {
 	if cur, ok := c.keyGen[st.key]; ok && cur == st && st.inflight == 0 {
 		st.inMem = c.mem != nil && c.mem.hasKey(st.key)
 		if !st.inMem && !st.inDisk {
+			c.unindexKeyEntryLocked(st)
 			delete(c.keyGen, st.key)
 		}
 	}
@@ -336,8 +396,12 @@ func (c *Cache) hasStoredKey(key string) bool {
 }
 
 func (c *Cache) get(key string) (*Entry, bool) {
-	if e, ok := c.mem.get(key); ok {
-		return e, true
+	if e, mgen, ok := c.mem.getWithGen(key); ok {
+		if lf := c.latestFenceGen.Load(); lf > 0 && mgen <= lf && c.isEntryFenced(mgen, key, e) {
+			c.delOneIfGenAtMost(key, mgen)
+		} else {
+			return e, true
+		}
 	}
 	if c.disk != nil {
 		c.genMu.Lock()
@@ -355,7 +419,8 @@ func (c *Cache) get(key string) (*Entry, bool) {
 		if curSt != nil {
 			curGen = curSt.gen
 		}
-		stillValid := c.purgeGen == prePurge && curSt == st && curGen == preGen && c.isGenCurrentLocked(key, diskGen)
+		stillValid := c.purgeGen == prePurge && curSt == st && curGen == preGen &&
+			c.isGenCurrentLocked(key, diskGen) && !c.isEntryFencedLocked(diskGen, key, e.Tags)
 		if !stillValid {
 			c.genMu.Unlock()
 			c.finishKeyOp(st)
@@ -365,6 +430,9 @@ func (c *Cache) get(key string) (*Entry, bool) {
 		if e.diskBody == nil {
 			victims = c.mem.putWithGen(key, e, diskGen) // promote memory-eligible entry under genMu
 			st.inMem = c.mem.hasKey(key)
+			if st.inMem {
+				st.memBytes = e.Size() + int64(len(key))
+			}
 			c.pinVictimsLocked(victims)
 		}
 		c.genMu.Unlock()
@@ -380,16 +448,52 @@ func (c *Cache) set(key string, e *Entry) {
 }
 
 func (c *Cache) setWithResult(key string, e *Entry) bool {
+	return c.setWithStartGen(key, e, 0, false)
+}
+
+func (c *Cache) setIfNotFenced(key string, e *Entry, startGen uint64, extraTags []string) (fenced bool) {
+	_, fenced = c.setCoreWithStartGen(key, e, startGen, true, extraTags)
+	return fenced
+}
+
+func (c *Cache) setWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool) bool {
+	stored, _ := c.setCoreWithStartGen(key, e, startGen, hasStartGen, nil)
+	return stored
+}
+
+func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool, extraTags []string) (stored, fenced bool) {
 	c.genMu.Lock()
+	if hasStartGen && e != nil && (c.isEntryFencedLocked(startGen, key, e.Tags) || (len(extraTags) > 0 && c.isEntryFencedLocked(startGen, key, extraTags))) {
+		c.genMu.Unlock()
+		return false, true
+	}
+	if e != nil && len(e.Tags) > 0 {
+		if _, host, _, _, ok := parseBaseKeyParts(key); ok {
+			if !c.canReserveTagLinksLocked(host, baseKeyOf(key), e.Tags) {
+				c.genMu.Unlock()
+				c.tagSkipped(TagSkipIndexLimit)
+				return false, true
+			}
+		}
+	}
 	st, gen, prevGen, hadPrev := c.beginNextGenLocked(key)
 	var victims []*memItem
 	if e != nil && e.diskBody != nil {
 		c.mem.del(key)
 		st.inMem = false
+		st.memBytes = 0
 	} else {
 		victims = c.mem.putWithGen(key, e, gen)
 		st.inMem = c.mem.hasKey(key)
+		if st.inMem && e != nil {
+			st.memBytes = e.Size() + int64(len(key))
+		} else {
+			st.memBytes = 0
+		}
 		c.pinVictimsLocked(victims)
+	}
+	if e != nil {
+		c.indexKeyEntryLocked(st, e)
 	}
 	c.genMu.Unlock()
 	c.mem.flushVictims(victims)
@@ -404,18 +508,36 @@ func (c *Cache) setWithResult(key string, e *Entry) bool {
 						st.gen = 0
 					}
 				}
+				fencedAfterDisk := hasStartGen && (c.isEntryFencedLocked(startGen, key, e.Tags) || (len(extraTags) > 0 && c.isEntryFencedLocked(startGen, key, extraTags)))
 				c.genMu.Unlock()
+				if fencedAfterDisk {
+					c.delOneIfGenAtMost(key, gen)
+				}
 				c.finishKeyOp(st)
-				return false
+				return false, fencedAfterDisk
 			}
 			// Memory write-through failed, while memory now holds the new generation `gen`.
 			// Remove or tombstone any older disk generation (< gen) for `key` so a
 			// subsequent restart cannot rehydrate and serve the superseded disk value.
 			c.disk.delIfOlderGen(key, gen)
+		} else if e != nil {
+			c.genMu.Lock()
+			st.diskBytes = e.BodyLen()
+			c.genMu.Unlock()
+		}
+	}
+	if hasStartGen && e != nil {
+		c.genMu.Lock()
+		fencedAfter := c.isEntryFencedLocked(startGen, key, e.Tags) || (len(extraTags) > 0 && c.isEntryFencedLocked(startGen, key, extraTags))
+		c.genMu.Unlock()
+		if fencedAfter {
+			c.delOneIfGenAtMost(key, gen)
+			c.finishKeyOp(st)
+			return false, true
 		}
 	}
 	c.finishKeyOp(st)
-	return c.hasStoredKey(key)
+	return c.hasStoredKey(key), false
 }
 
 // Delete removes a single key from both tiers. When the key holds a Vary stub,
@@ -423,28 +545,64 @@ func (c *Cache) setWithResult(key string, e *Entry) bool {
 // strand the hashed variant entries in the store, where a later stub with the
 // same Vary could make them reachable again.
 func (c *Cache) Delete(key string) {
-	c.varyMu.Lock()
-	defer c.varyMu.Unlock()
-	c.deleteLocked(key)
+	c.deleteAtMostGen(key, math.MaxUint64)
 }
 
-func (c *Cache) deleteLocked(key string) {
-	if e, ok := c.get(key); ok && e.IsVaryStub {
-		for _, vk := range e.Variants {
-			c.delOne(vk)
+func (c *Cache) deleteAtMostGen(key string, maxGen uint64) {
+	c.varyMu.Lock()
+	defer c.varyMu.Unlock()
+	var extraVars []string
+	c.genMu.Lock()
+	if st := c.keyGen[key]; st != nil && st.gen <= maxGen {
+		extraVars = append(extraVars, st.variants...)
+		if c.baseVariants != nil {
+			for vk := range c.baseVariants[key] {
+				extraVars = append(extraVars, vk)
+			}
 		}
 	}
-	c.delOne(key)
+	c.genMu.Unlock()
+	if maxGen == math.MaxUint64 {
+		if e, ok := c.get(key); ok && e.IsVaryStub {
+			extraVars = append(extraVars, e.Variants...)
+		}
+	}
+	seen := make(map[string]struct{}, len(extraVars))
+	for _, vk := range extraVars {
+		if _, ok := seen[vk]; ok {
+			continue
+		}
+		seen[vk] = struct{}{}
+		c.delOneIfGenAtMost(vk, maxGen)
+	}
+	c.delOneIfGenAtMost(key, maxGen)
 }
 
 func (c *Cache) delOne(key string) {
+	c.delOneIfGenAtMost(key, math.MaxUint64)
+}
+
+func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
 	c.genMu.Lock()
+	if maxGen != math.MaxUint64 {
+		if existing, ok := c.keyGen[key]; ok && existing.gen > maxGen {
+			c.genMu.Unlock()
+			return
+		}
+	}
 	st, _, _, _ := c.beginNextGenLocked(key)
-	c.mem.del(key)
-	st.inMem = false
+	c.mem.delIfGenAtMost(key, maxGen)
+	st.inMem = c.mem.hasKey(key)
+	if !st.inMem {
+		st.memBytes = 0
+	}
 	c.genMu.Unlock()
 	if c.disk != nil {
-		c.disk.del(key)
+		if maxGen == math.MaxUint64 {
+			c.disk.del(key)
+		} else {
+			c.disk.delIfOlderGen(key, maxGen+1)
+		}
 	}
 	c.finishKeyOp(st)
 }
@@ -452,7 +610,16 @@ func (c *Cache) delOne(key string) {
 // Purge clears both tiers.
 func (c *Cache) Purge() {
 	c.genMu.Lock()
-	c.purgeGen = c.genSeq.Add(1)
+	pGen := c.genSeq.Add(1)
+	c.purgeGen = pGen
+	c.fenceFloorGen = pGen
+	c.fences = nil
+	c.latestFenceGen.Store(pGen)
+	c.byHost = nil
+	c.baseVariants = nil
+	c.tagIndex = nil
+	c.baseIndexedTags = nil
+	c.totalTagLinks = 0
 	c.keyGen = make(map[string]*keyGenState)
 	c.mem.purge()
 	c.genMu.Unlock()
@@ -518,16 +685,37 @@ func (c *Cache) store(base string, r *http.Request, e *Entry) {
 }
 
 func (c *Cache) setCaptured(k string, e *Entry, stream *diskStreamCapture) bool {
+	return c.setCapturedWithStartGen(k, e, stream, 0, false)
+}
+
+func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) bool {
 	if stream == nil {
-		return c.setWithResult(k, e)
+		return c.setWithStartGen(k, e, startGen, hasStartGen)
 	}
 	if c.disk == nil {
 		return false
 	}
 	c.genMu.Lock()
+	if hasStartGen && e != nil && c.isEntryFencedLocked(startGen, k, e.Tags) {
+		c.genMu.Unlock()
+		return false
+	}
+	if e != nil && len(e.Tags) > 0 {
+		if _, host, _, _, ok := parseBaseKeyParts(k); ok {
+			if !c.canReserveTagLinksLocked(host, baseKeyOf(k), e.Tags) {
+				c.genMu.Unlock()
+				c.tagSkipped(TagSkipIndexLimit)
+				return false
+			}
+		}
+	}
 	st, gen, _, _ := c.beginNextGenLocked(k)
 	c.mem.del(k)
 	st.inMem = false
+	st.memBytes = 0
+	if e != nil {
+		c.indexKeyEntryLocked(st, e)
+	}
 	c.genMu.Unlock()
 	blob, ok := c.disk.publishStreamWithGen(k, e, stream, gen)
 	if !ok {
@@ -536,13 +724,25 @@ func (c *Cache) setCaptured(k string, e *Entry, stream *diskStreamCapture) bool 
 		return false
 	}
 	e.diskBody = blob
+	c.genMu.Lock()
+	st.diskBytes = blob.fileSize
+	c.genMu.Unlock()
+	if hasStartGen && c.isEntryFenced(startGen, k, e) {
+		c.delOneIfGenAtMost(k, gen)
+		c.finishKeyOp(st)
+		return false
+	}
 	c.finishKeyOp(st)
 	return true
 }
 
 func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *diskStreamCapture) bool {
+	return c.storeCapturedWithStartGen(base, r, e, stream, 0, false)
+}
+
+func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) bool {
 	if len(e.Vary) == 0 {
-		return c.setCaptured(base, e, stream)
+		return c.setCapturedWithStartGen(base, e, stream, startGen, hasStartGen)
 	}
 	vk := variantKey(base, e.Vary, r)
 
@@ -552,13 +752,22 @@ func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *di
 	stub := c.stubFor(base, e.Vary)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
-	if !c.setCaptured(vk, e, stream) {
+	if !c.setCapturedWithStartGen(vk, e, stream, startGen, hasStartGen) {
 		return false
 	}
 	if evicted := stub.addVariant(vk); evicted != "" {
 		c.delOne(evicted)
 	}
-	if !c.setWithResult(base, stub) {
+	var varTagSets [][]string
+	c.genMu.Lock()
+	for _, mvk := range stub.Variants {
+		if vst := c.keyGen[mvk]; vst != nil && len(vst.tags) > 0 {
+			varTagSets = append(varTagSets, vst.tags)
+		}
+	}
+	c.genMu.Unlock()
+	stub.Tags = mergeTagSets(varTagSets...)
+	if !c.setWithStartGen(base, stub, startGen, hasStartGen) {
 		c.delOne(vk)
 		return false
 	}
@@ -854,16 +1063,28 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 }
 
 func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time, pol CachePolicy, onAbandon func()) bool {
+	opID, startGen := c.beginInflightOriginOp()
+	defer c.endInflightOriginOp(opID)
+
+	var tagSkipReason string
 	cw := &cacheWriter{
-		ResponseWriter: w,
-		limit:          pol.MaxEntryBytes,
-		memLimit:       pol.MemoryCapBytes(),
-		memBudgetLimit: pol.MemoryMaxBytes,
-		disk:           c.disk,
-		acct:           c.newCaptureAccount(),
-		onAbandon:      onAbandon,
+		ResponseWriter:  w,
+		limit:           pol.MaxEntryBytes,
+		memLimit:        pol.MemoryCapBytes(),
+		memBudgetLimit:  pol.MemoryMaxBytes,
+		disk:            c.disk,
+		acct:            c.newCaptureAccount(),
+		onAbandon:       onAbandon,
+		tagHeaders:      pol.TagHeaderSlice(),
+		stripTagHeaders: pol.StripTagHeaders,
 	}
 	cw.headerCheck = func(code int, h http.Header) bool {
+		if pol.TagHeaderCount > 0 {
+			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
+				tagSkipReason = skip
+				return false
+			}
+		}
 		return c.headerStorable(r, code, h, c.clock(), pol)
 	}
 	defer cw.releaseCapture()
@@ -874,6 +1095,10 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	cw.entrySnapshot = cloneHeader(w.Header())
 	next.ServeHTTP(respwriter.Wrap(cw, w), r)
 
+	if tagSkipReason != "" {
+		c.tagSkipped(tagSkipReason)
+		return false
+	}
 	if !cw.storable() || cw.writeErr != nil || r.Context().Err() != nil {
 		return false
 	}
@@ -890,7 +1115,7 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 		h = w.Header()
 	}
 	if e := c.buildEntryFromCapture(r, cw.status, h, cw.buf.Bytes(), cw.bodyLen, cw.diskStream != nil, now, pol); e != nil {
-		return c.storeCaptured(key(r), r, e, cw.diskStream)
+		return c.storeCapturedWithStartGen(key(r), r, e, cw.diskStream, startGen, true)
 	}
 	return false
 }
@@ -929,10 +1154,12 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 
 	origReq := r.Clone(ctx)
 	req := conditionalRequest(r.Clone(ctx), stale)
+	opID, startGen := c.beginInflightOriginOp()
 
 	go func() {
 		defer release()
-		c.revalidate(ctx, k, req, origReq, next, stale, call)
+		defer c.endInflightOriginOp(opID)
+		c.revalidate(ctx, k, req, origReq, next, stale, call, startGen)
 	}()
 }
 
@@ -965,7 +1192,7 @@ func conditionalRequest(req *http.Request, stale *Entry) *http.Request {
 // replaces the stored pointer under the tier's own lock. The deferred cleanup
 // removes the call state and releases every waiter on all paths, including a
 // panic in the downstream handler.
-func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *http.Request, next http.Handler, stale *Entry, call *revalidateCall) {
+func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *http.Request, next http.Handler, stale *Entry, call *revalidateCall, startGen uint64) {
 	defer func() {
 		// Ordering matters: drop the call state first so a later stale hit can
 		// start a fresh refresh the instant a waiter is released.
@@ -1008,13 +1235,18 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		refreshed, action := c.merge304(stale, rec.header, now)
 		switch action {
 		case mergeReplace:
-			c.set(k.key, refreshed)
+			if c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
+				c.delOneIfGenAtMost(k.key, startGen)
+				call.finish(nil, outcomeUncacheable, nil)
+				c.observeRevalidation(outcomeUncacheable)
+				return
+			}
 			call.finish(refreshed, outcomeNotModified, nil)
 			c.observeRevalidation(outcomeNotModified)
 		case mergeDiscard:
 			// The 304 changed the representation's keying or made it
-			// unstorable; dropping it is the only safe outcome.
-			c.Delete(k.key)
+			// unstorable; dropping the pre-validation generation is the only safe outcome.
+			c.deleteAtMostGen(k.key, startGen)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 		}
@@ -1026,11 +1258,13 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		if sie := c.staleOnErrorWindow(stale); sie > 0 {
 			refreshed := stale.Clone()
 			refreshed.StaleUntil = now.Add(sie)
-			c.set(k.key, refreshed)
-			call.finish(refreshed, outcomeOriginError, nil)
-		} else {
-			call.finish(nil, outcomeOriginError, nil)
+			if !c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
+				call.finish(refreshed, outcomeOriginError, nil)
+				c.observeRevalidation(outcomeOriginError)
+				return
+			}
 		}
+		call.finish(nil, outcomeOriginError, nil)
 		c.observeRevalidation(outcomeOriginError)
 
 	case !rec.storable():
@@ -1039,7 +1273,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	default:
 		e := c.buildEntryFromCapture(req, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if e == nil || !e.matchesVary(origReq) || !c.storeCaptured(key(req), req, e, rec.diskStream) {
+		if e == nil || !e.matchesVary(origReq) || !c.storeCapturedWithStartGen(key(req), req, e, rec.diskStream, startGen, true) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
@@ -1051,12 +1285,14 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 func (c *Cache) newRecorder(pol CachePolicy) *recorder {
 	return &recorder{
-		header:         http.Header{},
-		limit:          pol.MaxEntryBytes,
-		memLimit:       pol.MemoryCapBytes(),
-		memBudgetLimit: pol.MemoryMaxBytes,
-		disk:           c.disk,
-		acct:           c.newCaptureAccount(),
+		header:          http.Header{},
+		limit:           pol.MaxEntryBytes,
+		memLimit:        pol.MemoryCapBytes(),
+		memBudgetLimit:  pol.MemoryMaxBytes,
+		disk:            c.disk,
+		acct:            c.newCaptureAccount(),
+		tagHeaders:      pol.TagHeaderSlice(),
+		stripTagHeaders: pol.StripTagHeaders,
 	}
 }
 
@@ -1092,6 +1328,15 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 			return nil
 		}
 	}
+	var parsedTags []string
+	if pol.TagHeaderCount > 0 {
+		var skipReason string
+		parsedTags, _, skipReason = extractOriginTags(h, pol.TagHeaderSlice())
+		if skipReason != "" {
+			c.tagSkipped(skipReason)
+			return nil
+		}
+	}
 	p := parseResponsePolicy(h)
 	ttl, swr, ok := c.freshnessWithPolicy(status, h, p, now, pol)
 	if !ok {
@@ -1106,6 +1351,9 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 
 	stored := cloneHeader(h)
 	removeHopByHop(stored)
+	if pol.StripTagHeaders && pol.TagHeaderCount > 0 {
+		stripConfiguredTagHeaders(stored, pol.TagHeaderSlice())
+	}
 
 	// created is when the origin generated the representation, not when Jul
 	// received it: RFC 9111 §4.2.3 corrected initial age. Without it a response
@@ -1137,6 +1385,7 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 		SharedAuthReuse:    p.sharedAuthReuse(),
 		StaleIfError:       p.SIE,
 		HasStaleIfError:    p.HasSIE,
+		Tags:               parsedTags,
 	}
 	if vary := varyFields(h); len(vary) > 0 {
 		for _, name := range vary {
@@ -1227,6 +1476,9 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 				h.Add(k, v)
 			}
 		}
+	}
+	if pol := c.Policy(); pol.StripTagHeaders && pol.TagHeaderCount > 0 {
+		stripConfiguredTagHeaders(h, pol.TagHeaderSlice())
 	}
 	h.Set("Age", strconv.Itoa(age))
 	h.Set("X-Cache", state)

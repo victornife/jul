@@ -36,6 +36,22 @@ type CachePolicy struct {
 	// MaxRanges bounds the number of byte-range specs accepted when RangeEnabled
 	// is true (defaults to 1 when RangeEnabled is true).
 	MaxRanges int
+	// TagHeaderCount and TagHeaders hold up to 8 canonicalized trusted origin
+	// response header names for grouping-tag ingestion (#621, ADR 0027). Using
+	// a fixed array keeps CachePolicy comparable by value.
+	TagHeaderCount int
+	TagHeaders     [8]string
+	// StripTagHeaders removes configured TagHeaders from downstream responses
+	// and stored headers (defaults to true when TagHeaderCount > 0).
+	StripTagHeaders bool
+}
+
+// TagHeaderSlice returns the active canonicalized origin tag header names.
+func (p CachePolicy) TagHeaderSlice() []string {
+	if p.TagHeaderCount <= 0 {
+		return nil
+	}
+	return p.TagHeaders[:p.TagHeaderCount]
 }
 
 // MemoryCapBytes returns the largest response body that may be captured in
@@ -66,6 +82,15 @@ func policyFromConfig(cfg config.CacheConfig) CachePolicy {
 	if cfg.RangeEnabled && maxRanges <= 0 {
 		maxRanges = 1
 	}
+	canonTags := canonicalizeTagHeaders(cfg.TagHeaders)
+	var tagArr [8]string
+	tagCount := len(canonTags)
+	if tagCount > len(tagArr) {
+		tagCount = len(tagArr)
+	}
+	for i := 0; i < tagCount; i++ {
+		tagArr[i] = canonTags[i]
+	}
 	return CachePolicy{
 		DefaultTTL:           cfg.DefaultTTL.Std(),
 		StaleWhileRevalidate: cfg.StaleWhileRevalidate.Std(),
@@ -76,6 +101,9 @@ func policyFromConfig(cfg config.CacheConfig) CachePolicy {
 		LockTimeout:          lockTimeout,
 		RangeEnabled:         cfg.RangeEnabled,
 		MaxRanges:            maxRanges,
+		TagHeaderCount:       tagCount,
+		TagHeaders:           tagArr,
+		StripTagHeaders:      cfg.StripTagHeadersEnabled(),
 	}
 }
 
@@ -134,6 +162,9 @@ func (p *PreparedCacheUpdate) Commit() {
 	}
 	pol := p.policy
 	p.c.policy.Store(&pol)
+	if pol.TagHeaderCount == 0 {
+		p.c.clearTagIndex()
+	}
 	p.c.mem.Resize(p.memMax)
 	if p.c.disk != nil {
 		if _, _, failed := p.c.disk.Resize(p.diskMax); failed > 0 {

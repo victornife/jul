@@ -69,6 +69,9 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	}()
 
 	pol := c.Policy()
+	opID, startGen := c.beginInflightOriginOp()
+	defer c.endInflightOriginOp(opID)
+
 	rec := c.newRecorder(pol)
 	defer rec.releaseCapture()
 	vreq := conditionalRequest(r.Clone(vctx), stored)
@@ -90,12 +93,17 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	case rec.status == http.StatusNotModified:
 		refreshed, action := c.merge304(stored, rec.header, now)
 		if action == mergeDiscard {
-			c.Delete(k.key)
+			c.deleteAtMostGen(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			fallbackAfterValidation()
 			return
 		}
-		c.set(k.key, refreshed)
+		if c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
+			c.delOneIfGenAtMost(k.key, startGen)
+			c.finishValidation(call, nil, outcomeUncacheable)
+			fallbackAfterValidation()
+			return
+		}
 		c.finishValidation(call, refreshed, outcomeNotModified)
 		if !c.serve(w, r, refreshed, stateRevalidated, now) {
 			fallbackAfterValidation()
@@ -108,9 +116,12 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		if sie := c.staleOnErrorWindow(stored); sie > 0 {
 			refreshed := stored.Clone()
 			refreshed.StaleUntil = now.Add(sie)
-			c.set(k.key, refreshed)
-			c.finishValidation(call, refreshed, outcomeOriginError)
-			if c.serve(w, r, refreshed, stateStale, now) {
+			if !c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
+				c.finishValidation(call, refreshed, outcomeOriginError)
+				if c.serve(w, r, refreshed, stateStale, now) {
+					return
+				}
+				fallbackAfterValidation()
 				return
 			}
 		}
@@ -125,17 +136,17 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// so they must not be sent. Re-fetch and stream instead: one extra
 		// origin request, bounded to this path, in exchange for never
 		// truncating a response.
-		c.Delete(k.key)
+		c.delOneIfGenAtMost(k.key, startGen)
 		c.finishValidation(call, nil, outcomeUncacheable)
 		fallbackAfterValidation()
 
 	default:
 		e := c.buildEntryFromCapture(vreq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if e == nil || !e.matchesVary(r) || !c.storeCaptured(key(vreq), vreq, e, rec.diskStream) {
+		if e == nil || !e.matchesVary(r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
-			c.Delete(k.key)
+			c.delOneIfGenAtMost(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			if isRange || (e != nil && !e.matchesVary(r)) || !writeRecorded(w, r, rec, nil, stateMiss) {
 				fallbackAfterValidation()
@@ -243,6 +254,9 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, publis
 				h.Add(name, v)
 			}
 		}
+	}
+	if rec.stripTagHeaders && len(rec.tagHeaders) > 0 {
+		stripConfiguredTagHeaders(h, rec.tagHeaders)
 	}
 	h.Set("X-Cache", state)
 	status := rec.status

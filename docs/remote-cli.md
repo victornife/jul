@@ -19,6 +19,7 @@ The CLI never falls back to the private Console API.
 | `jul export` | `GET /api/v1/config/export` |
 | `jul diagnostics` | `GET /api/v1/status` + `GET /api/v1/capabilities` |
 | `jul apply --adopt-external` | adoption preview + mutation + polling |
+| `jul cache purge` | `POST /api/v1/cache/purge/preview`, `POST /api/v1/cache/purge`, `GET /api/v1/cache/purges/{operation_id}` |
 
 Remote export is the redacted structured projection. Exact raw TOML remains a
 local expert workflow and is deliberately not part of v1. Remote diagnostics is
@@ -185,10 +186,45 @@ ledger. Drift/adoption rules remain server-owned.
 ## Authority modes
 
 Read operations (`plan`, `diff`, `status`, safe `export`, diagnostics) work in
-`managed` and `file_owned` wherever the server contract permits. A remote
-mutation rejected by file-owned authority returns the stable
-`config_authority_read_only` error and exit 6. The client does not infer or
-bypass authority locally.
+`managed` and `file_owned` wherever the server contract permits. Operational
+cache invalidation (`jul cache purge`) also works in both `managed` and
+`file_owned` modes because it mutates runtime cache state rather than
+configuration files. A remote configuration mutation rejected by file-owned
+authority returns the stable `config_authority_read_only` error and exit 6. The
+client does not infer or bypass authority locally.
+
+## Scoped cache invalidation (`jul cache purge`)
+
+Preview a scoped cache invalidation without side effects (#621):
+
+```sh
+jul cache purge --endpoint https://jul-admin.example.net \
+  --token-file /secure/path/token \
+  --host portal.example.com \
+  --tag article:42 \
+  --preview --include-samples --json
+```
+
+Execute the invalidation bound to the reviewed `preview_token` and an
+idempotency key:
+
+```sh
+jul cache purge --endpoint https://jul-admin.example.net \
+  --token-file /secure/path/token \
+  --host portal.example.com \
+  --tag article:42 \
+  --preview-token "$PREVIEW_TOKEN" \
+  --idempotency-key publish-article-42-rev-7 \
+  --json
+```
+
+Supported selector flags are `--url`, `--host` with `--uri` / `--prefix` /
+`--glob` / `--tag` (`--tag-match any|all`), `--host --confirm-broad`, `--key`,
+and `--all --confirm-broad` (plus optional `--route-id`). Inspect an operation by
+ID with `--operation-id cp_...` or retry an incomplete operation at its original
+fence with `--retry-operation-id cp_...`. A runnable deployment/content-update
+helper script is provided in
+[`examples/cache-invalidation/purge-on-deploy.sh`](../examples/cache-invalidation/purge-on-deploy.sh).
 
 ## JSON output
 

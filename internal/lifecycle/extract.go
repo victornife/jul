@@ -509,6 +509,20 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 		return func(cfg *config.Config) any { return cfg.Compression.IsEnabled() }, true
 	case "admin.console":
 		return func(cfg *config.Config) any { return cfg.Admin.ConsoleEnabled() }, true
+	case "cache.strip_tag_headers":
+		return func(cfg *config.Config) any { return cfg.Cache.StripTagHeadersEnabled() }, true
+	case "cache.tag_headers":
+		return func(cfg *config.Config) any {
+			if len(cfg.Cache.TagHeaders) == 0 {
+				return []string(nil)
+			}
+			out := make([]string, len(cfg.Cache.TagHeaders))
+			for i, h := range cfg.Cache.TagHeaders {
+				out[i] = strings.ToLower(strings.TrimSpace(h))
+			}
+			sort.Strings(out)
+			return out
+		}, true
 
 	// ── Order-insensitive lists ────────────────────────────────────────────
 	case "observability.access_log.sinks":
