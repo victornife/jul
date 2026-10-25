@@ -30,12 +30,12 @@ import {
 } from "@/api/client.ts";
 import {
   CacheInvalidationPanel,
+  buildCliCommandSnippet,
+  buildSelectorFromDraft,
 } from "@/features/traffic-controls/CacheInvalidationPanel.tsx";
 import { TrafficControlEditor } from "@/features/traffic-controls/TrafficControlEditor.tsx";
 import { seedCache } from "@/lib/trafficPatchBuilders.ts";
 import {
-  buildCliCommandSnippet,
-  buildSelectorFromDraft,
   cacheWarnings,
   generateCacheToml,
   generateLimitsToml,

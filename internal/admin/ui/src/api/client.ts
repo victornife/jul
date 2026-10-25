@@ -1522,132 +1522,124 @@ export async function purgeCache(key?: string): Promise<void> {
 
 // ── Scoped cache invalidation (/api/v1/cache/purge*, #621) ───────────────────
 
-export const CacheSelectorKindSchema = z.enum([
-  "exact_url",
-  "prefix",
-  "glob",
-  "tag",
-  "host",
-  "key",
-  "all",
-]);
-export type CacheSelectorKind = z.infer<typeof CacheSelectorKindSchema>;
+export type CacheSelectorKind =
+  | "exact_url"
+  | "prefix"
+  | "glob"
+  | "tag"
+  | "host"
+  | "key"
+  | "all";
 
-export const CacheSelectorSchema = z.object({
-  kind: CacheSelectorKindSchema,
-  host: z.string().optional(),
-  url: z.string().optional(),
-  uri: z.string().optional(),
-  prefix: z.string().optional(),
-  pattern: z.string().optional(),
-  tags: z.array(z.string()).optional(),
-  tag_match: z.enum(["any", "all"]).optional(),
-  key: z.string().optional(),
-  route_id: z.string().optional(),
-  all: z.boolean().optional(),
-});
-export type CacheSelector = z.infer<typeof CacheSelectorSchema>;
+export interface CacheSelector {
+  kind: CacheSelectorKind;
+  host?: string | undefined;
+  url?: string | undefined;
+  uri?: string | undefined;
+  prefix?: string | undefined;
+  pattern?: string | undefined;
+  tags?: string[] | undefined;
+  tag_match?: "any" | "all" | undefined;
+  key?: string | undefined;
+  route_id?: string | undefined;
+  all?: boolean | undefined;
+}
 
-export const CacheGuidanceSchema = z.object({
-  code: z.string(),
-  severity: z.string(),
-  scope: z.string().optional(),
-  summary: z.string(),
-  detail: z.string().optional(),
-  docs_ref: z.string().optional(),
-});
-export type CacheGuidance = z.infer<typeof CacheGuidanceSchema>;
+export interface CacheGuidance {
+  code: string;
+  severity: string;
+  scope?: string | undefined;
+  summary: string;
+  detail?: string | undefined;
+  docs_ref?: string | undefined;
+}
 
-export const CacheResourceSampleSchema = z.object({
-  host: z.string(),
-  path: z.string(),
-  has_query: z.boolean().optional(),
-  methods: z.array(z.string()),
-  representations: z.number().int().nonnegative(),
-  tiers: z.array(z.string()),
-  body_bytes: z.number().int().nonnegative(),
-  vary_fields: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
-  freshness_state: z.string(),
-  created_at: z.string().optional(),
-  expires_at: z.string().optional(),
-  stale_until: z.string().optional(),
-});
-export type CacheResourceSample = z.infer<typeof CacheResourceSampleSchema>;
+export interface CacheResourceSample {
+  host: string;
+  path: string;
+  has_query?: boolean | undefined;
+  methods: string[];
+  representations: number;
+  tiers: string[];
+  body_bytes: number;
+  vary_fields?: string[] | undefined;
+  tags?: string[] | undefined;
+  freshness_state: string;
+  created_at?: string | undefined;
+  expires_at?: string | undefined;
+  stale_until?: string | undefined;
+}
 
-export const CachePurgePreviewResponseSchema = z.object({
-  api_version: z.string(),
-  cache_enabled: z.boolean(),
-  tag_ingestion_enabled: z.boolean(),
-  selector: CacheSelectorSchema,
-  selector_digest: z.string(),
-  preview_token: z.string(),
-  matched_resources: z.number().int().nonnegative(),
-  matched_representations: z.number().int().nonnegative(),
-  memory_entries: z.number().int().nonnegative(),
-  disk_entries: z.number().int().nonnegative(),
-  matched_bytes: z.number().int().nonnegative(),
-  memory_bytes: z.number().int().nonnegative(),
-  disk_bytes: z.number().int().nonnegative(),
-  inflight_fills_matched: z.number().int().nonnegative(),
-  inflight_tag_unknown: z.boolean().optional(),
-  count_accuracy: z.string(),
-  truncated: z.boolean(),
-  scan_limit: z.number().int().nonnegative(),
-  scanned_entries: z.number().int().nonnegative(),
-  source: z.string(),
-  as_of: z.string(),
-  cache_sequence: z.number().int().nonnegative(),
-  execution_mode_contract: z.string(),
-  broad_scope: z.boolean(),
-  warnings: z.array(CacheGuidanceSchema).default([]),
-  samples: z.array(CacheResourceSampleSchema).default([]),
-  config_authority: z.string().optional(),
-  config_authority_source: z.string().optional(),
-});
-export type CachePurgePreviewResponse = z.infer<typeof CachePurgePreviewResponseSchema>;
+export interface CachePurgePreviewResponse {
+  api_version: string;
+  cache_enabled: boolean;
+  tag_ingestion_enabled: boolean;
+  selector: CacheSelector;
+  selector_digest: string;
+  preview_token: string;
+  matched_resources: number;
+  matched_representations: number;
+  memory_entries: number;
+  disk_entries: number;
+  matched_bytes: number;
+  memory_bytes: number;
+  disk_bytes: number;
+  inflight_fills_matched: number;
+  inflight_tag_unknown?: boolean | undefined;
+  count_accuracy: string;
+  truncated: boolean;
+  scan_limit: number;
+  scanned_entries: number;
+  source: string;
+  as_of: string;
+  cache_sequence: number;
+  execution_mode_contract: string;
+  broad_scope: boolean;
+  warnings: CacheGuidance[];
+  samples: CacheResourceSample[];
+  config_authority?: string | undefined;
+  config_authority_source?: string | undefined;
+}
 
-export const CachePurgeResponseSchema = z.object({
-  api_version: z.string(),
-  operation_id: z.string(),
-  state: z.enum(["succeeded", "partial", "failed", "canceled", "running"]),
-  terminal: z.boolean(),
-  outcome: z.string(),
-  invalidation_effective: z.enum(["effective", "incomplete", "uncertain"]),
-  idempotent_replay: z.boolean().optional(),
-  selector: CacheSelectorSchema,
-  selector_digest: z.string(),
-  fence_sequence: z.number().int().nonnegative().optional(),
-  state_changed_since_preview: z.boolean().optional(),
-  invalidated_resources: z.number().int().nonnegative(),
-  invalidated_representations: z.number().int().nonnegative(),
-  memory_entries_removed: z.number().int().nonnegative(),
-  disk_entries_removed: z.number().int().nonnegative(),
-  active_readers_retired: z.number().int().nonnegative().optional(),
-  fenced_inflight_ops: z.number().int().nonnegative().optional(),
-  skipped_entries: z.number().int().nonnegative().optional(),
-  failed_entries: z.number().int().nonnegative().optional(),
-  remaining_entries: z.number().int().nonnegative().optional(),
-  started_at: z.string(),
-  completed_at: z.string().optional(),
-  recovery_guidance: z.string().optional(),
-  warnings: z.array(CacheGuidanceSchema).default([]),
-  boot_id: z.string(),
-  config_authority: z.string().optional(),
-  config_authority_source: z.string().optional(),
-});
-export type CachePurgeResponse = z.infer<typeof CachePurgeResponseSchema>;
+export interface CachePurgeResponse {
+  api_version: string;
+  operation_id: string;
+  state: "succeeded" | "partial" | "failed" | "canceled" | "running";
+  terminal: boolean;
+  outcome: string;
+  invalidation_effective: "effective" | "incomplete" | "uncertain";
+  idempotent_replay?: boolean | undefined;
+  selector: CacheSelector;
+  selector_digest: string;
+  fence_sequence?: number | undefined;
+  state_changed_since_preview?: boolean | undefined;
+  invalidated_resources: number;
+  invalidated_representations: number;
+  memory_entries_removed: number;
+  disk_entries_removed: number;
+  active_readers_retired?: number | undefined;
+  fenced_inflight_ops?: number | undefined;
+  skipped_entries?: number | undefined;
+  failed_entries?: number | undefined;
+  remaining_entries?: number | undefined;
+  started_at: string;
+  completed_at?: string | undefined;
+  recovery_guidance?: string | undefined;
+  warnings: CacheGuidance[];
+  boot_id: string;
+  config_authority?: string | undefined;
+  config_authority_source?: string | undefined;
+}
 
-export async function previewCachePurge(
+export function previewCachePurge(
   selector: CacheSelector,
   includeSamples = true,
 ): Promise<CachePurgePreviewResponse> {
-  const data = await api<unknown>("/v1/cache/purge/preview", {
+  return api<CachePurgePreviewResponse>("/v1/cache/purge/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ selector, include_samples: includeSamples }),
   });
-  return CachePurgePreviewResponseSchema.parse(data);
 }
 
 export interface ExecuteCachePurgeInput {
@@ -1658,14 +1650,14 @@ export interface ExecuteCachePurgeInput {
   readonly idempotencyKey?: string | undefined;
 }
 
-export async function executeCachePurge(
+export function executeCachePurge(
   input: ExecuteCachePurgeInput,
 ): Promise<CachePurgeResponse> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (input.idempotencyKey) {
     headers["Idempotency-Key"] = input.idempotencyKey;
   }
-  const data = await api<unknown>("/v1/cache/purge", {
+  return api<CachePurgeResponse>("/v1/cache/purge", {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -1675,16 +1667,14 @@ export async function executeCachePurge(
       retry_operation_id: input.retryOperationId,
     }),
   });
-  return CachePurgeResponseSchema.parse(data);
 }
 
-export async function fetchCachePurgeOperation(
+export function fetchCachePurgeOperation(
   operationId: string,
 ): Promise<CachePurgeResponse> {
-  const data = await api<unknown>(
+  return api<CachePurgeResponse>(
     `/v1/cache/purges/${encodeURIComponent(operationId)}`,
   );
-  return CachePurgeResponseSchema.parse(data);
 }
 
 // ── History ──────────────────────────────────────────────────────────────────

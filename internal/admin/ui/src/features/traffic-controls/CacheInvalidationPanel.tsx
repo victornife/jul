@@ -13,12 +13,181 @@ import {
   type CacheGuidance,
   type CachePurgePreviewResponse,
   type CachePurgeResponse,
+  type CacheSelector,
   type CacheSelectorKind,
   type RouteProjection,
 } from "@/api/client.ts";
 import { usePermission } from "@/auth/usePermission.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
-import { buildCliCommandSnippet, buildSelectorFromDraft } from "@/lib/trafficToml.ts";
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildSelectorFromDraft(draft: {
+  readonly kind: CacheSelectorKind;
+  readonly host: string;
+  readonly url: string;
+  readonly uri: string;
+  readonly prefix: string;
+  readonly pattern: string;
+  readonly tagsText: string;
+  readonly tagMatch: "any" | "all";
+  readonly routeId: string;
+}): { readonly selector?: CacheSelector; readonly error?: string } {
+  const host = draft.host.trim();
+  const routeId = draft.routeId.trim() || undefined;
+  switch (draft.kind) {
+    case "exact_url": {
+      const url = draft.url.trim();
+      const uri = draft.uri.trim();
+      if (url !== "") {
+        return {
+          selector: {
+            kind: "exact_url",
+            url,
+            ...(host !== "" ? { host } : {}),
+            ...(routeId ? { route_id: routeId } : {}),
+          },
+        };
+      }
+      if (host === "" || uri === "") {
+        return {
+          error:
+            "Enter either a full http(s):// URL or both a target hostname and a request URI starting with /.",
+        };
+      }
+      return {
+        selector: {
+          kind: "exact_url",
+          host,
+          uri,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "prefix": {
+      const prefix = draft.prefix.trim();
+      if (host === "" || prefix === "") {
+        return {
+          error:
+            "Both hostname and an anchored path prefix starting with / are required.",
+        };
+      }
+      return {
+        selector: {
+          kind: "prefix",
+          host,
+          prefix,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "glob": {
+      const pattern = draft.pattern.trim();
+      if (host === "" || pattern === "") {
+        return {
+          error:
+            "Both hostname and an anchored glob pattern starting with / are required.",
+        };
+      }
+      return {
+        selector: {
+          kind: "glob",
+          host,
+          pattern,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "tag": {
+      const tags = draft.tagsText
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t !== "");
+      if (host === "" || tags.length === 0) {
+        return {
+          error:
+            "Both hostname and at least one grouping tag (e.g. article:42) are required.",
+        };
+      }
+      return {
+        selector: {
+          kind: "tag",
+          host,
+          tags,
+          tag_match: draft.tagMatch,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "host": {
+      if (host === "") {
+        return { error: "Target hostname is required for a host-scoped invalidation." };
+      }
+      return {
+        selector: {
+          kind: "host",
+          host,
+          ...(routeId ? { route_id: routeId } : {}),
+        },
+      };
+    }
+    case "all":
+      return { selector: { kind: "all", all: true } };
+    case "key":
+      return { error: "Use one of the structured selectors in the Console." };
+  }
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildCliCommandSnippet(
+  selector: CacheSelector,
+  broadScope: boolean,
+): string {
+  const args: string[] = [
+    "jul cache purge",
+    "--endpoint https://admin.example.com:9090",
+    "--token-file /etc/jul/admin.token",
+  ];
+  switch (selector.kind) {
+    case "exact_url":
+      if (selector.url) {
+        args.push(`--url ${JSON.stringify(selector.url)}`);
+      } else {
+        if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+        if (selector.uri) args.push(`--uri ${JSON.stringify(selector.uri)}`);
+      }
+      break;
+    case "prefix":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      if (selector.prefix) args.push(`--prefix ${JSON.stringify(selector.prefix)}`);
+      break;
+    case "glob":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      if (selector.pattern) args.push(`--glob ${JSON.stringify(selector.pattern)}`);
+      break;
+    case "tag":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      for (const tag of selector.tags ?? []) {
+        args.push(`--tag ${JSON.stringify(tag)}`);
+      }
+      if (selector.tag_match === "all") {
+        args.push("--tag-match all");
+      }
+      break;
+    case "host":
+      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      break;
+    case "all":
+      args.push("--all");
+      break;
+    case "key":
+      if (selector.key) args.push(`--key ${JSON.stringify(selector.key)}`);
+      break;
+  }
+  if (broadScope) {
+    args.push("--confirm-broad");
+  }
+  return args.join(" \\\n  ");
+}
 
 export interface CacheInvalidationPanelProps {
   readonly cacheEnabled: boolean;
@@ -85,6 +254,15 @@ function generateIdempotencyKey(): string {
   return `console-purge-${String(Date.now())}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+const INPUT_CLS =
+  "rounded-md border border-jul-border bg-jul-bg px-2.5 py-1.5 text-xs text-jul-text";
+const LABEL_CLS = "grid gap-1 text-xs";
+const TITLE_CLS = "font-semibold text-jul-text";
+const HINT_CLS = "text-[11px] text-jul-muted";
+const STAT_CLS = "rounded-md border border-jul-border bg-jul-surface p-2";
+const BTN_CLS =
+  "rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text disabled:opacity-40";
+
 function GuidanceList({
   items,
 }: {
@@ -92,36 +270,19 @@ function GuidanceList({
 }): React.JSX.Element | null {
   if (items.length === 0) return null;
   return (
-    <div style={{ display: "grid", gap: "0.5rem" }}>
+    <div className="grid gap-2">
       {items.map((w) => {
         const isWarn = w.severity.toLowerCase() === "warning";
         return (
           <div
             key={`${w.code}-${w.summary}`}
             role="note"
-            style={{
-              padding: "0.55rem 0.7rem",
-              borderRadius: "6px",
-              border: `1px solid ${
-                isWarn
-                  ? "rgba(245, 158, 11, 0.35)"
-                  : "rgba(59, 130, 246, 0.32)"
-              }`,
-              background: isWarn
-                ? "rgba(245, 158, 11, 0.1)"
-                : "rgba(59, 130, 246, 0.08)",
-              fontSize: "0.78rem",
-              lineHeight: 1.45,
-            }}
+            className="rounded-md border border-jul-border bg-jul-surface p-2 text-xs"
           >
-            <div style={{ fontWeight: 600, color: "var(--text)" }}>
+            <div className={TITLE_CLS}>
               [{isWarn ? "WARNING" : "INFO"} · {w.code}] {w.summary}
             </div>
-            {w.detail && (
-              <div style={{ color: "var(--muted)", marginTop: "0.2rem" }}>
-                {w.detail}
-              </div>
-            )}
+            {w.detail && <div className="mt-0.5 text-jul-muted">{w.detail}</div>}
           </div>
         );
       })}
@@ -353,50 +514,20 @@ export function CacheInvalidationPanel({
   return (
     <section
       aria-label="Scoped cache invalidation"
-      style={{
-        display: "grid",
-        gap: "0.9rem",
-        padding: "1rem",
-        borderRadius: "8px",
-        border: "1px solid var(--border)",
-        background: "rgba(15, 23, 42, 0.35)",
-      }}
+      className="grid gap-3 rounded-lg border border-jul-border bg-jul-bg/40 p-4"
     >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-          gap: "0.5rem",
-        }}
-      >
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h4 style={{ margin: 0, fontSize: "0.92rem", color: "var(--text)" }}>
+          <h4 className="m-0 text-sm font-semibold text-jul-text">
             Scoped Cache Invalidation (Select Scope → Preview → Confirm → Execute)
           </h4>
-          <p
-            style={{
-              margin: "0.25rem 0 0",
-              fontSize: "0.78rem",
-              color: "var(--muted)",
-              lineHeight: 1.45,
-            }}
-          >
+          <p className="mt-1 text-xs text-jul-muted">
             Preview matching resources and representations non-destructively before
             invalidating. Operations apply only to this Jul instance; external CDNs or
             browser caches are not notified.
           </p>
         </div>
-        <span
-          style={{
-            fontSize: "0.72rem",
-            padding: "0.2rem 0.5rem",
-            borderRadius: "999px",
-            border: "1px solid var(--border)",
-            color: "var(--muted)",
-          }}
-        >
+        <span className="rounded-full border border-jul-border px-2 py-0.5 text-[11px] text-jul-muted">
           Authority:{" "}
           {authorityMode === "file_owned"
             ? "file_owned (operational purge allowed)"
@@ -407,17 +538,7 @@ export function CacheInvalidationPanel({
       </div>
 
       {!cacheEnabled && (
-        <div
-          role="note"
-          style={{
-            padding: "0.6rem 0.75rem",
-            borderRadius: "6px",
-            border: "1px solid rgba(245, 158, 11, 0.35)",
-            background: "rgba(245, 158, 11, 0.1)",
-            fontSize: "0.78rem",
-            color: "var(--text)",
-          }}
-        >
+        <div role="note" className={STAT_CLS + " text-xs text-jul-text"}>
           <strong>[INFO]</strong> Response caching is currently disabled in configuration.
           You can still preview selector normalization, and executing a purge will return an
           explicit <code>cache_disabled</code> outcome.
@@ -425,30 +546,10 @@ export function CacheInvalidationPanel({
       )}
 
       {/* Step 1: Select Scope */}
-      <div
-        style={{
-          display: "grid",
-          gap: "0.75rem",
-          padding: "0.85rem",
-          borderRadius: "6px",
-          border: "1px solid var(--border)",
-          background: "var(--surface)",
-        }}
-      >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "0.75rem",
-          }}
-        >
-          <label
-            htmlFor={`${uid}-selector-kind`}
-            style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-          >
-            <span style={{ fontWeight: 600, color: "var(--text)" }}>
-              1. Selector kind
-            </span>
+      <div className="grid gap-3 rounded-md border border-jul-border bg-jul-surface p-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label htmlFor={`${uid}-selector-kind`} className={LABEL_CLS}>
+            <span className={TITLE_CLS}>1. Selector kind</span>
             <select
               id={`${uid}-selector-kind`}
               aria-label="Invalidation selector kind"
@@ -457,14 +558,7 @@ export function CacheInvalidationPanel({
                 setKind(e.target.value as CacheSelectorKind);
                 clearPreviewState();
               }}
-              style={{
-                padding: "0.45rem 0.6rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--bg)",
-                color: "var(--text)",
-                fontSize: "0.82rem",
-              }}
+              className={INPUT_CLS}
             >
               {SELECTOR_KIND_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
@@ -472,19 +566,12 @@ export function CacheInvalidationPanel({
                 </option>
               ))}
             </select>
-            <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
-              {selectedOption?.summary}
-            </span>
+            <span className={HINT_CLS}>{selectedOption?.summary}</span>
           </label>
 
           {cacheRoutes.length > 0 && kind !== "all" && (
-            <label
-              htmlFor={`${uid}-route-helper`}
-              style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-            >
-              <span style={{ fontWeight: 600, color: "var(--text)" }}>
-                Configured route scope (optional helper)
-              </span>
+            <label htmlFor={`${uid}-route-helper`} className={LABEL_CLS}>
+              <span className={TITLE_CLS}>Configured route scope (optional helper)</span>
               <select
                 id={`${uid}-route-helper`}
                 aria-label="Configured route helper"
@@ -492,14 +579,7 @@ export function CacheInvalidationPanel({
                 onChange={(e) => {
                   handleSelectRouteHelper(e.target.value);
                 }}
-                style={{
-                  padding: "0.45rem 0.6rem",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  fontSize: "0.82rem",
-                }}
+                className={INPUT_CLS}
               >
                 <option value="">All routes on selected hostname</option>
                 {cacheRoutes.map((r) => (
@@ -508,7 +588,7 @@ export function CacheInvalidationPanel({
                   </option>
                 ))}
               </select>
-              <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
+              <span className={HINT_CLS}>
                 Pre-fills path scope from authoritative route configuration.
               </span>
             </label>
@@ -516,70 +596,42 @@ export function CacheInvalidationPanel({
         </div>
 
         {needsHostInput && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-              gap: "0.75rem",
-            }}
-          >
-            <label
-              htmlFor={`${uid}-host`}
-              style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-            >
-              <span style={{ fontWeight: 600, color: "var(--text)" }}>
-                Target hostname {kind === "exact_url" ? "(or included in full URL)" : "(required)"}
-              </span>
-              <input
-                id={`${uid}-host`}
-                aria-label="Target hostname"
-                type="text"
-                value={host}
-                placeholder="portal.example.com"
-                list={`${uid}-host-datalist`}
-                onChange={(e) => {
-                  setHost(e.target.value);
-                  clearPreviewState();
-                }}
-                style={{
-                  padding: "0.45rem 0.6rem",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  fontSize: "0.82rem",
-                }}
-              />
-              {serverNames.length > 0 && (
-                <datalist id={`${uid}-host-datalist`}>
-                  {serverNames.map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
-              )}
-              <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
-                Case-normalized per RFC 9110. Explicit non-default ports (e.g.{" "}
-                <code>example.com:8443</code>) are matched literally.
-              </span>
-            </label>
-          </div>
+          <label htmlFor={`${uid}-host`} className={LABEL_CLS}>
+            <span className={TITLE_CLS}>
+              Target hostname{" "}
+              {kind === "exact_url" ? "(or included in full URL)" : "(required)"}
+            </span>
+            <input
+              id={`${uid}-host`}
+              aria-label="Target hostname"
+              type="text"
+              value={host}
+              placeholder="portal.example.com"
+              list={`${uid}-host-datalist`}
+              onChange={(e) => {
+                setHost(e.target.value);
+                clearPreviewState();
+              }}
+              className={INPUT_CLS}
+            />
+            {serverNames.length > 0 && (
+              <datalist id={`${uid}-host-datalist`}>
+                {serverNames.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            )}
+            <span className={HINT_CLS}>
+              Case-normalized per RFC 9110. Explicit non-default ports (e.g.{" "}
+              <code>example.com:8443</code>) are matched literally.
+            </span>
+          </label>
         )}
 
         {kind === "exact_url" && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-              gap: "0.75rem",
-            }}
-          >
-            <label
-              htmlFor={`${uid}-exact-url`}
-              style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-            >
-              <span style={{ fontWeight: 600, color: "var(--text)" }}>
-                Full public URL
-              </span>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label htmlFor={`${uid}-exact-url`} className={LABEL_CLS}>
+              <span className={TITLE_CLS}>Full public URL</span>
               <input
                 id={`${uid}-exact-url`}
                 aria-label="Exact public URL"
@@ -590,27 +642,15 @@ export function CacheInvalidationPanel({
                   setUrl(e.target.value);
                   clearPreviewState();
                 }}
-                style={{
-                  padding: "0.45rem 0.6rem",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  fontSize: "0.82rem",
-                }}
+                className={INPUT_CLS}
               />
-              <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
+              <span className={HINT_CLS}>
                 Exact query string is part of the selector; fragments (#...) are rejected.
               </span>
             </label>
 
-            <label
-              htmlFor={`${uid}-exact-uri`}
-              style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-            >
-              <span style={{ fontWeight: 600, color: "var(--text)" }}>
-                Or request URI (with Target hostname)
-              </span>
+            <label htmlFor={`${uid}-exact-uri`} className={LABEL_CLS}>
+              <span className={TITLE_CLS}>Or request URI (with Target hostname)</span>
               <input
                 id={`${uid}-exact-uri`}
                 aria-label="Exact request URI"
@@ -621,16 +661,9 @@ export function CacheInvalidationPanel({
                   setUri(e.target.value);
                   clearPreviewState();
                 }}
-                style={{
-                  padding: "0.45rem 0.6rem",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  background: "var(--bg)",
-                  color: "var(--text)",
-                  fontSize: "0.82rem",
-                }}
+                className={INPUT_CLS}
               />
-              <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
+              <span className={HINT_CLS}>
                 Invalidates GET, HEAD, and all Vary representations of this exact URI.
               </span>
             </label>
@@ -638,13 +671,8 @@ export function CacheInvalidationPanel({
         )}
 
         {kind === "prefix" && (
-          <label
-            htmlFor={`${uid}-prefix`}
-            style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-          >
-            <span style={{ fontWeight: 600, color: "var(--text)" }}>
-              Anchored path prefix
-            </span>
+          <label htmlFor={`${uid}-prefix`} className={LABEL_CLS}>
+            <span className={TITLE_CLS}>Anchored path prefix</span>
             <input
               id={`${uid}-prefix`}
               aria-label="Anchored path prefix"
@@ -655,16 +683,9 @@ export function CacheInvalidationPanel({
                 setPrefix(e.target.value);
                 clearPreviewState();
               }}
-              style={{
-                padding: "0.45rem 0.6rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--bg)",
-                color: "var(--text)",
-                fontSize: "0.82rem",
-              }}
+              className={INPUT_CLS}
             />
-            <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
+            <span className={HINT_CLS}>
               Segment-bounded: <code>/articles</code> or <code>/articles/</code> matches{" "}
               <code>/articles</code> and <code>/articles/42?page=1</code>, never{" "}
               <code>/articles-archive</code>.
@@ -673,13 +694,8 @@ export function CacheInvalidationPanel({
         )}
 
         {kind === "glob" && (
-          <label
-            htmlFor={`${uid}-glob`}
-            style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-          >
-            <span style={{ fontWeight: 600, color: "var(--text)" }}>
-              Anchored glob pattern
-            </span>
+          <label htmlFor={`${uid}-glob`} className={LABEL_CLS}>
+            <span className={TITLE_CLS}>Anchored glob pattern</span>
             <input
               id={`${uid}-glob`}
               aria-label="Anchored glob pattern"
@@ -690,16 +706,9 @@ export function CacheInvalidationPanel({
                 setPattern(e.target.value);
                 clearPreviewState();
               }}
-              style={{
-                padding: "0.45rem 0.6rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--bg)",
-                color: "var(--text)",
-                fontSize: "0.82rem",
-              }}
+              className={INPUT_CLS}
             />
-            <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
+            <span className={HINT_CLS}>
               <code>*</code> matches within one path segment; standalone <code>**</code>{" "}
               matches zero or more full path segments. All query strings on matched paths
               are included.
@@ -708,37 +717,18 @@ export function CacheInvalidationPanel({
         )}
 
         {kind === "tag" && (
-          <div style={{ display: "grid", gap: "0.65rem" }}>
+          <div className="grid gap-2.5">
             {tagHeaders.length === 0 && (
-              <div
-                role="note"
-                style={{
-                  padding: "0.55rem 0.7rem",
-                  borderRadius: "6px",
-                  border: "1px solid rgba(245, 158, 11, 0.35)",
-                  background: "rgba(245, 158, 11, 0.1)",
-                  fontSize: "0.76rem",
-                  color: "var(--text)",
-                }}
-              >
+              <div role="note" className={STAT_CLS + " text-xs text-jul-text"}>
                 <strong>[WARNING · TAG_INGESTION_DISABLED]</strong> No trusted origin tag
                 headers (<code>[cache].tag_headers</code>) are currently configured. Enable
                 tag headers above (e.g. <code>Cache-Tag, Surrogate-Key</code>) so Jul
                 indexes origin grouping tags on cached responses.
               </div>
             )}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "2fr 1fr",
-                gap: "0.75rem",
-              }}
-            >
-              <label
-                htmlFor={`${uid}-tags`}
-                style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-              >
-                <span style={{ fontWeight: 600, color: "var(--text)" }}>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label htmlFor={`${uid}-tags`} className={LABEL_CLS + " sm:col-span-2"}>
+                <span className={TITLE_CLS}>
                   Grouping tags (comma-separated, case-sensitive)
                 </span>
                 <input
@@ -751,28 +741,16 @@ export function CacheInvalidationPanel({
                     setTagsText(e.target.value);
                     clearPreviewState();
                   }}
-                  style={{
-                    padding: "0.45rem 0.6rem",
-                    borderRadius: "6px",
-                    border: "1px solid var(--border)",
-                    background: "var(--bg)",
-                    color: "var(--text)",
-                    fontSize: "0.82rem",
-                  }}
+                  className={INPUT_CLS}
                 />
-                <span style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
+                <span className={HINT_CLS}>
                   Tags are isolated per hostname and distinct from HTTP <code>ETag</code>{" "}
                   validators.
                 </span>
               </label>
 
-              <label
-                htmlFor={`${uid}-tag-match`}
-                style={{ display: "grid", gap: "0.3rem", fontSize: "0.78rem" }}
-              >
-                <span style={{ fontWeight: 600, color: "var(--text)" }}>
-                  Multi-tag match mode
-                </span>
+              <label htmlFor={`${uid}-tag-match`} className={LABEL_CLS}>
+                <span className={TITLE_CLS}>Multi-tag match mode</span>
                 <select
                   id={`${uid}-tag-match`}
                   aria-label="Multi-tag match mode"
@@ -781,14 +759,7 @@ export function CacheInvalidationPanel({
                     setTagMatch(e.target.value as "any" | "all");
                     clearPreviewState();
                   }}
-                  style={{
-                    padding: "0.45rem 0.6rem",
-                    borderRadius: "6px",
-                    border: "1px solid var(--border)",
-                    background: "var(--bg)",
-                    color: "var(--text)",
-                    fontSize: "0.82rem",
-                  }}
+                  className={INPUT_CLS}
                 >
                   <option value="any">ANY (union — match any listed tag)</option>
                   <option value="all">ALL (intersection — require every tag)</option>
@@ -798,16 +769,8 @@ export function CacheInvalidationPanel({
           </div>
         )}
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "0.6rem",
-          }}
-        >
-          <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className={HINT_CLS}>
             Step 2: Run a non-destructive preview to inspect matched resources, tiers, and
             warnings before confirming.
           </div>
@@ -825,33 +788,13 @@ export function CacheInvalidationPanel({
       </div>
 
       {permissionRevokedNotice && (
-        <div
-          role="alert"
-          style={{
-            padding: "0.65rem 0.8rem",
-            borderRadius: "6px",
-            border: "1px solid rgba(239, 68, 68, 0.45)",
-            background: "rgba(239, 68, 68, 0.12)",
-            fontSize: "0.8rem",
-            color: "var(--text)",
-          }}
-        >
+        <div role="alert" className={STAT_CLS + " text-xs text-jul-text"}>
           <strong>[PERMISSION CHANGE]</strong> {permissionRevokedNotice}
         </div>
       )}
 
       {errorMsg && (
-        <div
-          role="alert"
-          style={{
-            padding: "0.65rem 0.8rem",
-            borderRadius: "6px",
-            border: "1px solid rgba(239, 68, 68, 0.45)",
-            background: "rgba(239, 68, 68, 0.12)",
-            fontSize: "0.8rem",
-            color: "var(--text)",
-          }}
-        >
+        <div role="alert" className={STAT_CLS + " text-xs text-jul-text"}>
           <strong>[ERROR]</strong> {errorMsg}
         </div>
       )}
@@ -861,125 +804,63 @@ export function CacheInvalidationPanel({
         <div
           role="region"
           aria-label="Invalidation preview"
-          style={{
-            display: "grid",
-            gap: "0.8rem",
-            padding: "0.9rem",
-            borderRadius: "6px",
-            border: "1px solid rgba(59, 130, 246, 0.4)",
-            background: "rgba(15, 23, 42, 0.55)",
-          }}
+          className="grid gap-3 rounded-md border border-jul-border bg-jul-bg/60 p-3.5"
         >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "0.5rem",
-            }}
-          >
-            <div style={{ fontWeight: 600, fontSize: "0.86rem", color: "var(--text)" }}>
-              Preview Summary ({preview.count_accuracy === "exact" ? "EXACT COUNT" : "LOWER BOUND · TRUNCATED"})
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-semibold text-jul-text">
+              Preview Summary (
+              {preview.count_accuracy === "exact" ? "EXACT COUNT" : "LOWER BOUND · TRUNCATED"}
+              )
             </div>
-            <div style={{ fontSize: "0.73rem", color: "var(--muted)" }}>
+            <div className={HINT_CLS}>
               Source: <code>{preview.source}</code> · As of: <code>{preview.as_of}</code> · Seq:{" "}
               <code>{String(preview.cache_sequence)}</code>
             </div>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-              gap: "0.6rem",
-            }}
-          >
-            <div
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-              }}
-            >
-              <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-                Matched resources (URLs)
-              </div>
-              <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>
-                {preview.truncated ? `>= ${String(preview.matched_resources)}` : String(preview.matched_resources)}
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <div className={STAT_CLS}>
+              <div className={HINT_CLS}>Matched resources (URLs)</div>
+              <div className="text-base font-bold text-jul-text">
+                {preview.truncated
+                  ? `>= ${String(preview.matched_resources)}`
+                  : String(preview.matched_resources)}
               </div>
             </div>
 
-            <div
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-              }}
-            >
-              <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-                Representations (GET/HEAD/Vary)
-              </div>
-              <div style={{ fontSize: "1.05rem", fontWeight: 700, color: "var(--text)" }}>
+            <div className={STAT_CLS}>
+              <div className={HINT_CLS}>Representations (GET/HEAD/Vary)</div>
+              <div className="text-base font-bold text-jul-text">
                 {preview.truncated
                   ? `>= ${String(preview.matched_representations)}`
                   : String(preview.matched_representations)}
               </div>
-              <div style={{ fontSize: "0.68rem", color: "var(--muted)" }}>
+              <div className="text-[10px] text-jul-muted">
                 Deduplicated across memory &amp; disk
               </div>
             </div>
 
-            <div
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-              }}
-            >
-              <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-                Memory tier
-              </div>
-              <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--text)" }}>
+            <div className={STAT_CLS}>
+              <div className={HINT_CLS}>Memory tier</div>
+              <div className="text-sm font-semibold text-jul-text">
                 {String(preview.memory_entries)} entries ({formatByteCount(preview.memory_bytes)})
               </div>
             </div>
 
-            <div
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-              }}
-            >
-              <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-                Disk tier
-              </div>
-              <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--text)" }}>
+            <div className={STAT_CLS}>
+              <div className={HINT_CLS}>Disk tier</div>
+              <div className="text-sm font-semibold text-jul-text">
                 {String(preview.disk_entries)} entries ({formatByteCount(preview.disk_bytes)})
               </div>
             </div>
 
-            <div
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-              }}
-            >
-              <div style={{ fontSize: "0.72rem", color: "var(--muted)" }}>
-                In-flight origin fills
-              </div>
-              <div style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--text)" }}>
+            <div className={STAT_CLS}>
+              <div className={HINT_CLS}>In-flight origin fills</div>
+              <div className="text-sm font-semibold text-jul-text">
                 {String(preview.inflight_fills_matched)} matched
               </div>
               {preview.inflight_tag_unknown && (
-                <div style={{ fontSize: "0.68rem", color: "var(--muted)" }}>
+                <div className="text-[10px] text-jul-muted">
                   Response tags fenced on arrival
                 </div>
               )}
@@ -987,17 +868,7 @@ export function CacheInvalidationPanel({
           </div>
 
           {preview.matched_representations === 0 && (
-            <div
-              role="status"
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                fontSize: "0.78rem",
-                color: "var(--text)",
-              }}
-            >
+            <div role="status" className={STAT_CLS + " text-xs text-jul-text"}>
               <strong>[NO STORED MATCHES]</strong> 0 cached representations currently match
               this selector. Executing will still install a selector fence so any in-flight
               origin fill that started before the purge cannot publish stale content.
@@ -1005,17 +876,7 @@ export function CacheInvalidationPanel({
           )}
 
           {preview.truncated && (
-            <div
-              role="note"
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid rgba(245, 158, 11, 0.4)",
-                background: "rgba(245, 158, 11, 0.1)",
-                fontSize: "0.78rem",
-                color: "var(--text)",
-              }}
-            >
+            <div role="note" className={STAT_CLS + " text-xs text-jul-text"}>
               <strong>[TRUNCATED PREVIEW]</strong> Preview scan reached the bounded limit of{" "}
               <code>{String(preview.scan_limit)}</code> entries. Counts shown above are a
               lower bound; execution will still re-evaluate the selector and invalidate
@@ -1026,37 +887,21 @@ export function CacheInvalidationPanel({
           <GuidanceList items={preview.warnings} />
 
           {preview.samples.length > 0 && (
-            <div style={{ display: "grid", gap: "0.35rem" }}>
-              <div style={{ fontSize: "0.76rem", fontWeight: 600, color: "var(--text)" }}>
+            <div className="grid gap-1.5">
+              <div className="text-xs font-semibold text-jul-text">
                 Sampled matching resources (query values redacted, up to 20 shown):
               </div>
-              <div
-                style={{
-                  maxHeight: "180px",
-                  overflowY: "auto",
-                  borderRadius: "6px",
-                  border: "1px solid var(--border)",
-                  background: "var(--surface)",
-                  padding: "0.45rem 0.65rem",
-                  fontSize: "0.75rem",
-                }}
-              >
+              <div className="max-h-44 overflow-y-auto rounded-md border border-jul-border bg-jul-surface p-2 text-xs">
                 {preview.samples.map((sample) => (
                   <div
                     key={`${sample.host}${sample.path}`}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "0.5rem",
-                      padding: "0.25rem 0",
-                      borderBottom: "1px solid rgba(148, 163, 184, 0.12)",
-                    }}
+                    className="flex justify-between gap-2 border-b border-jul-border/40 py-1"
                   >
                     <code>
                       {sample.host}
                       {sample.path}
                     </code>
-                    <span style={{ color: "var(--muted)" }}>
+                    <span className="text-jul-muted">
                       {sample.methods.join("/")} · {String(sample.representations)} rep ·{" "}
                       {sample.tiers.join("+")} · {sample.freshness_state}
                       {sample.tags && sample.tags.length > 0
@@ -1069,13 +914,7 @@ export function CacheInvalidationPanel({
             </div>
           )}
 
-          <div
-            style={{
-              fontSize: "0.74rem",
-              color: "var(--muted)",
-              lineHeight: 1.4,
-            }}
-          >
+          <div className={HINT_CLS}>
             Execution contract: <code>{preview.execution_mode_contract}</code> — confirming
             installs a monotonic selector fence and re-evaluates the normalized selector so
             entries filled between preview and execution are also invalidated while
@@ -1085,18 +924,7 @@ export function CacheInvalidationPanel({
           {preview.broad_scope && (
             <label
               htmlFor={`${uid}-confirm-broad`}
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: "0.5rem",
-                padding: "0.6rem 0.75rem",
-                borderRadius: "6px",
-                border: "1px solid rgba(245, 158, 11, 0.45)",
-                background: "rgba(245, 158, 11, 0.12)",
-                fontSize: "0.79rem",
-                color: "var(--text)",
-                cursor: "pointer",
-              }}
+              className="flex cursor-pointer items-start gap-2 rounded-md border border-jul-border bg-jul-surface p-2.5 text-xs text-jul-text"
             >
               <input
                 id={`${uid}-confirm-broad`}
@@ -1105,7 +933,7 @@ export function CacheInvalidationPanel({
                 onChange={(e) => {
                   setConfirmBroad(e.target.checked);
                 }}
-                style={{ marginTop: "0.2rem" }}
+                className="mt-0.5"
               />
               <span>
                 <strong>Confirm broad invalidation:</strong> I understand this scope is
@@ -1116,40 +944,22 @@ export function CacheInvalidationPanel({
             </label>
           )}
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "0.6rem",
-            }}
-          >
-            <details style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
-              <summary style={{ cursor: "pointer" }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <details className="text-xs text-jul-muted">
+              <summary className="cursor-pointer">
                 Automation CLI equivalent (secret-safe)
               </summary>
-              <pre
-                style={{
-                  marginTop: "0.4rem",
-                  padding: "0.5rem 0.65rem",
-                  borderRadius: "6px",
-                  background: "var(--bg)",
-                  border: "1px solid var(--border)",
-                  color: "var(--text)",
-                  overflowX: "auto",
-                }}
-              >
+              <pre className="mt-1.5 overflow-x-auto rounded-md border border-jul-border bg-jul-bg p-2 text-jul-text">
                 {buildCliCommandSnippet(preview.selector, preview.broad_scope)}
               </pre>
             </details>
 
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={clearPreviewState}
                 disabled={executeBusy}
-                className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text disabled:opacity-40"
+                className={BTN_CLS}
               >
                 Cancel preview
               </button>
@@ -1179,43 +989,21 @@ export function CacheInvalidationPanel({
         <div
           role={result.state === "succeeded" ? "status" : "alert"}
           aria-label="Invalidation execution result"
-          style={{
-            display: "grid",
-            gap: "0.75rem",
-            padding: "0.9rem",
-            borderRadius: "6px",
-            border: `1px solid ${
-              result.state === "succeeded"
-                ? "rgba(34, 197, 94, 0.45)"
-                : "rgba(245, 158, 11, 0.55)"
-            }`,
-            background:
-              result.state === "succeeded"
-                ? "rgba(34, 197, 94, 0.08)"
-                : "rgba(245, 158, 11, 0.1)",
-          }}
+          className="grid gap-3 rounded-md border border-jul-border bg-jul-surface p-3.5"
         >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: "0.5rem",
-            }}
-          >
-            <div style={{ fontWeight: 700, fontSize: "0.86rem", color: "var(--text)" }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-bold text-jul-text">
               [{result.state.toUpperCase()} · {result.outcome}] Effectiveness:{" "}
               <code>{result.invalidation_effective}</code>
               {result.idempotent_replay ? " (Idempotent Replay)" : ""}
             </div>
-            <div style={{ fontSize: "0.74rem", color: "var(--muted)" }}>
+            <div className={HINT_CLS}>
               Operation ID: <code>{result.operation_id}</code> · Fence seq:{" "}
               <code>{String(result.fence_sequence ?? 0)}</code>
             </div>
           </div>
 
-          <div style={{ fontSize: "0.8rem", color: "var(--text)" }}>
+          <div className="text-xs text-jul-text">
             Invalidated <strong>{String(result.invalidated_resources)}</strong> resources (
             <strong>{String(result.invalidated_representations)}</strong> representations:{" "}
             {String(result.memory_entries_removed)} memory,{" "}
@@ -1232,23 +1020,14 @@ export function CacheInvalidationPanel({
           </div>
 
           {result.state_changed_since_preview && (
-            <div style={{ fontSize: "0.75rem", color: "var(--muted)" }}>
+            <div className={HINT_CLS}>
               Note: Cache state changed between preview and execution; the selector was
               re-evaluated under fence <code>{String(result.fence_sequence ?? 0)}</code>.
             </div>
           )}
 
           {result.recovery_guidance && (
-            <div
-              style={{
-                padding: "0.55rem 0.7rem",
-                borderRadius: "6px",
-                border: "1px solid var(--border)",
-                background: "var(--surface)",
-                fontSize: "0.78rem",
-                color: "var(--text)",
-              }}
-            >
+            <div className={STAT_CLS + " text-xs text-jul-text"}>
               <strong>Recovery guidance:</strong> {result.recovery_guidance}
             </div>
           )}
@@ -1256,7 +1035,7 @@ export function CacheInvalidationPanel({
           <GuidanceList items={result.warnings} />
 
           {result.state !== "succeeded" && (
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+            <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -1275,27 +1054,8 @@ export function CacheInvalidationPanel({
       )}
 
       {/* Operation ID status lookup for uncertain / disconnected outcomes */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          flexWrap: "wrap",
-          gap: "0.6rem",
-          paddingTop: "0.35rem",
-          borderTop: "1px solid var(--border)",
-        }}
-      >
-        <label
-          htmlFor={`${uid}-lookup-op`}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            fontSize: "0.76rem",
-            color: "var(--muted)",
-          }}
-        >
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-jul-border pt-2">
+        <label htmlFor={`${uid}-lookup-op`} className="flex items-center gap-2 text-xs text-jul-muted">
           <span>Inspect operation ID:</span>
           <input
             id={`${uid}-lookup-op`}
@@ -1306,14 +1066,7 @@ export function CacheInvalidationPanel({
             onChange={(e) => {
               setLookupOpId(e.target.value);
             }}
-            style={{
-              padding: "0.3rem 0.5rem",
-              borderRadius: "6px",
-              border: "1px solid var(--border)",
-              background: "var(--bg)",
-              color: "var(--text)",
-              fontSize: "0.76rem",
-            }}
+            className={INPUT_CLS}
           />
         </label>
         <button
@@ -1322,7 +1075,7 @@ export function CacheInvalidationPanel({
             void handleLookupOperation();
           }}
           disabled={!canReadMetadata || lookupBusy || lookupOpId.trim() === ""}
-          className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text disabled:opacity-40"
+          className={BTN_CLS}
         >
           {lookupBusy ? "Checking..." : "Check operation status"}
         </button>

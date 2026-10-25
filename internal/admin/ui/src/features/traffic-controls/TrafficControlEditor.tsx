@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Drawer } from "@/components/Drawer.tsx";
@@ -55,7 +55,12 @@ import {
 } from "@/lib/trafficToml.ts";
 import { describePatchBatchError, useRunPatchBatch } from "@/lib/useRunPatchBatch.ts";
 import { AffectedRoutes, CheckboxGroup, NumberField, TextField, Toggle } from "./TrafficFormFields.tsx";
-import { CacheInvalidationPanel } from "./CacheInvalidationPanel.tsx";
+
+const CacheInvalidationPanel = lazy(() =>
+  import("./CacheInvalidationPanel.tsx").then((m) => ({
+    default: m.CacheInvalidationPanel,
+  })),
+);
 
 export type TrafficEditorKind = "compression" | "cache" | "rate_limit" | "limits";
 
@@ -644,15 +649,17 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 Current cache hit ratio: {(stats.data.cacheHitRatio * 100).toFixed(1)}%
               </p>
             )}
-            <CacheInvalidationPanel
-              cacheEnabled={current.cache?.enabled ?? cache.enabled}
-              tagHeaders={current.cache?.tag_headers ?? cache.tagHeaders ?? []}
-              serverNames={unique(
-                (current.servers ?? []).flatMap((s) => s.server_names ?? []),
-              )}
-              routes={allRoutes}
-              authorityMode={overview.data?.authority?.config_authority}
-            />
+            <Suspense fallback={null}>
+              <CacheInvalidationPanel
+                cacheEnabled={current.cache?.enabled ?? cache.enabled}
+                tagHeaders={current.cache?.tag_headers ?? cache.tagHeaders ?? []}
+                serverNames={unique(
+                  (current.servers ?? []).flatMap((s) => s.server_names ?? []),
+                )}
+                routes={allRoutes}
+                authorityMode={overview.data?.authority?.config_authority}
+              />
+            </Suspense>
             <div className="flex items-center gap-2">
               <button
                 type="button"
