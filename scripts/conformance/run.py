@@ -180,6 +180,11 @@ def judge(suite, results, out, evidence=None):
 
 
 def suite_h2spec(args, out):
+    tool = Path(shutil.which(args.h2spec) or args.h2spec)
+    identity = {
+        "version": subprocess.check_output([str(tool), "--version"], text=True).strip(),
+        "sha256": hashlib.sha256(tool.read_bytes()).hexdigest(),
+    }
     cert, key = self_signed(out)
     www = static_root(out)
     tls, h2c = free_port(), free_port()
@@ -224,13 +229,16 @@ h2c = true
                 with open(out / f"h2spec-{target}.txt", "w") as text:
                     subprocess.run([args.h2spec, "-h", "127.0.0.1", "-o", "5", "-j", str(report), *flags],
                                    stdout=text, stderr=subprocess.STDOUT)
+                counts[target]["content_length_outcomes"] = re.findall(
+                    r"CONTENT_LENGTH_RESULT stream=1 outcome=(protocol_error|early_response|connection_closed)\b",
+                    (out / f"h2spec-{target}.txt").read_text())
                 for tc in ET.parse(report).iter("testcase"):
                     failure = tc.find("failure") if tc.find("failure") is not None else tc.find("error")
                     case = f"{tc.get('package')}: {tc.get('classname')} [{target}]"
                     results[case] = (failure is None, (failure.text or "").strip()[:300] if failure is not None else "")
                     counts[target]["total"] += 1
                     counts[target]["passed"] += int(failure is None)
-    return judge("h2spec", results, out, {"targets": counts})
+    return judge("h2spec", results, out, {"targets": counts, "tool": identity})
 
 
 # --- ambiguous framing corpus ------------------------------------------------

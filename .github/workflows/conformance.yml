@@ -67,7 +67,7 @@ jobs:
         if: matrix.suite == 'h2spec'
         run: |
           git clone --quiet --depth 1 --branch "$H2SPEC_TAG" https://github.com/summerwind/h2spec "$RUNNER_TEMP/h2spec-src"
-          (cd "$RUNNER_TEMP/h2spec-src" && go build -o "$RUNNER_TEMP/h2spec" ./cmd/h2spec)
+          sh scripts/conformance/build-h2spec.sh "$RUNNER_TEMP/h2spec-src" "$RUNNER_TEMP/h2spec"
       - name: Fetch h3spec
         if: matrix.suite == 'h3'
         run: |

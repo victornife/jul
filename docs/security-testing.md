@@ -201,7 +201,7 @@ for the historical upstream dispositions.
 
 | Suite | Tool | Target |
 | --- | --- | --- |
-| `h2spec` | h2spec 2.6.0, built from its tag | HTTP/2 over TLS and h2c, static and proxied paths |
+| `h2spec` | h2spec 2.6.0, pinned commit plus the scoped early-response correction below | HTTP/2 over TLS and h2c, static and proxied paths |
 | `h3` | h3spec 0.1.13 | HTTP/3 and QUIC on a TLS listener with `http3.enabled` |
 | `autobahn` | Autobahn\|Testsuite 0.8.2 (fuzzing client) | WebSocket through the reverse proxy to an echo server |
 | `cache` | `http-tests/cache-tests` at a pinned commit | a cache-enabled proxy location; only `required` cases gate, `optimal` and `check` results are informational |
@@ -215,6 +215,44 @@ go build -tags "brotli zstd acme console otel grpc http3 importer wasmplugins st
 python3 scripts/conformance/run.py framing --jul /tmp/jul --out /tmp/conformance
 python3 scripts/conformance/run.py h2spec --jul /tmp/jul --out /tmp/conformance --h2spec /path/to/h2spec
 ```
+
+Build the corrected h2spec with
+`sh scripts/conformance/build-h2spec.sh /path/to/clean/h2spec /absolute/path/to/h2spec-binary`.
+The builder requires commit `70ac2294010887f48b18e2d64f5cccd48421fad1`
+(v2.6.0), checks and applies the committed
+[`h2spec-early-response.patch`](../scripts/conformance/h2spec-early-response.patch),
+and runs its deterministic and live TLS/h2c regression tests under the race
+detector before building. This is a local tool correction, not stock h2spec or
+an upstream-approved change. Its version records both the base commit and
+patch SHA-256; the verdict also records the actual executable's SHA-256.
+
+Only the two `http2/8.1.2.6` content-length assertions change. In addition to
+protocol errors or connection closure, they recognize a complete early
+response followed by `RST_STREAM(NO_ERROR)` on the tested stream, as allowed
+by RFC 9113 section 8.1. Response headers, body length, stream identity and
+frame ordering are checked; a bare reset, incomplete response, timeout or
+unexpected error code still fails. The shared stream-error verifier, Jul's
+production handlers, the 584-case matrix and existing allowlist are unchanged.
+No retry or post-processing of failed test results is used.
+
+The per-target `content_length_outcomes` in the verdict distinguish
+`protocol_error`, `early_response` and `connection_closed`; the text artifacts
+retain frame/header/reset traces. An early response is not evidence that body
+validation executed. Separate live tests force a body-reading handler and
+require `PROTOCOL_ERROR`, while early-response tests observe `END_STREAM`
+before sending malformed DATA, without scheduler sleeps.
+
+On 2026-10-25, the full-profile Jul CI commit
+`b1d0e03c119cdba516a28a3b6ee2793a78c7da99` reproduced the early-response path in
+400/400 delayed trials across TLS/h2c and static/proxy routes (405/501,
+`END_STREAM`, then `NO_ERROR`). Without delay, protocol errors and early
+responses can race. This explains the intermittent content-length assertion
+in [run 40224953604](https://github.com/victornife/jul/actions/runs/40224953604);
+the original artifact did not capture the complete frame sequence.
+The corrected verifier additionally accepted 40/40 actual Jul early responses
+across the same four targets with `END_STREAM` observed before sending DATA
+(no sleeps). The complete corrected suite retained 566/584 passes, 18 existing
+allowed failures and zero unexpected or stale failures.
 
 The first local baselines (2026-09-30) found four Jul defects, all fixed:
 `HEAD` through the proxy failed and marked the backend down (#534); a

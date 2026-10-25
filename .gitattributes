@@ -19,3 +19,6 @@ docs/generated/** text eol=lf
 # Retained CI evidence must match its recorded raw SHA-256 on every checkout.
 # Windows reports intentionally retain CRLF; recognize their line terminators.
 docs/audit/evidence/2026-10-12-deployment/** -text whitespace=cr-at-eol
+
+# Unified diff context needs a space before Go tabs and on otherwise blank lines.
+scripts/conformance/h2spec-early-response.patch text eol=lf -whitespace
