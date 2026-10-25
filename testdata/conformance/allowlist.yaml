@@ -80,16 +80,21 @@ autobahn: []
 # both reproduce the same seven exact failures (42/49). Native wire probes
 # confirm the six HTTP/3 residuals, including QPACK stream-error scope.
 # See docs/reviews/2026-10-18-quic-go-v0.64.0.md and owner issue #569.
+# Reverified 2026-10-25 with Go 1.27.3 and quic-go v0.64.1 using the
+# conformance-h3 artifact from Actions run 40177075989, job 121119963412:
+# same seven exact failures (42/49), no unexpected/stale cases, unchanged
+# qpack and h3spec identities. The v0.64.0...v0.64.1 upstream diff changes
+# datagram cancellation and reliable stream boundaries, not these checks.
 h3:
   - id: "h3spec QUIC servers: MUST send PROTOCOL_VIOLATION if PATH_CHALLENGE in Handshake is received [Transport 17.2.4]"
     rationale: >-
-      quic-go v0.64.0 rejects the prohibited Handshake frame with
+      quic-go v0.64.1 rejects the prohibited Handshake frame with
       FRAME_ENCODING_ERROR instead of RFC 9000 section 12.4's
       PROTOCOL_VIOLATION. No exact active upstream issue found on 2026-10-10.
     issue: https://github.com/victornife/jul/issues/569
     temporary: true
     verified_with: &h3_versions
-      github.com/quic-go/quic-go: v0.64.0
+      github.com/quic-go/quic-go: v0.64.1
       github.com/quic-go/qpack: v0.6.0
       h3spec_sha256: b5f8eddd968cb195d1e3e7698d33fa141d6b2ad56153089d89928ac0fdee28bf
   - id: "h3spec HTTP/3 servers: MUST send H3_MISSING_SETTINGS if the first control frame is not SETTINGS [HTTP/3 6.2.1]"

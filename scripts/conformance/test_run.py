@@ -1,4 +1,5 @@
 import contextlib
+from argparse import Namespace
 import hashlib
 import io
 import json
@@ -8,6 +9,46 @@ import unittest
 from unittest.mock import patch
 
 import run
+
+
+class H2specResultsTests(unittest.TestCase):
+    def test_runner_preserves_failures_and_records_actual_tool_and_outcomes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tool = root / "h2spec"
+            tool.write_bytes(b"tested h2spec binary")
+            version = "Version: 2.6.0+jul.early-response.1 (base+patch.hash)"
+
+            def invoke(command, *, stdout, stderr):
+                report = Path(command[command.index("-j") + 1])
+                report.write_text(
+                    '<testsuite><testcase package="http2/8.1.2.6" classname="early"/>'
+                    '<testcase package="http2/8.1.2.6" classname="broken">'
+                    '<failure>bare NO_ERROR</failure></testcase></testsuite>')
+                stdout.write("CONTENT_LENGTH_RESULT stream=1 outcome=early_response\n")
+
+            with (patch.object(run, "self_signed", return_value=(root / "cert", root / "key")),
+                  patch.object(run, "static_root", return_value=root),
+                  patch.object(run, "static_backend", return_value=contextlib.nullcontext(8080)),
+                  patch.object(run, "run_jul", return_value=contextlib.nullcontext()),
+                  patch.object(run.subprocess, "check_output", return_value=version + "\n") as identify,
+                  patch.object(run.subprocess, "run", side_effect=invoke),
+                  contextlib.redirect_stdout(io.StringIO())):
+                status = run.suite_h2spec(Namespace(jul="tested-jul", h2spec=str(tool)), root)
+            identify.assert_called_once_with([str(tool), "--version"], text=True)
+            report = json.loads((root / "h2spec-verdict.json").read_text())
+            self.assertEqual(status, 1)
+            self.assertEqual(report["total"], 8)
+            self.assertEqual(report["passed"], 4)
+            self.assertEqual(len(report["unexpected_failures"]), 4)
+            self.assertTrue(all(case["detail"] == "bare NO_ERROR" for case in report["unexpected_failures"]))
+            self.assertEqual(report["tool"], {
+                "version": version, "sha256": hashlib.sha256(tool.read_bytes()).hexdigest(),
+            })
+            for target in report["targets"].values():
+                self.assertEqual(target, {
+                    "total": 2, "passed": 1, "content_length_outcomes": ["early_response"],
+                })
 
 
 class VerdictTests(unittest.TestCase):

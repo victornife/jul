@@ -1,0 +1,576 @@
+diff --git a/http2/8_1_2_6_malformed_requests_and_responses.go b/http2/8_1_2_6_malformed_requests_and_responses.go
+index f40aeb1..da96d5a 100644
+--- a/http2/8_1_2_6_malformed_requests_and_responses.go
++++ b/http2/8_1_2_6_malformed_requests_and_responses.go
+@@ -25,7 +25,7 @@ func MalformedRequestsAndResponses() *spec.TestGroup {
+ 	// (Section 5.4.2) of type PROTOCOL_ERROR.
+ 	tg.AddTestCase(&spec.TestCase{
+ 		Desc:        "Sends a HEADERS frame with the \"content-length\" header field which does not equal the DATA frame payload length",
+-		Requirement: "The endpoint MUST treat this as a stream error of type PROTOCOL_ERROR.",
++		Requirement: "The endpoint MUST reject the malformed body, or complete an early response and cancel the upload with NO_ERROR (RFC 9113 section 8.1).",
+ 		Run: func(c *config.Config, conn *spec.Conn) error {
+ 			var streamID uint32 = 1
+ 
+@@ -48,7 +48,7 @@ func MalformedRequestsAndResponses() *spec.TestGroup {
+ 			conn.WriteHeaders(hp)
+ 			conn.WriteData(streamID, true, []byte("test"))
+ 
+-			return spec.VerifyStreamError(conn, http2.ErrCodeProtocol)
++			return spec.VerifyContentLengthError(conn, streamID)
+ 		},
+ 	})
+ 
+@@ -68,7 +68,7 @@ func MalformedRequestsAndResponses() *spec.TestGroup {
+ 	// (Section 5.4.2) of type PROTOCOL_ERROR.
+ 	tg.AddTestCase(&spec.TestCase{
+ 		Desc:        "Sends a HEADERS frame with the \"content-length\" header field which does not equal the sum of the multiple DATA frames payload length",
+-		Requirement: "The endpoint MUST treat this as a stream error of type PROTOCOL_ERROR.",
++		Requirement: "The endpoint MUST reject the malformed body, or complete an early response and cancel the upload with NO_ERROR (RFC 9113 section 8.1).",
+ 		Run: func(c *config.Config, conn *spec.Conn) error {
+ 			var streamID uint32 = 1
+ 
+@@ -92,7 +92,7 @@ func MalformedRequestsAndResponses() *spec.TestGroup {
+ 			conn.WriteData(streamID, false, []byte("test"))
+ 			conn.WriteData(streamID, true, []byte("test"))
+ 
+-			return spec.VerifyStreamError(conn, http2.ErrCodeProtocol)
++			return spec.VerifyContentLengthError(conn, streamID)
+ 		},
+ 	})
+ 
+diff --git a/spec/content_length.go b/spec/content_length.go
+new file mode 100644
+index 0000000..9695640
+--- /dev/null
++++ b/spec/content_length.go
+@@ -0,0 +1,167 @@
++package spec
++
++import (
++	"errors"
++	"fmt"
++	"io"
++	"strconv"
++	"syscall"
++	"time"
++
++	"github.com/summerwind/h2spec/log"
++	"golang.org/x/net/http2"
++)
++
++// VerifyContentLengthError also recognizes an early response followed by upload
++// cancellation (RFC 9113 section 8.1). Other malformed-message tests stay strict.
++func VerifyContentLengthError(conn *Conn, streamID uint32) error {
++	outcome, err := verifyContentLengthError(conn, streamID)
++	if err == nil {
++		log.Println(fmt.Sprintf("CONTENT_LENGTH_RESULT stream=%d outcome=%s", streamID, outcome))
++	}
++	return err
++}
++
++func verifyContentLengthError(conn *Conn, streamID uint32) (string, error) {
++	framer := conn.framer
++	illegal, decoder, limit := framer.AllowIllegalReads, framer.ReadMetaHeaders, framer.MaxHeaderListSize
++	framer.AllowIllegalReads = false
++	framer.ReadMetaHeaders = conn.decoder
++	framer.MaxHeaderListSize = 64 << 10
++	defer func() {
++		framer.AllowIllegalReads, framer.ReadMetaHeaders, framer.MaxHeaderListSize = illegal, decoder, limit
++	}()
++	if err := conn.SetReadDeadline(time.Now().Add(conn.Timeout)); err != nil {
++		return "", err
++	}
++
++	started, ended := false, false
++	status := 0
++	var length *uint64
++	var received uint64
++	fail := func(reason string) (string, error) {
++		return "", &TestError{
++			Expected: []string{"PROTOCOL_ERROR or connection closure; alternatively, a complete early response followed by RST_STREAM(NO_ERROR) on the tested stream"},
++			Actual:   reason,
++		}
++	}
++	finish := func() error {
++		if length != nil && status != 304 && received != *length {
++			return fmt.Errorf("response content-length=%d, received=%d", *length, received)
++		}
++		ended = true
++		return nil
++	}
++
++	for {
++		frame, err := framer.ReadFrame()
++		if err != nil {
++			if errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) {
++				if started && !ended {
++					return fail("connection closed during an incomplete response")
++				}
++				return "connection_closed", nil
++			}
++			return fail(fmt.Sprintf("reading content-length verdict: %v", err))
++		}
++		log.Println(fmt.Sprintf("CONTENT_LENGTH_FRAME %s", frame.Header()))
++		switch f := frame.(type) {
++		case *http2.MetaHeadersFrame:
++			if f.StreamID != streamID || f.Truncated || ended {
++				return fail("unexpected stream, oversized headers, or headers after END_STREAM")
++			}
++			pseudo := f.PseudoFields()
++			if started {
++				if len(pseudo) != 0 || !f.StreamEnded() {
++					return fail("invalid response trailers")
++				}
++				for _, field := range f.RegularFields() {
++					switch field.Name {
++					case "content-length", "connection", "proxy-connection", "keep-alive", "transfer-encoding", "upgrade":
++						return fail("forbidden field in response trailers")
++					}
++				}
++				if err := finish(); err != nil {
++					return fail(err.Error())
++				}
++				continue
++			}
++			if len(pseudo) != 1 || pseudo[0].Name != ":status" {
++				return fail("missing or invalid response :status")
++			}
++			value := pseudo[0].Value
++			status, err = strconv.Atoi(value)
++			if err != nil || len(value) != 3 || status < 100 || status > 999 || status == 101 {
++				return fail("invalid HTTP/2 response status")
++			}
++			log.Println(fmt.Sprintf("CONTENT_LENGTH_HEADERS stream=%d status=%d end=%t", streamID, status, f.StreamEnded()))
++			for _, field := range f.RegularFields() {
++				switch field.Name {
++				case "connection", "proxy-connection", "keep-alive", "transfer-encoding", "upgrade":
++					return fail("connection-specific field in response")
++				case "content-length":
++					if length != nil {
++						return fail("duplicate response content-length")
++					}
++					n, err := strconv.ParseUint(field.Value, 10, 63)
++					if err != nil || field.Value == "" || field.Value[0] == '+' {
++						return fail("invalid response content-length")
++					}
++					if status < 200 || status == 204 {
++						return fail("content-length in an informational or 204 response")
++					}
++					length = &n
++				}
++			}
++			if status < 200 {
++				if f.StreamEnded() {
++					return fail("informational response ended the stream")
++				}
++				continue
++			}
++			started = true
++			if f.StreamEnded() {
++				if err := finish(); err != nil {
++					return fail(err.Error())
++				}
++			}
++		case *http2.DataFrame:
++			if f.StreamID != streamID || !started || ended {
++				return fail("DATA on the wrong stream or outside a final response")
++			}
++			received += uint64(len(f.Data()))
++			if (status == 204 || status == 304) && received != 0 {
++				return fail("DATA in a response that cannot have a body")
++			}
++			if length != nil && status != 304 && received > *length {
++				return fail("response exceeds its content-length")
++			}
++			conn.updateWindowSize(f)
++			if f.StreamEnded() {
++				if err := finish(); err != nil {
++					return fail(err.Error())
++				}
++			}
++		case *http2.RSTStreamFrame:
++			if f.StreamID != streamID {
++				return fail("RST_STREAM on the wrong stream")
++			}
++			log.Println(fmt.Sprintf("CONTENT_LENGTH_RESET stream=%d code=%s", streamID, f.ErrCode))
++			if f.ErrCode == http2.ErrCodeProtocol {
++				return "protocol_error", nil
++			}
++			if f.ErrCode == http2.ErrCodeNo && ended {
++				return "early_response", nil
++			}
++			return fail("unexpected reset code or reset before a complete final response")
++		case *http2.GoAwayFrame:
++			if f.ErrCode == http2.ErrCodeProtocol {
++				return "protocol_error", nil
++			}
++			return fail("unexpected GOAWAY error code")
++		case *http2.SettingsFrame, *http2.PingFrame, *http2.WindowUpdateFrame:
++		default:
++			return fail(fmt.Sprintf("unexpected frame: %T", frame))
++		}
++	}
++}
+diff --git a/spec/content_length_test.go b/spec/content_length_test.go
+new file mode 100644
+index 0000000..e654f4c
+--- /dev/null
++++ b/spec/content_length_test.go
+@@ -0,0 +1,357 @@
++package spec
++
++import (
++	"bytes"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"net/http/httptest"
++	"strconv"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/summerwind/h2spec/config"
++	"golang.org/x/net/http2"
++	"golang.org/x/net/http2/hpack"
++)
++
++type verdictTimeout struct{}
++
++func (verdictTimeout) Error() string   { return "verdict timeout" }
++func (verdictTimeout) Timeout() bool   { return true }
++func (verdictTimeout) Temporary() bool { return true }
++
++type verdictConn struct {
++	*bytes.Reader
++	terminal error
++}
++
++func (c verdictConn) Read(p []byte) (int, error) {
++	n, err := c.Reader.Read(p)
++	if err == io.EOF {
++		err = c.terminal
++	}
++	return n, err
++}
++func (verdictConn) Write(p []byte) (int, error)      { return len(p), nil }
++func (verdictConn) Close() error                     { return nil }
++func (verdictConn) LocalAddr() net.Addr              { return &net.TCPAddr{} }
++func (verdictConn) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
++func (verdictConn) SetDeadline(time.Time) error      { return nil }
++func (verdictConn) SetReadDeadline(time.Time) error  { return nil }
++func (verdictConn) SetWriteDeadline(time.Time) error { return nil }
++
++type verdictScript struct {
++	t *testing.T
++	bytes.Buffer
++	framer *http2.Framer
++}
++
++func (s *verdictScript) write(err error) {
++	s.t.Helper()
++	if err != nil {
++		s.t.Fatal(err)
++	}
++}
++
++func (s *verdictScript) headers(stream uint32, status string, end bool, extra ...hpack.HeaderField) {
++	s.t.Helper()
++	var block bytes.Buffer
++	encoder := hpack.NewEncoder(&block)
++	fields := extra
++	if status != "" {
++		fields = append([]hpack.HeaderField{{Name: ":status", Value: status}}, fields...)
++	}
++	for _, field := range fields {
++		s.write(encoder.WriteField(field))
++	}
++	b := block.Bytes()
++	n := len(b)
++	if n > 16384 {
++		n = 16384
++	}
++	s.write(s.framer.WriteHeaders(http2.HeadersFrameParam{
++		StreamID: stream, EndHeaders: n == len(b), EndStream: end, BlockFragment: b[:n],
++	}))
++	for b = b[n:]; len(b) > 0; b = b[n:] {
++		n = len(b)
++		if n > 16384 {
++			n = 16384
++		}
++		s.write(s.framer.WriteContinuation(stream, n == len(b), b[:n]))
++	}
++}
++
++func (s *verdictScript) response(status string) {
++	s.headers(1, status, false, HeaderField("content-length", "2"))
++	s.write(s.framer.WriteData(1, true, []byte("ok")))
++}
++
++func TestContentLengthVerdicts(t *testing.T) {
++	tests := []struct {
++		name    string
++		script  func(*verdictScript)
++		outcome string
++		close   bool
++	}{
++		{"protocol reset", func(s *verdictScript) { s.write(s.framer.WriteRSTStream(1, http2.ErrCodeProtocol)) }, "protocol_error", false},
++		{"protocol goaway", func(s *verdictScript) { s.write(s.framer.WriteGoAway(1, http2.ErrCodeProtocol, nil)) }, "protocol_error", false},
++		{"connection closure", func(s *verdictScript) {}, "connection_closed", true},
++		{"early 405", func(s *verdictScript) { s.response("405"); s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo)) }, "early_response", false},
++		{"early 501", func(s *verdictScript) { s.response("501"); s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo)) }, "early_response", false},
++		{"early 200", func(s *verdictScript) { s.response("200"); s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo)) }, "early_response", false},
++		{"empty 204", func(s *verdictScript) {
++			s.headers(1, "204", true)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "early_response", false},
++		{"informational then final", func(s *verdictScript) {
++			s.headers(1, "103", false)
++			s.response("405")
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "early_response", false},
++		{"trailers", func(s *verdictScript) {
++			s.headers(1, "405", false)
++			s.write(s.framer.WriteData(1, false, []byte("ok")))
++			s.headers(1, "", true, HeaderField("x-result", "done"))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "early_response", false},
++		{"continuation", func(s *verdictScript) {
++			var block bytes.Buffer
++			s.write(hpack.NewEncoder(&block).WriteField(HeaderField(":status", "405")))
++			b := block.Bytes()
++			s.write(s.framer.WriteHeaders(http2.HeadersFrameParam{StreamID: 1, EndStream: true, BlockFragment: b[:1]}))
++			s.write(s.framer.WriteContinuation(1, true, b[1:]))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "early_response", false},
++		{"bare NO_ERROR", func(s *verdictScript) { s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo)) }, "", false},
++		{"incomplete response", func(s *verdictScript) {
++			s.headers(1, "405", false)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"reset before completion", func(s *verdictScript) {
++			s.headers(1, "405", false)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++			s.write(s.framer.WriteData(1, true, []byte("ok")))
++		}, "", false},
++		{"incomplete response then close", func(s *verdictScript) { s.headers(1, "405", false) }, "", true},
++		{"complete response without reset", func(s *verdictScript) { s.response("405") }, "", false},
++		{"wrong response stream", func(s *verdictScript) {
++			s.headers(3, "405", true)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"wrong DATA stream", func(s *verdictScript) { s.headers(1, "405", false); s.write(s.framer.WriteData(3, true, nil)) }, "", false},
++		{"wrong reset stream", func(s *verdictScript) { s.response("405"); s.write(s.framer.WriteRSTStream(3, http2.ErrCodeNo)) }, "", false},
++		{"wrong protocol reset stream", func(s *verdictScript) { s.write(s.framer.WriteRSTStream(3, http2.ErrCodeProtocol)) }, "", false},
++		{"wrong reset code", func(s *verdictScript) { s.response("405"); s.write(s.framer.WriteRSTStream(1, http2.ErrCodeCancel)) }, "", false},
++		{"wrong goaway code", func(s *verdictScript) { s.write(s.framer.WriteGoAway(1, http2.ErrCodeNo, nil)) }, "", false},
++		{"missing status", func(s *verdictScript) {
++			s.headers(1, "", true, HeaderField("x-test", "value"))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"invalid status", func(s *verdictScript) {
++			s.headers(1, "+20", true)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"HTTP1 upgrade", func(s *verdictScript) {
++			s.headers(1, "101", true)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"informational END_STREAM", func(s *verdictScript) {
++			s.headers(1, "103", true)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"invalid HPACK", func(s *verdictScript) {
++			s.write(s.framer.WriteHeaders(http2.HeadersFrameParam{StreamID: 1, EndHeaders: true, EndStream: true, BlockFragment: []byte{0xff}}))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"response length too short", func(s *verdictScript) {
++			s.headers(1, "405", false, HeaderField("content-length", "3"))
++			s.write(s.framer.WriteData(1, true, []byte("ok")))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"response length too long", func(s *verdictScript) {
++			s.headers(1, "405", false, HeaderField("content-length", "1"))
++			s.write(s.framer.WriteData(1, true, []byte("ok")))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"negative response length", func(s *verdictScript) {
++			s.headers(1, "405", true, HeaderField("content-length", "-1"))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"duplicate response length", func(s *verdictScript) {
++			s.headers(1, "405", true, HeaderField("content-length", "0"), HeaderField("content-length", "0"))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"connection header", func(s *verdictScript) {
++			s.headers(1, "405", true, HeaderField("connection", "close"))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"invalid informational headers", func(s *verdictScript) {
++			s.headers(1, "103", false, HeaderField("connection", "close"))
++			s.response("405")
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"informational content-length", func(s *verdictScript) {
++			s.headers(1, "103", false, HeaderField("content-length", "0"))
++			s.response("405")
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"invalid trailers", func(s *verdictScript) {
++			s.headers(1, "405", false)
++			s.headers(1, "", true, HeaderField("transfer-encoding", "chunked"))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"DATA before headers", func(s *verdictScript) {
++			s.write(s.framer.WriteData(1, true, nil))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"DATA after END_STREAM", func(s *verdictScript) {
++			s.response("405")
++			s.write(s.framer.WriteData(1, true, nil))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"DATA for 204", func(s *verdictScript) {
++			s.headers(1, "204", false)
++			s.write(s.framer.WriteData(1, true, []byte("bad")))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"duplicate final headers", func(s *verdictScript) {
++			s.headers(1, "405", false)
++			s.headers(1, "405", true)
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"oversized headers", func(s *verdictScript) {
++			s.headers(1, "405", true, HeaderField("x-large", strings.Repeat("x", 64<<10)))
++			s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++		}, "", false},
++		{"timeout", func(s *verdictScript) { s.write(s.framer.WriteSettings()) }, "", false},
++	}
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			s := &verdictScript{t: t}
++			s.framer = http2.NewFramer(&s.Buffer, nil)
++			s.framer.AllowIllegalWrites = true
++			test.script(s)
++			terminal := error(&net.OpError{Op: "read", Net: "tcp", Err: verdictTimeout{}})
++			if test.close {
++				terminal = io.EOF
++			}
++			wire := verdictConn{Reader: bytes.NewReader(s.Bytes()), terminal: terminal}
++			conn := &Conn{Conn: wire, Timeout: time.Second,
++				framer: http2.NewFramer(io.Discard, wire), decoder: hpack.NewDecoder(4096, nil)}
++			outcome, err := verifyContentLengthError(conn, 1)
++			if (err == nil) != (test.outcome != "") || outcome != test.outcome {
++				t.Fatalf("outcome=%q err=%v; want %q", outcome, err, test.outcome)
++			}
++		})
++	}
++}
++
++func TestGenericStreamErrorStillRejectsEarlyResponse(t *testing.T) {
++	s := &verdictScript{t: t}
++	s.framer = http2.NewFramer(&s.Buffer, nil)
++	s.response("405")
++	s.write(s.framer.WriteRSTStream(1, http2.ErrCodeNo))
++	wire := verdictConn{Reader: bytes.NewReader(s.Bytes()), terminal: &net.OpError{Op: "read", Net: "tcp", Err: verdictTimeout{}}}
++	conn := &Conn{Conn: wire, Timeout: time.Second, framer: http2.NewFramer(io.Discard, wire)}
++	if err := VerifyStreamError(conn, http2.ErrCodeProtocol); err == nil {
++		t.Fatal("generic stream-error verifier accepted NO_ERROR")
++	}
++}
++
++func TestContentLengthLiveServer(t *testing.T) {
++	for _, secure := range []bool{false, true} {
++		for _, consume := range []bool{false, true} {
++			t.Run(fmt.Sprintf("tls=%t/consume=%t", secure, consume), func(t *testing.T) {
++				bodyError := make(chan error, 1)
++				server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++					if consume {
++						_, err := io.Copy(io.Discard, r.Body)
++						bodyError <- err
++					}
++					http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
++				}))
++				if secure {
++					server.EnableHTTP2 = true
++					server.StartTLS()
++				} else {
++					var protocols http.Protocols
++					protocols.SetUnencryptedHTTP2(true)
++					server.Config.Protocols = &protocols
++					server.Start()
++				}
++				defer server.Close()
++				host, port, err := net.SplitHostPort(server.Listener.Addr().String())
++				if err != nil {
++					t.Fatal(err)
++				}
++				number, err := strconv.Atoi(port)
++				if err != nil {
++					t.Fatal(err)
++				}
++				conf := &config.Config{Host: host, Port: number, Path: "/", TLS: secure, Insecure: true, Timeout: 5 * time.Second}
++				conn, err := Dial(conf)
++				if err != nil {
++					t.Fatal(err)
++				}
++				defer conn.Close()
++				if err := conn.Handshake(); err != nil {
++					t.Fatal(err)
++				}
++				headers := CommonHeaders(conf)
++				headers[0].Value = "POST"
++				headers = append(headers, HeaderField("content-length", "1"))
++				if err := conn.WriteHeaders(http2.HeadersFrameParam{
++					StreamID: 1, EndHeaders: true, BlockFragment: conn.EncodeHeaders(headers),
++				}); err != nil {
++					t.Fatal(err)
++				}
++				if !consume {
++					// Observe END_STREAM before sending DATA: no scheduler timing assumptions.
++					var prefix bytes.Buffer
++					conn.framer = http2.NewFramer(conn.Conn, io.TeeReader(conn.Conn, &prefix))
++					if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
++						t.Fatal(err)
++					}
++					for {
++						frame, err := conn.framer.ReadFrame()
++						if err != nil {
++							t.Fatal(err)
++						}
++						data, ok := frame.(*http2.DataFrame)
++						if ok && data.StreamID == 1 && data.StreamEnded() {
++							break
++						}
++					}
++					conn.framer = http2.NewFramer(conn.Conn, io.MultiReader(bytes.NewReader(prefix.Bytes()), conn.Conn))
++				}
++				if err := conn.WriteData(1, false, []byte("test")); err != nil {
++					t.Fatal(err)
++				}
++				if err := conn.WriteData(1, true, []byte("test")); err != nil {
++					t.Fatal(err)
++				}
++				outcome, err := verifyContentLengthError(conn, 1)
++				want := "early_response"
++				if consume {
++					want = "protocol_error"
++				}
++				if err != nil || outcome != want {
++					t.Fatalf("outcome=%q err=%v; want %q", outcome, err, want)
++				}
++				if consume {
++					select {
++					case err := <-bodyError:
++						if err == nil {
++							t.Fatal("body reader accepted malformed content-length")
++						}
++					case <-time.After(5 * time.Second):
++						t.Fatal("body reader did not finish")
++					}
++				}
++			})
++		}
++	}
++}
