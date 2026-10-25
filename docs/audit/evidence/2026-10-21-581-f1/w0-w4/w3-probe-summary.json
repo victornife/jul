@@ -1,5 +1,5 @@
 {
-  "duration_ms": 20009,
+  "duration_ms": 20036,
   "workers": 0,
   "total_requests": 0,
   "portal_html_count": 0,
@@ -16,7 +16,7 @@
   "protocols": {},
   "held_opened": 0,
   "held_closed": 0,
-  "probe_portal_ok": 20,
+  "probe_portal_ok": 19,
   "probe_portal_fail": 0,
   "probe_dash_ok": 0,
   "probe_dash_fail": 0,

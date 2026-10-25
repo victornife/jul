@@ -1,5 +1,5 @@
 {
-  "duration_ms": 12238,
+  "duration_ms": 12232,
   "workers": 8,
   "total_requests": 368,
   "portal_html_count": 258,
@@ -24,16 +24,16 @@
   "probe_dash_fail": 0,
   "ttfb_min_ms": 0,
   "ttfb_p50_ms": 0,
-  "ttfb_p95_ms": 57,
+  "ttfb_p95_ms": 56,
   "ttfb_p99_ms": 60,
-  "ttfb_max_ms": 62,
-  "ttfb_avg_ms": 11.078804347826088,
+  "ttfb_max_ms": 66,
+  "ttfb_avg_ms": 10.921195652173912,
   "latency_min_ms": 0,
   "latency_p50_ms": 0,
-  "latency_p95_ms": 57,
+  "latency_p95_ms": 56,
   "latency_p99_ms": 60,
-  "latency_max_ms": 62,
-  "latency_avg_ms": 11.396739130434783,
+  "latency_max_ms": 66,
+  "latency_avg_ms": 11.252717391304348,
   "by_class": {
     "dash_auth": {
       "count": 73,
@@ -42,15 +42,15 @@
       "status_403": 0,
       "status_429": 0,
       "status_5xx": 55,
-      "ttfb_p50_ms": 55,
+      "ttfb_p50_ms": 54,
       "ttfb_p95_ms": 60,
-      "ttfb_p99_ms": 62,
-      "latency_min_ms": 53,
-      "latency_p50_ms": 55,
+      "ttfb_p99_ms": 66,
+      "latency_min_ms": 52,
+      "latency_p50_ms": 54,
       "latency_p95_ms": 60,
-      "latency_p99_ms": 62,
-      "latency_max_ms": 62,
-      "latency_avg_ms": 55.87671232876713
+      "latency_p99_ms": 66,
+      "latency_max_ms": 66,
+      "latency_avg_ms": 54.95890410958904
     },
     "dash_excluded": {
       "count": 0,
@@ -82,9 +82,9 @@
       "latency_min_ms": 0,
       "latency_p50_ms": 1,
       "latency_p95_ms": 4,
-      "latency_p99_ms": 10,
-      "latency_max_ms": 10,
-      "latency_avg_ms": 1.6756756756756757
+      "latency_p99_ms": 5,
+      "latency_max_ms": 5,
+      "latency_avg_ms": 1.3513513513513513
     },
     "portal_html": {
       "count": 258,
@@ -94,26 +94,26 @@
       "status_429": 0,
       "status_5xx": 0,
       "ttfb_p50_ms": 0,
-      "ttfb_p95_ms": 0,
+      "ttfb_p95_ms": 1,
       "ttfb_p99_ms": 1,
       "latency_min_ms": 0,
       "latency_p50_ms": 0,
       "latency_p95_ms": 1,
       "latency_p99_ms": 2,
-      "latency_max_ms": 3,
-      "latency_avg_ms": 0.2054263565891473
+      "latency_max_ms": 5,
+      "latency_avg_ms": 0.3062015503875969
     }
   },
   "by_phase": {
     "healthy": {
-      "count": 93,
+      "count": 95,
       "dash_auth_200": 18,
       "dash_auth_403": 0,
       "dash_auth_5xx": 0,
       "oracle_violations": 0
     },
     "outage": {
-      "count": 275,
+      "count": 273,
       "dash_auth_200": 0,
       "dash_auth_403": 0,
       "dash_auth_5xx": 55,
