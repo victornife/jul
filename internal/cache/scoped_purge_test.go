@@ -1930,5 +1930,3 @@ func TestAdversarialRounds_ActiveFenceRetentionHeaderOnlyStripAndHighWaterError(
 		_, _, _, _, _, _ = readDiskEntryMetaWithKeyGen(p)
 	}
 }
-
-

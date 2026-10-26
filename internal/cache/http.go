@@ -119,10 +119,10 @@ type cacheWriter struct {
 	// noStore marks a response that can never be stored whatever its headers
 	// say: the connection was hijacked, the status is a protocol switch, or the
 	// body is a live event stream.
-	noStore         bool
-	hijacked        bool
-	writeErr        error
-	headerCheck     func(code int, h http.Header) bool
+	noStore           bool
+	hijacked          bool
+	writeErr          error
+	headerCheck       func(code int, h http.Header) bool
 	onAbandon         func()
 	tagHeaders        []string
 	stripTagHeaders   bool

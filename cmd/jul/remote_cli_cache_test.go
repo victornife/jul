@@ -252,4 +252,3 @@ func TestAuditR6_ConsoleSnippetShellQuotingPreservesLiteralArgv(t *testing.T) {
 		t.Fatalf("expected literal %q in captured argv %v (snippet: %s)", dangerousTag, lines, snippet)
 	}
 }
-

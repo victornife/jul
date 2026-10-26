@@ -594,11 +594,11 @@ func (p *countingScopedPurger) Purge()            {}
 func (p *countingScopedPurger) Delete(key string) {}
 func (p *countingScopedPurger) PreviewScope(sel cache.NormalizedSelector, opts cache.PreviewOptions) cache.PurgePreview {
 	return cache.PurgePreview{
-		Selector:       sel,
-		CountAccuracy:  "exact",
-		ScanLimit:      10000,
-		AsOf:           time.Now().UTC(),
-		BroadScope:     sel.BroadScope,
+		Selector:      sel,
+		CountAccuracy: "exact",
+		ScanLimit:     10000,
+		AsOf:          time.Now().UTC(),
+		BroadScope:    sel.BroadScope,
 		CacheSequence: 1,
 		Samples:       nil,
 	}
@@ -1067,4 +1067,3 @@ func TestAuditR5_R6_QueryRoundtripWireArraysAndCountBasedBroadGuard(t *testing.T
 		t.Fatalf("expected verifyLivePurgePermission to reject missing credential")
 	}
 }
-

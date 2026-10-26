@@ -64,15 +64,15 @@ type Cache struct {
 	// overwrite a newer disk entry. Entries in keyGen are reference-counted by
 	// in-flight operations and tier residency (inMem/inDisk), and are reclaimed
 	// in O(1) time once a key is idle and absent from both tiers.
-	genMu               sync.Mutex
-	genSeq              atomic.Uint64
-	keyGen              map[string]*keyGenState
-	purgeGen            uint64
-	byHost              map[string]map[string]struct{}
-	baseVariants        map[string]map[string]struct{}
-	tagIndex            map[string]map[string]map[string]struct{}
-	baseIndexedTags     map[string][]string
-	totalTagLinks       int
+	genMu                     sync.Mutex
+	genSeq                    atomic.Uint64
+	keyGen                    map[string]*keyGenState
+	purgeGen                  uint64
+	byHost                    map[string]map[string]struct{}
+	baseVariants              map[string]map[string]struct{}
+	tagIndex                  map[string]map[string]map[string]struct{}
+	baseIndexedTags           map[string][]string
+	totalTagLinks             int
 	fences                    []selectorFence
 	fenceFloorGen             uint64
 	hostFenceFloorGen         map[string]uint64
@@ -82,9 +82,9 @@ type Cache struct {
 	latestFenceGen            atomic.Uint64
 	incompleteFenceGen        atomic.Uint64
 	originOpSeq               uint64
-	inflightOps         map[uint64]uint64
-	onBeforeReclaim     func(key string)
-	onAfterFenceInstall func(sel NormalizedSelector, fenceGen uint64)
+	inflightOps               map[uint64]uint64
+	onBeforeReclaim           func(key string)
+	onAfterFenceInstall       func(sel NormalizedSelector, fenceGen uint64)
 
 	// observe, when set, receives one bounded outcome per revalidation
 	// decision. It is installed by the composition root so the cache does not
