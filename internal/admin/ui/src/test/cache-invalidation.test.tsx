@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -475,6 +475,7 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
   });
 
   afterEach(() => {
+    cleanup();
     authToken.clear();
     globalThis.fetch = realFetch;
     vi.restoreAllMocks();
@@ -685,6 +686,8 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     expect(await screen.findByText(/Recovery guidance:/)).toBeInTheDocument();
 
     const retryBtn = screen.getByRole("button", { name: /Retry invalidation \(cp_2_partial\)/ });
+    expect(retryBtn).toBeDisabled();
+    fireEvent.click(screen.getByLabelText("Confirm retry scope"));
     fireEvent.click(retryBtn);
     await waitFor(() => {
       expect(purgeCalls).toBe(2);
@@ -739,13 +742,13 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     expect(await screen.findByText(/\[NO STORED MATCHES\]/)).toBeInTheDocument();
 
     // Dispatch forbidden event while confirmation is open.
-    window.dispatchEvent(new CustomEvent("jul:forbidden"));
+    fireEvent(window, new CustomEvent("jul:forbidden"));
 
     expect(await screen.findByText(/\[PERMISSION CHANGE\]/)).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Invalidation preview" })).not.toBeInTheDocument();
   });
 
-  it("renders tag header controls in TrafficControlEditor cache drawer", () => {
+  it("renders tag header controls in TrafficControlEditor cache drawer", async () => {
     globalThis.fetch = vi.fn(() =>
       Promise.resolve(new Response("{}", { status: 200 })),
     );
@@ -779,6 +782,7 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
       </QueryClientProvider>,
     );
 
+    await screen.findByRole("region", { name: "Scoped cache invalidation" });
     const tagHeaderInput = screen.getByLabelText(/Trusted origin tag headers/);
     expect(tagHeaderInput).toHaveValue("Cache-Tag");
     expect(
@@ -1136,6 +1140,7 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     });
 
     // Retry must also send the original unredacted selector, NOT result.selector.
+    fireEvent.click(screen.getByLabelText("Confirm retry scope"));
     fireEvent.click(screen.getByRole("button", { name: /Retry invalidation/ }));
     await waitFor(() => {
       expect(sentPurgeBodies.length).toBe(2);
@@ -1164,6 +1169,7 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     const retryRedactedBtn = await screen.findByRole("button", {
       name: "Retry invalidation (cp_redacted_lookup)",
     });
+    fireEvent.click(screen.getByLabelText("Confirm retry scope"));
     fireEvent.click(retryRedactedBtn);
     expect(await screen.findByText(/re-enter the full URL above/)).toBeInTheDocument();
     expect(sentPurgeBodies.length).toBe(2);

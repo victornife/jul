@@ -1833,7 +1833,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				}
 				if st != nil {
 					st.inMem = c.mem.hasKey(k)
-					st.memBytes = 0
+					if !st.inMem {
+						st.memBytes = 0
+					}
 					c.maybeReclaimLocked(st)
 				}
 			}

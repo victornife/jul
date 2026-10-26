@@ -1148,6 +1148,23 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    already-admitted readers may finish once their retirement is durable.
    Old fenced fills cannot mutate Vary membership or delete newer variants.
 
+### Console retry confirmation
+
+The Console retries a terminal incomplete operation using its canonical
+`retry_operation_id`, without supplying an `Idempotency-Key`. Initial executions
+retain a stable generated key; a looked-up operation never borrows that key.
+Every retry requires checking **Confirm retry scope** for the displayed
+operation. This acknowledgement permits broad invalidation within that
+operation's original selector; it is not inferred from a preview, processed
+resource counts, or another operation. If no cutoff was recorded, retry can
+evaluate the selector against the current cache, so a formerly narrow operation
+may now match a broad set of resources.
+
+Clearing a preview, changing credentials or permissions, checking operation
+status, or submitting a retry clears the retry acknowledgement. Running
+operations cannot be retried until a terminal status is observed. A new
+acknowledgement is required if a retry remains incomplete or fails.
+
 ## Known limitations
 
 Product limitations — deliberate scope, not defects:

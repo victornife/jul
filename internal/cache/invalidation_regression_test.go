@@ -19,6 +19,91 @@ import (
 	"jul/internal/config"
 )
 
+func TestPurgeRetryPreservesFreshVaryPreviewAccounting(t *testing.T) {
+	t.Parallel()
+
+	for _, disk := range []bool{false, true} {
+		t.Run(fmt.Sprintf("disk=%t", disk), func(t *testing.T) {
+			t.Parallel()
+			cfg := config.CacheConfig{
+				MemoryMaxSize: config.Size(2 << 20),
+				DefaultTTL:    config.Duration(5 * time.Minute),
+				TagHeaders:    []string{"Cache-Tag"},
+			}
+			if disk {
+				cfg.DiskPath, cfg.DiskMaxSize = t.TempDir(), config.Size(8<<20)
+			}
+			c := newTestCache(t, cfg)
+			enCalls := 0
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				w.Header().Set("Vary", "Accept-Language")
+				if r.Header.Get("Accept-Language") == "en" {
+					enCalls++
+					tag := "A"
+					if enCalls > 1 {
+						tag = "C"
+					}
+					w.Header().Set("Cache-Tag", tag)
+					_, _ = fmt.Fprintf(w, "en-v%d", enCalls)
+				} else {
+					w.Header().Set("Cache-Tag", "B")
+					_, _ = io.WriteString(w, "fr-v1")
+				}
+			}))
+			serve := func(lang string) *httptest.ResponseRecorder {
+				rr := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/doc", nil)
+				req.Header.Set("Accept-Language", lang)
+				h.ServeHTTP(rr, req)
+				return rr
+			}
+			serve("en")
+			serve("fr")
+			tagA, err := ParseSelector(Selector{Kind: SelectorTag, Host: "portal.example.com", Tags: []string{"A"}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			c.onAfterFenceInstall = func(NormalizedSelector, uint64) { cancel() }
+			initial, err := c.InvalidateScope(ctx, tagA, InvalidateOptions{})
+			if !errors.Is(err, context.Canceled) || initial.State != "canceled" || initial.FenceSequence == 0 {
+				t.Fatalf("canceled purge: res=%+v err=%v", initial, err)
+			}
+			c.onAfterFenceInstall = nil
+			fresh := serve("en")
+			if fresh.Header().Get("X-Cache") != "MISS" || fresh.Body.String() != "en-v2" {
+				t.Fatalf("fresh variant: X-Cache=%q body=%q", fresh.Header().Get("X-Cache"), fresh.Body.String())
+			}
+			exact, err := ParseSelector(Selector{Kind: SelectorExactURL, Host: "portal.example.com", URI: "/doc"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := c.PreviewScope(exact, PreviewOptions{})
+			if before.MemoryEntries != 2 || before.MatchedRepresentations != 1 || before.MemoryBytes <= 0 {
+				t.Fatalf("expected a fresh variant and its stub, excluding the fenced variant: %+v", before)
+			}
+			retry, err := c.InvalidateScope(context.Background(), tagA, InvalidateOptions{ReuseFenceGen: initial.FenceSequence})
+			if err != nil || retry.State != "succeeded" {
+				t.Fatalf("retry: res=%+v err=%v", retry, err)
+			}
+			after := c.PreviewScope(exact, PreviewOptions{})
+			if before.MemoryEntries != after.MemoryEntries ||
+				before.MatchedRepresentations != after.MatchedRepresentations ||
+				before.MemoryBytes != after.MemoryBytes ||
+				before.DiskEntries != after.DiskEntries ||
+				before.DiskBytes != after.DiskBytes {
+				t.Fatalf("retry changed accounting for protected fresh entries: before=%+v after=%+v", before, after)
+			}
+			hit := serve("en")
+			if hit.Header().Get("X-Cache") != "HIT" || hit.Body.String() != "en-v2" {
+				t.Fatalf("fresh data was not preserved: X-Cache=%q body=%q", hit.Header().Get("X-Cache"), hit.Body.String())
+			}
+		})
+	}
+}
+
 func TestPurgeWaitsForInFlightDiskPublication(t *testing.T) {
 	t.Parallel()
 

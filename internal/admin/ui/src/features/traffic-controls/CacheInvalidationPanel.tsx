@@ -331,6 +331,7 @@ export function CacheInvalidationPanel({
   const [executeBusy, setExecuteBusy] = useState(false);
   const [activeIdempotencyKey, setActiveIdempotencyKey] = useState<string>("");
   const [result, setResult] = useState<CachePurgeResponse | null>(null);
+  const [retryConfirmedOperationId, setRetryConfirmedOperationId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [permissionRevokedNotice, setPermissionRevokedNotice] = useState<string | null>(null);
   const [lookupOpId, setLookupOpId] = useState<string>("");
@@ -372,6 +373,7 @@ export function CacheInvalidationPanel({
     setPreview(null);
     setConfirmedSelector(null);
     setConfirmBroad(false);
+    setRetryConfirmedOperationId(null);
     setErrorMsg(null);
     setPermissionRevokedNotice(null);
   };
@@ -383,6 +385,7 @@ export function CacheInvalidationPanel({
       setPreviewBusy(false);
       setConfirmedSelector(null);
       setConfirmBroad(false);
+      setRetryConfirmedOperationId(null);
       setPreview((prev) => {
         if (prev !== null) {
           setPermissionRevokedNotice(
@@ -403,10 +406,13 @@ export function CacheInvalidationPanel({
   }, []);
 
   useEffect(() => {
-    if (!canPurge && preview !== null) {
-      setPermissionRevokedNotice(
-        "Current principal no longer holds cache:purge permission. Execution is disabled.",
-      );
+    if (!canPurge) {
+      setRetryConfirmedOperationId(null);
+      if (preview !== null) {
+        setPermissionRevokedNotice(
+          "Current principal no longer holds cache:purge permission. Execution is disabled.",
+        );
+      }
     }
   }, [canPurge, preview]);
 
@@ -453,6 +459,7 @@ export function CacheInvalidationPanel({
     setErrorMsg(null);
     setPermissionRevokedNotice(null);
     setResult(null);
+    setRetryConfirmedOperationId(null);
     const requestedSelector = draftOutcome.selector;
     if (!requestedSelector) {
       setErrorMsg(draftOutcome.error ?? "Complete the selector fields to preview.");
@@ -485,9 +492,18 @@ export function CacheInvalidationPanel({
       setErrorMsg("cache:purge permission is required to execute cache invalidation.");
       return;
     }
+    if (
+      isRetry &&
+      (!result || !result.terminal || retryConfirmedOperationId !== result.operation_id)
+    ) {
+      setErrorMsg(
+        "Check the operation status and explicitly confirm its retry scope before retrying.",
+      );
+      return;
+    }
     let targetSelector: CacheSelector | undefined;
     if (isRetry && result) {
-      const bound = opSelectorsRef.current[result.operation_id] ?? confirmedSelector;
+      const bound = opSelectorsRef.current[result.operation_id];
       if (bound) {
         targetSelector = bound;
       } else {
@@ -523,22 +539,16 @@ export function CacheInvalidationPanel({
       return;
     }
     setExecuteBusy(true);
+    setRetryConfirmedOperationId(null);
     try {
-      const idempotencyKey = activeIdempotencyKey || generateIdempotencyKey();
-      if (!activeIdempotencyKey) {
+      const idempotencyKey = isRetry ? undefined : activeIdempotencyKey || generateIdempotencyKey();
+      if (idempotencyKey && !activeIdempotencyKey) {
         setActiveIdempotencyKey(idempotencyKey);
       }
       const resp = await executeCachePurge({
         selector: targetSelector,
         previewToken: !isRetry ? preview?.preview_token : undefined,
-        confirmBroad:
-          (isRetry &&
-            (result?.selector.kind === "host" ||
-              result?.selector.kind === "all" ||
-              (result?.invalidated_resources ?? 0) >= 100 ||
-              preview?.broad_scope === true)) ||
-          confirmBroad ||
-          undefined,
+        confirmBroad: isRetry ? true : confirmBroad || undefined,
         retryOperationId: isRetry && result ? result.operation_id : undefined,
         idempotencyKey,
       });
@@ -564,12 +574,14 @@ export function CacheInvalidationPanel({
     if (!trimmed) return;
     setLookupBusy(true);
     setErrorMsg(null);
+    setRetryConfirmedOperationId(null);
     try {
       const resp = await fetchCachePurgeOperation(trimmed);
       if (!opSelectorsRef.current[resp.operation_id]) {
         setConfirmedSelector(null);
       }
       setResult(resp);
+      setRetryConfirmedOperationId(null);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to load operation status.");
     } finally {
@@ -1043,6 +1055,7 @@ export function CacheInvalidationPanel({
                 disabled={
                   !canPurge ||
                   executeBusy ||
+                  lookupBusy ||
                   Boolean(permissionRevokedNotice) ||
                   (preview.broad_scope && !confirmBroad)
                 }
@@ -1107,19 +1120,48 @@ export function CacheInvalidationPanel({
           <GuidanceList items={result.warnings} />
 
           {result.state !== "succeeded" && (
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  void handleExecute(true);
-                }}
-                disabled={!canPurge || executeBusy}
-                className="rounded-md bg-jul-accent px-3 py-1.5 text-xs font-medium text-jul-bg disabled:opacity-40"
-              >
-                {executeBusy
-                  ? "Retrying invalidation..."
-                  : `Retry invalidation (${result.operation_id})`}
-              </button>
+            <div className="grid gap-2">
+              {!result.terminal && (
+                <div className={HINT_CLS}>
+                  This operation is still running. Check its status again before retrying.
+                </div>
+              )}
+              <label className="flex items-start gap-2 text-xs text-jul-text">
+                <input
+                  type="checkbox"
+                  aria-label="Confirm retry scope"
+                  checked={retryConfirmedOperationId === result.operation_id}
+                  disabled={!canPurge || executeBusy || lookupBusy || !result.terminal}
+                  onChange={(e) => {
+                    setRetryConfirmedOperationId(e.target.checked ? result.operation_id : null);
+                  }}
+                />
+                <span>
+                  Confirm retry scope: I understand that retrying operation{" "}
+                  <code>{result.operation_id}</code> may invalidate a broad set of cached resources
+                  within its original selector.
+                </span>
+              </label>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleExecute(true);
+                  }}
+                  disabled={
+                    !canPurge ||
+                    executeBusy ||
+                    lookupBusy ||
+                    !result.terminal ||
+                    retryConfirmedOperationId !== result.operation_id
+                  }
+                  className="rounded-md bg-jul-accent px-3 py-1.5 text-xs font-medium text-jul-bg disabled:opacity-40"
+                >
+                  {executeBusy
+                    ? "Retrying invalidation..."
+                    : `Retry invalidation (${result.operation_id})`}
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -1146,7 +1188,7 @@ export function CacheInvalidationPanel({
           onClick={() => {
             void handleLookupOperation();
           }}
-          disabled={!canReadMetadata || lookupBusy || lookupOpId.trim() === ""}
+          disabled={!canReadMetadata || lookupBusy || executeBusy || lookupOpId.trim() === ""}
           className={BTN_CLS}
         >
           {lookupBusy ? "Checking..." : "Check operation status"}

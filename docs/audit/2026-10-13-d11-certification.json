@@ -4366,13 +4366,13 @@
       "original_disposition": "not reviewed",
       "original_reason_and_limit": "generated OpenAPI, route classification, targeted admin mutation permission comparison and TLS self-lockout predicate sampled; full authorization matrix and Console UI not exercised",
       "current_paths": [
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-ncCLmetg.js",
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-ncCLmetg.js.map",
-        "internal/admin/assets/dist/assets/CodeEditor-BREINIYW.js",
-        "internal/admin/assets/dist/assets/CodeEditor-BREINIYW.js.map",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DiD0gJxH.js",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DiD0gJxH.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-D8CcUZnM.js",
+        "internal/admin/assets/dist/assets/CodeEditor-D8CcUZnM.js.map",
         "internal/admin/assets/dist/assets/index-C7sRNCYr.css",
-        "internal/admin/assets/dist/assets/index-D62m-Sz3.js",
-        "internal/admin/assets/dist/assets/index-D62m-Sz3.js.map",
+        "internal/admin/assets/dist/assets/index-tCSkrS2o.js",
+        "internal/admin/assets/dist/assets/index-tCSkrS2o.js.map",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-WkwZ5CU-.js",
@@ -4575,6 +4575,18 @@
             "internal/admin/assets/dist/assets/index-BVOm7TDi.css": "internal/admin/assets/dist/assets/index-C7sRNCYr.css",
             "internal/admin/assets/dist/assets/index-CYYC-J-2.js": "internal/admin/assets/dist/assets/index-B4ZW-Arn.js",
             "internal/admin/assets/dist/assets/index-CYYC-J-2.js.map": "internal/admin/assets/dist/assets/index-B4ZW-Arn.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/665",
+          "context": "Follow-up canonical operation-ID retry and explicit operation-bound confirmation fixes. Current paths follow the rebuilt embedded Console; this reconciles artifact paths only and does not recertify the implementation under D11.",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-ncCLmetg.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-DiD0gJxH.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-ncCLmetg.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-DiD0gJxH.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-BREINIYW.js": "internal/admin/assets/dist/assets/CodeEditor-D8CcUZnM.js",
+            "internal/admin/assets/dist/assets/CodeEditor-BREINIYW.js.map": "internal/admin/assets/dist/assets/CodeEditor-D8CcUZnM.js.map",
+            "internal/admin/assets/dist/assets/index-D62m-Sz3.js": "internal/admin/assets/dist/assets/index-tCSkrS2o.js",
+            "internal/admin/assets/dist/assets/index-D62m-Sz3.js.map": "internal/admin/assets/dist/assets/index-tCSkrS2o.js.map"
           }
         }
       ]
