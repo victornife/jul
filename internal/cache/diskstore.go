@@ -190,9 +190,7 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 		}
 	}
 	var ingestedHeaders [8]string
-	for i, th := range meta.TagHeaders {
-		ingestedHeaders[i] = th
-	}
+	copy(ingestedHeaders[:], meta.TagHeaders)
 	return &Entry{
 		Status:                 meta.Status,
 		Header:                 meta.Header,
