@@ -547,6 +547,9 @@ keeping `file_owned` configuration files strictly read-only remotely.
   retained ownership returns `400 invalid_request` rather than re-evaluating
   current tags. Conflicting existing `Idempotency-Key` and
   `retry_operation_id` identities return `409 idempotency_key_reused`.
+  An operation-ID retry must omit `Idempotency-Key` or reuse the operation's
+  original bound key; a new unbound key returns `400 invalid_request` rather
+  than being accepted without a binding.
 - **`GET /api/v1/cache/purges/{operation_id}`** (any of `cache:purge`,
   `audit:read`, `admin:manage`; principal-isolated unless the caller holds
   `audit:read` or `admin:manage`): inspects an operation record from the bounded

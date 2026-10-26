@@ -356,3 +356,80 @@ func TestV1CachePurgeRejectsInvalidDurableResourceSnapshots(t *testing.T) {
 		})
 	}
 }
+
+func TestV1CachePurgeOperationRetryRejectsUnboundIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	for _, keyed := range []bool{false, true} {
+		for _, completed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("keyed=%t/completed=%t", keyed, completed), func(t *testing.T) {
+				t.Parallel()
+				cfg := config.CacheConfig{Enabled: true, MemoryMaxSize: config.Size(2 << 20), DefaultTTL: config.Duration(5 * time.Minute)}
+				c, err := cache.New(cfg, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Cache-Control", "public, max-age=300")
+					_, _ = io.WriteString(w, "warm")
+				}))
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://portal.example.com/a", nil))
+				p := &cancelPurgeAfterCommit{Cache: c, cancelCount: 1}
+				if completed {
+					p.cancelCount = 0
+				}
+				const token = "unbound-retry-key-admin-token"
+				const freshKey = "idem-unbound-retry-key"
+				s := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+					Cache: p,
+					LoadConfig: func() (*config.Config, error) {
+						return &config.Config{Cache: cfg}, nil
+					},
+				})
+				originalKey := ""
+				if keyed {
+					originalKey = "idem-original-retry-key"
+				}
+				req := adminapi.CachePurgeRequest{Selector: adminapi.CacheSelector{Kind: "exact_url", Host: "portal.example.com", URI: "/a"}}
+				initialRR := postV1JSON(t, s, "/api/v1/cache/purge", token, originalKey, req)
+				if initialRR.Code != http.StatusOK {
+					t.Fatalf("initial operation: HTTP %d: %s", initialRR.Code, initialRR.Body.String())
+				}
+				initial := decodeInto[adminapi.CachePurgeResponse](t, initialRR)
+				req.RetryOperationID = initial.OperationID
+				rejected := postV1JSON(t, s, "/api/v1/cache/purge", token, freshKey, req)
+				if rejected.Code != http.StatusBadRequest || p.calls.Load() != 1 {
+					t.Fatalf("unbound key was accepted or reached execution: HTTP %d calls=%d", rejected.Code, p.calls.Load())
+				}
+				s.purgeLedger.mu.Lock()
+				record := s.purgeLedger.byID[initial.OperationID].Response
+				s.purgeLedger.mu.Unlock()
+				if record.State != initial.State || record.FenceSequence != initial.FenceSequence {
+					t.Fatalf("rejected retry mutated its operation: %+v", record)
+				}
+				validRR := postV1JSON(t, s, "/api/v1/cache/purge", token, originalKey, req)
+				if validRR.Code != http.StatusOK {
+					t.Fatalf("retry with original or omitted key failed: HTTP %d: %s", validRR.Code, validRR.Body.String())
+				}
+				valid := decodeInto[adminapi.CachePurgeResponse](t, validRR)
+				if valid.State != "succeeded" || valid.OperationID != initial.OperationID || valid.FenceSequence != initial.FenceSequence {
+					t.Fatalf("valid retry changed its identity or cutoff: %+v", valid)
+				}
+				req.RetryOperationID, req.Selector.URI = "", "/different"
+				newRR := postV1JSON(t, s, "/api/v1/cache/purge", token, freshKey, req)
+				if newRR.Code != http.StatusOK {
+					t.Fatalf("rejected request consumed its unused key: HTTP %d: %s", newRR.Code, newRR.Body.String())
+				}
+				newOp := decodeInto[adminapi.CachePurgeResponse](t, newRR)
+				if newOp.OperationID == initial.OperationID {
+					t.Fatal("fresh idempotency key was rebound to the retried operation")
+				}
+				req.Selector.URI = "/yet-another"
+				conflict := postV1JSON(t, s, "/api/v1/cache/purge", token, freshKey, req)
+				if conflict.Code != http.StatusConflict {
+					t.Fatalf("accepted new operation did not bind its key: HTTP %d", conflict.Code)
+				}
+			})
+		}
+	}
+}

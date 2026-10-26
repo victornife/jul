@@ -1540,11 +1540,10 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 
 	type matchedGroup struct {
-		resKey   string
-		baseKey  string
-		allKeys  []string
-		diskKeys []string
-		reps     int
+		resKey  string
+		baseKey string
+		allKeys []string
+		reps    int
 	}
 	var groups []matchedGroup
 	matchedResSet := make(map[string]struct{})
@@ -1603,11 +1602,10 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				allKeys = append(allKeys, bk)
 			}
 			groups = append(groups, matchedGroup{
-				resKey:   resKey,
-				baseKey:  bk,
-				allKeys:  allKeys,
-				diskKeys: diskKeys,
-				reps:     reps,
+				resKey:  resKey,
+				baseKey: bk,
+				allKeys: allKeys,
+				reps:    reps,
 			})
 		}
 		if opts.RequireBroadConfirm && len(matchedResSet) >= BroadScopeResourceThr {
@@ -1711,7 +1709,11 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		diskKeys := make([]string, 0, len(c.keyGen))
 		repCount := 0
 		for k, st := range c.keyGen {
-			if (!st.inMem && !st.inDisk) || st.gen > fenceGen {
+			if st.gen > fenceGen {
+				continue
+			}
+			diskKeys = append(diskKeys, k)
+			if !st.inMem && !st.inDisk {
 				continue
 			}
 			if _, host, reqURI, _, ok := parseBaseKeyParts(k); ok {
@@ -1719,9 +1721,6 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			}
 			if st.inMem {
 				memCount++
-			}
-			if st.inDisk {
-				diskKeys = append(diskKeys, k)
 			}
 			if !st.isVaryStub {
 				repCount++
@@ -1745,6 +1744,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				c.onAfterFenceInstall(sel, fenceGen)
 			}
 			diskRemoved, retiredReaders, diskFailed, uncertain = c.disk.deleteBatchAtMostGen(diskKeys, fenceGen)
+			pending, repairUncertain := c.disk.reconcileInvalidation()
+			diskFailed = max(diskFailed, pending)
+			uncertain = uncertain || repairUncertain
 			if hwErr != nil {
 				c.disk.unrecoverableInvalidation.Store(true)
 				uncertain = true
@@ -1800,9 +1802,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		if err := ctx.Err(); err != nil {
 			canceledMidway = true
 			for i := startIdx; i < len(groups); i++ {
-				if groups[i].reps > 0 || len(groups[i].diskKeys) > 0 {
-					remainingGroups += len(groups[i].allKeys)
-				}
+				remainingGroups += len(groups[i].allKeys)
 			}
 			break
 		}
@@ -1837,7 +1837,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 					c.maybeReclaimLocked(st)
 				}
 			}
-			batchDiskKeys = append(batchDiskKeys, g.diskKeys...)
+			batchDiskKeys = append(batchDiskKeys, g.allKeys...)
 		}
 		c.genMu.Unlock()
 
@@ -1852,6 +1852,11 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		}
 	}
 
+	if c.disk != nil {
+		pending, repairUncertain := c.disk.reconcileInvalidation()
+		failedEntries = max(failedEntries, pending)
+		uncertain = uncertain || repairUncertain
+	}
 	c.genMu.Lock()
 	for i := range c.fences {
 		if c.fences[i].gen == fenceGen {

@@ -1142,6 +1142,11 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    `invalidation_effective = "incomplete"`, and actionable `recovery_guidance`
    so the operator or automation script can retry using `retry_operation_id` or
    the same `Idempotency-Key`.
+   Cleanup includes targeted in-flight disk publications and reconciles pending
+   tombstones and retired files even if catalog generations have advanced.
+   A retry cannot claim effective success while durable cleanup remains unsafe;
+   already-admitted readers may finish once their retirement is durable.
+   Old fenced fills cannot mutate Vary membership or delete newer variants.
 
 ## Known limitations
 

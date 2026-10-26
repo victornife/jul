@@ -222,7 +222,9 @@ Supported selector flags are `--url`, `--host` with `--uri` / `--prefix` /
 `--glob` / `--tag` (`--tag-match any|all`), `--host --confirm-broad`, `--key`,
 and `--all --confirm-broad` (plus optional `--route-id`). Inspect an operation by
 ID with `--operation-id cp_...` or retry an incomplete operation at its original
-fence with `--retry-operation-id cp_...`. A runnable deployment/content-update
+fence with `--retry-operation-id cp_...`. On an operation-ID retry, omit
+`--idempotency-key` or reuse the operation's original key; a newly supplied key
+is rejected rather than silently ignored. A runnable deployment/content-update
 helper script is provided in
 [`examples/cache-invalidation/purge-on-deploy.sh`](../examples/cache-invalidation/purge-on-deploy.sh).
 

@@ -669,6 +669,13 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 				WithDetails(adminapi.Details{Kind: "cache_purge_operation", ID: retryID}))
 			return
 		}
+		if idemMeta != nil && reuseRecord == nil {
+			s.purgeLedger.mu.Unlock()
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest,
+				"Idempotency-Key is not bound to retry_operation_id; omit the header or reuse the operation's original key.").
+				WithDetails(adminapi.Details{Field: "retry_operation_id"}))
+			return
+		}
 		// If the caller is retrying a looked-up operation whose display selector had
 		// a redacted query ("?<redacted>") and the server holds the executable
 		// selector in memory, resolve the original executable selector.

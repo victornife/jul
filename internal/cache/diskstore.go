@@ -531,7 +531,7 @@ func (d *diskStore) persistTombstonesLocked() error {
 			d.tombstoneDirty = true
 			return err
 		}
-		if err == nil {
+		if err == nil || d.tombstoneDirty {
 			if sErr := d.syncDirLocked(); sErr != nil {
 				d.tombstoneDirty = true
 				return sErr
@@ -650,6 +650,28 @@ func (d *diskStore) sweepTombstonesLocked() {
 	if changed {
 		d.syncTombstoneStateLocked()
 	}
+}
+
+// reconcileInvalidation repairs durable cleanup even when an earlier attempt
+// advanced or reclaimed the cache catalog. Pinned readers may finish normally
+// once their retirement is durably recorded.
+func (d *diskStore) reconcileInvalidation() (remaining int, uncertain bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
+	pending := make(map[string]struct{}, len(d.tombstones)+len(d.failedRetired))
+	for hash := range d.tombstones {
+		if blob := d.pinned[hash]; blob != nil && blob.hasActiveReaders() {
+			continue
+		}
+		pending[hash] = struct{}{}
+	}
+	for blob := range d.failedRetired {
+		pending[blob.hash] = struct{}{}
+	}
+	uncertain = d.tombstoneDirty || d.corruptTombstoneCleanupPending
+	d.unrecoverableInvalidation.Store(uncertain)
+	return len(pending), uncertain
 }
 
 func (d *diskStore) dropIndexedHashLocked(hash string) {

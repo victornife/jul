@@ -642,7 +642,7 @@ func cmdRemoteCache(args []string) int {
 	previewToken := fs.String("preview-token", "", "bind execution to a reviewed preview_token")
 	confirmBroad := fs.Bool("confirm-broad", false, "explicitly confirm a broad (>= 100 matched resources, truncated scan, host, or all) cache purge")
 	retryOpID := fs.String("retry-operation-id", "", "retry an incomplete/canceled operation at its original fence")
-	idem := fs.String("idempotency-key", "", "optional 8-128 byte [A-Za-z0-9_-] automation key")
+	idem := fs.String("idempotency-key", "", "optional 8-128 byte [A-Za-z0-9_-] automation key (must be original key on an operation-ID retry)")
 	includeSamples := fs.Bool("include-samples", false, "include bounded resource samples in preview")
 	maxScan := fs.Int("max-scan-entries", 0, "optional preview scan limit")
 	timeoutMS := fs.Int("operation-timeout-ms", 0, "optional server operation timeout in milliseconds")

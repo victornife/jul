@@ -87,6 +87,7 @@ type Cache struct {
 	inflightOps               map[uint64]uint64
 	onBeforeReclaim           func(key string)
 	onAfterFenceInstall       func(sel NormalizedSelector, fenceGen uint64)
+	onAfterDiskPublication    func(key string, gen uint64)
 
 	// observe, when set, receives one bounded outcome per revalidation
 	// decision. It is installed by the composition root so the cache does not
@@ -495,23 +496,23 @@ func (c *Cache) setWithResult(key string, e *Entry) bool {
 }
 
 func (c *Cache) setIfNotFenced(key string, e *Entry, startGen uint64, extraTags []string) (fenced bool) {
-	_, fenced = c.setCoreWithStartGen(key, e, startGen, true, extraTags)
+	_, fenced, _ = c.setCoreWithStartGen(key, e, startGen, true, extraTags)
 	return fenced
 }
 
 func (c *Cache) setWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool) bool {
-	stored, _ := c.setCoreWithStartGen(key, e, startGen, hasStartGen, nil)
+	stored, _, _ := c.setCoreWithStartGen(key, e, startGen, hasStartGen, nil)
 	return stored
 }
 
-func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool, extraTags []string) (stored, fenced bool) {
+func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool, extraTags []string) (stored, fenced bool, publishedGen uint64) {
 	c.genMu.Lock()
 	if e != nil && !e.IsVaryStub {
 		curPol := c.Policy()
 		if e.tagPolicyTracked {
 			if curPol.TagHeaderCount > 0 && (e.ingestedTagHeaderCount != curPol.TagHeaderCount || e.ingestedTagHeaders != curPol.TagHeaders) {
 				c.genMu.Unlock()
-				return false, true
+				return false, true, 0
 			}
 		} else {
 			e.ingestedTagHeaderCount = curPol.TagHeaderCount
@@ -521,14 +522,14 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 	}
 	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) {
 		c.genMu.Unlock()
-		return false, true
+		return false, true, 0
 	}
 	if e != nil && len(e.Tags) > 0 {
 		if _, host, _, _, ok := parseBaseKeyParts(key); ok {
 			if !c.canReserveTagLinksLocked(host, baseKeyOf(key), e.Tags) {
 				c.genMu.Unlock()
 				c.tagSkipped(TagSkipIndexLimit)
-				return false, true
+				return false, true, 0
 			}
 		}
 	}
@@ -570,7 +571,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 					c.delOneIfGenAtMost(key, gen)
 				}
 				c.finishKeyOp(st)
-				return false, fencedAfterDisk
+				return false, fencedAfterDisk, 0
 			}
 			// Memory write-through failed, while memory now holds the new generation `gen`.
 			// Remove or tombstone any older disk generation (< gen) for `key` so a
@@ -589,11 +590,11 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 		if fencedAfter {
 			c.delOneIfGenAtMost(key, gen)
 			c.finishKeyOp(st)
-			return false, true
+			return false, true, 0
 		}
 	}
 	c.finishKeyOp(st)
-	return c.hasStoredKey(key), false
+	return c.hasStoredKey(key), false, gen
 }
 
 // Delete removes a single key from both tiers. When the key holds a Vary stub,
@@ -643,6 +644,11 @@ func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
 	if maxGen != math.MaxUint64 {
 		if existing, ok := c.keyGen[key]; ok && existing.gen > maxGen {
 			c.genMu.Unlock()
+			// An older disk publication may outlive the catalog generation
+			// that invalidated it. Preserve newer entries, not that old file.
+			if c.disk != nil {
+				c.disk.delIfOlderGen(key, maxGen+1)
+			}
 			return
 		}
 	}
@@ -752,11 +758,19 @@ func (c *Cache) setCaptured(k string, e *Entry, stream *diskStreamCapture) bool 
 }
 
 func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) bool {
+	stored, _ := c.publishCapturedWithStartGen(k, e, stream, startGen, hasStartGen)
+	return stored
+}
+
+// The returned generation belongs to this publication, not a later replacement,
+// and is the upper bound for any membership-publication rollback.
+func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (bool, uint64) {
 	if stream == nil {
-		return c.setWithStartGen(k, e, startGen, hasStartGen)
+		stored, _, gen := c.setCoreWithStartGen(k, e, startGen, hasStartGen, nil)
+		return stored, gen
 	}
 	if c.disk == nil {
-		return false
+		return false, 0
 	}
 	c.genMu.Lock()
 	if e != nil && !e.IsVaryStub {
@@ -764,7 +778,7 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 		if e.tagPolicyTracked {
 			if curPol.TagHeaderCount > 0 && (e.ingestedTagHeaderCount != curPol.TagHeaderCount || e.ingestedTagHeaders != curPol.TagHeaders) {
 				c.genMu.Unlock()
-				return false
+				return false, 0
 			}
 		} else {
 			e.ingestedTagHeaderCount = curPol.TagHeaderCount
@@ -774,14 +788,14 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 	}
 	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, k, e.Tags, nil) {
 		c.genMu.Unlock()
-		return false
+		return false, 0
 	}
 	if e != nil && len(e.Tags) > 0 {
 		if _, host, _, _, ok := parseBaseKeyParts(k); ok {
 			if !c.canReserveTagLinksLocked(host, baseKeyOf(k), e.Tags) {
 				c.genMu.Unlock()
 				c.tagSkipped(TagSkipIndexLimit)
-				return false
+				return false, 0
 			}
 		}
 	}
@@ -806,19 +820,22 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 		c.genMu.Unlock()
 		c.disk.delIfOlderGen(k, gen)
 		c.finishKeyOp(st)
-		return false
+		return false, 0
 	}
 	e.diskBody = blob
 	c.genMu.Lock()
 	st.diskBytes = blob.fileSize
 	c.genMu.Unlock()
+	if c.onAfterDiskPublication != nil {
+		c.onAfterDiskPublication(k, gen)
+	}
 	if hasStartGen && c.isPublicationFenced(startGen, k, e, nil) {
 		c.delOneIfGenAtMost(k, gen)
 		c.finishKeyOp(st)
-		return false
+		return false, 0
 	}
 	c.finishKeyOp(st)
-	return true
+	return true, gen
 }
 
 func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *diskStreamCapture) bool {
@@ -834,14 +851,22 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 	c.varyMu.Lock()
 	defer c.varyMu.Unlock()
 
-	stub := c.stubFor(base, e.Vary)
+	if hasStartGen && c.isPublicationFenced(startGen, base, e, nil) {
+		return false
+	}
+	deleteGen := uint64(math.MaxUint64)
+	if hasStartGen {
+		deleteGen = startGen
+	}
+	stub := c.stubFor(base, e.Vary, deleteGen)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
-	if !c.setCapturedWithStartGen(vk, e, stream, startGen, hasStartGen) {
+	stored, variantGen := c.publishCapturedWithStartGen(vk, e, stream, startGen, hasStartGen)
+	if !stored {
 		return false
 	}
 	if evicted := stub.addVariant(vk); evicted != "" {
-		c.delOne(evicted)
+		c.delOneIfGenAtMost(evicted, deleteGen)
 	}
 	var varTagSets [][]string
 	c.genMu.Lock()
@@ -852,14 +877,15 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 	}
 	c.genMu.Unlock()
 	stub.Tags = mergeTagSets(varTagSets...)
-	if !c.setWithStartGen(base, stub, startGen, hasStartGen) {
-		c.delOne(vk)
+	stubStored, _, stubGen := c.setCoreWithStartGen(base, stub, startGen, hasStartGen, nil)
+	if !stubStored {
+		c.delOneIfGenAtMost(vk, variantGen)
 		return false
 	}
 	if (e.diskBody != nil && c.disk != nil && (!c.disk.hasKey(base) || !c.disk.hasKey(vk))) ||
 		!c.hasStoredKey(base) || !c.hasStoredKey(vk) {
-		c.delOne(vk)
-		c.delOne(base)
+		c.delOneIfGenAtMost(vk, variantGen)
+		c.delOneIfGenAtMost(base, stubGen)
 		return false
 	}
 	return true
@@ -868,14 +894,14 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 // stubFor returns the membership stub to publish for base. An existing stub with
 // the same Vary field set is extended; a stub for a different Vary — the origin
 // changed what it varies on — is replaced, and the variants it owned are deleted
-// rather than left behind under keys nothing will ever look up again.
-func (c *Cache) stubFor(base string, vary []string) *Entry {
+// up to maxGen rather than deleting representations newer than the origin work.
+func (c *Cache) stubFor(base string, vary []string, maxGen uint64) *Entry {
 	if old, ok := c.get(base); ok && old.IsVaryStub {
 		if sameFields(old.Vary, vary) {
 			return old.Clone()
 		}
 		for _, vk := range old.Variants {
-			c.delOne(vk)
+			c.delOneIfGenAtMost(vk, maxGen)
 		}
 	}
 	return &Entry{IsVaryStub: true, Vary: append([]string(nil), vary...)}
