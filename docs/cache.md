@@ -1098,10 +1098,13 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    the 10,000-entry preview scan bound), a principal-and-selector-bound HMAC
    `preview_token`, and secret-safe resource samples (`?<redacted>`).
 2. **Linearization and in-flight fencing (`POST /api/v1/cache/purge`):**
-   reserves and durably records a monotonic `fence_sequence` in `genSeq` (and
+   allocates and durably records a monotonic `fence_sequence` in `genSeq` (and
    `.jul-cache-purge-ledger` / `.jul-cache-gen`), installs an active
    selector fence, and detaches matching in-flight cold-miss fill locks and
-   revalidations. Broad scopes (`host`, `all`, `>= 100` matched resources, or
+   revalidations. Cutoff allocation, durable intent commit, and fence
+   installation exclude origin publication under the same cache generation
+   lock; a fill cannot acquire a newer publication generation in between them.
+   Broad scopes (`host`, `all`, `>= 100` matched resources, or
    truncated preview scans) require explicit `confirm_broad = true`. Any cold
    fill, singleflight leader, synchronous `304` validation, background
    `stale-while-revalidate` refresh, or retired-handler operation that started
@@ -1109,6 +1112,13 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    miss not yet in cache at preview time or whose origin tag is first learned
    when response headers arrive — is blocked from publishing into memory or disk
    upon completion while still delivering its response to its waiting client.
+   Retries retain their original cutoffs even if execution completes out of
+   order: an older full purge cannot clear a newer selector fence or lower a
+   newer full-purge generation barrier. Fills started after a purge's cutoff
+   remain cacheable, including disk entries published while that purge is
+   completing its disk cleanup. A failed intent commit leaves resident entries
+   unchanged and conservatively fences earlier matching origin publications
+   because the failed write may still have reached durable storage.
 3. **Admitted readers and ordinary reloads:** already-admitted downstream
    readers holding an in-memory `*Entry` reference or a reference-counted
    `.jul-cache-retired-*` disk file lease finish streaming uninterrupted, while

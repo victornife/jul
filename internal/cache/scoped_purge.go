@@ -28,6 +28,11 @@ const (
 // InvalidateOptions.RequireBroadConfirm is true.
 var ErrBroadConfirmRequired = errors.New("broad cache invalidation (>= 100 matched resources, truncated scan, host, or all) requires confirm_broad = true")
 
+// ErrFenceCommit reports that durable invalidation intent could not be
+// committed. Resident entries are unchanged, but earlier origin publications
+// remain fenced because the write may have reached durable storage.
+var ErrFenceCommit = errors.New("cache invalidation intent commit failed")
+
 type selectorFence struct {
 	gen              uint64
 	sel              NormalizedSelector
@@ -89,20 +94,14 @@ type InvalidateOptions struct {
 	MaxScanKeys         int
 	PreviewSequence     uint64
 	ReuseFenceGen       uint64
-	ReservedNewFence    bool
 	CrossBootRetry      bool
 	BatchSize           int
 	RequireBroadConfirm bool
-}
-
-// ReserveFenceSequence allocates and returns the next monotonic cache fence
-// sequence so the caller can record it durably in an operation ledger before
-// invoking InvalidateScope.
-func (c *Cache) ReserveFenceSequence() uint64 {
-	if c == nil {
-		return 0
-	}
-	return c.genSeq.Add(1)
+	// CommitFence persists the operation's cutoff before its fence is installed.
+	// It runs under genMu so publications cannot cross that boundary, and must
+	// not call back into the cache. An error leaves resident entries unchanged
+	// and conservatively fences earlier origin work against an uncertain write.
+	CommitFence func(fenceGen uint64) error
 }
 
 // StartupHighWaterGen returns the durable generation high-water mark recovered
@@ -1386,16 +1385,20 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := ctx.Err(); err != nil {
+	canceledBeforeExecution := func(err error) (InvalidateResult, error) {
 		return InvalidateResult{
 			Selector:              sel,
 			State:                 "canceled",
 			Outcome:               "canceled",
 			InvalidationEffective: "incomplete",
+			FenceSequence:         opts.ReuseFenceGen,
 			StartedAt:             started,
 			CompletedAt:           c.clock().UTC(),
 			RecoveryGuidance:      "The invalidation request was canceled before execution started. Retry the operation.",
 		}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return canceledBeforeExecution(err)
 	}
 
 	maxScan := opts.MaxScanKeys
@@ -1408,21 +1411,22 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 
 	c.genMu.Lock()
+	if err := ctx.Err(); err != nil {
+		c.genMu.Unlock()
+		return canceledBeforeExecution(err)
+	}
 	if opts.RequireBroadConfirm && sel.BroadScope {
 		c.genMu.Unlock()
 		return InvalidateResult{}, ErrBroadConfirmRequired
 	}
 	seqBefore := c.genSeq.Load()
-	if opts.ReservedNewFence && opts.ReuseFenceGen > 0 && seqBefore == opts.ReuseFenceGen {
-		seqBefore = opts.ReuseFenceGen - 1
-	}
 	changedSincePreview := opts.PreviewSequence > 0 && seqBefore != opts.PreviewSequence
 
 	// Enforce scan bound for narrow selectors (prefix, glob, tag, or route-scoped host);
 	// whole-hostname (kind = 'host' with no RouteID) and kind = 'all' are the
 	// documented escape paths and are never rejected by maxScan (F13).
 	isUnboundedHost := sel.Kind == SelectorHost && sel.RouteID == ""
-	isRetryFence := opts.ReuseFenceGen > 0 && !opts.ReservedNewFence
+	isRetryFence := opts.ReuseFenceGen > 0
 	isFastAll := sel.Kind == SelectorAll && !isRetryFence
 	var candidates []string
 	if !isFastAll {
@@ -1471,7 +1475,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 
 	evalFenceGen := uint64(math.MaxUint64)
-	if isRetryFence {
+	if opts.ReuseFenceGen > 0 {
 		evalFenceGen = opts.ReuseFenceGen
 	}
 
@@ -1528,12 +1532,39 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		c.genMu.Unlock()
+		return canceledBeforeExecution(err)
+	}
 	var fenceGen uint64
 	if opts.ReuseFenceGen > 0 {
 		fenceGen = opts.ReuseFenceGen
 		if fenceGen > c.genSeq.Load() {
 			c.genSeq.Store(fenceGen)
 		}
+	} else {
+		fenceGen = c.genSeq.Add(1)
+	}
+	if opts.CommitFence != nil {
+		if err := opts.CommitFence(fenceGen); err != nil {
+			foundFence := false
+			for _, f := range c.fences {
+				if f.gen == fenceGen {
+					foundFence = true
+					break
+				}
+			}
+			if !foundFence {
+				c.fences = append(c.fences, selectorFence{
+					gen: fenceGen, sel: sel, matchedResources: matchedResSet,
+				})
+			}
+			c.reclaimFencesLocked()
+			c.genMu.Unlock()
+			return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
+		}
+	}
+	if opts.ReuseFenceGen > 0 {
 		if sel.Kind == SelectorAll {
 			if fenceGen > c.purgeGen {
 				c.purgeGen = fenceGen
@@ -1567,7 +1598,6 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			})
 		}
 	} else {
-		fenceGen = c.genSeq.Add(1)
 		c.fences = append(c.fences, selectorFence{
 			gen:              fenceGen,
 			sel:              sel,
@@ -1627,9 +1657,6 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				c.onAfterFenceInstall(sel, fenceGen)
 			}
 			diskRemoved, retiredReaders, diskFailed, uncertain = c.disk.deleteBatchAtMostGen(diskKeys, fenceGen)
-			if len(diskKeys) == 0 {
-				c.disk.purge()
-			}
 			if hwErr != nil {
 				c.disk.unrecoverableInvalidation.Store(true)
 				uncertain = true

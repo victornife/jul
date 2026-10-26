@@ -24,7 +24,9 @@ import (
 	"jul/internal/adminapi"
 	"jul/internal/cache"
 	"jul/internal/config"
+	"jul/internal/handler"
 	"jul/internal/rbac"
+	"jul/internal/router"
 	"jul/internal/server"
 )
 
@@ -586,8 +588,9 @@ func TestV1CachePurgeWorkflowRBACBindingIdempotencyAndSecretSafety(t *testing.T)
 }
 
 type countingScopedPurger struct {
-	executions atomic.Int32
-	onExec     func()
+	executions   atomic.Int32
+	beforeCommit func()
+	onExec       func()
 }
 
 func (p *countingScopedPurger) Purge()            {}
@@ -604,6 +607,18 @@ func (p *countingScopedPurger) PreviewScope(sel cache.NormalizedSelector, opts c
 	}
 }
 func (p *countingScopedPurger) InvalidateScope(ctx context.Context, sel cache.NormalizedSelector, opts cache.InvalidateOptions) (cache.InvalidateResult, error) {
+	if p.beforeCommit != nil {
+		p.beforeCommit()
+	}
+	fenceGen := opts.ReuseFenceGen
+	if fenceGen == 0 {
+		fenceGen = 1
+	}
+	if opts.CommitFence != nil {
+		if err := opts.CommitFence(fenceGen); err != nil {
+			return cache.InvalidateResult{}, fmt.Errorf("%w: %w", cache.ErrFenceCommit, err)
+		}
+	}
 	if p.onExec != nil {
 		p.onExec()
 	}
@@ -614,7 +629,7 @@ func (p *countingScopedPurger) InvalidateScope(ctx context.Context, sel cache.No
 		State:                      "succeeded",
 		Outcome:                    "succeeded",
 		InvalidationEffective:      "effective",
-		FenceSequence:              1,
+		FenceSequence:              fenceGen,
 		InvalidatedResources:       1,
 		InvalidatedRepresentations: 1,
 		MemoryEntriesRemoved:       1,
@@ -1133,7 +1148,6 @@ func TestReauditR01_InterruptedOperationRetryPreservesFreshPostRestartFills(t *t
 	// immediately after c1.InvalidateScope completes (before handleV1CachePurge writes finalResp).
 	snapPurger := &postInvalidateSnapshotPurger{
 		ScopedPurger: c1,
-		reserveFn:    c1.ReserveFenceSequence,
 		afterInvalidate: func() {
 			entries, rErr := os.ReadDir(diskDir)
 			if rErr != nil {
@@ -1274,15 +1288,7 @@ func TestReauditR01_InterruptedOperationRetryPreservesFreshPostRestartFills(t *t
 
 type postInvalidateSnapshotPurger struct {
 	ScopedPurger
-	reserveFn       func() uint64
 	afterInvalidate func()
-}
-
-func (p *postInvalidateSnapshotPurger) ReserveFenceSequence() uint64 {
-	if p.reserveFn != nil {
-		return p.reserveFn()
-	}
-	return 0
 }
 
 func (p *postInvalidateSnapshotPurger) InvalidateScope(ctx context.Context, sel cache.NormalizedSelector, opts cache.InvalidateOptions) (cache.InvalidateResult, error) {
@@ -1358,6 +1364,613 @@ func TestReauditR02_OpenToTokenAndOpenToRBACAuthTighteningDeniesAdmittedCredenti
 			}
 			if execCount.Load() != 0 {
 				t.Fatalf("%s: expected 0 engine executions after live auth tightening, got %d", mode, execCount.Load())
+			}
+		})
+	}
+}
+
+type delayedScopedPurger struct {
+	*cache.Cache
+	kind    cache.SelectorKind
+	entered chan cache.InvalidateOptions
+	release <-chan struct{}
+}
+
+func (p *delayedScopedPurger) InvalidateScope(ctx context.Context, sel cache.NormalizedSelector, opts cache.InvalidateOptions) (cache.InvalidateResult, error) {
+	if sel.Kind == p.kind {
+		p.entered <- opts
+		select {
+		case <-p.release:
+		case <-ctx.Done():
+			return cache.InvalidateResult{}, ctx.Err()
+		}
+	}
+	return p.Cache.InvalidateScope(ctx, sel, opts)
+}
+
+func TestV1CachePurgeOlderFullRetryPreservesNewerScopedFence(t *testing.T) {
+	t.Parallel()
+
+	for _, disk := range []bool{false, true} {
+		t.Run(fmt.Sprintf("disk=%t", disk), func(t *testing.T) {
+			t.Parallel()
+			const token = "purge-ordering-admin-token"
+			cfg := config.CacheConfig{
+				Enabled:       true,
+				MemoryMaxSize: config.Size(2 << 20),
+				DefaultTTL:    config.Duration(5 * time.Minute),
+			}
+			if disk {
+				cfg.DiskPath = t.TempDir()
+				cfg.DiskMaxSize = config.Size(8 << 20)
+			}
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			c, err := cache.New(cfg, log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fullRelease := make(chan struct{})
+			originEntered := make(chan struct{})
+			originRelease := make(chan struct{})
+			releaseFull := sync.OnceFunc(func() { close(fullRelease) })
+			releaseOrigin := sync.OnceFunc(func() { close(originRelease) })
+			purger := &delayedScopedPurger{
+				Cache: c, kind: cache.SelectorAll, entered: make(chan cache.InvalidateOptions, 1), release: fullRelease,
+			}
+			s := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+				Cache: c,
+				LoadConfig: func() (*config.Config, error) {
+					return &config.Config{Cache: cfg}, nil
+				},
+			})
+			initialRR := postV1JSON(t, s, "/api/v1/cache/purge", token, "", adminapi.CachePurgeRequest{
+				Selector: adminapi.CacheSelector{Kind: "all", All: true}, ConfirmBroad: true,
+			})
+			if initialRR.Code != http.StatusOK {
+				t.Fatalf("initial full purge: HTTP %d: %s", initialRR.Code, initialRR.Body.String())
+			}
+			initial := decodeInto[adminapi.CachePurgeResponse](t, initialRR)
+			s.purgeLedger.mu.Lock()
+			s.purgeLedger.byID[initial.OperationID].Response.State = "partial"
+			s.purgeLedger.mu.Unlock()
+			s.deps.Cache = purger
+			var calls atomic.Int64
+			origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				if calls.Add(1) == 1 {
+					close(originEntered)
+					select {
+					case <-originRelease:
+					case <-r.Context().Done():
+						return
+					}
+					_, _ = io.WriteString(w, "stale-pre-purge")
+					return
+				}
+				_, _ = io.WriteString(w, "fresh-post-purge")
+			}))
+			t.Cleanup(origin.Close)
+			var wg sync.WaitGroup
+			t.Cleanup(func() {
+				releaseFull()
+				releaseOrigin()
+				wg.Wait()
+			})
+			rt, err := router.New(&config.Config{Servers: []config.ServerConfig{{
+				Listen: "purge-test", ServerNames: []string{"portal.example.com"},
+				Locations: []config.LocationConfig{{
+					Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: origin.URL, Cache: true,
+				}},
+			}}}, map[string]router.Builder{
+				router.ActionProxy: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
+					proxy, err := handler.NewProxy(context.Background(), srv, loc, nil, nil, log, nil)
+					if err != nil {
+						return nil, err
+					}
+					return c.Handler(proxy), nil
+				},
+			}, nil, nil, log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			serve := func() *httptest.ResponseRecorder {
+				rr := httptest.NewRecorder()
+				rt.For("purge-test").ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://portal.example.com/article", nil))
+				return rr
+			}
+			fullDone := make(chan *httptest.ResponseRecorder, 1)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				fullDone <- postV1JSON(t, s, "/api/v1/cache/purge", token, "", adminapi.CachePurgeRequest{
+					Selector: adminapi.CacheSelector{Kind: "all", All: true}, ConfirmBroad: true,
+					RetryOperationID: initial.OperationID,
+				})
+			}()
+			var fullOpts cache.InvalidateOptions
+			select {
+			case fullOpts = <-purger.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("full purge never reached engine entry")
+			}
+			if fullOpts.ReuseFenceGen != initial.FenceSequence || fullOpts.CommitFence == nil {
+				t.Fatalf("full purge retry did not preserve its cutoff: %+v", fullOpts)
+			}
+			fillDone := make(chan *httptest.ResponseRecorder, 1)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				fillDone <- serve()
+			}()
+			select {
+			case <-originEntered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("cold fill never reached origin")
+			}
+			scopedRR := postV1JSON(t, s, "/api/v1/cache/purge", token, "", adminapi.CachePurgeRequest{
+				Selector: adminapi.CacheSelector{Kind: "exact_url", Host: "portal.example.com", URI: "/article"},
+			})
+			if scopedRR.Code != http.StatusOK {
+				t.Fatalf("scoped purge: HTTP %d: %s", scopedRR.Code, scopedRR.Body.String())
+			}
+			scoped := decodeInto[adminapi.CachePurgeResponse](t, scopedRR)
+			if scoped.State != "succeeded" || scoped.InvalidationEffective != "effective" || scoped.FenceSequence <= fullOpts.ReuseFenceGen {
+				t.Fatalf("unexpected scoped purge result: %+v", scoped)
+			}
+			if stats := c.IndexStats(); stats.ActiveFences != 1 || stats.InflightOriginOps != 1 {
+				t.Fatalf("expected retained scoped fence and blocked fill: %+v", stats)
+			}
+			releaseFull()
+			select {
+			case rr := <-fullDone:
+				if rr.Code != http.StatusOK {
+					t.Fatalf("full purge: HTTP %d: %s", rr.Code, rr.Body.String())
+				}
+				full := decodeInto[adminapi.CachePurgeResponse](t, rr)
+				if full.State != "succeeded" || full.InvalidationEffective != "effective" || full.FenceSequence != fullOpts.ReuseFenceGen {
+					t.Fatalf("unexpected full purge result: %+v", full)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("full purge did not finish")
+			}
+			if stats := c.IndexStats(); stats.ActiveFences != 1 || stats.InflightOriginOps != 1 {
+				t.Fatalf("older full purge cleared the newer scoped fence: %+v", stats)
+			}
+			releaseOrigin()
+			select {
+			case rr := <-fillDone:
+				if rr.Code != http.StatusOK || rr.Body.String() != "stale-pre-purge" {
+					t.Fatalf("unexpected original response: HTTP %d body=%q", rr.Code, rr.Body.String())
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("original fill did not finish")
+			}
+			after := serve()
+			if after.Header().Get("X-Cache") != "MISS" || after.Body.String() != "fresh-post-purge" {
+				t.Fatalf("stale response was cached: X-Cache=%q body=%q", after.Header().Get("X-Cache"), after.Body.String())
+			}
+			hit := serve()
+			if hit.Header().Get("X-Cache") != "HIT" || hit.Body.String() != "fresh-post-purge" || calls.Load() != 2 {
+				t.Fatalf("fresh replacement was not cached: X-Cache=%q body=%q calls=%d", hit.Header().Get("X-Cache"), hit.Body.String(), calls.Load())
+			}
+			if stats := c.IndexStats(); stats.ActiveFences != 0 || stats.InflightOriginOps != 0 {
+				t.Fatalf("completed origin work did not reclaim fences: %+v", stats)
+			}
+		})
+	}
+}
+
+func TestV1CachePurgeRetiresFillCompletedBeforeEngineEntry(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []cache.SelectorKind{cache.SelectorAll, cache.SelectorExactURL, cache.SelectorPrefix, cache.SelectorGlob, cache.SelectorTag, cache.SelectorHost, cache.SelectorKey} {
+		for _, disk := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/disk=%t", kind, disk), func(t *testing.T) {
+				t.Parallel()
+				cfg := config.CacheConfig{
+					Enabled: true, MemoryMaxSize: config.Size(2 << 20),
+					DefaultTTL: config.Duration(5 * time.Minute), TagHeaders: []string{"Cache-Tag"},
+				}
+				if disk {
+					cfg.DiskPath = t.TempDir()
+					cfg.DiskMaxSize = config.Size(8 << 20)
+				}
+				c, err := cache.New(cfg, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				purgeRelease := make(chan struct{})
+				originEntered := make(chan struct{})
+				originRelease := make(chan struct{})
+				releasePurge := sync.OnceFunc(func() { close(purgeRelease) })
+				releaseOrigin := sync.OnceFunc(func() { close(originRelease) })
+				var wg sync.WaitGroup
+				purger := &delayedScopedPurger{
+					Cache: c, kind: kind, entered: make(chan cache.InvalidateOptions, 1), release: purgeRelease,
+				}
+				const token = "pre-engine-purge-admin-token"
+				s := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+					Cache: purger,
+					LoadConfig: func() (*config.Config, error) {
+						return &config.Config{Cache: cfg}, nil
+					},
+				})
+				t.Cleanup(func() {
+					releaseOrigin()
+					releasePurge()
+					wg.Wait()
+				})
+				var calls atomic.Int64
+				h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Cache-Control", "public, max-age=300")
+					w.Header().Set("Cache-Tag", "article:42")
+					if calls.Add(1) == 1 {
+						close(originEntered)
+						<-originRelease
+						_, _ = io.WriteString(w, "stale-pre-cutoff")
+						return
+					}
+					_, _ = io.WriteString(w, "fresh-post-cutoff")
+				}))
+				serve := func() *httptest.ResponseRecorder {
+					rr := httptest.NewRecorder()
+					h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://portal.example.com/article", nil))
+					return rr
+				}
+				fillDone := make(chan *httptest.ResponseRecorder, 1)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					fillDone <- serve()
+				}()
+				<-originEntered
+				sel := adminapi.CacheSelector{Kind: string(kind), Host: "portal.example.com"}
+				switch kind {
+				case cache.SelectorAll:
+					sel.Host, sel.All = "", true
+				case cache.SelectorExactURL:
+					sel.URI = "/article"
+				case cache.SelectorPrefix:
+					sel.Prefix = "/article"
+				case cache.SelectorGlob:
+					sel.Pattern = "/art*"
+				case cache.SelectorTag:
+					sel.Tags = []string{"article:42"}
+				case cache.SelectorKey:
+					sel.Host, sel.Key = "", "GET\nportal.example.com\n/article"
+				}
+				purgeDone := make(chan *httptest.ResponseRecorder, 1)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					purgeDone <- postV1JSON(t, s, "/api/v1/cache/purge", token, "", adminapi.CachePurgeRequest{
+						Selector: sel, ConfirmBroad: true,
+					})
+				}()
+				opts := <-purger.entered
+				if opts.ReuseFenceGen != 0 || opts.CommitFence == nil {
+					t.Fatalf("new operation reserved its cutoff before engine entry: %+v", opts)
+				}
+				releaseOrigin()
+				if initial := <-fillDone; initial.Body.String() != "stale-pre-cutoff" {
+					t.Fatalf("unexpected original response: %q", initial.Body.String())
+				}
+				if warm := serve(); warm.Header().Get("X-Cache") != "HIT" {
+					t.Fatal("pre-cutoff fill did not finish publication before engine entry")
+				}
+				releasePurge()
+				rr := <-purgeDone
+				if rr.Code != http.StatusOK {
+					t.Fatalf("purge: HTTP %d: %s", rr.Code, rr.Body.String())
+				}
+				res := decodeInto[adminapi.CachePurgeResponse](t, rr)
+				if res.State != "succeeded" || res.InvalidationEffective != "effective" || res.FenceSequence == 0 || res.InvalidatedRepresentations != 1 {
+					t.Fatalf("unexpected purge result: %+v", res)
+				}
+				after := serve()
+				if after.Header().Get("X-Cache") != "MISS" || after.Body.String() != "fresh-post-cutoff" {
+					t.Fatalf("stale entry survived purge: X-Cache=%q body=%q", after.Header().Get("X-Cache"), after.Body.String())
+				}
+			})
+		}
+	}
+}
+
+func TestV1CachePurgeFenceCommitFailureKeepsUnknownCutoff(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	ledgerPath := filepath.Join(diskDir, diskPurgeLedgerFilename)
+	eng := &countingScopedPurger{
+		beforeCommit: func() {
+			if err := os.Remove(ledgerPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(ledgerPath, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	const token = "fence-commit-failure-admin-token"
+	s := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+		Cache: eng,
+		LoadConfig: func() (*config.Config, error) {
+			return &config.Config{Cache: config.CacheConfig{Enabled: true, DiskPath: diskDir}}, nil
+		},
+	})
+	req := adminapi.CachePurgeRequest{
+		Selector: adminapi.CacheSelector{Kind: "exact_url", Host: "portal.example.com", URI: "/article"},
+	}
+	rr := postV1JSON(t, s, "/api/v1/cache/purge", token, "idem-fence-commit-fail", req)
+	if rr.Code != http.StatusServiceUnavailable || eng.executions.Load() != 0 {
+		t.Fatalf("failed intent commit reached execution: HTTP %d executions=%d", rr.Code, eng.executions.Load())
+	}
+	s.purgeLedger.mu.Lock()
+	rec := s.purgeLedger.records[0]
+	fence, state, effective := rec.Response.FenceSequence, rec.Response.State, rec.Response.InvalidationEffective
+	s.purgeLedger.mu.Unlock()
+	if fence != 0 || state != "failed" || effective != "uncertain" {
+		t.Fatalf("uncommitted cutoff was retained as usable: fence=%d state=%s effective=%s", fence, state, effective)
+	}
+	retry := postV1JSON(t, s, "/api/v1/cache/purge", token, "idem-fence-commit-fail", req)
+	if retry.Code != http.StatusConflict || eng.executions.Load() != 0 {
+		t.Fatalf("unknown-cutoff retry was accepted: HTTP %d executions=%d", retry.Code, eng.executions.Load())
+	}
+}
+
+func TestV1CachePurgeFenceCommitFailurePreservesLedgerBoundsAndBindings(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"at_capacity", "retry"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			diskDir := t.TempDir()
+			ledgerPath := filepath.Join(diskDir, diskPurgeLedgerFilename)
+			eng := &countingScopedPurger{beforeCommit: func() {
+				if err := os.Remove(ledgerPath); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(ledgerPath, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}}
+			const token = "ledger-bounds-failure-admin-token"
+			const idemKey = "idem-commit-failure-bounds"
+			s := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+				Cache: eng,
+				LoadConfig: func() (*config.Config, error) {
+					return &config.Config{Cache: config.CacheConfig{Enabled: true, DiskPath: diskDir}}, nil
+				},
+			})
+			s.ensurePurgeLedgerInit()
+			sel := adminapi.CacheSelector{Kind: "exact_url", Host: "portal.example.com", URI: "/article"}
+			norm, err := cache.ParseSelector(toCacheSelector(sel), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantCount := maxRetainedCachePurgeOps
+			wantFence := uint64(0)
+			if mode == "retry" {
+				wantCount, wantFence = 1, 7
+			}
+			for i := 0; i < wantCount; i++ {
+				rec := &cachePurgeRecord{
+					OperationID: fmt.Sprintf("prior_%d", i), Principal: "shared", CreatedAt: time.Now().UTC(),
+					Response: adminapi.CachePurgeResponse{
+						State: "succeeded", Terminal: true, SelectorDigest: norm.DigestHex(),
+					},
+				}
+				if mode == "retry" {
+					rec.IdempotencyKey = idemKey
+					rec.Response.State = "partial"
+					rec.Response.FenceSequence = wantFence
+					s.purgeLedger.byIdem[idemMapKey("shared", idemKey)] = rec
+				}
+				s.purgeLedger.records = append(s.purgeLedger.records, rec)
+				s.purgeLedger.byID[rec.OperationID] = rec
+			}
+			rr := postV1JSON(t, s, "/api/v1/cache/purge", token, idemKey, adminapi.CachePurgeRequest{Selector: sel})
+			if rr.Code != http.StatusServiceUnavailable || eng.executions.Load() != 0 {
+				t.Fatalf("intent failure: HTTP %d executions=%d", rr.Code, eng.executions.Load())
+			}
+			s.purgeLedger.mu.Lock()
+			count, indexed := len(s.purgeLedger.records), len(s.purgeLedger.byID)
+			rec := s.purgeLedger.byIdem[idemMapKey("shared", idemKey)]
+			s.purgeLedger.mu.Unlock()
+			if count != wantCount || indexed != wantCount {
+				t.Fatalf("failed admission duplicated or exceeded ledger bounds: records=%d indexed=%d want=%d", count, indexed, wantCount)
+			}
+			if rec == nil || rec.Response.FenceSequence != wantFence || !rec.Response.Terminal || rec.Response.InvalidationEffective != "uncertain" {
+				t.Fatalf("failed admission lost its idempotency binding: %+v", rec)
+			}
+		})
+	}
+}
+
+func TestV1CachePurgeCanceledRetryPreservesCutoffAndBoot(t *testing.T) {
+	t.Parallel()
+
+	for _, unsafeCrossBoot := range []bool{false, true} {
+		t.Run(fmt.Sprintf("unsafe_cross_boot=%t", unsafeCrossBoot), func(t *testing.T) {
+			t.Parallel()
+			cfg := config.CacheConfig{Enabled: true, MemoryMaxSize: config.Size(2 << 20), DefaultTTL: config.Duration(5 * time.Minute)}
+			c, err := cache.New(cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const token = "canceled-retry-purge-admin-token"
+			const idemKey = "idem-canceled-purge-retry"
+			s := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+				Cache: c,
+				LoadConfig: func() (*config.Config, error) {
+					return &config.Config{Cache: cfg}, nil
+				},
+			})
+			req := adminapi.CachePurgeRequest{Selector: adminapi.CacheSelector{Kind: "all", All: true}, ConfirmBroad: true}
+			initialRR := postV1JSON(t, s, "/api/v1/cache/purge", token, idemKey, req)
+			if initialRR.Code != http.StatusOK {
+				t.Fatalf("initial purge: HTTP %d: %s", initialRR.Code, initialRR.Body.String())
+			}
+			initial := decodeInto[adminapi.CachePurgeResponse](t, initialRR)
+			cutoff, originalBoot := initial.FenceSequence, initial.BootID
+			if unsafeCrossBoot {
+				cutoff, originalBoot = c.StartupHighWaterGen()+100, "prior-boot"
+			}
+			s.purgeLedger.mu.Lock()
+			rec := s.purgeLedger.byID[initial.OperationID]
+			rec.Response.State = "partial"
+			rec.Response.FenceSequence = cutoff
+			rec.Response.BootID = originalBoot
+			s.purgeLedger.mu.Unlock()
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				_, _ = io.WriteString(w, "fresh-post-cutoff")
+			}))
+			serve := func() *httptest.ResponseRecorder {
+				rr := httptest.NewRecorder()
+				h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://portal.example.com/fresh", nil))
+				return rr
+			}
+			serve()
+			body, err := json.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			canceledReq := httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", bytes.NewReader(body)).WithContext(ctx)
+			canceledReq.Header.Set("Content-Type", "application/json")
+			canceledReq.Header.Set("Authorization", "Bearer "+token)
+			canceledReq.Header.Set("Idempotency-Key", idemKey)
+			canceledRR := httptest.NewRecorder()
+			s.routes().ServeHTTP(canceledRR, canceledReq)
+			if canceledRR.Code != http.StatusOK {
+				t.Fatalf("canceled retry: HTTP %d: %s", canceledRR.Code, canceledRR.Body.String())
+			}
+			canceled := decodeInto[adminapi.CachePurgeResponse](t, canceledRR)
+			if canceled.State != "canceled" || canceled.FenceSequence != cutoff || canceled.BootID != originalBoot {
+				t.Fatalf("canceled retry lost its original boundary: %+v", canceled)
+			}
+			retry := postV1JSON(t, s, "/api/v1/cache/purge", token, idemKey, req)
+			wantStatus := http.StatusOK
+			if unsafeCrossBoot {
+				wantStatus = http.StatusBadRequest
+			}
+			if retry.Code != wantStatus {
+				t.Fatalf("subsequent retry: HTTP %d want %d: %s", retry.Code, wantStatus, retry.Body.String())
+			}
+			fresh := serve()
+			if fresh.Header().Get("X-Cache") != "HIT" || fresh.Body.String() != "fresh-post-cutoff" {
+				t.Fatalf("canceled retry expanded its cutoff: X-Cache=%q body=%q", fresh.Header().Get("X-Cache"), fresh.Body.String())
+			}
+		})
+	}
+}
+
+func TestV1CachePurgeRollbackPreservesReusedExpiredIdempotencyKey(t *testing.T) {
+	t.Parallel()
+
+	for _, cleanupFails := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cleanup_fails=%t", cleanupFails), func(t *testing.T) {
+			t.Parallel()
+			cfg := config.CacheConfig{
+				Enabled: true, MemoryMaxSize: config.Size(2 << 20),
+				DefaultTTL: config.Duration(5 * time.Minute),
+			}
+			if cleanupFails {
+				cfg.DiskPath, cfg.DiskMaxSize = t.TempDir(), config.Size(8<<20)
+			}
+			c, err := cache.New(cfg, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				_, _ = io.WriteString(w, "warm")
+			}))
+			for i := 0; i < cache.BroadScopeResourceThr; i++ {
+				h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://portal.example.com/many/%d", i), nil))
+			}
+			release := make(chan struct{})
+			releasePurge := sync.OnceFunc(func() { close(release) })
+			purger := &delayedScopedPurger{
+				Cache: c, kind: cache.SelectorPrefix, entered: make(chan cache.InvalidateOptions, 1), release: release,
+			}
+			const token = "rollback-collision-admin-token"
+			const reusedKey = "idem-expired-key-reused"
+			s := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+				Cache: purger,
+				LoadConfig: func() (*config.Config, error) {
+					return &config.Config{Cache: cfg}, nil
+				},
+			})
+			var wg sync.WaitGroup
+			t.Cleanup(func() {
+				releasePurge()
+				wg.Wait()
+			})
+			s.ensurePurgeLedgerInit()
+			for i := 0; i < maxRetainedCachePurgeOps; i++ {
+				rec := &cachePurgeRecord{
+					OperationID: fmt.Sprintf("expired_%d", i), Principal: "shared", CreatedAt: time.Now().UTC(),
+					Response: adminapi.CachePurgeResponse{State: "succeeded", Terminal: true, SelectorDigest: "expired-selector"},
+				}
+				if i == 0 {
+					rec.IdempotencyKey = reusedKey
+					rec.CreatedAt = time.Now().Add(-2 * cachePurgeLedgerMinAge)
+					s.purgeLedger.byIdem[idemMapKey("shared", reusedKey)] = rec
+				}
+				s.purgeLedger.records = append(s.purgeLedger.records, rec)
+				s.purgeLedger.byID[rec.OperationID] = rec
+			}
+			failedDone := make(chan *httptest.ResponseRecorder, 1)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				failedDone <- postV1JSON(t, s, "/api/v1/cache/purge", token, "idem-rollback-broad-denied", adminapi.CachePurgeRequest{
+					Selector: adminapi.CacheSelector{Kind: "prefix", Host: "portal.example.com", Prefix: "/many"},
+				})
+			}()
+			<-purger.entered
+			newReq := adminapi.CachePurgeRequest{
+				Selector: adminapi.CacheSelector{Kind: "exact_url", Host: "portal.example.com", URI: "/unrelated"},
+			}
+			newRR := postV1JSON(t, s, "/api/v1/cache/purge", token, reusedKey, newReq)
+			if newRR.Code != http.StatusOK {
+				t.Fatalf("new use of expired key: HTTP %d: %s", newRR.Code, newRR.Body.String())
+			}
+			newOp := decodeInto[adminapi.CachePurgeResponse](t, newRR)
+			if cleanupFails {
+				path := filepath.Join(cfg.DiskPath, diskPurgeLedgerFilename)
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			releasePurge()
+			failed := <-failedDone
+			wantStatus, wantCount := http.StatusBadRequest, maxRetainedCachePurgeOps-1
+			if cleanupFails {
+				wantStatus, wantCount = http.StatusServiceUnavailable, maxRetainedCachePurgeOps
+			}
+			if failed.Code != wantStatus {
+				t.Fatalf("rejected broad purge: HTTP %d want %d: %s", failed.Code, wantStatus, failed.Body.String())
+			}
+			replayRR := postV1JSON(t, s, "/api/v1/cache/purge", token, reusedKey, newReq)
+			if replayRR.Code != http.StatusOK {
+				t.Fatalf("rollback overwrote the newer key binding: HTTP %d: %s", replayRR.Code, replayRR.Body.String())
+			}
+			replay := decodeInto[adminapi.CachePurgeResponse](t, replayRR)
+			if !replay.IdempotentReplay || replay.OperationID != newOp.OperationID {
+				t.Fatalf("rollback replaced a newer operation: got %+v want operation %s", replay, newOp.OperationID)
+			}
+			s.purgeLedger.mu.Lock()
+			count, indexed := len(s.purgeLedger.records), len(s.purgeLedger.byID)
+			s.purgeLedger.mu.Unlock()
+			if count != wantCount || indexed != wantCount {
+				t.Fatalf("rollback ledger size: records=%d indexed=%d want=%d", count, indexed, wantCount)
 			}
 		})
 	}

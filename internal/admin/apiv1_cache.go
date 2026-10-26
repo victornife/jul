@@ -41,6 +41,8 @@ const (
 // ScopedPurger is the rich cache invalidation interface implemented by
 // *cache.Cache (#621, ADR 0027). Minimal test doubles that implement only
 // Purger (Purge and Delete) remain supported via fallback.
+// InvalidateScope must invoke opts.CommitFence before installing its fence
+// or mutating cache entries when that callback is provided.
 type ScopedPurger interface {
 	Purger
 	PreviewScope(sel cache.NormalizedSelector, opts cache.PreviewOptions) cache.PurgePreview
@@ -119,10 +121,12 @@ func (s *Server) evictOneLedgerRecordLocked(now time.Time) (*cachePurgeRecord, i
 	return nil, -1, false
 }
 
-func (s *Server) rollbackAdmittedRecordLocked(opID string, rec, reuseRecord, evictedRec *cachePurgeRecord, prevSnapshot adminapi.CachePurgeResponse, evictIdx int, idemMeta *v1IdempotencyMetadata) {
+// The restored victim's index lets failed cleanup retain the admitted record
+// in that slot without exceeding the ledger bound.
+func (s *Server) rollbackAdmittedRecordLocked(opID string, rec, reuseRecord, evictedRec *cachePurgeRecord, prevSnapshot adminapi.CachePurgeResponse, evictIdx int, idemMeta *v1IdempotencyMetadata) int {
 	if reuseRecord != nil {
 		reuseRecord.Response = prevSnapshot
-		return
+		return -1
 	}
 	delete(s.purgeLedger.byID, opID)
 	if idemMeta != nil {
@@ -135,12 +139,19 @@ func (s *Server) rollbackAdmittedRecordLocked(opID string, rec, reuseRecord, evi
 		}
 	}
 	if evictedRec != nil && evictIdx >= 0 && evictIdx <= len(s.purgeLedger.records) {
+		if evictedRec.IdempotencyKey != "" {
+			if _, exists := s.purgeLedger.byIdem[idemMapKey(evictedRec.Principal, evictedRec.IdempotencyKey)]; exists {
+				return -1
+			}
+		}
 		s.purgeLedger.records = append(s.purgeLedger.records[:evictIdx], append([]*cachePurgeRecord{evictedRec}, s.purgeLedger.records[evictIdx:]...)...)
 		s.purgeLedger.byID[evictedRec.OperationID] = evictedRec
 		if evictedRec.IdempotencyKey != "" {
 			s.purgeLedger.byIdem[idemMapKey(evictedRec.Principal, evictedRec.IdempotencyKey)] = evictedRec
 		}
+		return evictIdx
 	}
+	return -1
 }
 
 func (s *Server) ensurePurgeLedgerLoadedLocked(diskDir string) error {
@@ -733,16 +744,6 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	var rec *cachePurgeRecord
 	var prevRecSnapshot adminapi.CachePurgeResponse
 	crossBootRetry := false
-	reservedNewFence := false
-	if reuseFenceGen == 0 {
-		if fr, ok := s.deps.Cache.(interface{ ReserveFenceSequence() uint64 }); ok && s.deps.Cache != nil {
-			reuseFenceGen = fr.ReserveFenceSequence()
-			reservedNewFence = reuseFenceGen > 0
-		}
-	}
-	if reuseFenceGen == 0 {
-		reuseFenceGen = s.purgeLedger.seq + 1
-	}
 	if reuseRecord != nil {
 		opID = reuseRecord.OperationID
 		rec = reuseRecord
@@ -815,10 +816,7 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	requireBroadConfirm := !req.ConfirmBroad
 	var invRes cache.InvalidateResult
 	var invErr error
-	var engineReuseFenceGen uint64
-	if reuseRecord != nil || reservedNewFence {
-		engineReuseFenceGen = reuseFenceGen
-	}
+	fenceCommitted := false
 	if s.deps.Cache == nil {
 		invRes = cache.InvalidateResult{
 			Selector:              normSel,
@@ -831,10 +829,21 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	} else if sp, ok := s.deps.Cache.(ScopedPurger); ok {
 		invRes, invErr = sp.InvalidateScope(opCtx, normSel, cache.InvalidateOptions{
 			PreviewSequence:     previewSeq,
-			ReuseFenceGen:       engineReuseFenceGen,
-			ReservedNewFence:    reservedNewFence,
+			ReuseFenceGen:       reuseFenceGen,
 			CrossBootRetry:      crossBootRetry,
 			RequireBroadConfirm: requireBroadConfirm,
+			CommitFence: func(fenceGen uint64) error {
+				s.purgeLedger.mu.Lock()
+				defer s.purgeLedger.mu.Unlock()
+				prevFence := rec.Response.FenceSequence
+				rec.Response.FenceSequence = fenceGen
+				if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
+					rec.Response.FenceSequence = prevFence
+					return err
+				}
+				fenceCommitted = true
+				return nil
+			},
 		})
 	} else {
 		// Minimal Purger fake in legacy tests.
@@ -864,14 +873,27 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 
 	if invErr != nil && invRes.State == "" {
 		s.purgeLedger.mu.Lock()
-		s.rollbackAdmittedRecordLocked(opID, rec, reuseRecord, evictedRec, prevRecSnapshot, evictIdx, idemMeta)
+		restoredEvictIdx := s.rollbackAdmittedRecordLocked(opID, rec, reuseRecord, evictedRec, prevRecSnapshot, evictIdx, idemMeta)
 		if pErr := s.persistPurgeLedgerLocked(diskDir); pErr != nil {
 			rec.Response.State = "failed"
 			rec.Response.Terminal = true
 			rec.Response.Outcome = "failed"
 			rec.Response.InvalidationEffective = "uncertain"
-			s.purgeLedger.records = append(s.purgeLedger.records, rec)
+			if reuseRecord == nil {
+				if restoredEvictIdx >= 0 {
+					s.purgeLedger.records[restoredEvictIdx] = rec
+					delete(s.purgeLedger.byID, evictedRec.OperationID)
+					if evictedRec.IdempotencyKey != "" {
+						delete(s.purgeLedger.byIdem, idemMapKey(evictedRec.Principal, evictedRec.IdempotencyKey))
+					}
+				} else {
+					s.purgeLedger.records = append(s.purgeLedger.records, rec)
+				}
+			}
 			s.purgeLedger.byID[opID] = rec
+			if rec.IdempotencyKey != "" {
+				s.purgeLedger.byIdem[idemMapKey(rec.Principal, rec.IdempotencyKey)] = rec
+			}
 			s.purgeLedger.mu.Unlock()
 			s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: durable purge ledger cleanup write failed")
 			writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
@@ -879,6 +901,10 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		}
 		s.purgeLedger.mu.Unlock()
 		s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: "+invErr.Error())
+		if errors.Is(invErr, cache.ErrFenceCommit) {
+			writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
+			return
+		}
 		errField := "selector"
 		if errors.Is(invErr, cache.ErrBroadConfirmRequired) {
 			errField = "confirm_broad"
@@ -889,6 +915,10 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	finalBroad := normSel.BroadScope || invRes.InvalidatedResources >= cache.BroadScopeResourceThr
+	responseBootID := bootID
+	if reuseRecord != nil && invRes.State == "canceled" && !fenceCommitted {
+		responseBootID = prevRecSnapshot.BootID
+	}
 	finalResp := adminapi.CachePurgeResponse{
 		APIVersion:                 adminapi.APIVersion,
 		OperationID:                opID,
@@ -913,7 +943,7 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		CompletedAt:                adminapi.Timestamp(invRes.CompletedAt),
 		RecoveryGuidance:           invRes.RecoveryGuidance,
 		Warnings:                   buildCachePurgeWarnings(normSel, finalBroad, false, tagEnabled, cacheEnabled),
-		BootID:                     bootID,
+		BootID:                     responseBootID,
 		AuthorityState:             s.v1AuthorityState(),
 	}
 

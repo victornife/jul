@@ -2347,23 +2347,25 @@ func TestReauditR01_LedgerHighWaterFallbackWhenMarkerWriteFails(t *testing.T) {
 		t.Fatalf("expected CrossBootRetry with ReuseFenceGen > StartupHighWaterGen to fail closed")
 	}
 
-	// Exercise ReserveFenceSequence, ReservedNewFence, nil receivers, and SelectorAll retry at ReuseFenceGen.
+	// Exercise durable cutoff commit, nil receivers, and SelectorAll retry at ReuseFenceGen.
 	var nilCache *Cache
-	if nilCache.ReserveFenceSequence() != 0 || nilCache.StartupHighWaterGen() != 0 {
-		t.Fatalf("expected nil Cache ReserveFenceSequence and StartupHighWaterGen to return 0")
+	if nilCache.StartupHighWaterGen() != 0 {
+		t.Fatalf("expected nil Cache StartupHighWaterGen to return 0")
 	}
 	_, nilComp, nilErr := nilCache.BeginSelectorFenceWithError(sel)
 	nilComp()
 	if nilErr != nil {
 		t.Fatalf("expected nil BeginSelectorFenceWithError error, got %v", nilErr)
 	}
-	rsvFence := c2.ReserveFenceSequence()
+	var rsvFence uint64
 	if _, err := c2.InvalidateScope(context.Background(), sel, InvalidateOptions{
-		PreviewSequence:  rsvFence - 1,
-		ReuseFenceGen:    rsvFence,
-		ReservedNewFence: true,
+		PreviewSequence: c2.genSeq.Load(),
+		CommitFence: func(fenceGen uint64) error {
+			rsvFence = fenceGen
+			return nil
+		},
 	}); err != nil {
-		t.Fatalf("InvalidateScope with ReservedNewFence: %v", err)
+		t.Fatalf("InvalidateScope with CommitFence: %v", err)
 	}
 	allSel, _ := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
 	if _, err := c2.InvalidateScope(context.Background(), allSel, InvalidateOptions{
@@ -2375,4 +2377,516 @@ func TestReauditR01_LedgerHighWaterFallbackWhenMarkerWriteFails(t *testing.T) {
 	if _, _, hErr := swNoHijack.Hijack(); !errors.Is(hErr, http.ErrNotSupported) {
 		t.Fatalf("expected statusWriter.Hijack on non-Hijacker to return ErrNotSupported, got %v", hErr)
 	}
+}
+
+func TestFullPurgeRetryPreservesPostCutoffEntries(t *testing.T) {
+	t.Parallel()
+
+	for _, tier := range []string{"memory", "disk", "disk_only"} {
+		for _, replacement := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/replacement=%t", tier, replacement), func(t *testing.T) {
+				t.Parallel()
+				cfg := config.CacheConfig{
+					MemoryMaxSize: config.Size(2 << 20),
+					DefaultTTL:    config.Duration(5 * time.Minute),
+					TagHeaders:    []string{"Cache-Tag"},
+				}
+				if tier != "memory" {
+					cfg.DiskPath = t.TempDir()
+					cfg.DiskMaxSize = config.Size(8 << 20)
+					cfg.MaxEntrySize = config.Size(4 << 20)
+					if tier == "disk_only" {
+						cfg.MemoryMaxSize = config.Size(1)
+					}
+				}
+				c := newTestCache(t, cfg)
+				oldKey := keyFor(http.MethodGet, "portal.example.com", "/old")
+				freshKey := keyFor(http.MethodGet, "portal.example.com", "/fresh")
+				if replacement {
+					freshKey = oldKey
+				}
+				entry := func(body string) *Entry {
+					return &Entry{
+						Status:    http.StatusOK,
+						CreatedAt: time.Now(),
+						ExpiresAt: time.Now().Add(5 * time.Minute),
+						Body:      []byte(body),
+						Tags:      []string{body},
+					}
+				}
+				c.set(oldKey, entry("old"))
+				cutoff := c.genSeq.Add(1)
+				c.set(freshKey, entry("fresh"))
+				all, err := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				res, err := c.InvalidateScope(context.Background(), all, InvalidateOptions{
+					ReuseFenceGen: cutoff,
+					MaxScanKeys:   1,
+				})
+				if err != nil || res.State != "succeeded" || res.InvalidationEffective != "effective" {
+					t.Fatalf("full purge retry: res=%+v err=%v", res, err)
+				}
+				wantRemoved := 1
+				if replacement {
+					wantRemoved = 0
+				}
+				if res.InvalidatedResources != wantRemoved || res.InvalidatedRepresentations != wantRemoved {
+					t.Errorf("purge counted post-cutoff entries: %+v", res)
+				}
+				wantMem, wantDisk := wantRemoved, wantRemoved
+				if tier == "disk_only" {
+					wantMem = 0
+				}
+				if tier == "memory" {
+					wantDisk = 0
+				}
+				if res.MemoryEntriesRemoved != wantMem || res.DiskEntriesRemoved != wantDisk {
+					t.Errorf("unexpected tier deletion counts: %+v", res)
+				}
+				if !replacement {
+					if _, ok := c.get(oldKey); ok {
+						t.Error("pre-cutoff entry survived full purge")
+					}
+				}
+				assertCachedEntryBody(t, c, freshKey, "fresh")
+				tag, err := ParseSelector(Selector{Kind: SelectorTag, Host: "portal.example.com", Tags: []string{"fresh"}}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if prev := c.PreviewScope(tag, PreviewOptions{}); prev.MatchedResources != 1 || prev.MatchedRepresentations != 1 {
+					t.Fatalf("post-cutoff entry lost its catalog or tag index: %+v", prev)
+				}
+				if tier != "memory" {
+					reopened := newTestCache(t, cfg)
+					assertCachedEntryBody(t, reopened, freshKey, "fresh")
+					if !replacement {
+						if _, ok := reopened.get(oldKey); ok {
+							t.Error("pre-cutoff disk entry reappeared after restart")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestFullPurgeRetryPreservesNewerFullPurgeFloor(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(2 << 20)})
+	oldCutoff := c.genSeq.Add(1)
+	opID, startGen := c.beginInflightOriginOp()
+	defer c.endInflightOriginOp(opID)
+	all, err := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := c.InvalidateScope(context.Background(), all, InvalidateOptions{})
+	if err != nil || newer.State != "succeeded" {
+		t.Fatalf("newer full purge: res=%+v err=%v", newer, err)
+	}
+	older, err := c.InvalidateScope(context.Background(), all, InvalidateOptions{
+		ReuseFenceGen: oldCutoff,
+	})
+	if err != nil || older.State != "succeeded" {
+		t.Fatalf("older full purge: res=%+v err=%v", older, err)
+	}
+	if floor := c.IndexStats().FenceFloorGen; floor < newer.FenceSequence {
+		t.Fatalf("older full purge lowered generation floor: got %d, want >= %d", floor, newer.FenceSequence)
+	}
+	e := &Entry{Status: http.StatusOK, Body: []byte("stale")}
+	key := keyFor(http.MethodGet, "portal.example.com", "/inflight")
+	if c.setWithStartGen(key, e, startGen, true) {
+		t.Fatal("older full purge allowed a fill fenced by the newer full purge to publish")
+	}
+}
+
+func TestFullPurgePreservesPostFenceDiskPublication(t *testing.T) {
+	t.Parallel()
+
+	for _, retry := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retry=%t", retry), func(t *testing.T) {
+			t.Parallel()
+			cfg := config.CacheConfig{
+				MemoryMaxSize: config.Size(1),
+				MaxEntrySize:  config.Size(4 << 20),
+				DiskPath:      t.TempDir(),
+				DiskMaxSize:   config.Size(8 << 20),
+			}
+			c := newTestCache(t, cfg)
+			key := keyFor(http.MethodGet, "portal.example.com", "/fresh")
+			c.onAfterFenceInstall = func(_ NormalizedSelector, _ uint64) {
+				c.set(key, &Entry{
+					Status:    http.StatusOK,
+					ExpiresAt: time.Now().Add(5 * time.Minute),
+					Body:      []byte("fresh-post-fence"),
+				})
+			}
+			all, err := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := InvalidateOptions{}
+			if retry {
+				opts.ReuseFenceGen = c.genSeq.Add(1)
+			}
+			res, err := c.InvalidateScope(context.Background(), all, opts)
+			if err != nil || res.State != "succeeded" || res.InvalidatedRepresentations != 0 {
+				t.Fatalf("empty full purge: res=%+v err=%v", res, err)
+			}
+			assertCachedEntryBody(t, c, key, "fresh-post-fence")
+			reopened := newTestCache(t, cfg)
+			assertCachedEntryBody(t, reopened, key, "fresh-post-fence")
+		})
+	}
+}
+
+func assertCachedEntryBody(t *testing.T, c *Cache, key, want string) {
+	t.Helper()
+	e, ok := c.get(key)
+	if !ok {
+		t.Fatalf("expected cached entry for %q", key)
+	}
+	r, err := e.OpenBody()
+	if err != nil {
+		t.Fatalf("OpenBody: %v", err)
+	}
+	defer r.Close()
+	body, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != want {
+		t.Fatalf("cached body = %q, want %q", body, want)
+	}
+}
+
+func TestPurgeCommitFenceAtomicallyBlocksEarlierPublications(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []SelectorKind{SelectorAll, SelectorExactURL, SelectorPrefix, SelectorGlob, SelectorTag, SelectorHost, SelectorKey} {
+		for _, disk := range []bool{false, true} {
+			for _, vary := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/disk=%t/vary=%t", kind, disk, vary), func(t *testing.T) {
+					t.Parallel()
+					cfg := config.CacheConfig{
+						MemoryMaxSize: config.Size(2 << 20),
+						DefaultTTL:    config.Duration(5 * time.Minute),
+						TagHeaders:    []string{"Cache-Tag"},
+					}
+					if disk {
+						cfg.DiskPath = t.TempDir()
+						cfg.DiskMaxSize = config.Size(8 << 20)
+					}
+					c := newTestCache(t, cfg)
+					entered := make(chan struct{})
+					originReturned := make(chan struct{})
+					originRelease := make(chan struct{})
+					commitRelease := make(chan struct{})
+					releaseOrigin := sync.OnceFunc(func() { close(originRelease) })
+					releaseCommit := sync.OnceFunc(func() { close(commitRelease) })
+					var wg sync.WaitGroup
+					t.Cleanup(func() {
+						releaseOrigin()
+						releaseCommit()
+						wg.Wait()
+					})
+					var calls atomic.Int64
+					h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Cache-Control", "public, max-age=300")
+						w.Header().Set("Cache-Tag", "article:42")
+						if vary {
+							w.Header().Set("Vary", "Accept")
+						}
+						if calls.Add(1) == 1 {
+							close(entered)
+							<-originRelease
+							_, _ = io.WriteString(w, "stale-pre-cutoff")
+							close(originReturned)
+							return
+						}
+						_, _ = io.WriteString(w, "fresh-post-cutoff")
+					}))
+					serve := func() *httptest.ResponseRecorder {
+						rr := httptest.NewRecorder()
+						req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/article", nil)
+						req.Header.Set("Accept", "text/plain")
+						h.ServeHTTP(rr, req)
+						return rr
+					}
+					fillDone := make(chan *httptest.ResponseRecorder, 1)
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						fillDone <- serve()
+					}()
+					<-entered
+					raw := Selector{Kind: kind, Host: "portal.example.com"}
+					switch kind {
+					case SelectorAll:
+						raw.Host, raw.All = "", true
+					case SelectorExactURL:
+						raw.URI = "/article"
+					case SelectorPrefix:
+						raw.Prefix = "/article"
+					case SelectorGlob:
+						raw.Pattern = "/art*"
+					case SelectorTag:
+						raw.Tags = []string{"article:42"}
+					case SelectorKey:
+						raw.Host, raw.Key = "", keyFor(http.MethodGet, "portal.example.com", "/article")
+					}
+					sel, err := ParseSelector(raw, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					committing := make(chan uint64, 1)
+					purgeDone := make(chan InvalidateResult, 1)
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
+							CommitFence: func(fenceGen uint64) error {
+								committing <- fenceGen
+								<-commitRelease
+								return nil
+							},
+						})
+						if err != nil {
+							t.Errorf("InvalidateScope: %v", err)
+						}
+						purgeDone <- res
+					}()
+					fenceGen := <-committing
+					if c.genMu.TryLock() {
+						c.genMu.Unlock()
+						t.Fatal("durable cutoff commit did not exclude origin publication")
+					}
+					releaseOrigin()
+					<-originReturned
+					releaseCommit()
+					res := <-purgeDone
+					if res.State != "succeeded" || res.InvalidationEffective != "effective" || res.FenceSequence != fenceGen {
+						t.Fatalf("unexpected purge result: %+v", res)
+					}
+					if initial := <-fillDone; initial.Body.String() != "stale-pre-cutoff" {
+						t.Fatalf("original client response changed: %q", initial.Body.String())
+					}
+					after := serve()
+					if after.Header().Get("X-Cache") != "MISS" || after.Body.String() != "fresh-post-cutoff" {
+						t.Fatalf("pre-cutoff work survived purge: X-Cache=%q body=%q", after.Header().Get("X-Cache"), after.Body.String())
+					}
+					hit := serve()
+					if hit.Header().Get("X-Cache") != "HIT" || hit.Body.String() != "fresh-post-cutoff" || calls.Load() != 2 {
+						t.Fatalf("fresh response not cached: X-Cache=%q body=%q calls=%d", hit.Header().Get("X-Cache"), hit.Body.String(), calls.Load())
+					}
+					if stats := c.IndexStats(); stats.ActiveFences != 0 || stats.InflightOriginOps != 0 {
+						t.Fatalf("completed work leaked fences: %+v", stats)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestPurgeCommitFenceFailurePreservesResidentsAndFencesEarlierWork(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(2 << 20)})
+	key := keyFor(http.MethodGet, "portal.example.com", "/item")
+	c.set(key, &Entry{Status: http.StatusOK, Body: []byte("warm")})
+	opID, startGen := c.beginInflightOriginOp()
+	defer c.endInflightOriginOp(opID)
+	all, err := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitErr := errors.New("intent storage unavailable")
+	res, err := c.InvalidateScope(context.Background(), all, InvalidateOptions{
+		CommitFence: func(uint64) error { return commitErr },
+	})
+	if !errors.Is(err, ErrFenceCommit) || !errors.Is(err, commitErr) || res.State != "" {
+		t.Fatalf("commit failure: res=%+v err=%v", res, err)
+	}
+	assertCachedEntryBody(t, c, key, "warm")
+	if stats := c.IndexStats(); stats.ActiveFences != 1 || stats.FenceFloorGen != 0 {
+		t.Fatalf("uncertain intent did not retain a publication-only fence: %+v", stats)
+	}
+	if c.setWithStartGen(key, &Entry{Status: http.StatusOK, Body: []byte("completed")}, startGen, true) {
+		t.Fatal("uncertain intent allowed earlier origin work to publish")
+	}
+	assertCachedEntryBody(t, c, key, "warm")
+}
+
+func TestPurgeRejectedBeforeFenceCommit(t *testing.T) {
+	t.Parallel()
+
+	for _, reason := range []string{"canceled", "broad", "scan_bound"} {
+		t.Run(reason, func(t *testing.T) {
+			t.Parallel()
+			c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(2 << 20)})
+			for _, path := range []string{"/items/a", "/items/b"} {
+				c.set(keyFor(http.MethodGet, "portal.example.com", path), &Entry{Status: http.StatusOK, Body: []byte("warm")})
+			}
+			raw := Selector{Kind: SelectorAll, All: true}
+			ctx := context.Background()
+			committed := false
+			opts := InvalidateOptions{CommitFence: func(uint64) error {
+				committed = true
+				return nil
+			}}
+			switch reason {
+			case "canceled":
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			case "broad":
+				opts.RequireBroadConfirm = true
+			case "scan_bound":
+				raw = Selector{Kind: SelectorPrefix, Host: "portal.example.com", Prefix: "/items"}
+				opts.MaxScanKeys = 1
+			}
+			sel, err := ParseSelector(raw, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.InvalidateScope(ctx, sel, opts); err == nil || committed {
+				t.Fatalf("rejected purge committed intent: committed=%t err=%v", committed, err)
+			}
+			assertCachedEntryBody(t, c, keyFor(http.MethodGet, "portal.example.com", "/items/a"), "warm")
+			if stats := c.IndexStats(); stats.ActiveFences != 0 || stats.FenceFloorGen != 0 {
+				t.Fatalf("rejected purge installed a fence: %+v", stats)
+			}
+		})
+	}
+}
+
+type observedErrContext struct {
+	context.Context
+	checked func()
+}
+
+func (ctx observedErrContext) Err() error {
+	err := ctx.Context.Err()
+	ctx.checked()
+	return err
+}
+
+func TestPurgeCanceledWhileWaitingForGenerationLockDoesNotCommit(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(2 << 20)})
+	key := keyFor(http.MethodGet, "portal.example.com", "/warm")
+	c.set(key, &Entry{Status: http.StatusOK, Body: []byte("warm")})
+	all, err := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	checked := make(chan struct{})
+	ctx := observedErrContext{Context: base, checked: sync.OnceFunc(func() { close(checked) })}
+	done := make(chan struct{})
+	var res InvalidateResult
+	var invErr error
+	committed := false
+	c.genMu.Lock()
+	go func() {
+		defer close(done)
+		res, invErr = c.InvalidateScope(ctx, all, InvalidateOptions{
+			CommitFence: func(uint64) error {
+				committed = true
+				return nil
+			},
+		})
+	}()
+	<-checked
+	cancel()
+	c.genMu.Unlock()
+	<-done
+	if !errors.Is(invErr, context.Canceled) || res.State != "canceled" || committed {
+		t.Fatalf("canceled waiter committed a purge: state=%s committed=%t err=%v", res.State, committed, invErr)
+	}
+	assertCachedEntryBody(t, c, key, "warm")
+}
+
+func TestPurgeUncertainIntentFencesDiskPublicationsAcrossRestart(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CacheConfig{
+		MemoryMaxSize: config.Size(2 << 20), DefaultTTL: config.Duration(5 * time.Minute),
+		DiskPath: t.TempDir(), DiskMaxSize: config.Size(8 << 20),
+	}
+	c := newTestCache(t, cfg)
+	warmKey := keyFor(http.MethodGet, "portal.example.com", "/articles/warm")
+	c.set(warmKey, &Entry{Status: http.StatusOK, Body: []byte("warm")})
+	entered, release := make(chan struct{}), make(chan struct{})
+	releaseOrigin := sync.OnceFunc(func() { close(release) })
+	var wg sync.WaitGroup
+	t.Cleanup(func() {
+		releaseOrigin()
+		wg.Wait()
+	})
+	var calls atomic.Int64
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+			_, _ = io.WriteString(w, "stale")
+			return
+		}
+		_, _ = io.WriteString(w, "fresh")
+	}))
+	serve := func() *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://portal.example.com/articles/item", nil))
+		return rr
+	}
+	done := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(done)
+		serve()
+	}()
+	<-entered
+	sel, err := ParseSelector(Selector{Kind: SelectorPrefix, Host: "portal.example.com", Prefix: "/articles"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cutoff uint64
+	_, err = c.InvalidateScope(context.Background(), sel, InvalidateOptions{
+		CommitFence: func(gen uint64) error {
+			cutoff = gen
+			ledger := fmt.Sprintf(`[{"response":{"fence_sequence":%d}}]`, gen)
+			if err := os.WriteFile(filepath.Join(cfg.DiskPath, ".jul-cache-purge-ledger"), []byte(ledger), 0o600); err != nil {
+				return err
+			}
+			return errors.New("intent rename succeeded but directory sync failed")
+		},
+	})
+	if !errors.Is(err, ErrFenceCommit) {
+		t.Fatalf("expected uncertain intent failure, got %v", err)
+	}
+	assertCachedEntryBody(t, c, warmKey, "warm")
+	releaseOrigin()
+	<-done
+	fresh := serve()
+	if fresh.Header().Get("X-Cache") != "MISS" || fresh.Body.String() != "fresh" {
+		t.Fatalf("uncertain intent allowed stale publication: X-Cache=%q body=%q", fresh.Header().Get("X-Cache"), fresh.Body.String())
+	}
+	reopened := newTestCache(t, cfg)
+	res, err := reopened.InvalidateScope(context.Background(), sel, InvalidateOptions{
+		ReuseFenceGen: cutoff, CrossBootRetry: true,
+	})
+	if err != nil || res.State != "succeeded" {
+		t.Fatalf("cross-boot continuation: res=%+v err=%v", res, err)
+	}
+	if _, ok := reopened.get(warmKey); ok {
+		t.Fatal("cross-boot retry retained a pre-cutoff resident entry")
+	}
+	assertCachedEntryBody(t, reopened, keyFor(http.MethodGet, "portal.example.com", "/articles/item"), "fresh")
 }
