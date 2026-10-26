@@ -324,6 +324,7 @@ export function CacheInvalidationPanel({
 
   const [preview, setPreview] = useState<CachePurgePreviewResponse | null>(null);
   const [confirmedSelector, setConfirmedSelector] = useState<CacheSelector | null>(null);
+  const previewGenRef = useRef(0);
   const opSelectorsRef = useRef<Record<string, CacheSelector>>({});
   const [previewBusy, setPreviewBusy] = useState(false);
   const [confirmBroad, setConfirmBroad] = useState(false);
@@ -366,6 +367,8 @@ export function CacheInvalidationPanel({
   // Any change to selector inputs invalidates a previously generated preview so
   // confirmation always stays bound to the exact previewed selector.
   const clearPreviewState = (): void => {
+    previewGenRef.current += 1;
+    setPreviewBusy(false);
     setPreview(null);
     setConfirmedSelector(null);
     setConfirmBroad(false);
@@ -376,6 +379,8 @@ export function CacheInvalidationPanel({
   // Listen for credential or RBAC permission changes while confirmation is open.
   useEffect(() => {
     const handleAuthOrPermissionChange = (): void => {
+      previewGenRef.current += 1;
+      setPreviewBusy(false);
       setConfirmedSelector(null);
       setConfirmBroad(false);
       setPreview((prev) => {
@@ -453,19 +458,24 @@ export function CacheInvalidationPanel({
       setErrorMsg(draftOutcome.error ?? "Complete the selector fields to preview.");
       return;
     }
+    const reqGen = ++previewGenRef.current;
     setPreviewBusy(true);
     try {
       const resp = await previewCachePurge(requestedSelector, true);
+      if (previewGenRef.current !== reqGen) return;
       setConfirmedSelector(requestedSelector);
       setPreview(resp);
       setConfirmBroad(false);
       setActiveIdempotencyKey(generateIdempotencyKey());
     } catch (err) {
+      if (previewGenRef.current !== reqGen) return;
       setPreview(null);
       setConfirmedSelector(null);
       setErrorMsg(err instanceof Error ? err.message : "Failed to preview cache invalidation.");
     } finally {
-      setPreviewBusy(false);
+      if (previewGenRef.current === reqGen) {
+        setPreviewBusy(false);
+      }
     }
   };
 
@@ -522,7 +532,11 @@ export function CacheInvalidationPanel({
         selector: targetSelector,
         previewToken: !isRetry ? preview?.preview_token : undefined,
         confirmBroad:
-          (isRetry && (result?.selector.kind === "host" || result?.selector.kind === "all")) ||
+          (isRetry &&
+            (result?.selector.kind === "host" ||
+              result?.selector.kind === "all" ||
+              (result?.invalidated_resources ?? 0) >= 100 ||
+              preview?.broad_scope === true)) ||
           confirmBroad ||
           undefined,
         retryOperationId: isRetry && result ? result.operation_id : undefined,

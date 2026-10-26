@@ -1067,3 +1067,298 @@ func TestAuditR5_R6_QueryRoundtripWireArraysAndCountBasedBroadGuard(t *testing.T
 		t.Fatalf("expected verifyLivePurgePermission to reject missing credential")
 	}
 }
+
+func TestReauditR01_InterruptedOperationRetryPreservesFreshPostRestartFills(t *testing.T) {
+	t.Parallel()
+
+	const tok = "admin-secret-token-621-r01"
+	diskDir := t.TempDir()
+	crashDir := t.TempDir()
+
+	makeCacheCfg := func(dir string) config.CacheConfig {
+		return config.CacheConfig{
+			Enabled:       true,
+			MemoryMaxSize: config.Size(2 << 20),
+			DiskPath:      dir,
+			DiskMaxSize:   config.Size(16 << 20),
+			MaxEntrySize:  config.Size(4 << 20),
+			DefaultTTL:    config.Duration(5 * time.Minute),
+		}
+	}
+
+	c1, err := cache.New(makeCacheCfg(diskDir), nil)
+	if err != nil {
+		t.Fatalf("cache.New c1: %v", err)
+	}
+	effCfg1 := &config.Config{Cache: makeCacheCfg(diskDir)}
+	s1 := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: c1,
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{EffectiveConfig: effCfg1}
+		},
+	})
+
+	originGen := 0
+	serveItem := func(c *cache.Cache) (*httptest.ResponseRecorder, string) {
+		h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			originGen++
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, "payload-v%d", originGen)
+		}))
+		req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/r01-item", nil)
+		req.Host = "portal.example.com"
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr, rr.Body.String()
+	}
+
+	// Warm v1 in c1.
+	rrWarm, bodyWarm := serveItem(c1)
+	if rrWarm.Header().Get("X-Cache") != "MISS" || bodyWarm != "payload-v1" {
+		t.Fatalf("expected initial MISS payload-v1, got %q %q", rrWarm.Header().Get("X-Cache"), bodyWarm)
+	}
+
+	// 1. Execute purge on s1; after the engine finishes invalidating disk/memory,
+	// snapshot the reachable crash state in diskDir BEFORE the final API ledger commit
+	// by intercepting the post-execution ledger write via a read-only crash snapshot copy.
+	sel := adminapi.CacheSelector{
+		Kind: "exact_url",
+		Host: "portal.example.com",
+		URI:  "/r01-item",
+	}
+
+	// Capture the pre-execution durable running record right after s1 writes it by
+	// wrapping s1.deps.Cache with a proxy that delegates to c1 and copies diskDir -> crashDir
+	// immediately after c1.InvalidateScope completes (before handleV1CachePurge writes finalResp).
+	snapPurger := &postInvalidateSnapshotPurger{
+		ScopedPurger: c1,
+		reserveFn:    c1.ReserveFenceSequence,
+		afterInvalidate: func() {
+			entries, rErr := os.ReadDir(diskDir)
+			if rErr != nil {
+				t.Errorf("ReadDir diskDir: %v", rErr)
+				return
+			}
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				data, fErr := os.ReadFile(filepath.Join(diskDir, e.Name()))
+				if fErr == nil {
+					_ = os.WriteFile(filepath.Join(crashDir, e.Name()), data, 0o600)
+				}
+			}
+		},
+	}
+	s1.deps.Cache = snapPurger
+
+	rr1 := postV1JSON(t, s1, "/api/v1/cache/purge", tok, "idem-r01-crash-retry", adminapi.CachePurgeRequest{
+		Selector: sel,
+	})
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("expected 200 on initial purge, got %d: %s", rr1.Code, rr1.Body.String())
+	}
+
+	// Verify the crash snapshot in crashDir captured a "running" record with FenceSequence > 0.
+	rawCrashLedger, err := os.ReadFile(filepath.Join(crashDir, diskPurgeLedgerFilename))
+	if err != nil {
+		t.Fatalf("ReadFile crashDir ledger: %v", err)
+	}
+	var crashRecs []cachePurgeRecord
+	if err := json.Unmarshal(rawCrashLedger, &crashRecs); err != nil || len(crashRecs) != 1 {
+		t.Fatalf("Unmarshal crashRecs: err=%v len=%d", err, len(crashRecs))
+	}
+	if crashRecs[0].Response.State != "running" || crashRecs[0].Response.FenceSequence == 0 {
+		t.Fatalf("expected crash snapshot running record to have FenceSequence > 0, got state=%q fence=%d",
+			crashRecs[0].Response.State, crashRecs[0].Response.FenceSequence)
+	}
+	origFence := crashRecs[0].Response.FenceSequence
+
+	// 2. Reopen crashDir on a new cache (c2) and server (s2).
+	c2, err := cache.New(makeCacheCfg(crashDir), nil)
+	if err != nil {
+		t.Fatalf("cache.New c2: %v", err)
+	}
+	effCfg2 := &config.Config{Cache: makeCacheCfg(crashDir)}
+	s2 := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: c2,
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{EffectiveConfig: effCfg2}
+		},
+	})
+
+	// 3. Populate new matching content on c2; verify it is a warm HIT.
+	rrMiss2, body2 := serveItem(c2)
+	if rrMiss2.Header().Get("X-Cache") != "MISS" || body2 != "payload-v2" {
+		t.Fatalf("expected MISS payload-v2 on c2, got %q %q", rrMiss2.Header().Get("X-Cache"), body2)
+	}
+	rrHit2, bodyHit2 := serveItem(c2)
+	if rrHit2.Header().Get("X-Cache") != "HIT" || bodyHit2 != "payload-v2" {
+		t.Fatalf("expected warm HIT payload-v2 before retry, got %q %q", rrHit2.Header().Get("X-Cache"), bodyHit2)
+	}
+
+	// 4. Retry the same Idempotency-Key on s2: must complete at origFence and keep payload-v2 as a warm HIT.
+	rrRetry := postV1JSON(t, s2, "/api/v1/cache/purge", tok, "idem-r01-crash-retry", adminapi.CachePurgeRequest{
+		Selector: sel,
+	})
+	if rrRetry.Code != http.StatusOK {
+		t.Fatalf("expected 200 on interrupted retry, got %d: %s", rrRetry.Code, rrRetry.Body.String())
+	}
+	var retryResp adminapi.CachePurgeResponse
+	_ = json.Unmarshal(rrRetry.Body.Bytes(), &retryResp)
+	if retryResp.FenceSequence != origFence {
+		t.Fatalf("expected retry to preserve original FenceSequence %d, got %d", origFence, retryResp.FenceSequence)
+	}
+
+	// 5. Verify fresh post-restart content remains a warm HIT!
+	rrAfter, bodyAfter := serveItem(c2)
+	if rrAfter.Header().Get("X-Cache") != "HIT" || bodyAfter != "payload-v2" {
+		t.Fatalf("R01 regression: interrupted retry wiped post-restart warm content (X-Cache=%q body=%q)",
+			rrAfter.Header().Get("X-Cache"), bodyAfter)
+	}
+
+	// 6. Verify that an interrupted record with an unknown cutoff (FenceSequence == 0) refuses automatic continuation.
+	unknownDir := t.TempDir()
+	unknownLedger := []*cachePurgeRecord{
+		{
+			OperationID:    "cp_unknown_1",
+			Principal:      "shared",
+			IdempotencyKey: "idem-r01-unknown-cutoff",
+			CreatedAt:      time.Now().UTC(),
+			Response: adminapi.CachePurgeResponse{
+				APIVersion:            adminapi.APIVersion,
+				OperationID:           "cp_unknown_1",
+				State:                 "running",
+				Terminal:              false,
+				Outcome:               "running",
+				InvalidationEffective: "incomplete",
+				Selector:              sel,
+				SelectorDigest:        retryResp.SelectorDigest,
+				FenceSequence:         0,
+			},
+		},
+	}
+	rawUnknown, _ := json.Marshal(unknownLedger)
+	_ = os.WriteFile(filepath.Join(unknownDir, diskPurgeLedgerFilename), rawUnknown, 0o600)
+	c3, err := cache.New(makeCacheCfg(unknownDir), nil)
+	if err != nil {
+		t.Fatalf("cache.New c3: %v", err)
+	}
+	effCfg3 := &config.Config{Cache: makeCacheCfg(unknownDir)}
+	s3 := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: c3,
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{EffectiveConfig: effCfg3}
+		},
+	})
+	_, _ = serveItem(c3)
+	rrUnknownIdem := postV1JSON(t, s3, "/api/v1/cache/purge", tok, "idem-r01-unknown-cutoff", adminapi.CachePurgeRequest{
+		Selector: sel,
+	})
+	if rrUnknownIdem.Code != http.StatusConflict {
+		t.Fatalf("expected 409 refusing unknown-cutoff Idempotency-Key continuation, got %d: %s", rrUnknownIdem.Code, rrUnknownIdem.Body.String())
+	}
+	rrUnknownOp := postV1JSON(t, s3, "/api/v1/cache/purge", tok, "", adminapi.CachePurgeRequest{
+		Selector:         sel,
+		RetryOperationID: "cp_unknown_1",
+	})
+	if rrUnknownOp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 refusing unknown-cutoff retry_operation_id continuation, got %d: %s", rrUnknownOp.Code, rrUnknownOp.Body.String())
+	}
+	rrStillWarm, _ := serveItem(c3)
+	if rrStillWarm.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("expected c3 warm entry to remain HIT after refused unknown-cutoff retry, got %q", rrStillWarm.Header().Get("X-Cache"))
+	}
+}
+
+type postInvalidateSnapshotPurger struct {
+	ScopedPurger
+	reserveFn       func() uint64
+	afterInvalidate func()
+}
+
+func (p *postInvalidateSnapshotPurger) ReserveFenceSequence() uint64 {
+	if p.reserveFn != nil {
+		return p.reserveFn()
+	}
+	return 0
+}
+
+func (p *postInvalidateSnapshotPurger) InvalidateScope(ctx context.Context, sel cache.NormalizedSelector, opts cache.InvalidateOptions) (cache.InvalidateResult, error) {
+	res, err := p.ScopedPurger.InvalidateScope(ctx, sel, opts)
+	if p.afterInvalidate != nil {
+		p.afterInvalidate()
+	}
+	return res, err
+}
+
+func TestReauditR02_OpenToTokenAndOpenToRBACAuthTighteningDeniesAdmittedCredentiallessRequest(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"open_to_legacy_token", "open_to_rbac"} {
+		t.Run(mode, func(t *testing.T) {
+			var execCount atomic.Int32
+			eng := &countingScopedPurger{
+				onExec: func() {
+					execCount.Add(1)
+				},
+			}
+			// Start with open administration (empty token, RBAC disabled).
+			s := newTestServer(t, config.AdminConfig{}, Deps{Cache: eng})
+
+			payloadBytes, _ := json.Marshal(adminapi.CachePurgeRequest{
+				Selector: adminapi.CacheSelector{
+					Kind: "exact_url",
+					Host: "portal.example.com",
+					URI:  "/r02-open-tighten",
+				},
+			})
+
+			bodyReader := &blockingBodyReader{
+				admitted: make(chan struct{}),
+				release:  make(chan struct{}),
+				inner:    strings.NewReader(string(payloadBytes)),
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", bodyReader)
+			req.RemoteAddr = "127.0.0.1:54321"
+			req.Header.Set("Content-Type", "application/json")
+			// Credentialless request admitted while administration is open.
+			rr := httptest.NewRecorder()
+			doneCh := make(chan struct{})
+			go func() {
+				defer close(doneCh)
+				s.routes().ServeHTTP(rr, req)
+			}()
+
+			<-bodyReader.admitted
+			if mode == "open_to_legacy_token" {
+				s.UpdateLiveAdminConfig(config.AdminConfig{
+					Token: "newly-required-legacy-token-621",
+				})
+			} else {
+				pol, err := rbac.Build(true, rbac.RoleAdmin, nil, []rbac.PrincipalDef{
+					{Name: "admin-user", Role: rbac.RoleAdmin, Token: "rbac-admin-token-32-chars-padded-621"},
+				}, "", time.Now())
+				if err != nil {
+					t.Fatalf("rbac.Build: %v", err)
+				}
+				s.UpdateLiveAdminConfig(config.AdminConfig{
+					RBAC: config.AdminRBACConfig{Enabled: true},
+				})
+				s.UpdatePolicy(pol)
+			}
+			close(bodyReader.release)
+			<-doneCh
+
+			if rr.Code != http.StatusUnauthorized {
+				t.Fatalf("%s: expected 401 Unauthorized after live auth tightening on credentialless request, got %d: %s",
+					mode, rr.Code, rr.Body.String())
+			}
+			if execCount.Load() != 0 {
+				t.Fatalf("%s: expected 0 engine executions after live auth tightening, got %d", mode, execCount.Load())
+			}
+		})
+	}
+}

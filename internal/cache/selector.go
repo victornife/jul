@@ -84,6 +84,7 @@ type NormalizedSelector struct {
 	globSegments        []string
 	cutoverExactPath    string
 	cutoverRawPrefix    string
+	cutoverMatchAnyPort bool
 	digest              [32]byte
 }
 
@@ -289,12 +290,26 @@ func checkRouteHostAllowed(host, routeID string, routeHosts []string) error {
 	if len(routeHosts) == 0 {
 		return selErr("route_id", fmt.Sprintf("route %q has no explicit non-wildcard server_names; specify host without route_id or configure explicit server_names", routeID))
 	}
+	bareHost := stripSelectorHostPort(host)
 	for _, rh := range routeHosts {
-		if rh == host {
+		if rh == host || rh == bareHost {
 			return nil
 		}
 	}
 	return selErr("host", fmt.Sprintf("host %q does not belong to route %q server_names", host, routeID))
+}
+
+func stripSelectorHostPort(host string) string {
+	if strings.HasPrefix(host, "[") {
+		if closeIdx := strings.IndexByte(host, ']'); closeIdx > 0 {
+			return host[:closeIdx+1]
+		}
+		return host
+	}
+	if colon := strings.IndexByte(host, ':'); colon > 0 {
+		return host[:colon]
+	}
+	return host
 }
 
 func parseRequiredHost(rawHost, field string) (host string, explicitDefaultPort bool, err error) {
@@ -691,8 +706,12 @@ func computeSelectorDigest(s NormalizedSelector) [32]byte {
 		s.Key,
 		s.RouteID,
 	)
-	if s.cutoverExactPath != "" || s.cutoverRawPrefix != "" {
-		writePart(s.cutoverExactPath, s.cutoverRawPrefix)
+	if s.cutoverExactPath != "" || s.cutoverRawPrefix != "" || s.cutoverMatchAnyPort {
+		anyPortBit := "0"
+		if s.cutoverMatchAnyPort {
+			anyPortBit = "1"
+		}
+		writePart(s.cutoverExactPath, s.cutoverRawPrefix, anyPortBit)
 	}
 	writePart(strconv.Itoa(len(s.Tags)))
 	writePart(s.Tags...)
@@ -741,6 +760,16 @@ func redactURIQuery(uri string) string {
 	return uri
 }
 
+func (s NormalizedSelector) matchesHost(host string) bool {
+	if host == s.Host {
+		return true
+	}
+	if s.cutoverMatchAnyPort && stripSelectorHostPort(host) == stripSelectorHostPort(s.Host) {
+		return true
+	}
+	return false
+}
+
 // MatchesResource reports whether s selects a cached resource identified by
 // normalized host, raw requestURI (path + optional ?query), and sorted tags.
 func (s NormalizedSelector) MatchesResource(host, requestURI string, tags []string) bool {
@@ -748,11 +777,11 @@ func (s NormalizedSelector) MatchesResource(host, requestURI string, tags []stri
 	case SelectorAll:
 		return true
 	case SelectorHost:
-		return host == s.Host
+		return s.matchesHost(host)
 	case SelectorExactURL, SelectorKey:
-		return host == s.Host && requestURI == s.URI
+		return s.matchesHost(host) && requestURI == s.URI
 	case SelectorPrefix:
-		if host != s.Host {
+		if !s.matchesHost(host) {
 			return false
 		}
 		path := stripQueryFromURI(requestURI)
@@ -765,7 +794,7 @@ func (s NormalizedSelector) MatchesResource(host, requestURI string, tags []stri
 		}
 		return matchSegmentPrefix(s.Prefix, path)
 	case SelectorGlob:
-		if host != s.Host {
+		if !s.matchesHost(host) {
 			return false
 		}
 		path := stripQueryFromURI(requestURI)
@@ -777,7 +806,7 @@ func (s NormalizedSelector) MatchesResource(host, requestURI string, tags []stri
 		}
 		return matchAnchoredGlob(s.globSegments, path)
 	case SelectorTag:
-		if host != s.Host || len(tags) == 0 {
+		if !s.matchesHost(host) || len(tags) == 0 {
 			return false
 		}
 		return matchTags(s.Tags, s.TagMatch, tags)
@@ -1084,12 +1113,23 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 		addSel(Selector{Kind: SelectorAll, All: true})
 		return
 	}
+	addHostCutover := func(h string) {
+		ns := NormalizedSelector{
+			Kind:                SelectorHost,
+			Host:                h,
+			BroadScope:          true,
+			cutoverMatchAnyPort: true,
+		}
+		ns.digest = computeSelectorDigest(ns)
+		addNorm(ns)
+	}
 	for _, sn := range srv.ServerNames {
 		nh, err := normalizeSelectorHost(sn)
 		if err != nil || strings.Contains(nh, "*") {
 			addSel(Selector{Kind: SelectorAll, All: true})
 			return
 		}
+		nh = stripSelectorHostPort(nh)
 		mType := loc.Match.Type
 		if mType == "" {
 			mType = "prefix"
@@ -1097,33 +1137,35 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 		switch mType {
 		case "exact":
 			if loc.Match.Path == "" || !strings.HasPrefix(loc.Match.Path, "/") {
-				addSel(Selector{Kind: SelectorHost, Host: nh})
+				addHostCutover(nh)
 			} else {
 				ns := NormalizedSelector{
-					Kind:             SelectorGlob,
-					Host:             nh,
-					Pattern:          loc.Match.Path,
-					globSegments:     strings.Split(loc.Match.Path[1:], "/"),
-					cutoverExactPath: loc.Match.Path,
+					Kind:                SelectorGlob,
+					Host:                nh,
+					Pattern:             loc.Match.Path,
+					globSegments:        strings.Split(loc.Match.Path[1:], "/"),
+					cutoverExactPath:    loc.Match.Path,
+					cutoverMatchAnyPort: true,
 				}
 				ns.digest = computeSelectorDigest(ns)
 				addNorm(ns)
 			}
 		case "prefix":
 			if loc.Match.Path == "/" || loc.Match.Path == "" || !strings.HasPrefix(loc.Match.Path, "/") {
-				addSel(Selector{Kind: SelectorHost, Host: nh})
+				addHostCutover(nh)
 			} else {
 				ns := NormalizedSelector{
-					Kind:             SelectorPrefix,
-					Host:             nh,
-					Prefix:           loc.Match.Path,
-					cutoverRawPrefix: loc.Match.Path,
+					Kind:                SelectorPrefix,
+					Host:                nh,
+					Prefix:              loc.Match.Path,
+					cutoverRawPrefix:    loc.Match.Path,
+					cutoverMatchAnyPort: true,
 				}
 				ns.digest = computeSelectorDigest(ns)
 				addNorm(ns)
 			}
 		default:
-			addSel(Selector{Kind: SelectorHost, Host: nh})
+			addHostCutover(nh)
 		}
 	}
 }

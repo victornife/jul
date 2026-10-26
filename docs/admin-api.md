@@ -531,19 +531,23 @@ keeping `file_owned` configuration files strictly read-only remotely.
   HMAC `preview_token`, structured `warnings`, and up to 20 secret-safe resource
   `samples` (with query values redacted).
 - **`POST /api/v1/cache/purge`** (`cache:purge`, re-verified at the execution
-  boundary): installs a monotonic selector fence (`fence_sequence`), detaches
+  boundary): reserves and durably records a monotonic selector fence
+  (`fence_sequence`) in `.jul-cache-purge-ledger` before execution, detaches
   matching in-flight cold fills and revalidations, and removes matching entries
   across memory and disk with crash-consistent `.jul-cache-tombstones`. Broad
-  selectors (`host`, `all`) require either `confirm_broad = true` or a valid
-  `preview_token` minted for the same principal and normalized selector.
-  Supports `Idempotency-Key` (replaying `succeeded` results with
-  `idempotent_replay = true` and re-running `partial`/`failed`/`canceled`
-  attempts at the original `fence_sequence`) and `retry_operation_id`.
+  scopes (`host`, `all`, `>= 100` matched resources, or a truncated preview
+  scan) require explicit `confirm_broad = true` even when a valid
+  `preview_token` is supplied. Supports `Idempotency-Key` (replaying `succeeded`
+  results with `idempotent_replay = true` and re-running
+  `partial`/`failed`/`canceled` attempts at the original `fence_sequence`) and
+  `retry_operation_id`; returns `503 storage_unavailable` if the durable purge
+  ledger cannot be read or persisted before execution.
 - **`GET /api/v1/cache/purges/{operation_id}`** (any of `cache:purge`,
   `audit:read`, `admin:manage`; principal-isolated unless the caller holds
   `audit:read` or `admin:manage`): inspects an operation record from the bounded
   256-entry ledger (persisted to `.jul-cache-purge-ledger` when
-  `[cache].disk_path` is configured).
+  `[cache].disk_path` is configured; returns `503 storage_unavailable` if the
+  on-disk ledger is unreadable).
 
 ## What is deliberately not published
 

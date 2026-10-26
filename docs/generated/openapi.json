@@ -146,6 +146,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -168,6 +178,7 @@
           "not_found",
           "idempotency_key_reused",
           "idempotency_key_in_flight",
+          "storage_unavailable",
           "payload_too_large",
           "unsupported_media_type"
         ]
@@ -416,6 +427,16 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -436,7 +457,8 @@
           "rate_limited",
           "internal_error",
           "invalid_request",
-          "not_found"
+          "not_found",
+          "storage_unavailable"
         ]
       }
     },

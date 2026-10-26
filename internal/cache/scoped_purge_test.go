@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1928,5 +1929,450 @@ func TestAdversarialRounds_ActiveFenceRetentionHeaderOnlyStripAndHighWaterError(
 		}, 0)
 		_ = os.WriteFile(p, tail, 0o600)
 		_, _, _, _, _, _ = readDiskEntryMetaWithKeyGen(p)
+	}
+}
+
+func TestReauditR04_DeclinedUpgradeResponseStripsTagHeadersAndPreservesHijacker(t *testing.T) {
+	t.Parallel()
+
+	c, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag", "Surrogate-Key"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New: %v", err)
+	}
+
+	// 1. Declined upgrade returning explicit HTTP 200 OK with Cache-Tag must strip Cache-Tag.
+	h200 := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Tag", "internal-declined-upgrade-tag")
+		w.Header().Set("Surrogate-Key", "internal-sk")
+		w.Header().Set("X-Origin", "ordinary-200")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("declined upgrade body"))
+	}))
+	req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/ws-endpoint", nil)
+	req.Host = "portal.example.com"
+	req.Header.Set("Connection", "upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	rr := httptest.NewRecorder()
+	h200.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Cache-Tag"); got != "" {
+		t.Fatalf("expected Cache-Tag to be stripped on declined upgrade HTTP 200 response, got %q", got)
+	}
+	if got := rr.Header().Get("Surrogate-Key"); got != "" {
+		t.Fatalf("expected Surrogate-Key to be stripped on declined upgrade HTTP 200 response, got %q", got)
+	}
+	if got := rr.Header().Get("X-Origin"); got != "ordinary-200" {
+		t.Fatalf("expected X-Origin to be preserved, got %q", got)
+	}
+
+	// 2. Declined upgrade returning header-only implicit 200 without WriteHeader/Write also strips Cache-Tag.
+	hImplicit := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Tag", "implicit-upgrade-tag")
+	}))
+	rrImp := httptest.NewRecorder()
+	hImplicit.ServeHTTP(rrImp, req.Clone(context.Background()))
+	if got := rrImp.Header().Get("Cache-Tag"); got != "" {
+		t.Fatalf("expected Cache-Tag to be stripped on implicit 200 declined upgrade response, got %q", got)
+	}
+
+	// 3. Genuine accepted upgrade preserves http.Hijacker capability through the strip wrapper.
+	c1, c2 := net.Pipe()
+	defer func() { _ = c1.Close(); _ = c2.Close() }()
+	hw := &hijackableWriter{ResponseRecorder: httptest.NewRecorder(), conn: c1}
+	var sawHijacker bool
+	hHijack := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Tag", "hijacked-raw")
+		hj, ok := w.(http.Hijacker)
+		sawHijacker = ok
+		if ok {
+			conn, _, hErr := hj.Hijack()
+			if hErr != nil {
+				t.Errorf("Hijack error: %v", hErr)
+			}
+			_ = conn.Close()
+		}
+	}))
+	hHijack.ServeHTTP(hw, req.Clone(context.Background()))
+	if !sawHijacker || !hw.hijacked {
+		t.Fatalf("expected http.Hijacker capability to be preserved on upgrade request (sawHijacker=%v, hijacked=%v)", sawHijacker, hw.hijacked)
+	}
+}
+
+func TestReauditR06_StartupTagPolicyProvenanceRetiresIncompatibleEntries(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	c1, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		MaxEntrySize:  config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"X-Tag-A"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New c1: %v", err)
+	}
+
+	originCalls := 0
+	makeHandler := func(c *Cache) http.Handler {
+		return c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			originCalls++
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Header().Set("X-Tag-A", "tag-from-a")
+			w.Header().Set("X-Tag-B", "tag-from-b")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, "body-%d", originCalls)
+		}))
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/item", nil)
+	req.Host = "portal.example.com"
+	rr1 := httptest.NewRecorder()
+	makeHandler(c1).ServeHTTP(rr1, req)
+	if rr1.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("expected initial MISS, got %q", rr1.Header().Get("X-Cache"))
+	}
+
+	// 1. Restart with the SAME tag_headers policy (["X-Tag-A"]): warm disk entry and its tag are retained.
+	c2, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		MaxEntrySize:  config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"X-Tag-A"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New c2: %v", err)
+	}
+	rr2 := httptest.NewRecorder()
+	makeHandler(c2).ServeHTTP(rr2, req.Clone(context.Background()))
+	if rr2.Header().Get("X-Cache") != "HIT" || rr2.Body.String() != "body-1" {
+		t.Fatalf("expected warm HIT with same tag_headers policy across restart, got X-Cache=%q body=%q", rr2.Header().Get("X-Cache"), rr2.Body.String())
+	}
+	selTagA, _ := ParseSelector(Selector{Kind: SelectorTag, Host: "portal.example.com", Tags: []string{"tag-from-a"}}, nil)
+	if prev := c2.PreviewScope(selTagA, PreviewOptions{}); prev.MatchedResources != 1 {
+		t.Fatalf("expected tag-from-a to remain indexed on restart with same policy, got %d", prev.MatchedResources)
+	}
+
+	// 2. Restart with a DIFFERENT tag_headers policy (["X-Tag-B"]):
+	// Entry ingested under ["X-Tag-A"] must NOT be stamped with fabricated ["X-Tag-B"] provenance;
+	// it must be retired on startup and refetched under ["X-Tag-B"].
+	c3, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		MaxEntrySize:  config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"X-Tag-B"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New c3: %v", err)
+	}
+	if prev := c3.PreviewScope(selTagA, PreviewOptions{}); prev.MatchedResources != 0 {
+		t.Fatalf("expected tag-from-a from old policy to NOT be indexed under X-Tag-B, got %d", prev.MatchedResources)
+	}
+	rr3 := httptest.NewRecorder()
+	makeHandler(c3).ServeHTTP(rr3, req.Clone(context.Background()))
+	if rr3.Header().Get("X-Cache") != "MISS" || rr3.Body.String() != "body-2" {
+		t.Fatalf("expected incompatible disk entry to be retired on startup (MISS body-2), got X-Cache=%q body=%q", rr3.Header().Get("X-Cache"), rr3.Body.String())
+	}
+	selTagB, _ := ParseSelector(Selector{Kind: SelectorTag, Host: "portal.example.com", Tags: []string{"tag-from-b"}}, nil)
+	if prev := c3.PreviewScope(selTagB, PreviewOptions{}); prev.MatchedResources != 1 {
+		t.Fatalf("expected refetched entry to be indexed under tag-from-b, got %d", prev.MatchedResources)
+	}
+
+	// 3. Also verify Vary stub + variants are retired together on startup when tag_headers changes (AR-07).
+	hVary := c3.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Vary", "Accept-Language")
+		w.Header().Set("X-Tag-B", "vary-tag-b")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "vary-%s", r.Header.Get("Accept-Language"))
+	}))
+	for _, lang := range []string{"en", "es"} {
+		vReq := httptest.NewRequest(http.MethodGet, "http://portal.example.com/vary-item", nil)
+		vReq.Host = "portal.example.com"
+		vReq.Header.Set("Accept-Language", lang)
+		hVary.ServeHTTP(httptest.NewRecorder(), vReq)
+	}
+	c4, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		MaxEntrySize:  config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"X-Tag-C"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New c4: %v", err)
+	}
+	if stats := c4.IndexStats(); stats.BaseKeysIndexed != 0 {
+		t.Fatalf("expected all Vary variants and stubs from incompatible tag policy to be retired on startup, got BaseKeysIndexed=%d", stats.BaseKeysIndexed)
+	}
+}
+
+func TestReauditR07_CutoverDerivationMatchesExplicitPortAuthoritiesAndFenceError(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	c, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		MaxEntrySize:  config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New: %v", err)
+	}
+
+	// Cache entries under both bare portal.example.com and explicit-port portal.example.com:8080,
+	// plus an unrelated host.
+	for _, h := range []string{"portal.example.com", "portal.example.com:8080", "other.example.com:8080"} {
+		c.set(keyFor(http.MethodGet, h, "/api/v1/items?page=1"), &Entry{
+			Status:    http.StatusOK,
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(5 * time.Minute),
+			Body:      []byte("items-" + h),
+		})
+	}
+
+	routeID := "route-api"
+	before := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"portal.example.com"},
+				Locations: []config.LocationConfig{
+					{
+						RouteID:   &routeID,
+						Match:     config.MatchConfig{Path: "/api/v1", Type: "prefix"},
+						ProxyPass: "http://127.0.0.1:9001",
+					},
+				},
+			},
+		},
+	}
+	after := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"portal.example.com"},
+				Locations: []config.LocationConfig{
+					{
+						RouteID:   &routeID,
+						Match:     config.MatchConfig{Path: "/api/v1", Type: "prefix"},
+						ProxyPass: "http://127.0.0.1:9002",
+					},
+				},
+			},
+		},
+	}
+
+	sels := DeriveRouteCutoverSelectors(before, after)
+	if len(sels) != 1 {
+		t.Fatalf("expected 1 derived cutover selector, got %d", len(sels))
+	}
+	if !sels[0].MatchesResource("portal.example.com:8080", "/api/v1/items?page=1", nil) {
+		t.Fatalf("expected route-derived cutover selector to match explicit-port authority portal.example.com:8080")
+	}
+	if !sels[0].MatchesResource("portal.example.com", "/api/v1/items?page=1", nil) {
+		t.Fatalf("expected route-derived cutover selector to match bare authority portal.example.com")
+	}
+
+	res, err := c.InvalidateScope(context.Background(), sels[0], InvalidateOptions{})
+	if err != nil {
+		t.Fatalf("InvalidateScope cutover selector: %v", err)
+	}
+	if res.InvalidatedResources != 2 {
+		t.Fatalf("expected cutover invalidation to remove both bare and :8080 cached resources (2), got %d", res.InvalidatedResources)
+	}
+	if _, ok := c.get(keyFor(http.MethodGet, "portal.example.com:8080", "/api/v1/items?page=1")); ok {
+		t.Fatalf("expected portal.example.com:8080 resource to be invalidated by route cutover selector")
+	}
+	if _, ok := c.get(keyFor(http.MethodGet, "other.example.com:8080", "/api/v1/items?page=1")); !ok {
+		t.Fatalf("expected unrelated host other.example.com:8080 to remain cached")
+	}
+
+	// Verify BeginSelectorFenceWithError surfaces durable high-water persistence errors.
+	c.disk.mu.Lock()
+	c.disk.testWriteHighWaterErr = errors.New("injected high-water marker error")
+	c.disk.mu.Unlock()
+	_, comp, fenceErr := c.BeginSelectorFenceWithError(sels[0])
+	comp()
+	c.disk.mu.Lock()
+	c.disk.testWriteHighWaterErr = nil
+	c.disk.mu.Unlock()
+	if fenceErr == nil {
+		t.Fatalf("expected BeginSelectorFenceWithError to return injected high-water persistence error")
+	}
+
+	// Verify server_names containing an explicit port (portal.example.com:8443) still derives a cutover selector
+	// that matches bare and alternate-port cached authorities (AR-07).
+	beforePorted := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8443",
+				ServerNames: []string{"portal.example.com:8443"},
+				Locations: []config.LocationConfig{
+					{
+						Match:     config.MatchConfig{Path: "/api/v1", Type: "prefix"},
+						ProxyPass: "http://127.0.0.1:9001",
+					},
+				},
+			},
+		},
+	}
+	afterPorted := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8443",
+				ServerNames: []string{"portal.example.com:8443"},
+				Locations: []config.LocationConfig{
+					{
+						Match:     config.MatchConfig{Path: "/api/v1", Type: "prefix"},
+						ProxyPass: "http://127.0.0.1:9002",
+					},
+				},
+			},
+		},
+	}
+	selsPorted := DeriveRouteCutoverSelectors(beforePorted, afterPorted)
+	if len(selsPorted) != 1 || !selsPorted[0].MatchesResource("portal.example.com", "/api/v1/items", nil) || !selsPorted[0].MatchesResource("portal.example.com:8080", "/api/v1/items", nil) {
+		t.Fatalf("expected ported server_name cutover selector to match both bare and :8080 authorities")
+	}
+}
+
+func TestReauditR01_LedgerHighWaterFallbackWhenMarkerWriteFails(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	c1, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		MaxEntrySize:  config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New c1: %v", err)
+	}
+
+	c1.set(keyFor(http.MethodGet, "portal.example.com", "/r01-marker"), &Entry{
+		Status:    http.StatusOK,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+		Body:      []byte("v1"),
+	})
+
+	// Force only the .jul-cache-gen marker write to fail while the purge ledger records the uncertain high fence.
+	c1.disk.mu.Lock()
+	c1.disk.testWriteHighWaterErr = errors.New("injected .jul-cache-gen write failure")
+	c1.disk.mu.Unlock()
+
+	sel, _ := ParseSelector(Selector{Kind: SelectorExactURL, Host: "portal.example.com", URI: "/r01-marker"}, nil)
+	res1, err := c1.InvalidateScope(context.Background(), sel, InvalidateOptions{})
+	if err != nil {
+		t.Fatalf("InvalidateScope res1: %v", err)
+	}
+	if res1.InvalidationEffective != "uncertain" || res1.FenceSequence == 0 {
+		t.Fatalf("expected uncertain outcome with FenceSequence > 0 when marker write fails, got effective=%q fence=%d",
+			res1.InvalidationEffective, res1.FenceSequence)
+	}
+
+	// Persist the uncertain high fence in .jul-cache-purge-ledger (as handleV1CachePurge does).
+	ledgerJSON := fmt.Sprintf(`[{"operation_id":"cp_1","principal":"shared","response":{"fence_sequence":%d}}]`, res1.FenceSequence)
+	if err := os.WriteFile(filepath.Join(diskDir, diskPurgeLedgerFile), []byte(ledgerJSON), 0o600); err != nil {
+		t.Fatalf("WriteFile ledger: %v", err)
+	}
+
+	// Repair marker write and restart (cache.New on diskDir): rehydrate() must recover highWaterGen from .jul-cache-purge-ledger.
+	c2, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		MaxEntrySize:  config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New c2: %v", err)
+	}
+	if c2.StartupHighWaterGen() < res1.FenceSequence {
+		t.Fatalf("expected c2 StartupHighWaterGen (%d) >= ledger FenceSequence (%d)",
+			c2.StartupHighWaterGen(), res1.FenceSequence)
+	}
+
+	// Populate fresh content on c2; it must receive gen > res1.FenceSequence and survive a cross-boot retry at ReuseFenceGen.
+	c2.set(keyFor(http.MethodGet, "portal.example.com", "/r01-marker"), &Entry{
+		Status:    http.StatusOK,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+		Body:      []byte("v2-fresh"),
+	})
+	res2, err := c2.InvalidateScope(context.Background(), sel, InvalidateOptions{
+		ReuseFenceGen:  res1.FenceSequence,
+		CrossBootRetry: true,
+	})
+	if err != nil {
+		t.Fatalf("InvalidateScope cross-boot retry: %v", err)
+	}
+	if res2.State != "succeeded" {
+		t.Fatalf("expected succeeded retry, got %q", res2.State)
+	}
+	if e, ok := c2.get(keyFor(http.MethodGet, "portal.example.com", "/r01-marker")); !ok || string(e.Body) != "v2-fresh" {
+		t.Fatalf("expected fresh post-restart fill v2-fresh to survive retry at old FenceSequence, got ok=%v", ok)
+	}
+
+	// Verify CrossBootRetry fails closed when ReuseFenceGen exceeds StartupHighWaterGen (AR-07).
+	if _, err := c2.InvalidateScope(context.Background(), sel, InvalidateOptions{
+		ReuseFenceGen:  c2.StartupHighWaterGen() + 100,
+		CrossBootRetry: true,
+	}); err == nil {
+		t.Fatalf("expected CrossBootRetry with ReuseFenceGen > StartupHighWaterGen to fail closed")
+	}
+
+	// Exercise ReserveFenceSequence, ReservedNewFence, nil receivers, and SelectorAll retry at ReuseFenceGen.
+	var nilCache *Cache
+	if nilCache.ReserveFenceSequence() != 0 || nilCache.StartupHighWaterGen() != 0 {
+		t.Fatalf("expected nil Cache ReserveFenceSequence and StartupHighWaterGen to return 0")
+	}
+	_, nilComp, nilErr := nilCache.BeginSelectorFenceWithError(sel)
+	nilComp()
+	if nilErr != nil {
+		t.Fatalf("expected nil BeginSelectorFenceWithError error, got %v", nilErr)
+	}
+	rsvFence := c2.ReserveFenceSequence()
+	if _, err := c2.InvalidateScope(context.Background(), sel, InvalidateOptions{
+		PreviewSequence:  rsvFence - 1,
+		ReuseFenceGen:    rsvFence,
+		ReservedNewFence: true,
+	}); err != nil {
+		t.Fatalf("InvalidateScope with ReservedNewFence: %v", err)
+	}
+	allSel, _ := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+	if _, err := c2.InvalidateScope(context.Background(), allSel, InvalidateOptions{
+		ReuseFenceGen: rsvFence,
+	}); err != nil {
+		t.Fatalf("InvalidateScope SelectorAll with ReuseFenceGen: %v", err)
+	}
+	swNoHijack := &statusWriter{ResponseWriter: httptest.NewRecorder()}
+	if _, _, hErr := swNoHijack.Hijack(); !errors.Is(hErr, http.ErrNotSupported) {
+		t.Fatalf("expected statusWriter.Hijack on non-Hijacker to return ErrNotSupported, got %v", hErr)
 	}
 }

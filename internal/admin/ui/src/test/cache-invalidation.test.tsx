@@ -1169,6 +1169,115 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     expect(sentPurgeBodies.length).toBe(2);
   });
 
+  it("ignores delayed preview responses when the operator edits the form while preview is pending (R03)", async () => {
+    let resolvePreviewA: ((resp: Response) => void) | undefined;
+    const sentPurgeBodies: Array<Record<string, unknown>> = [];
+    let previewCallCount = 0;
+
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/me")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              authenticated: true,
+              principal: "ops",
+              role: "admin",
+              permissions: ["stats:read", "cache:purge"],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url === "/api/v1/cache/purge/preview") {
+        previewCallCount += 1;
+        if (previewCallCount === 1) {
+          return new Promise<Response>((resolve) => {
+            resolvePreviewA = resolve;
+          });
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...samplePreview,
+              selector: {
+                kind: "exact_url",
+                host: "portal.example.com",
+                uri: "/article-b",
+              },
+              preview_token: "cpt1.11.1790000000.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url === "/api/v1/cache/purge") {
+        const rawBody = typeof init?.body === "string" ? init.body : "{}";
+        sentPurgeBodies.push(JSON.parse(rawBody) as Record<string, unknown>);
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...samplePurgeSuccess,
+              selector: {
+                kind: "exact_url",
+                host: "portal.example.com",
+                uri: "/article-b",
+              },
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+
+    renderWorkflow();
+
+    // 1. Start preview for /article-a.
+    fireEvent.change(screen.getByLabelText("Exact request URI"), {
+      target: { value: "/article-a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview invalidation scope" }));
+    expect(resolvePreviewA).toBeDefined();
+
+    // 2. Change the URI input to /article-b while /article-a's preview is still pending.
+    fireEvent.change(screen.getByLabelText("Exact request URI"), {
+      target: { value: "/article-b" },
+    });
+
+    // 3. Resolve /article-a's delayed response: it must NOT restore /article-a's preview or confirmedSelector.
+    resolvePreviewA?.(
+      new Response(
+        JSON.stringify({
+          ...samplePreview,
+          selector: {
+            kind: "exact_url",
+            host: "portal.example.com",
+            uri: "/article-a",
+          },
+          preview_token: "cpt1.10.1790000000.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        }),
+        { status: 200 },
+      ),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Invalidation preview" })).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Confirm & invalidate" })).not.toBeInTheDocument();
+
+    // 4. Preview /article-b and confirm: must submit /article-b, never /article-a.
+    fireEvent.click(screen.getByRole("button", { name: "Preview invalidation scope" }));
+    expect(await screen.findByRole("region", { name: "Invalidation preview" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm & invalidate" }));
+    expect(await screen.findByLabelText("Invalidation execution result")).toBeInTheDocument();
+    expect(sentPurgeBodies).toHaveLength(1);
+    expect(sentPurgeBodies[0]?.selector).toEqual({
+      kind: "exact_url",
+      host: "portal.example.com",
+      uri: "/article-b",
+    });
+  });
+
   it("exercises limitsToml, limitsWarnings, and TrafficControlEditor compression/rate_limit/limits/cache flows", async () => {
     expect(
       generateLimitsToml({

@@ -560,8 +560,21 @@ type statusWriter struct {
 	http.ResponseWriter
 	status          int
 	wroteHeader     bool
+	hijacked        bool
 	stripTagHeaders bool
 	tagHeaders      []string
+}
+
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	conn, buf, err := h.Hijack()
+	if err == nil {
+		w.hijacked = true
+	}
+	return conn, buf, err
 }
 
 func (w *statusWriter) WriteHeader(code int) {

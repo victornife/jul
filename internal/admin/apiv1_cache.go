@@ -174,7 +174,11 @@ func (s *Server) ensurePurgeLedgerLoadedLocked(diskDir string) error {
 			rec.Response.Terminal = true
 			rec.Response.Outcome = "interrupted"
 			rec.Response.InvalidationEffective = "uncertain"
-			rec.Response.RecoveryGuidance = "The server restarted while this invalidation was in flight; outcome is uncertain. Retry with the same Idempotency-Key or operation_id to complete cleanup."
+			if rec.Response.FenceSequence > 0 {
+				rec.Response.RecoveryGuidance = "The server restarted while this invalidation was in flight; outcome is uncertain. Retry with the same Idempotency-Key or operation_id to complete cleanup."
+			} else {
+				rec.Response.RecoveryGuidance = "The server restarted before a fence cutoff was recorded for this invalidation; outcome is uncertain. Submit a fresh purge request with a new Idempotency-Key if you intend to invalidate current cache entries."
+			}
 			changed = true
 		}
 		if rec.Response.Warnings == nil {
@@ -607,6 +611,14 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 				writeAPIJSON(w, http.StatusOK, replayResp)
 				return
 			}
+			if existing.Response.FenceSequence == 0 && (existing.Response.Outcome == "interrupted" || existing.Response.InvalidationEffective == "uncertain") {
+				opID := existing.OperationID
+				s.purgeLedger.mu.Unlock()
+				writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyReused,
+					"Interrupted cache purge operation has an unknown fence cutoff and cannot be safely continued automatically; submit a fresh purge request with a new Idempotency-Key.").
+					WithDetails(adminapi.Details{ApplyID: opID}))
+				return
+			}
 			// Prior attempt terminated in partial/failed/canceled state; reuse its
 			// fence sequence and record to complete cleanup without invalidating newer fills.
 			reuseFenceGen = existing.Response.FenceSequence
@@ -658,6 +670,14 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 			replayResp.AuthorityState = s.v1AuthorityState()
 			s.purgeLedger.mu.Unlock()
 			writeAPIJSON(w, http.StatusOK, replayResp)
+			return
+		}
+		if prior.Response.FenceSequence == 0 && (prior.Response.Outcome == "interrupted" || prior.Response.InvalidationEffective == "uncertain") {
+			opID := prior.OperationID
+			s.purgeLedger.mu.Unlock()
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest,
+				"Interrupted cache purge operation has an unknown fence cutoff and cannot be safely continued automatically; submit a fresh purge request without retry_operation_id.").
+				WithDetails(adminapi.Details{Field: "retry_operation_id", ApplyID: opID}))
 			return
 		}
 		reuseFenceGen = prior.Response.FenceSequence
@@ -712,14 +732,27 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	var opID string
 	var rec *cachePurgeRecord
 	var prevRecSnapshot adminapi.CachePurgeResponse
+	crossBootRetry := false
+	reservedNewFence := false
+	if reuseFenceGen == 0 {
+		if fr, ok := s.deps.Cache.(interface{ ReserveFenceSequence() uint64 }); ok && s.deps.Cache != nil {
+			reuseFenceGen = fr.ReserveFenceSequence()
+			reservedNewFence = reuseFenceGen > 0
+		}
+	}
+	if reuseFenceGen == 0 {
+		reuseFenceGen = s.purgeLedger.seq + 1
+	}
 	if reuseRecord != nil {
 		opID = reuseRecord.OperationID
 		rec = reuseRecord
 		prevRecSnapshot = reuseRecord.Response
+		crossBootRetry = prevRecSnapshot.BootID != "" && prevRecSnapshot.BootID != bootID
 		rec.execSelector = &normSelCopy
 		rec.Response.State = "running"
 		rec.Response.Terminal = false
 		rec.Response.Outcome = "running"
+		rec.Response.FenceSequence = reuseFenceGen
 		if rec.Response.Warnings == nil {
 			rec.Response.Warnings = []adminapi.CacheGuidance{}
 		}
@@ -740,6 +773,7 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 				InvalidationEffective: "incomplete",
 				Selector:              redactedSel,
 				SelectorDigest:        digestHex,
+				FenceSequence:         reuseFenceGen,
 				StartedAt:             adminapi.Timestamp(now),
 				Warnings:              []adminapi.CacheGuidance{},
 				BootID:                bootID,
@@ -781,6 +815,10 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	requireBroadConfirm := !req.ConfirmBroad
 	var invRes cache.InvalidateResult
 	var invErr error
+	var engineReuseFenceGen uint64
+	if reuseRecord != nil || reservedNewFence {
+		engineReuseFenceGen = reuseFenceGen
+	}
 	if s.deps.Cache == nil {
 		invRes = cache.InvalidateResult{
 			Selector:              normSel,
@@ -793,7 +831,9 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	} else if sp, ok := s.deps.Cache.(ScopedPurger); ok {
 		invRes, invErr = sp.InvalidateScope(opCtx, normSel, cache.InvalidateOptions{
 			PreviewSequence:     previewSeq,
-			ReuseFenceGen:       reuseFenceGen,
+			ReuseFenceGen:       engineReuseFenceGen,
+			ReservedNewFence:    reservedNewFence,
+			CrossBootRetry:      crossBootRetry,
 			RequireBroadConfirm: requireBroadConfirm,
 		})
 	} else {
@@ -1008,7 +1048,7 @@ func (s *Server) verifyLivePurgePermission(w http.ResponseWriter, r *http.Reques
 			}
 			return true
 		}
-		if id, ok := rbacIdentityFromRequest(r); ok {
+		if id, ok := rbacIdentityFromRequest(r); ok && !id.Legacy {
 			if !snap.policy.Authorize(id, rbac.CachePurge) {
 				s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(rbac.CachePurge))
 				writeForbidden(w, r, rbac.CachePurge, id)
@@ -1019,7 +1059,7 @@ func (s *Server) verifyLivePurgePermission(w http.ResponseWriter, r *http.Reques
 		s.writeUnauthenticated(w, r, "")
 		return false
 	case authModeLegacy:
-		if r.Header.Get("Authorization") != "" && !checkLegacyToken(r, snap.cfg.Token) {
+		if !checkLegacyToken(r, snap.cfg.Token) {
 			s.writeUnauthenticated(w, r, "")
 			return false
 		}

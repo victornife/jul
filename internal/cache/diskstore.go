@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -62,9 +63,15 @@ type diskEntryMeta struct {
 	BaseKey            string
 	Gen                uint64
 	Tags               []string
+	TagPolicyTracked   bool
+	TagHeaders         []string
 }
 
 func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLen int64) ([]byte, error) {
+	var tagHeaders []string
+	if e.tagPolicyTracked && e.ingestedTagHeaderCount > 0 && e.ingestedTagHeaderCount <= len(e.ingestedTagHeaders) {
+		tagHeaders = append([]string(nil), e.ingestedTagHeaders[:e.ingestedTagHeaderCount]...)
+	}
 	meta := diskEntryMeta{
 		Status:             e.Status,
 		Header:             e.Header,
@@ -86,6 +93,8 @@ func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLe
 		BaseKey:            baseKeyOf(key),
 		Gen:                gen,
 		Tags:               e.Tags,
+		TagPolicyTracked:   e.tagPolicyTracked,
+		TagHeaders:         tagHeaders,
 	}
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(&meta); err != nil {
@@ -167,7 +176,7 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 	if meta.BaseKey != "" && meta.BaseKey != baseKeyOf(meta.Key) {
 		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
-	if len(meta.Tags) > MaxTagsPerEntry {
+	if len(meta.Tags) > MaxTagsPerEntry || len(meta.TagHeaders) > 8 {
 		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	totalTagBytes := 0
@@ -180,24 +189,31 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 			return nil, "", 0, 0, 0, errCorruptDiskEntry
 		}
 	}
+	var ingestedHeaders [8]string
+	for i, th := range meta.TagHeaders {
+		ingestedHeaders[i] = th
+	}
 	return &Entry{
-		Status:             meta.Status,
-		Header:             meta.Header,
-		CreatedAt:          meta.CreatedAt,
-		ExpiresAt:          meta.ExpiresAt,
-		StaleUntil:         meta.StaleUntil,
-		ETag:               meta.ETag,
-		LastModified:       meta.LastModified,
-		RequiresValidation: meta.RequiresValidation,
-		MustRevalidate:     meta.MustRevalidate,
-		SharedAuthReuse:    meta.SharedAuthReuse,
-		StaleIfError:       meta.StaleIfError,
-		HasStaleIfError:    meta.HasStaleIfError,
-		Vary:               meta.Vary,
-		VaryValues:         meta.VaryValues,
-		IsVaryStub:         meta.IsVaryStub,
-		Variants:           meta.Variants,
-		Tags:               meta.Tags,
+		Status:                 meta.Status,
+		Header:                 meta.Header,
+		CreatedAt:              meta.CreatedAt,
+		ExpiresAt:              meta.ExpiresAt,
+		StaleUntil:             meta.StaleUntil,
+		ETag:                   meta.ETag,
+		LastModified:           meta.LastModified,
+		RequiresValidation:     meta.RequiresValidation,
+		MustRevalidate:         meta.MustRevalidate,
+		SharedAuthReuse:        meta.SharedAuthReuse,
+		StaleIfError:           meta.StaleIfError,
+		HasStaleIfError:        meta.HasStaleIfError,
+		Vary:                   meta.Vary,
+		VaryValues:             meta.VaryValues,
+		IsVaryStub:             meta.IsVaryStub,
+		Variants:               meta.Variants,
+		Tags:                   meta.Tags,
+		ingestedTagHeaders:     ingestedHeaders,
+		ingestedTagHeaderCount: len(meta.TagHeaders),
+		tagPolicyTracked:       meta.TagPolicyTracked,
 	}, meta.Key, meta.Gen, bodyLen, fileSize, nil
 }
 
@@ -278,35 +294,41 @@ type diskStore struct {
 const diskWriteFailureLogInterval = 10 * time.Second
 
 type diskItem struct {
-	hash       string
-	key        string
-	gen        uint64
-	size       int64
-	fileSize   int64
-	bodyLen    int64
-	metaLen    int64
-	isVaryStub bool
-	variants   []string
-	tags       []string
-	createdAt  time.Time
-	expiresAt  time.Time
-	staleUntil time.Time
-	varyFields []string
-	blob       *diskBlob
+	hash             string
+	key              string
+	gen              uint64
+	size             int64
+	fileSize         int64
+	bodyLen          int64
+	metaLen          int64
+	isVaryStub       bool
+	variants         []string
+	tags             []string
+	tagPolicyTracked bool
+	tagHeaders       [8]string
+	tagHeaderCount   int
+	createdAt        time.Time
+	expiresAt        time.Time
+	staleUntil       time.Time
+	varyFields       []string
+	blob             *diskBlob
 }
 
 type diskItemSnapshot struct {
-	Key        string
-	Gen        uint64
-	FileSize   int64
-	BodyLen    int64
-	IsVaryStub bool
-	Variants   []string
-	Tags       []string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	StaleUntil time.Time
-	VaryFields []string
+	Key              string
+	Gen              uint64
+	FileSize         int64
+	BodyLen          int64
+	IsVaryStub       bool
+	Variants         []string
+	Tags             []string
+	TagPolicyTracked bool
+	TagHeaders       [8]string
+	TagHeaderCount   int
+	CreatedAt        time.Time
+	ExpiresAt        time.Time
+	StaleUntil       time.Time
+	VaryFields       []string
 }
 
 func (it *diskItem) effectiveSize(maxBytes int64) int64 {
@@ -826,30 +848,54 @@ func isCacheTempFile(name string) bool {
 // temporary files and corrupt/incompatible cache files are removed; foreign
 // files are left untouched.
 func (d *diskStore) rehydrate() {
+	var fileHW uint64
 	if rawHW, err := os.ReadFile(filepath.Join(d.dir, diskHighWaterFile)); err == nil {
-		if parsedHW, pErr := strconv.ParseUint(strings.TrimSpace(string(rawHW)), 10, 64); pErr == nil && parsedHW > d.highWaterGen {
-			d.highWaterGen = parsedHW
+		if parsedHW, pErr := strconv.ParseUint(strings.TrimSpace(string(rawHW)), 10, 64); pErr == nil {
+			fileHW = parsedHW
+			if parsedHW > d.highWaterGen {
+				d.highWaterGen = parsedHW
+			}
+		}
+	}
+	if rawLedger, err := os.ReadFile(filepath.Join(d.dir, diskPurgeLedgerFile)); err == nil {
+		var ledgerRecs []struct {
+			Response struct {
+				FenceSequence uint64 `json:"fence_sequence"`
+			} `json:"response"`
+		}
+		if json.Unmarshal(rawLedger, &ledgerRecs) == nil {
+			for _, rec := range ledgerRecs {
+				if rec.Response.FenceSequence > d.highWaterGen {
+					d.highWaterGen = rec.Response.FenceSequence
+				}
+			}
 		}
 	}
 	d.loadAndSweepTombstonesLocked()
 	entries, err := d.readDir(d.dir)
 	if err != nil || d.corruptTombstoneCleanupPending {
+		if d.highWaterGen > fileHW {
+			_ = atomicfile.Write(filepath.Join(d.dir, diskHighWaterFile), []byte(strconv.FormatUint(d.highWaterGen, 10)+"\n"), 0o600)
+		}
 		return
 	}
 	type fi struct {
-		hash       string
-		key        string
-		gen        uint64
-		size       int64
-		bodyLen    int64
-		mod        int64
-		isVaryStub bool
-		variants   []string
-		tags       []string
-		createdAt  time.Time
-		expiresAt  time.Time
-		staleUntil time.Time
-		varyFields []string
+		hash             string
+		key              string
+		gen              uint64
+		size             int64
+		bodyLen          int64
+		mod              int64
+		isVaryStub       bool
+		variants         []string
+		tags             []string
+		tagPolicyTracked bool
+		tagHeaders       [8]string
+		tagHeaderCount   int
+		createdAt        time.Time
+		expiresAt        time.Time
+		staleUntil       time.Time
+		varyFields       []string
 	}
 	var files []fi
 	var foreign int
@@ -889,19 +935,22 @@ func (d *diskStore) rehydrate() {
 			d.highWaterGen = entryGen
 		}
 		files = append(files, fi{
-			hash:       name,
-			key:        entryKey,
-			gen:        entryGen,
-			size:       fileSize,
-			bodyLen:    bodyLen,
-			mod:        info.ModTime().UnixNano(),
-			isVaryStub: entryMeta.IsVaryStub,
-			variants:   entryMeta.Variants,
-			tags:       entryMeta.Tags,
-			createdAt:  entryMeta.CreatedAt,
-			expiresAt:  entryMeta.ExpiresAt,
-			staleUntil: entryMeta.StaleUntil,
-			varyFields: entryMeta.Vary,
+			hash:             name,
+			key:              entryKey,
+			gen:              entryGen,
+			size:             fileSize,
+			bodyLen:          bodyLen,
+			mod:              info.ModTime().UnixNano(),
+			isVaryStub:       entryMeta.IsVaryStub,
+			variants:         entryMeta.Variants,
+			tags:             entryMeta.Tags,
+			tagPolicyTracked: entryMeta.tagPolicyTracked,
+			tagHeaders:       entryMeta.ingestedTagHeaders,
+			tagHeaderCount:   entryMeta.ingestedTagHeaderCount,
+			createdAt:        entryMeta.CreatedAt,
+			expiresAt:        entryMeta.ExpiresAt,
+			staleUntil:       entryMeta.StaleUntil,
+			varyFields:       entryMeta.Vary,
 		})
 	}
 	if foreign > 0 {
@@ -913,20 +962,23 @@ func (d *diskStore) rehydrate() {
 	for _, f := range files {
 		blob := d.newBlob(f.hash, d.path(f.hash), f.bodyLen, f.size)
 		it := &diskItem{
-			hash:       f.hash,
-			key:        f.key,
-			gen:        f.gen,
-			fileSize:   f.size,
-			bodyLen:    f.bodyLen,
-			metaLen:    f.size - f.bodyLen,
-			isVaryStub: f.isVaryStub,
-			variants:   f.variants,
-			tags:       f.tags,
-			createdAt:  f.createdAt,
-			expiresAt:  f.expiresAt,
-			staleUntil: f.staleUntil,
-			varyFields: f.varyFields,
-			blob:       blob,
+			hash:             f.hash,
+			key:              f.key,
+			gen:              f.gen,
+			fileSize:         f.size,
+			bodyLen:          f.bodyLen,
+			metaLen:          f.size - f.bodyLen,
+			isVaryStub:       f.isVaryStub,
+			variants:         f.variants,
+			tags:             f.tags,
+			tagPolicyTracked: f.tagPolicyTracked,
+			tagHeaders:       f.tagHeaders,
+			tagHeaderCount:   f.tagHeaderCount,
+			createdAt:        f.createdAt,
+			expiresAt:        f.expiresAt,
+			staleUntil:       f.staleUntil,
+			varyFields:       f.varyFields,
+			blob:             blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
 		el := d.ll.PushFront(it)
@@ -937,6 +989,9 @@ func (d *diskStore) rehydrate() {
 	}
 	d.pruneOrphanedVaryStubsLocked()
 	d.evictLocked()
+	if d.highWaterGen > fileHW {
+		_ = atomicfile.Write(filepath.Join(d.dir, diskHighWaterFile), []byte(strconv.FormatUint(d.highWaterGen, 10)+"\n"), 0o600)
+	}
 	if d.onRehydrate != nil {
 		d.onRehydrate(d.snapshotItemsLocked())
 	}
@@ -950,17 +1005,20 @@ func (d *diskStore) snapshotItemsLocked() []diskItemSnapshot {
 			continue
 		}
 		out = append(out, diskItemSnapshot{
-			Key:        it.key,
-			Gen:        it.gen,
-			FileSize:   it.fileSize,
-			BodyLen:    it.bodyLen,
-			IsVaryStub: it.isVaryStub,
-			Variants:   append([]string(nil), it.variants...),
-			Tags:       append([]string(nil), it.tags...),
-			CreatedAt:  it.createdAt,
-			ExpiresAt:  it.expiresAt,
-			StaleUntil: it.staleUntil,
-			VaryFields: append([]string(nil), it.varyFields...),
+			Key:              it.key,
+			Gen:              it.gen,
+			FileSize:         it.fileSize,
+			BodyLen:          it.bodyLen,
+			IsVaryStub:       it.isVaryStub,
+			Variants:         append([]string(nil), it.variants...),
+			Tags:             append([]string(nil), it.tags...),
+			TagPolicyTracked: it.tagPolicyTracked,
+			TagHeaders:       it.tagHeaders,
+			TagHeaderCount:   it.tagHeaderCount,
+			CreatedAt:        it.createdAt,
+			ExpiresAt:        it.expiresAt,
+			StaleUntil:       it.staleUntil,
+			VaryFields:       append([]string(nil), it.varyFields...),
 		})
 	}
 	return out
@@ -1417,6 +1475,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 		it.isVaryStub = e.IsVaryStub
 		it.variants = append([]string(nil), e.Variants...)
 		it.tags = append([]string(nil), e.Tags...)
+		it.tagPolicyTracked = e.tagPolicyTracked
+		it.tagHeaders = e.ingestedTagHeaders
+		it.tagHeaderCount = e.ingestedTagHeaderCount
 		it.createdAt = e.CreatedAt
 		it.expiresAt = e.ExpiresAt
 		it.staleUntil = e.StaleUntil
@@ -1428,20 +1489,23 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 		d.ll.MoveToFront(el)
 	} else {
 		it := &diskItem{
-			hash:       hash,
-			key:        key,
-			gen:        gen,
-			fileSize:   totalSize,
-			bodyLen:    s.bodyLen,
-			metaLen:    int64(len(tail)),
-			isVaryStub: e.IsVaryStub,
-			variants:   append([]string(nil), e.Variants...),
-			tags:       append([]string(nil), e.Tags...),
-			createdAt:  e.CreatedAt,
-			expiresAt:  e.ExpiresAt,
-			staleUntil: e.StaleUntil,
-			varyFields: append([]string(nil), e.Vary...),
-			blob:       blob,
+			hash:             hash,
+			key:              key,
+			gen:              gen,
+			fileSize:         totalSize,
+			bodyLen:          s.bodyLen,
+			metaLen:          int64(len(tail)),
+			isVaryStub:       e.IsVaryStub,
+			variants:         append([]string(nil), e.Variants...),
+			tags:             append([]string(nil), e.Tags...),
+			tagPolicyTracked: e.tagPolicyTracked,
+			tagHeaders:       e.ingestedTagHeaders,
+			tagHeaderCount:   e.ingestedTagHeaderCount,
+			createdAt:        e.CreatedAt,
+			expiresAt:        e.ExpiresAt,
+			staleUntil:       e.StaleUntil,
+			varyFields:       append([]string(nil), e.Vary...),
+			blob:             blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
 		el := d.ll.PushFront(it)

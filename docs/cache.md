@@ -1061,14 +1061,20 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
 - **`[cache].strip_tag_headers`** (`hot_reload`, defaults to `true` when
   `tag_headers` is non-empty): removes configured tag headers from downstream
   client responses on fresh misses, memory/disk hits, `304` revalidations, `206`
-  range responses, and `stale_if_error` fallbacks so internal grouping topology
-  is not leaked to public clients.
+  range responses, declined protocol-upgrade HTTP responses, and `stale_if_error`
+  fallbacks so internal grouping topology is not leaked to public clients.
 - **Validation and bounds:** each tag must be `1..128` visible ASCII characters
   (`0x21..0x7E` excluding `,`, `;`, quotes, and whitespace) and is checked
   against credential-like patterns (`Bearer`, `token=`, `api_key=`, JWTs). Each
   entry stores at most `32` tags and `1024` total tag bytes (from at most `4096`
   raw tag header bytes), and the process-wide reverse index is bounded to
-  `65,536` `(host, tag, baseKey)` links.
+  `65,536` `(host, tag, resKey)` links.
+- **Persisted tag-policy provenance:** `JULDCH02` disk entry metadata records
+  whether tag-policy provenance was tracked (`TagPolicyTracked`) and the exact
+  `TagHeaders` policy active when the entry was ingested. On both live reloads
+  and startup rehydration when `tag_headers` is configured, entries whose
+  persisted provenance is absent or differs from the active `tag_headers` set
+  are conservatively retired rather than re-indexed under fabricated provenance.
 - **Conservative failure policy:** if an origin response carries a malformed,
   credential-like, or oversize tag header, or if adding its tags would exceed
   `MaxTotalTagLinks`, Jul still serves the response normally to the downstream
@@ -1092,15 +1098,17 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    the 10,000-entry preview scan bound), a principal-and-selector-bound HMAC
    `preview_token`, and secret-safe resource samples (`?<redacted>`).
 2. **Linearization and in-flight fencing (`POST /api/v1/cache/purge`):**
-   allocates a monotonic `fence_sequence` in `genSeq`, records an active
+   reserves and durably records a monotonic `fence_sequence` in `genSeq` (and
+   `.jul-cache-purge-ledger` / `.jul-cache-gen`), installs an active
    selector fence, and detaches matching in-flight cold-miss fill locks and
-   revalidations. Any cold fill, singleflight leader, synchronous `304`
-   validation, background `stale-while-revalidate` refresh, or retired-handler
-   operation that started before `fence_sequence` (`startGen <= fence_sequence`)
-   — including a cold miss not yet in cache at preview time or whose origin tag
-   is first learned when response headers arrive — is blocked from publishing
-   into memory or disk upon completion while still delivering its response to
-   its waiting client.
+   revalidations. Broad scopes (`host`, `all`, `>= 100` matched resources, or
+   truncated preview scans) require explicit `confirm_broad = true`. Any cold
+   fill, singleflight leader, synchronous `304` validation, background
+   `stale-while-revalidate` refresh, or retired-handler operation that started
+   before `fence_sequence` (`startGen <= fence_sequence`) — including a cold
+   miss not yet in cache at preview time or whose origin tag is first learned
+   when response headers arrive — is blocked from publishing into memory or disk
+   upon completion while still delivering its response to its waiting client.
 3. **Admitted readers and ordinary reloads:** already-admitted downstream
    readers holding an in-memory `*Entry` reference or a reference-counted
    `.jul-cache-retired-*` disk file lease finish streaming uninterrupted, while
