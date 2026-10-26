@@ -33,6 +33,10 @@ var ErrBroadConfirmRequired = errors.New("broad cache invalidation (>= 100 match
 // remain fenced because the write may have reached durable storage.
 var ErrFenceCommit = errors.New("cache invalidation intent commit failed")
 
+// ErrRetrySnapshotUnavailable prevents a tag retry from forgetting its
+// original resource group when neither durable nor retained ownership exists.
+var ErrRetrySnapshotUnavailable = errors.New("original tag purge resource snapshot is unavailable; submit a fresh host or all purge with confirm_broad=true and a new idempotency key")
+
 type selectorFence struct {
 	gen              uint64
 	sel              NormalizedSelector
@@ -91,9 +95,12 @@ type PurgePreview struct {
 
 // InvalidateOptions configures a scoped cache invalidation execution.
 type InvalidateOptions struct {
-	MaxScanKeys         int
-	PreviewSequence     uint64
-	ReuseFenceGen       uint64
+	MaxScanKeys     int
+	PreviewSequence uint64
+	ReuseFenceGen   uint64
+	// ReuseResourceIDs preserves original tag ownership across retries.
+	// Nil means unavailable; an empty non-nil slice means zero original targets.
+	ReuseResourceIDs    []string
 	CrossBootRetry      bool
 	BatchSize           int
 	RequireBroadConfirm bool
@@ -101,7 +108,9 @@ type InvalidateOptions struct {
 	// It runs under genMu so publications cannot cross that boundary, and must
 	// not call back into the cache. An error leaves resident entries unchanged
 	// and conservatively fences earlier origin work against an uncertain write.
-	CommitFence func(fenceGen uint64) error
+	// Resource IDs are opaque hashes, never raw request URIs. A nil slice means
+	// no snapshot is required; an empty non-nil slice records zero tag targets.
+	CommitFence func(fenceGen uint64, resourceIDs []string) error
 }
 
 // StartupHighWaterGen returns the durable generation high-water mark recovered
@@ -592,6 +601,19 @@ func (c *Cache) indexKeyEntryLocked(st *keyGenState, e *Entry) {
 		c.byHost[host] = hm
 	}
 	hm[st.baseKey] = struct{}{}
+	if method == http.MethodGet || method == http.MethodHead {
+		if c.byResourceID == nil {
+			c.byResourceID = make(map[string][2]string)
+		}
+		id := hashKey(resourceKeyOf(host, reqURI))
+		bases := c.byResourceID[id]
+		if method == http.MethodGet {
+			bases[0] = st.baseKey
+		} else {
+			bases[1] = st.baseKey
+		}
+		c.byResourceID[id] = bases
+	}
 
 	if isVar {
 		if c.baseVariants == nil {
@@ -635,8 +657,53 @@ func (c *Cache) unindexKeyEntryLocked(st *keyGenState) {
 			if len(hm) == 0 {
 				delete(c.byHost, host)
 			}
+			id := hashKey(resourceKeyOf(host, st.requestURI))
+			if bases, ok := c.byResourceID[id]; ok {
+				for i, bk := range bases {
+					if bk == baseKey {
+						bases[i] = ""
+					}
+				}
+				if bases[0] == "" && bases[1] == "" {
+					delete(c.byResourceID, id)
+				} else {
+					c.byResourceID[id] = bases
+				}
+			}
 		}
 	}
+
+}
+
+func resourceIDsOf(resources map[string]struct{}) []string {
+	ids := make([]string, 0, len(resources))
+	for resource := range resources {
+		ids = append(ids, hashKey(resource))
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func (c *Cache) resourceBaseKeysLocked(ids []string, maxScan int) (keys []string, truncated bool, total int) {
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		for _, bk := range c.byResourceID[id] {
+			if bk == "" {
+				continue
+			}
+			total++
+			if maxScan > 0 && len(keys) >= maxScan {
+				return keys, true, total
+			}
+			keys = append(keys, bk)
+		}
+	}
+	sort.Strings(keys)
+	return keys, false, total
 }
 
 func (c *Cache) refreshBaseTagsLocked(host, baseKey string) {
@@ -1428,6 +1495,31 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	isUnboundedHost := sel.Kind == SelectorHost && sel.RouteID == ""
 	isRetryFence := opts.ReuseFenceGen > 0
 	isFastAll := sel.Kind == SelectorAll && !isRetryFence
+	isTagRetry := isRetryFence && sel.Kind == SelectorTag
+	resourceIDs := opts.ReuseResourceIDs
+	if isRetryFence {
+		if opts.CrossBootRetry && opts.ReuseFenceGen > c.startupHighWaterGen.Load() {
+			c.genMu.Unlock()
+			return InvalidateResult{}, fmt.Errorf("cannot safely continue interrupted or uncertain purge fence %d across restart because durable high-water mark (%d) is lower; submit a fresh purge request", opts.ReuseFenceGen, c.startupHighWaterGen.Load())
+		}
+		for _, f := range c.fences {
+			if f.gen != opts.ReuseFenceGen {
+				continue
+			}
+			if f.sel.Digest() != sel.Digest() {
+				c.genMu.Unlock()
+				return InvalidateResult{}, fmt.Errorf("reuse_fence_gen %d selector digest does not match requested selector", opts.ReuseFenceGen)
+			}
+			if isTagRetry && resourceIDs == nil && f.matchedResources != nil {
+				resourceIDs = resourceIDsOf(f.matchedResources)
+			}
+			break
+		}
+		if isTagRetry && resourceIDs == nil {
+			c.genMu.Unlock()
+			return InvalidateResult{}, ErrRetrySnapshotUnavailable
+		}
+	}
 	var candidates []string
 	if !isFastAll {
 		scanCap := 0
@@ -1436,26 +1528,14 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		}
 		var candTrunc bool
 		var totalCand int
-		candidates, _, candTrunc, totalCand = c.candidateBaseKeysLocked(sel, scanCap)
+		if isTagRetry {
+			candidates, candTrunc, totalCand = c.resourceBaseKeysLocked(resourceIDs, scanCap)
+		} else {
+			candidates, _, candTrunc, totalCand = c.candidateBaseKeysLocked(sel, scanCap)
+		}
 		if !isUnboundedHost && sel.Kind != SelectorAll && (candTrunc || len(candidates) > maxScan) {
 			c.genMu.Unlock()
 			return InvalidateResult{}, fmt.Errorf("cache selector scope (%d candidate resources) exceeds maximum scan bound of %d; use kind = 'host' or 'all'", totalCand, maxScan)
-		}
-	}
-
-	if isRetryFence {
-		if opts.CrossBootRetry && opts.ReuseFenceGen > c.startupHighWaterGen.Load() {
-			c.genMu.Unlock()
-			return InvalidateResult{}, fmt.Errorf("cannot safely continue interrupted or uncertain purge fence %d across restart because durable high-water mark (%d) is lower; submit a fresh purge request", opts.ReuseFenceGen, c.startupHighWaterGen.Load())
-		}
-		for i := range c.fences {
-			if c.fences[i].gen == opts.ReuseFenceGen {
-				if c.fences[i].sel.Digest() != sel.Digest() {
-					c.genMu.Unlock()
-					return InvalidateResult{}, fmt.Errorf("reuse_fence_gen %d selector digest does not match requested selector", opts.ReuseFenceGen)
-				}
-				break
-			}
 		}
 	}
 
@@ -1491,7 +1571,11 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			if c.baseIndexedTags != nil {
 				tags = c.baseIndexedTags[resKey]
 			}
-			if sel.Kind != SelectorKey && !sel.MatchesResource(host, reqURI, tags) {
+			if isTagRetry && !sel.matchesHost(host) {
+				c.genMu.Unlock()
+				return InvalidateResult{}, fmt.Errorf("original tag purge resource snapshot does not match the selector host")
+			}
+			if !isTagRetry && sel.Kind != SelectorKey && !sel.MatchesResource(host, reqURI, tags) {
 				skipped++
 				continue
 			}
@@ -1499,12 +1583,12 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				skipped++
 				continue
 			}
-			matchedResSet[resKey] = struct{}{}
 			memKeys, diskKeys, inflightKeys, reps, _, _, _, _, live := c.collectOwnedKeysForBaseLockedWithFence(bk, exactFilter, evalFenceGen)
 			if !live && len(inflightKeys) == 0 {
 				skipped++
 				continue
 			}
+			matchedResSet[resKey] = struct{}{}
 			keySet := make(map[string]struct{}, len(memKeys)+len(diskKeys)+len(inflightKeys)+1)
 			var allKeys []string
 			for _, slice := range [][]string{memKeys, diskKeys, inflightKeys} {
@@ -1532,6 +1616,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		}
 	}
 
+	if sel.Kind == SelectorTag && !isRetryFence {
+		resourceIDs = resourceIDsOf(matchedResSet)
+	}
 	if err := ctx.Err(); err != nil {
 		c.genMu.Unlock()
 		return canceledBeforeExecution(err)
@@ -1546,7 +1633,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		fenceGen = c.genSeq.Add(1)
 	}
 	if opts.CommitFence != nil {
-		if err := opts.CommitFence(fenceGen); err != nil {
+		if err := opts.CommitFence(fenceGen, resourceIDs); err != nil {
 			foundFence := false
 			for _, f := range c.fences {
 				if f.gen == fenceGen {
@@ -1641,6 +1728,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			}
 		}
 		c.byHost = nil
+		c.byResourceID = nil
 		c.baseVariants = nil
 		c.tagIndex = nil
 		c.baseIndexedTags = nil

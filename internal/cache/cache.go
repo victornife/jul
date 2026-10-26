@@ -69,6 +69,7 @@ type Cache struct {
 	keyGen                    map[string]*keyGenState
 	purgeGen                  uint64
 	byHost                    map[string]map[string]struct{}
+	byResourceID              map[string][2]string
 	baseVariants              map[string]map[string]struct{}
 	tagIndex                  map[string]map[string]map[string]struct{}
 	baseIndexedTags           map[string][]string
@@ -676,6 +677,7 @@ func (c *Cache) Purge() {
 	c.latestFenceGen.Store(pGen)
 	c.incompleteFenceGen.Store(0)
 	c.byHost = nil
+	c.byResourceID = nil
 	c.baseVariants = nil
 	c.tagIndex = nil
 	c.baseIndexedTags = nil

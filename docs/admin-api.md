@@ -541,7 +541,12 @@ keeping `file_owned` configuration files strictly read-only remotely.
   results with `idempotent_replay = true` and re-running
   `partial`/`failed`/`canceled` attempts at the original `fence_sequence`) and
   `retry_operation_id`; returns `503 storage_unavailable` if the durable purge
-  ledger cannot be read or persisted before execution.
+  ledger cannot be read or persisted before execution. Tag retries retain
+  their original resource groups across tag changes, fence eviction, and
+  restart using secret-safe opaque IDs. A legacy tag retry without durable or
+  retained ownership returns `400 invalid_request` rather than re-evaluating
+  current tags. Conflicting existing `Idempotency-Key` and
+  `retry_operation_id` identities return `409 idempotency_key_reused`.
 - **`GET /api/v1/cache/purges/{operation_id}`** (any of `cache:purge`,
   `audit:read`, `admin:manage`; principal-isolated unless the caller holds
   `audit:read` or `admin:manage`): inspects an operation record from the bounded

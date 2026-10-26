@@ -58,6 +58,7 @@ type cachePurgeRecord struct {
 	IdempotencyOperation   string                      `json:"idempotency_operation,omitempty"`
 	CreatedAt              time.Time                   `json:"created_at"`
 	Response               adminapi.CachePurgeResponse `json:"response"`
+	MatchedResourceIDs     []string                    `json:"matched_resource_ids"`
 	execSelector           *cache.NormalizedSelector   `json:"-"`
 }
 
@@ -173,6 +174,22 @@ func (s *Server) ensurePurgeLedgerLoadedLocked(diskDir string) error {
 	var persisted []*cachePurgeRecord
 	if err := json.Unmarshal(data, &persisted); err != nil {
 		return err
+	}
+	for _, rec := range persisted {
+		if rec == nil || rec.OperationID == "" {
+			continue
+		}
+		if len(rec.MatchedResourceIDs) > cache.MaxPurgeScanKeys {
+			return fmt.Errorf("cache purge ledger resource snapshot exceeds the scan bound")
+		}
+		for _, id := range rec.MatchedResourceIDs {
+			if len(id) != sha256.Size*2 || id != strings.ToLower(id) {
+				return fmt.Errorf("cache purge ledger contains an invalid resource snapshot ID")
+			}
+			if _, err := hex.DecodeString(id); err != nil {
+				return fmt.Errorf("cache purge ledger contains an invalid resource snapshot ID: %w", err)
+			}
+		}
 	}
 	now := time.Now().UTC()
 	changed := false
@@ -594,6 +611,13 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	var reuseRecord *cachePurgeRecord
 	if idemMeta != nil {
 		if existing, ok := s.purgeLedger.byIdem[idemMapKey(idemMeta.Principal, idemMeta.Key)]; ok {
+			if retryID := strings.TrimSpace(req.RetryOperationID); retryID != "" && retryID != existing.OperationID {
+				s.purgeLedger.mu.Unlock()
+				writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyReused,
+					"Idempotency-Key and retry_operation_id refer to different cache purge operations.").
+					WithDetails(adminapi.Details{Field: "retry_operation_id"}))
+				return
+			}
 			if existing.Response.SelectorDigest != digestHex {
 				s.purgeLedger.mu.Unlock()
 				writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyReused,
@@ -743,11 +767,13 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	var opID string
 	var rec *cachePurgeRecord
 	var prevRecSnapshot adminapi.CachePurgeResponse
+	var reuseResourceIDs []string
 	crossBootRetry := false
 	if reuseRecord != nil {
 		opID = reuseRecord.OperationID
 		rec = reuseRecord
 		prevRecSnapshot = reuseRecord.Response
+		reuseResourceIDs = reuseRecord.MatchedResourceIDs
 		crossBootRetry = prevRecSnapshot.BootID != "" && prevRecSnapshot.BootID != bootID
 		rec.execSelector = &normSelCopy
 		rec.Response.State = "running"
@@ -830,15 +856,19 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		invRes, invErr = sp.InvalidateScope(opCtx, normSel, cache.InvalidateOptions{
 			PreviewSequence:     previewSeq,
 			ReuseFenceGen:       reuseFenceGen,
+			ReuseResourceIDs:    reuseResourceIDs,
 			CrossBootRetry:      crossBootRetry,
 			RequireBroadConfirm: requireBroadConfirm,
-			CommitFence: func(fenceGen uint64) error {
+			CommitFence: func(fenceGen uint64, resourceIDs []string) error {
 				s.purgeLedger.mu.Lock()
 				defer s.purgeLedger.mu.Unlock()
 				prevFence := rec.Response.FenceSequence
+				prevResources := rec.MatchedResourceIDs
 				rec.Response.FenceSequence = fenceGen
+				rec.MatchedResourceIDs = resourceIDs
 				if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
 					rec.Response.FenceSequence = prevFence
+					rec.MatchedResourceIDs = prevResources
 					return err
 				}
 				fenceCommitted = true
@@ -949,7 +979,12 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 
 	s.purgeLedger.mu.Lock()
 	rec.Response = finalResp
+	prevResources := rec.MatchedResourceIDs
+	if finalResp.State == "succeeded" {
+		rec.MatchedResourceIDs = nil
+	}
 	if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
+		rec.MatchedResourceIDs = prevResources
 		finalResp.State = "partial"
 		finalResp.Outcome = "partial_failure"
 		finalResp.InvalidationEffective = "uncertain"

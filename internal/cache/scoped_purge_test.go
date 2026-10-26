@@ -2360,7 +2360,7 @@ func TestReauditR01_LedgerHighWaterFallbackWhenMarkerWriteFails(t *testing.T) {
 	var rsvFence uint64
 	if _, err := c2.InvalidateScope(context.Background(), sel, InvalidateOptions{
 		PreviewSequence: c2.genSeq.Load(),
-		CommitFence: func(fenceGen uint64) error {
+		CommitFence: func(fenceGen uint64, _ []string) error {
 			rsvFence = fenceGen
 			return nil
 		},
@@ -2648,7 +2648,7 @@ func TestPurgeCommitFenceAtomicallyBlocksEarlierPublications(t *testing.T) {
 					go func() {
 						defer wg.Done()
 						res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
-							CommitFence: func(fenceGen uint64) error {
+							CommitFence: func(fenceGen uint64, _ []string) error {
 								committing <- fenceGen
 								<-commitRelease
 								return nil
@@ -2705,7 +2705,7 @@ func TestPurgeCommitFenceFailurePreservesResidentsAndFencesEarlierWork(t *testin
 	}
 	commitErr := errors.New("intent storage unavailable")
 	res, err := c.InvalidateScope(context.Background(), all, InvalidateOptions{
-		CommitFence: func(uint64) error { return commitErr },
+		CommitFence: func(uint64, []string) error { return commitErr },
 	})
 	if !errors.Is(err, ErrFenceCommit) || !errors.Is(err, commitErr) || res.State != "" {
 		t.Fatalf("commit failure: res=%+v err=%v", res, err)
@@ -2733,7 +2733,7 @@ func TestPurgeRejectedBeforeFenceCommit(t *testing.T) {
 			raw := Selector{Kind: SelectorAll, All: true}
 			ctx := context.Background()
 			committed := false
-			opts := InvalidateOptions{CommitFence: func(uint64) error {
+			opts := InvalidateOptions{CommitFence: func(uint64, []string) error {
 				committed = true
 				return nil
 			}}
@@ -2796,7 +2796,7 @@ func TestPurgeCanceledWhileWaitingForGenerationLockDoesNotCommit(t *testing.T) {
 	go func() {
 		defer close(done)
 		res, invErr = c.InvalidateScope(ctx, all, InvalidateOptions{
-			CommitFence: func(uint64) error {
+			CommitFence: func(uint64, []string) error {
 				committed = true
 				return nil
 			},
@@ -2859,7 +2859,7 @@ func TestPurgeUncertainIntentFencesDiskPublicationsAcrossRestart(t *testing.T) {
 	}
 	var cutoff uint64
 	_, err = c.InvalidateScope(context.Background(), sel, InvalidateOptions{
-		CommitFence: func(gen uint64) error {
+		CommitFence: func(gen uint64, _ []string) error {
 			cutoff = gen
 			ledger := fmt.Sprintf(`[{"response":{"fence_sequence":%d}}]`, gen)
 			if err := os.WriteFile(filepath.Join(cfg.DiskPath, ".jul-cache-purge-ledger"), []byte(ledger), 0o600); err != nil {
@@ -2889,4 +2889,143 @@ func TestPurgeUncertainIntentFencesDiskPublicationsAcrossRestart(t *testing.T) {
 		t.Fatal("cross-boot retry retained a pre-cutoff resident entry")
 	}
 	assertCachedEntryBody(t, reopened, keyFor(http.MethodGet, "portal.example.com", "/articles/item"), "fresh")
+}
+
+func TestTagRetryRequiresOriginalOwnershipAndBoundsUniqueTargets(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.CacheConfig{MemoryMaxSize: config.Size(2 << 20), TagHeaders: []string{"Cache-Tag"}}
+	sel, err := ParseSelector(Selector{Kind: SelectorTag, Host: "portal.example.com", Tags: []string{"A"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("unknown_and_known_empty", func(t *testing.T) {
+		c := newTestCache(t, cfg)
+		cutoff := c.genSeq.Add(1)
+		key := keyFor(http.MethodGet, "portal.example.com", "/fresh")
+		c.set(key, &Entry{Status: http.StatusOK, Body: []byte("fresh"), Tags: []string{"A"}})
+		if _, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{ReuseFenceGen: cutoff}); !errors.Is(err, ErrRetrySnapshotUnavailable) {
+			t.Fatalf("unknown ownership was silently re-evaluated: %v", err)
+		}
+		res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
+			ReuseFenceGen: cutoff, ReuseResourceIDs: []string{},
+		})
+		if err != nil || res.State != "succeeded" || res.InvalidatedRepresentations != 0 {
+			t.Fatalf("known-empty ownership: res=%+v err=%v", res, err)
+		}
+		assertCachedEntryBody(t, c, key, "fresh")
+	})
+	t.Run("retained_legacy_fence", func(t *testing.T) {
+		c := newTestCache(t, cfg)
+		c.set(keyFor(http.MethodGet, "portal.example.com", "/old"), &Entry{Status: http.StatusOK, Tags: []string{"A"}})
+		cutoff, complete := c.BeginSelectorFence(sel)
+		defer complete()
+		var ids []string
+		res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
+			ReuseFenceGen: cutoff,
+			CommitFence: func(_ uint64, resources []string) error {
+				ids = resources
+				return nil
+			},
+		})
+		if err != nil || res.State != "succeeded" || len(ids) != 1 {
+			t.Fatalf("retained ownership could not be upgraded: res=%+v ids=%v err=%v", res, ids, err)
+		}
+	})
+	t.Run("bounds_and_duplicates", func(t *testing.T) {
+		c := newTestCache(t, cfg)
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			c.set(keyFor(method, "portal.example.com", "/old"), &Entry{Status: http.StatusOK, Tags: []string{"A"}})
+		}
+		cutoff := c.genSeq.Add(1)
+		id := hashKey(resourceKeyOf("portal.example.com", "/old"))
+		opts := InvalidateOptions{ReuseFenceGen: cutoff, ReuseResourceIDs: []string{id, id}, MaxScanKeys: 1}
+		if _, err := c.InvalidateScope(context.Background(), sel, opts); err == nil {
+			t.Fatal("retry bypassed the scan bound")
+		}
+		opts.MaxScanKeys = 2
+		res, err := c.InvalidateScope(context.Background(), sel, opts)
+		if err != nil || res.State != "succeeded" || res.InvalidatedResources != 1 || res.InvalidatedRepresentations != 2 {
+			t.Fatalf("retry did not deduplicate resource ownership: res=%+v err=%v", res, err)
+		}
+		if len(c.byResourceID) != 0 {
+			t.Fatal("removed resources leaked opaque catalog entries")
+		}
+	})
+	t.Run("host_isolation", func(t *testing.T) {
+		c := newTestCache(t, cfg)
+		key := keyFor(http.MethodGet, "other.example.com", "/old")
+		c.set(key, &Entry{Status: http.StatusOK, Body: []byte("other"), Tags: []string{"A"}})
+		id := hashKey(resourceKeyOf("other.example.com", "/old"))
+		if _, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
+			ReuseFenceGen: c.genSeq.Load(), ReuseResourceIDs: []string{id},
+		}); err == nil {
+			t.Fatal("retry accepted ownership from a different host")
+		}
+		assertCachedEntryBody(t, c, key, "other")
+	})
+}
+
+func TestResourceIDCatalogTracksVariantsRehydrationAndGlobalPurge(t *testing.T) {
+	t.Parallel()
+
+	for _, disk := range []bool{false, true} {
+		for _, legacyPurge := range []bool{false, true} {
+			t.Run(fmt.Sprintf("disk=%t/legacy_purge=%t", disk, legacyPurge), func(t *testing.T) {
+				t.Parallel()
+				cfg := config.CacheConfig{MemoryMaxSize: config.Size(2 << 20), DefaultTTL: config.Duration(time.Minute)}
+				if disk {
+					cfg.DiskPath, cfg.DiskMaxSize = t.TempDir(), config.Size(8<<20)
+				}
+				c := newTestCache(t, cfg)
+				warm := func(c *Cache) {
+					h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("Cache-Control", "public, max-age=300")
+						w.Header().Set("Vary", "Accept")
+						_, _ = io.WriteString(w, "body")
+					}))
+					for _, method := range []string{http.MethodGet, http.MethodHead} {
+						for _, accept := range []string{"text/plain", "application/json"} {
+							req := httptest.NewRequest(method, "http://portal.example.com/item", nil)
+							req.Header.Set("Accept", accept)
+							h.ServeHTTP(httptest.NewRecorder(), req)
+						}
+					}
+				}
+				warm(c)
+				if len(c.byResourceID) != 1 {
+					t.Fatalf("variants duplicated the logical-resource index: %d", len(c.byResourceID))
+				}
+				if disk {
+					c = newTestCache(t, cfg)
+					if len(c.byResourceID) != 1 {
+						t.Fatal("rehydration lost the logical-resource index")
+					}
+				}
+				if legacyPurge {
+					c.Purge()
+				} else {
+					all, err := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := c.InvalidateScope(context.Background(), all, InvalidateOptions{}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if len(c.byResourceID) != 0 {
+					t.Fatal("global purge retained logical-resource index entries")
+				}
+				warm(c)
+				c.Delete(keyFor(http.MethodGet, "portal.example.com", "/item"))
+				if len(c.byResourceID) != 1 {
+					t.Fatal("deleting GET lost retained HEAD ownership")
+				}
+				c.Delete(keyFor(http.MethodHead, "portal.example.com", "/item"))
+				if len(c.byResourceID) != 0 {
+					t.Fatal("deleting the last method leaked resource ownership")
+				}
+			})
+		}
+	}
 }

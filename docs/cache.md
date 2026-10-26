@@ -1119,6 +1119,15 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    completing its disk cleanup. A failed intent commit leaves resident entries
    unchanged and conservatively fences earlier matching origin publications
    because the failed write may still have reached durable storage.
+   Tag-purge retries also retain the original logical-resource group, not just
+   the tag selector: opaque resource IDs are committed with the cutoff and
+   resolve both GET and HEAD representations, including Vary variants, after
+   tag changes, tag-ingestion policy changes, fence eviction, or restart.
+   Query values are never stored in this retry snapshot. Older tag operations
+   without a durable snapshot can use retained in-memory ownership; if neither
+   is available, continuation fails explicitly instead of reporting success
+   from the current tag index. Use a fresh host or all purge with explicit
+   broad confirmation and a new idempotency key to clean up unknown ownership.
 3. **Admitted readers and ordinary reloads:** already-admitted downstream
    readers holding an in-memory `*Entry` reference or a reference-counted
    `.jul-cache-retired-*` disk file lease finish streaming uninterrupted, while
