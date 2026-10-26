@@ -1595,8 +1595,8 @@ export interface CachePurgePreviewResponse {
   cache_sequence: number;
   execution_mode_contract: string;
   broad_scope: boolean;
-  warnings: CacheGuidance[];
-  samples: CacheResourceSample[];
+  warnings?: CacheGuidance[] | undefined;
+  samples?: CacheResourceSample[] | undefined;
   config_authority?: string | undefined;
   config_authority_source?: string | undefined;
 }
@@ -1625,21 +1625,26 @@ export interface CachePurgeResponse {
   started_at: string;
   completed_at?: string | undefined;
   recovery_guidance?: string | undefined;
-  warnings: CacheGuidance[];
+  warnings?: CacheGuidance[] | undefined;
   boot_id: string;
   config_authority?: string | undefined;
   config_authority_source?: string | undefined;
 }
 
-export function previewCachePurge(
+export async function previewCachePurge(
   selector: CacheSelector,
   includeSamples = true,
 ): Promise<CachePurgePreviewResponse> {
-  return api<CachePurgePreviewResponse>("/v1/cache/purge/preview", {
+  const data = await api<CachePurgePreviewResponse>("/v1/cache/purge/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ selector, include_samples: includeSamples }),
   });
+  return {
+    ...data,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    samples: Array.isArray(data.samples) ? data.samples : [],
+  };
 }
 
 export interface ExecuteCachePurgeInput {
@@ -1650,14 +1655,14 @@ export interface ExecuteCachePurgeInput {
   readonly idempotencyKey?: string | undefined;
 }
 
-export function executeCachePurge(
+export async function executeCachePurge(
   input: ExecuteCachePurgeInput,
 ): Promise<CachePurgeResponse> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (input.idempotencyKey) {
     headers["Idempotency-Key"] = input.idempotencyKey;
   }
-  return api<CachePurgeResponse>("/v1/cache/purge", {
+  const data = await api<CachePurgeResponse>("/v1/cache/purge", {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -1667,14 +1672,22 @@ export function executeCachePurge(
       retry_operation_id: input.retryOperationId,
     }),
   });
+  return {
+    ...data,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+  };
 }
 
-export function fetchCachePurgeOperation(
+export async function fetchCachePurgeOperation(
   operationId: string,
 ): Promise<CachePurgeResponse> {
-  return api<CachePurgeResponse>(
+  const data = await api<CachePurgeResponse>(
     `/v1/cache/purges/${encodeURIComponent(operationId)}`,
   );
+  return {
+    ...data,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+  };
 }
 
 // ── History ──────────────────────────────────────────────────────────────────

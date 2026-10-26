@@ -8,11 +8,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +25,7 @@ import (
 	"jul/internal/cache"
 	"jul/internal/config"
 	"jul/internal/rbac"
+	"jul/internal/server"
 )
 
 type errScopedPurger struct{}
@@ -452,6 +458,14 @@ func TestV1CachePurgeWorkflowRBACBindingIdempotencyAndSecretSafety(t *testing.T)
 	inflightRR := postV1JSON(t, sLegacy, "/api/v1/cache/purge", adminToken, "idem-inflight-1", adminapi.CachePurgeRequest{
 		Selector: tagSelector,
 	})
+	// In-flight idempotency conflict (409 CodeIdempotencyKeyInUse), retry_operation_id conflict (409), and 202 Accepted status lookup.
+	inflightRetryRR := postV1JSON(t, sLegacy, "/api/v1/cache/purge", adminToken, "", adminapi.CachePurgeRequest{
+		Selector:         tagSelector,
+		RetryOperationID: "cp_inflight_1",
+	})
+	if inflightRetryRR.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for retry_operation_id referencing in-flight operation, got %d", inflightRetryRR.Code)
+	}
 	if inflightRR.Code != http.StatusConflict {
 		t.Fatalf("expected 409 for in-flight idempotency key, got %d", inflightRR.Code)
 	}
@@ -570,3 +584,487 @@ func TestV1CachePurgeWorkflowRBACBindingIdempotencyAndSecretSafety(t *testing.T)
 		t.Fatalf("expected 400 when ScopedPurger returns scan error, got %d", errPurgeRR.Code)
 	}
 }
+
+type countingScopedPurger struct {
+	executions atomic.Int32
+	onExec     func()
+}
+
+func (p *countingScopedPurger) Purge()            {}
+func (p *countingScopedPurger) Delete(key string) {}
+func (p *countingScopedPurger) PreviewScope(sel cache.NormalizedSelector, opts cache.PreviewOptions) cache.PurgePreview {
+	return cache.PurgePreview{
+		Selector:       sel,
+		CountAccuracy:  "exact",
+		ScanLimit:      10000,
+		AsOf:           time.Now().UTC(),
+		BroadScope:     sel.BroadScope,
+		CacheSequence: 1,
+		Samples:       nil,
+	}
+}
+func (p *countingScopedPurger) InvalidateScope(ctx context.Context, sel cache.NormalizedSelector, opts cache.InvalidateOptions) (cache.InvalidateResult, error) {
+	if p.onExec != nil {
+		p.onExec()
+	}
+	p.executions.Add(1)
+	now := time.Now().UTC()
+	return cache.InvalidateResult{
+		Selector:                   sel,
+		State:                      "succeeded",
+		Outcome:                    "succeeded",
+		InvalidationEffective:      "effective",
+		FenceSequence:              1,
+		InvalidatedResources:       1,
+		InvalidatedRepresentations: 1,
+		MemoryEntriesRemoved:       1,
+		StartedAt:                  now,
+		CompletedAt:                now,
+	}, nil
+}
+
+func TestAuditR5_LedgerWriteAndLoadFailuresFailClosed(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	// Make the ledger pathname a directory to force an actual read/write failure (F03).
+	ledgerPath := filepath.Join(diskDir, diskPurgeLedgerFilename)
+	if err := os.MkdirAll(ledgerPath, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+
+	eng := &countingScopedPurger{}
+	const tok = "admin-secret-token-621-f03"
+	s1 := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: eng,
+		LoadConfig: func() (*config.Config, error) {
+			return &config.Config{
+				Cache: config.CacheConfig{Enabled: true, DiskPath: diskDir},
+			}, nil
+		},
+	})
+
+	sel := adminapi.CacheSelector{
+		Kind: "exact_url",
+		URL:  "https://portal.example.com/articles/42",
+	}
+	rr1 := postV1JSON(t, s1, "/api/v1/cache/purge", tok, "idem-f03-write-fail", adminapi.CachePurgeRequest{
+		Selector: sel,
+	})
+	if rr1.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable when ledger path is a directory, got %d: %s", rr1.Code, rr1.Body.String())
+	}
+	if got := eng.executions.Load(); got != 0 {
+		t.Fatalf("expected 0 engine executions when ledger persistence fails pre-execution, got %d", got)
+	}
+
+	// Also verify post-execution persistence failure downgrades response to partial/uncertain.
+	_ = os.RemoveAll(ledgerPath)
+	s2 := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: &countingScopedPurger{
+			onExec: func() {
+				// Break the ledger path during execution so post-execution persistence fails.
+				_ = os.Remove(ledgerPath)
+				_ = os.MkdirAll(ledgerPath, 0o700)
+			},
+		},
+		LoadConfig: func() (*config.Config, error) {
+			return &config.Config{
+				Cache: config.CacheConfig{Enabled: true, DiskPath: diskDir},
+			}, nil
+		},
+	})
+	rr2 := postV1JSON(t, s2, "/api/v1/cache/purge", tok, "idem-f03-post-fail", adminapi.CachePurgeRequest{
+		Selector: sel,
+	})
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("expected 200 with degraded state on post-execution ledger failure, got %d: %s", rr2.Code, rr2.Body.String())
+	}
+	var postResp adminapi.CachePurgeResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &postResp); err != nil {
+		t.Fatalf("unmarshal postResp: %v", err)
+	}
+	if postResp.State == "succeeded" || postResp.InvalidationEffective != "uncertain" {
+		t.Fatalf("expected post-execution ledger write failure to report partial/uncertain, got %+v", postResp)
+	}
+
+	// Verify startup recovery of a persisted "running" record transitions it to interrupted/uncertain AND persists that terminal state to disk (Round 4).
+	_ = os.RemoveAll(ledgerPath)
+	runningJSON := `[{"operation_id":"cp_1_crash","principal":"shared","idempotency_key":"idem-crash-1","created_at":"2026-10-25T10:00:00Z","response":{"api_version":"v1","operation_id":"cp_1_crash","state":"running","terminal":false,"outcome":"running","invalidation_effective":"incomplete","selector":{"kind":"exact_url","host":"portal.example.com","uri":"/articles/42"},"selector_digest":"deadbeef","started_at":"2026-10-25T10:00:00Z","warnings":[],"boot_id":"boot-old"}}]`
+	if err := os.WriteFile(ledgerPath, []byte(runningJSON), 0o600); err != nil {
+		t.Fatalf("WriteFile runningJSON: %v", err)
+	}
+	s3 := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: &countingScopedPurger{},
+		LoadConfig: func() (*config.Config, error) {
+			return &config.Config{
+				Cache: config.CacheConfig{Enabled: true, DiskPath: diskDir},
+			}, nil
+		},
+	})
+	lookupRR := getV1(t, s3, "/api/v1/cache/purges/cp_1_crash", tok)
+	if lookupRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for recovered interrupted operation, got %d: %s", lookupRR.Code, lookupRR.Body.String())
+	}
+	diskAfterBytes, err := os.ReadFile(ledgerPath)
+	if err != nil {
+		t.Fatalf("ReadFile ledgerPath: %v", err)
+	}
+	if !strings.Contains(string(diskAfterBytes), `"outcome":"interrupted"`) || !strings.Contains(string(diskAfterBytes), `"terminal":true`) {
+		t.Fatalf("expected startup recovery to persist interrupted/terminal state to disk, got %s", string(diskAfterBytes))
+	}
+
+	// Verify corrupt ledger JSON fails closed on GET /api/v1/cache/purges/{id}, and LiveSnapshot + rollbackAdmittedRecordLocked with evictedRec.
+	_ = os.WriteFile(ledgerPath, []byte("{corrupt-json"), 0o600)
+	sCorrupt := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: &countingScopedPurger{},
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{
+				EffectiveConfig: &config.Config{
+					Cache: config.CacheConfig{Enabled: true, DiskPath: diskDir},
+				},
+			}
+		},
+	})
+	if getCorruptRR := getV1(t, sCorrupt, "/api/v1/cache/purges/cp_1_crash", tok); getCorruptRR.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on corrupt ledger GET lookup, got %d", getCorruptRR.Code)
+	}
+
+	// Exercise rollbackAdmittedRecordLocked restoring evictedRec when ledger is at 256 capacity and pre-execution write fails.
+	_ = os.RemoveAll(ledgerPath)
+	_ = os.MkdirAll(ledgerPath, 0o700)
+	sCorrupt.ensurePurgeLedgerInit()
+	sCorrupt.purgeLedger.mu.Lock()
+	sCorrupt.purgeLedger.loadedDisk = diskDir
+	sCorrupt.purgeLedger.records = nil
+	for i := 0; i < maxRetainedCachePurgeOps; i++ {
+		id := fmt.Sprintf("cp_evict_%d", i)
+		rec := &cachePurgeRecord{
+			OperationID:    id,
+			Principal:      "shared",
+			IdempotencyKey: id,
+			CreatedAt:      time.Now().Add(-2 * cachePurgeLedgerMinAge),
+			Response:       adminapi.CachePurgeResponse{OperationID: id, State: "succeeded", Terminal: true},
+		}
+		sCorrupt.purgeLedger.records = append(sCorrupt.purgeLedger.records, rec)
+		sCorrupt.purgeLedger.byID[id] = rec
+		sCorrupt.purgeLedger.byIdem[idemMapKey("shared", id)] = rec
+	}
+	sCorrupt.purgeLedger.mu.Unlock()
+	evictRollbackRR := postV1JSON(t, sCorrupt, "/api/v1/cache/purge", tok, "idem-rollback-evict", adminapi.CachePurgeRequest{
+		Selector: sel,
+	})
+	if evictRollbackRR.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 on pre-execution write failure at capacity, got %d", evictRollbackRR.Code)
+	}
+	sCorrupt.purgeLedger.mu.Lock()
+	_, restored := sCorrupt.purgeLedger.byID["cp_evict_0"]
+	sCorrupt.purgeLedger.mu.Unlock()
+	if !restored {
+		t.Fatalf("expected rollbackAdmittedRecordLocked to restore evicted cp_evict_0")
+	}
+}
+
+func TestAuditR5_ProtectedReplayBindingNeverEvictedByRejectedOrUnkeyedTraffic(t *testing.T) {
+	t.Parallel()
+
+	const tok = "admin-secret-token-621-f04"
+	blockCh := make(chan struct{})
+	slotEntered := make(chan struct{}, maxConcurrentCachePurges)
+	var shouldBlock atomic.Bool
+
+	eng := &countingScopedPurger{
+		onExec: func() {
+			if shouldBlock.Load() {
+				slotEntered <- struct{}{}
+				<-blockCh
+			}
+		},
+	}
+	s := newTestServer(t, config.AdminConfig{Token: tok}, Deps{Cache: eng})
+
+	// 1. Execute the original keyed operation (#1) and fill the remaining 255 ledger slots with young keyed records.
+	origSel := adminapi.CacheSelector{
+		Kind: "exact_url",
+		URL:  "https://portal.example.com/articles/orig",
+	}
+	rrOrig := postV1JSON(t, s, "/api/v1/cache/purge", tok, "idem-orig-protected-key", adminapi.CachePurgeRequest{
+		Selector: origSel,
+	})
+	if rrOrig.Code != http.StatusOK || eng.executions.Load() != 1 {
+		t.Fatalf("expected initial keyed operation to succeed (executions=1), got code=%d execs=%d", rrOrig.Code, eng.executions.Load())
+	}
+
+	s.purgeLedger.mu.Lock()
+	for i := len(s.purgeLedger.records); i < maxRetainedCachePurgeOps; i++ {
+		id := fmt.Sprintf("cp_young_%d", i)
+		ik := fmt.Sprintf("idem-young-%d", i)
+		rec := &cachePurgeRecord{
+			OperationID:    id,
+			Principal:      "shared",
+			IdempotencyKey: ik,
+			CreatedAt:      time.Now().UTC(),
+			Response: adminapi.CachePurgeResponse{
+				OperationID: id,
+				State:       "succeeded",
+				Terminal:    true,
+				Warnings:    []adminapi.CacheGuidance{},
+			},
+		}
+		s.purgeLedger.records = append(s.purgeLedger.records, rec)
+		s.purgeLedger.byID[id] = rec
+		s.purgeLedger.byIdem[idemMapKey("shared", ik)] = rec
+	}
+	s.purgeLedger.mu.Unlock()
+
+	// 2. Occupy all 4 execution slots and attempt an unkeyed operation: must return 429 WITHOUT evicting idem-orig-protected-key!
+	s.cachePurgeInflight.Store(maxConcurrentCachePurges)
+	unkeyedBlockedRR := postV1JSON(t, s, "/api/v1/cache/purge", tok, "", adminapi.CachePurgeRequest{
+		Selector: adminapi.CacheSelector{Kind: "exact_url", URL: "https://portal.example.com/articles/unkeyed"},
+	})
+	if unkeyedBlockedRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 when all slots occupied, got %d", unkeyedBlockedRR.Code)
+	}
+	s.cachePurgeInflight.Store(0)
+
+	// 3. Even with a free slot, an unkeyed request when all 256 records are young (<15m) keyed records must return 429 without evicting!
+	unkeyedCapRR := postV1JSON(t, s, "/api/v1/cache/purge", tok, "", adminapi.CachePurgeRequest{
+		Selector: adminapi.CacheSelector{Kind: "exact_url", URL: "https://portal.example.com/articles/unkeyed-2"},
+	})
+	if unkeyedCapRR.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 when all 256 ledger slots hold protected <15m keyed records, got %d", unkeyedCapRR.Code)
+	}
+
+	// 4. Retry the original key: must return 200 with IdempotentReplay=true and engine executions still == 1!
+	close(blockCh)
+	retryOrigRR := postV1JSON(t, s, "/api/v1/cache/purge", tok, "idem-orig-protected-key", adminapi.CachePurgeRequest{
+		Selector: origSel,
+	})
+	if retryOrigRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 on replay of protected key, got %d: %s", retryOrigRR.Code, retryOrigRR.Body.String())
+	}
+	var replayResp adminapi.CachePurgeResponse
+	if err := json.Unmarshal(retryOrigRR.Body.Bytes(), &replayResp); err != nil {
+		t.Fatalf("unmarshal replayResp: %v", err)
+	}
+	if !replayResp.IdempotentReplay || eng.executions.Load() != 1 {
+		t.Fatalf("expected IdempotentReplay=true and executions=1, got replay=%v executions=%d", replayResp.IdempotentReplay, eng.executions.Load())
+	}
+}
+
+type blockingBodyReader struct {
+	admitted chan struct{}
+	release  chan struct{}
+	once     sync.Once
+	inner    *strings.Reader
+}
+
+func (b *blockingBodyReader) Read(p []byte) (int, error) {
+	b.once.Do(func() {
+		close(b.admitted)
+		<-b.release
+	})
+	return b.inner.Read(p)
+}
+
+func TestAuditR5_LiveRevocationDuringAdmissionBlocksExecution(t *testing.T) {
+	t.Parallel()
+
+	const rootTok = "root-admin-token-32-chars-padded-621"
+	const opTok = "rbac-live-revoke-token-32-chars-621"
+	pol1, err := rbac.Build(true, rbac.RoleAdmin, nil, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: rootTok},
+		{Name: "ops-1", Role: rbac.RoleOperator, Token: opTok},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("rbac.Build pol1: %v", err)
+	}
+	polViewer, err := rbac.Build(true, rbac.RoleAdmin, nil, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: rootTok},
+		{Name: "ops-1", Role: rbac.RoleViewer, Token: opTok},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("rbac.Build polViewer: %v", err)
+	}
+
+	eng := &countingScopedPurger{}
+	s := newTestServer(t, config.AdminConfig{}, Deps{Cache: eng})
+	s.UpdatePolicy(pol1)
+
+	bodyReader := &blockingBodyReader{
+		admitted: make(chan struct{}),
+		release:  make(chan struct{}),
+		inner:    strings.NewReader(`{"selector":{"kind":"exact_url","url":"https://portal.example.com/articles/42"}}`),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", bodyReader)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+opTok)
+	rr := httptest.NewRecorder()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.routes().ServeHTTP(rr, req)
+	}()
+
+	// Wait until the request has passed outer RBAC middleware and is reading the body.
+	<-bodyReader.admitted
+	// Hot-reload the same principal/token to viewer!
+	s.UpdatePolicy(polViewer)
+	close(bodyReader.release)
+	wg.Wait()
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden when principal is demoted to viewer before execution, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := eng.executions.Load(); got != 0 {
+		t.Fatalf("expected 0 engine executions after live revocation, got %d", got)
+	}
+}
+
+func TestAuditR5_R6_QueryRoundtripWireArraysAndCountBasedBroadGuard(t *testing.T) {
+	t.Parallel()
+
+	const tok = "admin-secret-token-621-f07-f08-f14"
+	realCache, err := cache.New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}, nil)
+	if err != nil {
+		t.Fatalf("cache.New: %v", err)
+	}
+	h := realCache.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = fmt.Fprintf(w, "item-%s", r.URL.RawQuery)
+	}))
+
+	s := newTestServer(t, config.AdminConfig{Token: tok}, Deps{
+		Cache: realCache,
+		LoadConfig: func() (*config.Config, error) {
+			return &config.Config{
+				Cache: config.CacheConfig{Enabled: true},
+			}, nil
+		},
+	})
+
+	// 1. Preview a no-match queried URL and verify raw JSON includes "samples":[] and "warnings":[...] (F07, F08).
+	querySel := adminapi.CacheSelector{
+		Kind: "exact_url",
+		URL:  "https://portal.example.com/articles/42?lang=es",
+	}
+	prevRR := postV1JSON(t, s, "/api/v1/cache/purge/preview", tok, "", adminapi.CachePurgePreviewRequest{
+		Selector:       querySel,
+		IncludeSamples: true,
+	})
+	if prevRR.Code != http.StatusOK {
+		t.Fatalf("preview status = %d: %s", prevRR.Code, prevRR.Body.String())
+	}
+	rawPrevJSON := prevRR.Body.String()
+	if !strings.Contains(rawPrevJSON, `"samples":[]`) || !strings.Contains(rawPrevJSON, `"warnings":`) {
+		t.Fatalf("expected raw preview JSON to contain non-null samples and warnings arrays, got %s", rawPrevJSON)
+	}
+	var prevResp adminapi.CachePurgePreviewResponse
+	if err := json.Unmarshal(prevRR.Body.Bytes(), &prevResp); err != nil {
+		t.Fatalf("unmarshal prevResp: %v", err)
+	}
+	if prevResp.Selector.URI != "/articles/42?<redacted>" {
+		t.Fatalf("expected redacted URI in preview response, got %q", prevResp.Selector.URI)
+	}
+
+	// Execute with the original unredacted selector and preview_token: must succeed (200 OK).
+	execQueryRR := postV1JSON(t, s, "/api/v1/cache/purge", tok, "", adminapi.CachePurgeRequest{
+		Selector:     querySel,
+		PreviewToken: prevResp.PreviewToken,
+	})
+	if execQueryRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK executing queried URL with preview_token, got %d: %s", execQueryRR.Code, execQueryRR.Body.String())
+	}
+
+	// 2. Warm 100 resources under /articles/item-* and verify count-based broad confirmation is enforced at execution (F14).
+	for i := 0; i < 100; i++ {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://portal.example.com/articles/item-%d", i), nil)
+		req.Host = "portal.example.com"
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	pfx100 := adminapi.CacheSelector{
+		Kind:   "prefix",
+		Host:   "portal.example.com",
+		Prefix: "/articles/",
+	}
+	prev100RR := postV1JSON(t, s, "/api/v1/cache/purge/preview", tok, "", adminapi.CachePurgePreviewRequest{
+		Selector: pfx100,
+	})
+	var prev100 adminapi.CachePurgePreviewResponse
+	_ = json.Unmarshal(prev100RR.Body.Bytes(), &prev100)
+	if !prev100.BroadScope || prev100.MatchedResources != 100 {
+		t.Fatalf("expected BroadScope=true and MatchedResources=100, got %+v", prev100)
+	}
+
+	// Execute without confirm_broad: must fail with 400 confirm_broad and remove 0 entries!
+	noConfirmRR := postV1JSON(t, s, "/api/v1/cache/purge", tok, "", adminapi.CachePurgeRequest{
+		Selector: pfx100,
+	})
+	if noConfirmRR.Code != http.StatusBadRequest || !strings.Contains(noConfirmRR.Body.String(), "confirm_broad") {
+		t.Fatalf("expected 400 confirm_broad for 100-resource prefix without confirm_broad, got %d: %s", noConfirmRR.Code, noConfirmRR.Body.String())
+	}
+
+	// Execute with confirm_broad=true: must succeed and remove all 100 resources.
+	withConfirmRR := postV1JSON(t, s, "/api/v1/cache/purge", tok, "", adminapi.CachePurgeRequest{
+		Selector:     pfx100,
+		ConfirmBroad: true,
+	})
+	if withConfirmRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 with confirm_broad=true, got %d: %s", withConfirmRR.Code, withConfirmRR.Body.String())
+	}
+
+	// 3. Also test retry_operation_id resolution when the caller sends the redacted display selector (Round 5).
+	var execQueryResp adminapi.CachePurgeResponse
+	_ = json.Unmarshal(execQueryRR.Body.Bytes(), &execQueryResp)
+	s.purgeLedger.mu.Lock()
+	if rec, ok := s.purgeLedger.byID[execQueryResp.OperationID]; ok {
+		rec.Response.State = "partial"
+	}
+	s.purgeLedger.mu.Unlock()
+	retryRedactedRR := postV1JSON(t, s, "/api/v1/cache/purge", tok, "", adminapi.CachePurgeRequest{
+		Selector:         execQueryResp.Selector, // uri: "/articles/42?<redacted>"
+		RetryOperationID: execQueryResp.OperationID,
+	})
+	if retryRedactedRR.Code != http.StatusOK {
+		t.Fatalf("expected 200 retrying with redacted selector via execSelector resolution, got %d: %s", retryRedactedRR.Code, retryRedactedRR.Body.String())
+	}
+
+	// Exercise verifyLivePurgePermission across authModeBlocked and authModeLegacy mismatch.
+	reqLegacyBad := httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", nil)
+	reqLegacyBad.Header.Set("Authorization", "Bearer wrong-legacy-token")
+	if s.verifyLivePurgePermission(httptest.NewRecorder(), reqLegacyBad) {
+		t.Fatalf("expected verifyLivePurgePermission to reject wrong legacy token")
+	}
+	s.UpdateLiveAdminConfig(config.AdminConfig{
+		RBAC: config.AdminRBACConfig{Enabled: true},
+	})
+	s.UpdatePolicy(nil)
+	if s.verifyLivePurgePermission(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", nil)) {
+		t.Fatalf("expected verifyLivePurgePermission to reject authModeBlocked")
+	}
+
+	// Exercise verifyLivePurgePermission with disabled RBAC principal and missing credential.
+	disabledPol, err := rbac.Build(true, rbac.RoleAdmin, nil, []rbac.PrincipalDef{
+		{Name: "root", Role: rbac.RoleAdmin, Token: "root-admin-token-32-chars-padded-621"},
+		{Name: "disabled-op", Role: rbac.RoleOperator, Token: "disabled-op-token-32-chars-padded-621", Disabled: true},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatalf("rbac.Build disabledPol: %v", err)
+	}
+	s.UpdatePolicy(disabledPol)
+	reqDisabled := httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", nil)
+	reqDisabled.Header.Set("Authorization", "Bearer disabled-op-token-32-chars-padded-621")
+	if s.verifyLivePurgePermission(httptest.NewRecorder(), reqDisabled) {
+		t.Fatalf("expected verifyLivePurgePermission to reject disabled RBAC principal")
+	}
+	if s.verifyLivePurgePermission(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", nil)) {
+		t.Fatalf("expected verifyLivePurgePermission to reject missing credential")
+	}
+}
+

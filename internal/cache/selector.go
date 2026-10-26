@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"path"
 	"reflect"
 	"strconv"
 	"strings"
@@ -80,6 +82,8 @@ type NormalizedSelector struct {
 	BroadScope          bool
 	ExplicitDefaultPort bool
 	globSegments        []string
+	cutoverExactPath    string
+	cutoverRawPrefix    string
 	digest              [32]byte
 }
 
@@ -569,7 +573,7 @@ func validateSelectorGlob(raw string) (string, []string, error) {
 			return "", nil, selErr("pattern", "pattern contains forbidden control, whitespace, non-ASCII, or backslash characters")
 		}
 		switch c {
-		case '?', '#', '[', ']', '{', '}', '^', '$', '(', ')', '|', '+':
+		case '?', '#', '[', ']', '{', '}', '^', '$', '(', ')', '|':
 			return "", nil, selErr("pattern", fmt.Sprintf("pattern contains unsupported metacharacter %q; only '*' (single segment) and '**' (standalone multi-segment) are supported", c))
 		case '%':
 			if i+2 >= len(raw) || !isHexByte(raw[i+1]) || !isHexByte(raw[i+2]) {
@@ -687,6 +691,9 @@ func computeSelectorDigest(s NormalizedSelector) [32]byte {
 		s.Key,
 		s.RouteID,
 	)
+	if s.cutoverExactPath != "" || s.cutoverRawPrefix != "" {
+		writePart(s.cutoverExactPath, s.cutoverRawPrefix)
+	}
 	writePart(strconv.Itoa(len(s.Tags)))
 	writePart(s.Tags...)
 	var out [32]byte
@@ -749,12 +756,25 @@ func (s NormalizedSelector) MatchesResource(host, requestURI string, tags []stri
 			return false
 		}
 		path := stripQueryFromURI(requestURI)
+		if s.cutoverRawPrefix != "" {
+			if strings.HasPrefix(path, s.cutoverRawPrefix) {
+				return true
+			}
+			dec := decodeRoutePath(path)
+			return strings.HasPrefix(dec, s.cutoverRawPrefix)
+		}
 		return matchSegmentPrefix(s.Prefix, path)
 	case SelectorGlob:
 		if host != s.Host {
 			return false
 		}
 		path := stripQueryFromURI(requestURI)
+		if s.cutoverExactPath != "" {
+			if path == s.cutoverExactPath {
+				return true
+			}
+			return decodeRoutePath(path) == s.cutoverExactPath
+		}
 		return matchAnchoredGlob(s.globSegments, path)
 	case SelectorTag:
 		if host != s.Host || len(tags) == 0 {
@@ -771,6 +791,22 @@ func stripQueryFromURI(requestURI string) string {
 		return requestURI[:q]
 	}
 	return requestURI
+}
+
+func decodeRoutePath(rawPath string) string {
+	if strings.IndexByte(rawPath, '%') >= 0 {
+		if unescaped, err := url.PathUnescape(rawPath); err == nil && unescaped != "" {
+			rawPath = unescaped
+		}
+	}
+	if strings.HasPrefix(rawPath, "/") && (strings.Contains(rawPath, "//") || strings.Contains(rawPath, "/.")) {
+		trailing := len(rawPath) > 1 && strings.HasSuffix(rawPath, "/")
+		rawPath = path.Clean(rawPath)
+		if trailing && rawPath != "/" {
+			rawPath += "/"
+		}
+	}
+	return rawPath
 }
 
 // matchSegmentPrefix implements ADR 0027 §1.2 segment-bounded path prefix
@@ -793,23 +829,33 @@ func matchSegmentPrefix(prefix, path string) bool {
 }
 
 // matchAnchoredGlob matches path (starting with '/') against pre-split pattern
-// segments (ADR 0027 §1.3).
+// segments without allocating (ADR 0027 §1.3).
 func matchAnchoredGlob(patternSegs []string, path string) bool {
 	if !strings.HasPrefix(path, "/") {
 		return false
 	}
-	pathSegs := strings.Split(path[1:], "/")
+	rem := path[1:]
+	var stackBounds [MaxGlobSegments * 4][2]int
+	segBounds := stackBounds[:0]
+	start := 0
+	for i := 0; i <= len(rem); i++ {
+		if i == len(rem) || rem[i] == '/' {
+			segBounds = append(segBounds, [2]int{start, i})
+			start = i + 1
+		}
+	}
+
 	pIdx, sIdx := 0, 0
 	starPIdx, starSIdx := -1, -1
-
-	for sIdx < len(pathSegs) {
+	for sIdx < len(segBounds) {
 		if pIdx < len(patternSegs) && patternSegs[pIdx] == "**" {
 			starPIdx = pIdx
 			starSIdx = sIdx
 			pIdx++
 			continue
 		}
-		if pIdx < len(patternSegs) && matchSingleGlobSegment(patternSegs[pIdx], pathSegs[sIdx]) {
+		b := segBounds[sIdx]
+		if pIdx < len(patternSegs) && matchSingleGlobSegment(patternSegs[pIdx], rem[b[0]:b[1]]) {
 			pIdx++
 			sIdx++
 			continue
@@ -822,7 +868,6 @@ func matchAnchoredGlob(patternSegs []string, path string) bool {
 		}
 		return false
 	}
-
 	for pIdx < len(patternSegs) && patternSegs[pIdx] == "**" {
 		pIdx++
 	}
@@ -929,16 +974,27 @@ func DeriveRouteCutoverSelectors(before, after *config.Config) []NormalizedSelec
 	changedUpstreams := changedUpstreamNames(before, after)
 	var selectors []NormalizedSelector
 	seen := make(map[[32]byte]struct{})
-	addSel := func(s Selector) {
-		ns, err := ParseSelector(s, nil)
-		if err != nil {
-			return
-		}
+	addNorm := func(ns NormalizedSelector) {
 		if _, ok := seen[ns.Digest()]; ok {
 			return
 		}
 		seen[ns.Digest()] = struct{}{}
 		selectors = append(selectors, ns)
+	}
+	addSel := func(s Selector) {
+		ns, err := ParseSelector(s, nil)
+		if err != nil {
+			if s.Host != "" {
+				ns, err = ParseSelector(Selector{Kind: SelectorHost, Host: s.Host}, nil)
+			}
+			if err != nil {
+				ns, err = ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+			}
+			if err != nil {
+				return
+			}
+		}
+		addNorm(ns)
 	}
 
 	collectAffectedRoutes := func(primary, secondary *config.Config) {
@@ -952,7 +1008,7 @@ func DeriveRouteCutoverSelectors(before, after *config.Config) []NormalizedSelec
 				if !routeChangedOrUpstreamChanged(primary, srv, loc, secondary, changedUpstreams) {
 					continue
 				}
-				emitSelectorsForRoute(srv, loc, addSel)
+				emitSelectorsForRoute(srv, loc, addSel, addNorm)
 			}
 		}
 	}
@@ -1023,7 +1079,7 @@ func sameLocationCacheIdentity(a, b *config.LocationConfig) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, addSel func(Selector)) {
+func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, addSel func(Selector), addNorm func(NormalizedSelector)) {
 	if len(srv.ServerNames) == 0 {
 		addSel(Selector{Kind: SelectorAll, All: true})
 		return
@@ -1040,16 +1096,31 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 		}
 		switch mType {
 		case "exact":
-			if loc.Match.Path == "/" || loc.Match.Path == "" {
+			if loc.Match.Path == "" || !strings.HasPrefix(loc.Match.Path, "/") {
 				addSel(Selector{Kind: SelectorHost, Host: nh})
 			} else {
-				addSel(Selector{Kind: SelectorGlob, Host: nh, Pattern: loc.Match.Path})
+				ns := NormalizedSelector{
+					Kind:             SelectorGlob,
+					Host:             nh,
+					Pattern:          loc.Match.Path,
+					globSegments:     strings.Split(loc.Match.Path[1:], "/"),
+					cutoverExactPath: loc.Match.Path,
+				}
+				ns.digest = computeSelectorDigest(ns)
+				addNorm(ns)
 			}
 		case "prefix":
-			if loc.Match.Path == "/" || loc.Match.Path == "" {
+			if loc.Match.Path == "/" || loc.Match.Path == "" || !strings.HasPrefix(loc.Match.Path, "/") {
 				addSel(Selector{Kind: SelectorHost, Host: nh})
 			} else {
-				addSel(Selector{Kind: SelectorPrefix, Host: nh, Prefix: loc.Match.Path})
+				ns := NormalizedSelector{
+					Kind:             SelectorPrefix,
+					Host:             nh,
+					Prefix:           loc.Match.Path,
+					cutoverRawPrefix: loc.Match.Path,
+				}
+				ns.digest = computeSelectorDigest(ns)
+				addNorm(ns)
 			}
 		default:
 			addSel(Selector{Kind: SelectorHost, Host: nh})

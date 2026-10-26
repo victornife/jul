@@ -333,31 +333,42 @@ describe("cache tag TOML and patch helpers (#621)", () => {
       }).error,
     ).toMatch(/structured selectors/);
 
-    // Verify CLI snippets for every selector kind and never leak tokens.
+    // Verify CLI snippets for every selector kind use POSIX single quotes and never leak tokens (F15).
     expect(
       buildCliCommandSnippet(
         { kind: "exact_url", url: "https://portal.example.com/a" },
         false,
       ),
-    ).toContain('--url "https://portal.example.com/a"');
+    ).toContain("--url 'https://portal.example.com/a'");
     expect(
       buildCliCommandSnippet(
         { kind: "exact_url", host: "portal.example.com", uri: "/a" },
         false,
       ),
-    ).toContain('--uri "/a"');
+    ).toContain("--uri '/a'");
     expect(
       buildCliCommandSnippet(
         { kind: "prefix", host: "portal.example.com", prefix: "/articles/" },
         false,
       ),
-    ).toContain('--prefix "/articles/"');
+    ).toContain("--prefix '/articles/'");
     expect(
       buildCliCommandSnippet(
         { kind: "glob", host: "portal.example.com", pattern: "/articles/*" },
         false,
       ),
-    ).toContain('--glob "/articles/*"');
+    ).toContain("--glob '/articles/*'");
+    expect(
+      buildCliCommandSnippet(
+        {
+          kind: "tag",
+          host: "portal.example.com",
+          tags: ["article:42", "tag-$(id)-`uname`-'quote'"],
+          tag_match: "all",
+        },
+        false,
+      ),
+    ).toContain("--tag 'tag-$(id)-`uname`-'\\''quote'\\'''");
     expect(
       buildCliCommandSnippet(
         {
@@ -375,7 +386,7 @@ describe("cache tag TOML and patch helpers (#621)", () => {
     expect(buildCliCommandSnippet({ kind: "all", all: true }, true)).toContain("--all");
     expect(
       buildCliCommandSnippet({ kind: "key", key: "GET:example.com:/a" }, false),
-    ).toContain('--key "GET:example.com:/a"');
+    ).toContain("--key 'GET:example.com:/a'");
   });
 });
 
@@ -885,6 +896,277 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     shouldFail = true;
     fireEvent.click(screen.getByRole("button", { name: "Confirm & invalidate" }));
     expect(await screen.findByText(/INVALID_REQUEST: bad selector/)).toBeInTheDocument();
+  });
+
+  it("preserves unredacted query selector on execute/retry, omits fabricated route_id, and handles omitted wire arrays (F07, F08)", async () => {
+    const sentPurgeBodies: Array<Record<string, unknown>> = [];
+    const sentPreviewBodies: Array<Record<string, unknown>> = [];
+    let purgeCall = 0;
+
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.endsWith("/me")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              authenticated: true,
+              principal: "ops",
+              role: "admin",
+              permissions: ["stats:read", "cache:purge"],
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url === "/api/v1/cache/purge/preview") {
+        const rawBody = typeof init?.body === "string" ? init.body : "{}";
+        const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+        sentPreviewBodies.push(parsed);
+        // Simulate wire response with redacted display selector and omitted samples/warnings arrays (F07, F08).
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              api_version: "v1",
+              cache_enabled: true,
+              tag_ingestion_enabled: true,
+              selector: {
+                kind: "exact_url",
+                host: "portal.example.com",
+                uri: "/articles/42?<redacted>",
+              },
+              selector_digest: "deadbeef",
+              preview_token: "cpt1.10.1790000000.0123456789abcdef0123456789abcdef",
+              matched_resources: 0,
+              matched_representations: 0,
+              memory_entries: 0,
+              disk_entries: 0,
+              matched_bytes: 0,
+              memory_bytes: 0,
+              disk_bytes: 0,
+              inflight_fills_matched: 0,
+              count_accuracy: "exact",
+              truncated: false,
+              scan_limit: 10000,
+              scanned_entries: 0,
+              source: "live_cache_index",
+              as_of: "2026-10-25T10:00:00Z",
+              cache_sequence: 10,
+              execution_mode_contract: "reevaluate_selector_with_fence",
+              broad_scope: false,
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url === "/api/v1/cache/purge") {
+        purgeCall += 1;
+        const rawBody = typeof init?.body === "string" ? init.body : "{}";
+        const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+        sentPurgeBodies.push(parsed);
+        // First call returns partial with redacted display selector and omitted warnings; retry succeeds.
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              api_version: "v1",
+              operation_id: "cp_query_1",
+              state: purgeCall === 1 ? "partial" : "succeeded",
+              terminal: true,
+              outcome: purgeCall === 1 ? "partial_failure" : "succeeded",
+              invalidation_effective: purgeCall === 1 ? "incomplete" : "effective",
+              selector: {
+                kind: "exact_url",
+                host: "portal.example.com",
+                uri: "/articles/42?<redacted>",
+              },
+              selector_digest: "deadbeef",
+              invalidated_resources: 1,
+              invalidated_representations: 1,
+              memory_entries_removed: 1,
+              disk_entries_removed: 0,
+              started_at: "2026-10-25T10:00:01Z",
+              boot_id: "boot-1",
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      if (url === "/api/v1/cache/purges/cp_running_no_warnings") {
+        // Running operation omitting warnings on the wire (F08).
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              api_version: "v1",
+              operation_id: "cp_running_no_warnings",
+              state: "running",
+              terminal: false,
+              outcome: "running",
+              invalidation_effective: "incomplete",
+              selector: { kind: "prefix", host: "portal.example.com", prefix: "/articles/" },
+              selector_digest: "deadbeef",
+              invalidated_resources: 0,
+              invalidated_representations: 0,
+              memory_entries_removed: 0,
+              disk_entries_removed: 0,
+              started_at: "2026-10-25T10:00:01Z",
+              boot_id: "boot-1",
+            }),
+            { status: 202 },
+          ),
+        );
+      }
+      if (url === "/api/v1/cache/purges/cp_redacted_lookup") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              api_version: "v1",
+              operation_id: "cp_redacted_lookup",
+              state: "partial",
+              terminal: true,
+              outcome: "partial_failure",
+              invalidation_effective: "incomplete",
+              selector: {
+                kind: "exact_url",
+                host: "portal.example.com",
+                uri: "/articles/42?<redacted>",
+              },
+              selector_digest: "deadbeef",
+              invalidated_resources: 1,
+              invalidated_representations: 1,
+              memory_entries_removed: 1,
+              disk_entries_removed: 0,
+              started_at: "2026-10-25T10:00:01Z",
+              boot_id: "boot-1",
+            }),
+            { status: 200 },
+          ),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    });
+
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, refetchInterval: false } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <CacheInvalidationPanel
+            cacheEnabled={true}
+            tagHeaders={["Cache-Tag"]}
+            serverNames={["portal.example.com", "second.example.com"]}
+            routes={[
+              {
+                listen: ":443",
+                http3: false,
+                h2c: false,
+                server_names: ["portal.example.com"],
+                locations: [
+                  {
+                    index: 0,
+                    match: "/no-id-route/",
+                    type: "prefix",
+                    action: "proxy",
+                    auth: false,
+                    cache: true,
+                    compression: false,
+                    rate_limit: false,
+                    secure: true,
+                    require_client_cert: false,
+                  },
+                ],
+              },
+              {
+                listen: ":443",
+                http3: false,
+                h2c: false,
+                server_names: ["second.example.com"],
+                locations: [
+                  {
+                    index: 0,
+                    match: "/no-id-route/",
+                    type: "prefix",
+                    action: "proxy",
+                    auth: false,
+                    cache: true,
+                    compression: false,
+                    rate_limit: false,
+                    secure: true,
+                    require_client_cert: false,
+                  },
+                ],
+              },
+            ]}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    // Selecting second vhost route updates host to second.example.com; selecting first restores portal.example.com without fabricating route_id (F07).
+    fireEvent.change(screen.getByLabelText("Configured route helper"), {
+      target: { value: "1:second.example.com:0:/no-id-route/" },
+    });
+    expect(screen.getByLabelText("Target hostname")).toHaveValue("second.example.com");
+    fireEvent.change(screen.getByLabelText("Configured route helper"), {
+      target: { value: "0:portal.example.com:0:/no-id-route/" },
+    });
+    expect(screen.getByLabelText("Target hostname")).toHaveValue("portal.example.com");
+    expect(screen.getByLabelText("Exact request URI")).toHaveValue("/no-id-route/");
+
+    // Enter a queried URL and preview.
+    fireEvent.change(screen.getByLabelText("Exact public URL"), {
+      target: { value: "https://portal.example.com/articles/42?lang=es" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview invalidation scope" }));
+    expect(await screen.findByRole("region", { name: "Invalidation preview" })).toBeInTheDocument();
+
+    // Preview request must have no route_id and must carry the full queried URL.
+    expect(sentPreviewBodies[0]?.selector).toEqual({
+      kind: "exact_url",
+      host: "portal.example.com",
+      url: "https://portal.example.com/articles/42?lang=es",
+    });
+
+    // Execute must send the original unredacted selector, NOT uri="/articles/42?<redacted>".
+    fireEvent.click(screen.getByRole("button", { name: "Confirm & invalidate" }));
+    expect(await screen.findByLabelText("Invalidation execution result")).toBeInTheDocument();
+    expect(sentPurgeBodies[0]?.selector).toEqual({
+      kind: "exact_url",
+      host: "portal.example.com",
+      url: "https://portal.example.com/articles/42?lang=es",
+    });
+
+    // Retry must also send the original unredacted selector, NOT result.selector.
+    fireEvent.click(screen.getByRole("button", { name: /Retry invalidation/ }));
+    await waitFor(() => {
+      expect(sentPurgeBodies.length).toBe(2);
+    });
+    expect(sentPurgeBodies[1]?.selector).toEqual({
+      kind: "exact_url",
+      host: "portal.example.com",
+      url: "https://portal.example.com/articles/42?lang=es",
+    });
+
+    // Lookup a running operation that omits warnings on the wire without throwing (F08).
+    fireEvent.change(screen.getByLabelText("Inspect purge operation ID"), {
+      target: { value: "cp_running_no_warnings" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check operation status" }));
+    expect(await screen.findByText(/RUNNING · running/)).toBeInTheDocument();
+
+    // Lookup a partial operation with a redacted query selector when form inputs are cleared:
+    // clicking Retry must NOT send ?<redacted> to the server, and instead prompt to re-enter the URL.
+    fireEvent.change(screen.getByLabelText("Exact public URL"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Exact request URI"), { target: { value: "" } });
+    fireEvent.change(screen.getByLabelText("Inspect purge operation ID"), {
+      target: { value: "cp_redacted_lookup" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Check operation status" }));
+    const retryRedactedBtn = await screen.findByRole("button", {
+      name: "Retry invalidation (cp_redacted_lookup)",
+    });
+    fireEvent.click(retryRedactedBtn);
+    expect(await screen.findByText(/re-enter the full URL above/)).toBeInTheDocument();
+    expect(sentPurgeBodies.length).toBe(2);
   });
 
   it("exercises limitsToml, limitsWarnings, and TrafficControlEditor compression/rate_limit/limits/cache flows", async () => {

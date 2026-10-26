@@ -527,6 +527,9 @@ func TestRedactedSummaryAndDeriveRouteCutoverSelectors(t *testing.T) {
 		}
 	}
 	_ = DeriveRouteCutoverSelectors(nil, upAfter)
+	if got := decodeRoutePath("/a//b/./c/"); got != "/a/b/c/" {
+		t.Fatalf("decodeRoutePath(/a//b/./c/) = %q, want /a/b/c/", got)
+	}
 }
 
 func TestTagValidationAndHeaderExtraction(t *testing.T) {

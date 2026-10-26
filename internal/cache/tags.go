@@ -66,12 +66,17 @@ func ValidateTag(tag string) error {
 // keys, or key=value credential pairs so origin misconfiguration cannot index
 // or expose secret material as grouping tags.
 func looksLikeCredentialTag(tag string) bool {
-	lower := strings.ToLower(tag)
+	lower := strings.ToLower(strings.TrimSpace(tag))
+	switch lower {
+	case "bearer", "basic", "digest", "negotiate", "ntlm", "oauth", "aws4-hmac-sha256":
+		return true
+	}
 	for _, prefix := range []string{
-		"bearer:", "bearer_", "bearer-",
-		"basic:", "basic_", "basic-",
-		"token=", "token:", "access_token=", "refresh_token=",
-		"secret=", "secret:", "client_secret=",
+		"bearer ", "bearer\t", "bearer:", "bearer_", "bearer-",
+		"basic ", "basic\t", "basic:", "basic_", "basic-",
+		"digest ", "digest\t", "digest:",
+		"token ", "token\t", "token=", "token:", "access_token=", "refresh_token=",
+		"secret ", "secret\t", "secret=", "secret:", "client_secret=",
 		"password=", "passwd=", "pwd=",
 		"apikey=", "api_key=", "api-key=",
 		"authorization=", "authorization:",
@@ -148,11 +153,14 @@ func extractOriginTags(h http.Header, tagHeaders []string) (tags []string, prese
 				// zero tags and is valid (used on 304 responses to clear tags).
 				continue
 			}
+			if looksLikeCredentialTag(trimmedLine) {
+				return nil, true, TagSkipInvalid
+			}
 			// Reject leading, trailing, or consecutive commas such as "a,,b" or ",a".
 			parts := strings.Split(trimmedLine, ",")
 			for _, part := range parts {
 				part = strings.TrimSpace(part)
-				if part == "" {
+				if part == "" || looksLikeCredentialTag(part) {
 					return nil, true, TagSkipInvalid
 				}
 				fields := strings.Fields(part)

@@ -42,6 +42,28 @@ import {
   IdentitySchema,
 } from "../src/api/client.ts";
 
+const CacheGuidanceSchema = z.object({
+  code: z.string(),
+  severity: z.string(),
+  scope: z.string().optional(),
+  summary: z.string(),
+  detail: z.string().optional(),
+  docs_ref: z.string().optional(),
+});
+
+const CacheResourceSampleSchema = z.object({
+  host: z.string(),
+  path: z.string(),
+  has_query: z.boolean().optional(),
+  methods: z.array(z.string()),
+  representations: z.number().int().nonnegative(),
+  tiers: z.array(z.string()),
+  body_bytes: z.number().int().nonnegative(),
+  vary_fields: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+  freshness_state: z.string(),
+});
+
 const CachePurgePreviewResponseSchema = z.object({
   api_version: z.string(),
   cache_enabled: z.boolean(),
@@ -55,6 +77,23 @@ const CachePurgePreviewResponseSchema = z.object({
   preview_token: z.string(),
   matched_resources: z.number().int().nonnegative(),
   matched_representations: z.number().int().nonnegative(),
+  memory_entries: z.number().int().nonnegative(),
+  disk_entries: z.number().int().nonnegative(),
+  matched_bytes: z.number().int().nonnegative(),
+  memory_bytes: z.number().int().nonnegative(),
+  disk_bytes: z.number().int().nonnegative(),
+  inflight_fills_matched: z.number().int().nonnegative(),
+  count_accuracy: z.string(),
+  truncated: z.boolean(),
+  scan_limit: z.number().int().nonnegative(),
+  scanned_entries: z.number().int().nonnegative(),
+  source: z.string(),
+  as_of: z.string(),
+  cache_sequence: z.number().int().nonnegative(),
+  execution_mode_contract: z.string(),
+  broad_scope: z.boolean(),
+  warnings: z.array(CacheGuidanceSchema),
+  samples: z.array(CacheResourceSampleSchema),
 });
 
 const CachePurgeResponseSchema = z.object({
@@ -64,8 +103,14 @@ const CachePurgeResponseSchema = z.object({
   terminal: z.boolean(),
   outcome: z.string(),
   invalidation_effective: z.string(),
+  selector_digest: z.string(),
   invalidated_resources: z.number().int().nonnegative(),
   invalidated_representations: z.number().int().nonnegative(),
+  memory_entries_removed: z.number().int().nonnegative(),
+  disk_entries_removed: z.number().int().nonnegative(),
+  started_at: z.string(),
+  warnings: z.array(CacheGuidanceSchema),
+  boot_id: z.string(),
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

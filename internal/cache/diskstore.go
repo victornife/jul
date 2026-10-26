@@ -17,11 +17,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"jul/internal/atomicfile"
@@ -211,6 +213,7 @@ const (
 	diskTombstoneFile   = ".jul-cache-tombstones"
 	diskTombstoneMagic  = "JULTOMB1"
 	diskPurgeLedgerFile = ".jul-cache-purge-ledger"
+	diskHighWaterFile   = ".jul-cache-gen"
 )
 
 type diskStore struct {
@@ -229,6 +232,7 @@ type diskStore struct {
 	pinned                         map[string]*diskBlob
 	tombstones                     map[string]int64
 	hashKeys                       map[string]string
+	highWaterGen                   uint64
 	tombstoneDirty                 bool
 	corruptTombstoneCleanupPending bool
 	failedRetired                  map[*diskBlob]struct{}
@@ -241,6 +245,7 @@ type diskStore struct {
 	tempBudget                captureBudget
 	onSkip                    func(reason string)
 	checkGen                  func(key string, gen uint64) bool
+	canCommit                 func(key string, gen, startGen uint64, hasStartGen bool, e *Entry, extraTags []string) bool
 	onKeyDiskState            func(key string, inDisk bool)
 	onRehydrate               func(items []diskItemSnapshot)
 	unrecoverableInvalidation atomic.Bool
@@ -252,7 +257,9 @@ type diskStore struct {
 	testTruncateFile         func(path string, size int64) error
 	testReadTombstoneFile    func(path string) ([]byte, error)
 	testReadDir              func(path string) ([]os.DirEntry, error)
+	testSyncDir              func(dir string) error
 	testPersistTombstoneErr  error
+	testWriteHighWaterErr    error
 	onLookupLeaseAcquire     func()
 	onBeforePublishLock      func(key string, gen uint64)
 	onBeforeLastReaderRemove func()
@@ -441,6 +448,57 @@ func (d *diskStore) newBlob(hash, path string, bodyLen, fileSize int64) *diskBlo
 	}
 }
 
+func (d *diskStore) syncDirLocked() error {
+	if d.testSyncDir != nil {
+		return d.testSyncDir(d.dir)
+	}
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	dirHandle, err := os.Open(d.dir)
+	if err != nil {
+		return err
+	}
+	syncErr := dirHandle.Sync()
+	closeErr := dirHandle.Close()
+	if syncErr != nil {
+		if errors.Is(syncErr, syscall.EINVAL) || errors.Is(syncErr, syscall.EBADF) || errors.Is(syncErr, syscall.ENOSYS) {
+			return nil
+		}
+		return syncErr
+	}
+	return closeErr
+}
+
+func (d *diskStore) recordHighWaterGen(gen uint64) error {
+	if d == nil || gen == 0 {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.testWriteHighWaterErr != nil {
+		d.recordWriteFailure(d.testWriteHighWaterErr)
+		return d.testWriteHighWaterErr
+	}
+	if gen > d.highWaterGen {
+		d.highWaterGen = gen
+	}
+	if err := atomicfile.Write(filepath.Join(d.dir, diskHighWaterFile), []byte(strconv.FormatUint(d.highWaterGen, 10)+"\n"), 0o600); err != nil {
+		d.recordWriteFailure(err)
+		return err
+	}
+	return nil
+}
+
+func (d *diskStore) highWaterMark() uint64 {
+	if d == nil {
+		return 0
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.highWaterGen
+}
+
 func (d *diskStore) persistTombstonesLocked() error {
 	if d.testPersistTombstoneErr != nil {
 		d.tombstoneDirty = true
@@ -448,9 +506,16 @@ func (d *diskStore) persistTombstonesLocked() error {
 	}
 	tombPath := filepath.Join(d.dir, diskTombstoneFile)
 	if len(d.tombstones) == 0 {
-		if err := os.Remove(tombPath); err != nil && !os.IsNotExist(err) {
+		err := os.Remove(tombPath)
+		if err != nil && !os.IsNotExist(err) {
 			d.tombstoneDirty = true
 			return err
+		}
+		if err == nil {
+			if sErr := d.syncDirLocked(); sErr != nil {
+				d.tombstoneDirty = true
+				return sErr
+			}
 		}
 		d.tombstoneDirty = false
 		return nil
@@ -472,6 +537,10 @@ func (d *diskStore) persistTombstonesLocked() error {
 	if err := atomicfile.Write(tombPath, []byte(sb.String()), 0o600); err != nil {
 		d.tombstoneDirty = true
 		return err
+	}
+	if sErr := d.syncDirLocked(); sErr != nil {
+		d.tombstoneDirty = true
+		return sErr
 	}
 	d.tombstoneDirty = false
 	return nil
@@ -739,7 +808,9 @@ func isCacheTempFile(name string) bool {
 	if strings.HasPrefix(name, ".jul-cache-tmp-") ||
 		strings.HasPrefix(name, ".jul-cache-retired-") ||
 		strings.HasPrefix(name, diskTombstoneFile+".tmp-") ||
-		strings.HasPrefix(name, "."+diskTombstoneFile+".tmp-") {
+		strings.HasPrefix(name, "."+diskTombstoneFile+".tmp-") ||
+		strings.HasPrefix(name, diskHighWaterFile+".tmp-") ||
+		strings.HasPrefix(name, "."+diskHighWaterFile+".tmp-") {
 		return true
 	}
 	if strings.HasPrefix(name, ".") {
@@ -755,6 +826,11 @@ func isCacheTempFile(name string) bool {
 // temporary files and corrupt/incompatible cache files are removed; foreign
 // files are left untouched.
 func (d *diskStore) rehydrate() {
+	if rawHW, err := os.ReadFile(filepath.Join(d.dir, diskHighWaterFile)); err == nil {
+		if parsedHW, pErr := strconv.ParseUint(strings.TrimSpace(string(rawHW)), 10, 64); pErr == nil && parsedHW > d.highWaterGen {
+			d.highWaterGen = parsedHW
+		}
+	}
 	d.loadAndSweepTombstonesLocked()
 	entries, err := d.readDir(d.dir)
 	if err != nil || d.corruptTombstoneCleanupPending {
@@ -782,7 +858,7 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		name := e.Name()
-		if name == diskTombstoneFile || name == diskPurgeLedgerFile {
+		if name == diskTombstoneFile || name == diskPurgeLedgerFile || name == diskHighWaterFile {
 			continue
 		}
 		if isCacheTempFile(name) {
@@ -808,6 +884,9 @@ func (d *diskStore) rehydrate() {
 		if err != nil || entryKey == "" || hashKey(entryKey) != name {
 			_ = d.removePath(fullPath)
 			continue
+		}
+		if entryGen > d.highWaterGen {
+			d.highWaterGen = entryGen
 		}
 		files = append(files, fi{
 			hash:       name,
@@ -991,6 +1070,10 @@ func (d *diskStore) set(key string, e *Entry) {
 }
 
 func (d *diskStore) setWithGen(key string, e *Entry, gen uint64) bool {
+	return d.setWithGenFull(key, e, gen, 0, false, nil)
+}
+
+func (d *diskStore) setWithGenFull(key string, e *Entry, gen, startGen uint64, hasStartGen bool, extraTags []string) bool {
 	if e == nil {
 		return false
 	}
@@ -1027,7 +1110,7 @@ func (d *diskStore) setWithGen(key string, e *Entry, gen uint64) bool {
 		}
 		s.bodyLen = int64(len(e.Body))
 	}
-	blob, ok := d.publishStreamWithGen(key, e, s, gen)
+	blob, ok := d.publishStreamWithGenFull(key, e, s, gen, startGen, hasStartGen, extraTags)
 	if ok && e.diskBody != nil {
 		e.diskBody = blob
 	}
@@ -1190,6 +1273,10 @@ func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*
 }
 
 func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapture, gen uint64) (*diskBlob, bool) {
+	return d.publishStreamWithGenFull(key, e, s, gen, 0, false, nil)
+}
+
+func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStreamCapture, gen, startGen uint64, hasStartGen bool, extraTags []string) (*diskBlob, bool) {
 	if s == nil || s.closed {
 		return nil, false
 	}
@@ -1253,7 +1340,11 @@ func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapt
 		return nil, false
 	}
 	if gen != 0 {
-		if d.checkGen != nil && !d.checkGen(key, gen) {
+		if d.canCommit != nil {
+			if !d.canCommit(key, gen, startGen, hasStartGen, e, extraTags) {
+				return nil, false
+			}
+		} else if d.checkGen != nil && !d.checkGen(key, gen) {
 			return nil, false
 		}
 		if el, ok := d.items[hash]; ok {
@@ -1261,6 +1352,9 @@ func (d *diskStore) publishStreamWithGen(key string, e *Entry, s *diskStreamCapt
 				return nil, false
 			}
 		}
+	}
+	if gen > d.highWaterGen {
+		d.highWaterGen = gen
 	}
 	if fault == "rename" {
 		d.recordWriteFailure(errors.New("injected rename failure"))

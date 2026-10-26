@@ -97,8 +97,8 @@ type CachePurgePreviewResponse struct {
 	CacheSequence          uint64                `json:"cache_sequence"`
 	ExecutionModeContract  string                `json:"execution_mode_contract"`
 	BroadScope             bool                  `json:"broad_scope"`
-	Warnings               []CacheGuidance       `json:"warnings,omitempty"`
-	Samples                []CacheResourceSample `json:"samples,omitempty"`
+	Warnings               []CacheGuidance       `json:"warnings"`
+	Samples                []CacheResourceSample `json:"samples"`
 	AuthorityState
 }
 
@@ -137,7 +137,7 @@ type CachePurgeResponse struct {
 	StartedAt                  string          `json:"started_at"`
 	CompletedAt                string          `json:"completed_at,omitempty"`
 	RecoveryGuidance           string          `json:"recovery_guidance,omitempty"`
-	Warnings                   []CacheGuidance `json:"warnings,omitempty"`
+	Warnings                   []CacheGuidance `json:"warnings"`
 	BootID                     string          `json:"boot_id"`
 	AuthorityState
 }

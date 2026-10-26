@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -22,11 +23,17 @@ const (
 	BroadScopeResourceThr = 100
 )
 
+// ErrBroadConfirmRequired is returned when an invalidation selects a broad
+// scope (host, all, >= 100 matched resources, or truncated) and
+// InvalidateOptions.RequireBroadConfirm is true.
+var ErrBroadConfirmRequired = errors.New("broad cache invalidation (>= 100 matched resources, truncated scan, host, or all) requires confirm_broad = true")
+
 type selectorFence struct {
-	gen       uint64
-	sel       NormalizedSelector
-	active    bool
-	remaining int
+	gen              uint64
+	sel              NormalizedSelector
+	active           bool
+	remaining        int
+	matchedResources map[string]struct{}
 }
 
 // SafeResourceSummary is the secret-safe per-resource metadata summary shared
@@ -79,10 +86,11 @@ type PurgePreview struct {
 
 // InvalidateOptions configures a scoped cache invalidation execution.
 type InvalidateOptions struct {
-	MaxScanKeys     int
-	PreviewSequence uint64
-	ReuseFenceGen   uint64
-	BatchSize       int
+	MaxScanKeys         int
+	PreviewSequence     uint64
+	ReuseFenceGen       uint64
+	BatchSize           int
+	RequireBroadConfirm bool
 }
 
 // InvalidateResult reports the outcome of a scoped cache invalidation.
@@ -151,6 +159,18 @@ func baseKeyOf(key string) string {
 	return key
 }
 
+func resourceKeyOf(host, reqURI string) string {
+	return host + "\n" + reqURI
+}
+
+func resourceKeyFromBaseKey(baseKey string) (host, reqURI, resKey string, ok bool) {
+	_, host, reqURI, _, ok = parseBaseKeyParts(baseKey)
+	if !ok {
+		return "", "", "", false
+	}
+	return host, reqURI, resourceKeyOf(host, reqURI), true
+}
+
 func (c *Cache) beginInflightOriginOp() (opID, startGen uint64) {
 	if c == nil {
 		return 0, 0
@@ -191,28 +211,170 @@ func (c *Cache) minInflightStartGenLocked() uint64 {
 }
 
 func (c *Cache) enforceFenceCapLocked() {
+	// Coalesce completed fences with identical selector digests first so
+	// repeated purges for the same selector do not consume distinct slots.
+	if len(c.fences) > 1 {
+		dedup := make([]selectorFence, 0, len(c.fences))
+		completedIdxByDigest := make(map[[32]byte]int, len(c.fences))
+		for _, f := range c.fences {
+			if !f.active && f.remaining == 0 {
+				d := f.sel.Digest()
+				if prevIdx, exists := completedIdxByDigest[d]; exists {
+					if f.gen > dedup[prevIdx].gen {
+						dedup[prevIdx].gen = f.gen
+					}
+					if len(f.matchedResources) > 0 {
+						if dedup[prevIdx].matchedResources == nil {
+							dedup[prevIdx].matchedResources = make(map[string]struct{}, len(f.matchedResources))
+						}
+						for rk := range f.matchedResources {
+							dedup[prevIdx].matchedResources[rk] = struct{}{}
+						}
+					}
+					continue
+				}
+				completedIdxByDigest[d] = len(dedup)
+			}
+			dedup = append(dedup, f)
+		}
+		c.fences = dedup
+	}
+
 	for len(c.fences) > MaxActiveFences {
-		evicted := c.fences[0]
-		c.fences = c.fences[1:]
-		if evicted.gen > c.fenceFloorGen {
-			c.fenceFloorGen = evicted.gen
+		// Always evict completed fences (!f.active && f.remaining == 0) before
+		// touching any active or incomplete fence.
+		evictIdx := -1
+		for i, f := range c.fences {
+			if !f.active && f.remaining == 0 {
+				evictIdx = i
+				break
+			}
+		}
+		if evictIdx < 0 {
+			evictIdx = 0
+		}
+		evicted := c.fences[evictIdx]
+		c.fences = append(c.fences[:evictIdx], c.fences[evictIdx+1:]...)
+		evictHost := evicted.sel.Host
+		if evictHost != "" && evicted.sel.Kind != SelectorAll {
+			if c.hostFenceFloorGen == nil {
+				c.hostFenceFloorGen = make(map[string]uint64)
+			}
+			if evicted.gen > c.hostFenceFloorGen[evictHost] {
+				c.hostFenceFloorGen[evictHost] = evicted.gen
+			}
+			if evicted.active || evicted.remaining > 0 {
+				if c.incompleteHostFloorGen == nil {
+					c.incompleteHostFloorGen = make(map[string]uint64)
+				}
+				if c.evictedIncompleteHostGens == nil {
+					c.evictedIncompleteHostGens = make(map[string]map[uint64]struct{})
+				}
+				if c.evictedIncompleteHostGens[evictHost] == nil {
+					c.evictedIncompleteHostGens[evictHost] = make(map[uint64]struct{})
+				}
+				c.evictedIncompleteHostGens[evictHost][evicted.gen] = struct{}{}
+				if evicted.gen > c.incompleteHostFloorGen[evictHost] {
+					c.incompleteHostFloorGen[evictHost] = evicted.gen
+				}
+			}
+		} else {
+			if evicted.gen > c.fenceFloorGen {
+				c.fenceFloorGen = evicted.gen
+			}
+			if (evicted.active || evicted.remaining > 0) && evicted.gen > c.incompleteFloorGen {
+				c.incompleteFloorGen = evicted.gen
+			}
 		}
 	}
 	maxGen := c.fenceFloorGen
+	for _, hg := range c.hostFenceFloorGen {
+		if hg > maxGen {
+			maxGen = hg
+		}
+	}
+	incompleteMax := c.incompleteFloorGen
+	for _, hg := range c.incompleteHostFloorGen {
+		if hg > incompleteMax {
+			incompleteMax = hg
+		}
+	}
 	for _, f := range c.fences {
 		if f.gen > maxGen {
 			maxGen = f.gen
 		}
+		if (f.active || f.remaining > 0) && f.gen > incompleteMax {
+			incompleteMax = f.gen
+		}
 	}
 	c.latestFenceGen.Store(maxGen)
+	c.incompleteFenceGen.Store(incompleteMax)
+}
+
+func (c *Cache) clearEvictedIncompleteFenceLocked(host string, fenceGen uint64) {
+	if host == "" || c.evictedIncompleteHostGens == nil {
+		return
+	}
+	gm := c.evictedIncompleteHostGens[host]
+	if gm == nil {
+		return
+	}
+	delete(gm, fenceGen)
+	if len(gm) == 0 {
+		delete(c.evictedIncompleteHostGens, host)
+		if len(c.evictedIncompleteHostGens) == 0 {
+			c.evictedIncompleteHostGens = nil
+		}
+		if c.incompleteHostFloorGen != nil {
+			delete(c.incompleteHostFloorGen, host)
+			if len(c.incompleteHostFloorGen) == 0 {
+				c.incompleteHostFloorGen = nil
+			}
+		}
+		return
+	}
+	maxG := uint64(0)
+	for g := range gm {
+		if g > maxG {
+			maxG = g
+		}
+	}
+	if c.incompleteHostFloorGen != nil {
+		c.incompleteHostFloorGen[host] = maxG
+	}
 }
 
 func (c *Cache) reclaimFencesLocked() {
+	minInflight := c.minInflightStartGenLocked()
+	if minInflight == math.MaxUint64 {
+		c.hostFenceFloorGen = nil
+	} else if len(c.hostFenceFloorGen) > 0 {
+		for h, hg := range c.hostFenceFloorGen {
+			if minInflight > hg {
+				delete(c.hostFenceFloorGen, h)
+			}
+		}
+		if len(c.hostFenceFloorGen) == 0 {
+			c.hostFenceFloorGen = nil
+		}
+	}
 	if len(c.fences) == 0 {
-		c.latestFenceGen.Store(c.fenceFloorGen)
+		maxGen := c.fenceFloorGen
+		for _, hg := range c.hostFenceFloorGen {
+			if hg > maxGen {
+				maxGen = hg
+			}
+		}
+		incompleteMax := c.incompleteFloorGen
+		for _, hg := range c.incompleteHostFloorGen {
+			if hg > incompleteMax {
+				incompleteMax = hg
+			}
+		}
+		c.latestFenceGen.Store(maxGen)
+		c.incompleteFenceGen.Store(incompleteMax)
 		return
 	}
-	minInflight := c.minInflightStartGenLocked()
 	kept := c.fences[:0]
 	for _, f := range c.fences {
 		if f.active || f.remaining > 0 || minInflight <= f.gen {
@@ -223,21 +385,18 @@ func (c *Cache) reclaimFencesLocked() {
 	c.enforceFenceCapLocked()
 }
 
-func (c *Cache) isEntryFencedLocked(entryGen uint64, key string, tags []string) bool {
-	if entryGen < c.purgeGen {
-		return true
-	}
-	if c.fenceFloorGen > 0 && entryGen <= c.fenceFloorGen {
-		return true
-	}
+func (c *Cache) matchesAnyFenceLocked(entryGen uint64, key, host, reqURI string, ok bool, tags, extraTags []string, onlyIncomplete bool) bool {
 	if len(c.fences) == 0 {
 		return false
 	}
-	_, host, reqURI, _, ok := parseBaseKeyParts(key)
 	baseKey := baseKeyOf(key)
+	resKey := ""
+	if ok {
+		resKey = resourceKeyOf(host, reqURI)
+	}
 	for i := range c.fences {
 		f := &c.fences[i]
-		if entryGen > f.gen {
+		if entryGen > f.gen || (onlyIncomplete && !f.active && f.remaining == 0) {
 			continue
 		}
 		if f.sel.Kind == SelectorKey {
@@ -249,10 +408,16 @@ func (c *Cache) isEntryFencedLocked(entryGen uint64, key string, tags []string) 
 		if !ok {
 			continue
 		}
-		effTags := tags
-		if len(effTags) == 0 && c.baseIndexedTags != nil {
-			effTags = c.baseIndexedTags[baseKey]
+		if f.matchedResources != nil {
+			if _, matched := f.matchedResources[resKey]; matched {
+				return true
+			}
 		}
+		var resTags []string
+		if c.baseIndexedTags != nil {
+			resTags = c.baseIndexedTags[resKey]
+		}
+		effTags := mergeBaseTagSets(tags, extraTags, resTags)
 		if f.sel.MatchesResource(host, reqURI, effTags) {
 			return true
 		}
@@ -260,7 +425,27 @@ func (c *Cache) isEntryFencedLocked(entryGen uint64, key string, tags []string) 
 	return false
 }
 
-func (c *Cache) isEntryFenced(entryGen uint64, key string, e *Entry) bool {
+// isPublicationFencedLocked reports whether an origin fill, revalidation, or
+// memory-to-disk overflow whose origin work started at entryGen is barred from
+// publishing because a matching invalidation fence was installed at >= entryGen
+// (ADR 0027 §3.2).
+func (c *Cache) isPublicationFencedLocked(entryGen uint64, key string, tags, extraTags []string) bool {
+	if entryGen < c.purgeGen {
+		return true
+	}
+	if c.fenceFloorGen > 0 && entryGen <= c.fenceFloorGen {
+		return true
+	}
+	_, host, reqURI, _, ok := parseBaseKeyParts(key)
+	if ok && c.hostFenceFloorGen != nil {
+		if hf := c.hostFenceFloorGen[host]; hf > 0 && entryGen <= hf {
+			return true
+		}
+	}
+	return c.matchesAnyFenceLocked(entryGen, key, host, reqURI, ok, tags, extraTags, false)
+}
+
+func (c *Cache) isPublicationFenced(entryGen uint64, key string, e *Entry, extraTags []string) bool {
 	if c == nil {
 		return false
 	}
@@ -270,14 +455,55 @@ func (c *Cache) isEntryFenced(entryGen uint64, key string, e *Entry) bool {
 	}
 	c.genMu.Lock()
 	defer c.genMu.Unlock()
-	return c.isEntryFencedLocked(entryGen, key, tags)
+	return c.isPublicationFencedLocked(entryGen, key, tags, extraTags)
+}
+
+func (c *Cache) isEntryFenced(entryGen uint64, key string, e *Entry) bool {
+	return c.isPublicationFenced(entryGen, key, e, nil)
+}
+
+// isResidentEntryFencedLocked reports whether an already-stored entry at
+// entryGen is fenced by an actively executing or incomplete/canceled purge.
+// Completed purges (!f.active && f.remaining == 0) have already removed their
+// resident entries and therefore do not require lock acquisition on warm hits.
+func (c *Cache) isResidentEntryFencedLocked(entryGen uint64, key string, tags []string) bool {
+	if entryGen < c.purgeGen {
+		return true
+	}
+	if c.incompleteFloorGen > 0 && entryGen <= c.incompleteFloorGen {
+		return true
+	}
+	_, host, reqURI, _, ok := parseBaseKeyParts(key)
+	if ok && c.incompleteHostFloorGen != nil {
+		if ihf := c.incompleteHostFloorGen[host]; ihf > 0 && entryGen <= ihf {
+			return true
+		}
+	}
+	return c.matchesAnyFenceLocked(entryGen, key, host, reqURI, ok, tags, nil, true)
+}
+
+func (c *Cache) isResidentEntryFenced(entryGen uint64, key string, e *Entry) bool {
+	if c == nil {
+		return false
+	}
+	var tags []string
+	if e != nil {
+		tags = e.Tags
+	}
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
+	return c.isResidentEntryFencedLocked(entryGen, key, tags)
 }
 
 func (c *Cache) canReserveTagLinksLocked(host, baseKey string, candidateTags []string) bool {
 	if len(candidateTags) == 0 {
 		return true
 	}
-	existing := c.baseIndexedTags[baseKey]
+	_, _, resKey, ok := resourceKeyFromBaseKey(baseKey)
+	if !ok {
+		return true
+	}
+	existing := c.baseIndexedTags[resKey]
 	merged := mergeBaseTagSets(existing, candidateTags)
 	added := len(merged) - len(existing)
 	if added <= 0 {
@@ -294,6 +520,7 @@ func (c *Cache) indexKeyEntryLocked(st *keyGenState, e *Entry) {
 	if !ok {
 		return
 	}
+	pol := c.Policy()
 	st.method = method
 	st.host = host
 	st.requestURI = reqURI
@@ -301,8 +528,20 @@ func (c *Cache) indexKeyEntryLocked(st *keyGenState, e *Entry) {
 	st.baseKey = baseKeyOf(st.key)
 	st.isVaryStub = e.IsVaryStub
 	st.variants = append([]string(nil), e.Variants...)
-	if c.Policy().TagHeaderCount > 0 && !e.IsVaryStub {
-		st.tags = append([]string(nil), e.Tags...)
+	if !e.IsVaryStub {
+		st.retainedTags = append([]string(nil), e.Tags...)
+		if e.tagPolicyTracked {
+			st.ingestedTagHeaderCount = e.ingestedTagHeaderCount
+			st.ingestedTagHeaders = e.ingestedTagHeaders
+		} else {
+			st.ingestedTagHeaderCount = pol.TagHeaderCount
+			st.ingestedTagHeaders = pol.TagHeaders
+		}
+	}
+	if pol.TagHeaderCount > 0 && !e.IsVaryStub &&
+		st.ingestedTagHeaderCount == pol.TagHeaderCount &&
+		st.ingestedTagHeaders == pol.TagHeaders {
+		st.tags = append([]string(nil), st.retainedTags...)
 	} else {
 		st.tags = nil
 	}
@@ -373,28 +612,35 @@ func (c *Cache) refreshBaseTagsLocked(host, baseKey string) {
 	if host == "" || baseKey == "" {
 		return
 	}
-	var sets [][]string
-	if bst, ok := c.keyGen[baseKey]; ok && bst.indexed && !bst.isVaryStub && (bst.inMem || bst.inDisk || bst.inflight > 0) && len(bst.tags) > 0 {
-		sets = append(sets, bst.tags)
+	_, reqURI, resKey, ok := resourceKeyFromBaseKey(baseKey)
+	if !ok {
+		return
 	}
-	if c.baseVariants != nil {
-		for vk := range c.baseVariants[baseKey] {
-			if vst, ok := c.keyGen[vk]; ok && vst.indexed && (vst.inMem || vst.inDisk || vst.inflight > 0) && len(vst.tags) > 0 {
-				sets = append(sets, vst.tags)
+	var sets [][]string
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		bk := keyFor(method, host, reqURI)
+		if bst, exists := c.keyGen[bk]; exists && bst.indexed && !bst.isVaryStub && (bst.inMem || bst.inDisk || bst.inflight > 0) && len(bst.tags) > 0 {
+			sets = append(sets, bst.tags)
+		}
+		if c.baseVariants != nil {
+			for vk := range c.baseVariants[bk] {
+				if vst, exists := c.keyGen[vk]; exists && vst.indexed && (vst.inMem || vst.inDisk || vst.inflight > 0) && len(vst.tags) > 0 {
+					sets = append(sets, vst.tags)
+				}
 			}
 		}
 	}
 	desired := mergeBaseTagSets(sets...)
-	old := c.baseIndexedTags[baseKey]
+	old := c.baseIndexedTags[resKey]
 
-	// Remove tags no longer present on baseKey.
+	// Remove tags no longer present on resKey.
 	for _, t := range old {
 		if !containsSortedOrLinear(desired, t) {
 			if c.tagIndex != nil {
 				if tm := c.tagIndex[host]; tm != nil {
 					if bm := tm[t]; bm != nil {
-						if _, had := bm[baseKey]; had {
-							delete(bm, baseKey)
+						if _, had := bm[resKey]; had {
+							delete(bm, resKey)
 							c.totalTagLinks--
 							if c.totalTagLinks < 0 {
 								c.totalTagLinks = 0
@@ -414,7 +660,7 @@ func (c *Cache) refreshBaseTagsLocked(host, baseKey string) {
 
 	if len(desired) == 0 {
 		if c.baseIndexedTags != nil {
-			delete(c.baseIndexedTags, baseKey)
+			delete(c.baseIndexedTags, resKey)
 		}
 		return
 	}
@@ -440,36 +686,69 @@ func (c *Cache) refreshBaseTagsLocked(host, baseKey string) {
 			bm = make(map[string]struct{})
 			tm[t] = bm
 		}
-		if _, exists := bm[baseKey]; !exists {
+		if _, exists := bm[resKey]; !exists {
 			if c.totalTagLinks >= MaxTotalTagLinks {
 				continue
 			}
-			bm[baseKey] = struct{}{}
+			bm[resKey] = struct{}{}
 			c.totalTagLinks++
 		}
 		indexed = append(indexed, t)
 	}
 	if len(indexed) == 0 {
-		delete(c.baseIndexedTags, baseKey)
+		delete(c.baseIndexedTags, resKey)
 		if len(tm) == 0 {
 			delete(c.tagIndex, host)
 		}
 	} else {
-		c.baseIndexedTags[baseKey] = indexed
+		c.baseIndexedTags[resKey] = indexed
 	}
 }
 
-func (c *Cache) clearTagIndex() {
+func (c *Cache) commitPolicyAndSyncTags(newPol CachePolicy) {
 	if c == nil {
 		return
 	}
+	var retireBases []string
 	c.genMu.Lock()
-	defer c.genMu.Unlock()
+	prevPol := c.Policy()
+	c.policy.Store(&newPol)
+	if newPol.TagHeaderCount == 0 {
+		c.tagIndex = nil
+		c.baseIndexedTags = nil
+		c.totalTagLinks = 0
+		for _, st := range c.keyGen {
+			st.tags = nil
+		}
+		c.genMu.Unlock()
+		return
+	}
+	if prevPol.TagHeaderCount == newPol.TagHeaderCount && prevPol.TagHeaders == newPol.TagHeaders {
+		c.genMu.Unlock()
+		return
+	}
 	c.tagIndex = nil
 	c.baseIndexedTags = nil
 	c.totalTagLinks = 0
+	seenRetire := make(map[string]struct{})
 	for _, st := range c.keyGen {
-		st.tags = nil
+		if st == nil || !st.indexed || st.isVaryStub || (!st.inMem && !st.inDisk) {
+			continue
+		}
+		if st.ingestedTagHeaderCount == newPol.TagHeaderCount && st.ingestedTagHeaders == newPol.TagHeaders {
+			st.tags = append([]string(nil), st.retainedTags...)
+			c.refreshBaseTagsLocked(st.host, st.baseKey)
+		} else {
+			st.tags = nil
+			if _, ok := seenRetire[st.baseKey]; !ok {
+				seenRetire[st.baseKey] = struct{}{}
+				retireBases = append(retireBases, st.baseKey)
+			}
+		}
+	}
+	c.genMu.Unlock()
+	for _, bk := range retireBases {
+		c.deleteAtMostGen(bk, math.MaxUint64)
 	}
 }
 
@@ -482,6 +761,7 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 	if c.keyGen == nil {
 		c.keyGen = make(map[string]*keyGenState)
 	}
+	pol := c.Policy()
 	diskSeen := make(map[string]struct{}, len(items))
 	for _, it := range items {
 		if it.Key == "" {
@@ -500,20 +780,21 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 		}
 		st.inDisk = true
 		st.diskBytes = it.FileSize
-		var rehydratedTags []string
-		if c.Policy().TagHeaderCount > 0 {
-			rehydratedTags = it.Tags
-		}
 		e := &Entry{
 			IsVaryStub: it.IsVaryStub,
 			Variants:   it.Variants,
-			Tags:       rehydratedTags,
+			Tags:       it.Tags,
 			CreatedAt:  it.CreatedAt,
 			ExpiresAt:  it.ExpiresAt,
 			StaleUntil: it.StaleUntil,
 			Vary:       it.VaryFields,
 		}
 		c.indexKeyEntryLocked(st, e)
+		st.retainedTags = append([]string(nil), it.Tags...)
+		if pol.TagHeaderCount > 0 {
+			st.ingestedTagHeaderCount = pol.TagHeaderCount
+			st.ingestedTagHeaders = pol.TagHeaders
+		}
 		st.bodyBytes = it.BodyLen
 	}
 	for k, st := range c.keyGen {
@@ -525,85 +806,156 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 	}
 }
 
-// candidateBaseKeysLocked returns the deduplicated slice of base keys to
-// evaluate for sel.
-func (c *Cache) candidateBaseKeysLocked(sel NormalizedSelector) (baseKeys []string, directLookup bool) {
+// expandResourceKeysToBaseKeys converts a slice of logical resource keys
+// ("host\nreqURI") into the resident GET and HEAD base keys ("GET\nhost\nreqURI",
+// "HEAD\nhost\nreqURI") present in c.byHost[host] or c.keyGen.
+func (c *Cache) expandResourceKeysToBaseKeysLocked(resKeys []string) []string {
+	if len(resKeys) == 0 {
+		return nil
+	}
+	baseKeys := make([]string, 0, len(resKeys)*2)
+	for _, rk := range resKeys {
+		nl := strings.IndexByte(rk, '\n')
+		if nl <= 0 {
+			continue
+		}
+		host := rk[:nl]
+		reqURI := rk[nl+1:]
+		hm := c.byHost[host]
+		for _, method := range []string{http.MethodGet, http.MethodHead} {
+			bk := keyFor(method, host, reqURI)
+			if hm != nil {
+				if _, ok := hm[bk]; ok {
+					baseKeys = append(baseKeys, bk)
+					continue
+				}
+			}
+			if _, ok := c.keyGen[bk]; ok {
+				baseKeys = append(baseKeys, bk)
+			}
+		}
+	}
+	sort.Strings(baseKeys)
+	return baseKeys
+}
+
+// candidateBaseKeysLocked returns a bounded, deduplicated slice of base keys to
+// evaluate for sel. When maxScan > 0, collection stops after scanning maxScan
+// candidate entries so preview/execution never copies or sorts an unbounded
+// host catalog under genMu (F13).
+func (c *Cache) candidateBaseKeysLocked(sel NormalizedSelector, maxScan int) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
 	switch sel.Kind {
 	case SelectorKey:
-		return []string{baseKeyOf(sel.Key)}, true
+		return []string{baseKeyOf(sel.Key)}, 1, false, 1
 	case SelectorExactURL:
 		return []string{
 			keyFor(http.MethodGet, sel.Host, sel.URI),
 			keyFor(http.MethodHead, sel.Host, sel.URI),
-		}, true
+		}, 2, false, 2
 	case SelectorTag:
 		if c.tagIndex == nil {
-			return nil, true
+			return nil, 0, false, 0
 		}
 		tm := c.tagIndex[sel.Host]
 		if len(tm) == 0 || len(sel.Tags) == 0 {
-			return nil, true
+			return nil, 0, false, 0
 		}
+		var resKeys []string
 		if sel.TagMatch == TagMatchAll {
 			firstMap := tm[sel.Tags[0]]
 			if len(firstMap) == 0 {
-				return nil, true
+				return nil, 0, false, 0
 			}
-			for bk := range firstMap {
+			totalCandidates = len(firstMap)
+			for rk := range firstMap {
+				if maxScan > 0 && scanned >= maxScan {
+					truncated = true
+					break
+				}
+				scanned++
 				allMatch := true
 				for i := 1; i < len(sel.Tags); i++ {
-					if _, ok := tm[sel.Tags[i]][bk]; !ok {
+					if _, ok := tm[sel.Tags[i]][rk]; !ok {
 						allMatch = false
 						break
 					}
 				}
 				if allMatch {
-					baseKeys = append(baseKeys, bk)
+					resKeys = append(resKeys, rk)
 				}
 			}
-			sort.Strings(baseKeys)
-			return baseKeys, true
+			baseKeys = c.expandResourceKeysToBaseKeysLocked(resKeys)
+			return baseKeys, scanned, truncated, totalCandidates
 		}
 		seen := make(map[string]struct{})
 		for _, t := range sel.Tags {
-			for bk := range tm[t] {
-				if _, ok := seen[bk]; !ok {
-					seen[bk] = struct{}{}
-					baseKeys = append(baseKeys, bk)
+			totalCandidates += len(tm[t])
+		}
+		for _, t := range sel.Tags {
+			for rk := range tm[t] {
+				if _, ok := seen[rk]; ok {
+					continue
 				}
+				if maxScan > 0 && scanned >= maxScan {
+					truncated = true
+					break
+				}
+				seen[rk] = struct{}{}
+				scanned++
+				resKeys = append(resKeys, rk)
+			}
+			if truncated {
+				break
 			}
 		}
-		sort.Strings(baseKeys)
-		return baseKeys, true
+		baseKeys = c.expandResourceKeysToBaseKeysLocked(resKeys)
+		return baseKeys, scanned, truncated, totalCandidates
 	case SelectorHost, SelectorPrefix, SelectorGlob:
-		if c.byHost == nil {
-			return nil, false
+		if c.byHost == nil || len(c.byHost[sel.Host]) == 0 {
+			return nil, 0, false, 0
 		}
-		hm := c.byHost[sel.Host]
-		if len(hm) == 0 {
-			return nil, false
-		}
-		baseKeys = make([]string, 0, len(hm))
-		for bk := range hm {
-			baseKeys = append(baseKeys, bk)
-		}
-		sort.Strings(baseKeys)
-		return baseKeys, false
+		return collectBoundedHostKeys([]map[string]struct{}{c.byHost[sel.Host]}, maxScan)
 	case SelectorAll:
+		var maps []map[string]struct{}
 		for _, hm := range c.byHost {
-			for bk := range hm {
-				baseKeys = append(baseKeys, bk)
-			}
+			maps = append(maps, hm)
 		}
-		sort.Strings(baseKeys)
-		return baseKeys, false
+		return collectBoundedHostKeys(maps, maxScan)
 	default:
-		return nil, false
+		return nil, 0, false, 0
 	}
 }
 
+func collectBoundedHostKeys(maps []map[string]struct{}, maxScan int) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
+	for _, hm := range maps {
+		totalCandidates += len(hm)
+	}
+	if totalCandidates == 0 {
+		return nil, 0, false, 0
+	}
+	capHint := totalCandidates
+	if maxScan > 0 && capHint > maxScan {
+		capHint = maxScan
+	}
+	baseKeys = make([]string, 0, capHint)
+	for _, hm := range maps {
+		for bk := range hm {
+			if maxScan > 0 && scanned >= maxScan {
+				truncated = true
+				sort.Strings(baseKeys)
+				return baseKeys, scanned, truncated, totalCandidates
+			}
+			scanned++
+			baseKeys = append(baseKeys, bk)
+		}
+	}
+	sort.Strings(baseKeys)
+	return baseKeys, scanned, truncated, totalCandidates
+}
+
 func (c *Cache) collectOwnedKeysForBaseLocked(baseKey string, exactKeyFilter string) (memKeys, diskKeys []string, repCount int, bodyBytes, memBytes, diskBytes int64, stBase *keyGenState, live bool) {
-	return c.collectOwnedKeysForBaseLockedWithFence(baseKey, exactKeyFilter, 0)
+	memKeys, diskKeys, _, repCount, bodyBytes, memBytes, diskBytes, stBase, live = c.collectOwnedKeysForBaseLockedWithFence(baseKey, exactKeyFilter, 0)
+	return
 }
 
 func (c *Cache) countMatchingInflightLocked(sel NormalizedSelector) (matched int, tagUnknown bool) {
@@ -651,14 +1003,15 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 		if !ok {
 			continue
 		}
+		resKey := resourceKeyOf(host, reqURI)
 		var tags []string
 		if c.baseIndexedTags != nil {
-			tags = c.baseIndexedTags[base]
+			tags = c.baseIndexedTags[resKey]
 		}
 		hit := false
 		switch sel.Kind {
 		case SelectorKey:
-			hit = rk.key == sel.Key || base == baseKeyOf(sel.Key)
+			hit = rk.key == sel.Key || base == baseKeyOf(rk.key)
 		case SelectorTag:
 			if sel.MatchesResource(host, reqURI, tags) {
 				hit = true
@@ -722,7 +1075,11 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 		TagIngestionEnabled: pol.TagHeaderCount > 0,
 	}
 
-	candidates, _ := c.candidateBaseKeysLocked(sel)
+	candidates, _, candTrunc, _ := c.candidateBaseKeysLocked(sel, scanLimit)
+	if candTrunc {
+		out.Truncated = true
+		out.CountAccuracy = "lower_bound_truncated"
+	}
 	type resourceAgg struct {
 		host       string
 		uri        string
@@ -756,9 +1113,10 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 		if !ok {
 			continue
 		}
+		resKey := resourceKeyOf(host, reqURI)
 		var tags []string
 		if c.baseIndexedTags != nil {
-			tags = c.baseIndexedTags[bk]
+			tags = c.baseIndexedTags[resKey]
 		}
 		if sel.Kind != SelectorKey && !sel.MatchesResource(host, reqURI, tags) {
 			continue
@@ -777,7 +1135,6 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 		out.MemoryBytes += memB
 		out.DiskBytes += diskB
 
-		resKey := host + "\n" + reqURI
 		agg, exists := resources[resKey]
 		if !exists {
 			agg = &resourceAgg{
@@ -854,6 +1211,35 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 	return out
 }
 
+func (c *Cache) snapshotMatchedResourcesLocked(sel NormalizedSelector) map[string]struct{} {
+	if sel.Kind == SelectorAll || sel.Kind == SelectorKey {
+		return nil
+	}
+	candidates, _, _, _ := c.candidateBaseKeysLocked(sel, MaxPurgeScanKeys)
+	if len(candidates) == 0 {
+		return nil
+	}
+	var matched map[string]struct{}
+	for _, bk := range candidates {
+		_, host, reqURI, _, ok := parseBaseKeyParts(bk)
+		if !ok {
+			continue
+		}
+		resKey := resourceKeyOf(host, reqURI)
+		var tags []string
+		if c.baseIndexedTags != nil {
+			tags = c.baseIndexedTags[resKey]
+		}
+		if sel.MatchesResource(host, reqURI, tags) {
+			if matched == nil {
+				matched = make(map[string]struct{})
+			}
+			matched[resKey] = struct{}{}
+		}
+	}
+	return matched
+}
+
 // BeginSelectorFence installs an active selector fence at a new monotonic
 // generation and returns the fence sequence and a completion function
 // (reusable contract for #624, ADR 0027 §6.2).
@@ -863,14 +1249,21 @@ func (c *Cache) BeginSelectorFence(sel NormalizedSelector) (fenceGen uint64, com
 	}
 	c.genMu.Lock()
 	fenceGen = c.genSeq.Add(1)
+	matchedRes := c.snapshotMatchedResourcesLocked(sel)
 	c.fences = append(c.fences, selectorFence{
-		gen:    fenceGen,
-		sel:    sel,
-		active: true,
+		gen:              fenceGen,
+		sel:              sel,
+		active:           true,
+		matchedResources: matchedRes,
 	})
 	c.enforceFenceCapLocked()
 	c.detachMatchingInflightLocked(sel)
 	c.genMu.Unlock()
+	if c.disk != nil {
+		if err := c.disk.recordHighWaterGen(fenceGen); err != nil {
+			c.disk.unrecoverableInvalidation.Store(true)
+		}
+	}
 
 	var done bool
 	return fenceGen, func() {
@@ -886,6 +1279,7 @@ func (c *Cache) BeginSelectorFence(sel NormalizedSelector) (fenceGen uint64, com
 				break
 			}
 		}
+		c.clearEvictedIncompleteFenceLocked(sel.Host, fenceGen)
 		c.reclaimFencesLocked()
 	}
 }
@@ -933,45 +1327,154 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 
 	c.genMu.Lock()
+	if opts.RequireBroadConfirm && sel.BroadScope {
+		c.genMu.Unlock()
+		return InvalidateResult{}, ErrBroadConfirmRequired
+	}
 	seqBefore := c.genSeq.Load()
 	changedSincePreview := opts.PreviewSequence > 0 && seqBefore != opts.PreviewSequence
 
+	// Enforce scan bound for narrow selectors (prefix, glob, tag, or route-scoped host);
+	// whole-hostname (kind = 'host' with no RouteID) and kind = 'all' are the
+	// documented escape paths and are never rejected by maxScan (F13).
+	isUnboundedHost := sel.Kind == SelectorHost && sel.RouteID == ""
+	var candidates []string
 	if sel.Kind != SelectorAll {
-		candidates, _ := c.candidateBaseKeysLocked(sel)
-		if len(candidates) > maxScan {
+		scanCap := 0
+		if !isUnboundedHost {
+			scanCap = maxScan
+		}
+		var candTrunc bool
+		var totalCand int
+		candidates, _, candTrunc, totalCand = c.candidateBaseKeysLocked(sel, scanCap)
+		if !isUnboundedHost && (candTrunc || len(candidates) > maxScan) {
 			c.genMu.Unlock()
-			return InvalidateResult{}, fmt.Errorf("cache selector scope (%d candidate resources) exceeds maximum scan bound of %d; use kind = 'host' or 'all'", len(candidates), maxScan)
+			return InvalidateResult{}, fmt.Errorf("cache selector scope (%d candidate resources) exceeds maximum scan bound of %d; use kind = 'host' or 'all'", totalCand, maxScan)
+		}
+	}
+
+	if opts.ReuseFenceGen > 0 {
+		for i := range c.fences {
+			if c.fences[i].gen == opts.ReuseFenceGen {
+				if c.fences[i].sel.Digest() != sel.Digest() {
+					c.genMu.Unlock()
+					return InvalidateResult{}, fmt.Errorf("reuse_fence_gen %d selector digest does not match requested selector", opts.ReuseFenceGen)
+				}
+				break
+			}
+		}
+	}
+
+	type matchedGroup struct {
+		resKey   string
+		baseKey  string
+		allKeys  []string
+		diskKeys []string
+		reps     int
+	}
+	var groups []matchedGroup
+	matchedResSet := make(map[string]struct{})
+	skipped := 0
+	exactFilter := ""
+	if sel.Kind == SelectorKey {
+		exactFilter = sel.Key
+	}
+
+	evalFenceGen := opts.ReuseFenceGen
+	if evalFenceGen == 0 {
+		evalFenceGen = math.MaxUint64
+	}
+
+	if sel.Kind != SelectorAll {
+		for _, bk := range candidates {
+			_, host, reqURI, _, ok := parseBaseKeyParts(bk)
+			if !ok {
+				skipped++
+				continue
+			}
+			resKey := resourceKeyOf(host, reqURI)
+			var tags []string
+			if c.baseIndexedTags != nil {
+				tags = c.baseIndexedTags[resKey]
+			}
+			if sel.Kind != SelectorKey && !sel.MatchesResource(host, reqURI, tags) {
+				skipped++
+				continue
+			}
+			if sel.Kind == SelectorKey && bk != baseKeyOf(sel.Key) {
+				skipped++
+				continue
+			}
+			matchedResSet[resKey] = struct{}{}
+			memKeys, diskKeys, inflightKeys, reps, _, _, _, _, live := c.collectOwnedKeysForBaseLockedWithFence(bk, exactFilter, evalFenceGen)
+			if !live && len(inflightKeys) == 0 {
+				skipped++
+				continue
+			}
+			keySet := make(map[string]struct{}, len(memKeys)+len(diskKeys)+len(inflightKeys)+1)
+			var allKeys []string
+			for _, slice := range [][]string{memKeys, diskKeys, inflightKeys} {
+				for _, k := range slice {
+					if _, exists := keySet[k]; !exists {
+						keySet[k] = struct{}{}
+						allKeys = append(allKeys, k)
+					}
+				}
+			}
+			if _, exists := keySet[bk]; !exists && exactFilter == "" {
+				allKeys = append(allKeys, bk)
+			}
+			groups = append(groups, matchedGroup{
+				resKey:   resKey,
+				baseKey:  bk,
+				allKeys:  allKeys,
+				diskKeys: diskKeys,
+				reps:     reps,
+			})
+		}
+		if opts.RequireBroadConfirm && len(matchedResSet) >= BroadScopeResourceThr {
+			c.genMu.Unlock()
+			return InvalidateResult{}, ErrBroadConfirmRequired
 		}
 	}
 
 	var fenceGen uint64
 	if opts.ReuseFenceGen > 0 {
 		fenceGen = opts.ReuseFenceGen
+		if fenceGen > c.genSeq.Load() {
+			c.genSeq.Store(fenceGen)
+		}
 		foundFence := false
 		for i := range c.fences {
 			if c.fences[i].gen == fenceGen {
-				if c.fences[i].sel.Digest() != sel.Digest() {
-					c.genMu.Unlock()
-					return InvalidateResult{}, fmt.Errorf("reuse_fence_gen %d selector digest does not match requested selector", fenceGen)
-				}
 				c.fences[i].active = true
+				if len(matchedResSet) > 0 {
+					if c.fences[i].matchedResources == nil {
+						c.fences[i].matchedResources = make(map[string]struct{}, len(matchedResSet))
+					}
+					for rk := range matchedResSet {
+						c.fences[i].matchedResources[rk] = struct{}{}
+					}
+				}
 				foundFence = true
 				break
 			}
 		}
 		if !foundFence {
 			c.fences = append(c.fences, selectorFence{
-				gen:    fenceGen,
-				sel:    sel,
-				active: true,
+				gen:              fenceGen,
+				sel:              sel,
+				active:           true,
+				matchedResources: matchedResSet,
 			})
 		}
 	} else {
 		fenceGen = c.genSeq.Add(1)
 		c.fences = append(c.fences, selectorFence{
-			gen:    fenceGen,
-			sel:    sel,
-			active: true,
+			gen:              fenceGen,
+			sel:              sel,
+			active:           true,
+			matchedResources: matchedResSet,
 		})
 	}
 	c.enforceFenceCapLocked()
@@ -980,8 +1483,13 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	if sel.Kind == SelectorAll {
 		c.purgeGen = fenceGen
 		c.fenceFloorGen = fenceGen
+		c.hostFenceFloorGen = nil
+		c.incompleteFloorGen = 0
+		c.incompleteHostFloorGen = nil
+		c.evictedIncompleteHostGens = nil
 		c.fences = nil
 		c.latestFenceGen.Store(fenceGen)
+		c.incompleteFenceGen.Store(0)
 
 		resources := make(map[string]struct{})
 		memCount := 0
@@ -1016,9 +1524,14 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		var diskRemoved, retiredReaders, diskFailed int
 		var uncertain bool
 		if c.disk != nil {
+			hwErr := c.disk.recordHighWaterGen(fenceGen)
 			diskRemoved, retiredReaders, diskFailed, uncertain = c.disk.deleteBatchAtMostGen(diskKeys, fenceGen)
 			if len(diskKeys) == 0 {
 				c.disk.purge()
+			}
+			if hwErr != nil {
+				c.disk.unrecoverableInvalidation.Store(true)
+				uncertain = true
 			}
 		}
 		res := InvalidateResult{
@@ -1042,74 +1555,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		}
 		return res, nil
 	}
-
-	// Collect matched target keys under genMu at the fence linearization point.
-	candidates, _ := c.candidateBaseKeysLocked(sel)
-	type matchedGroup struct {
-		resKey   string
-		baseKey  string
-		allKeys  []string
-		diskKeys []string
-		reps     int
-	}
-	var groups []matchedGroup
-	skipped := 0
-	exactFilter := ""
-	if sel.Kind == SelectorKey {
-		exactFilter = sel.Key
-	}
-
-	for _, bk := range candidates {
-		_, host, reqURI, _, ok := parseBaseKeyParts(bk)
-		if !ok {
-			skipped++
-			continue
-		}
-		var tags []string
-		if c.baseIndexedTags != nil {
-			tags = c.baseIndexedTags[bk]
-		}
-		if sel.Kind != SelectorKey && !sel.MatchesResource(host, reqURI, tags) {
-			skipped++
-			continue
-		}
-		if sel.Kind == SelectorKey && bk != baseKeyOf(sel.Key) {
-			skipped++
-			continue
-		}
-		memKeys, diskKeys, reps, _, _, _, _, live := c.collectOwnedKeysForBaseLockedWithFence(bk, exactFilter, fenceGen)
-		if !live {
-			skipped++
-			continue
-		}
-		keySet := make(map[string]struct{}, len(memKeys)+len(diskKeys)+1)
-		var allKeys []string
-		for _, k := range memKeys {
-			keySet[k] = struct{}{}
-			allKeys = append(allKeys, k)
-		}
-		for _, k := range diskKeys {
-			if _, exists := keySet[k]; !exists {
-				keySet[k] = struct{}{}
-				allKeys = append(allKeys, k)
-			}
-		}
-		if _, exists := keySet[bk]; !exists && exactFilter == "" {
-			allKeys = append(allKeys, bk)
-		}
-		groups = append(groups, matchedGroup{
-			resKey:   host + "\n" + reqURI,
-			baseKey:  bk,
-			allKeys:  allKeys,
-			diskKeys: diskKeys,
-			reps:     reps,
-		})
-	}
 	c.genMu.Unlock()
-
-	if c.onAfterFenceInstall != nil {
-		c.onAfterFenceInstall(sel, fenceGen)
-	}
 
 	invalidatedRes := make(map[string]struct{}, len(groups))
 	invalidatedReps := 0
@@ -1121,11 +1567,24 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	uncertain := false
 	canceledMidway := false
 
+	if c.disk != nil {
+		if err := c.disk.recordHighWaterGen(fenceGen); err != nil {
+			c.disk.unrecoverableInvalidation.Store(true)
+			uncertain = true
+		}
+	}
+
+	if c.onAfterFenceInstall != nil {
+		c.onAfterFenceInstall(sel, fenceGen)
+	}
+
 	for startIdx := 0; startIdx < len(groups); startIdx += batchSize {
 		if err := ctx.Err(); err != nil {
 			canceledMidway = true
 			for i := startIdx; i < len(groups); i++ {
-				remainingGroups += len(groups[i].allKeys)
+				if groups[i].reps > 0 || len(groups[i].diskKeys) > 0 {
+					remainingGroups += len(groups[i].allKeys)
+				}
 			}
 			break
 		}
@@ -1138,8 +1597,10 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		var batchDiskKeys []string
 		c.genMu.Lock()
 		for _, g := range batch {
-			invalidatedRes[g.resKey] = struct{}{}
-			invalidatedReps += g.reps
+			if g.reps > 0 {
+				invalidatedRes[g.resKey] = struct{}{}
+				invalidatedReps += g.reps
+			}
 			for _, k := range g.allKeys {
 				st := c.keyGen[k]
 				if st != nil && st.gen <= fenceGen {
@@ -1181,6 +1642,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			break
 		}
 	}
+	if remainingGroups+failedEntries == 0 {
+		c.clearEvictedIncompleteFenceLocked(sel.Host, fenceGen)
+	}
 	c.reclaimFencesLocked()
 	c.genMu.Unlock()
 
@@ -1211,7 +1675,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	return res, nil
 }
 
-func (c *Cache) collectOwnedKeysForBaseLockedWithFence(baseKey, exactKeyFilter string, ownFenceGen uint64) (memKeys, diskKeys []string, repCount int, bodyBytes, memBytes, diskBytes int64, stBase *keyGenState, live bool) {
+func (c *Cache) collectOwnedKeysForBaseLockedWithFence(baseKey, exactKeyFilter string, ownFenceGen uint64) (memKeys, diskKeys, inflightKeys []string, repCount int, bodyBytes, memBytes, diskBytes int64, stBase *keyGenState, live bool) {
 	st := c.keyGen[baseKey]
 	var varKeys []string
 	seenVar := make(map[string]struct{})
@@ -1238,14 +1702,20 @@ func (c *Cache) collectOwnedKeysForBaseLockedWithFence(baseKey, exactKeyFilter s
 			return
 		}
 		kst := c.keyGen[k]
-		if kst == nil || (!kst.inMem && !kst.inDisk) {
+		if kst == nil {
 			return
 		}
 		if ownFenceGen > 0 {
 			if kst.gen > ownFenceGen {
 				return
 			}
-		} else if c.isEntryFencedLocked(kst.gen, k, kst.tags) {
+		} else if c.isResidentEntryFencedLocked(kst.gen, k, kst.tags) {
+			return
+		}
+		if !kst.inMem && !kst.inDisk {
+			if ownFenceGen > 0 && kst.inflight > 0 {
+				inflightKeys = append(inflightKeys, k)
+			}
 			return
 		}
 		live = true
@@ -1273,7 +1743,7 @@ func (c *Cache) collectOwnedKeysForBaseLockedWithFence(baseKey, exactKeyFilter s
 	if repCount == 0 && live {
 		repCount = 1
 	}
-	return memKeys, diskKeys, repCount, bodyBytes, memBytes, diskBytes, stBase, live
+	return memKeys, diskKeys, inflightKeys, repCount, bodyBytes, memBytes, diskBytes, stBase, live
 }
 
 func finalizeInvalidateOutcome(res *InvalidateResult, uncertain, canceled bool) {

@@ -1046,3 +1046,889 @@ func TestScopedPurgeNegativeOracleVerification(t *testing.T) {
 		t.Fatalf("expected failed state/outcome when 0 entries removed and FailedEntries=1, got %+v", failedRes)
 	}
 }
+
+func TestAuditR2_TagPurgeVarySiblingValidationDoesNotResurrect(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	})
+
+	var frValidationEntered = make(chan struct{})
+	var releaseFrValidation = make(chan struct{})
+	var frCalls atomic.Int32
+	var enCalls atomic.Int32
+
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lang := r.Header.Get("Accept-Language")
+		w.Header().Set("Vary", "Accept-Language")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		if lang == "en" {
+			n := enCalls.Add(1)
+			w.Header().Set("ETag", `"en-etag"`)
+			w.Header().Set("Cache-Tag", "A")
+			_, _ = fmt.Fprintf(w, "en-v%d", n)
+			return
+		}
+		n := frCalls.Add(1)
+		w.Header().Set("ETag", fmt.Sprintf(`"fr-etag-%d"`, n))
+		w.Header().Set("Cache-Tag", "B")
+		if n == 2 {
+			close(frValidationEntered)
+			<-releaseFrValidation
+			// Return a fresh HTTP 200 replacement ("fr-v1-reval") still tagged B.
+			_, _ = io.WriteString(w, "fr-v1")
+			return
+		}
+		_, _ = fmt.Fprintf(w, "fr-v%d", n)
+	}))
+
+	doLang := func(lang string, noCache bool) (string, string) {
+		req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/articles/42", nil)
+		req.Host = "portal.example.com"
+		req.Header.Set("Accept-Language", lang)
+		if noCache {
+			req.Header.Set("Cache-Control", "max-age=0")
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Header().Get("X-Cache"), rec.Body.String()
+	}
+
+	// 1. Warm English (tag A) and French (tag B) Vary representations.
+	if st, body := doLang("en", false); st != "MISS" || body != "en-v1" {
+		t.Fatalf("warm en = (%s, %q)", st, body)
+	}
+	if st, body := doLang("fr", false); st != "MISS" || body != "fr-v1" {
+		t.Fatalf("warm fr = (%s, %q)", st, body)
+	}
+
+	// 2. Start a mandatory pre-purge French validation (max-age=0) and block its HTTP 200 completion.
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_, _ = doLang("fr", true)
+	}()
+	<-frValidationEntered
+
+	// 3. Purge tag A: must remove both representations of the logical resource.
+	selA, err := ParseSelector(Selector{
+		Kind: SelectorTag,
+		Host: "portal.example.com",
+		Tags: []string{"A"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("ParseSelector: %v", err)
+	}
+	res, err := c.InvalidateScope(context.Background(), selA, InvalidateOptions{})
+	if err != nil {
+		t.Fatalf("InvalidateScope: %v", err)
+	}
+	if res.State != "succeeded" || res.InvalidatedRepresentations != 2 {
+		t.Fatalf("expected 2 representations removed for tag A, got %+v", res)
+	}
+
+	// 4. Release the old French response tagged B.
+	close(releaseFrValidation)
+	wg.Wait()
+
+	// 5. The next French request MUST be a MISS (never a HIT serving the pre-purge fr-v1).
+	if st, body := doLang("fr", false); st != "MISS" || body == "fr-v1" {
+		t.Fatalf("expected MISS with post-purge French body, got X-Cache=%s body=%q", st, body)
+	}
+}
+
+func TestAuditR2_TagPurgeMethodGroupGETAndHEAD(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	})
+
+	var headCalls atomic.Int32
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		if r.Method == http.MethodGet {
+			w.Header().Set("Cache-Tag", "A")
+			_, _ = io.WriteString(w, "get-body")
+			return
+		}
+		headCalls.Add(1)
+		w.Header().Set("Cache-Tag", "B")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	reqGet := httptest.NewRequest(http.MethodGet, "http://portal.example.com/doc", nil)
+	reqGet.Host = "portal.example.com"
+	h.ServeHTTP(httptest.NewRecorder(), reqGet)
+
+	reqHead := httptest.NewRequest(http.MethodHead, "http://portal.example.com/doc", nil)
+	reqHead.Host = "portal.example.com"
+	h.ServeHTTP(httptest.NewRecorder(), reqHead)
+
+	// Confirm HEAD is warm (HIT).
+	recHeadWarm := httptest.NewRecorder()
+	h.ServeHTTP(recHeadWarm, reqHead)
+	if recHeadWarm.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("expected warm HEAD HIT before purge, got %s", recHeadWarm.Header().Get("X-Cache"))
+	}
+
+	// Purge tag A: must invalidate both GET and HEAD representations of the logical resource.
+	selA, _ := ParseSelector(Selector{
+		Kind: SelectorTag,
+		Host: "portal.example.com",
+		Tags: []string{"A"},
+	}, nil)
+	res, err := c.InvalidateScope(context.Background(), selA, InvalidateOptions{})
+	if err != nil {
+		t.Fatalf("InvalidateScope: %v", err)
+	}
+	if res.InvalidatedResources != 1 || res.InvalidatedRepresentations != 2 {
+		t.Fatalf("expected 1 resource and 2 representations (GET+HEAD) invalidated, got %+v", res)
+	}
+
+	recHeadAfter := httptest.NewRecorder()
+	h.ServeHTTP(recHeadAfter, reqHead)
+	if recHeadAfter.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("expected HEAD to be MISS after purging GET tag A, got %s", recHeadAfter.Header().Get("X-Cache"))
+	}
+}
+
+func TestAuditR2_TagStrippingAcrossBypassUnsafeAndInformationalPaths(t *testing.T) {
+	t.Parallel()
+
+	stripTrue := true
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:         true,
+		MemoryMaxSize:   config.Size(2 << 20),
+		DefaultTTL:      config.Duration(5 * time.Minute),
+		RangeEnabled:    false,
+		TagHeaders:      []string{"Cache-Tag", "Surrogate-Key"},
+		StripTagHeaders: &stripTrue,
+	})
+
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Tag", "internal-tag-1")
+		w.Header().Set("Surrogate-Key", "internal-tag-2")
+		if r.URL.Path == "/interim" {
+			w.WriteHeader(http.StatusEarlyHints)
+		}
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok")
+	}))
+
+	// Case 1: GET with Cache-Control: no-store (bypass).
+	reqNoStore := httptest.NewRequest(http.MethodGet, "http://portal.example.com/item", nil)
+	reqNoStore.Header.Set("Cache-Control", "no-store")
+	recNoStore := httptest.NewRecorder()
+	h.ServeHTTP(recNoStore, reqNoStore)
+	if recNoStore.Header().Get("Cache-Tag") != "" || recNoStore.Header().Get("Surrogate-Key") != "" {
+		t.Fatalf("no-store bypass leaked tag headers: %v", recNoStore.Header())
+	}
+
+	// Case 2: GET with Range when range_enabled = false (bypass).
+	reqRange := httptest.NewRequest(http.MethodGet, "http://portal.example.com/item", nil)
+	reqRange.Header.Set("Range", "bytes=0-1")
+	recRange := httptest.NewRecorder()
+	h.ServeHTTP(recRange, reqRange)
+	if recRange.Header().Get("Cache-Tag") != "" || recRange.Header().Get("Surrogate-Key") != "" {
+		t.Fatalf("Range bypass leaked tag headers: %v", recRange.Header())
+	}
+
+	// Case 3: POST (unsafe method) and OPTIONS (non-unsafe non-GET/HEAD method).
+	for _, method := range []string{http.MethodPost, http.MethodOptions} {
+		reqM := httptest.NewRequest(method, "http://portal.example.com/item", nil)
+		recM := httptest.NewRecorder()
+		h.ServeHTTP(recM, reqM)
+		if recM.Header().Get("Cache-Tag") != "" || recM.Header().Get("Surrogate-Key") != "" {
+			t.Fatalf("%s leaked tag headers: %v", method, recM.Header())
+		}
+	}
+
+	// Case 4: 103 Early Hints before 200 OK.
+	reqInterim := httptest.NewRequest(http.MethodGet, "http://portal.example.com/interim", nil)
+	recInterim := httptest.NewRecorder()
+	h.ServeHTTP(recInterim, reqInterim)
+	if recInterim.Header().Get("Cache-Tag") != "" || recInterim.Header().Get("Surrogate-Key") != "" {
+		t.Fatalf("1xx interim response leaked tag headers: %v", recInterim.Header())
+	}
+}
+
+func TestAuditR2_CredentialHeaderRejectionBeforeTokenization(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	})
+	var skipReasons []string
+	c.SetTagSkipObserver(func(reason string) {
+		skipReasons = append(skipReasons, reason)
+	})
+
+	for i, hdrVal := range []string{
+		"Bearer opaque-private-token-123",
+		"Basic dXNlcjpwYXNz",
+		"Digest username=admin",
+	} {
+		h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.Header().Set("Cache-Tag", hdrVal)
+			_, _ = io.WriteString(w, "secret-body")
+		}))
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://portal.example.com/cred-%d", i), nil)
+		req.Host = "portal.example.com"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Body.String() != "secret-body" {
+			t.Fatalf("client delivery broken for %q: code=%d body=%q", hdrVal, rec.Code, rec.Body.String())
+		}
+	}
+
+	if len(skipReasons) != 3 {
+		t.Fatalf("expected 3 TagSkipInvalid events, got %v", skipReasons)
+	}
+	if stats := c.IndexStats(); stats.TagLinks != 0 || stats.BaseKeysIndexed != 0 {
+		t.Fatalf("credential headers must not be stored or indexed, got %+v", stats)
+	}
+}
+
+func TestAuditR2_CutoverExactAndPrefixRouterFidelity(t *testing.T) {
+	t.Parallel()
+
+	before := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":443",
+				ServerNames: []string{"portal.example.com"},
+				Locations: []config.LocationConfig{
+					{Match: config.MatchConfig{Type: "exact", Path: "/a+b"}, ProxyPass: "http://up-1"},
+					{Match: config.MatchConfig{Type: "exact", Path: "/a*b"}, ProxyPass: "http://up-1"},
+					{Match: config.MatchConfig{Type: "prefix", Path: "/a"}, ProxyPass: "http://up-1"},
+				},
+			},
+		},
+	}
+	after := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":443",
+				ServerNames: []string{"portal.example.com"},
+				Locations: []config.LocationConfig{
+					{Match: config.MatchConfig{Type: "exact", Path: "/a+b"}, ProxyPass: "http://up-2"},
+					{Match: config.MatchConfig{Type: "exact", Path: "/a*b"}, ProxyPass: "http://up-2"},
+					{Match: config.MatchConfig{Type: "prefix", Path: "/a"}, ProxyPass: "http://up-2"},
+				},
+			},
+		},
+	}
+
+	sels := DeriveRouteCutoverSelectors(before, after)
+	if len(sels) != 3 {
+		t.Fatalf("expected 3 cutover selectors, got %d: %+v", len(sels), sels)
+	}
+
+	matchesAny := func(uri string) bool {
+		for _, s := range sels {
+			if s.MatchesResource("portal.example.com", uri, nil) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Exact /a+b must match literal /a+b and percent-encoded /a%2Bb.
+	if !matchesAny("/a+b") || !matchesAny("/a%2Bb?x=1") {
+		t.Fatalf("expected /a+b cutover selector to match /a+b and /a%%2Bb?x=1")
+	}
+	// Exact /a*b must match literal /a*b and NOT treat * as a wildcard if tested alone.
+	if !sels[1].MatchesResource("portal.example.com", "/a*b", nil) {
+		t.Fatalf("expected exact /a*b selector to match /a*b")
+	}
+	if sels[1].MatchesResource("portal.example.com", "/aXYZb", nil) {
+		t.Fatalf("exact /a*b cutover selector must not treat * as a wildcard")
+	}
+	// Router prefix /a matches /a, /a/1, /assets, and /%61ssets.
+	for _, p := range []string{"/a", "/a/1", "/assets", "/assets/logo.png", "/%61ssets"} {
+		if !sels[2].MatchesResource("portal.example.com", p, nil) {
+			t.Fatalf("expected router prefix /a cutover selector to match %q", p)
+		}
+	}
+	if sels[2].MatchesResource("portal.example.com", "/b", nil) {
+		t.Fatalf("router prefix /a cutover selector must not match /b")
+	}
+}
+
+func TestAuditR3_DelayedDiskPublicationCannotCreateStaleRecoverableState(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	cfg := config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(4096), // 4 KiB memory cap so 12,288-byte response streams to disk
+		MaxEntrySize:  config.Size(64 << 10),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}
+	c := newTestCache(t, cfg)
+
+	publishPaused := make(chan struct{})
+	releasePublish := make(chan struct{})
+	var hookOnce sync.Once
+
+	c.disk.onBeforePublishLock = func(_ string, _ uint64) {
+		hookOnce.Do(func() {
+			close(publishPaused)
+			<-releasePublish
+		})
+	}
+
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Content-Length", "12288")
+		_, _ = w.Write([]byte(strings.Repeat("X", 12288)))
+	}))
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/large.bin", nil)
+		req.Host = "portal.example.com"
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+
+	<-publishPaused
+
+	// Purge the exact URL while disk publication is paused before d.mu.Lock().
+	sel, err := ParseSelector(Selector{
+		Kind: SelectorExactURL,
+		URL:  "http://portal.example.com/large.bin",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ParseSelector: %v", err)
+	}
+	res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{})
+	if err != nil {
+		t.Fatalf("InvalidateScope: %v", err)
+	}
+	if res.InvalidationEffective != "effective" {
+		t.Fatalf("expected effective invalidation, got %+v", res)
+	}
+
+	// Resume publication. Because d.canCommit checks the fence/generation under d.mu
+	// BEFORE renamePath, the stale 12,288-byte file is never committed on disk.
+	close(releasePublish)
+	wg.Wait()
+
+	// Reopen a second Cache instance against the same disk directory and verify
+	// the stale 12,288-byte response is NOT recovered.
+	cRecovered := newTestCache(t, cfg)
+	if e, ok := cRecovered.get(keyFor(http.MethodGet, "portal.example.com", "/large.bin")); ok || e != nil {
+		t.Fatalf("stale 12,288-byte response was recovered from disk after acknowledged purge!")
+	}
+}
+
+func TestAuditR3_FenceCapOverflowPreservesUnrelatedHostHits(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(4 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	})
+
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = io.WriteString(w, "body-"+r.Host)
+	}))
+
+	// Warm host B.
+	reqB := httptest.NewRequest(http.MethodGet, "http://host-b.example.com/warm", nil)
+	reqB.Host = "host-b.example.com"
+	h.ServeHTTP(httptest.NewRecorder(), reqB)
+
+	// Hold one old origin operation open so completed fences remain retained.
+	opID, _ := c.beginInflightOriginOp()
+	defer c.endInflightOriginOp(opID)
+
+	// Perform 257 scoped/no-match purges for host A.
+	for i := 0; i < MaxActiveFences+2; i++ {
+		selA, err := ParseSelector(Selector{
+			Kind: SelectorExactURL,
+			Host: "host-a.example.com",
+			URI:  fmt.Sprintf("/miss-%d", i),
+		}, nil)
+		if err != nil {
+			t.Fatalf("ParseSelector: %v", err)
+		}
+		if _, err := c.InvalidateScope(context.Background(), selA, InvalidateOptions{}); err != nil {
+			t.Fatalf("InvalidateScope %d: %v", i, err)
+		}
+	}
+
+	// Host B MUST still be a warm HIT.
+	recB := httptest.NewRecorder()
+	h.ServeHTTP(recB, reqB)
+	if recB.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("expected unrelated host-b to remain HIT after 257 host-a purges, got %s", recB.Header().Get("X-Cache"))
+	}
+}
+
+func TestAuditR4_CrossBootFenceContinuationPreservesFreshPostRestartFills(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	cfg := config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(64 << 10),
+		MaxEntrySize:  config.Size(256 << 10),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(16 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}
+
+	c1 := newTestCache(t, cfg)
+	h1 := c1.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/uncached-") {
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = io.WriteString(w, "uncached")
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = io.WriteString(w, "cached-boot1")
+	}))
+
+	// Warm 2 surviving disk entries (gen <= 4).
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://portal.example.com/keep-%d", i), nil)
+		req.Host = "portal.example.com"
+		h1.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	// Advance Boot 1 genSeq with 128 uncached origin operations.
+	for i := 0; i < 128; i++ {
+		opID, _ := c1.beginInflightOriginOp()
+		c1.endInflightOriginOp(opID)
+	}
+
+	// Install a fence >= 131 on /articles/ and cancel midway.
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("http://portal.example.com/articles/old-%d", i), nil)
+		req.Host = "portal.example.com"
+		h1.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	sel, _ := ParseSelector(Selector{
+		Kind:   SelectorPrefix,
+		Host:   "portal.example.com",
+		Prefix: "/articles/",
+	}, nil)
+	ctxCancel, cancel := context.WithCancel(context.Background())
+	c1.onAfterFenceInstall = func(_ NormalizedSelector, _ uint64) {
+		cancel()
+	}
+	cancelRes, _ := c1.InvalidateScope(ctxCancel, sel, InvalidateOptions{BatchSize: 1})
+	if cancelRes.State != "canceled" || cancelRes.FenceSequence < 130 {
+		t.Fatalf("expected canceled purge with fence >= 130, got %+v", cancelRes)
+	}
+	oldFence := cancelRes.FenceSequence
+
+	// Restart (Boot 2) against the same disk directory.
+	c2 := newTestCache(t, cfg)
+	var boot2OriginCalls atomic.Int32
+	h2 := c2.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		boot2OriginCalls.Add(1)
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = io.WriteString(w, "fresh-boot2")
+	}))
+
+	// Fetch a new matching resource in Boot 2; verify it is a warm HIT.
+	reqNew := httptest.NewRequest(http.MethodGet, "http://portal.example.com/articles/fresh", nil)
+	reqNew.Host = "portal.example.com"
+	h2.ServeHTTP(httptest.NewRecorder(), reqNew)
+	recWarm := httptest.NewRecorder()
+	h2.ServeHTTP(recWarm, reqNew)
+	if recWarm.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("expected fresh Boot 2 resource to be warm HIT, got %s", recWarm.Header().Get("X-Cache"))
+	}
+
+	// Retry the old fence from Boot 1.
+	retryRes, err := c2.InvalidateScope(context.Background(), sel, InvalidateOptions{
+		ReuseFenceGen: oldFence,
+	})
+	if err != nil || retryRes.State != "succeeded" {
+		t.Fatalf("expected retry with oldFence=%d to succeed, got %+v err=%v", oldFence, retryRes, err)
+	}
+
+	// Fresh Boot 2 resource MUST still be a warm HIT!
+	recAfterRetry := httptest.NewRecorder()
+	h2.ServeHTTP(recAfterRetry, reqNew)
+	if recAfterRetry.Header().Get("X-Cache") != "HIT" || recAfterRetry.Body.String() != "fresh-boot2" {
+		t.Fatalf("fresh Boot 2 resource became %s after retrying Boot 1 fence %d!", recAfterRetry.Header().Get("X-Cache"), oldFence)
+	}
+}
+
+func TestAuditR4_TagDisableAndReenableRebuildsIndexAndRetiresDisabledFills(t *testing.T) {
+	t.Parallel()
+
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	})
+
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Cache-Tag", "article:42")
+		_, _ = io.WriteString(w, "body-"+r.URL.Path)
+	}))
+
+	// 1. Warm a tagged response: 1 index link.
+	req1 := httptest.NewRequest(http.MethodGet, "http://portal.example.com/tagged-1", nil)
+	req1.Host = "portal.example.com"
+	h.ServeHTTP(httptest.NewRecorder(), req1)
+	if links := c.IndexStats().TagLinks; links != 1 {
+		t.Fatalf("expected 1 tag link after warming, got %d", links)
+	}
+
+	// 2. Disable tag ingestion via hot reload: 0 tag links while response stays warm.
+	c.PrepareCacheUpdate(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    nil,
+	}).Commit()
+	if links := c.IndexStats().TagLinks; links != 0 {
+		t.Fatalf("expected 0 tag links while disabled, got %d", links)
+	}
+
+	// Also warm a response during the disabled period.
+	reqDisabled := httptest.NewRequest(http.MethodGet, "http://portal.example.com/filled-while-disabled", nil)
+	reqDisabled.Host = "portal.example.com"
+	h.ServeHTTP(httptest.NewRecorder(), reqDisabled)
+
+	// 3. Re-enable the same tagging policy: original tagged response must have its
+	// index link restored (TagLinks == 1), while disabled-period fill is retired.
+	c.PrepareCacheUpdate(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	}).Commit()
+	if links := c.IndexStats().TagLinks; links != 1 {
+		t.Fatalf("expected 1 tag link restored after re-enabling tag_headers, got %d", links)
+	}
+
+	// 4. Purge article:42: must report 1 resource invalidated and turn /tagged-1 into a MISS.
+	sel, _ := ParseSelector(Selector{
+		Kind: SelectorTag,
+		Host: "portal.example.com",
+		Tags: []string{"article:42"},
+	}, nil)
+	res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{})
+	if err != nil || res.State != "succeeded" || res.InvalidatedResources != 1 {
+		t.Fatalf("expected succeeded with 1 resource invalidated after re-enabling tags, got %+v err=%v", res, err)
+	}
+	recAfter := httptest.NewRecorder()
+	h.ServeHTTP(recAfter, req1)
+	if recAfter.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("expected MISS for /tagged-1 after tag purge, got %s", recAfter.Header().Get("X-Cache"))
+	}
+}
+
+func TestAuditR4_PreviewBoundsHostEscapeAndTombstoneSyncDirFailure(t *testing.T) {
+	t.Parallel()
+
+	diskDir := t.TempDir()
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(8 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	})
+
+	for i := 0; i < 25; i++ {
+		c.set(keyFor(http.MethodGet, "portal.example.com", fmt.Sprintf("/items/%d", i)), &Entry{
+			Status:    http.StatusOK,
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(5 * time.Minute),
+			Body:      []byte("item"),
+		})
+	}
+
+	// 1. PreviewScope with MaxScanEntries=5 stops at 5 scanned entries and marks Truncated=true.
+	pfxSel, _ := ParseSelector(Selector{
+		Kind:   SelectorPrefix,
+		Host:   "portal.example.com",
+		Prefix: "/items/",
+	}, nil)
+	prev := c.PreviewScope(pfxSel, PreviewOptions{MaxScanEntries: 5})
+	if !prev.Truncated || prev.ScannedEntries != 5 {
+		t.Fatalf("expected Truncated=true and ScannedEntries=5, got %+v", prev)
+	}
+
+	// 2. Prefix InvalidateScope with MaxScanKeys=5 rejects, while SelectorHost with MaxScanKeys=5 succeeds as the escape path (F13).
+	if _, err := c.InvalidateScope(context.Background(), pfxSel, InvalidateOptions{MaxScanKeys: 5}); err == nil {
+		t.Fatalf("expected prefix InvalidateScope above MaxScanKeys=5 to fail")
+	}
+	hostSel, _ := ParseSelector(Selector{
+		Kind: SelectorHost,
+		Host: "portal.example.com",
+	}, nil)
+	hostRes, err := c.InvalidateScope(context.Background(), hostSel, InvalidateOptions{MaxScanKeys: 5})
+	if err != nil || hostRes.State != "succeeded" || hostRes.InvalidatedResources != 25 {
+		t.Fatalf("expected SelectorHost escape path to succeed regardless of MaxScanKeys=5, got %+v err=%v", hostRes, err)
+	}
+
+	// 3. Tombstone directory sync failure surfaces as uncertain/failed rather than unconditional success (F17).
+	c.set(keyFor(http.MethodGet, "portal.example.com", "/sync-fail"), &Entry{
+		Status:    http.StatusOK,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(5 * time.Minute),
+		Body:      []byte("sync-fail"),
+	})
+	c.disk.mu.Lock()
+	c.disk.testRemoveFile = func(_ string) error {
+		return errors.New("injected unlink failure")
+	}
+	c.disk.testSyncDir = func(_ string) error {
+		return errors.New("injected dir fsync failure")
+	}
+	c.disk.mu.Unlock()
+
+	exactSel, _ := ParseSelector(Selector{
+		Kind: SelectorExactURL,
+		Host: "portal.example.com",
+		URI:  "/sync-fail",
+	}, nil)
+	syncRes, err := c.InvalidateScope(context.Background(), exactSel, InvalidateOptions{})
+	if err != nil {
+		t.Fatalf("InvalidateScope sync-fail: %v", err)
+	}
+	if syncRes.State == "succeeded" || syncRes.InvalidationEffective != "uncertain" {
+		t.Fatalf("expected directory sync failure to report uncertain non-succeeded outcome, got %+v", syncRes)
+	}
+}
+
+func TestAdversarialRounds_ActiveFenceRetentionHeaderOnlyStripAndHighWaterError(t *testing.T) {
+	t.Parallel()
+
+	// 1. Round 1: Active fence paused in onAfterFenceInstall must NOT be evicted when 256 completed no-match purges run.
+	c := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	})
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		_, _ = io.WriteString(w, "v1")
+	}))
+	reqTarget := httptest.NewRequest(http.MethodGet, "http://host-a.example.com/target/1", nil)
+	reqTarget.Host = "host-a.example.com"
+	h.ServeHTTP(httptest.NewRecorder(), reqTarget)
+
+	fenceInstalled := make(chan struct{})
+	releaseActivePurge := make(chan struct{})
+	var pauseOnce sync.Once
+	c.onAfterFenceInstall = func(s NormalizedSelector, _ uint64) {
+		if s.Kind == SelectorPrefix {
+			pauseOnce.Do(func() {
+				close(fenceInstalled)
+				<-releaseActivePurge
+			})
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pfxSel, _ := ParseSelector(Selector{
+			Kind:   SelectorPrefix,
+			Host:   "host-a.example.com",
+			Prefix: "/target/",
+		}, nil)
+		_, _ = c.InvalidateScope(context.Background(), pfxSel, InvalidateOptions{})
+	}()
+
+	<-fenceInstalled
+
+	for i := 0; i < MaxActiveFences+4; i++ {
+		noMatchSel, _ := ParseSelector(Selector{
+			Kind: SelectorExactURL,
+			Host: "host-a.example.com",
+			URI:  fmt.Sprintf("/no-match-%d", i),
+		}, nil)
+		_, _ = c.InvalidateScope(context.Background(), noMatchSel, InvalidateOptions{})
+	}
+
+	// While the original prefix purge is still paused before its first batch,
+	// a concurrent GET /target/1 MUST be fenced (MISS, never HIT).
+	recDuring := httptest.NewRecorder()
+	h.ServeHTTP(recDuring, reqTarget)
+	if recDuring.Header().Get("X-Cache") == "HIT" {
+		t.Fatalf("active fence was evicted by completed no-match purges, allowing stale HIT!")
+	}
+	close(releaseActivePurge)
+	wg.Wait()
+
+	// 2. Round 2: High-water generation write failure surfaces as uncertain.
+	diskDir := t.TempDir()
+	cDisk := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DiskPath:      diskDir,
+		DiskMaxSize:   config.Size(8 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	})
+	cDisk.disk.mu.Lock()
+	cDisk.disk.testWriteHighWaterErr = errors.New("injected high-water write failure")
+	cDisk.disk.mu.Unlock()
+	hwSel, _ := ParseSelector(Selector{
+		Kind: SelectorExactURL,
+		Host: "host-a.example.com",
+		URI:  "/hw-fail",
+	}, nil)
+	hwRes, err := cDisk.InvalidateScope(context.Background(), hwSel, InvalidateOptions{})
+	if err != nil {
+		t.Fatalf("InvalidateScope hw-fail: %v", err)
+	}
+	if hwRes.State == "succeeded" || hwRes.InvalidationEffective != "uncertain" {
+		t.Fatalf("expected high-water persistence failure to report uncertain, got %+v", hwRes)
+	}
+
+	// 3. Round 3: Header-only handler (no WriteHeader or Write) strips Cache-Tag across miss, bypass, and unsafe/non-unsafe methods.
+	stripTrue := true
+	cStrip := newTestCache(t, config.CacheConfig{
+		Enabled:         true,
+		MemoryMaxSize:   config.Size(2 << 20),
+		DefaultTTL:      config.Duration(5 * time.Minute),
+		TagHeaders:      []string{"Cache-Tag"},
+		StripTagHeaders: &stripTrue,
+	})
+	hHeaderOnly := cStrip.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Tag", "internal-header-only")
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		// Intentionally return without calling WriteHeader or Write!
+	}))
+	for _, tc := range []struct {
+		method  string
+		noStore bool
+	}{
+		{http.MethodGet, false},
+		{http.MethodGet, true},
+		{http.MethodPost, false},
+		{http.MethodOptions, false},
+	} {
+		req := httptest.NewRequest(tc.method, "http://portal.example.com/header-only", nil)
+		if tc.noStore {
+			req.Header.Set("Cache-Control", "no-store")
+		}
+		rec := httptest.NewRecorder()
+		hHeaderOnly.ServeHTTP(rec, req)
+		if got := rec.Header().Get("Cache-Tag"); got != "" {
+			t.Fatalf("header-only handler leaked Cache-Tag=%q on method=%s noStore=%v", got, tc.method, tc.noStore)
+		}
+	}
+
+	// 4. Round 6: Two evicted incomplete fences on the same host — completing the newer one preserves the older incomplete floor.
+	cEvict := newTestCache(t, config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(2 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	})
+	var evictComps []func()
+	var evictGens []uint64
+	for i := 0; i < MaxActiveFences+2; i++ {
+		s, _ := ParseSelector(Selector{
+			Kind: SelectorExactURL,
+			Host: "host-a.example.com",
+			URI:  fmt.Sprintf("/inc-%d", i),
+		}, nil)
+		fg, comp := cEvict.BeginSelectorFence(s)
+		evictGens = append(evictGens, fg)
+		evictComps = append(evictComps, comp)
+	}
+	// evictGens[0] and evictGens[1] were evicted into evictedIncompleteHostGens["host-a.example.com"].
+	// Complete the newer evicted one (evictGens[1]) and verify incompleteHostFloorGen drops to evictGens[0] (> 0).
+	evictComps[1]()
+	cEvict.genMu.Lock()
+	remFloor := cEvict.incompleteHostFloorGen["host-a.example.com"]
+	cEvict.genMu.Unlock()
+	if remFloor != evictGens[0] {
+		t.Fatalf("expected incompleteHostFloorGen to remain at older evicted gen %d after completing %d, got %d", evictGens[0], evictGens[1], remFloor)
+	}
+	for _, comp := range evictComps {
+		comp()
+	}
+
+	// 5. Exercise completed-fence coalescing with matchedResources, PreviewScope(SelectorAll), TagMatchAll truncation, and SelectorAll high-water error.
+	cDisk.set(keyFor(http.MethodGet, "host-a.example.com", "/all-item"), &Entry{
+		Status:    http.StatusOK,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Minute),
+		Body:      []byte("all"),
+		Tags:      []string{"t1", "t2"},
+	})
+	opHold, _ := cDisk.beginInflightOriginOp()
+	sameSel, _ := ParseSelector(Selector{Kind: SelectorExactURL, Host: "host-a.example.com", URI: "/all-item"}, nil)
+	_, _ = cDisk.InvalidateScope(context.Background(), sameSel, InvalidateOptions{})
+	cDisk.set(keyFor(http.MethodGet, "host-a.example.com", "/all-item"), &Entry{
+		Status:    http.StatusOK,
+		CreatedAt: time.Now(),
+		ExpiresAt: time.Now().Add(time.Minute),
+		Body:      []byte("all-2"),
+		Tags:      []string{"t1", "t2"},
+	})
+	fgActive, compActive := cDisk.BeginSelectorFence(sameSel)
+	_, _ = cDisk.InvalidateScope(context.Background(), sameSel, InvalidateOptions{ReuseFenceGen: fgActive})
+	compActive()
+	cDisk.endInflightOriginOp(opHold)
+
+	// Exercise TagMatchAll truncation and SelectorAll preview/invalidate.
+	for i := 0; i < 4; i++ {
+		cDisk.set(keyFor(http.MethodGet, "host-a.example.com", fmt.Sprintf("/tag-all-%d", i)), &Entry{
+			Status:    http.StatusOK,
+			CreatedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Minute),
+			Body:      []byte("t"),
+			Tags:      []string{"t1", "t2"},
+		})
+	}
+	tagAllSel, _ := ParseSelector(Selector{Kind: SelectorTag, Host: "host-a.example.com", Tags: []string{"t1", "t2"}, TagMatch: TagMatchAll}, nil)
+	_ = cDisk.PreviewScope(tagAllSel, PreviewOptions{MaxScanEntries: 1})
+
+	allSel, _ := ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+	_ = cDisk.PreviewScope(allSel, PreviewOptions{MaxScanEntries: 1})
+	_, _ = cDisk.InvalidateScope(context.Background(), allSel, InvalidateOptions{})
+
+	// Exercise readDiskEntryMetaWithKeyGen corruption branches (invalid tag, >32 tags, >1024 tag bytes).
+	for idx, badTags := range [][]string{
+		{"invalid tag with spaces"},
+		make([]string, MaxTagsPerEntry+1),
+		{strings.Repeat("a", 120), strings.Repeat("b", 120), strings.Repeat("c", 120), strings.Repeat("d", 120), strings.Repeat("e", 120), strings.Repeat("f", 120), strings.Repeat("g", 120), strings.Repeat("h", 120), strings.Repeat("i", 120)},
+	} {
+		p := filepath.Join(diskDir, fmt.Sprintf("corrupt-meta-%d", idx))
+		tail, _ := encodeDiskTrailerAndMetaWithKeyGen("GET\nhost-a.example.com\n/x", 1, &Entry{
+			Status: http.StatusOK,
+			Tags:   badTags,
+		}, 0)
+		_ = os.WriteFile(p, tail, 0o600)
+		_, _, _, _, _, _ = readDiskEntryMetaWithKeyGen(p)
+	}
+}
+
+

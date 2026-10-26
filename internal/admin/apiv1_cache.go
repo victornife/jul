@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"jul/internal/adminapi"
+	"jul/internal/adminoidc"
 	"jul/internal/atomicfile"
 	"jul/internal/cache"
 	"jul/internal/config"
@@ -55,6 +56,7 @@ type cachePurgeRecord struct {
 	IdempotencyOperation   string                      `json:"idempotency_operation,omitempty"`
 	CreatedAt              time.Time                   `json:"created_at"`
 	Response               adminapi.CachePurgeResponse `json:"response"`
+	execSelector           *cache.NormalizedSelector   `json:"-"`
 }
 
 type cachePurgeLedger struct {
@@ -99,26 +101,84 @@ func (s *Server) cacheDiskPath() string {
 	return strings.TrimSpace(cfg.Cache.DiskPath)
 }
 
-func (s *Server) ensurePurgeLedgerLoadedLocked(diskDir string) {
+func (s *Server) evictOneLedgerRecordLocked(now time.Time) (*cachePurgeRecord, int, bool) {
+	for i, cand := range s.purgeLedger.records {
+		if !cand.Response.Terminal {
+			continue
+		}
+		if cand.IdempotencyKey != "" && now.Sub(cand.CreatedAt) < cachePurgeLedgerMinAge {
+			continue
+		}
+		s.purgeLedger.records = append(s.purgeLedger.records[:i], s.purgeLedger.records[i+1:]...)
+		delete(s.purgeLedger.byID, cand.OperationID)
+		if cand.IdempotencyKey != "" {
+			delete(s.purgeLedger.byIdem, idemMapKey(cand.Principal, cand.IdempotencyKey))
+		}
+		return cand, i, true
+	}
+	return nil, -1, false
+}
+
+func (s *Server) rollbackAdmittedRecordLocked(opID string, rec, reuseRecord, evictedRec *cachePurgeRecord, prevSnapshot adminapi.CachePurgeResponse, evictIdx int, idemMeta *v1IdempotencyMetadata) {
+	if reuseRecord != nil {
+		reuseRecord.Response = prevSnapshot
+		return
+	}
+	delete(s.purgeLedger.byID, opID)
+	if idemMeta != nil {
+		delete(s.purgeLedger.byIdem, idemMapKey(idemMeta.Principal, idemMeta.Key))
+	}
+	for i := len(s.purgeLedger.records) - 1; i >= 0; i-- {
+		if s.purgeLedger.records[i] == rec {
+			s.purgeLedger.records = append(s.purgeLedger.records[:i], s.purgeLedger.records[i+1:]...)
+			break
+		}
+	}
+	if evictedRec != nil && evictIdx >= 0 && evictIdx <= len(s.purgeLedger.records) {
+		s.purgeLedger.records = append(s.purgeLedger.records[:evictIdx], append([]*cachePurgeRecord{evictedRec}, s.purgeLedger.records[evictIdx:]...)...)
+		s.purgeLedger.byID[evictedRec.OperationID] = evictedRec
+		if evictedRec.IdempotencyKey != "" {
+			s.purgeLedger.byIdem[idemMapKey(evictedRec.Principal, evictedRec.IdempotencyKey)] = evictedRec
+		}
+	}
+}
+
+func (s *Server) ensurePurgeLedgerLoadedLocked(diskDir string) error {
 	if s.purgeLedger == nil {
 		s.purgeLedger = newCachePurgeLedger()
 	}
 	if diskDir == "" || s.purgeLedger.loadedDisk == diskDir {
-		return
+		return nil
 	}
-	s.purgeLedger.loadedDisk = diskDir
 	path := filepath.Join(diskDir, diskPurgeLedgerFilename)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return
+		if os.IsNotExist(err) {
+			s.purgeLedger.loadedDisk = diskDir
+			return nil
+		}
+		return err
 	}
 	var persisted []*cachePurgeRecord
 	if err := json.Unmarshal(data, &persisted); err != nil {
-		return
+		return err
 	}
+	now := time.Now().UTC()
+	changed := false
 	for _, rec := range persisted {
 		if rec == nil || rec.OperationID == "" {
 			continue
+		}
+		if !rec.Response.Terminal {
+			rec.Response.State = "failed"
+			rec.Response.Terminal = true
+			rec.Response.Outcome = "interrupted"
+			rec.Response.InvalidationEffective = "uncertain"
+			rec.Response.RecoveryGuidance = "The server restarted while this invalidation was in flight; outcome is uncertain. Retry with the same Idempotency-Key or operation_id to complete cleanup."
+			changed = true
+		}
+		if rec.Response.Warnings == nil {
+			rec.Response.Warnings = []adminapi.CacheGuidance{}
 		}
 		if _, exists := s.purgeLedger.byID[rec.OperationID]; exists {
 			continue
@@ -130,24 +190,32 @@ func (s *Server) ensurePurgeLedgerLoadedLocked(diskDir string) {
 		}
 	}
 	for len(s.purgeLedger.records) > maxRetainedCachePurgeOps {
-		evicted := s.purgeLedger.records[0]
-		s.purgeLedger.records = s.purgeLedger.records[1:]
-		delete(s.purgeLedger.byID, evicted.OperationID)
-		if evicted.IdempotencyKey != "" {
-			delete(s.purgeLedger.byIdem, idemMapKey(evicted.Principal, evicted.IdempotencyKey))
+		if _, _, ok := s.evictOneLedgerRecordLocked(now); !ok {
+			break
+		}
+		changed = true
+	}
+	if changed {
+		if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
+			s.purgeLedger.records = nil
+			s.purgeLedger.byID = make(map[string]*cachePurgeRecord)
+			s.purgeLedger.byIdem = make(map[string]*cachePurgeRecord)
+			return err
 		}
 	}
+	s.purgeLedger.loadedDisk = diskDir
+	return nil
 }
 
-func (s *Server) persistPurgeLedgerLocked(diskDir string) {
+func (s *Server) persistPurgeLedgerLocked(diskDir string) error {
 	if diskDir == "" || s.purgeLedger == nil {
-		return
+		return nil
 	}
 	data, err := json.Marshal(s.purgeLedger.records)
 	if err != nil {
-		return
+		return err
 	}
-	_ = atomicfile.Write(filepath.Join(diskDir, diskPurgeLedgerFilename), data, 0o600)
+	return atomicfile.Write(filepath.Join(diskDir, diskPurgeLedgerFilename), data, 0o600)
 }
 
 func (s *Server) callerPrincipal(r *http.Request) string {
@@ -184,34 +252,34 @@ func (s *Server) computePreviewMAC(principal, selectorDigest string, broad bool,
 	return h.Sum(nil)[:16]
 }
 
-func (s *Server) verifyPreviewToken(token, principal, selectorDigest string, now time.Time) (cacheSeq uint64, ok bool) {
+func (s *Server) verifyPreviewToken(token, principal, selectorDigest string, now time.Time) (cacheSeq uint64, wasBroad bool, ok bool) {
 	parts := strings.Split(strings.TrimSpace(token), ".")
 	if len(parts) != 4 || parts[0] != "cpt1" {
-		return 0, false
+		return 0, false, false
 	}
 	seq, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
-		return 0, false
+		return 0, false, false
 	}
 	ts, err := strconv.ParseInt(parts[2], 10, 64)
 	if err != nil {
-		return 0, false
+		return 0, false, false
 	}
 	issued := time.Unix(ts, 0)
 	if now.Sub(issued) > previewTokenMaxAge || issued.Sub(now) > time.Minute {
-		return 0, false
+		return 0, false, false
 	}
 	gotMAC, err := hex.DecodeString(parts[3])
 	if err != nil || len(gotMAC) != 16 {
-		return 0, false
+		return 0, false, false
 	}
 	for _, broad := range []bool{false, true} {
 		wantMAC := s.computePreviewMAC(principal, selectorDigest, broad, seq, ts)
 		if hmac.Equal(gotMAC, wantMAC) {
-			return seq, true
+			return seq, broad, true
 		}
 	}
-	return 0, false
+	return 0, false, false
 }
 
 func toCacheSelector(in adminapi.CacheSelector) cache.Selector {
@@ -257,7 +325,7 @@ func selectorErrorToAPIError(err error) *adminapi.Error {
 }
 
 func buildCachePurgeWarnings(sel cache.NormalizedSelector, broad, truncated, tagEnabled, cacheEnabled bool) []adminapi.CacheGuidance {
-	var out []adminapi.CacheGuidance
+	out := make([]adminapi.CacheGuidance, 0, 2)
 	if !cacheEnabled {
 		out = append(out, adminapi.CacheGuidance{
 			Code:     "cache_disabled",
@@ -381,15 +449,23 @@ func (s *Server) handleV1CachePurgePreview(w http.ResponseWriter, r *http.Reques
 	token := s.mintPreviewToken(principal, digestHex, preview.BroadScope, preview.CacheSequence, preview.AsOf)
 	redactedSel := fromCacheSelector(normSel.RedactedSummary())
 
-	var samples []adminapi.CacheResourceSample
+	samples := make([]adminapi.CacheResourceSample, 0, len(preview.Samples))
 	for _, sm := range preview.Samples {
+		methods := sm.Methods
+		if methods == nil {
+			methods = []string{}
+		}
+		tiers := sm.Tiers
+		if tiers == nil {
+			tiers = []string{}
+		}
 		samples = append(samples, adminapi.CacheResourceSample{
 			Host:            sm.Host,
 			Path:            sm.Path,
 			HasQuery:        sm.HasQuery,
-			Methods:         sm.Methods,
+			Methods:         methods,
 			Representations: sm.Representations,
-			Tiers:           sm.Tiers,
+			Tiers:           tiers,
 			BodyBytes:       sm.BodyBytes,
 			VaryFields:      sm.VaryFields,
 			Tags:            sm.Tags,
@@ -466,9 +542,9 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 
 	var previewSeq uint64
-	previewVerified := false
+	previewWasBroad := false
 	if strings.TrimSpace(req.PreviewToken) != "" {
-		seq, ok := s.verifyPreviewToken(req.PreviewToken, principal, digestHex, now)
+		seq, wasBroad, ok := s.verifyPreviewToken(req.PreviewToken, principal, digestHex, now)
 		if !ok {
 			s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: preview_token mismatch or expired")
 			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest,
@@ -477,13 +553,13 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		previewSeq = seq
-		previewVerified = true
+		previewWasBroad = wasBroad
 	}
 
-	if normSel.BroadScope && !req.ConfirmBroad && !previewVerified {
+	if (normSel.BroadScope || previewWasBroad) && !req.ConfirmBroad {
 		s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: broad scope confirmation required")
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest,
-			"broad cache invalidation (host or all) requires confirm_broad = true or a matching preview_token").
+			"broad cache invalidation (>= 100 matched resources, truncated scan, host, or all) requires confirm_broad = true").
 			WithDetails(adminapi.Details{Field: "confirm_broad"}))
 		return
 	}
@@ -492,7 +568,12 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	s.ensurePurgeLedgerInit()
 
 	s.purgeLedger.mu.Lock()
-	s.ensurePurgeLedgerLoadedLocked(diskDir)
+	if err := s.ensurePurgeLedgerLoadedLocked(diskDir); err != nil {
+		s.purgeLedger.mu.Unlock()
+		s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: durable purge ledger unavailable")
+		writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
+		return
+	}
 
 	var reuseFenceGen uint64
 	var reuseRecord *cachePurgeRecord
@@ -517,6 +598,9 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 			}
 			if existing.Response.State == "succeeded" {
 				replayResp := existing.Response
+				if replayResp.Warnings == nil {
+					replayResp.Warnings = []adminapi.CacheGuidance{}
+				}
 				replayResp.IdempotentReplay = true
 				replayResp.AuthorityState = s.v1AuthorityState()
 				s.purgeLedger.mu.Unlock()
@@ -538,6 +622,18 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 				WithDetails(adminapi.Details{Kind: "cache_purge_operation", ID: retryID}))
 			return
 		}
+		// If the caller is retrying a looked-up operation whose display selector had
+		// a redacted query ("?<redacted>") and the server holds the executable
+		// selector in memory, resolve the original executable selector.
+		if prior.Response.SelectorDigest != digestHex && prior.execSelector != nil {
+			redactedPrior := fromCacheSelector(prior.execSelector.RedactedSummary())
+			if req.Selector.Kind == redactedPrior.Kind && req.Selector.Host == redactedPrior.Host &&
+				((redactedPrior.URI != "" && req.Selector.URI == redactedPrior.URI) ||
+					(redactedPrior.Key != "" && req.Selector.Key == redactedPrior.Key)) {
+				normSel = *prior.execSelector
+				digestHex = normSel.DigestHex()
+			}
+		}
 		if prior.Response.SelectorDigest != digestHex {
 			s.purgeLedger.mu.Unlock()
 			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest,
@@ -545,8 +641,19 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 				WithDetails(adminapi.Details{Field: "retry_operation_id"}))
 			return
 		}
-		if prior.Response.Terminal && prior.Response.State == "succeeded" {
+		if !prior.Response.Terminal {
+			opID := prior.OperationID
+			s.purgeLedger.mu.Unlock()
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeIdempotencyKeyInUse,
+				"The referenced cache purge operation is still in flight; poll its operation_id.").
+				WithDetails(adminapi.Details{ApplyID: opID}))
+			return
+		}
+		if prior.Response.State == "succeeded" {
 			replayResp := prior.Response
+			if replayResp.Warnings == nil {
+				replayResp.Warnings = []adminapi.CacheGuidance{}
+			}
 			replayResp.IdempotentReplay = true
 			replayResp.AuthorityState = s.v1AuthorityState()
 			s.purgeLedger.mu.Unlock()
@@ -554,26 +661,13 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		reuseFenceGen = prior.Response.FenceSequence
-	}
-
-	if len(s.purgeLedger.records) >= maxRetainedCachePurgeOps {
-		oldest := s.purgeLedger.records[0]
-		if now.Sub(oldest.CreatedAt) < cachePurgeLedgerMinAge && idemMeta != nil {
-			s.purgeLedger.mu.Unlock()
-			one := 1
-			w.Header().Set("Retry-After", "1")
-			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeRateLimited,
-				"The cache purge idempotency ledger is at capacity within its retention window; retry shortly.").
-				WithDetails(adminapi.Details{RetryAfterSeconds: &one}))
-			return
-		}
-		s.purgeLedger.records = s.purgeLedger.records[1:]
-		delete(s.purgeLedger.byID, oldest.OperationID)
-		if oldest.IdempotencyKey != "" {
-			delete(s.purgeLedger.byIdem, idemMapKey(oldest.Principal, oldest.IdempotencyKey))
+		if reuseRecord == nil {
+			reuseRecord = prior
 		}
 	}
 
+	// Stage concurrency admission and live permission re-verification BEFORE
+	// evicting or mutating any retained record in s.purgeLedger (F04, F06).
 	if s.cachePurgeInflight.Add(1) > maxConcurrentCachePurges {
 		s.cachePurgeInflight.Add(-1)
 		s.purgeLedger.mu.Unlock()
@@ -586,12 +680,25 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.cachePurgeInflight.Add(-1)
 
-	// Re-verify against the latest live auth snapshot at the execution boundary
-	// so an RBAC policy change while acquiring the operation slot immediately
-	// revokes destructive execution authority.
 	if !s.verifyLivePurgePermission(w, r) {
 		s.purgeLedger.mu.Unlock()
 		return
+	}
+
+	var evictedRec *cachePurgeRecord
+	evictIdx := -1
+	if reuseRecord == nil && len(s.purgeLedger.records) >= maxRetainedCachePurgeOps {
+		var ok bool
+		evictedRec, evictIdx, ok = s.evictOneLedgerRecordLocked(now)
+		if !ok {
+			s.purgeLedger.mu.Unlock()
+			one := 1
+			w.Header().Set("Retry-After", "1")
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeRateLimited,
+				"The cache purge idempotency ledger is at capacity within its retention window; retry shortly.").
+				WithDetails(adminapi.Details{RetryAfterSeconds: &one}))
+			return
+		}
 	}
 
 	bootID := s.bootID()
@@ -600,22 +707,30 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		bootShort = bootShort[:8]
 	}
 	redactedSel := fromCacheSelector(normSel.RedactedSummary())
+	normSelCopy := normSel
 
 	var opID string
 	var rec *cachePurgeRecord
+	var prevRecSnapshot adminapi.CachePurgeResponse
 	if reuseRecord != nil {
 		opID = reuseRecord.OperationID
 		rec = reuseRecord
+		prevRecSnapshot = reuseRecord.Response
+		rec.execSelector = &normSelCopy
 		rec.Response.State = "running"
 		rec.Response.Terminal = false
 		rec.Response.Outcome = "running"
+		if rec.Response.Warnings == nil {
+			rec.Response.Warnings = []adminapi.CacheGuidance{}
+		}
 	} else {
 		s.purgeLedger.seq++
 		opID = fmt.Sprintf("cp_%d_%s", s.purgeLedger.seq, bootShort)
 		rec = &cachePurgeRecord{
-			OperationID: opID,
-			Principal:   principal,
-			CreatedAt:   now,
+			OperationID:  opID,
+			Principal:    principal,
+			CreatedAt:    now,
+			execSelector: &normSelCopy,
 			Response: adminapi.CachePurgeResponse{
 				APIVersion:            adminapi.APIVersion,
 				OperationID:           opID,
@@ -626,6 +741,7 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 				Selector:              redactedSel,
 				SelectorDigest:        digestHex,
 				StartedAt:             adminapi.Timestamp(now),
+				Warnings:              []adminapi.CacheGuidance{},
 				BootID:                bootID,
 				AuthorityState:        s.v1AuthorityState(),
 			},
@@ -639,6 +755,13 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		}
 		s.purgeLedger.records = append(s.purgeLedger.records, rec)
 		s.purgeLedger.byID[opID] = rec
+	}
+	if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
+		s.rollbackAdmittedRecordLocked(opID, rec, reuseRecord, evictedRec, prevRecSnapshot, evictIdx, idemMeta)
+		s.purgeLedger.mu.Unlock()
+		s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: durable purge ledger write failed")
+		writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
+		return
 	}
 	s.purgeLedger.mu.Unlock()
 
@@ -655,6 +778,7 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	cacheEnabled := s.deps.Cache != nil && (cfg == nil || cfg.Cache.Enabled)
 	tagEnabled := cfg != nil && len(cfg.Cache.TagHeaders) > 0
 
+	requireBroadConfirm := !req.ConfirmBroad
 	var invRes cache.InvalidateResult
 	var invErr error
 	if s.deps.Cache == nil {
@@ -668,8 +792,9 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if sp, ok := s.deps.Cache.(ScopedPurger); ok {
 		invRes, invErr = sp.InvalidateScope(opCtx, normSel, cache.InvalidateOptions{
-			PreviewSequence: previewSeq,
-			ReuseFenceGen:   reuseFenceGen,
+			PreviewSequence:     previewSeq,
+			ReuseFenceGen:       reuseFenceGen,
+			RequireBroadConfirm: requireBroadConfirm,
 		})
 	} else {
 		// Minimal Purger fake in legacy tests.
@@ -699,20 +824,31 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 
 	if invErr != nil && invRes.State == "" {
 		s.purgeLedger.mu.Lock()
-		delete(s.purgeLedger.byID, opID)
-		if idemMeta != nil {
-			delete(s.purgeLedger.byIdem, idemMapKey(idemMeta.Principal, idemMeta.Key))
-		}
-		if len(s.purgeLedger.records) > 0 && s.purgeLedger.records[len(s.purgeLedger.records)-1] == rec {
-			s.purgeLedger.records = s.purgeLedger.records[:len(s.purgeLedger.records)-1]
+		s.rollbackAdmittedRecordLocked(opID, rec, reuseRecord, evictedRec, prevRecSnapshot, evictIdx, idemMeta)
+		if pErr := s.persistPurgeLedgerLocked(diskDir); pErr != nil {
+			rec.Response.State = "failed"
+			rec.Response.Terminal = true
+			rec.Response.Outcome = "failed"
+			rec.Response.InvalidationEffective = "uncertain"
+			s.purgeLedger.records = append(s.purgeLedger.records, rec)
+			s.purgeLedger.byID[opID] = rec
+			s.purgeLedger.mu.Unlock()
+			s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: durable purge ledger cleanup write failed")
+			writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
+			return
 		}
 		s.purgeLedger.mu.Unlock()
 		s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: "+invErr.Error())
+		errField := "selector"
+		if errors.Is(invErr, cache.ErrBroadConfirmRequired) {
+			errField = "confirm_broad"
+		}
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest, "%s", invErr.Error()).
-			WithDetails(adminapi.Details{Field: "selector"}))
+			WithDetails(adminapi.Details{Field: errField}))
 		return
 	}
 
+	finalBroad := normSel.BroadScope || invRes.InvalidatedResources >= cache.BroadScopeResourceThr
 	finalResp := adminapi.CachePurgeResponse{
 		APIVersion:                 adminapi.APIVersion,
 		OperationID:                opID,
@@ -736,14 +872,20 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		StartedAt:                  adminapi.Timestamp(invRes.StartedAt),
 		CompletedAt:                adminapi.Timestamp(invRes.CompletedAt),
 		RecoveryGuidance:           invRes.RecoveryGuidance,
-		Warnings:                   buildCachePurgeWarnings(normSel, normSel.BroadScope, false, tagEnabled, cacheEnabled),
+		Warnings:                   buildCachePurgeWarnings(normSel, finalBroad, false, tagEnabled, cacheEnabled),
 		BootID:                     bootID,
 		AuthorityState:             s.v1AuthorityState(),
 	}
 
 	s.purgeLedger.mu.Lock()
 	rec.Response = finalResp
-	s.persistPurgeLedgerLocked(diskDir)
+	if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
+		finalResp.State = "partial"
+		finalResp.Outcome = "partial_failure"
+		finalResp.InvalidationEffective = "uncertain"
+		finalResp.RecoveryGuidance = "Cache entries were invalidated in memory/disk, but persisting the durable operation ledger failed; inspect [cache].disk_path before retrying."
+		rec.Response = finalResp
+	}
 	s.purgeLedger.mu.Unlock()
 
 	auditResult := "success"
@@ -773,12 +915,19 @@ func (s *Server) handleV1CachePurgeGet(w http.ResponseWriter, r *http.Request) {
 	s.ensurePurgeLedgerInit()
 
 	s.purgeLedger.mu.Lock()
-	s.ensurePurgeLedgerLoadedLocked(diskDir)
+	if err := s.ensurePurgeLedgerLoadedLocked(diskDir); err != nil {
+		s.purgeLedger.mu.Unlock()
+		writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
+		return
+	}
 	rec, ok := s.purgeLedger.byID[opID]
 	var resp adminapi.CachePurgeResponse
 	var owner string
 	if ok {
 		resp = rec.Response
+		if resp.Warnings == nil {
+			resp.Warnings = []adminapi.CacheGuidance{}
+		}
 		owner = rec.Principal
 	}
 	s.purgeLedger.mu.Unlock()
@@ -831,12 +980,51 @@ func emptyOrDash(v string) string {
 
 func (s *Server) verifyLivePurgePermission(w http.ResponseWriter, r *http.Request) bool {
 	snap := s.currentAuth()
-	if snap.mode == authModeRBAC {
-		if id, ok := rbacIdentityFromRequest(r); ok && !snap.policy.Authorize(id, rbac.CachePurge) {
-			s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(rbac.CachePurge))
-			writeForbidden(w, r, rbac.CachePurge, id)
+	now := time.Now()
+	switch snap.mode {
+	case authModeBlocked:
+		writeRBACUnavailable(w, r)
+		return false
+	case authModeRBAC:
+		bearer := adminAuthorization(r)
+		if bearer != "" || adminoidc.CookiePresented(r) {
+			authID, err := authenticateAdminRBAC(r, snap, bearer, now)
+			if err == rbac.ErrDisabled {
+				s.writeUnauthenticated(w, r, "The principal is disabled or expired.")
+				return false
+			}
+			if err != nil {
+				s.writeUnauthenticated(w, r, "")
+				return false
+			}
+			if prevID, ok := rbacIdentityFromRequest(r); ok && prevID.Principal != "" && authID.Principal != prevID.Principal {
+				s.writeUnauthenticated(w, r, "")
+				return false
+			}
+			if !snap.policy.Authorize(authID, rbac.CachePurge) {
+				s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(rbac.CachePurge))
+				writeForbidden(w, r, rbac.CachePurge, authID)
+				return false
+			}
+			return true
+		}
+		if id, ok := rbacIdentityFromRequest(r); ok {
+			if !snap.policy.Authorize(id, rbac.CachePurge) {
+				s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(rbac.CachePurge))
+				writeForbidden(w, r, rbac.CachePurge, id)
+				return false
+			}
+			return true
+		}
+		s.writeUnauthenticated(w, r, "")
+		return false
+	case authModeLegacy:
+		if r.Header.Get("Authorization") != "" && !checkLegacyToken(r, snap.cfg.Token) {
+			s.writeUnauthenticated(w, r, "")
 			return false
 		}
+		return true
+	default:
+		return true
 	}
-	return true
 }

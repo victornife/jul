@@ -73,10 +73,15 @@ type Cache struct {
 	tagIndex            map[string]map[string]map[string]struct{}
 	baseIndexedTags     map[string][]string
 	totalTagLinks       int
-	fences              []selectorFence
-	fenceFloorGen       uint64
-	latestFenceGen      atomic.Uint64
-	originOpSeq         uint64
+	fences                    []selectorFence
+	fenceFloorGen             uint64
+	hostFenceFloorGen         map[string]uint64
+	incompleteFloorGen        uint64
+	incompleteHostFloorGen    map[string]uint64
+	evictedIncompleteHostGens map[string]map[uint64]struct{}
+	latestFenceGen            atomic.Uint64
+	incompleteFenceGen        atomic.Uint64
+	originOpSeq               uint64
 	inflightOps         map[uint64]uint64
 	onBeforeReclaim     func(key string)
 	onAfterFenceInstall func(sel NormalizedSelector, fenceGen uint64)
@@ -165,6 +170,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		}
 		d.onSkip = c.captureSkipped
 		d.checkGen = c.isGenCurrent
+		d.canCommit = c.canCommitToDisk
 		d.onKeyDiskState = c.setKeyDiskState
 		d.onRehydrate = c.onDiskRehydrated
 		c.disk = d
@@ -172,6 +178,9 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		rehydrated := d.snapshotItemsLocked()
 		d.mu.Unlock()
 		c.onDiskRehydrated(rehydrated)
+		if hw := d.highWaterMark(); hw > c.genSeq.Load() {
+			c.genSeq.Store(hw)
+		}
 	}
 	c.mem = newMemStore(cfg.MemoryMaxSize.Bytes(), nil)
 	c.mem.pinVictims = func(victims []*memItem) {
@@ -180,8 +189,8 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		c.genMu.Unlock()
 	}
 	c.mem.onEvictItem = func(it *memItem) {
-		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) && !c.isEntryFenced(it.gen, it.key, it.entry) {
-			c.disk.setWithGen(it.key, it.entry, it.gen)
+		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) && !c.isPublicationFenced(it.gen, it.key, it.entry, nil) {
+			c.disk.setWithGenFull(it.key, it.entry, it.gen, it.gen, true, nil)
 		}
 		if it.pinnedState != nil {
 			c.finishKeyOp(it.pinnedState)
@@ -259,27 +268,30 @@ func (c *Cache) captureSkipped(reason string) {
 }
 
 type keyGenState struct {
-	key        string
-	baseKey    string
-	host       string
-	requestURI string
-	method     string
-	isVariant  bool
-	isVaryStub bool
-	variants   []string
-	tags       []string
-	bodyBytes  int64
-	memBytes   int64
-	diskBytes  int64
-	createdAt  time.Time
-	expiresAt  time.Time
-	staleUntil time.Time
-	varyFields []string
-	gen        uint64
-	inflight   int32
-	inMem      bool
-	inDisk     bool
-	indexed    bool
+	key                    string
+	baseKey                string
+	host                   string
+	requestURI             string
+	method                 string
+	isVariant              bool
+	isVaryStub             bool
+	variants               []string
+	tags                   []string
+	retainedTags           []string
+	ingestedTagHeaders     [8]string
+	ingestedTagHeaderCount int
+	bodyBytes              int64
+	memBytes               int64
+	diskBytes              int64
+	createdAt              time.Time
+	expiresAt              time.Time
+	staleUntil             time.Time
+	varyFields             []string
+	gen                    uint64
+	inflight               int32
+	inMem                  bool
+	inDisk                 bool
+	indexed                bool
 }
 
 func (c *Cache) beginNextGenLocked(key string) (st *keyGenState, gen, prevGen uint64, hadPrev bool) {
@@ -385,6 +397,23 @@ func (c *Cache) isGenCurrent(key string, gen uint64) bool {
 	return c.isGenCurrentLocked(key, gen)
 }
 
+func (c *Cache) canCommitToDisk(key string, gen, startGen uint64, hasStartGen bool, e *Entry, extraTags []string) bool {
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
+	if !c.isGenCurrentLocked(key, gen) {
+		return false
+	}
+	if e != nil && !e.IsVaryStub && e.tagPolicyTracked {
+		if curPol := c.Policy(); curPol.TagHeaderCount > 0 && (e.ingestedTagHeaderCount != curPol.TagHeaderCount || e.ingestedTagHeaders != curPol.TagHeaders) {
+			return false
+		}
+	}
+	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) {
+		return false
+	}
+	return true
+}
+
 func (c *Cache) hasStoredKey(key string) bool {
 	if _, ok := c.mem.get(key); ok {
 		return true
@@ -397,7 +426,7 @@ func (c *Cache) hasStoredKey(key string) bool {
 
 func (c *Cache) get(key string) (*Entry, bool) {
 	if e, mgen, ok := c.mem.getWithGen(key); ok {
-		if lf := c.latestFenceGen.Load(); lf > 0 && mgen <= lf && c.isEntryFenced(mgen, key, e) {
+		if lf := c.incompleteFenceGen.Load(); lf > 0 && mgen <= lf && c.isResidentEntryFenced(mgen, key, e) {
 			c.delOneIfGenAtMost(key, mgen)
 		} else {
 			return e, true
@@ -420,7 +449,7 @@ func (c *Cache) get(key string) (*Entry, bool) {
 			curGen = curSt.gen
 		}
 		stillValid := c.purgeGen == prePurge && curSt == st && curGen == preGen &&
-			c.isGenCurrentLocked(key, diskGen) && !c.isEntryFencedLocked(diskGen, key, e.Tags)
+			c.isGenCurrentLocked(key, diskGen) && !c.isResidentEntryFencedLocked(diskGen, key, e.Tags)
 		if !stillValid {
 			c.genMu.Unlock()
 			c.finishKeyOp(st)
@@ -463,7 +492,13 @@ func (c *Cache) setWithStartGen(key string, e *Entry, startGen uint64, hasStartG
 
 func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool, extraTags []string) (stored, fenced bool) {
 	c.genMu.Lock()
-	if hasStartGen && e != nil && (c.isEntryFencedLocked(startGen, key, e.Tags) || (len(extraTags) > 0 && c.isEntryFencedLocked(startGen, key, extraTags))) {
+	if e != nil && !e.IsVaryStub && e.tagPolicyTracked {
+		if curPol := c.Policy(); curPol.TagHeaderCount > 0 && (e.ingestedTagHeaderCount != curPol.TagHeaderCount || e.ingestedTagHeaders != curPol.TagHeaders) {
+			c.genMu.Unlock()
+			return false, true
+		}
+	}
+	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) {
 		c.genMu.Unlock()
 		return false, true
 	}
@@ -498,7 +533,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 	c.genMu.Unlock()
 	c.mem.flushVictims(victims)
 	if c.disk != nil {
-		if !c.disk.setWithGen(key, e, gen) {
+		if !c.disk.setWithGenFull(key, e, gen, startGen, hasStartGen, extraTags) {
 			if e != nil && e.diskBody != nil {
 				c.genMu.Lock()
 				if c.keyGen[key] == st && st.gen == gen {
@@ -508,7 +543,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 						st.gen = 0
 					}
 				}
-				fencedAfterDisk := hasStartGen && (c.isEntryFencedLocked(startGen, key, e.Tags) || (len(extraTags) > 0 && c.isEntryFencedLocked(startGen, key, extraTags)))
+				fencedAfterDisk := hasStartGen && c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags)
 				c.genMu.Unlock()
 				if fencedAfterDisk {
 					c.delOneIfGenAtMost(key, gen)
@@ -528,7 +563,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 	}
 	if hasStartGen && e != nil {
 		c.genMu.Lock()
-		fencedAfter := c.isEntryFencedLocked(startGen, key, e.Tags) || (len(extraTags) > 0 && c.isEntryFencedLocked(startGen, key, extraTags))
+		fencedAfter := c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags)
 		c.genMu.Unlock()
 		if fencedAfter {
 			c.delOneIfGenAtMost(key, gen)
@@ -613,8 +648,13 @@ func (c *Cache) Purge() {
 	pGen := c.genSeq.Add(1)
 	c.purgeGen = pGen
 	c.fenceFloorGen = pGen
+	c.hostFenceFloorGen = nil
+	c.incompleteFloorGen = 0
+	c.incompleteHostFloorGen = nil
+	c.evictedIncompleteHostGens = nil
 	c.fences = nil
 	c.latestFenceGen.Store(pGen)
+	c.incompleteFenceGen.Store(0)
 	c.byHost = nil
 	c.baseVariants = nil
 	c.tagIndex = nil
@@ -624,6 +664,7 @@ func (c *Cache) Purge() {
 	c.mem.purge()
 	c.genMu.Unlock()
 	if c.disk != nil {
+		_ = c.disk.recordHighWaterGen(pGen)
 		c.disk.purge()
 	}
 }
@@ -696,7 +737,13 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 		return false
 	}
 	c.genMu.Lock()
-	if hasStartGen && e != nil && c.isEntryFencedLocked(startGen, k, e.Tags) {
+	if e != nil && !e.IsVaryStub && e.tagPolicyTracked {
+		if curPol := c.Policy(); curPol.TagHeaderCount > 0 && (e.ingestedTagHeaderCount != curPol.TagHeaderCount || e.ingestedTagHeaders != curPol.TagHeaders) {
+			c.genMu.Unlock()
+			return false
+		}
+	}
+	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, k, e.Tags, nil) {
 		c.genMu.Unlock()
 		return false
 	}
@@ -709,7 +756,7 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 			}
 		}
 	}
-	st, gen, _, _ := c.beginNextGenLocked(k)
+	st, gen, prevGen, hadPrev := c.beginNextGenLocked(k)
 	c.mem.del(k)
 	st.inMem = false
 	st.memBytes = 0
@@ -717,8 +764,17 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 		c.indexKeyEntryLocked(st, e)
 	}
 	c.genMu.Unlock()
-	blob, ok := c.disk.publishStreamWithGen(k, e, stream, gen)
+	blob, ok := c.disk.publishStreamWithGenFull(k, e, stream, gen, startGen, hasStartGen, nil)
 	if !ok {
+		c.genMu.Lock()
+		if c.keyGen[k] == st && st.gen == gen {
+			if hadPrev {
+				st.gen = prevGen
+			} else {
+				st.gen = 0
+			}
+		}
+		c.genMu.Unlock()
 		c.disk.delIfOlderGen(k, gen)
 		c.finishKeyOp(st)
 		return false
@@ -727,7 +783,7 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 	c.genMu.Lock()
 	st.diskBytes = blob.fileSize
 	c.genMu.Unlock()
-	if hasStartGen && c.isEntryFenced(startGen, k, e) {
+	if hasStartGen && c.isPublicationFenced(startGen, k, e, nil) {
 		c.delOneIfGenAtMost(k, gen)
 		c.finishKeyOp(st)
 		return false
@@ -980,12 +1036,34 @@ func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, ne
 	return effKey, false
 }
 
+func (c *Cache) serveDownstreamWithStrip(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	if isUpgradeRequest(r) {
+		next.ServeHTTP(w, r)
+		return
+	}
+	pol := c.Policy()
+	if !pol.StripTagHeaders || pol.TagHeaderCount == 0 {
+		next.ServeHTTP(w, r)
+		return
+	}
+	tagHeaders := pol.TagHeaderSlice()
+	sw := &statusWriter{
+		ResponseWriter:  w,
+		stripTagHeaders: true,
+		tagHeaders:      tagHeaders,
+	}
+	next.ServeHTTP(respwriter.Wrap(sw, w), r)
+	if !sw.wroteHeader {
+		stripConfiguredTagHeaders(w.Header(), tagHeaders)
+	}
+}
+
 // bypass forwards the request with the untouched writer and stores nothing.
 func (c *Cache) bypass(w http.ResponseWriter, r *http.Request, next http.Handler, span tracing.Span) {
 	span.SetString("cache.status", stateBypass)
 	span.End()
 	w.Header().Set("X-Cache", stateBypass)
-	next.ServeHTTP(w, r)
+	c.serveDownstreamWithStrip(w, r, next)
 }
 
 // reuseKind is the decision taken for a request that matched a stored entry.
@@ -1041,11 +1119,21 @@ func reuseDecision(e *Entry, r *http.Request, p requestPolicy, now time.Time) re
 func (c *Cache) serveUnsafe(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	if !isUnsafeMethod(r.Method) {
 		// OPTIONS and TRACE change nothing; CONNECT never has a representation.
-		next.ServeHTTP(w, r)
+		c.serveDownstreamWithStrip(w, r, next)
 		return
 	}
-	sw := &statusWriter{ResponseWriter: w}
+	pol := c.Policy()
+	tagHeaders := pol.TagHeaderSlice()
+	strip := pol.StripTagHeaders && pol.TagHeaderCount > 0
+	sw := &statusWriter{
+		ResponseWriter:  w,
+		stripTagHeaders: strip,
+		tagHeaders:      tagHeaders,
+	}
 	next.ServeHTTP(respwriter.Wrap(sw, w), r)
+	if !sw.wroteHeader && strip {
+		stripConfiguredTagHeaders(w.Header(), tagHeaders)
+	}
 	if !invalidatingStatus(sw.status) {
 		// A failed, hijacked, timed-out or canceled request changed nothing the
 		// cache can prove, so it invalidates nothing.
@@ -1094,6 +1182,15 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	// rather than needing its own denylist entry in buildEntry.
 	cw.entrySnapshot = cloneHeader(w.Header())
 	next.ServeHTTP(respwriter.Wrap(cw, w), r)
+	if !cw.wroteHeader && !cw.hijacked {
+		cw.snapshot = headerDifference(w.Header(), cw.entrySnapshot)
+		if cw.headerCheck != nil && !cw.headerCheck(http.StatusOK, cw.snapshot) {
+			cw.dropCapture()
+		}
+		if cw.stripTagHeaders && len(cw.tagHeaders) > 0 {
+			stripOriginTagHeadersFromResponse(w.Header(), cw.entrySnapshot, cw.tagHeaders)
+		}
+	}
 
 	if tagSkipReason != "" {
 		c.tagSkipped(tagSkipReason)
@@ -1372,20 +1469,23 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 	}
 
 	e := &Entry{
-		Status:             status,
-		Header:             stored,
-		Body:               copiedBody,
-		CreatedAt:          created,
-		ExpiresAt:          created.Add(ttl),
-		StaleUntil:         created.Add(ttl + swr),
-		ETag:               h.Get("ETag"),
-		LastModified:       h.Get("Last-Modified"),
-		RequiresValidation: p.NoCache,
-		MustRevalidate:     p.revalidationRequired(),
-		SharedAuthReuse:    p.sharedAuthReuse(),
-		StaleIfError:       p.SIE,
-		HasStaleIfError:    p.HasSIE,
-		Tags:               parsedTags,
+		Status:                 status,
+		Header:                 stored,
+		Body:                   copiedBody,
+		CreatedAt:              created,
+		ExpiresAt:              created.Add(ttl),
+		StaleUntil:             created.Add(ttl + swr),
+		ETag:                   h.Get("ETag"),
+		LastModified:           h.Get("Last-Modified"),
+		RequiresValidation:     p.NoCache,
+		MustRevalidate:         p.revalidationRequired(),
+		SharedAuthReuse:        p.sharedAuthReuse(),
+		StaleIfError:           p.SIE,
+		HasStaleIfError:        p.HasSIE,
+		Tags:                   parsedTags,
+		ingestedTagHeaderCount: pol.TagHeaderCount,
+		ingestedTagHeaders:     pol.TagHeaders,
+		tagPolicyTracked:       true,
 	}
 	if vary := varyFields(h); len(vary) > 0 {
 		for _, name := range vary {

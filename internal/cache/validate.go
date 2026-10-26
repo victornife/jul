@@ -83,7 +83,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		if isRange {
 			c.observeRange(rangeOutcomeFallback)
 			w.Header().Set("X-Cache", stateBypass)
-			next.ServeHTTP(w, r)
+			c.serveDownstreamWithStrip(w, r, next)
 			return
 		}
 		c.fetchAndStore(w, r, next, c.clock())
@@ -193,7 +193,7 @@ func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next htt
 	if _, isRange := rangeSpecFromRequest(r); isRange {
 		c.observeRange(rangeOutcomeFallback)
 		w.Header().Set("X-Cache", stateBypass)
-		next.ServeHTTP(w, r)
+		c.serveDownstreamWithStrip(w, r, next)
 		return
 	}
 	c.fetchAndStore(w, r, next, c.clock())

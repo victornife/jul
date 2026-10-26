@@ -5035,13 +5035,15 @@
           "memory_bytes",
           "memory_entries",
           "preview_token",
+          "samples",
           "scan_limit",
           "scanned_entries",
           "selector",
           "selector_digest",
           "source",
           "tag_ingestion_enabled",
-          "truncated"
+          "truncated",
+          "warnings"
         ],
         "additionalProperties": false
       },
@@ -5190,7 +5192,8 @@
           "selector_digest",
           "started_at",
           "state",
-          "terminal"
+          "terminal",
+          "warnings"
         ],
         "additionalProperties": false
       },

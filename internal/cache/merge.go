@@ -107,6 +107,9 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 		refreshed.Tags = nil
 	} else if present304 {
 		refreshed.Tags = tags304
+		refreshed.ingestedTagHeaderCount = pol.TagHeaderCount
+		refreshed.ingestedTagHeaders = pol.TagHeaders
+		refreshed.tagPolicyTracked = true
 	}
 	return refreshed, mergeReplace
 }

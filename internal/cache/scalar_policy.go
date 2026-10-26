@@ -161,10 +161,7 @@ func (p *PreparedCacheUpdate) Commit() {
 		return
 	}
 	pol := p.policy
-	p.c.policy.Store(&pol)
-	if pol.TagHeaderCount == 0 {
-		p.c.clearTagIndex()
-	}
+	p.c.commitPolicyAndSyncTags(pol)
 	p.c.mem.Resize(p.memMax)
 	if p.c.disk != nil {
 		if _, _, failed := p.c.disk.Resize(p.diskMax); failed > 0 {

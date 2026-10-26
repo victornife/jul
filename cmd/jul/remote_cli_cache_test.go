@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -203,3 +204,52 @@ func TestRemoteCachePurgeCLIFlowsAndDeployScript(t *testing.T) {
 		t.Fatalf("unexpected purge-on-deploy.sh result: %+v", scriptRes)
 	}
 }
+
+func TestAuditR6_ConsoleSnippetShellQuotingPreservesLiteralArgv(t *testing.T) {
+	t.Parallel()
+
+	panelPath := filepath.Join("..", "..", "internal", "admin", "ui", "src", "features", "traffic-controls", "CacheInvalidationPanel.tsx")
+	srcBytes, err := os.ReadFile(panelPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", panelPath, err)
+	}
+	src := string(srcBytes)
+	start := strings.Index(src, "function shellQuote(")
+	end := strings.Index(src, "export interface CacheInvalidationPanelProps")
+	if start < 0 || end <= start {
+		t.Fatalf("could not locate shellQuote / buildCliCommandSnippet in %s", panelPath)
+	}
+	extracted := src[start:end]
+	extracted = strings.ReplaceAll(extracted, "val: string): string", "val)")
+	extracted = strings.ReplaceAll(extracted, "export function buildCliCommandSnippet(\n  selector: CacheSelector,\n  broadScope: boolean,\n): string", "function buildCliCommandSnippet(selector, broadScope)")
+	extracted = strings.ReplaceAll(extracted, "const args: string[] =", "const args =")
+
+	dangerousTag := "tag-$(echo PWNED)-`echo PWNED`-$HOME-'single'"
+	jsRunner := extracted + "\n" + `console.log(buildCliCommandSnippet({kind:"tag", host:"portal.example.com", tags:[` + fmt.Sprintf("%q", dangerousTag) + `], tag_match:"any"}, false));`
+	nodeCmd := exec.Command("node", "-e", jsRunner)
+	snippetBytes, err := nodeCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node execution failed: %v\n%s", err, string(snippetBytes))
+	}
+	snippet := strings.TrimSpace(string(snippetBytes))
+
+	shCmd := exec.Command("bash", "-c", "jul() { printf '%s\\n' \"$@\"; }\n"+snippet)
+	argvOut, err := shCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash argv capture failed: %v\n%s", err, string(argvOut))
+	}
+	lines := strings.Split(strings.TrimSpace(string(argvOut)), "\n")
+	foundLiteral := false
+	for _, l := range lines {
+		if l == dangerousTag {
+			foundLiteral = true
+		}
+		if l == "PWNED" {
+			t.Fatalf("shell substitution executed in generated CLI snippet: %s", string(argvOut))
+		}
+	}
+	if !foundLiteral {
+		t.Fatalf("expected literal %q in captured argv %v (snippet: %s)", dangerousTag, lines, snippet)
+	}
+}
+

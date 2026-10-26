@@ -123,9 +123,10 @@ type cacheWriter struct {
 	hijacked        bool
 	writeErr        error
 	headerCheck     func(code int, h http.Header) bool
-	onAbandon       func()
-	tagHeaders      []string
-	stripTagHeaders bool
+	onAbandon         func()
+	tagHeaders        []string
+	stripTagHeaders   bool
+	interimTagHeaders http.Header
 	// snapshot is the multiset difference between the response header map at
 	// WriteHeader and entrySnapshot, taken before delegating to the outer
 	// ResponseWriter. Every wrapper from here to the real connection shares one
@@ -282,6 +283,17 @@ func (w *cacheWriter) WriteHeader(code int) {
 	// protocol switch, not an interim response, and keeps the normal treatment
 	// below.
 	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		if w.stripTagHeaders && len(w.tagHeaders) > 0 {
+			for _, name := range w.tagHeaders {
+				if vals := w.Header().Values(name); len(vals) > 0 {
+					if w.interimTagHeaders == nil {
+						w.interimTagHeaders = make(http.Header)
+					}
+					w.interimTagHeaders[name] = append([]string(nil), vals...)
+				}
+			}
+			stripOriginTagHeadersFromResponse(w.Header(), w.entrySnapshot, w.tagHeaders)
+		}
 		w.ResponseWriter.WriteHeader(code)
 		return
 	}
@@ -296,6 +308,13 @@ func (w *cacheWriter) WriteHeader(code int) {
 	// the handler ran, so a pre-set field is never mistaken for one the handler
 	// contributed.
 	w.snapshot = headerDifference(w.Header(), w.entrySnapshot)
+	if len(w.interimTagHeaders) > 0 {
+		for name, vals := range w.interimTagHeaders {
+			if len(w.snapshot.Values(name)) == 0 {
+				w.snapshot[name] = append([]string(nil), vals...)
+			}
+		}
+	}
 	cl := declaredLength(w.Header())
 	// A 1xx status is an interim or protocol-switch response, not a
 	// representation; 101 in particular means the connection is leaving HTTP.
@@ -539,10 +558,21 @@ func (r *recorder) storable() bool { return !r.noStore && !r.tooBig }
 // zero, and nothing is invalidated.
 type statusWriter struct {
 	http.ResponseWriter
-	status int
+	status          int
+	wroteHeader     bool
+	stripTagHeaders bool
+	tagHeaders      []string
 }
 
 func (w *statusWriter) WriteHeader(code int) {
+	if w.stripTagHeaders && len(w.tagHeaders) > 0 {
+		stripConfiguredTagHeaders(w.Header(), w.tagHeaders)
+	}
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		w.ResponseWriter.WriteHeader(code)
+		return
+	}
+	w.wroteHeader = true
 	if w.status == 0 {
 		w.status = code
 	}
@@ -551,12 +581,21 @@ func (w *statusWriter) WriteHeader(code int) {
 
 func (w *statusWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
-		w.status = http.StatusOK
+		w.WriteHeader(http.StatusOK)
 	}
 	// lgtm[go/reflected-xss] – This observes the status of a response the cache
 	// only forwards. The bytes are the upstream application's, passed through
 	// unchanged; that application is responsible for sanitizing its own output.
 	return w.ResponseWriter.Write(p)
+}
+
+func (w *statusWriter) Flush() {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // isRangeRequest reports whether the request asks for part of a representation.

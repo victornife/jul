@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   FORBIDDEN_EVENT,
   UNAUTHORIZED_EVENT,
@@ -137,6 +137,10 @@ export function buildSelectorFromDraft(draft: {
   }
 }
 
+function shellQuote(val: string): string {
+  return `'${val.replace(/'/g, "'\\''")}'`;
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export function buildCliCommandSnippet(
   selector: CacheSelector,
@@ -150,37 +154,37 @@ export function buildCliCommandSnippet(
   switch (selector.kind) {
     case "exact_url":
       if (selector.url) {
-        args.push(`--url ${JSON.stringify(selector.url)}`);
+        args.push(`--url ${shellQuote(selector.url)}`);
       } else {
-        if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
-        if (selector.uri) args.push(`--uri ${JSON.stringify(selector.uri)}`);
+        if (selector.host) args.push(`--host ${shellQuote(selector.host)}`);
+        if (selector.uri) args.push(`--uri ${shellQuote(selector.uri)}`);
       }
       break;
     case "prefix":
-      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
-      if (selector.prefix) args.push(`--prefix ${JSON.stringify(selector.prefix)}`);
+      if (selector.host) args.push(`--host ${shellQuote(selector.host)}`);
+      if (selector.prefix) args.push(`--prefix ${shellQuote(selector.prefix)}`);
       break;
     case "glob":
-      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
-      if (selector.pattern) args.push(`--glob ${JSON.stringify(selector.pattern)}`);
+      if (selector.host) args.push(`--host ${shellQuote(selector.host)}`);
+      if (selector.pattern) args.push(`--glob ${shellQuote(selector.pattern)}`);
       break;
     case "tag":
-      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      if (selector.host) args.push(`--host ${shellQuote(selector.host)}`);
       for (const tag of selector.tags ?? []) {
-        args.push(`--tag ${JSON.stringify(tag)}`);
+        args.push(`--tag ${shellQuote(tag)}`);
       }
       if (selector.tag_match === "all") {
         args.push("--tag-match all");
       }
       break;
     case "host":
-      if (selector.host) args.push(`--host ${JSON.stringify(selector.host)}`);
+      if (selector.host) args.push(`--host ${shellQuote(selector.host)}`);
       break;
     case "all":
       args.push("--all");
       break;
     case "key":
-      if (selector.key) args.push(`--key ${JSON.stringify(selector.key)}`);
+      if (selector.key) args.push(`--key ${shellQuote(selector.key)}`);
       break;
   }
   if (broadScope) {
@@ -266,9 +270,9 @@ const BTN_CLS =
 function GuidanceList({
   items,
 }: {
-  readonly items: readonly CacheGuidance[];
+  readonly items?: readonly CacheGuidance[] | undefined;
 }): React.JSX.Element | null {
-  if (items.length === 0) return null;
+  if (!items || items.length === 0) return null;
   return (
     <div className="grid gap-2">
       {items.map((w) => {
@@ -316,8 +320,11 @@ export function CacheInvalidationPanel({
   const [tagsText, setTagsText] = useState<string>("");
   const [tagMatch, setTagMatch] = useState<"any" | "all">("any");
   const [routeId, setRouteId] = useState<string>("");
+  const [selectedRouteKey, setSelectedRouteKey] = useState<string>("");
 
   const [preview, setPreview] = useState<CachePurgePreviewResponse | null>(null);
+  const [confirmedSelector, setConfirmedSelector] = useState<CacheSelector | null>(null);
+  const opSelectorsRef = useRef<Record<string, CacheSelector>>({});
   const [previewBusy, setPreviewBusy] = useState(false);
   const [confirmBroad, setConfirmBroad] = useState(false);
   const [executeBusy, setExecuteBusy] = useState(false);
@@ -329,20 +336,30 @@ export function CacheInvalidationPanel({
   const [lookupBusy, setLookupBusy] = useState(false);
 
   const cacheRoutes = useMemo(() => {
-    const items: Array<{ readonly route_id: string; readonly match: string; readonly host?: string }> = [];
-    for (const r of routes) {
+    const items: Array<{
+      readonly key: string;
+      readonly label: string;
+      readonly authoritative_route_id?: string | undefined;
+      readonly match: string;
+      readonly host?: string;
+    }> = [];
+    routes.forEach((r, sIdx) => {
       const firstHost = (r.server_names ?? []).find((n) => n.trim() !== "" && !n.includes("*"));
-      for (const loc of r.locations) {
-        const id = loc.route_id ?? `${r.listen}${loc.match}`;
+      r.locations.forEach((loc, lIdx) => {
+        const authId = loc.route_id && loc.route_id.trim() !== "" ? loc.route_id.trim() : undefined;
+        const key = authId ?? `${String(sIdx)}:${firstHost ?? r.listen}:${String(lIdx)}:${loc.match}`;
+        const label = authId ?? `${firstHost ?? r.listen}${loc.match}`;
         if (loc.match && loc.match.startsWith("/")) {
           items.push({
-            route_id: id,
+            key,
+            label,
+            ...(authId ? { authoritative_route_id: authId } : {}),
             match: loc.match,
             ...(firstHost ? { host: firstHost } : {}),
           });
         }
-      }
-    }
+      });
+    });
     return items;
   }, [routes]);
 
@@ -350,6 +367,7 @@ export function CacheInvalidationPanel({
   // confirmation always stays bound to the exact previewed selector.
   const clearPreviewState = (): void => {
     setPreview(null);
+    setConfirmedSelector(null);
     setConfirmBroad(false);
     setErrorMsg(null);
     setPermissionRevokedNotice(null);
@@ -358,13 +376,16 @@ export function CacheInvalidationPanel({
   // Listen for credential or RBAC permission changes while confirmation is open.
   useEffect(() => {
     const handleAuthOrPermissionChange = (): void => {
-      if (preview !== null) {
-        setPreview(null);
-        setConfirmBroad(false);
-        setPermissionRevokedNotice(
-          "Your authentication or RBAC permissions changed while confirmation was open. Preview the scope again with your current credentials before executing.",
-        );
-      }
+      setConfirmedSelector(null);
+      setConfirmBroad(false);
+      setPreview((prev) => {
+        if (prev !== null) {
+          setPermissionRevokedNotice(
+            "Your authentication or RBAC permissions changed while confirmation was open. Preview the scope again with your current credentials before executing.",
+          );
+        }
+        return null;
+      });
     };
     window.addEventListener("jul:credential-changed", handleAuthOrPermissionChange);
     window.addEventListener(UNAUTHORIZED_EVENT, handleAuthOrPermissionChange);
@@ -374,7 +395,7 @@ export function CacheInvalidationPanel({
       window.removeEventListener(UNAUTHORIZED_EVENT, handleAuthOrPermissionChange);
       window.removeEventListener(FORBIDDEN_EVENT, handleAuthOrPermissionChange);
     };
-  }, [preview]);
+  }, []);
 
   useEffect(() => {
     if (!canPurge && preview !== null) {
@@ -400,12 +421,16 @@ export function CacheInvalidationPanel({
     [kind, host, url, uri, prefix, pattern, tagsText, tagMatch, routeId],
   );
 
-  const handleSelectRouteHelper = (selectedRouteId: string): void => {
+  const handleSelectRouteHelper = (selectedKey: string): void => {
     clearPreviewState();
-    setRouteId(selectedRouteId);
-    const found = cacheRoutes.find((r) => r.route_id === selectedRouteId);
-    if (!found) return;
-    if (found.host && host.trim() === "") {
+    setSelectedRouteKey(selectedKey);
+    const found = cacheRoutes.find((r) => r.key === selectedKey);
+    if (!found) {
+      setRouteId("");
+      return;
+    }
+    setRouteId(found.authoritative_route_id ?? "");
+    if (found.host) {
       setHost(found.host);
     }
     const matchPath = found.match.trim();
@@ -423,18 +448,21 @@ export function CacheInvalidationPanel({
     setErrorMsg(null);
     setPermissionRevokedNotice(null);
     setResult(null);
-    if (!draftOutcome.selector) {
+    const requestedSelector = draftOutcome.selector;
+    if (!requestedSelector) {
       setErrorMsg(draftOutcome.error ?? "Complete the selector fields to preview.");
       return;
     }
     setPreviewBusy(true);
     try {
-      const resp = await previewCachePurge(draftOutcome.selector, true);
+      const resp = await previewCachePurge(requestedSelector, true);
+      setConfirmedSelector(requestedSelector);
       setPreview(resp);
       setConfirmBroad(false);
       setActiveIdempotencyKey(generateIdempotencyKey());
     } catch (err) {
       setPreview(null);
+      setConfirmedSelector(null);
       setErrorMsg(err instanceof Error ? err.message : "Failed to preview cache invalidation.");
     } finally {
       setPreviewBusy(false);
@@ -447,7 +475,33 @@ export function CacheInvalidationPanel({
       setErrorMsg("cache:purge permission is required to execute cache invalidation.");
       return;
     }
-    const targetSelector = isRetry && result ? result.selector : preview?.selector;
+    let targetSelector: CacheSelector | undefined;
+    if (isRetry && result) {
+      const bound = opSelectorsRef.current[result.operation_id] ?? confirmedSelector;
+      if (bound) {
+        targetSelector = bound;
+      } else {
+        const isRedacted =
+          Boolean(result.selector.uri?.includes("?<redacted>")) ||
+          Boolean(result.selector.key?.includes("?<redacted>"));
+        if (!isRedacted) {
+          targetSelector = result.selector;
+        } else if (
+          draftOutcome.selector &&
+          draftOutcome.selector.kind === result.selector.kind &&
+          !draftOutcome.selector.uri?.includes("?<redacted>")
+        ) {
+          targetSelector = draftOutcome.selector;
+        } else {
+          setErrorMsg(
+            "This looked-up operation targets a redacted query string; re-enter the full URL above and preview to retry.",
+          );
+          return;
+        }
+      }
+    } else {
+      targetSelector = confirmedSelector ?? preview?.selector;
+    }
     if (!targetSelector) {
       setErrorMsg("Preview the invalidation scope before executing.");
       return;
@@ -474,6 +528,7 @@ export function CacheInvalidationPanel({
         retryOperationId: isRetry && result ? result.operation_id : undefined,
         idempotencyKey,
       });
+      opSelectorsRef.current[resp.operation_id] = targetSelector;
       setResult(resp);
       if (resp.state === "succeeded") {
         setPreview(null);
@@ -497,6 +552,9 @@ export function CacheInvalidationPanel({
     setErrorMsg(null);
     try {
       const resp = await fetchCachePurgeOperation(trimmed);
+      if (!opSelectorsRef.current[resp.operation_id]) {
+        setConfirmedSelector(null);
+      }
       setResult(resp);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Failed to load operation status.");
@@ -575,7 +633,7 @@ export function CacheInvalidationPanel({
               <select
                 id={`${uid}-route-helper`}
                 aria-label="Configured route helper"
-                value={routeId}
+                value={selectedRouteKey}
                 onChange={(e) => {
                   handleSelectRouteHelper(e.target.value);
                 }}
@@ -583,8 +641,8 @@ export function CacheInvalidationPanel({
               >
                 <option value="">All routes on selected hostname</option>
                 {cacheRoutes.map((r) => (
-                  <option key={r.route_id} value={r.route_id}>
-                    {r.route_id} ({r.match})
+                  <option key={r.key} value={r.key}>
+                    {r.label} ({r.match})
                   </option>
                 ))}
               </select>
@@ -886,13 +944,13 @@ export function CacheInvalidationPanel({
 
           <GuidanceList items={preview.warnings} />
 
-          {preview.samples.length > 0 && (
+          {(preview.samples ?? []).length > 0 && (
             <div className="grid gap-1.5">
               <div className="text-xs font-semibold text-jul-text">
                 Sampled matching resources (query values redacted, up to 20 shown):
               </div>
               <div className="max-h-44 overflow-y-auto rounded-md border border-jul-border bg-jul-surface p-2 text-xs">
-                {preview.samples.map((sample) => (
+                {(preview.samples ?? []).map((sample) => (
                   <div
                     key={`${sample.host}${sample.path}`}
                     className="flex justify-between gap-2 border-b border-jul-border/40 py-1"
@@ -950,7 +1008,7 @@ export function CacheInvalidationPanel({
                 Automation CLI equivalent (secret-safe)
               </summary>
               <pre className="mt-1.5 overflow-x-auto rounded-md border border-jul-border bg-jul-bg p-2 text-jul-text">
-                {buildCliCommandSnippet(preview.selector, preview.broad_scope)}
+                {buildCliCommandSnippet(confirmedSelector ?? preview.selector, preview.broad_scope)}
               </pre>
             </details>
 

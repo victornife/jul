@@ -83,7 +83,10 @@ type Entry struct {
 
 	// Tags holds the sorted, deduplicated grouping tags ingested from
 	// configured trusted origin response headers (#621, ADR 0027).
-	Tags []string
+	Tags                   []string
+	ingestedTagHeaderCount int
+	ingestedTagHeaders     [8]string
+	tagPolicyTracked       bool
 }
 
 // maxVariantsPerResource caps one base resource's membership list. A pathological
