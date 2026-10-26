@@ -175,6 +175,8 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveCacheCaptureSkipped("budget")
 	m.ObserveCacheFillLock("wait")
 	m.ObserveCacheRangeRequest("hit")
+	m.ObserveCacheInvalidation("exact_url", "succeeded", 1, 1)
+	m.ObserveCacheTagIngestSkipped("invalid")
 	m.ObserveRateLimited("ip")
 	m.ObserveClientAddrDerivation("xff", "accepted")
 	m.ObserveAuthDecision("jwt", "allow")

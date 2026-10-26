@@ -100,6 +100,25 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_cache_invalidation_entries_total",
+      "type": "counter",
+      "help": "Cache tier entries removed or retired by explicit invalidation operations, labeled by tier (memory/disk).",
+      "labels": [
+        "tier"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_cache_invalidations_total",
+      "type": "counter",
+      "help": "Explicit cache invalidation operations, labeled by selector kind (exact_url/prefix/glob/tag/host/key/all) and bounded outcome (succeeded/succeeded_no_matches/partial_failure/failed/canceled/cache_disabled).",
+      "labels": [
+        "outcome",
+        "selector"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_cache_max_bytes",
       "type": "gauge",
       "help": "Configured byte cap for a cache tier, labeled by tier (memory/disk).",
@@ -125,6 +144,15 @@
         "outcome"
       ],
       "state": "released_v2.0.0"
+    },
+    {
+      "name": "jul_cache_tag_ingest_skipped_total",
+      "type": "counter",
+      "help": "Cacheable origin responses not stored because configured grouping-tag metadata failed validation or bounds, labeled by reason (invalid/oversize/index_limit).",
+      "labels": [
+        "reason"
+      ],
+      "state": "merged_release_pending"
     },
     {
       "name": "jul_client_addr_derivations_total",

@@ -59,6 +59,8 @@ lock = true
 lock_timeout = "7s"
 range_enabled = true
 max_ranges = 4
+tag_headers = ["Cache-Tag", "Surrogate-Key"]
+strip_tag_headers = true
 
 [[servers]]
 listen = "127.0.0.1:8080"
@@ -92,7 +94,8 @@ path = "/"
 		got.Cache.DiskMaxSize != "5g" || got.Cache.MaxEntrySize != "256m" || got.Cache.DefaultTTL != "1m11s" ||
 		got.Cache.StaleWhileRevalidate != "13s" || got.Cache.StaleIfError != "29s" ||
 		!got.Cache.Lock || got.Cache.LockTimeout != "7s" ||
-		!got.Cache.RangeEnabled || got.Cache.MaxRanges != 4 {
+		!got.Cache.RangeEnabled || got.Cache.MaxRanges != 4 ||
+		len(got.Cache.TagHeaders) != 2 || !got.Cache.StripTagHeaders {
 		t.Fatalf("cache projection is incomplete: %#v", got.Cache)
 	}
 

@@ -156,6 +156,27 @@ func TestValidateRejectsInvalidCacheCompressionAndAdminScalars(t *testing.T) {
 			c.Cache.RangeEnabled = true
 			c.Cache.MaxRanges = 17
 		}, `[cache].max_ranges`},
+		{"cache tag headers too many", func(c *Config) {
+			c.Cache.TagHeaders = []string{"H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9"}
+		}, `[cache].tag_headers`},
+		{"cache tag header empty", func(c *Config) {
+			c.Cache.TagHeaders = []string{""}
+		}, `[cache].tag_headers[0]`},
+		{"cache tag header whitespace", func(c *Config) {
+			c.Cache.TagHeaders = []string{" Cache-Tag"}
+		}, `[cache].tag_headers[0]`},
+		{"cache tag header invalid char", func(c *Config) {
+			c.Cache.TagHeaders = []string{"Cache:Tag"}
+		}, `[cache].tag_headers[0]`},
+		{"cache tag header reserved ETag", func(c *Config) {
+			c.Cache.TagHeaders = []string{"ETag"}
+		}, `[cache].tag_headers[0]`},
+		{"cache tag header duplicate", func(c *Config) {
+			c.Cache.TagHeaders = []string{"Cache-Tag", "cache-tag"}
+		}, `[cache].tag_headers[1]`},
+		{"cache strip tag headers without tag headers", func(c *Config) {
+			c.Cache.StripTagHeaders = Bool(true)
+		}, `[cache].strip_tag_headers`},
 		{"compression min size", func(c *Config) { c.Compression = CompressionConfig{Enabled: Bool(false), MinSize: -1} }, `[compression].min_size`},
 		{"history keep disabled admin", func(c *Config) { c.Admin.HistoryKeep = -1 }, `[admin].history_keep`},
 		{"event connections", func(c *Config) { c.Admin.MaxEventConns = -1 }, `[admin].max_event_conns`},
@@ -195,6 +216,7 @@ func TestValidatePreservesDocumentedZeroAndDisableSemantics(t *testing.T) {
 enabled = true
 lock = true
 range_enabled = true
+tag_headers = ["Cache-Tag", "Surrogate-Key"]
 
 [[servers]]
 listen = "127.0.0.1:8080"
@@ -205,8 +227,23 @@ listen = "127.0.0.1:8080"
 	if err != nil {
 		t.Fatalf("Parse cache.lock default: %v", err)
 	}
-	if !parsed.Cache.Lock || parsed.Cache.LockTimeout.Std() != 5*time.Second || !parsed.Cache.RangeEnabled || parsed.Cache.MaxRanges != 1 {
-		t.Fatalf("parsed cache = %+v, want Lock=true LockTimeout=5s RangeEnabled=true MaxRanges=1", parsed.Cache)
+	if !parsed.Cache.Lock || parsed.Cache.LockTimeout.Std() != 5*time.Second || !parsed.Cache.RangeEnabled || parsed.Cache.MaxRanges != 1 || len(parsed.Cache.TagHeaders) != 2 || !parsed.Cache.StripTagHeadersEnabled() {
+		t.Fatalf("parsed cache = %+v, want Lock=true LockTimeout=5s RangeEnabled=true MaxRanges=1 TagHeaders=2 StripTagHeaders=true", parsed.Cache)
+	}
+	if err := Validate(parsed); err != nil {
+		t.Fatalf("Validate(parsed) = %v", err)
+	}
+	explicitKeep := CacheConfig{TagHeaders: []string{"Cache-Tag"}, StripTagHeaders: Bool(false)}
+	if explicitKeep.StripTagHeadersEnabled() {
+		t.Fatalf("StripTagHeadersEnabled() = true when StripTagHeaders=false")
+	}
+	emptyKeep := CacheConfig{StripTagHeaders: Bool(false)}
+	if emptyKeep.StripTagHeadersEnabled() {
+		t.Fatalf("StripTagHeadersEnabled() = true when TagHeaders is empty and StripTagHeaders=false")
+	}
+	emptyExplicitTrue := CacheConfig{StripTagHeaders: Bool(true)}
+	if !emptyExplicitTrue.StripTagHeadersEnabled() {
+		t.Fatalf("StripTagHeadersEnabled() = false when StripTagHeaders=true")
 	}
 }
 

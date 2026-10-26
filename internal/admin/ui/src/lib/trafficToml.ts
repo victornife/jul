@@ -67,6 +67,56 @@ export function isValidCacheMaxRanges(draft: CacheDraft): boolean {
   return Boolean(draft.rangeEnabled) || maxRanges === 0;
 }
 
+const FORBIDDEN_CACHE_TAG_HEADERS = new Set([
+  "age",
+  "authorization",
+  "cache-control",
+  "cdn-cache-control",
+  "connection",
+  "content-encoding",
+  "content-length",
+  "content-location",
+  "content-range",
+  "content-type",
+  "date",
+  "etag",
+  "expires",
+  "keep-alive",
+  "last-modified",
+  "location",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "set-cookie",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "vary",
+  "www-authenticate",
+  "x-cache",
+  "x-request-id",
+]);
+
+const HTTP_TOKEN_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]{1,64}$/;
+
+export function isValidCacheTagHeaders(draft: CacheDraft): boolean {
+  const headers = draft.tagHeaders ?? [];
+  if (headers.length > 8) return false;
+  const seen = new Set<string>();
+  for (const raw of headers) {
+    const trimmed = raw.trim();
+    if (trimmed === "" || trimmed !== raw || !HTTP_TOKEN_RE.test(trimmed)) {
+      return false;
+    }
+    const lower = trimmed.toLowerCase();
+    if (FORBIDDEN_CACHE_TAG_HEADERS.has(lower) || seen.has(lower)) {
+      return false;
+    }
+    seen.add(lower);
+  }
+  return true;
+}
+
 /**
  * Generates the complete current [cache] table. Values are emitted independently
  * of enabled so dormant disk/TTL/stale settings survive disable/enable cycles.
@@ -110,6 +160,14 @@ export function generateCacheToml(draft: CacheDraft): string {
     if (maxRanges > 0) {
       lines.push(`max_ranges = ${String(maxRanges)}`);
     }
+  }
+  const tagHeaders = (draft.tagHeaders ?? []).map((h) => h.trim()).filter((h) => h !== "");
+  if (tagHeaders.length > 0) {
+    if (!isValidCacheTagHeaders({ ...draft, tagHeaders })) {
+      throw new Error("cache.tag_headers must contain 1 to 8 unique non-reserved HTTP header token names.");
+    }
+    lines.push(`tag_headers = [${tagHeaders.map(tomlString).join(", ")}]`);
+    lines.push(`strip_tag_headers = ${String(draft.stripTagHeaders ?? true)}`);
   }
   return lines.join("\n");
 }

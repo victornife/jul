@@ -1429,6 +1429,31 @@ type CacheConfig struct {
 	// when range_enabled is true. Omitted or zero defaults to 1 (single byte
 	// range); maximum 16.
 	MaxRanges int `toml:"max_ranges,omitempty"`
+	// TagHeaders lists trusted origin response header names from which Jul
+	// ingests grouping tags for scoped tag invalidation (#621, ADR 0027; for
+	// example ["Cache-Tag"] or ["Cache-Tag", "Surrogate-Key"]). Omitted or
+	// empty disables origin tag ingestion. Maximum 8 header names.
+	TagHeaders []string `toml:"tag_headers,omitempty"`
+	// StripTagHeaders removes the configured tag_headers from downstream client
+	// responses and stored response headers so internal grouping metadata is not
+	// exposed to clients. Omitted defaults to true when tag_headers is non-empty.
+	StripTagHeaders *bool `toml:"strip_tag_headers,omitempty"`
+}
+
+// StripTagHeadersEnabled reports whether configured TagHeaders should be
+// stripped from downstream responses. When TagHeaders is non-empty, omitting
+// StripTagHeaders defaults to true.
+func (c CacheConfig) StripTagHeadersEnabled() bool {
+	if len(c.TagHeaders) == 0 {
+		if c.StripTagHeaders != nil {
+			return *c.StripTagHeaders
+		}
+		return false
+	}
+	if c.StripTagHeaders == nil {
+		return true
+	}
+	return *c.StripTagHeaders
 }
 
 // AdminConfig configures the separate admin/observability listener. It binds

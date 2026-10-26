@@ -10,6 +10,458 @@
     }
   },
   "paths": {
+    "/api/v1/cache/purge": {
+      "post": {
+        "operationId": "purgeCache",
+        "summary": "Execute a scoped cache invalidation across memory and disk tiers with in-flight fill fencing and durable tombstones. Operational in both managed and file_owned authority modes.",
+        "tags": [
+          "cache"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Optional 8–128 byte [A-Za-z0-9_-] key, scoped to the authenticated principal and current boot. Reusing it for byte-identical input replays the recorded operation; reusing it for different input conflicts.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "Request body. Maximum accepted size: 1048576 bytes; larger bodies return payload_too_large before unbounded allocation.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CachePurgeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CachePurgeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — The request was malformed: an unparseable body, an unknown field, a bad parameter or a missing required parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`insecure_transport` — The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.\n\n`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`idempotency_key_reused` — The Idempotency-Key matches a recorded operation with a different request fingerprint. The recorded operation is named by its route template, never by a concrete path.\n\n`idempotency_key_in_flight` — The Idempotency-Key matches an operation that has not reached a terminal state. Poll the named apply_id rather than retrying.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` — The request body exceeded the admin body cap. The cap applies to every body-bearing /api/v1 request, not only mutations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported_media_type` — The request Content-Type is not accepted for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "cache:purge"
+        ],
+        "x-jul-max-body-bytes": 1048576,
+        "x-jul-error-codes": [
+          "insecure_transport",
+          "unauthenticated",
+          "forbidden",
+          "rate_limited",
+          "internal_error",
+          "invalid_request",
+          "not_found",
+          "idempotency_key_reused",
+          "idempotency_key_in_flight",
+          "storage_unavailable",
+          "payload_too_large",
+          "unsupported_media_type"
+        ]
+      }
+    },
+    "/api/v1/cache/purge/preview": {
+      "post": {
+        "operationId": "previewCachePurge",
+        "summary": "Non-destructively preview a scoped cache invalidation selector (exact URL, prefix, glob, tag, host, key, or all) and mint a principal-and-scope-bound preview_token.",
+        "tags": [
+          "cache"
+        ],
+        "requestBody": {
+          "description": "Request body. Maximum accepted size: 1048576 bytes; larger bodies return payload_too_large before unbounded allocation.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CachePurgePreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CachePurgePreviewResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — The request was malformed: an unparseable body, an unknown field, a bad parameter or a missing required parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`insecure_transport` — The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.\n\n`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` — The request body exceeded the admin body cap. The cap applies to every body-bearing /api/v1 request, not only mutations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported_media_type` — The request Content-Type is not accepted for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "cache:purge"
+        ],
+        "x-jul-max-body-bytes": 1048576,
+        "x-jul-error-codes": [
+          "insecure_transport",
+          "unauthenticated",
+          "forbidden",
+          "rate_limited",
+          "internal_error",
+          "invalid_request",
+          "payload_too_large",
+          "unsupported_media_type"
+        ]
+      }
+    },
+    "/api/v1/cache/purges/{operation_id}": {
+      "get": {
+        "operationId": "getCachePurgeOperation",
+        "summary": "Retrieve the status and outcome of one cache invalidation operation from the bounded operation ledger.",
+        "tags": [
+          "cache"
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CachePurgeResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted/non-terminal success. Follow the operation's terminal fields and polling contract rather than inferring completion from HTTP status alone.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CachePurgeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — The request was malformed: an unparseable body, an unknown field, a bad parameter or a missing required parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`insecure_transport` — The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.\n\n`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — The addressed resource does not exist. Returned only to a caller that already holds the required permission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "cache:purge",
+          "audit:read",
+          "admin:manage"
+        ],
+        "x-jul-error-codes": [
+          "insecure_transport",
+          "unauthenticated",
+          "forbidden",
+          "rate_limited",
+          "internal_error",
+          "invalid_request",
+          "not_found",
+          "storage_unavailable"
+        ]
+      }
+    },
     "/api/v1/capabilities": {
       "get": {
         "operationId": "getCapabilities",
@@ -4424,6 +4876,459 @@
           "apply_id",
           "degraded",
           "state"
+        ],
+        "additionalProperties": false
+      },
+      "CacheGuidance": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "docs_ref": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "CachePurgePreviewRequest": {
+        "type": "object",
+        "properties": {
+          "include_samples": {
+            "type": "boolean"
+          },
+          "max_scan_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/CacheSelector"
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false
+      },
+      "CachePurgePreviewResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "as_of": {
+            "type": "string"
+          },
+          "broad_scope": {
+            "type": "boolean"
+          },
+          "cache_enabled": {
+            "type": "boolean"
+          },
+          "cache_sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "config_inconsistent_reason": {
+            "type": "string"
+          },
+          "config_state": {
+            "type": "string"
+          },
+          "count_accuracy": {
+            "type": "string"
+          },
+          "disk_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "disk_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "execution_mode_contract": {
+            "type": "string"
+          },
+          "inflight_fills_matched": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "inflight_tag_unknown": {
+            "type": "boolean"
+          },
+          "matched_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "matched_representations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "matched_resources": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "memory_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "preview_token": {
+            "type": "string"
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheResourceSample"
+            }
+          },
+          "scan_limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scanned_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/CacheSelector"
+          },
+          "selector_digest": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "tag_ingestion_enabled": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheGuidance"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "as_of",
+          "broad_scope",
+          "cache_enabled",
+          "cache_sequence",
+          "config_authority",
+          "config_authority_source",
+          "count_accuracy",
+          "disk_bytes",
+          "disk_entries",
+          "execution_mode_contract",
+          "inflight_fills_matched",
+          "matched_bytes",
+          "matched_representations",
+          "matched_resources",
+          "memory_bytes",
+          "memory_entries",
+          "preview_token",
+          "samples",
+          "scan_limit",
+          "scanned_entries",
+          "selector",
+          "selector_digest",
+          "source",
+          "tag_ingestion_enabled",
+          "truncated",
+          "warnings"
+        ],
+        "additionalProperties": false
+      },
+      "CachePurgeRequest": {
+        "type": "object",
+        "properties": {
+          "confirm_broad": {
+            "type": "boolean"
+          },
+          "preview_token": {
+            "type": "string"
+          },
+          "retry_operation_id": {
+            "type": "string"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/CacheSelector"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false
+      },
+      "CachePurgeResponse": {
+        "type": "object",
+        "properties": {
+          "active_readers_retired": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "api_version": {
+            "type": "string"
+          },
+          "boot_id": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": "string"
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "config_inconsistent_reason": {
+            "type": "string"
+          },
+          "config_state": {
+            "type": "string"
+          },
+          "disk_entries_removed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "failed_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "fence_sequence": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "fenced_inflight_ops": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "idempotent_replay": {
+            "type": "boolean"
+          },
+          "invalidated_representations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "invalidated_resources": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "invalidation_effective": {
+            "type": "string"
+          },
+          "memory_entries_removed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "recovery_guidance": {
+            "type": "string"
+          },
+          "remaining_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/CacheSelector"
+          },
+          "selector_digest": {
+            "type": "string"
+          },
+          "skipped_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "state_changed_since_preview": {
+            "type": "boolean"
+          },
+          "terminal": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheGuidance"
+            }
+          }
+        },
+        "required": [
+          "api_version",
+          "boot_id",
+          "config_authority",
+          "config_authority_source",
+          "disk_entries_removed",
+          "invalidated_representations",
+          "invalidated_resources",
+          "invalidation_effective",
+          "memory_entries_removed",
+          "operation_id",
+          "outcome",
+          "selector",
+          "selector_digest",
+          "started_at",
+          "state",
+          "terminal",
+          "warnings"
+        ],
+        "additionalProperties": false
+      },
+      "CacheResourceSample": {
+        "type": "object",
+        "properties": {
+          "body_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "freshness_state": {
+            "type": "string"
+          },
+          "has_query": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string"
+          },
+          "representations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "stale_until": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tiers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "vary_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "body_bytes",
+          "freshness_state",
+          "host",
+          "methods",
+          "path",
+          "representations",
+          "tiers"
+        ],
+        "additionalProperties": false
+      },
+      "CacheSelector": {
+        "type": "object",
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "tag_match": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "uri": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
         ],
         "additionalProperties": false
       },
@@ -9676,6 +10581,10 @@
     {
       "name": "observability",
       "description": "Metrics exposition."
+    },
+    {
+      "name": "cache",
+      "description": "Scoped response-cache preview, invalidation, and operation status."
     }
   ]
 }

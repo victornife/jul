@@ -97,13 +97,23 @@ func TestGRPCHealthEjectsAndRecoversRealBackend(t *testing.T) {
 		MaxFails: 3,
 		HealthCheck: &config.HealthCheckConfig{
 			Enabled: true, Type: "grpc",
-			Interval: config.Duration(20 * time.Millisecond), Timeout: config.Duration(500 * time.Millisecond),
+			Interval: config.Duration(time.Second), Timeout: config.Duration(500 * time.Millisecond),
 			HealthyThreshold: 2, UnhealthyThreshold: 2,
 		},
 		BackendTLS: &config.BackendTLSConfig{CAMode: "file_only", CAFile: ca.caPath, ServerName: "svc.internal"},
 	}
 	upstreams := map[string]config.UpstreamConfig{"grpcsvc": up}
-	loc := config.LocationConfig{ProxyPass: "https://grpcsvc", GRPC: true}
+	loc := config.LocationConfig{
+		Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "https://grpcsvc", GRPC: true,
+	}
+	if err := config.Validate(&config.Config{
+		Upstreams: []config.UpstreamConfig{up},
+		Servers: []config.ServerConfig{{
+			Listen: "127.0.0.1:8080", Locations: []config.LocationConfig{loc},
+		}},
+	}); err != nil {
+		t.Fatalf("invalid gRPC health integration fixture: %v", err)
+	}
 
 	reg := upstream.NewRegistry(upstream.RegistryOptions{})
 	reg.Begin()

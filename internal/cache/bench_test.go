@@ -4,6 +4,7 @@
 package cache
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -474,5 +475,155 @@ func BenchmarkCacheWriteChurnScaling(b *testing.B) {
 				c.set(keys[i%len(keys)], e)
 			}
 		})
+	}
+}
+
+// BenchmarkCacheHitWithTagIngestionAndFences verifies that warm cache hits
+// remain O(1) with zero fence-scan overhead when tag_headers is enabled and
+// 1,000 tagged resources are indexed (#621).
+func BenchmarkCacheHitWithTagIngestionAndFences(b *testing.B) {
+	strip := true
+	c, err := New(config.CacheConfig{
+		Enabled:         true,
+		MemoryMaxSize:   config.Size(64 << 20),
+		DefaultTTL:      config.Duration(5 * time.Minute),
+		TagHeaders:      []string{"Cache-Tag"},
+		StripTagHeaders: &strip,
+	}, nil)
+	if err != nil {
+		b.Fatal(err)
+	}
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=300")
+		w.Header().Set("Cache-Tag", "article:42, category:news")
+		_, _ = w.Write([]byte("hello-tagged"))
+	}))
+
+	for i := 0; i < 1000; i++ {
+		r := httptest.NewRequest(http.MethodGet, "http://portal.example.com/articles/"+strconv.Itoa(i), nil)
+		r.Host = "portal.example.com"
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://portal.example.com/articles/42", nil)
+	req.Host = "portal.example.com"
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Header().Get("X-Cache") != "HIT" {
+			b.Fatal("expected HIT")
+		}
+	}
+}
+
+// BenchmarkScopedPurgeTagIndex measures tag-scoped invalidation (`article:42`)
+// using the per-host reverse tag index in a 2,000-entry cache (#621).
+func BenchmarkScopedPurgeTagIndex(b *testing.B) {
+	c, _ := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(64 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	}, nil)
+	now := time.Now()
+	bgEntry := &Entry{
+		Status:    http.StatusOK,
+		Body:      []byte("bg"),
+		CreatedAt: now,
+		ExpiresAt: now.Add(5 * time.Minute),
+		Tags:      []string{"category:general"},
+	}
+	for i := 0; i < 2000; i++ {
+		c.set(keyFor(http.MethodGet, "portal.example.com", "/bg/"+strconv.Itoa(i)), bgEntry)
+	}
+	targetEntry := &Entry{
+		Status:    http.StatusOK,
+		Body:      []byte("target"),
+		CreatedAt: now,
+		ExpiresAt: now.Add(5 * time.Minute),
+		Tags:      []string{"article:42", "category:news"},
+	}
+	sel, _ := ParseSelector(Selector{
+		Kind: SelectorTag,
+		Host: "portal.example.com",
+		Tags: []string{"article:42"},
+	}, nil)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		c.set(keyFor(http.MethodGet, "portal.example.com", "/articles/42"), targetEntry)
+		c.set(keyFor(http.MethodGet, "portal.example.com", "/articles/42/comments"), targetEntry)
+		_, _ = c.InvalidateScope(context.Background(), sel, InvalidateOptions{})
+	}
+}
+
+// BenchmarkScopedPurgePrefixScan measures host-partitioned prefix invalidation
+// in a multi-host cache (#621).
+func BenchmarkScopedPurgePrefixScan(b *testing.B) {
+	c, _ := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(64 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+	}, nil)
+	now := time.Now()
+	entry := &Entry{
+		Status:    http.StatusOK,
+		Body:      []byte("payload"),
+		CreatedAt: now,
+		ExpiresAt: now.Add(5 * time.Minute),
+	}
+	for i := 0; i < 1000; i++ {
+		c.set(keyFor(http.MethodGet, "other.example.com", "/static/"+strconv.Itoa(i)), entry)
+		c.set(keyFor(http.MethodGet, "portal.example.com", "/static/"+strconv.Itoa(i)), entry)
+	}
+	sel, _ := ParseSelector(Selector{
+		Kind:   SelectorPrefix,
+		Host:   "portal.example.com",
+		Prefix: "/articles/hot/",
+	}, nil)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		for j := 0; j < 8; j++ {
+			c.set(keyFor(http.MethodGet, "portal.example.com", "/articles/hot/"+strconv.Itoa(j)), entry)
+		}
+		_, _ = c.InvalidateScope(context.Background(), sel, InvalidateOptions{})
+	}
+}
+
+// BenchmarkScopedPurgePreviewLargeSelection measures non-destructive PreviewScope
+// over a 2,000-entry host catalog (#621).
+func BenchmarkScopedPurgePreviewLargeSelection(b *testing.B) {
+	c, _ := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: config.Size(64 << 20),
+		DefaultTTL:    config.Duration(5 * time.Minute),
+		TagHeaders:    []string{"Cache-Tag"},
+	}, nil)
+	now := time.Now()
+	entry := &Entry{
+		Status:    http.StatusOK,
+		Body:      []byte("payload"),
+		CreatedAt: now,
+		ExpiresAt: now.Add(5 * time.Minute),
+		Tags:      []string{"section:docs"},
+	}
+	for i := 0; i < 2000; i++ {
+		c.set(keyFor(http.MethodGet, "docs.example.com", "/guides/"+strconv.Itoa(i)), entry)
+	}
+	sel, _ := ParseSelector(Selector{
+		Kind:   SelectorPrefix,
+		Host:   "docs.example.com",
+		Prefix: "/guides/",
+	}, nil)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		_ = c.PreviewScope(sel, PreviewOptions{MaxSampleItems: 20})
 	}
 }

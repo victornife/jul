@@ -69,6 +69,8 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.lock_timeout")
 		d.cover("cache.range_enabled")
 		d.cover("cache.max_ranges")
+		d.cover("cache.tag_headers")
+		d.cover("cache.strip_tag_headers")
 		return
 	}
 	if !a.Enabled {
@@ -84,6 +86,8 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.lock_timeout")
 		d.cover("cache.range_enabled")
 		d.cover("cache.max_ranges")
+		d.cover("cache.tag_headers")
+		d.cover("cache.strip_tag_headers")
 		return
 	}
 	if b.MemoryMaxSize != a.MemoryMaxSize {
@@ -127,6 +131,16 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	if b.MaxRanges != a.MaxRanges {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: fmt.Sprintf("%d", b.MaxRanges), After: fmt.Sprintf("%d", a.MaxRanges), Detail: "Change cache maximum ranges"}, "cache max_ranges")
 	}
+	if strings.Join(b.TagHeaders, ",") != strings.Join(a.TagHeaders, ",") {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: orNone(strings.Join(b.TagHeaders, ", ")), After: orNone(strings.Join(a.TagHeaders, ", ")), Detail: "Change cache origin tag headers"}, "cache tag_headers")
+	}
+	if b.StripTagHeadersEnabled() != a.StripTagHeadersEnabled() {
+		action := "Enable"
+		if !a.StripTagHeadersEnabled() {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " stripping of cache tag headers"}, "cache strip_tag_headers")
+	}
 	d.cover("cache.enabled")
 	d.cover("cache.memory_max_size")
 	d.cover("cache.disk_path")
@@ -139,6 +153,8 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	d.cover("cache.lock_timeout")
 	d.cover("cache.range_enabled")
 	d.cover("cache.max_ranges")
+	d.cover("cache.tag_headers")
+	d.cover("cache.strip_tag_headers")
 }
 
 // diffGlobalCompression compares the [compression] block.

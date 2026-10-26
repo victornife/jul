@@ -41,6 +41,8 @@ export interface CacheDraft {
   lockTimeout?: string;
   rangeEnabled?: boolean;
   maxRanges?: number;
+  tagHeaders?: string[];
+  stripTagHeaders?: boolean;
 }
 
 export interface RateLimitDraft {
@@ -168,6 +170,12 @@ export function seedCache(current: TrafficControls): CacheDraft {
     lockTimeout: rawLockTimeout === "0s" ? "" : rawLockTimeout,
     rangeEnabled: cache?.range_enabled ?? false,
     maxRanges: cache?.max_ranges ?? 0,
+    ...(cache?.tag_headers !== undefined
+      ? { tagHeaders: [...cache.tag_headers] }
+      : {}),
+    ...(cache?.strip_tag_headers !== undefined || (cache?.tag_headers?.length ?? 0) > 0
+      ? { stripTagHeaders: cache?.strip_tag_headers ?? true }
+      : {}),
   };
 }
 

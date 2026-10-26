@@ -82,6 +82,14 @@ var schemaTypes = map[string]reflect.Type{
 	"ExportGlobal":         reflect.TypeFor[ExportGlobal](),
 	"HistoryDiffResponse":  reflect.TypeFor[HistoryDiffResponse](),
 	"DiffEntry":            reflect.TypeFor[DiffEntry](),
+
+	"CacheSelector":             reflect.TypeFor[CacheSelector](),
+	"CacheGuidance":             reflect.TypeFor[CacheGuidance](),
+	"CacheResourceSample":       reflect.TypeFor[CacheResourceSample](),
+	"CachePurgePreviewRequest":  reflect.TypeFor[CachePurgePreviewRequest](),
+	"CachePurgePreviewResponse": reflect.TypeFor[CachePurgePreviewResponse](),
+	"CachePurgeRequest":         reflect.TypeFor[CachePurgeRequest](),
+	"CachePurgeResponse":        reflect.TypeFor[CachePurgeResponse](),
 }
 
 // SchemaTypes returns the registered external DTOs by component name.

@@ -129,7 +129,10 @@ priorities are organized around three tracks:
   posture and exposure reviews, and route/protocol isolation verification.
 - **Gateway usability and cache operations ([#620](https://github.com/victornife/jul/issues/620))** —
   Practical operational depth for multi-application hosts: scoped cache
-  invalidation (by URL, prefix, pattern, or tag), cache decision inspection,
+  invalidation by exact URL, segment-bounded prefix, bounded anchored glob,
+  trusted origin grouping tag, or hostname ([#621](https://github.com/victornife/jul/issues/621),
+  implemented on PR), plus planned cache decision inspection (#622), route
+  caching profiles (#623), cutover invalidation (#624), and Console IA (#625).
   route-scoped cache defaults and bypass rules, plain-language effective-behavior
   summaries in the Console, aggregate download bandwidth controls, and external
   alerting recipes.

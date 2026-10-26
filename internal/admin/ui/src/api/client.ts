@@ -197,8 +197,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     else if (resp.status === 403) notifyForbidden();
     let msg = `${String(resp.status)} ${resp.statusText}`;
     try {
-      const body = (await resp.json()) as { error?: string };
-      if (body.error) msg = body.error;
+      const body = (await resp.json()) as {
+        error?: string | { code?: string; message?: string };
+      };
+      if (typeof body.error === "string") {
+        if (body.error !== "") msg = body.error;
+      } else if (body.error !== undefined && typeof body.error.message === "string" && body.error.message !== "") {
+        msg = body.error.code ? `${body.error.code}: ${body.error.message}` : body.error.message;
+      }
     } catch {
       // ignore parse failure
     }
@@ -1131,6 +1137,8 @@ export const CacheProjectionSchema = z.object({
   lock_timeout: z.string().default(""),
   range_enabled: z.boolean().default(false),
   max_ranges: z.number().int().nonnegative().default(0),
+  tag_headers: z.array(z.string()).optional(),
+  strip_tag_headers: z.boolean().optional(),
 });
 export type CacheProjection = z.infer<typeof CacheProjectionSchema>;
 
@@ -1510,6 +1518,176 @@ export async function purgeCache(key?: string): Promise<void> {
   if (!resp.ok) {
     throw new ApiError("/cache/purge", resp.status, `${String(resp.status)} ${resp.statusText}`);
   }
+}
+
+// ── Scoped cache invalidation (/api/v1/cache/purge*, #621) ───────────────────
+
+export type CacheSelectorKind =
+  | "exact_url"
+  | "prefix"
+  | "glob"
+  | "tag"
+  | "host"
+  | "key"
+  | "all";
+
+export interface CacheSelector {
+  kind: CacheSelectorKind;
+  host?: string | undefined;
+  url?: string | undefined;
+  uri?: string | undefined;
+  prefix?: string | undefined;
+  pattern?: string | undefined;
+  tags?: string[] | undefined;
+  tag_match?: "any" | "all" | undefined;
+  key?: string | undefined;
+  route_id?: string | undefined;
+  all?: boolean | undefined;
+}
+
+export interface CacheGuidance {
+  code: string;
+  severity: string;
+  scope?: string | undefined;
+  summary: string;
+  detail?: string | undefined;
+  docs_ref?: string | undefined;
+}
+
+export interface CacheResourceSample {
+  host: string;
+  path: string;
+  has_query?: boolean | undefined;
+  methods: string[];
+  representations: number;
+  tiers: string[];
+  body_bytes: number;
+  vary_fields?: string[] | undefined;
+  tags?: string[] | undefined;
+  freshness_state: string;
+  created_at?: string | undefined;
+  expires_at?: string | undefined;
+  stale_until?: string | undefined;
+}
+
+export interface CachePurgePreviewResponse {
+  api_version: string;
+  cache_enabled: boolean;
+  tag_ingestion_enabled: boolean;
+  selector: CacheSelector;
+  selector_digest: string;
+  preview_token: string;
+  matched_resources: number;
+  matched_representations: number;
+  memory_entries: number;
+  disk_entries: number;
+  matched_bytes: number;
+  memory_bytes: number;
+  disk_bytes: number;
+  inflight_fills_matched: number;
+  inflight_tag_unknown?: boolean | undefined;
+  count_accuracy: string;
+  truncated: boolean;
+  scan_limit: number;
+  scanned_entries: number;
+  source: string;
+  as_of: string;
+  cache_sequence: number;
+  execution_mode_contract: string;
+  broad_scope: boolean;
+  warnings?: CacheGuidance[] | undefined;
+  samples?: CacheResourceSample[] | undefined;
+  config_authority?: string | undefined;
+  config_authority_source?: string | undefined;
+}
+
+export interface CachePurgeResponse {
+  api_version: string;
+  operation_id: string;
+  state: "succeeded" | "partial" | "failed" | "canceled" | "running";
+  terminal: boolean;
+  outcome: string;
+  invalidation_effective: "effective" | "incomplete" | "uncertain";
+  idempotent_replay?: boolean | undefined;
+  selector: CacheSelector;
+  selector_digest: string;
+  fence_sequence?: number | undefined;
+  state_changed_since_preview?: boolean | undefined;
+  invalidated_resources: number;
+  invalidated_representations: number;
+  memory_entries_removed: number;
+  disk_entries_removed: number;
+  active_readers_retired?: number | undefined;
+  fenced_inflight_ops?: number | undefined;
+  skipped_entries?: number | undefined;
+  failed_entries?: number | undefined;
+  remaining_entries?: number | undefined;
+  started_at: string;
+  completed_at?: string | undefined;
+  recovery_guidance?: string | undefined;
+  warnings?: CacheGuidance[] | undefined;
+  boot_id: string;
+  config_authority?: string | undefined;
+  config_authority_source?: string | undefined;
+}
+
+export async function previewCachePurge(
+  selector: CacheSelector,
+  includeSamples = true,
+): Promise<CachePurgePreviewResponse> {
+  const data = await api<CachePurgePreviewResponse>("/v1/cache/purge/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selector, include_samples: includeSamples }),
+  });
+  return {
+    ...data,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+    samples: Array.isArray(data.samples) ? data.samples : [],
+  };
+}
+
+export interface ExecuteCachePurgeInput {
+  readonly selector: CacheSelector;
+  readonly previewToken?: string | undefined;
+  readonly confirmBroad?: boolean | undefined;
+  readonly retryOperationId?: string | undefined;
+  readonly idempotencyKey?: string | undefined;
+}
+
+export async function executeCachePurge(
+  input: ExecuteCachePurgeInput,
+): Promise<CachePurgeResponse> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (input.idempotencyKey) {
+    headers["Idempotency-Key"] = input.idempotencyKey;
+  }
+  const data = await api<CachePurgeResponse>("/v1/cache/purge", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      selector: input.selector,
+      preview_token: input.previewToken,
+      confirm_broad: input.confirmBroad,
+      retry_operation_id: input.retryOperationId,
+    }),
+  });
+  return {
+    ...data,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+  };
+}
+
+export async function fetchCachePurgeOperation(
+  operationId: string,
+): Promise<CachePurgeResponse> {
+  const data = await api<CachePurgeResponse>(
+    `/v1/cache/purges/${encodeURIComponent(operationId)}`,
+  );
+  return {
+    ...data,
+    warnings: Array.isArray(data.warnings) ? data.warnings : [],
+  };
 }
 
 // ── History ──────────────────────────────────────────────────────────────────

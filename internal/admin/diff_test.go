@@ -303,7 +303,7 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 		RateLimit:   config.RateLimitConfig{Enabled: true, Rate: 100, Burst: 100},
 	}
 	after := &config.Config{
-		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache", MaxEntrySize: config.Size(128 << 20), Lock: true, LockTimeout: config.Duration(3 * time.Second), RangeEnabled: true, MaxRanges: 4},
+		Cache:       config.CacheConfig{Enabled: true, DiskPath: "/var/cache", MaxEntrySize: config.Size(128 << 20), Lock: true, LockTimeout: config.Duration(3 * time.Second), RangeEnabled: true, MaxRanges: 4, TagHeaders: []string{"Cache-Tag"}, StripTagHeaders: config.Bool(true)},
 		Compression: config.CompressionConfig{Enabled: config.Bool(true), Encoders: []string{"gzip", "br"}},
 		RateLimit:   config.RateLimitConfig{Enabled: false},
 	}
@@ -320,14 +320,20 @@ func TestDiffGlobalCacheCompressionRateLimit(t *testing.T) {
 	if !diffHas(d, "Change cache maximum ranges") {
 		t.Errorf("expected cache max_ranges change, got %+v", d)
 	}
+	if !diffHas(d, "Change cache origin tag headers") {
+		t.Errorf("expected cache tag_headers change, got %+v", d)
+	}
+	if !diffHas(d, "Enable stripping of cache tag headers") {
+		t.Errorf("expected cache strip_tag_headers change, got %+v", d)
+	}
 	if !diffHas(d, "Enable cache fill lock") {
 		t.Errorf("expected cache fill-lock enable, got %+v", d)
 	}
 	if !diffHas(d, "Change cache fill-lock timeout") {
 		t.Errorf("expected cache fill-lock timeout change, got %+v", d)
 	}
-	if dDisable := diffConfigs(after, before); !diffHas(dDisable, "Disable cache fill lock") {
-		t.Errorf("expected cache fill-lock disable, got %+v", dDisable)
+	if dDisable := diffConfigs(after, before); !diffHas(dDisable, "Disable cache fill lock") || !diffHas(dDisable, "Disable stripping of cache tag headers") {
+		t.Errorf("expected cache fill-lock and strip_tag_headers disable, got %+v", dDisable)
 	}
 	cacheOff := &config.Config{Cache: config.CacheConfig{Enabled: false}}
 	cacheOnOnly := &config.Config{Cache: after.Cache}

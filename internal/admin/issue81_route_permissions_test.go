@@ -36,6 +36,7 @@ func TestIssue81TypedProjectionRoutesAdmitConfigPrincipals(t *testing.T) {
 		rbac.ConfigRead,
 		rbac.ConfigWrite,
 		rbac.ConfigApply,
+		rbac.CachePurge,
 	} {
 		if !issue81HasPermission(traffic.AnyPermissions, want) {
 			t.Fatalf("traffic-controls route does not admit %q: %v", want, traffic.AnyPermissions)

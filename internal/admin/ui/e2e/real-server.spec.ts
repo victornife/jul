@@ -42,6 +42,77 @@ import {
   IdentitySchema,
 } from "../src/api/client.ts";
 
+const CacheGuidanceSchema = z.object({
+  code: z.string(),
+  severity: z.string(),
+  scope: z.string().optional(),
+  summary: z.string(),
+  detail: z.string().optional(),
+  docs_ref: z.string().optional(),
+});
+
+const CacheResourceSampleSchema = z.object({
+  host: z.string(),
+  path: z.string(),
+  has_query: z.boolean().optional(),
+  methods: z.array(z.string()),
+  representations: z.number().int().nonnegative(),
+  tiers: z.array(z.string()),
+  body_bytes: z.number().int().nonnegative(),
+  vary_fields: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(),
+  freshness_state: z.string(),
+});
+
+const CachePurgePreviewResponseSchema = z.object({
+  api_version: z.string(),
+  cache_enabled: z.boolean(),
+  tag_ingestion_enabled: z.boolean(),
+  selector: z.object({
+    kind: z.string(),
+    host: z.string().optional(),
+    prefix: z.string().optional(),
+  }),
+  selector_digest: z.string(),
+  preview_token: z.string(),
+  matched_resources: z.number().int().nonnegative(),
+  matched_representations: z.number().int().nonnegative(),
+  memory_entries: z.number().int().nonnegative(),
+  disk_entries: z.number().int().nonnegative(),
+  matched_bytes: z.number().int().nonnegative(),
+  memory_bytes: z.number().int().nonnegative(),
+  disk_bytes: z.number().int().nonnegative(),
+  inflight_fills_matched: z.number().int().nonnegative(),
+  count_accuracy: z.string(),
+  truncated: z.boolean(),
+  scan_limit: z.number().int().nonnegative(),
+  scanned_entries: z.number().int().nonnegative(),
+  source: z.string(),
+  as_of: z.string(),
+  cache_sequence: z.number().int().nonnegative(),
+  execution_mode_contract: z.string(),
+  broad_scope: z.boolean(),
+  warnings: z.array(CacheGuidanceSchema),
+  samples: z.array(CacheResourceSampleSchema),
+});
+
+const CachePurgeResponseSchema = z.object({
+  api_version: z.string(),
+  operation_id: z.string(),
+  state: z.string(),
+  terminal: z.boolean(),
+  outcome: z.string(),
+  invalidation_effective: z.string(),
+  selector_digest: z.string(),
+  invalidated_resources: z.number().int().nonnegative(),
+  invalidated_representations: z.number().int().nonnegative(),
+  memory_entries_removed: z.number().int().nonnegative(),
+  disk_entries_removed: z.number().int().nonnegative(),
+  started_at: z.string(),
+  warnings: z.array(CacheGuidanceSchema),
+  boot_id: z.string(),
+});
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -1071,5 +1142,58 @@ test(
       }),
     });
     if (failure) throw failure;
+  },
+);
+
+test(
+  "POST /api/v1/cache/purge/preview, POST /api/v1/cache/purge, and GET /api/v1/cache/purges/{id} match client schemas (#621)",
+  async ({ request }) => {
+    const previewResp = await request.post("/api/v1/cache/purge/preview", {
+      headers: { "Content-Type": "application/json" },
+      data: JSON.stringify({
+        selector: {
+          kind: "prefix",
+          host: "localhost",
+          prefix: "/articles/",
+        },
+        include_samples: true,
+      }),
+    });
+    expect(previewResp.status()).toBe(200);
+    const preview = assertShape(
+      CachePurgePreviewResponseSchema,
+      await previewResp.json(),
+      "/api/v1/cache/purge/preview",
+    );
+    expect(preview.preview_token).toBeTruthy();
+
+    const purgeResp = await request.post("/api/v1/cache/purge", {
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "e2e-real-server-purge-621",
+      },
+      data: JSON.stringify({
+        selector: preview.selector,
+        preview_token: preview.preview_token,
+      }),
+    });
+    expect(purgeResp.status()).toBe(200);
+    const purge = assertShape(
+      CachePurgeResponseSchema,
+      await purgeResp.json(),
+      "/api/v1/cache/purge",
+    );
+    expect(purge.operation_id).toMatch(/^cp_/);
+
+    const statusResp = await request.get(
+      `/api/v1/cache/purges/${encodeURIComponent(purge.operation_id)}`,
+    );
+    expect(statusResp.status()).toBe(200);
+    const status = assertShape(
+      CachePurgeResponseSchema,
+      await statusResp.json(),
+      "/api/v1/cache/purges/{id}",
+    );
+    expect(status.operation_id).toBe(purge.operation_id);
   },
 );

@@ -875,7 +875,15 @@ connections. Every `global_set` field (`log_level`, `log_format`,
 `redact_min_secret_length`) is also hot. The Global and Traffic Controls forms
 use these sparse typed operations after #81, preserving omitted/dormant values;
 the cache form retains its validated-TOML path and lifecycle-assessed staging
-when the candidate requires it. The raw editor remains available.
+when the candidate requires it, including hot-reloadable trusted origin tag
+headers (`[cache].tag_headers` and `[cache].strip_tag_headers`, #621), and embeds
+the **Scoped Cache Invalidation** operator workflow (**Select Scope → Preview →
+Confirm → Execute → Observe Result / Recover**) backed by
+`/api/v1/cache/purge*`. Any edit to the selector inputs or change in RBAC
+permissions while confirmation is open automatically invalidates the active
+preview; broad-scope selections (`host`, `all`, `>= 100` resources, or
+truncated previews) require an explicit confirmation checkbox before execution.
+The raw editor remains available.
 
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,

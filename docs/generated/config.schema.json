@@ -428,6 +428,20 @@
           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
           "type": "string",
           "x-jul-constraint": "non-negative"
+        },
+        "strip_tag_headers": {
+          "description": "StripTagHeaders removes the configured tag_headers from downstream client responses and stored response headers so internal grouping metadata is not exposed to clients",
+          "type": "boolean",
+          "x-jul-conditional-default": "true (when cache.tag_headers is set)",
+          "x-jul-constraint": "must not be true when cache.tag_headers is empty"
+        },
+        "tag_headers": {
+          "description": "TagHeaders lists trusted origin response header names from which Jul ingests grouping tags for scoped tag invalidation (#621, ADR 0027; for example [\"Cache-Tag\"] or [\"Cache-Tag\", \"Surrogate-Key\"])",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "x-jul-constraint": "at most 8 unique 1..64-byte HTTP header token names; reserved protocol, framing, validator, and credential headers are rejected"
         }
       },
       "type": "object"

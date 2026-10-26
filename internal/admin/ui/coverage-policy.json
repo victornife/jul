@@ -30,6 +30,18 @@
     "src/auth/OidcSession.tsx": {
       "statements": 90,
       "branches": 70
+    },
+    "src/features/traffic-controls/CacheInvalidationPanel.tsx": {
+      "statements": 90,
+      "branches": 75
+    },
+    "src/lib/trafficToml.ts": {
+      "statements": 90,
+      "branches": 80
+    },
+    "src/lib/trafficPatchBuilders.ts": {
+      "statements": 90,
+      "branches": 85
     }
   }
 }

@@ -323,12 +323,13 @@ func TestPrivateCABackendIsBothReachableAndHealthy(t *testing.T) {
 
 	up := config.UpstreamConfig{
 		Name:     "probed",
+		Strategy: "round_robin",
 		Servers:  []config.UpstreamServer{{Address: addr, Weight: 1}},
 		MaxFails: 1,
 		HealthCheck: &config.HealthCheckConfig{
 			Enabled: true, Type: "http", Path: "/healthz", Host: "routing.internal",
-			Interval: config.Duration(20 * time.Millisecond),
-			Timeout:  config.Duration(2 * time.Second),
+			Interval: config.Duration(time.Second),
+			Timeout:  config.Duration(500 * time.Millisecond),
 			// One successful probe is enough for the transition, so the test
 			// asserts on the probe's verdict rather than on wall-clock timing.
 			HealthyThreshold: 1, UnhealthyThreshold: 1,
@@ -336,6 +337,17 @@ func TestPrivateCABackendIsBothReachableAndHealthy(t *testing.T) {
 		BackendTLS: &config.BackendTLSConfig{
 			CAMode: "file_only", CAFile: ca.caPath, ServerName: "probe.internal",
 		},
+	}
+	if err := config.Validate(&config.Config{
+		Upstreams: []config.UpstreamConfig{up},
+		Servers: []config.ServerConfig{{
+			Listen: "127.0.0.1:8080",
+			Locations: []config.LocationConfig{{
+				Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "https://probed",
+			}},
+		}},
+	}); err != nil {
+		t.Fatalf("invalid private-CA health integration fixture: %v", err)
 	}
 
 	// The probe verdict is observed through the registry's own hook, which is

@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 422 |
-| Schema leaves (configurable values) | 355 |
-| Registry entries | 355 |
+| Schema paths (containers included) | 424 |
+| Schema leaves (configurable values) | 357 |
+| Registry entries | 357 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 312 |
+| Class `hot_reload` | 314 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -183,6 +183,8 @@ value is compared as a digest so no secret material leaves the process.
 | `cache.range_enabled` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.stale_if_error` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.stale_while_revalidate` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.strip_tag_headers` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.tag_headers` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `compression.enabled` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |
 | `compression.encoders` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |
 | `compression.level` | `hot_reload` | `compression` | — | the compression middleware is rebuilt with the handler tree on each successful reload |

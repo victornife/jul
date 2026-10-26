@@ -142,6 +142,7 @@ var ConditionalDefaultOverrides = map[string]string{
 	"cache.lock_timeout":          "5s (when cache.lock)",
 	"cache.max_entry_size":        "memory_max_size (when cache.enabled)",
 	"cache.max_ranges":            "1 (when cache.range_enabled)",
+	"cache.strip_tag_headers":     "true (when cache.tag_headers is set)",
 }
 
 // DefaultFor returns the documented unconditional default for path, as

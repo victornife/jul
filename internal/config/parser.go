@@ -382,6 +382,9 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 	if c.Cache.RangeEnabled && c.Cache.MaxRanges == 0 {
 		c.Cache.MaxRanges = 1
 	}
+	if len(c.Cache.TagHeaders) > 0 && c.Cache.StripTagHeaders == nil {
+		c.Cache.StripTagHeaders = Bool(true)
+	}
 
 	// Resolve compression enabled state:
 	//   - Explicit enabled=true  → always active.

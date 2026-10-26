@@ -30,8 +30,10 @@ benchmarks below were refreshed against the corrected implementation.
 - [On-disk format](#on-disk-format)
 - [Disk-tier safety](#disk-tier-safety)
 - [Eviction and overflow](#eviction-and-overflow)
-- [Operations](#operations)
-- [Deployment](#deployment)
+- [Scoped cache invalidation and origin grouping tags](#scoped-cache-invalidation-and-origin-grouping-tags)
+- [Known limitations](#known-limitations)
+- [Benchmarks](#benchmarks)
+- [Threat note](#threat-note)
 
 ## Two-tier model
 
@@ -74,6 +76,8 @@ lock                   = true     # coalesce concurrent cold misses per key
 lock_timeout           = "5s"     # fall through uncached after 5s wait
 range_enabled          = true     # opt-in Option A range-aware caching (#442)
 max_ranges             = 1        # bound accepted range specs (default 1 when range_enabled = true)
+tag_headers            = ["Cache-Tag", "Surrogate-Key"] # opt-in trusted origin grouping-tag headers (#621)
+strip_tag_headers      = true     # strip configured tag_headers from client responses (default true when tag_headers is set)
 ```
 
 Per-location opt-in is still required:
@@ -1017,14 +1021,162 @@ Stored memory entries plus in-flight memory captures stay within twice
 `jul_cache_capture_skipped_total{reason="oversize"|"budget"}` and logged at
 debug level, throttled to one line per ten seconds.
 
+## Scoped cache invalidation and origin grouping tags
+
+Jul.IA supports preview-confirmed scoped cache invalidation across the memory
+and disk tiers (#621, [ADR 0027](adr/0027-scoped-cache-invalidation.md)) through
+the versioned Admin API (`/api/v1/cache/purge*`), the remote CLI
+(`jul cache purge`), and the Full Console (**Global & Traffic Controls → Cache**).
+
+### Supported selectors
+
+Every invalidation request specifies one explicit `selector.kind`. Malformed,
+empty, unanchored, or cross-scope inputs are rejected with `400 invalid_request`
+and never fall back to a broader purge:
+
+| Selector kind | Required fields | Scope and matching rules |
+| --- | --- | --- |
+| `exact_url` | `url` (`http(s)://host[:port]/path[?query]`) or `host` + `uri` (`/path[?query]`) | Matches one exact normalized hostname and request URI (including the exact raw query string) across `GET`, `HEAD`, and all `Vary` variants. Scheme does not partition Jul's cache key; explicit ports in `r.Host` (e.g. `example.com:8443` or `example.com:443`) are matched literally. |
+| `prefix` | `host` + `prefix` (`/path...`) | Matches all cached resources on `host` under a **segment-bounded** path prefix across all query strings, `GET`/`HEAD`, and `Vary` variants. `/articles` or `/articles/` matches `/articles`, `/articles/42`, and `/articles/42?lang=en`, and never matches `/articles-archive`. Root `/` is rejected on `prefix`; use `kind = "host"` for whole-host invalidation. |
+| `glob` | `host` + `pattern` (`/path/...`) | Matches paths on `host` against a bounded anchored glob (linear-time segment state machine, no regex). `*` matches zero or more characters within a single path segment (never `/`); standalone `**` matches zero or more full path segments. Bounded to `<= 16` segments, `<= 8` `*` wildcards, and `<= 2` `**` segments. |
+| `tag` | `host` + `tags` (`1..16` tags) + optional `tag_match` (`"any"` default or `"all"`) | Matches cached resources on `host` carrying trusted origin grouping tags (e.g. `article:42`). Tags are case-sensitive, isolated per `host`, and never conflated with HTTP `ETag` validators. |
+| `host` | `host` | Matches every cached resource belonging to `host` while preserving other virtual hosts on the same Jul instance. Flagged as `broad_scope = true`. |
+| `key` | `key` (`METHOD\nhost\nrequest_uri`) | Legacy compatibility selector for one internal cache key. |
+| `all` | `all = true` | Purges the entire node cache across all hostnames. Flagged as `broad_scope = true`. |
+
+Percent-encoded path separators (`%2F` / `%2f`) are preserved distinctly from
+literal `/` so `/files/a%2Fb` and `/files/a/b` are never equated. Dot-segments
+(`/../`, `/./`, `%2e`) and `#fragment` components are rejected. An optional
+`route_id` field constrains or derives the host/path scope from the active
+route configuration without introducing a separate application registry.
+
+### Trusted origin grouping-tag ingestion
+
+Tag-based invalidation is opt-in via `[cache].tag_headers`:
+
+- **`[cache].tag_headers`** (`hot_reload`, default `[]`): up to 8 non-reserved
+  origin response header names (typically `["Cache-Tag", "Surrogate-Key"]`).
+  Reserved HTTP headers (`ETag`, `Cache-Control`, `Vary`, `Set-Cookie`,
+  `Authorization`, etc.) are rejected at config validation.
+- **`[cache].strip_tag_headers`** (`hot_reload`, defaults to `true` when
+  `tag_headers` is non-empty): removes configured tag headers from downstream
+  client responses on fresh misses, memory/disk hits, `304` revalidations, `206`
+  range responses, declined protocol-upgrade HTTP responses, and `stale_if_error`
+  fallbacks so internal grouping topology is not leaked to public clients.
+- **Validation and bounds:** each tag must be `1..128` visible ASCII characters
+  (`0x21..0x7E` excluding `,`, `;`, quotes, and whitespace) and is checked
+  against credential-like patterns (`Bearer`, `token=`, `api_key=`, JWTs). Each
+  entry stores at most `32` tags and `1024` total tag bytes (from at most `4096`
+  raw tag header bytes), and the process-wide reverse index is bounded to
+  `65,536` `(host, tag, resKey)` links.
+- **Persisted tag-policy provenance:** `JULDCH02` disk entry metadata records
+  whether tag-policy provenance was tracked (`TagPolicyTracked`) and the exact
+  `TagHeaders` policy active when the entry was ingested. On both live reloads
+  and startup rehydration when `tag_headers` is configured, entries whose
+  persisted provenance is absent or differs from the active `tag_headers` set
+  are conservatively retired rather than re-indexed under fabricated provenance.
+- **Conservative failure policy:** if an origin response carries a malformed,
+  credential-like, or oversize tag header, or if adding its tags would exceed
+  `MaxTotalTagLinks`, Jul still serves the response normally to the downstream
+  client (`X-Cache: MISS`) but **skips storing the response in the cache** and
+  increments `jul_cache_tag_ingest_skipped_total{reason="invalid"|"oversize"|"index_limit"}`.
+  A misconfigured origin header therefore never causes a cache hit that misses
+  a subsequent tag purge.
+- **Trust boundary:** tags are extracted exclusively from upstream origin
+  responses (and merged on `304 Not Modified`), never from client request
+  headers.
+
+### Preview, linearization, concurrency fencing, and durability
+
+1. **Non-destructive preview (`POST /api/v1/cache/purge/preview`):** evaluates
+   the normalized selector against the live catalog without fetching from the
+   origin, warming the cache, or mutating freshness. Returns deduplicated
+   `matched_resources` (URLs) and `matched_representations` (`GET`/`HEAD`/`Vary`
+   variants, counted once even when resident in both memory and disk), per-tier
+   entry and byte counts, `inflight_fills_matched` (plus `inflight_tag_unknown`
+   for tag selectors), `count_accuracy` (`exact` or `lower_bound_truncated` at
+   the 10,000-entry preview scan bound), a principal-and-selector-bound HMAC
+   `preview_token`, and secret-safe resource samples (`?<redacted>`).
+2. **Linearization and in-flight fencing (`POST /api/v1/cache/purge`):**
+   allocates and durably records a monotonic `fence_sequence` in `genSeq` (and
+   `.jul-cache-purge-ledger` / `.jul-cache-gen`), installs an active
+   selector fence, and detaches matching in-flight cold-miss fill locks and
+   revalidations. Cutoff allocation, durable intent commit, and fence
+   installation exclude origin publication under the same cache generation
+   lock; a fill cannot acquire a newer publication generation in between them.
+   Broad scopes (`host`, `all`, `>= 100` matched resources, or
+   truncated preview scans) require explicit `confirm_broad = true`. Any cold
+   fill, singleflight leader, synchronous `304` validation, background
+   `stale-while-revalidate` refresh, or retired-handler operation that started
+   before `fence_sequence` (`startGen <= fence_sequence`) — including a cold
+   miss not yet in cache at preview time or whose origin tag is first learned
+   when response headers arrive — is blocked from publishing into memory or disk
+   upon completion while still delivering its response to its waiting client.
+   Retries retain their original cutoffs even if execution completes out of
+   order: an older full purge cannot clear a newer selector fence or lower a
+   newer full-purge generation barrier. Fills started after a purge's cutoff
+   remain cacheable, including disk entries published while that purge is
+   completing its disk cleanup. A failed intent commit leaves resident entries
+   unchanged and conservatively fences earlier matching origin publications
+   because the failed write may still have reached durable storage.
+   Tag-purge retries also retain the original logical-resource group, not just
+   the tag selector: opaque resource IDs are committed with the cutoff and
+   resolve both GET and HEAD representations, including Vary variants, after
+   tag changes, tag-ingestion policy changes, fence eviction, or restart.
+   Query values are never stored in this retry snapshot. Older tag operations
+   without a durable snapshot can use retained in-memory ownership; if neither
+   is available, continuation fails explicitly instead of reporting success
+   from the current tag index. Use a fresh host or all purge with explicit
+   broad confirmation and a new idempotency key to clean up unknown ownership.
+3. **Admitted readers and ordinary reloads:** already-admitted downstream
+   readers holding an in-memory `*Entry` reference or a reference-counted
+   `.jul-cache-retired-*` disk file lease finish streaming uninterrupted, while
+   new requests immediately miss and refetch from the origin. Ordinary
+   configuration reloads retain warm cache entries unless an explicit purge is
+   executed.
+4. **Crash-consistent disk durability and outcomes:** `deleteBatchAtMostGen`
+   writes target hashes to `.jul-cache-tombstones` before unlinking `JULDCH02`
+   files and prunes orphan `Vary` variants on startup rehydration. If a disk
+   unlink fails, the entry remains removed in memory, is tombstoned on disk, and
+   the response reports `state = "partial"`, `outcome = "partial_failure"`,
+   `invalidation_effective = "incomplete"`, and actionable `recovery_guidance`
+   so the operator or automation script can retry using `retry_operation_id` or
+   the same `Idempotency-Key`.
+   Cleanup includes targeted in-flight disk publications and reconciles pending
+   tombstones and retired files even if catalog generations have advanced.
+   A retry cannot claim effective success while durable cleanup remains unsafe;
+   already-admitted readers may finish once their retirement is durable.
+   Old fenced fills cannot mutate Vary membership or delete newer variants.
+
+### Console retry confirmation
+
+The Console retries a terminal incomplete operation using its canonical
+`retry_operation_id`, without supplying an `Idempotency-Key`. Initial executions
+retain a stable generated key; a looked-up operation never borrows that key.
+Every retry requires checking **Confirm retry scope** for the displayed
+operation. This acknowledgement permits broad invalidation within that
+operation's original selector; it is not inferred from a preview, processed
+resource counts, or another operation. If no cutoff was recorded, retry can
+evaluate the selector against the current cache, so a formerly narrow operation
+may now match a broad set of resources.
+
+Clearing a preview, changing credentials or permissions, checking operation
+status, or submitting a retry clears the retry acknowledgement. Running
+operations cannot be retried until a terminal status is observed. A new
+acknowledgement is required if a retry remains incomplete or fails.
+
 ## Known limitations
 
 Product limitations — deliberate scope, not defects:
 
-1. **No tag or pattern purge.** The admin API can purge a single exact key or
-   the entire cache. There is no way to purge by URL prefix, host, or tag (e.g.
-   invalidate all `/api/v1/users/*`). Operators needing selective invalidation
-   must do so at the application layer or use short TTLs.
+1. **Scoped invalidation is local to one Jul instance and uses bounded selectors.**
+   `/api/v1/cache/purge*`, `jul cache purge`, and the Console invalidate cached
+   representations by exact URL, segment-bounded path prefix, bounded anchored
+   glob (`*` and `**`), trusted origin grouping tag, hostname, legacy key, or
+   full cache (#621, [ADR 0027](adr/0027-scoped-cache-invalidation.md)). Arbitrary
+   regular-expression purges, unauthenticated data-plane `PURGE` requests,
+   cross-instance distributed invalidation, and downstream browser/external-CDN
+   cache eviction are outside scope.
 
 2. **Range-aware caching is opt-in, complete-object only, and single-range.**
    By default (`[cache].range_enabled = false`), every request carrying `Range`
@@ -1168,6 +1320,26 @@ full-object amplification:
 | `BenchmarkCacheRangeHitDisk/option_a` | Warm 64 KiB range on 4 MiB disk object (`range_enabled = true`, 32 KiB chunks) | 393,525 | 0 | 293 | 14,528 |
 | `BenchmarkCacheRangeOneShotTinyCold/bypass` | One-shot cold 1 KiB range on 4 MiB object (`range_enabled = false`) | 11,334 | 1,024 | 29 | 6,774 |
 | `BenchmarkCacheRangeOneShotTinyCold/option_a` | One-shot cold 1 KiB range on 4 MiB object (`range_enabled = true`, full-object fill) | 3,899,675 | 4,194,304 | 397 | 29,632 |
+
+### Scoped cache invalidation and tag-index benchmarks (#621)
+
+Command (five samples):
+
+```bash
+go test -run '^$' -bench='BenchmarkCacheHit$|BenchmarkCacheHitWithTagIngestionAndFences$|BenchmarkScopedPurge' -benchmem -benchtime=200ms -count=5 ./internal/cache
+```
+
+Environment: Linux 6.18.54.1-microsoft-standard-WSL2, Go 1.27.3, `linux/arm64`,
+Qualcomm Oryon (12 cores), `GOMAXPROCS=12`, on the `#621` implementation branch.
+Values below are the five-sample medians:
+
+| Benchmark | Scenario | Median ns/op | allocs/op | bytes/op |
+| --- | --- | ---: | ---: | ---: |
+| `BenchmarkCacheHit` | Baseline warm memory hit (1 entry, tag ingestion off) | 2,402 | 16 | 1,256 |
+| `BenchmarkCacheHitWithTagIngestionAndFences` | Warm memory hit with `tag_headers = ["Cache-Tag"]`, `strip_tag_headers = true`, and 1,000 indexed tagged resources | 2,783 | 15 | 1,248 |
+| `BenchmarkScopedPurgeTagIndex` | Invalidate `article:42` (2 representations) + refill in a 2,000-entry cache via reverse tag index | 7,835 | 36 | 2,208 |
+| `BenchmarkScopedPurgePrefixScan` | Invalidate `/articles/hot/` (8 representations) + refill in a 2,000-entry multi-host cache | 251,152 | 62 | 38,256 |
+| `BenchmarkScopedPurgePreviewLargeSelection` | Non-destructive `PreviewScope` over 2,000 matched entries with 20 safe resource samples | 1,197,337 | 8,062 | 900,622 |
 
 ## Threat note
 

@@ -256,12 +256,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 422,
-    "schema_leaves": 355,
-    "registry_entries": 355,
+    "schema_paths": 424,
+    "schema_leaves": 357,
+    "registry_entries": 357,
     "startup_consumed": 29,
     "by_class": {
-      "hot_reload": 312,
+      "hot_reload": 314,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 29,
@@ -1117,6 +1117,32 @@
     },
     {
       "path": "cache.stale_while_revalidate",
+      "class": "hot_reload",
+      "subsystem": "cache",
+      "reason": "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "cache.strip_tag_headers",
+      "class": "hot_reload",
+      "subsystem": "cache",
+      "reason": "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "cache.tag_headers",
       "class": "hot_reload",
       "subsystem": "cache",
       "reason": "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)",

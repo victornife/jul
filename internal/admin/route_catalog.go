@@ -492,6 +492,7 @@ var Catalog = []RouteSpec{
 			rbac.ConfigRead,
 			rbac.ConfigWrite,
 			rbac.ConfigApply,
+			rbac.CachePurge,
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleTrafficControls) },
 	},

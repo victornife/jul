@@ -71,6 +71,22 @@ Optimistic concurrency: the config changed since you loaded it (another edit, a
 rollback, or a direct file edit + reload). Reload the current config in the
 Console and re-apply your change.
 
+### Scoped cache invalidation warns `TAG_INGESTION_DISABLED` or returns `partial` / `uncertain`
+
+- **`TAG_INGESTION_DISABLED`:** tag-scoped invalidation (`selector.kind = "tag"`)
+  requires `[cache].tag_headers` to list the trusted upstream response header
+  names (e.g. `tag_headers = ["Cache-Tag", "Surrogate-Key"]`). Without it, Jul
+  does not index origin grouping tags.
+- **`EXPLICIT_DEFAULT_PORT`:** Jul keys cache entries by the literal lowercased
+  `Host` request header. If clients connect on standard port 80/443 without
+  sending `:80` or `:443` in `Host`, omit `:80`/`:443` from the purge selector
+  host or URL.
+- **`partial` (`incomplete`) or `uncertain` outcome:** one or more disk cache
+  file removals or `.jul-cache-tombstones` writes failed under
+  `[cache].disk_path`. Matching entries are immediately fenced in memory; verify
+  filesystem permissions and free space on `[cache].disk_path` and retry the
+  purge with `--retry-operation-id <op_id>` (or the same `--idempotency-key`).
+
 ## Reloads
 
 ### A `SIGHUP`/reload did not apply a change

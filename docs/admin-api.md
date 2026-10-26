@@ -188,6 +188,9 @@ route it asked for.
 | `/api/v1/streams` | GET | external | `status:read` |
 | `/api/v1/config/export` | GET | external | `config:read` |
 | `/api/v1/config/history/{id}/diff` | GET | external | `history:rollback` **and** `config:raw` |
+| `/api/v1/cache/purge/preview` | POST | external | `cache:purge` |
+| `/api/v1/cache/purge` | POST | external | `cache:purge` |
+| `/api/v1/cache/purges/{operation_id}` | GET | external | any of `cache:purge`, `audit:read`, `admin:manage` |
 
 The probes and the scrape target keep their **current unversioned paths**.
 Moving a liveness probe or a Prometheus target under `/api/v1` would break every
@@ -511,6 +514,48 @@ A credential change is reported as a change — "rotate", with no `before` or
 put a credential in either would put it on the wire. Withholding the value must
 not withhold the fact: an operator reviewing a rollback needs to see a rotation
 coming. A test asserts both halves.
+
+### `POST /api/v1/cache/purge/preview`, `POST /api/v1/cache/purge`, and `GET /api/v1/cache/purges/{operation_id}`
+
+Scoped cache invalidation (#621, [ADR 0027](adr/0027-scoped-cache-invalidation.md))
+is an **operational cache action**, not a configuration mutation: it is
+available in both `managed` and `file_owned` configuration-authority modes while
+keeping `file_owned` configuration files strictly read-only remotely.
+
+- **`POST /api/v1/cache/purge/preview`** (`cache:purge`):
+  evaluates a `selector` (`exact_url`, `prefix`, `glob`, `tag`, `host`, `key`, or
+  `all`) non-destructively against the live cache catalog. Returns deduplicated
+  `matched_resources` and `matched_representations`, per-tier entry/byte counts,
+  `inflight_fills_matched` (plus `inflight_tag_unknown` for tag selectors),
+  `count_accuracy` (`exact` or `lower_bound_truncated`), a principal-and-scope-bound
+  HMAC `preview_token`, structured `warnings`, and up to 20 secret-safe resource
+  `samples` (with query values redacted).
+- **`POST /api/v1/cache/purge`** (`cache:purge`, re-verified at the execution
+  boundary): reserves and durably records a monotonic selector fence
+  (`fence_sequence`) in `.jul-cache-purge-ledger` before execution, detaches
+  matching in-flight cold fills and revalidations, and removes matching entries
+  across memory and disk with crash-consistent `.jul-cache-tombstones`. Broad
+  scopes (`host`, `all`, `>= 100` matched resources, or a truncated preview
+  scan) require explicit `confirm_broad = true` even when a valid
+  `preview_token` is supplied. Supports `Idempotency-Key` (replaying `succeeded`
+  results with `idempotent_replay = true` and re-running
+  `partial`/`failed`/`canceled` attempts at the original `fence_sequence`) and
+  `retry_operation_id`; returns `503 storage_unavailable` if the durable purge
+  ledger cannot be read or persisted before execution. Tag retries retain
+  their original resource groups across tag changes, fence eviction, and
+  restart using secret-safe opaque IDs. A legacy tag retry without durable or
+  retained ownership returns `400 invalid_request` rather than re-evaluating
+  current tags. Conflicting existing `Idempotency-Key` and
+  `retry_operation_id` identities return `409 idempotency_key_reused`.
+  An operation-ID retry must omit `Idempotency-Key` or reuse the operation's
+  original bound key; a new unbound key returns `400 invalid_request` rather
+  than being accepted without a binding.
+- **`GET /api/v1/cache/purges/{operation_id}`** (any of `cache:purge`,
+  `audit:read`, `admin:manage`; principal-isolated unless the caller holds
+  `audit:read` or `admin:manage`): inspects an operation record from the bounded
+  256-entry ledger (persisted to `.jul-cache-purge-ledger` when
+  `[cache].disk_path` is configured; returns `503 storage_unavailable` if the
+  on-disk ledger is unreadable).
 
 ## What is deliberately not published
 

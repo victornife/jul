@@ -64,21 +64,30 @@ type Metrics struct {
 	// cacheRangeRequests counts range-aware cache decisions (#442 Option A),
 	// labeled by a closed outcome set.
 	cacheRangeRequests *prometheus.CounterVec
-	compressed         *prometheus.CounterVec
-	ratelimited        *prometheus.CounterVec
-	clientAddrDerived  *prometheus.CounterVec
-	authDecisions      *prometheus.CounterVec
-	upstreamUp         *prometheus.GaugeVec
-	upstreamBackends   *prometheus.GaugeVec
-	admissionRejected  *prometheus.CounterVec
-	retryAttempts      *prometheus.CounterVec
-	retryBudgetDenied  *prometheus.CounterVec
-	circuitTransitions *prometheus.CounterVec
-	affinityKeys       *prometheus.CounterVec
-	transportRetired   *prometheus.CounterVec
-	resilience         *resilienceCollector
-	cache              *cacheCollector
-	storage            *storageCollector
+	// cacheInvalidations counts explicit cache invalidation operations (#621),
+	// labeled by closed selector kind and bounded outcome sets.
+	cacheInvalidations *prometheus.CounterVec
+	// cacheInvalidationEntries counts tier entries removed or retired by
+	// explicit invalidation operations (#621), labeled by tier (memory/disk).
+	cacheInvalidationEntries *prometheus.CounterVec
+	// cacheTagIngestSkipped counts cacheable responses not stored because
+	// configured origin tag metadata failed validation or bounds (#621).
+	cacheTagIngestSkipped *prometheus.CounterVec
+	compressed            *prometheus.CounterVec
+	ratelimited           *prometheus.CounterVec
+	clientAddrDerived     *prometheus.CounterVec
+	authDecisions         *prometheus.CounterVec
+	upstreamUp            *prometheus.GaugeVec
+	upstreamBackends      *prometheus.GaugeVec
+	admissionRejected     *prometheus.CounterVec
+	retryAttempts         *prometheus.CounterVec
+	retryBudgetDenied     *prometheus.CounterVec
+	circuitTransitions    *prometheus.CounterVec
+	affinityKeys          *prometheus.CounterVec
+	transportRetired      *prometheus.CounterVec
+	resilience            *resilienceCollector
+	cache                 *cacheCollector
+	storage               *storageCollector
 	// upstreamCapacity is #431's separate, un-scraped capacity source; see
 	// SetUpstreamCapacitySource.
 	upstreamCapacity atomic.Pointer[UpstreamStatsSource]
@@ -323,6 +332,18 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_cache_range_requests_total",
 			Help: "Range-aware cache decisions, labeled by bounded outcome (hit/fill/fallback/if_range_full/unsatisfiable/invalid).",
 		}, []string{"outcome"}),
+		cacheInvalidations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_cache_invalidations_total",
+			Help: "Explicit cache invalidation operations, labeled by selector kind (exact_url/prefix/glob/tag/host/key/all) and bounded outcome (succeeded/succeeded_no_matches/partial_failure/failed/canceled/cache_disabled).",
+		}, []string{"selector", "outcome"}),
+		cacheInvalidationEntries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_cache_invalidation_entries_total",
+			Help: "Cache tier entries removed or retired by explicit invalidation operations, labeled by tier (memory/disk).",
+		}, []string{"tier"}),
+		cacheTagIngestSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_cache_tag_ingest_skipped_total",
+			Help: "Cacheable origin responses not stored because configured grouping-tag metadata failed validation or bounds, labeled by reason (invalid/oversize/index_limit).",
+		}, []string{"reason"}),
 		compressed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_http_response_compressed_total",
 			Help: "Responses compressed by the edge, labeled by content coding.",
@@ -596,6 +617,9 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.cacheCaptureSkipped,
 		m.cacheFillLocks,
 		m.cacheRangeRequests,
+		m.cacheInvalidations,
+		m.cacheInvalidationEntries,
+		m.cacheTagIngestSkipped,
 		m.compressed,
 		m.ratelimited,
 		m.clientAddrDerived,
@@ -845,6 +869,42 @@ func (m *Metrics) ObserveCacheFillLock(outcome string) {
 // value, path, host, user identity, or error string.
 func (m *Metrics) ObserveCacheRangeRequest(outcome string) {
 	m.cacheRangeRequests.WithLabelValues(outcome).Inc()
+}
+
+// ObserveCacheInvalidation records one explicit cache invalidation operation
+// and its per-tier removed entry counts (#621). Both selector and outcome are
+// clamped to their closed allow-lists so no URL, query, tag, host, principal,
+// or operation ID can ever become a Prometheus label.
+func (m *Metrics) ObserveCacheInvalidation(selector, outcome string, memRemoved, diskRemoved int) {
+	switch selector {
+	case "exact_url", "prefix", "glob", "tag", "host", "key", "all":
+	default:
+		selector = "exact_url"
+	}
+	switch outcome {
+	case "succeeded", "succeeded_no_matches", "partial_failure", "failed", "canceled", "cache_disabled":
+	default:
+		outcome = "failed"
+	}
+	m.cacheInvalidations.WithLabelValues(selector, outcome).Inc()
+	if memRemoved > 0 {
+		m.cacheInvalidationEntries.WithLabelValues("memory").Add(float64(memRemoved))
+	}
+	if diskRemoved > 0 {
+		m.cacheInvalidationEntries.WithLabelValues("disk").Add(float64(diskRemoved))
+	}
+}
+
+// ObserveCacheTagIngestSkipped records one cacheable response that was not
+// stored because its configured origin tag header failed validation or bounds
+// (#621). reason is clamped to the closed set (invalid/oversize/index_limit).
+func (m *Metrics) ObserveCacheTagIngestSkipped(reason string) {
+	switch reason {
+	case "invalid", "oversize", "index_limit":
+	default:
+		reason = "invalid"
+	}
+	m.cacheTagIngestSkipped.WithLabelValues(reason).Inc()
 }
 
 // ObserveRateLimited records that a request was rejected by rate limiting. kind

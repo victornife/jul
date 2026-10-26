@@ -365,6 +365,8 @@ func TestCacheScalarPolicyIsHot(t *testing.T) {
 		"cache.range_enabled",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",
+		"cache.strip_tag_headers",
+		"cache.tag_headers",
 	} {
 		e, ok := Lookup(path)
 		if !ok {
