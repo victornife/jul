@@ -524,7 +524,7 @@ var decisionCatalog = map[string]decisionDescription{
 	"upgrade_bypass":               {"bypass", "A protocol upgrade bypassed response caching.", "Protocol-switch traffic is not a cacheable HTTP representation."},
 	"range_bypass":                 {"bypass", "The range request was forwarded outside cache reuse.", "Inspect range support, syntax, method and complete-object availability."},
 	"sse_bypass":                   {"bypass", "A live event stream was excluded from capture.", "Do not buffer an unbounded SSE response for shared caching."},
-	"capture_oversize":             {"capture", "The response exceeded the capture size limit.", "Compare maximum entry size, tier support and the object size."},
+	"capture_oversize":             {"capture", "The response body or encoded disk metadata exceeded its capture size limit.", "Compare maximum entry size, tier support, object size and the fixed disk metadata limit."},
 	"capture_budget":               {"capture", "The bounded concurrent capture budget was unavailable.", "Inspect cache pressure and concurrent fills."},
 	"capture_not_stored":           {"capture", "This capture did not produce a stored response.", "Inspect companion admission/capture decisions and cancellation."},
 	"response_stored":              {"publication", "The response was published to at least one cache tier.", "Inspect current residency; publication does not guarantee a future hit."},

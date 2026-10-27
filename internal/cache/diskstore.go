@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -41,6 +42,7 @@ const (
 )
 
 var errCorruptDiskEntry = errors.New("cache: corrupt or incompatible disk cache file")
+var errDiskMetaTooLarge = fmt.Errorf("%w: metadata exceeds format limit", errCorruptDiskEntry)
 
 type diskEntryMeta struct {
 	Evidence           *publicationEvidence
@@ -103,7 +105,10 @@ func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLe
 		return nil, err
 	}
 	metaLen := buf.Len()
-	if metaLen == 0 || metaLen > maxDiskMetaBytes {
+	if metaLen > maxDiskMetaBytes {
+		return nil, errDiskMetaTooLarge
+	}
+	if metaLen == 0 {
 		return nil, errCorruptDiskEntry
 	}
 	var trailer [diskTrailerSize]byte
@@ -1408,6 +1413,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 	}
 	tail, err := encodeDiskTrailerAndMetaWithKeyGen(key, gen, e, s.bodyLen)
 	if err != nil {
+		if errors.Is(err, errDiskMetaTooLarge) {
+			s.acct.skip(captureSkipOversize)
+		}
 		return nil, false
 	}
 	budgetCap := d.availableBudgetCap()

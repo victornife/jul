@@ -1,7 +1,7 @@
 {
-  "covered": 133,
-  "total": 144,
-  "percent": 92.36111111111111,
+  "covered": 139,
+  "total": 150,
+  "percent": 92.66666666666667,
   "files": [
     "internal/admin/api.go",
     "internal/admin/route_catalog.go",
@@ -14,27 +14,27 @@
   "uncovered": [
     [
       "internal/cache/diskstore.go",
-      "1203.5,1204.1",
+      "1208.5,1209.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1210.4,1211.24",
+      "1215.4,1216.24",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1212.5,1213.1",
+      "1217.5,1218.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1219.4,1220.24",
+      "1224.4,1225.24",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1221.5,1222.1",
+      "1226.5,1227.1",
       1
     ],
     [

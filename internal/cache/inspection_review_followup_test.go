@@ -593,3 +593,22 @@ func TestOverlay622ActualBodyReadFailure(t *testing.T) {
 		t.Fatal(have)
 	}
 }
+
+func TestOverlay622MetadataEnvelopeRejection(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 8 << 20, DefaultTTL: config.Duration(time.Minute), DiskPath: t.TempDir(), DiskMaxSize: 8 << 20, DecisionSamples: true})
+	defer c.setDecisionSampling(false)
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Large", strings.Repeat("a", (1<<20)+1))
+		w.Write([]byte("x"))
+	}))
+	req := httptest.NewRequest("GET", "http://example.com/meta-limit", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	have := reviewDecisionReasons(t, c)
+	t.Log(have)
+	if c.disk.hasKey(key(req)) {
+		t.Fatal("fixture disk limit not reached")
+	}
+	if !have["capture_oversize"] || !have["response_stored"] || have["disk_capture_failed"] {
+		t.Error("metadata envelope admission refusal unobserved")
+	}
+}

@@ -41,9 +41,9 @@ Commands use Go1.27.3 and the existing full tag set from Makefile:
 | `make generated-check` | PASS; owning API/schema/lifecycle projections remain in sync; no generated files hand-edited |
 | `make ci-pr` / `make test-race` | Results collected separately; environment Unix sockets/process probes remain unavailable. Missing/failing checks are not passing evidence |
 
-Move-aware changed Go at this checkpoint is **94.7692307692%=924/975**
+Move-aware changed Go at this checkpoint is **94.8012232416%=930/981**
 against78b458b8 ([raw result](622/review-correction-added-go.json)); the correction
-alone is **92.3611111111%=133/144** against4cc4e46e
+alone is **92.6666666667%=139/150** against4cc4e46e
 ([raw delta](622/review-correction-delta-go.json)). These are local Go statement
 reports, not the new-head Codecov PATCH report.51 statements remain
 uncovered in the complete diff, listed in the raw record; no exclusions/floors
@@ -138,3 +138,13 @@ catalogued blob reader retains its original1B limit, exercising the actual
 ReadFull failure after metadata succeeds. Both independent8c production reviews
 report no unresolved concrete findings; the final test/docs-only delta is subject
 to exact-tree confirmation and fresh hosted gates.
+
+The final publication audit additionally reproduced encoded metadata beyond the
+existing1MiB disk-format ceiling. That specific size refusal now reaches the
+existing oversize skip/metric sink (no new metric label), distinct from I/O failure,
+while preserving successful memory publication. A valid-ASCII large-header
+regression proves the refusal and bounded static evidence.
+
+The final affected-package command `go test -race -coverprofile=...
+./internal/cache ./internal/admin ./internal/adminapi ./internal/adminclient
+./cmd/jul` passes in full (not just focused tests); current lint reports0 issues.

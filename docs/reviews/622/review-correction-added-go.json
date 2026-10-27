@@ -1,7 +1,7 @@
 {
-  "covered": 924,
-  "total": 975,
-  "percent": 94.76923076923077,
+  "covered": 930,
+  "total": 981,
+  "percent": 94.80122324159021,
   "files": [
     "cmd/jul/remote_cli.go",
     "cmd/jul/remote_cli_inspect.go",
@@ -56,62 +56,62 @@
     ],
     [
       "internal/cache/diskstore.go",
-      "1203.5,1204.1",
+      "1208.5,1209.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1210.4,1211.24",
+      "1215.4,1216.24",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1212.5,1213.1",
+      "1217.5,1218.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1219.4,1220.24",
+      "1224.4,1225.24",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1221.5,1222.1",
+      "1226.5,1227.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1363.5,1364.1",
+      "1368.5,1369.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1432.4,1433.1",
+      "1440.4,1441.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1441.3,1442.25",
+      "1449.3,1450.25",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1443.4,1444.1",
+      "1451.4,1452.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1501.4,1502.26",
+      "1509.4,1510.26",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1503.5,1504.1",
+      "1511.5,1512.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1527.4,1528.1",
+      "1535.4,1536.1",
       1
     ],
     [
