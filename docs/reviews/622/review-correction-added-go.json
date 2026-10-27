@@ -1,7 +1,7 @@
 {
-  "covered": 885,
-  "total": 933,
-  "percent": 94.85530546623794,
+  "covered": 891,
+  "total": 935,
+  "percent": 95.29411764705883,
   "files": [
     "cmd/jul/remote_cli.go",
     "cmd/jul/remote_cli_inspect.go",
@@ -46,12 +46,12 @@
     ],
     [
       "internal/cache/cache.go",
-      "1601.5,1602.1",
+      "1602.5,1603.1",
       1
     ],
     [
       "internal/cache/cache.go",
-      "1801.4,1802.1",
+      "1802.4,1803.1",
       1
     ],
     [
@@ -133,11 +133,6 @@
       "internal/cache/merge.go",
       "53.4,55.1",
       2
-    ],
-    [
-      "internal/cache/range.go",
-      "459.3,463.1",
-      4
     ],
     [
       "internal/cache/range.go",

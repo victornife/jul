@@ -1,7 +1,7 @@
 {
-  "covered": 98,
-  "total": 102,
-  "percent": 96.07843137254902,
+  "covered": 100,
+  "total": 104,
+  "percent": 96.15384615384616,
   "files": [
     "internal/admin/api.go",
     "internal/admin/route_catalog.go",

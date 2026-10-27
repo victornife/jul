@@ -427,3 +427,50 @@ func TestReview622TagIndexLimitEvidence(t *testing.T) {
 		})
 	}
 }
+
+func TestIndependent622IncompleteBodyCaptureReason(t *testing.T) {
+	for _, mode := range []string{"cold", "sync", "background", "range"} {
+		t.Run(mode, func(t *testing.T) {
+			c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Second), StaleWhileRevalidate: config.Duration(time.Minute), RangeEnabled: true, DecisionSamples: true})
+			defer c.setDecisionSampling(false)
+			var clock atomic.Int64
+			clock.Store(time.Now().UnixNano())
+			c.now = func() time.Time { return time.Unix(0, clock.Load()) }
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("ETag", `"v1"`)
+				w.Header().Set("Cache-Control", "max-age=1")
+				if mode == "cold" || mode == "range" || r.Header.Get("If-None-Match") != "" {
+					w.Header().Set("Content-Length", "10")
+				}
+				w.Write([]byte("x"))
+			}))
+			req := httptest.NewRequest("GET", "http://example.com/short", nil)
+			if mode == "sync" || mode == "background" {
+				h.ServeHTTP(httptest.NewRecorder(), req)
+				resetReviewDecisions(c)
+				clock.Add(int64(2 * time.Second))
+			}
+			switch mode {
+			case "sync":
+				req.Header.Set("Cache-Control", "no-cache")
+			case "background":
+				req = leased(req, testLease(t, 95))
+			case "range":
+				req.Header.Set("Range", "bytes=1-3")
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			waitDrained(t, c)
+			have := reviewDecisionReasons(t, c)
+			t.Log(have)
+			found := false
+			for reason := range have {
+				if reason == "capture_not_stored" || reason == "capture_incomplete" {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("known incomplete-body capture rejection is not observed")
+			}
+		})
+	}
+}

@@ -524,5 +524,6 @@ var decisionCatalog = map[string]decisionDescription{
 	"fill_lock_not_reusable":       {"fill_lock", "The completed fill could not satisfy this request.", "Review Vary and authentication restrictions; values remain private."},
 	"memory_eviction":              {"eviction", "A memory copy was evicted for capacity.", "A disk copy may remain; inspect tier residency and configured capacity."},
 	"disk_eviction":                {"eviction", "A disk copy was evicted for capacity.", "A memory copy may remain; inspect tier residency and configured capacity."},
+	"capture_incomplete":           {"admission", "Captured body length differs from the declared Content-Length.", "Check origin response framing; the incomplete representation was not stored."},
 	"tag_capture_rejected":         {"admission", "Trusted origin tag ingestion was rejected.", "Review configured tag names and bounded tag syntax."},
 }

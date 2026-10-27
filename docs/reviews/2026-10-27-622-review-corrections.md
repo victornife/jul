@@ -41,11 +41,11 @@ Commands use Go1.27.3 and the existing full tag set from Makefile:
 | `make generated-check` | PASS; owning API/schema/lifecycle projections remain in sync; no generated files hand-edited |
 | `make ci-pr` / `make test-race` | Results collected separately; environment Unix sockets/process probes remain unavailable. Missing/failing checks are not passing evidence |
 
-Move-aware changed Go at this checkpoint is **94.8553054662%=885/933**
+Move-aware changed Go at this checkpoint is **95.2941176471%=891/935**
 against78b458b8 ([raw result](622/review-correction-added-go.json)); the correction
-alone is **96.0784313725%=98/102** against4cc4e46e
+alone is **96.1538461538%=100/104** against4cc4e46e
 ([raw delta](622/review-correction-delta-go.json)). These are local Go statement
-reports, not the new-head Codecov PATCH report.48 statements remain
+reports, not the new-head Codecov PATCH report.44 statements remain
 uncovered in the complete diff, listed in the raw record; no exclusions/floors
 changed. Full-tag lint passes0 issues after removing the now-unused private
 headerStorable wrapper; the first lint attempt correctly failed that unused code.
@@ -109,3 +109,9 @@ metadata; no response-reuse event is fabricated for a background operation.
 After the review follow-up, the affected lean package tests and focused inspection/
 review race tests pass; lint reports0 issues. The changed-Go records above were
 regenerated from fresh affected-package/config/lifecycle profiles at this tree.
+
+A second correctness pass found a silent declared-length/body-length rejection
+at the shared capture builder. `capture_incomplete` now observes that existing
+rejection. The reviewer reproduction covers cold, sync, background and range
+paths.3f9d security review passed (including1,200 concurrent bounded/private
+tag-capacity samples); correctness approval requires this final correction.

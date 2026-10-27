@@ -1527,6 +1527,7 @@ func (c *Cache) buildEntryWithPolicy(r *http.Request, status int, h http.Header,
 func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header, body []byte, bodyLen int64, streamBacked bool, now time.Time, pol CachePolicy) *Entry {
 	if r.Method != http.MethodHead {
 		if cl := declaredLength(h); cl >= 0 && bodyLen != cl {
+			c.recordDecision(r, "capture_incomplete")
 			return nil
 		}
 	}
