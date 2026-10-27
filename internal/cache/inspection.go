@@ -88,6 +88,17 @@ func (c *Cache) observeRecorder(rec *recorder, r *http.Request) {
 	}
 }
 
+// Preserve disk metrics while attributing write-through outcomes to this resource.
+func (c *Cache) writeThroughObserved(key string, e *Entry, gen, startGen uint64, hasStartGen bool, extraTags []string) bool {
+	return c.disk.setWithGenObserved(key, e, gen, startGen, hasStartGen, extraTags,
+		func(reason string) {
+			if c.disk.onSkip != nil {
+				c.disk.onSkip(reason)
+			}
+			c.recordKeyDecision(key, "capture_"+reason)
+		}, func() { c.recordKeyDecision(key, "disk_capture_failed") })
+}
+
 // Observe the existing Vary matcher at recorder publication boundaries.
 func (c *Cache) captureMatchesRequest(e *Entry, r *http.Request) bool {
 	if e == nil {

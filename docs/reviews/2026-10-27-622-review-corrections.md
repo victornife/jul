@@ -41,11 +41,11 @@ Commands use Go1.27.3 and the existing full tag set from Makefile:
 | `make generated-check` | PASS; owning API/schema/lifecycle projections remain in sync; no generated files hand-edited |
 | `make ci-pr` / `make test-race` | Results collected separately; environment Unix sockets/process probes remain unavailable. Missing/failing checks are not passing evidence |
 
-Move-aware changed Go at this checkpoint is **95.2941176471%=891/935**
+Move-aware changed Go at this checkpoint is **94.3589743590%=920/975**
 against78b458b8 ([raw result](622/review-correction-added-go.json)); the correction
-alone is **96.1538461538%=100/104** against4cc4e46e
+alone is **89.5833333333%=129/144** against4cc4e46e
 ([raw delta](622/review-correction-delta-go.json)). These are local Go statement
-reports, not the new-head Codecov PATCH report.44 statements remain
+reports, not the new-head Codecov PATCH report.55 statements remain
 uncovered in the complete diff, listed in the raw record; no exclusions/floors
 changed. Full-tag lint passes0 issues after removing the now-unused private
 headerStorable wrapper; the first lint attempt correctly failed that unused code.
@@ -115,3 +115,14 @@ at the shared capture builder. `capture_incomplete` now observes that existing
 rejection. The reviewer reproduction covers cold, sync, background and range
 paths.3f9d security review passed (including1,200 concurrent bounded/private
 tag-capacity samples); correctness approval requires this final correction.
+
+Final owner audit also reproduced a small memory-buffered disk write-through
+failure with memory publication succeeding. Per-resource disk failure/skip sinks
+now reach that existing write-through owner (including eviction spill), preserving
+its original metrics and successful memory publication. The maintained real-handler
+regression proves an actual disk failure and its safe static reason.
+
+The read-side audit also found lookup open/metadata/body I/O failures preceding
+serve. A per-call failure sink now records only those actual failures, after
+existing cleanup; ordinary misses and failed leases remain ordinary misses.
+The regression covers open, corrupt metadata, truncated body and ordinary miss.

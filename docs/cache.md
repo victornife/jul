@@ -1601,7 +1601,9 @@ processing modified a header named by Vary. Enabled range requests retain the
 `request_no_store` reason, and tag-index admission limits record
 `tag_capture_rejected`. `capture_incomplete` records a declared-length/body-length
 mismatch at the shared capture builder. These codes retain no header names or
-values.
+values. Disk lookup open/metadata/body failures and small-response write-through
+failures are recorded at their I/O owners. A failed write-through can coexist
+with successful memory publication; an ordinary disk miss is not a read failure.
 
 A stored stale deadline can originate from SWR or be extended after an origin
 error. New immutable provenance preserves that distinction through cloning and

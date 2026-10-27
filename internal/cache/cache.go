@@ -181,7 +181,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	c.mem.onEvictItem = func(it *memItem) {
 		c.recordKeyDecision(it.key, "memory_eviction")
 		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) && !c.isPublicationFenced(it.gen, it.key, it.entry, nil) {
-			c.disk.setWithGenFull(it.key, it.entry, it.gen, it.gen, true, nil)
+			c.writeThroughObserved(it.key, it.entry, it.gen, it.gen, true, nil)
 		}
 		if it.pinnedState != nil {
 			c.finishKeyOp(it.pinnedState)
@@ -450,7 +450,7 @@ func (c *Cache) get(key string) (*Entry, bool) {
 		st, preGen, prePurge := c.beginReadGenLocked(key)
 		c.genMu.Unlock()
 		memCap := c.Policy().MemoryCapBytes()
-		e, diskGen, ok := c.disk.getWithMemCapGen(key, memCap)
+		e, diskGen, ok := c.disk.getWithMemCapObserved(key, memCap, func() { c.recordKeyDecision(key, "disk_read_failed") })
 		if !ok {
 			c.finishKeyOp(st)
 			return nil, false
@@ -565,7 +565,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 	c.genMu.Unlock()
 	c.mem.flushVictims(victims)
 	if c.disk != nil {
-		if !c.disk.setWithGenFull(key, e, gen, startGen, hasStartGen, extraTags) {
+		if !c.writeThroughObserved(key, e, gen, startGen, hasStartGen, extraTags) {
 			if e != nil && e.diskBody != nil {
 				c.genMu.Lock()
 				if c.keyGen[key] == st && st.gen == gen {

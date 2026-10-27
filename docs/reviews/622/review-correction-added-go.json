@@ -1,7 +1,7 @@
 {
-  "covered": 891,
-  "total": 935,
-  "percent": 95.29411764705883,
+  "covered": 920,
+  "total": 975,
+  "percent": 94.35897435897436,
   "files": [
     "cmd/jul/remote_cli.go",
     "cmd/jul/remote_cli_inspect.go",
@@ -56,77 +56,112 @@
     ],
     [
       "internal/cache/diskstore.go",
-      "1337.5,1338.1",
+      "1154.5,1156.25",
+      3
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1157.6,1158.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1406.4,1407.1",
+      "1203.5,1204.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1415.3,1416.25",
+      "1210.4,1211.24",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1417.4,1418.1",
+      "1212.5,1213.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1475.4,1476.26",
+      "1219.4,1220.24",
       2
     ],
     [
       "internal/cache/diskstore.go",
-      "1477.5,1478.1",
+      "1221.5,1222.1",
       1
     ],
     [
       "internal/cache/diskstore.go",
-      "1501.4,1502.1",
+      "1363.5,1364.1",
+      1
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1432.4,1433.1",
+      1
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1441.3,1442.25",
+      2
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1443.4,1444.1",
+      1
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1501.4,1502.26",
+      2
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1503.5,1504.1",
+      1
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1527.4,1528.1",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "177.3,178.1",
+      "188.3,189.1",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "187.3,189.1",
+      "198.3,200.1",
       2
     ],
     [
       "internal/cache/inspection.go",
-      "248.5,249.10",
+      "259.5,260.10",
       2
     ],
     [
       "internal/cache/inspection.go",
-      "270.3,271.1",
+      "281.3,282.1",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "327.6,327.14",
+      "338.6,338.14",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "330.5,330.13",
+      "341.5,341.13",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "402.3,403.1",
+      "413.3,414.1",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "417.3,418.1",
+      "428.3,429.1",
       1
     ],
     [

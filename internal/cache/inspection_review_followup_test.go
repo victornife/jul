@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -470,6 +472,68 @@ func TestIndependent622IncompleteBodyCaptureReason(t *testing.T) {
 			}
 			if !found {
 				t.Error("known incomplete-body capture rejection is not observed")
+			}
+		})
+	}
+}
+
+func TestExternal622SmallWriteThroughDiskFailureReason(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, MaxEntrySize: 4096, DefaultTTL: config.Duration(time.Minute), DiskPath: t.TempDir(), DiskMaxSize: 1 << 20, DecisionSamples: true})
+	defer c.setDecisionSampling(false)
+	c.disk.dir = filepath.Join(t.TempDir(), "missing")
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("x")) }))
+	req := httptest.NewRequest("GET", "http://example.com/small-disk-failure", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	have := reviewDecisionReasons(t, c)
+	t.Log(have, "disk failure count", c.disk.writeFails.Load())
+	if c.disk.writeFails.Load() == 0 {
+		t.Fatal("fixture did not cause actual disk failure")
+	}
+	if !have["disk_capture_failed"] {
+		t.Error("actual disk write-through failure is unobserved")
+	}
+}
+
+func TestExternal622DiskLookupFailureReason(t *testing.T) {
+	for _, mode := range []string{"open", "metadata", "body", "ordinary_miss"} {
+		t.Run(mode, func(t *testing.T) {
+			c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), DiskPath: t.TempDir(), DiskMaxSize: 1 << 20, DecisionSamples: true})
+			defer c.setDecisionSampling(false)
+			calls := 0
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; _, _ = w.Write([]byte("x")) }))
+			req := httptest.NewRequest("GET", "http://example.com/disk-read-failure", nil)
+			if mode != "ordinary_miss" {
+				h.ServeHTTP(httptest.NewRecorder(), req)
+				c.mem.del(key(req))
+				path := c.disk.path(hashKey(key(req)))
+				switch mode {
+				case "open":
+					if err := os.Remove(path); err != nil {
+						t.Fatal(err)
+					}
+				case "metadata":
+					if err := os.WriteFile(path, []byte("invalid"), 0600); err != nil {
+						t.Fatal(err)
+					}
+				case "body":
+					st, err := os.Stat(path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Truncate(path, st.Size()-1); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			resetReviewDecisions(c)
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			have := reviewDecisionReasons(t, c)
+			want := mode != "ordinary_miss"
+			if have["disk_read_failed"] != want {
+				t.Fatal(mode, have)
+			}
+			if want && calls != 2 {
+				t.Fatal("disk lookup failure did not fall back", calls)
 			}
 		})
 	}

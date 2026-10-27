@@ -1091,6 +1091,10 @@ func (d *diskStore) get(key string) (*Entry, bool) {
 }
 
 func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, bool) {
+	return d.getWithMemCapObserved(key, memCap, nil)
+}
+
+func (d *diskStore) getWithMemCapObserved(key string, memCap int64, onFailure func()) (*Entry, uint64, bool) {
 	hash := hashKey(key)
 	d.mu.Lock()
 	d.sweepTombstonesLocked()
@@ -1127,6 +1131,9 @@ func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, 
 	rc, err := blob.openAcquiredReader()
 	if err != nil {
 		d.delIfBlob(key, blob)
+		if onFailure != nil {
+			onFailure()
+		}
 		return nil, 0, false
 	}
 	defer func() { _ = rc.Close() }()
@@ -1135,6 +1142,9 @@ func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, 
 	if err != nil {
 		_ = rc.Close()
 		d.delIfBlob(key, blob)
+		if onFailure != nil {
+			onFailure()
+		}
 		return nil, 0, false
 	}
 	if bodyLen <= memCap {
@@ -1143,6 +1153,9 @@ func (d *diskStore) getWithMemCapGen(key string, memCap int64) (*Entry, uint64, 
 			if _, err := io.ReadFull(rc, body); err != nil {
 				_ = rc.Close()
 				d.delIfBlob(key, blob)
+				if onFailure != nil {
+					onFailure()
+				}
 				return nil, 0, false
 			}
 			e.Body = body
@@ -1162,16 +1175,20 @@ func (d *diskStore) setWithGen(key string, e *Entry, gen uint64) bool {
 }
 
 func (d *diskStore) setWithGenFull(key string, e *Entry, gen, startGen uint64, hasStartGen bool, extraTags []string) bool {
+	return d.setWithGenObserved(key, e, gen, startGen, hasStartGen, extraTags, d.onSkip, nil)
+}
+
+func (d *diskStore) setWithGenObserved(key string, e *Entry, gen, startGen uint64, hasStartGen bool, extraTags []string, onSkip func(string), onFailure func()) bool {
 	if e == nil {
 		return false
 	}
-	acct := captureAccount{budget: &d.tempBudget, onSkip: d.onSkip}
+	acct := captureAccount{budget: &d.tempBudget, onSkip: onSkip}
 	bodyLen := e.BodyLen()
 	if bodyLen > 0 && !acct.grow(int(bodyLen), d.availableBudgetCap()) {
 		acct.skip(captureSkipBudget)
 		return false
 	}
-	s := d.beginStreamCapture(d.onSkip)
+	s := d.beginStreamCaptureObserved(onSkip, onFailure)
 	if s == nil {
 		acct.release()
 		return false
@@ -1182,18 +1199,27 @@ func (d *diskStore) setWithGenFull(key string, e *Entry, gen, startGen uint64, h
 		rc, err := e.diskBody.openReader()
 		if err != nil {
 			d.recordWriteFailure(err)
+			if onFailure != nil {
+				onFailure()
+			}
 			return false
 		}
 		n, copyErr := copyWithPooledBuffer(s.file, rc)
 		_ = rc.Close()
 		if copyErr != nil {
 			d.recordWriteFailure(copyErr)
+			if onFailure != nil {
+				onFailure()
+			}
 			return false
 		}
 		s.bodyLen = n
 	} else if len(e.Body) > 0 {
 		if _, err := s.file.Write(e.Body); err != nil {
 			d.recordWriteFailure(err)
+			if onFailure != nil {
+				onFailure()
+			}
 			return false
 		}
 		s.bodyLen = int64(len(e.Body))
