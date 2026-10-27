@@ -851,7 +851,14 @@ func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *di
 	return c.storeCapturedWithStartGen(base, r, e, stream, 0, false)
 }
 
-func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) bool {
+func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (stored bool) {
+	defer func() {
+		if stored {
+			c.recordKeyDecision(base, "response_stored")
+		} else {
+			c.recordKeyDecision(base, "publication_failed_or_fenced")
+		}
+	}()
 	if len(e.Vary) == 0 {
 		return c.setCapturedWithStartGen(base, e, stream, startGen, hasStartGen)
 	}
@@ -1082,7 +1089,6 @@ func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, ne
 			span.End()
 			return effKey, true
 		case reuseStale:
-			c.recordDecision(r, "stale_while_revalidate")
 			if !c.serve(w, r, e, stateStale, now) {
 				continue
 			}
@@ -1290,11 +1296,6 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	}
 	if e := c.buildEntryFromCapture(r, cw.status, h, cw.buf.Bytes(), cw.bodyLen, cw.diskStream != nil, now, pol); e != nil {
 		stored := c.storeCapturedWithStartGen(key(r), r, e, cw.diskStream, startGen, true)
-		if stored {
-			c.recordDecision(r, "response_stored")
-		} else {
-			c.recordDecision(r, "publication_failed_or_fenced")
-		}
 		return stored
 	}
 	return false
@@ -1393,8 +1394,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	pol := c.Policy()
 	rec := c.newRecorder(pol)
-	rec.onDecision = func(reason string) { c.recordDecision(req, reason) }
-	rec.acct.onFailure = func() { c.recordDecision(req, "disk_capture_failed") }
+	c.observeRecorder(rec, req)
 	defer rec.releaseCapture()
 	next.ServeHTTP(rec, req)
 	now := c.clock()
@@ -1441,9 +1441,12 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		// so the entry stays servable while the backend recovers. The published
 		// entry is replaced by a clone, never edited in place.
 		if sie := c.staleOnErrorWindow(stale); sie > 0 {
+			c.recordDecision(req, "stale_if_error")
 			refreshed := stale.Clone()
 			refreshed.StaleUntil = now.Add(sie)
+			markStaleIfError(refreshed)
 			if !c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
+				c.recordDecision(req, "stale_if_error_extended")
 				call.finish(refreshed, outcomeOriginError, nil)
 				c.observeRevalidation(outcomeOriginError)
 				return
@@ -1453,6 +1456,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		c.observeRevalidation(outcomeOriginError)
 
 	case !rec.storable():
+		c.recordDecision(req, "capture_not_stored")
 		call.finish(nil, outcomeUncacheable, nil)
 		c.observeRevalidation(outcomeUncacheable)
 
@@ -1485,10 +1489,6 @@ func (c *Cache) newRecorder(pol CachePolicy) *recorder {
 // stored.
 func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []byte, now time.Time) *Entry {
 	return c.buildEntryWithPolicy(r, status, h, body, now, c.Policy())
-}
-
-func (c *Cache) headerStorable(r *http.Request, status int, h http.Header, now time.Time, pol CachePolicy) bool {
-	return c.storageReason(r, status, h, now, pol) == ""
 }
 
 // storageReason is the capture admission owner; callers record its actual
@@ -1650,6 +1650,9 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 	if age < 0 {
 		age = 0
 	}
+	// Every successful reuse path, including conditional and range responses,
+	// passes here after acquiring any required disk reader.
+	c.recordReuseDecision(r, e, state)
 
 	if modified && r.Method == http.MethodGet && e.Status == http.StatusOK {
 		if spec, isRange := rangeSpecFromRequest(r); isRange {
@@ -1690,14 +1693,6 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 	}
 	h.Set("Age", strconv.Itoa(age))
 	h.Set("X-Cache", state)
-	switch state {
-	case stateHit:
-		c.recordDecision(r, "fresh_hit")
-	case stateRevalidated:
-		c.recordDecision(r, "validated_reuse")
-	case stateStale:
-		c.recordDecision(r, "stale_reuse")
-	}
 
 	if !modified {
 		w.WriteHeader(http.StatusNotModified)

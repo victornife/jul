@@ -1,3 +1,5 @@
+> **Readiness superseded after review of4cc4e46e:** see [review corrections](2026-10-27-622-review-corrections.md). Earlier check results remain historical; the four new findings require fixes and new-head verification.
+
 # CACHE-OPS-02 implementation and verification checkpoint
 
 Refs [#622](https://github.com/victornife/jul/issues/622), parent

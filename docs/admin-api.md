@@ -710,3 +710,10 @@ handling, key backup/loss and the binary-downgrade boundary.
 Inspection `page_size` is an upper bound: encoded responses are also limited to
 2 MiB. Wide representation metadata can shorten a page. Follow `next_cursor`
 until absent, even when fewer than the requested resources were returned.
+
+Inspection evidence timestamps with no known value are omitted (`inserted_at`,
+`validated_at`), rather than serialized as Go's zero date. Other known timestamps
+retain their existing format. The internal Console `GET /api/traffic-controls`
+also accepts `cache:inspect`: when none of its pre-existing projection grants is
+held, it returns only `{ "inspection_only": true }`, without loading editable
+configuration. This does not grant the broader configuration/status projection.

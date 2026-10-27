@@ -5,6 +5,7 @@
 
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { usePermission } from "@/auth/usePermission.ts";
 import { fetchConsoleHealth } from "@/api/client.ts";
 
 function tone(status: string): string {
@@ -31,11 +32,16 @@ export interface ConsoleHealthBadgeProps {
  * primary content.
  */
 export function ConsoleHealthBadge({ compact = false }: ConsoleHealthBadgeProps) {
+  const { has } = usePermission();
+  const canRead = has("observability:read");
   const { data, isError } = useQuery({
+    enabled: canRead,
     queryKey: ["console-health-badge"],
     queryFn: fetchConsoleHealth,
     refetchInterval: 30_000,
   });
+
+  if (!canRead) return null;
 
   const status = isError ? "error" : (data?.status ?? "…");
   const p95 = data?.latency_p95;
@@ -61,9 +67,7 @@ export function ConsoleHealthBadge({ compact = false }: ConsoleHealthBadgeProps)
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
       <span>console {status}</span>
-      {p95 !== undefined && p95 > 0 && (
-        <span className="opacity-70">{`${p95.toFixed(0)}ms`}</span>
-      )}
+      {p95 !== undefined && p95 > 0 && <span className="opacity-70">{`${p95.toFixed(0)}ms`}</span>}
     </Link>
   );
 }

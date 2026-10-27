@@ -517,18 +517,23 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 
 	var tagSkipReason string
 	rec := c.newRecorder(pol)
-	rec.onDecision = func(reason string) { c.recordDecision(origReq, reason) }
-	rec.acct.onFailure = func() { c.recordDecision(origReq, "disk_capture_failed") }
+	c.observeRecorder(rec, origReq)
 	rec.headerCheck = func(code int, h http.Header) bool {
 		if pol.TagHeaderCount > 0 {
 			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
 				tagSkipReason = skip
+				c.recordDecision(origReq, "tag_capture_rejected")
 				return false
 			}
 		}
-		return code == http.StatusOK &&
-			c.headerStorable(fillReq, code, h, c.clock(), pol) &&
-			varyCompatibleWithModifiedRequest(h, fillReq, origReq)
+		if code != http.StatusOK {
+			return false
+		}
+		if reason := c.storageReason(fillReq, code, h, c.clock(), pol); reason != "" {
+			c.recordDecision(origReq, reason)
+			return false
+		}
+		return varyCompatibleWithModifiedRequest(h, fillReq, origReq)
 	}
 	rec.onAbandon = abortFill
 	defer rec.releaseCapture()

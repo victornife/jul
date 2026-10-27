@@ -13,6 +13,10 @@ import {
 } from "@/api/client.ts";
 import { usePermission } from "@/auth/usePermission.ts";
 
+function evidenceDate(value: string | undefined, unknown: string): string {
+  return value && value !== "0001-01-01T00:00:00Z" ? value : unknown;
+}
+
 export function CacheInspectorPanel({ serverNames }: { readonly serverNames: string[] }) {
   const { has } = usePermission();
   const id = useId();
@@ -224,13 +228,14 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
                           {d.evidence_state}.
                           {d.evidence_state === "recorded" && (
                             <p>
-                              Inserted {d.evidence.inserted_at}; validated{" "}
-                              {d.evidence.validated_at || "no recorded validation"}. Freshness{" "}
-                              {d.evidence.freshness_seconds}s from {d.evidence.freshness_source};
-                              stale-while-revalidate {d.evidence.swr_seconds}s (
-                              {d.evidence.swr_source}); recorded stale-if-error{" "}
-                              {d.evidence.sie_seconds}s ({d.evidence.sie_source}); current effective
-                              stale-if-error {d.effective_sie_seconds ?? "unavailable"}s.{" "}
+                              Inserted {evidenceDate(d.evidence.inserted_at, "unknown")}; validated{" "}
+                              {evidenceDate(d.evidence.validated_at, "no recorded validation")}.
+                              Freshness {d.evidence.freshness_seconds}s from{" "}
+                              {d.evidence.freshness_source}; stale-while-revalidate{" "}
+                              {d.evidence.swr_seconds}s ({d.evidence.swr_source}); recorded
+                              stale-if-error {d.evidence.sie_seconds}s ({d.evidence.sie_source});
+                              current effective stale-if-error{" "}
+                              {d.effective_sie_seconds ?? "unavailable"}s.{" "}
                               {d.evidence.requires_validation || d.evidence.must_revalidate
                                 ? "Validation restrictions apply."
                                 : "Reuse still depends on the request."}{" "}

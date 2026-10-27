@@ -531,8 +531,10 @@ export function Layout() {
   const [layout, setLayout] = usePersistentState<NavLayout>("nav_layout", "top", isNavLayout);
   const [collapsed, setCollapsed] = usePersistentState<boolean>("nav_collapsed", false, isBool);
 
+  const { has } = usePermission();
   const { data: overview } = useQuery({
     queryKey: ["console-version"],
+    enabled: has("status:read"),
     queryFn: fetchOverview,
     refetchInterval: 30000, // version changes rarely, poll every 30s
   });

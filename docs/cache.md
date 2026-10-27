@@ -1588,3 +1588,24 @@ can be correlated to **current** selected resource membership, labeled
 `observed_current_membership`; historical tag membership remains unavailable.
 `concurrent_change` distinguishes observed sequence changes from unknown
 independent churn; an unchanged publication sequence does not prove no eviction.
+
+### Inspection decision attribution across reuse paths
+
+`fresh_hit`, `validated_reuse` and `stale_reuse` apply to conditional, full and
+range responses through the same serve owner. A successful 206 HIT is therefore
+observable too. Capture rejection/publication evidence includes background
+validation and complete-object range fills; a private/no-store/cookie rejection
+is separate from the later range fallback.
+
+A stored stale deadline can originate from SWR or be extended after an origin
+error. New immutable provenance preserves that distinction through cloning and
+disk restart. `stale_if_error` records the failed-validation eligibility decision;
+`stale_if_error_extended` records selection of the extended deadline;
+`stale_if_error_reuse` records actual reuse under that deadline. Only original
+SWR deadlines produce `stale_while_revalidate`. Earlier provenance formats
+without the discriminator produce `stale_basis_unavailable`, even when their
+other publication metadata is available. This changes observation, not cache
+reuse/expiry policy. A successful 304 or replacement resets the deadline basis.
+
+Unknown insertion/validation dates are omitted from inspection JSON; a missing
+date is not a validation in year 0001. Known timestamps retain RFC3339 encoding.

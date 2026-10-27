@@ -35,7 +35,7 @@ type Entry struct {
 
 	CreatedAt  time.Time
 	ExpiresAt  time.Time // end of freshness
-	StaleUntil time.Time // end of stale-while-revalidate grace window
+	StaleUntil time.Time // current stale deadline: original SWR or an SIE extension
 
 	ETag         string
 	LastModified string
@@ -193,7 +193,7 @@ func (e *Entry) Fresh(now time.Time) bool {
 }
 
 // ServableStale reports whether the entry is expired but still within the
-// stale-while-revalidate grace window.
+// current stale deadline (original SWR or an SIE extension).
 func (e *Entry) ServableStale(now time.Time) bool {
 	return !e.Fresh(now) && now.Before(e.StaleUntil)
 }

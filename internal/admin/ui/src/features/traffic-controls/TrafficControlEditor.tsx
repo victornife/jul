@@ -63,7 +63,7 @@ import {
   Toggle,
 } from "./TrafficFormFields.tsx";
 
-const CacheInspectorPanel = lazy(() =>
+export const CacheInspectorPanel = lazy(() =>
   import("./CacheInspectorPanel.tsx").then((m) => ({ default: m.CacheInspectorPanel })),
 );
 

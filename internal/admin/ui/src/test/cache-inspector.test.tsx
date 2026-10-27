@@ -2,6 +2,9 @@
  * Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
  * SPDX-License-Identifier: agpl
  */
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
+import { App } from "@/app/App.tsx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CacheInspectorPanel } from "@/features/traffic-controls/CacheInspectorPanel.tsx";
@@ -236,5 +239,70 @@ describe("cache inspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inspect / refresh" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Inspection unavailable");
     expect(screen.queryByText(/SECRET_ERROR/)).not.toBeInTheDocument();
+  });
+  it.each([undefined, "0001-01-01T00:00:00Z"])(
+    "renders unknown timestamps (%s) without a year-0001 date",
+    async (unknownTime) => {
+      const d = page();
+      const evidence = d.inspection.resources[0]?.details[0]?.evidence;
+      if (!evidence) throw new Error("fixture evidence missing");
+      delete evidence.inserted_at;
+      delete evidence.validated_at;
+      if (unknownTime) {
+        evidence.inserted_at = unknownTime;
+        evidence.validated_at = unknownTime;
+      }
+      globalThis.fetch = vi.fn(() => Promise.resolve(json(d)));
+      render(<CacheInspectorPanel serverNames={["example.com"]} />);
+      fireEvent.click(screen.getByRole("button", { name: "Inspect / refresh" }));
+      await screen.findByText(/Inserted unknown; validated no recorded validation/);
+      expect(screen.queryByText(/0001-/)).not.toBeInTheDocument();
+    },
+  );
+  it("opens the full Console inspection view with only cache:inspect", async () => {
+    const requested: string[] = [];
+    globalThis.fetch = vi.fn((input) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.endsWith("/api/traffic-controls"))
+        return Promise.resolve(json({ inspection_only: true }));
+      if (url.endsWith("/api/v1/cache/inspect")) return Promise.resolve(json(page()));
+      throw new Error("Unexpected privileged request: " + url);
+    });
+    const q = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={q}>
+        <PermissionContext.Provider
+          value={{
+            identity: {
+              principal: "reader",
+              token_id: "test-reader",
+              role: "inspect",
+              permissions: ["cache:inspect"],
+              legacy: false,
+            },
+            isLoading: false,
+            ready: true,
+            has: (p) => p === "cache:inspect",
+          }}
+        >
+          <MemoryRouter initialEntries={["/traffic"]}>
+            <App />
+          </MemoryRouter>
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("heading", { name: "Cache inspection" });
+    fireEvent.change(await screen.findByLabelText("Configured hostname"), {
+      target: { value: "example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Inspect / refresh" }));
+    await screen.findAllByText(/example.com\/article/);
+    expect(requested).toEqual(["/api/traffic-controls", "/api/v1/cache/inspect"]);
+    expect(
+      screen.queryByRole("button", { name: "Preview invalidation scope" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review changes" })).not.toBeInTheDocument();
+    q.clear();
   });
 });

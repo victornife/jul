@@ -3,11 +3,12 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchTrafficControls } from "@/api/client.ts";
 import { GlobalSettingsEditor } from "@/features/config/GlobalSettingsEditor.tsx";
 import {
+  CacheInspectorPanel,
   TrafficControlEditor,
   type TrafficEditorKind,
 } from "@/features/traffic-controls/TrafficControlEditor.tsx";
@@ -88,6 +89,18 @@ export function TrafficControlsPanel() {
   if (isLoading) return <Loading label="Loading traffic controls…" />;
   if (isError || !data) {
     return <PanelError error={error} resource="traffic controls" onRetry={() => void refetch()} />;
+  }
+
+  if (data.inspection_only) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-xl font-semibold">Cache inspection</h1>
+        <p>Enter a configured hostname to inspect cache metadata.</p>
+        <Suspense fallback={<Loading label="Loading cache inspector…" />}>
+          <CacheInspectorPanel serverNames={[]} />
+        </Suspense>
+      </div>
+    );
   }
 
   return (

@@ -54,3 +54,11 @@ errors, examples and inherited #666/#667/#668 boundaries. NGINX migration impact
 is not applicable while request semantics remain unchanged. Final maturity,
 coverage, platform/browser and independent review evidence remain separate gates;
 this ADR does not declare release, GA, soak or issue completion.
+
+Review clarification: stale-deadline provenance distinguishes original SWR from
+an SIE extension using the existing immutable provenance allocation; older
+metadata lacking this distinction stays explicitly unknown. Inspection-only
+Console loading uses a minimal view marker and manual configured-host input,
+without widening existing configuration/status projections or grants. Unknown
+evidence timestamps are omitted, not represented by zero dates. These implement
+the accepted evidence/permission contract; they do not change reuse policy.

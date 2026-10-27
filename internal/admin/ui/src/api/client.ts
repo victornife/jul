@@ -1176,6 +1176,7 @@ export const AccessLogProjectionSchema = z.object({
 });
 
 export const TrafficControlsSchema = z.object({
+  inspection_only: z.boolean().optional(),
   global: GlobalSettingsProjectionSchema.optional(),
   compression: CompressionProjectionSchema.optional(),
   rate_limit: GlobalRateLimitProjectionSchema.optional(),

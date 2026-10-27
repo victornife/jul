@@ -73,8 +73,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	defer c.endInflightOriginOp(opID)
 
 	rec := c.newRecorder(pol)
-	rec.onDecision = func(reason string) { c.recordDecision(r, reason) }
-	rec.acct.onFailure = func() { c.recordDecision(r, "disk_capture_failed") }
+	c.observeRecorder(rec, r)
 	defer rec.releaseCapture()
 	vreq := conditionalRequest(r.Clone(vctx), stored)
 	next.ServeHTTP(rec, vreq)
@@ -122,7 +121,9 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			c.recordDecision(r, "stale_if_error")
 			refreshed := stored.Clone()
 			refreshed.StaleUntil = now.Add(sie)
+			markStaleIfError(refreshed)
 			if !c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
+				c.recordDecision(r, "stale_if_error_extended")
 				c.finishValidation(call, refreshed, outcomeOriginError)
 				if c.serve(w, r, refreshed, stateStale, now) {
 					return

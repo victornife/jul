@@ -21,9 +21,9 @@ type SafeResourceSummary struct {
 	VaryFields       []string                 `json:"vary_fields,omitempty"`
 	Tags             []string                 `json:"tags,omitempty"`
 	FreshnessState   string                   `json:"freshness_state"`
-	CreatedAt        time.Time                `json:"created_at,omitempty"`
-	ExpiresAt        time.Time                `json:"expires_at,omitempty"`
-	StaleUntil       time.Time                `json:"stale_until,omitempty"`
+	CreatedAt        time.Time                `json:"created_at,omitempty,omitzero"`
+	ExpiresAt        time.Time                `json:"expires_at,omitempty,omitzero"`
+	StaleUntil       time.Time                `json:"stale_until,omitempty,omitzero"`
 }
 
 type TierStats struct {
@@ -34,8 +34,8 @@ type TierStats struct {
 }
 
 type EntryEvidence struct {
-	InsertedAt         time.Time `json:"inserted_at,omitempty"`
-	ValidatedAt        time.Time `json:"validated_at,omitempty"`
+	InsertedAt         time.Time `json:"inserted_at,omitempty,omitzero"`
+	ValidatedAt        time.Time `json:"validated_at,omitempty,omitzero"`
 	FreshnessSource    string    `json:"freshness_source"`
 	SWRSource          string    `json:"swr_source"`
 	SIESource          string    `json:"sie_source"`

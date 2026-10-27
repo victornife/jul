@@ -1,0 +1,25 @@
+{
+  "covered": 67,
+  "total": 71,
+  "percent": 94.36619718309859,
+  "files": [
+    "internal/admin/api.go",
+    "internal/admin/route_catalog.go",
+    "internal/cache/cache.go",
+    "internal/cache/inspection.go",
+    "internal/cache/range.go",
+    "internal/cache/validate.go"
+  ],
+  "uncovered": [
+    [
+      "internal/cache/range.go",
+      "524.5,527.1",
+      3
+    ],
+    [
+      "internal/cache/range.go",
+      "530.4,531.1",
+      1
+    ]
+  ]
+}

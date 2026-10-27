@@ -46,6 +46,48 @@ type publicationEvidence struct {
 	Flags           uint8
 }
 
+// The provenance flag follows the same immutable clone and additive gob
+// ownership as the deadline it describes. A successful 304/replacement creates
+// new provenance and clears it. Legacy entries without provenance stay unknown.
+const evidenceStaleIfError uint8 = 8
+const evidenceStaleBasisKnown uint8 = 16
+
+func markStaleIfError(e *Entry) {
+	if e.Evidence != nil {
+		e.Evidence.Flags |= evidenceStaleIfError | evidenceStaleBasisKnown
+	}
+}
+
+func (c *Cache) recordReuseDecision(r *http.Request, e *Entry, state string) {
+	switch state {
+	case stateHit:
+		c.recordDecision(r, "fresh_hit")
+	case stateRevalidated:
+		c.recordDecision(r, "validated_reuse")
+	case stateStale:
+		basis := "stale_basis_unavailable"
+		if e.Evidence != nil && e.Evidence.Flags&evidenceStaleBasisKnown != 0 {
+			basis = "stale_while_revalidate"
+			if e.Evidence.Flags&evidenceStaleIfError != 0 {
+				basis = "stale_if_error_reuse"
+			}
+		}
+		c.recordDecision(r, basis)
+		c.recordDecision(r, "stale_reuse")
+	}
+}
+
+// Bind every recorder's capture outcomes to the originating resource, without
+// replacing the existing low-cardinality capture metrics/log owner.
+func (c *Cache) observeRecorder(rec *recorder, r *http.Request) {
+	rec.onDecision = func(reason string) { c.recordDecision(r, reason) }
+	rec.acct.onFailure = func() { c.recordDecision(r, "disk_capture_failed") }
+	rec.acct.onSkip = func(reason string) {
+		c.captureSkipped(reason)
+		c.recordDecision(r, "capture_"+reason)
+	}
+}
+
 var freshnessSources = [...]string{"", "gateway_fallback", "origin_s_maxage", "origin_max_age", "origin_expires", "gateway_fallback_no_cache", "targeted_gateway_fallback", "targeted_origin_s_maxage", "targeted_origin_max_age", "targeted_gateway_fallback_no_cache"}
 var windowSources = [...]string{"", "gateway_fallback", "origin", "mandatory_validation"}
 
@@ -88,7 +130,7 @@ func (c *Cache) entryEvidence(status int, h http.Header, p responsePolicy, pol C
 	if p.revalidationRequired() || p.NoCache {
 		swrSource = "mandatory_validation"
 	}
-	flags := uint8(0)
+	flags := evidenceStaleBasisKnown
 	if p.NoCache {
 		flags |= 1
 	}
@@ -439,8 +481,11 @@ var decisionCatalog = map[string]decisionDescription{
 	"disk_capture_failed":          {"capture", "A disk operation prevented response capture or publication.", "Inspect disk availability, permissions and write-health counters; raw filesystem errors are not exposed."},
 	"fresh_hit":                    {"reuse", "A fresh cached representation was reused.", "Inspect its age and validation restrictions; future reuse is not guaranteed."},
 	"stale_while_revalidate":       {"reuse", "Stale-while-revalidate reuse was selected.", "Check the recorded stale window and whether background refresh can acquire a generation lease."},
-	"stale_reuse":                  {"reuse", "A cached representation was served stale.", "Inspect the companion stale-while-revalidate or stale-if-error decision for its basis."},
-	"stale_if_error":               {"validation", "Origin validation failed and stale-if-error reuse was selected.", "Check origin health and the current effective stale-if-error window."},
+	"stale_reuse":                  {"reuse", "A cached representation was served stale.", "Inspect the companion stale-while-revalidate, stale-if-error or unavailable-basis decision."},
+	"stale_if_error":               {"validation", "Origin validation failed and stale-if-error eligibility was selected.", "Check origin health and the current effective stale-if-error window."},
+	"stale_if_error_extended":      {"validation", "An origin failure selected an extended stale-if-error deadline.", "Check origin health; this deadline is not a guarantee of later residency or reuse."},
+	"stale_if_error_reuse":         {"reuse", "A cached representation was reused under an origin-error-extended stale deadline.", "Check origin health and the recorded extension; background refresh may still run."},
+	"stale_basis_unavailable":      {"reuse", "A cached representation was reused within its stale deadline, but the deadline's basis is unavailable.", "Legacy provenance cannot distinguish original stale-while-revalidate from an error extension; do not infer a basis."},
 	"revalidation_required":        {"validation", "The cached representation requires validation before reuse.", "Inspect request/origin no-cache restrictions, age and validators."},
 	"validated_reuse":              {"reuse", "A successfully validated representation was reused.", "Inspect the recorded validation time."},
 	"response_no_store":            {"admission", "The origin prohibited storage with no-store.", "Change origin policy only if shared caching is appropriate."},
