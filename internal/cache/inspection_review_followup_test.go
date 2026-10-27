@@ -295,3 +295,135 @@ func TestInspectionReviewRangeFillPublication(t *testing.T) {
 		t.Fatal("fill publication must be observed, not inferred from a miss", have)
 	}
 }
+
+func TestReview622TagRejectionAllRecorders(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(map[bool]string{false: "sync", true: "background"}[background], func(t *testing.T) {
+			c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Second), StaleWhileRevalidate: config.Duration(time.Minute), DecisionSamples: true, TagHeaders: []string{"Cache-Tag"}})
+			defer c.setDecisionSampling(false)
+			var clock atomic.Int64
+			clock.Store(time.Now().UnixNano())
+			c.now = func() time.Time { return time.Unix(0, clock.Load()) }
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("ETag", `"v1"`)
+				w.Header().Set("Cache-Control", "max-age=1")
+				if r.Header.Get("If-None-Match") != "" {
+					w.Header().Set("Cache-Tag", "token=REDACTED")
+				} else {
+					w.Header().Set("Cache-Tag", "safe")
+				}
+				w.Write([]byte("x"))
+			}))
+			req := httptest.NewRequest("GET", "http://example.com/tag", nil)
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			resetReviewDecisions(c)
+			clock.Add(int64(2 * time.Second))
+			if background {
+				req = leased(req, testLease(t, 91))
+			} else {
+				req.Header.Set("Cache-Control", "no-cache")
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			waitDrained(t, c)
+			have := reviewDecisionReasons(t, c)
+			t.Log(have)
+			if !have["tag_capture_rejected"] {
+				t.Error("actual trusted-tag rejection is unobserved in recorder owner")
+			}
+		})
+	}
+}
+func TestReview622RangeVaryOnModifiedHeader(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), RangeEnabled: true, DecisionSamples: true})
+	defer c.setDecisionSampling(false)
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		w.Header().Set("Vary", "If-Range")
+		w.Write([]byte("abcdef"))
+	}))
+	req := httptest.NewRequest("GET", "http://example.com/range", nil)
+	req.Header.Set("Range", "bytes=1-3")
+	req.Header.Set("If-Range", `"v1"`)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	have := reviewDecisionReasons(t, c)
+	t.Log(have)
+	if !have["vary_request_mismatch"] {
+		t.Error("range-fill Vary rejection emitted only generic bypass")
+	}
+}
+
+func TestReview622RangeRequestNoStoreReason(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), RangeEnabled: true, DecisionSamples: true})
+	defer c.setDecisionSampling(false)
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("abcdef")) }))
+	req := httptest.NewRequest("GET", "http://example.com/range-nostore", nil)
+	req.Header.Set("Range", "bytes=1-3")
+	req.Header.Set("Cache-Control", "no-store")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	have := reviewDecisionReasons(t, c)
+	t.Log(have)
+	if !have["request_no_store"] {
+		t.Error("request no-store actual rejection is lost for enabled range path")
+	}
+}
+
+func TestReview622ReplacementVaryMismatch(t *testing.T) {
+	for _, bg := range []bool{false, true} {
+		t.Run(strconv.FormatBool(bg), func(t *testing.T) {
+			c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Second), StaleWhileRevalidate: config.Duration(time.Minute), DecisionSamples: true})
+			defer c.setDecisionSampling(false)
+			var clock atomic.Int64
+			clock.Store(time.Now().UnixNano())
+			c.now = func() time.Time { return time.Unix(0, clock.Load()) }
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("ETag", `"v1"`)
+				w.Header().Set("Cache-Control", "max-age=1")
+				if r.Header.Get("If-None-Match") != "" {
+					w.Header().Set("Vary", "If-None-Match")
+				}
+				_, _ = w.Write([]byte("x"))
+			}))
+			req := httptest.NewRequest("GET", "http://example.com/replacement-vary", nil)
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			resetReviewDecisions(c)
+			clock.Add(int64(2 * time.Second))
+			if bg {
+				req = leased(req, testLease(t, 96))
+			} else {
+				req.Header.Set("Cache-Control", "no-cache")
+			}
+			h.ServeHTTP(httptest.NewRecorder(), req)
+			waitDrained(t, c)
+			if have := reviewDecisionReasons(t, c); !have["vary_request_mismatch"] {
+				t.Fatal(have)
+			}
+		})
+	}
+}
+
+func TestReview622TagIndexLimitEvidence(t *testing.T) {
+	for _, disk := range []bool{false, true} {
+		t.Run(strconv.FormatBool(disk), func(t *testing.T) {
+			cfg := config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), DecisionSamples: true, TagHeaders: []string{"Cache-Tag"}}
+			if disk {
+				cfg.DiskPath = t.TempDir()
+				cfg.DiskMaxSize = 16 << 20
+				cfg.MemoryMaxSize = 1024
+				cfg.MaxEntrySize = 4096
+			}
+			c := newTestCache(t, cfg)
+			defer c.setDecisionSampling(false)
+			c.genMu.Lock()
+			c.totalTagLinks = MaxTotalTagLinks
+			c.genMu.Unlock()
+			h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Tag", "safe")
+				_, _ = w.Write([]byte(strings.Repeat("x", 2048)))
+			}))
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "http://example.com/tag-limit", nil))
+			if have := reviewDecisionReasons(t, c); !have["tag_capture_rejected"] {
+				t.Fatal(have)
+			}
+		})
+	}
+}

@@ -1,7 +1,7 @@
 {
-  "covered": 861,
-  "total": 905,
-  "percent": 95.13812154696133,
+  "covered": 885,
+  "total": 933,
+  "percent": 94.85530546623794,
   "files": [
     "cmd/jul/remote_cli.go",
     "cmd/jul/remote_cli_inspect.go",
@@ -41,17 +41,17 @@
     ],
     [
       "internal/cache/cache.go",
-      "1419.4,1420.1",
+      "1421.4,1422.1",
       1
     ],
     [
       "internal/cache/cache.go",
-      "1598.5,1599.1",
+      "1601.5,1602.1",
       1
     ],
     [
       "internal/cache/cache.go",
-      "1798.4,1799.1",
+      "1801.4,1802.1",
       1
     ],
     [
@@ -91,42 +91,42 @@
     ],
     [
       "internal/cache/inspection.go",
-      "165.3,166.1",
+      "177.3,178.1",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "175.3,177.1",
+      "187.3,189.1",
       2
     ],
     [
       "internal/cache/inspection.go",
-      "236.5,237.10",
+      "248.5,249.10",
       2
     ],
     [
       "internal/cache/inspection.go",
-      "258.3,259.1",
+      "270.3,271.1",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "315.6,315.14",
+      "327.6,327.14",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "318.5,318.13",
+      "330.5,330.13",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "390.3,391.1",
+      "402.3,403.1",
       1
     ],
     [
       "internal/cache/inspection.go",
-      "405.3,406.1",
+      "417.3,418.1",
       1
     ],
     [
@@ -136,12 +136,17 @@
     ],
     [
       "internal/cache/range.go",
-      "524.5,527.1",
+      "459.3,463.1",
+      4
+    ],
+    [
+      "internal/cache/range.go",
+      "525.5,528.1",
       3
     ],
     [
       "internal/cache/range.go",
-      "530.4,531.1",
+      "531.4,532.1",
       1
     ],
     [

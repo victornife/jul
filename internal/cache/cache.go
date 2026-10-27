@@ -537,6 +537,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 		if _, host, _, _, ok := parseBaseKeyParts(key); ok {
 			if !c.canReserveTagLinksLocked(host, baseKeyOf(key), e.Tags) {
 				c.genMu.Unlock()
+				c.recordKeyDecision(key, "tag_capture_rejected")
 				c.tagSkipped(TagSkipIndexLimit)
 				return false, true, 0
 			}
@@ -803,6 +804,7 @@ func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStre
 		if _, host, _, _, ok := parseBaseKeyParts(k); ok {
 			if !c.canReserveTagLinksLocked(host, baseKeyOf(k), e.Tags) {
 				c.genMu.Unlock()
+				c.recordKeyDecision(k, "tag_capture_rejected")
 				c.tagSkipped(TagSkipIndexLimit)
 				return false, 0
 			}
@@ -1462,7 +1464,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	default:
 		e := c.buildEntryFromCapture(req, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if e == nil || !e.matchesVary(origReq) || !c.storeCapturedWithStartGen(key(req), req, e, rec.diskStream, startGen, true) {
+		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(key(req), req, e, rec.diskStream, startGen, true) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
@@ -1533,6 +1535,7 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 		var skipReason string
 		parsedTags, _, skipReason = extractOriginTags(h, pol.TagHeaderSlice())
 		if skipReason != "" {
+			c.recordDecision(r, "tag_capture_rejected")
 			c.tagSkipped(skipReason)
 			return nil
 		}

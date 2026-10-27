@@ -342,6 +342,7 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 
 	reqPolicy := parseRequestPolicy(r)
 	if reqPolicy.NoStore {
+		c.recordDecision(r, "request_no_store")
 		c.recordDecision(r, "range_bypass")
 		c.bypass(w, r, next, span)
 		return
@@ -533,7 +534,11 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 			c.recordDecision(origReq, reason)
 			return false
 		}
-		return varyCompatibleWithModifiedRequest(h, fillReq, origReq)
+		if !varyCompatibleWithModifiedRequest(h, fillReq, origReq) {
+			c.recordDecision(origReq, "vary_request_mismatch")
+			return false
+		}
+		return true
 	}
 	rec.onAbandon = abortFill
 	defer rec.releaseCapture()
@@ -549,7 +554,7 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 
 	now := c.clock()
 	e := c.buildEntryFromCapture(fillReq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-	if e == nil || !e.matchesVary(origReq) || !c.storeCapturedWithStartGen(base, fillReq, e, rec.diskStream, startGen, true) {
+	if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(base, fillReq, e, rec.diskStream, startGen, true) {
 		return nil
 	}
 	return e

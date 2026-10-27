@@ -149,7 +149,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	default:
 		e := c.buildEntryFromCapture(vreq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if e == nil || !e.matchesVary(r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
+		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.

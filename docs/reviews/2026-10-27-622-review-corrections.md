@@ -41,11 +41,11 @@ Commands use Go1.27.3 and the existing full tag set from Makefile:
 | `make generated-check` | PASS; owning API/schema/lifecycle projections remain in sync; no generated files hand-edited |
 | `make ci-pr` / `make test-race` | Results collected separately; environment Unix sockets/process probes remain unavailable. Missing/failing checks are not passing evidence |
 
-Move-aware changed Go at this checkpoint is **95.1381215469%=861/905**
+Move-aware changed Go at this checkpoint is **94.8553054662%=885/933**
 against78b458b8 ([raw result](622/review-correction-added-go.json)); the correction
-alone is **94.3661971831%=67/71** against4cc4e46e
+alone is **96.0784313725%=98/102** against4cc4e46e
 ([raw delta](622/review-correction-delta-go.json)). These are local Go statement
-reports, not the new-head Codecov PATCH report.44 statements remain
+reports, not the new-head Codecov PATCH report.48 statements remain
 uncovered in the complete diff, listed in the raw record; no exclusions/floors
 changed. Full-tag lint passes0 issues after removing the now-unused private
 headerStorable wrapper; the first lint attempt correctly failed that unused code.
@@ -89,3 +89,23 @@ baseline, broader acceptance mapping, previous review dispositions and inherited
 head. Updated PR/issue evidence will bind the new source tree to independent
 review, exact validation commands/results and the actual final Codecov report.
 NGINX migration remains not applicable; no request/cache policy semantics changed.
+
+
+## Independent review follow-up
+
+The security reviewer passed the immutable03bb6219 tree after focused race,
+privacy/metrics overlays and41 UI permission/disclosure cases. The correctness
+reviewer requested changes: sync/background recorders omitted invalid-tag
+rejection, and range admission omitted Vary mismatch/request-no-store reasons.
+Those reproductions are now maintained regressions. Observation is attached to
+the existing tag parser, Vary matcher and no-store branch; the shared publication
+owners also report tag-index capacity rejection. No admission decision changed.
+Replacement Vary mismatch and memory/disk tag-index limits have regressions too.
+The raw red-baseline log's trailing whitespace was removed. Fresh exact-tree
+reviews and hosted results are required;03bb's earlier pass is not certification
+of these later edits. Background304 completion remains visible in validation
+metadata; no response-reuse event is fabricated for a background operation.
+
+After the review follow-up, the affected lean package tests and focused inspection/
+review race tests pass; lint reports0 issues. The changed-Go records above were
+regenerated from fresh affected-package/config/lifecycle profiles at this tree.

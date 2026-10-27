@@ -88,6 +88,18 @@ func (c *Cache) observeRecorder(rec *recorder, r *http.Request) {
 	}
 }
 
+// Observe the existing Vary matcher at recorder publication boundaries.
+func (c *Cache) captureMatchesRequest(e *Entry, r *http.Request) bool {
+	if e == nil {
+		return false
+	}
+	if !e.matchesVary(r) {
+		c.recordDecision(r, "vary_request_mismatch")
+		return false
+	}
+	return true
+}
+
 var freshnessSources = [...]string{"", "gateway_fallback", "origin_s_maxage", "origin_max_age", "origin_expires", "gateway_fallback_no_cache", "targeted_gateway_fallback", "targeted_origin_s_maxage", "targeted_origin_max_age", "targeted_gateway_fallback_no_cache"}
 var windowSources = [...]string{"", "gateway_fallback", "origin", "mandatory_validation"}
 
@@ -495,6 +507,7 @@ var decisionCatalog = map[string]decisionDescription{
 	"auth_reuse_restricted":        {"reuse", "An authenticated request could not reuse this shared representation.", "Review the origin's explicit shared-auth reuse permission."},
 	"request_no_store":             {"bypass", "The request opted out of cache lookup and storage.", "Inspect the client's Cache-Control behavior."},
 	"response_policy_rejected":     {"admission", "The response was not eligible under the existing storage policy.", "Review status, freshness, validators and origin directives."},
+	"vary_request_mismatch":        {"admission", "The captured representation varies on a request header modified for cache validation or range filling.", "A fresh origin response for the original request is required."},
 	"vary_star":                    {"admission", "Vary: * prevented reusable shared storage.", "Review the origin's Vary policy."},
 	"vary_changed":                 {"validation", "Validation changed the representation's Vary identity.", "A fresh fill is required under the new identity."},
 	"upgrade_bypass":               {"bypass", "A protocol upgrade bypassed response caching.", "Protocol-switch traffic is not a cacheable HTTP representation."},

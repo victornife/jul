@@ -23,7 +23,7 @@ FAIL
 FAIL	jul/internal/cache	0.017s
 --- FAIL: TestInspectionOnlyConsoleProjectionIsScoped (0.00s)
     cache_inspection_console_access_test.go:34: inspection-only Console entry denied 403 {"error":"forbidden","principal":"reader","required_any":["status:read","config:read","config:write","config:apply","cache:purge"],"role":"inspect"}
-        
+
 FAIL
 FAIL	jul/internal/admin	0.015s
 FAIL

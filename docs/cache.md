@@ -1595,7 +1595,11 @@ independent churn; an unchanged publication sequence does not prove no eviction.
 range responses through the same serve owner. A successful 206 HIT is therefore
 observable too. Capture rejection/publication evidence includes background
 validation and complete-object range fills; a private/no-store/cookie rejection
-is separate from the later range fallback.
+is separate from the later range fallback. Recorder-based replacements also
+record invalid trusted tags and `vary_request_mismatch` when validation/range
+processing modified a header named by Vary. Enabled range requests retain the
+`request_no_store` reason, and tag-index admission limits record
+`tag_capture_rejected`; these codes retain no header names or values.
 
 A stored stale deadline can originate from SWR or be extended after an origin
 error. New immutable provenance preserves that distinction through cloning and
