@@ -2067,3 +2067,8 @@ existing meaning. Provision the key before starting or upgrading, including
 read-only and container deployments. See [effective versions, migration and
 recovery](effective-versions.md) for comparison rules, legacy pending-state
 handling, key backup/loss and the binary-downgrade boundary.
+
+
+## Opt-in cache decision evidence
+
+`[cache].decision_samples` defaults to `false` and hot-reloads. Enable it only when bounded recent evidence is wanted: 256 memory-only records, maximum 60-second evidence lifetime, no query/header values or response bodies. The Console cache editor preserves and exposes it. See [retention and limits](cache.md#recent-observed-decisions-and-privacy).

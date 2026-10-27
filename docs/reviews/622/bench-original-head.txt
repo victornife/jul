@@ -1,0 +1,46 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkCacheHit-2                   	  306121	      2017 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                   	  356300	      1872 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                   	  342096	      2354 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                   	  310093	      1985 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                   	  347044	      2039 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheVaryHit-2               	  199222	      2907 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2               	  176858	      3021 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2               	  256105	      2775 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2               	  254282	      2826 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2               	  164830	      3445 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkInspectionBounded/0-2        	 1521046	       392.8 ns/op	      96 B/op	       1 allocs/op
+BenchmarkInspectionBounded/0-2        	 1584766	       462.3 ns/op	      96 B/op	       1 allocs/op
+BenchmarkInspectionBounded/0-2        	 1282779	       494.8 ns/op	      96 B/op	       1 allocs/op
+BenchmarkInspectionBounded/0-2        	 1000000	       526.1 ns/op	      96 B/op	       1 allocs/op
+BenchmarkInspectionBounded/0-2        	 1000000	       571.9 ns/op	      96 B/op	       1 allocs/op
+BenchmarkInspectionBounded/256-2      	     258	   2367627 ns/op	  922060 B/op	    8729 allocs/op
+BenchmarkInspectionBounded/256-2      	     260	   2161696 ns/op	  922070 B/op	    8729 allocs/op
+BenchmarkInspectionBounded/256-2      	     351	   2138294 ns/op	  922069 B/op	    8729 allocs/op
+BenchmarkInspectionBounded/256-2      	     315	   1841489 ns/op	  922056 B/op	    8729 allocs/op
+BenchmarkInspectionBounded/256-2      	     295	   2718641 ns/op	  922045 B/op	    8729 allocs/op
+BenchmarkInspectionBounded/2000-2     	     127	   5804227 ns/op	 1750332 B/op	   19214 allocs/op
+BenchmarkInspectionBounded/2000-2     	     100	   7522282 ns/op	 1750289 B/op	   19214 allocs/op
+BenchmarkInspectionBounded/2000-2     	     142	   5526226 ns/op	 1750305 B/op	   19214 allocs/op
+BenchmarkInspectionBounded/2000-2     	     100	   6074186 ns/op	 1750334 B/op	   19214 allocs/op
+BenchmarkInspectionBounded/2000-2     	     123	   6209406 ns/op	 1750296 B/op	   19214 allocs/op
+BenchmarkInspectionBounded/10001-2    	      52	   9634306 ns/op	 5495566 B/op	   67269 allocs/op
+BenchmarkInspectionBounded/10001-2    	      56	  10459546 ns/op	 5495495 B/op	   67269 allocs/op
+BenchmarkInspectionBounded/10001-2    	      39	  12911460 ns/op	 5495556 B/op	   67269 allocs/op
+BenchmarkInspectionBounded/10001-2    	      78	   9606722 ns/op	 5495491 B/op	   67269 allocs/op
+BenchmarkInspectionBounded/10001-2    	      52	   9618975 ns/op	 5495567 B/op	   67269 allocs/op
+BenchmarkCacheHitDecisionSampling/false-2         	  348260	      1665 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHitDecisionSampling/false-2         	  331906	      1701 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHitDecisionSampling/false-2         	  371094	      1623 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHitDecisionSampling/false-2         	  323954	      1737 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHitDecisionSampling/false-2         	  364473	      1696 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHitDecisionSampling/true-2          	  200242	      2960 ns/op	    1952 B/op	      28 allocs/op
+BenchmarkCacheHitDecisionSampling/true-2          	  195319	      2845 ns/op	    1952 B/op	      28 allocs/op
+BenchmarkCacheHitDecisionSampling/true-2          	  197932	      2931 ns/op	    1952 B/op	      28 allocs/op
+BenchmarkCacheHitDecisionSampling/true-2          	  200367	      2788 ns/op	    1952 B/op	      28 allocs/op
+BenchmarkCacheHitDecisionSampling/true-2          	  218137	      2823 ns/op	    1952 B/op	      28 allocs/op
+PASS
+ok  	jul/internal/cache	32.788s

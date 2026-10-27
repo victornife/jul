@@ -28,6 +28,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Bounded read-only cache metadata inspection and opt-in recent cache-decision
+  evidence across the admin API, remote CLI and Full Console (#622). Separate
+  - Review corrections: preserve SIE versus SWR decision basis, instrument range/background capture paths, allow a scoped inspection-only Console view, and omit unknown evidence timestamps.
+  `cache:inspect` permission, query/Vary-value redaction, context-bound expiring
+  pagination and explicit evidence/policy limitations; no origin probe.
+
 - Scoped URL, prefix, bounded anchored glob, origin grouping-tag, and hostname
   cache invalidation with non-destructive preview (#621 / `CACHE-OPS-01`,
   [ADR 0027](docs/adr/0027-scoped-cache-invalidation.md)):

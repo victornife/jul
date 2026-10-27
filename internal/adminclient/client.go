@@ -45,6 +45,7 @@ type Operation struct {
 }
 
 var operations = []Operation{
+	{ID: "inspectCache", Method: http.MethodPost, Path: "/api/v1/cache/inspect", ContentType: "application/json"},
 	{ID: "getStatus", Method: http.MethodGet, Path: "/api/v1/status"},
 	{ID: "getCapabilities", Method: http.MethodGet, Path: "/api/v1/capabilities"},
 	{ID: "planConfig", Method: http.MethodPost, Path: "/api/v1/config/plan", ContentType: "application/toml"},
@@ -730,4 +731,18 @@ func OutcomeExit(outcome string, restored bool, restoreError string, degraded []
 	default:
 		return 9, false
 	}
+}
+
+// CacheInspect reads one bounded metadata page without sending origin traffic.
+func (c *Client) CacheInspect(ctx context.Context, req adminapi.CacheInspectRequest) (adminapi.CacheInspectResponse, RawResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return adminapi.CacheInspectResponse{}, RawResponse{}, err
+	}
+	r, err := c.do(ctx, operation("inspectCache"), nil, nil, body, "application/json", "")
+	if err != nil {
+		return adminapi.CacheInspectResponse{}, r, err
+	}
+	v, err := decode[adminapi.CacheInspectResponse](r)
+	return v, r, err
 }

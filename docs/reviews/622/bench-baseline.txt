@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkCacheHit-2       	  334381	      1672 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  346598	      1683 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  353689	      1632 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  365162	      2273 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  358172	      2939 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheVaryHit-2   	  225248	      3045 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  173071	      2921 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  220633	      3310 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  220747	      2803 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  238591	      2794 ns/op	    1504 B/op	      25 allocs/op
+PASS
+ok  	jul/internal/cache	7.397s

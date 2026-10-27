@@ -10,6 +10,147 @@
     }
   },
   "paths": {
+    "/api/v1/cache/inspect": {
+      "post": {
+        "operationId": "inspectCache",
+        "summary": "Read bounded configured-host cache metadata and observed decisions without origin traffic.",
+        "tags": [
+          "cache"
+        ],
+        "requestBody": {
+          "description": "Request body. Maximum accepted size: 1048576 bytes; larger bodies return payload_too_large before unbounded allocation.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CacheInspectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheInspectResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — The request was malformed: an unparseable body, an unknown field, a bad parameter or a missing required parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`insecure_transport` — The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.\n\n`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` — The request body exceeded the admin body cap. The cap applies to every body-bearing /api/v1 request, not only mutations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`unsupported_media_type` — The request Content-Type is not accepted for this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "cache:inspect"
+        ],
+        "x-jul-max-body-bytes": 1048576,
+        "x-jul-error-codes": [
+          "insecure_transport",
+          "unauthenticated",
+          "forbidden",
+          "rate_limited",
+          "internal_error",
+          "invalid_request",
+          "storage_unavailable",
+          "payload_too_large",
+          "unsupported_media_type"
+        ]
+      }
+    },
     "/api/v1/cache/purge": {
       "post": {
         "operationId": "purgeCache",
@@ -4905,6 +5046,498 @@
           "code",
           "severity",
           "summary"
+        ],
+        "additionalProperties": false
+      },
+      "CacheInspectRequest": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "page_size": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/CacheSelector"
+          }
+        },
+        "required": [
+          "selector"
+        ],
+        "additionalProperties": false
+      },
+      "CacheInspectResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "concurrent_change": {
+            "type": "string"
+          },
+          "config_authority": {
+            "type": "string"
+          },
+          "config_authority_source": {
+            "type": "string"
+          },
+          "config_inconsistent_reason": {
+            "type": "string"
+          },
+          "config_state": {
+            "type": "string"
+          },
+          "consistency": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "inspection": {
+            "type": "object",
+            "properties": {
+              "cache_sequence": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "captured_at": {
+                "type": "object",
+                "additionalProperties": false
+              },
+              "count_accuracy": {
+                "type": "string"
+              },
+              "decisions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "expires_at": {
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "has_query": {
+                      "type": "boolean"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "next_step": {
+                      "type": "string"
+                    },
+                    "observed_at": {
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    },
+                    "resource_id": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "stage": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "expires_at",
+                    "has_query",
+                    "host",
+                    "next_step",
+                    "observed_at",
+                    "path",
+                    "reason",
+                    "resource_id",
+                    "source",
+                    "stage",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "disk_entries": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "disk_occupancy": {
+                "type": "object",
+                "properties": {
+                  "bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "entries": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "evictions": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "bytes",
+                  "entries",
+                  "evictions",
+                  "max_bytes"
+                ],
+                "additionalProperties": false
+              },
+              "evidence_state": {
+                "type": "string"
+              },
+              "matched_body_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "matched_representations": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "matched_resources": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "memory_entries": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "memory_occupancy": {
+                "type": "object",
+                "properties": {
+                  "bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "entries": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "evictions": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "bytes",
+                  "entries",
+                  "evictions",
+                  "max_bytes"
+                ],
+                "additionalProperties": false
+              },
+              "policy": {
+                "type": "object",
+                "properties": {
+                  "default_ttl_seconds": {
+                    "type": "number"
+                  },
+                  "fill_lock_enabled": {
+                    "type": "boolean"
+                  },
+                  "gateway_freshness_cap_supported": {
+                    "type": "boolean"
+                  },
+                  "max_entry_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "range_enabled": {
+                    "type": "boolean"
+                  },
+                  "route_overrides_supported": {
+                    "type": "boolean"
+                  },
+                  "sie_seconds": {
+                    "type": "number"
+                  },
+                  "swr_seconds": {
+                    "type": "number"
+                  },
+                  "tag_ingestion_enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "default_ttl_seconds",
+                  "fill_lock_enabled",
+                  "gateway_freshness_cap_supported",
+                  "max_entry_bytes",
+                  "range_enabled",
+                  "route_overrides_supported",
+                  "sie_seconds",
+                  "swr_seconds",
+                  "tag_ingestion_enabled"
+                ],
+                "additionalProperties": false
+              },
+              "resources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "body_bytes": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "created_at": {
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "body_bytes": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "effective_sie_seconds": {
+                            "type": "number"
+                          },
+                          "evidence": {
+                            "type": "object",
+                            "properties": {
+                              "freshness_seconds": {
+                                "type": "number"
+                              },
+                              "freshness_source": {
+                                "type": "string"
+                              },
+                              "inserted_at": {
+                                "type": "object",
+                                "additionalProperties": false
+                              },
+                              "must_revalidate": {
+                                "type": "boolean"
+                              },
+                              "requires_validation": {
+                                "type": "boolean"
+                              },
+                              "shared_auth_reuse": {
+                                "type": "boolean"
+                              },
+                              "sie_seconds": {
+                                "type": "number"
+                              },
+                              "sie_source": {
+                                "type": "string"
+                              },
+                              "swr_seconds": {
+                                "type": "number"
+                              },
+                              "swr_source": {
+                                "type": "string"
+                              },
+                              "validated_at": {
+                                "type": "object",
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": [
+                              "freshness_seconds",
+                              "freshness_source",
+                              "must_revalidate",
+                              "requires_validation",
+                              "shared_auth_reuse",
+                              "sie_seconds",
+                              "sie_source",
+                              "swr_seconds",
+                              "swr_source"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "evidence_state": {
+                            "type": "string"
+                          },
+                          "freshness_state": {
+                            "type": "string"
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "method": {
+                            "type": "string"
+                          },
+                          "origin_age_seconds": {
+                            "type": "number"
+                          },
+                          "retained_policy": {
+                            "type": "boolean"
+                          },
+                          "tiers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "vary_fields": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "body_bytes",
+                          "evidence",
+                          "evidence_state",
+                          "freshness_state",
+                          "id",
+                          "method",
+                          "origin_age_seconds",
+                          "retained_policy",
+                          "tiers",
+                          "vary_fields"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "details_truncated": {
+                      "type": "boolean"
+                    },
+                    "expires_at": {
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "freshness_state": {
+                      "type": "string"
+                    },
+                    "has_query": {
+                      "type": "boolean"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "methods": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "representations": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "resource_id": {
+                      "type": "string"
+                    },
+                    "stale_until": {
+                      "type": "object",
+                      "additionalProperties": false
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "tiers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "vary_fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "body_bytes",
+                    "details",
+                    "freshness_state",
+                    "host",
+                    "methods",
+                    "path",
+                    "representations",
+                    "tiers"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "state": {
+                "type": "string"
+              },
+              "truncated": {
+                "type": "boolean"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "cache_sequence",
+              "captured_at",
+              "count_accuracy",
+              "decisions",
+              "disk_entries",
+              "evidence_state",
+              "matched_body_bytes",
+              "matched_representations",
+              "matched_resources",
+              "memory_entries",
+              "memory_occupancy",
+              "policy",
+              "resources",
+              "state",
+              "truncated",
+              "warnings"
+            ],
+            "additionalProperties": false
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "policy_source": {
+            "type": "string"
+          },
+          "route_cache_state": {
+            "type": "string"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/CacheSelector"
+          }
+        },
+        "required": [
+          "api_version",
+          "concurrent_change",
+          "config_authority",
+          "config_authority_source",
+          "consistency",
+          "expires_at",
+          "inspection",
+          "policy_source",
+          "route_cache_state",
+          "selector"
         ],
         "additionalProperties": false
       },

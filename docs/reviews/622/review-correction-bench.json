@@ -1,0 +1,162 @@
+[
+  {
+    "pair": 0,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 3857.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 0,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 3357.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 0,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1803.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 0,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2581.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 1,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1759.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 1,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2547.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 1,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1801.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 1,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2557.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 2,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1743.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 2,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2522.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 2,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1757.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 2,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2566.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 3,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1766.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 3,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2561.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 3,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1757.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 3,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2532.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 4,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1740.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 4,
+    "revision": "base",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2574.0,
+    "bytes": 1504,
+    "allocs": 25
+  },
+  {
+    "pair": 4,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheHit",
+    "ns": 1756.0,
+    "bytes": 1256,
+    "allocs": 16
+  },
+  {
+    "pair": 4,
+    "revision": "fix",
+    "benchmark": "BenchmarkCacheVaryHit",
+    "ns": 2623.0,
+    "bytes": 1504,
+    "allocs": 25
+  }
+]

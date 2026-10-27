@@ -20,6 +20,7 @@ Remote automation (stable /api/v1):
   jul export --endpoint u [--json]
   jul diagnostics --endpoint u [--json]
   jul apply --endpoint u --adopt-external [--base-version v] [--adopt-mode hot|stage_restart]
+  jul cache inspect --endpoint u --host h [--uri u | --prefix p | --glob g | --tag t] [--cursor c] [--page-size n] [--json]
   jul cache purge --endpoint u (--url u | --host h [--prefix p | --glob g | --tag t] | --key k | --all) [--preview] [--confirm-broad] [--idempotency-key k] [--json]
 
 Remote connection flags:

@@ -59,6 +59,7 @@ type GlobalRateLimitProjection struct {
 // memory_max compatibility alias remains for one release while the canonical
 // memory_max_size name is adopted by the guided editor.
 type CompleteCacheProjection struct {
+	DecisionSamples      bool     `json:"decision_samples"`
 	Enabled              bool     `json:"enabled"`
 	MemoryMaxSize        string   `json:"memory_max_size"`
 	MemoryMax            string   `json:"memory_max,omitempty"`
@@ -166,6 +167,7 @@ func projectCacheSettings(c *config.Config) *CompleteCacheProjection {
 	memory := string(mustMarshal(c.Cache.MemoryMaxSize.MarshalText()))
 	return &CompleteCacheProjection{
 		Enabled:              c.Cache.Enabled,
+		DecisionSamples:      c.Cache.DecisionSamples,
 		MemoryMaxSize:        memory,
 		MemoryMax:            memory,
 		DiskPath:             c.Cache.DiskPath,

@@ -1330,3 +1330,17 @@ existing meaning. Provision the key before starting or upgrading, including
 read-only and container deployments. See [effective versions, migration and
 recovery](effective-versions.md) for comparison rules, legacy pending-state
 handling, key backup/loss and the binary-downgrade boundary.
+
+
+## Cache resource inspector
+
+Traffic Controls → Cache provides a lazy-loaded inspector with configured-host and exact/prefix/glob/tag filters, paginated metadata, policy provenance and recent observed stages. Permission, empty, disabled, partial, truncated, legacy, stale-evidence and failure states remain explicit. Existing purge controls keep their separate grants and confirmations. See [inspection](cache.md#bounded-cache-inspection).
+
+An identity holding only `cache:inspect` can open **Traffic** and use the cache
+inspector. The Console entry projection returns only `inspection_only: true`;
+it reads no editable configuration, exposes no configured-host catalogue and
+shows no editing or purge controls. Enter a known configured hostname. Existing
+status/configuration/purge grants retain their previous traffic-control view.
+The limited view avoids unauthorized overview/health polling. Unknown publication
+dates display `unknown` / `no recorded validation`, including older zero-date
+responses. Inspection access still does not grant configuration or purge access.

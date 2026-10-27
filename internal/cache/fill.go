@@ -181,6 +181,7 @@ func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Hand
 	case <-timer.C:
 		span.SetString("cache.status", "MISS")
 		span.End()
+		c.recordDecision(r, "fill_lock_timeout")
 		c.observeFillLock(fillOutcomeTimeout)
 		c.proxyUncached(w, r, next)
 		return
@@ -189,6 +190,7 @@ func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Hand
 	if !call.stored {
 		span.SetString("cache.status", "MISS")
 		span.End()
+		c.recordDecision(r, "fill_lock_uncacheable")
 		c.observeFillLock(fillOutcomeUncacheable)
 		c.fetchAndStoreWithPolicy(w, r, next, c.clock(), pol, nil)
 		return
@@ -200,6 +202,7 @@ func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Hand
 		return
 	}
 
+	c.recordDecision(r, "fill_lock_not_reusable")
 	c.observeFillLock(fillOutcomeNotReusable)
 	if allowVariantRetry && latestEffKey != base && fillLockKey(base, latestEffKey) != fk {
 		c.fillOrWait(w, r, next, base, latestEffKey, reqPolicy, pol, span, false)

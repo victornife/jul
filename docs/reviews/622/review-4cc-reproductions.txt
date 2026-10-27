@@ -1,0 +1,29 @@
+--- FAIL: TestInspectionReviewSIEReuseBasis (0.00s)
+    inspection_review_followup_test.go:67: wrong stale basis/background extension evidence map[stale_reuse:true stale_while_revalidate:true]
+--- FAIL: TestInspectionReviewRangeReuseAndRestrictions (0.00s)
+    --- FAIL: TestInspectionReviewRangeReuseAndRestrictions/hit (0.00s)
+        inspection_review_followup_test.go:89: 206 hit lacks reuse evidence map[]
+    --- FAIL: TestInspectionReviewRangeReuseAndRestrictions/private (0.00s)
+        inspection_review_followup_test.go:110: range-fill rejection missing actual reason map[range_bypass:true]
+    --- FAIL: TestInspectionReviewRangeReuseAndRestrictions/no-store (0.00s)
+        inspection_review_followup_test.go:110: range-fill rejection missing actual reason map[range_bypass:true]
+    --- FAIL: TestInspectionReviewRangeReuseAndRestrictions/cookie (0.00s)
+        inspection_review_followup_test.go:110: range-fill rejection missing actual reason map[range_bypass:true]
+--- FAIL: TestInspectionReviewBackgroundOversize (0.00s)
+    inspection_review_followup_test.go:143: background rejection lacks capture evidence map[stale_reuse:true stale_while_revalidate:true]
+--- FAIL: TestInspectionReviewUnknownAndKnownValidationTime (0.00s)
+    inspection_review_followup_test.go:176: unvalidated response has a date map[freshness_seconds:60 freshness_source:gateway_fallback inserted_at:2026-10-27T22:45:50.820508757Z must_revalidate:false requires_validation:false shared_auth_reuse:false sie_seconds:0 sie_source:gateway_fallback swr_seconds:0 swr_source:gateway_fallback validated_at:0001-01-01T00:00:00Z]
+--- FAIL: TestInspectionReviewStaleBasisRestartAndReplacement (0.01s)
+    inspection_review_followup_test.go:225: restart lost error basis map[stale_reuse:true stale_while_revalidate:true]
+--- FAIL: TestInspectionReviewBackgroundSIEExtension (0.00s)
+    inspection_review_followup_test.go:274: background failure/extension not observed map[stale_reuse:true stale_while_revalidate:true]
+--- FAIL: TestInspectionReviewRangeFillPublication (0.00s)
+    inspection_review_followup_test.go:295: fill publication must be observed, not inferred from a miss map[]
+FAIL
+FAIL	jul/internal/cache	0.017s
+--- FAIL: TestInspectionOnlyConsoleProjectionIsScoped (0.00s)
+    cache_inspection_console_access_test.go:34: inspection-only Console entry denied 403 {"error":"forbidden","principal":"reader","required_any":["status:read","config:read","config:write","config:apply","cache:purge"],"role":"inspect"}
+
+FAIL
+FAIL	jul/internal/admin	0.015s
+FAIL

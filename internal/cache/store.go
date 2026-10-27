@@ -24,16 +24,18 @@ import (
 // stored pointer under the tier's own lock. Clone is the only supported way to
 // produce a mutable copy.
 type Entry struct {
-	Status int
-	Header http.Header
-	Body   []byte
+	// Evidence is bounded publication provenance; zero means legacy/unavailable.
+	Evidence *publicationEvidence
+	Status   int
+	Header   http.Header
+	Body     []byte
 	// diskBody is non-nil when the entry's payload lives in a reference-counted
 	// on-disk cache file rather than in Body (#525 Part 2, ADR 0023).
 	diskBody *diskBlob
 
 	CreatedAt  time.Time
 	ExpiresAt  time.Time // end of freshness
-	StaleUntil time.Time // end of stale-while-revalidate grace window
+	StaleUntil time.Time // current stale deadline: original SWR or an SIE extension
 
 	ETag         string
 	LastModified string
@@ -107,6 +109,10 @@ func (e *Entry) Clone() *Entry {
 		return nil
 	}
 	cp := *e
+	if e.Evidence != nil {
+		v := *e.Evidence
+		cp.Evidence = &v
+	}
 	cp.Header = cloneHeader(e.Header)
 	if e.Body != nil {
 		cp.Body = append([]byte(nil), e.Body...)
@@ -155,7 +161,10 @@ func (e *Entry) OpenBody() (BodyReader, error) {
 
 // Size estimates the entry's memory footprint in bytes.
 func (e *Entry) Size() int64 {
-	n := int64(len(e.Body)) + 256 // body + fixed metadata overhead
+	n := int64(len(e.Body)) + 256
+	if e.Evidence != nil {
+		n += 96
+	} // immutable provenance allocation and catalog pointer allowance
 	for k, vs := range e.Header {
 		n += int64(len(k))
 		for _, v := range vs {
@@ -184,7 +193,7 @@ func (e *Entry) Fresh(now time.Time) bool {
 }
 
 // ServableStale reports whether the entry is expired but still within the
-// stale-while-revalidate grace window.
+// current stale deadline (original SWR or an SIE extension).
 func (e *Entry) ServableStale(now time.Time) bool {
 	return !e.Fresh(now) && now.Before(e.StaleUntil)
 }

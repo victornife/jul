@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 424 |
-| Schema leaves (configurable values) | 357 |
-| Registry entries | 357 |
+| Schema paths (containers included) | 425 |
+| Schema leaves (configurable values) | 358 |
+| Registry entries | 358 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 314 |
+| Class `hot_reload` | 315 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -171,6 +171,7 @@ value is compared as a digest so no secret material leaves the process.
 | `admin.tls.key` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during preflight, then swapped atomically into the admin listener's existing dynamic provider on the next successful reload, reusing #100's seam (#336) |
 | `admin.tls.min_version` | `restart_required` | `tls` | startup | the minimum protocol version is written into the admin listener's tls.Config when it is created |
 | `admin.token` | `hot_reload` | `admin` | digest | the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap |
+| `cache.decision_samples` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.default_ttl` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.disk_max_size` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.disk_path` | `restart_required` | `cache` | startup | the response cache backend is created once at startup and retains its counters and LRU state across reloads |

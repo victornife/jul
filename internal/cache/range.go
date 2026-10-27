@@ -323,6 +323,7 @@ func ifRangeMatches(r *http.Request, e *Entry) bool {
 }
 
 func (c *Cache) fallbackRange(w http.ResponseWriter, r *http.Request, next http.Handler, span tracing.Span) {
+	c.recordDecision(r, "range_bypass")
 	c.observeRange(rangeOutcomeFallback)
 	c.bypass(w, r, next, span)
 }
@@ -334,12 +335,15 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 	// 206 responses or trigger a full-object GET fill; bypass to preserve exact
 	// origin HEAD behavior.
 	if r.Method != http.MethodGet {
+		c.recordDecision(r, "range_bypass")
 		c.bypass(w, r, next, span)
 		return
 	}
 
 	reqPolicy := parseRequestPolicy(r)
 	if reqPolicy.NoStore {
+		c.recordDecision(r, "request_no_store")
+		c.recordDecision(r, "range_bypass")
 		c.bypass(w, r, next, span)
 		return
 	}
@@ -357,6 +361,7 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 	switch res {
 	case rangeParseInvalid:
 		c.observeRange(rangeOutcomeInvalid)
+		c.recordDecision(r, "range_bypass")
 		c.bypass(w, r, next, span)
 		return
 	case rangeParseNonBytes, rangeParseMulti:
@@ -444,12 +449,14 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 		c.observeFillLock(fillOutcomeCanceled)
 		return
 	case <-timer.C:
+		c.recordDecision(origReq, "fill_lock_timeout")
 		c.observeFillLock(fillOutcomeTimeout)
 		c.fallbackRange(w, origReq, next, span)
 		return
 	}
 
 	if !call.stored {
+		c.recordDecision(origReq, "fill_lock_uncacheable")
 		c.observeFillLock(fillOutcomeUncacheable)
 		c.fallbackRange(w, origReq, next, span)
 		return
@@ -461,6 +468,7 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 		return
 	}
 
+	c.recordDecision(origReq, "fill_lock_not_reusable")
 	c.observeFillLock(fillOutcomeNotReusable)
 	if allowVariantRetry && latestEffKey != base && fillLockKey(base, latestEffKey) != fk {
 		c.rangeFillOrWait(w, origReq, rWithSpec, next, base, latestEffKey, reqPolicy, pol, span, false)
@@ -510,16 +518,27 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 
 	var tagSkipReason string
 	rec := c.newRecorder(pol)
+	c.observeRecorder(rec, origReq)
 	rec.headerCheck = func(code int, h http.Header) bool {
 		if pol.TagHeaderCount > 0 {
 			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
 				tagSkipReason = skip
+				c.recordDecision(origReq, "tag_capture_rejected")
 				return false
 			}
 		}
-		return code == http.StatusOK &&
-			c.headerStorable(fillReq, code, h, c.clock(), pol) &&
-			varyCompatibleWithModifiedRequest(h, fillReq, origReq)
+		if code != http.StatusOK {
+			return false
+		}
+		if reason := c.storageReason(fillReq, code, h, c.clock(), pol); reason != "" {
+			c.recordDecision(origReq, reason)
+			return false
+		}
+		if !varyCompatibleWithModifiedRequest(h, fillReq, origReq) {
+			c.recordDecision(origReq, "vary_request_mismatch")
+			return false
+		}
+		return true
 	}
 	rec.onAbandon = abortFill
 	defer rec.releaseCapture()
@@ -535,7 +554,7 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 
 	now := c.clock()
 	e := c.buildEntryFromCapture(fillReq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-	if e == nil || !e.matchesVary(origReq) || !c.storeCapturedWithStartGen(base, fillReq, e, rec.diskStream, startGen, true) {
+	if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(base, fillReq, e, rec.diskStream, startGen, true) {
 		return nil
 	}
 	return e

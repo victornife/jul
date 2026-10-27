@@ -253,6 +253,19 @@ func (s *Server) handleTrafficControls(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodGet)
 		return
 	}
+	// Inspection-only users must be able to load the Console view without
+	// acquiring config/status permissions or reading the editable config at all.
+	if id, ok := rbacIdentityFromRequest(r); ok && !id.Legacy {
+		broad := false
+		for _, permission := range trafficControlsProjectionPermissions {
+			broad = broad || id.Has(permission)
+		}
+		if !broad {
+			writeJSON(w, http.StatusOK, map[string]bool{"inspection_only": true})
+			return
+		}
+	}
+
 	// Project the authoritative editable baseline. When a managed planned-restart
 	// candidate exists, currentWriteState selects that staged disk configuration
 	// rather than falsely presenting the currently serving runtime as editable.

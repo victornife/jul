@@ -9,6 +9,13 @@ import (
 	"jul/internal/rbac"
 )
 
+// Existing grants that allow the complete traffic configuration projection.
+// cache:inspect alone receives only an inspection-view marker, never these
+// broader configuration fields.
+var trafficControlsProjectionPermissions = []rbac.Permission{
+	rbac.StatusRead, rbac.ConfigRead, rbac.ConfigWrite, rbac.ConfigApply, rbac.CachePurge,
+}
+
 // RouteSpec declares the authorization metadata for a single admin route.
 // Every non-public route MUST declare permissions for every method it accepts
 // so the guard test can assert completeness — there is no implicit default.
@@ -485,16 +492,10 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleSecurity) },
 	},
 	{
-		Pattern: "/api/traffic-controls",
-		Methods: []string{http.MethodGet},
-		AnyPermissions: []rbac.Permission{
-			rbac.StatusRead,
-			rbac.ConfigRead,
-			rbac.ConfigWrite,
-			rbac.ConfigApply,
-			rbac.CachePurge,
-		},
-		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleTrafficControls) },
+		Pattern:        "/api/traffic-controls",
+		Methods:        []string{http.MethodGet},
+		AnyPermissions: append(append([]rbac.Permission{}, trafficControlsProjectionPermissions...), rbac.CacheInspect),
+		Handler:        func(s *Server) http.Handler { return http.HandlerFunc(s.handleTrafficControls) },
 	},
 	{
 		Pattern:    "/api/plugins",

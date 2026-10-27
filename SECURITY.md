@@ -204,3 +204,14 @@ are removed across identity/permission changes. This correction does not claim
 to hide independently authorized mutation effects or all existing status/export
 fingerprints; [the evidence record](docs/reviews/2026-10-19-645-preview-disclosure.md)
 states the boundary and relationship to #644.
+
+
+## Cache inspection privacy
+
+The unreleased cache inspector requires an explicit `cache:inspect` grant; built-in viewer/operator/auditor permissions are unchanged. Existing wildcard and legacy-token authority remain in effect. Every page reauthenticates and binds principal, scope and live authorization/configuration context. Safe output omits query/Vary values, bodies and credentials; malformed Vary names are filtered as unavailable metadata. Opt-in decision samples are bounded, memory-only and expiring. See [retention and threat boundaries](docs/cache.md#bounded-cache-inspection).
+
+Inspection-only Console access is a limited projection: `cache:inspect` alone
+returns only an `inspection_only` view marker from the Traffic entry endpoint.
+It does not read or expose editable configuration, configured-host lists, raw
+configuration, node status/health, or purge controls. Every actual metadata
+request still uses the configured-host scope and live inspection authorization.

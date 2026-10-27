@@ -1,0 +1,51 @@
+{
+  "covered": 139,
+  "total": 150,
+  "percent": 92.66666666666667,
+  "files": [
+    "internal/admin/api.go",
+    "internal/admin/route_catalog.go",
+    "internal/cache/cache.go",
+    "internal/cache/diskstore.go",
+    "internal/cache/inspection.go",
+    "internal/cache/range.go",
+    "internal/cache/validate.go"
+  ],
+  "uncovered": [
+    [
+      "internal/cache/diskstore.go",
+      "1208.5,1209.1",
+      1
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1215.4,1216.24",
+      2
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1217.5,1218.1",
+      1
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1224.4,1225.24",
+      2
+    ],
+    [
+      "internal/cache/diskstore.go",
+      "1226.5,1227.1",
+      1
+    ],
+    [
+      "internal/cache/range.go",
+      "525.5,528.1",
+      3
+    ],
+    [
+      "internal/cache/range.go",
+      "531.4,532.1",
+      1
+    ]
+  ]
+}

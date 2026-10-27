@@ -1389,7 +1389,9 @@ type ForwardAuthConfig struct {
 
 // CacheConfig configures the two-tier response cache.
 type CacheConfig struct {
-	Enabled bool `toml:"enabled"`
+	// DecisionSamples opts into a memory-only, 256-record, 60-second cache decision buffer. Disabled by default.
+	DecisionSamples bool `toml:"decision_samples,omitempty"`
+	Enabled         bool `toml:"enabled"`
 	// MemoryMaxSize is the in-memory tier cap.
 	MemoryMaxSize Size `toml:"memory_max_size"`
 	// DiskPath enables the disk overflow tier when non-empty.

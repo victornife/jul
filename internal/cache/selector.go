@@ -69,23 +69,25 @@ type Selector struct {
 // NormalizedSelector is a validated, canonicalized selector ready for preview,
 // fence registration, or execution.
 type NormalizedSelector struct {
-	Kind                SelectorKind
-	Host                string
-	URI                 string
-	Prefix              string
-	Pattern             string
-	Tags                []string
-	TagMatch            TagMatchMode
-	Key                 string
-	KeyMethod           string
-	RouteID             string
-	BroadScope          bool
-	ExplicitDefaultPort bool
-	globSegments        []string
-	cutoverExactPath    string
-	cutoverRawPrefix    string
-	cutoverMatchAnyPort bool
-	digest              [32]byte
+	Kind                  SelectorKind
+	Host                  string
+	URI                   string
+	Prefix                string
+	Pattern               string
+	Tags                  []string
+	TagMatch              TagMatchMode
+	Key                   string
+	KeyMethod             string
+	RouteID               string
+	BroadScope            bool
+	ExplicitDefaultPort   bool
+	globSegments          []string
+	inspectionRouteExact  string
+	inspectionRoutePrefix string
+	cutoverExactPath      string
+	cutoverRawPrefix      string
+	cutoverMatchAnyPort   bool
+	digest                [32]byte
 }
 
 // SelectorError reports a deterministic validation error on a selector field.
@@ -713,6 +715,9 @@ func computeSelectorDigest(s NormalizedSelector) [32]byte {
 		}
 		writePart(s.cutoverExactPath, s.cutoverRawPrefix, anyPortBit)
 	}
+	if s.inspectionRouteExact != "" || s.inspectionRoutePrefix != "" {
+		writePart(s.inspectionRouteExact, s.inspectionRoutePrefix)
+	}
 	writePart(strconv.Itoa(len(s.Tags)))
 	writePart(s.Tags...)
 	var out [32]byte
@@ -773,6 +778,9 @@ func (s NormalizedSelector) matchesHost(host string) bool {
 // MatchesResource reports whether s selects a cached resource identified by
 // normalized host, raw requestURI (path + optional ?query), and sorted tags.
 func (s NormalizedSelector) MatchesResource(host, requestURI string, tags []string) bool {
+	if !s.matchesInspectionRoutePath(requestURI) {
+		return false
+	}
 	switch s.Kind {
 	case SelectorAll:
 		return true
@@ -1168,4 +1176,52 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 			addHostCutover(nh)
 		}
 	}
+}
+
+// ParseInspectionSelector retains the shared selector grammar and adds a route
+// path intersection. It does not claim historical request-route attribution.
+func ParseInspectionSelector(in Selector, cfg *config.Config) (NormalizedSelector, error) {
+	s, err := ParseSelector(in, cfg)
+	if err != nil || s.RouteID == "" {
+		return s, err
+	}
+	for _, srv := range cfg.Servers {
+		for _, loc := range srv.Locations {
+			if loc.RouteID == nil || *loc.RouteID != s.RouteID {
+				continue
+			}
+			if s.Kind == SelectorKey {
+				hosts := []string{}
+				for _, name := range srv.ServerNames {
+					if h, e := normalizeSelectorHost(name); e == nil {
+						hosts = append(hosts, h)
+					}
+				}
+				if e := checkRouteHostAllowed(s.Host, s.RouteID, hosts); e != nil {
+					return NormalizedSelector{}, e
+				}
+			}
+			switch loc.Match.Type {
+			case "exact":
+				s.inspectionRouteExact = loc.Match.Path
+			case "prefix", "":
+				s.inspectionRoutePrefix = loc.Match.Path
+			default:
+				return NormalizedSelector{}, selErr("route_id", "inspection of regex route paths is unavailable; use configured-host scope")
+			}
+			s.digest = computeSelectorDigest(s)
+			return s, nil
+		}
+	}
+	return NormalizedSelector{}, selErr("route_id", "inspection route is unavailable")
+}
+
+func (s NormalizedSelector) matchesInspectionRoutePath(uri string) bool {
+	if s.inspectionRouteExact != "" && decodeRoutePath(stripQueryFromURI(uri)) != s.inspectionRouteExact {
+		return false
+	}
+	if s.inspectionRoutePrefix != "" && !strings.HasPrefix(decodeRoutePath(stripQueryFromURI(uri)), s.inspectionRoutePrefix) {
+		return false
+	}
+	return true
 }

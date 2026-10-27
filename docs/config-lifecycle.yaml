@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 424
-  schema_leaves: 357
-  registry_entries: 357
+  schema_paths: 425
+  schema_leaves: 358
+  registry_entries: 358
   startup_consumed: 29
   by_class:
-    hot_reload: 314
+    hot_reload: 315
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -325,6 +325,10 @@ fields:
     subsystem: admin
     reason: "the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap"
     secret_digested: true
+  - path: "cache.decision_samples"
+    class: hot_reload
+    subsystem: cache
+    reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
   - path: "cache.default_ttl"
     class: hot_reload
     subsystem: cache

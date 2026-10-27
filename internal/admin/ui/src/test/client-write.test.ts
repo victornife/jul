@@ -45,21 +45,30 @@ describe("reviewed Console write inventory", () => {
     });
     const outsideClient: string[] = [];
     for (const [path, text] of Object.entries(sources)) {
-      if (path.includes("/test/") || /\.test\.tsx?$/.test(path) || path === "../api/client.ts") continue;
-      const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true,
-        path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+      if (path.includes("/test/") || /\.test\.tsx?$/.test(path) || path === "../api/client.ts")
+        continue;
+      const source = ts.createSourceFile(
+        path,
+        text,
+        ts.ScriptTarget.Latest,
+        true,
+        path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      );
       function visit(node: ts.Node): void {
         if (ts.isCallExpression(node)) {
           const target = node.expression;
           if (
             (ts.isIdentifier(target) && target.text === "fetch") ||
             (ts.isPropertyAccessExpression(target) && target.name.text === "fetch")
-          ) outsideClient.push(path);
+          )
+            outsideClient.push(path);
         }
         if (
-          ts.isNewExpression(node) && ts.isIdentifier(node.expression) &&
+          ts.isNewExpression(node) &&
+          ts.isIdentifier(node.expression) &&
           ["EventSource", "XMLHttpRequest"].includes(node.expression.text)
-        ) outsideClient.push(path);
+        )
+          outsideClient.push(path);
         ts.forEachChild(node, visit);
       }
       visit(source);
@@ -90,7 +99,10 @@ describe("reviewed Console write inventory", () => {
               ts.isPropertyAssignment(property) && property.name.getText(source) === "method",
           );
           if (method !== undefined) {
-            expect(ts.isStringLiteral(method.initializer), `${owner}: review non-literal request method`).toBe(true);
+            expect(
+              ts.isStringLiteral(method.initializer),
+              `${owner}: review non-literal request method`,
+            ).toBe(true);
             if (ts.isStringLiteral(method.initializer)) {
               const value = method.initializer.text;
               if (!["GET", "HEAD", "OPTIONS"].includes(value)) {
@@ -100,7 +112,9 @@ describe("reviewed Console write inventory", () => {
           }
         }
       }
-      ts.forEachChild(node, (child) => { visit(child, owner); });
+      ts.forEachChild(node, (child) => {
+        visit(child, owner);
+      });
     }
     visit(source);
     expect(writes).toEqual({
@@ -108,6 +122,7 @@ describe("reviewed Console write inventory", () => {
       testRoute: ["POST"],
       purgeCache: ["POST"],
       previewCachePurge: ["POST"],
+      inspectCache: ["POST"], // read-only JSON operation; preserves normal POST/CSRF policy
       executeCachePurge: ["POST"],
       rollback: ["POST"],
       discardPendingRestart: ["POST"],
@@ -478,16 +493,23 @@ describe("rollback", () => {
   it("sends the reviewed base_version in the body when provided", async () => {
     const fn = mockFetch(
       () =>
-        new Response(JSON.stringify({ ok: true, status: "rolled back", id: "s1" }), { status: 200 }),
+        new Response(JSON.stringify({ ok: true, status: "rolled back", id: "s1" }), {
+          status: 200,
+        }),
     );
     await rollback("s1", false, "v-reviewed");
-    expect(JSON.parse(lastInit(fn).body as string)).toEqual({ id: "s1", base_version: "v-reviewed" });
+    expect(JSON.parse(lastInit(fn).body as string)).toEqual({
+      id: "s1",
+      base_version: "v-reviewed",
+    });
   });
 
   it("omits base_version when none was reviewed", async () => {
     const fn = mockFetch(
       () =>
-        new Response(JSON.stringify({ ok: true, status: "rolled back", id: "s1" }), { status: 200 }),
+        new Response(JSON.stringify({ ok: true, status: "rolled back", id: "s1" }), {
+          status: 200,
+        }),
     );
     await rollback("s1");
     expect(JSON.parse(lastInit(fn).body as string)).toEqual({ id: "s1" });

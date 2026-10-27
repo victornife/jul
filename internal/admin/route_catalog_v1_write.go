@@ -211,6 +211,10 @@ var v1WriteCatalog = []RouteSpec{
 		}},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1DiscardPendingRestart) },
 	},
+	{Pattern: "/api/v1/cache/inspect", Methods: []string{http.MethodPost}, Permission: rbac.CacheInspect, Stability: StabilityExternal,
+		LimitClasses: map[string]limitKind{http.MethodPost: limitRead},
+		Operations:   map[string]ExternalOperation{http.MethodPost: {ID: "inspectCache", Summary: "Read bounded configured-host cache metadata and observed decisions without origin traffic.", RequestBody: "CacheInspectRequest", RequestContentTypes: []string{"application/json"}, MaxBodyBytes: v1BodyLimit, Response: "CacheInspectResponse", Errors: []string{"invalid_request", "storage_unavailable", "payload_too_large", "unsupported_media_type"}}},
+		Handler:      func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1CacheInspect) }},
 	{
 		Pattern:      "/api/v1/cache/purge/preview",
 		Methods:      []string{http.MethodPost},

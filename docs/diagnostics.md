@@ -262,3 +262,8 @@ CI enforces at least 85% statement coverage independently for:
 - `internal/supportbundle`.
 
 The same gate runs the three packages and `cmd/jul` under the race detector and the complete optional build-tag set.
+
+
+## Cache decision evidence
+
+The [cache inspector](cache.md#bounded-cache-inspection) reads bounded metadata and optional recent owner-recorded decisions. It is network-free with respect to application traffic, does not invoke handlers, and does not populate or refresh cache entries. No live probe is added. Missing/expired evidence is unavailable history, never proof of a clean result or a future cache HIT. Existing sharing/doctor live-network authority remains separate.

@@ -619,6 +619,9 @@ func (m *multiStringFlag) Set(val string) error {
 }
 
 func cmdRemoteCache(args []string) int {
+	if len(args) > 0 && args[0] == "inspect" {
+		return cmdRemoteCacheInspect(args[1:])
+	}
 	if len(args) > 0 && args[0] == "purge" {
 		args = args[1:]
 	}

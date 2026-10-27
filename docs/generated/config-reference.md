@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 357 configurable leaves.
+Coverage: 358 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -691,6 +691,18 @@ Token, when set, requires `Authorization: Bearer <token>`.
 | Subsystem | `admin` |
 | Why | the shared bearer token is resolved into the same immutable authentication snapshot the RBAC fields below install atomically at Publish; the prior token is rejected for every request after the swap |
 | Flags | secret |
+
+## `cache.decision_samples` {#cache-decision_samples}
+
+DecisionSamples opts into a memory-only, 256-record, 60-second cache decision buffer.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 
 ## `cache.default_ttl` {#cache-default_ttl}
 

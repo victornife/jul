@@ -73,6 +73,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	defer c.endInflightOriginOp(opID)
 
 	rec := c.newRecorder(pol)
+	c.observeRecorder(rec, r)
 	defer rec.releaseCapture()
 	vreq := conditionalRequest(r.Clone(vctx), stored)
 	next.ServeHTTP(rec, vreq)
@@ -91,7 +92,10 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	switch {
 	case rec.status == http.StatusNotModified:
-		refreshed, action := c.merge304(stored, rec.header, now)
+		refreshed, action, reason := c.merge304Decision(stored, rec.header, now)
+		if reason != "" {
+			c.recordDecision(r, reason)
+		}
 		if action == mergeDiscard {
 			c.deleteAtMostGen(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
@@ -114,9 +118,12 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// an explicit stale-if-error window, and never when the origin said
 		// must-revalidate or proxy-revalidate.
 		if sie := c.staleOnErrorWindow(stored); sie > 0 {
+			c.recordDecision(r, "stale_if_error")
 			refreshed := stored.Clone()
 			refreshed.StaleUntil = now.Add(sie)
+			markStaleIfError(refreshed)
 			if !c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
+				c.recordDecision(r, "stale_if_error_extended")
 				c.finishValidation(call, refreshed, outcomeOriginError)
 				if c.serve(w, r, refreshed, stateStale, now) {
 					return
@@ -142,7 +149,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	default:
 		e := c.buildEntryFromCapture(vreq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if e == nil || !e.matchesVary(r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
+		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
