@@ -51,16 +51,16 @@ func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
 
 func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.Cache, after.Cache
+	if b.DecisionSamples != a.DecisionSamples {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: "Change bounded cache decision sampling"}, "cache decision_samples")
+	}
+	d.cover("cache.decision_samples")
 	if b.Enabled != a.Enabled {
 		action := "Enable"
 		if !a.Enabled {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " the response cache"}, "cache")
-		if b.DecisionSamples != a.DecisionSamples {
-			d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: "Change bounded cache decision sampling"}, "cache decision_samples")
-		}
-		d.cover("cache.decision_samples")
 		d.cover("cache.enabled")
 		d.cover("cache.memory_max_size")
 		d.cover("cache.disk_path")

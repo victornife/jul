@@ -1,0 +1,18 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: INTEL(R) XEON(R) PLATINUM 8573C
+BenchmarkInspectionVariants/256resources_1variants-2         	     300	   1828247 ns/op	  963816 B/op	   10522 allocs/op
+BenchmarkInspectionVariants/256resources_1variants-2         	     312	   1833220 ns/op	  963798 B/op	   10522 allocs/op
+BenchmarkInspectionVariants/256resources_1variants-2         	     336	   2133359 ns/op	  963809 B/op	   10522 allocs/op
+BenchmarkInspectionVariants/256resources_64variants-2        	      18	  30494961 ns/op	20767920 B/op	  135961 allocs/op
+BenchmarkInspectionVariants/256resources_64variants-2        	      15	  35420803 ns/op	20767890 B/op	  135961 allocs/op
+BenchmarkInspectionVariants/256resources_64variants-2        	      18	  30945296 ns/op	20768024 B/op	  135962 allocs/op
+BenchmarkCacheHitWithInspectionLoad/0-2                      	  342932	      1623 ns/op	    1192 B/op	      14 allocs/op
+BenchmarkCacheHitWithInspectionLoad/0-2                      	  324332	      1621 ns/op	    1192 B/op	      14 allocs/op
+BenchmarkCacheHitWithInspectionLoad/0-2                      	  400138	      1569 ns/op	    1192 B/op	      14 allocs/op
+BenchmarkCacheHitWithInspectionLoad/2-2                      	  272737	      2251 ns/op	    2093 B/op	      24 allocs/op
+BenchmarkCacheHitWithInspectionLoad/2-2                      	  249470	      2279 ns/op	    2105 B/op	      24 allocs/op
+BenchmarkCacheHitWithInspectionLoad/2-2                      	  267255	      2233 ns/op	    2121 B/op	      24 allocs/op
+PASS
+ok  	jul/internal/cache	14.135s

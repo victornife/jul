@@ -1,3 +1,5 @@
+> **Implementation checkpoint:** see [implementation and verification evidence](2026-10-27-622-implementation.md). The proposal/status rows below are preserved historical preparation, superseded by that checkpoint and the live PR checks.
+
 > **Decision update, 2026-10-27:** the maintainer approved the recommendations ("I approve everything"). The explicit `cache:inspect` grant, unchanged built-in grants and bounded implementation design are approved. The text below preserves the pre-implementation proposal and baseline; it is not a final verification record.
 
 # CACHE-OPS-02: source baseline, proposed contract and acceptance ledger

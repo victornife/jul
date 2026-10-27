@@ -1,0 +1,5 @@
+=== RUN   TestInspectionMaximumSampleRetentionBudget
+    inspection_bench_test.go:110: retained sample storage conservative bound=214048 bytes; capacity=267; record=184
+--- PASS: TestInspectionMaximumSampleRetentionBudget (0.02s)
+PASS
+ok  	jul/internal/cache	0.023s

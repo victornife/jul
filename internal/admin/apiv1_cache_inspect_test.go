@@ -307,6 +307,11 @@ func TestInspectionRoutePathIntersection(t *testing.T) {
 	if len(v.Inspection.Resources) != 1 || v.Inspection.Resources[0].Path != "/app/a" {
 		t.Fatal("route widened", rr.Body.String())
 	}
+	cfg.Servers[0].Locations[0].Cache = false
+	rr = postV1JSON(t, s, "/api/v1/cache/inspect", token, "", req)
+	if rr.Code != 200 || decodeInto[adminapi.CacheInspectResponse](t, rr).RouteCacheState != "disabled_retained_entries_may_exist" {
+		t.Fatal("disabled route policy not disclosed", rr.Code, rr.Body.String())
+	}
 	cfg.Servers[0].Locations[0].Match.Type = "regex"
 	rr = postV1JSON(t, s, "/api/v1/cache/inspect", token, "", req)
 	if rr.Code != 400 {

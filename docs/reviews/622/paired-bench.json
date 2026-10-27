@@ -1,0 +1,972 @@
+{
+  "base": "78b458b84d8b6015f64d86191b3bd7c157ffbb11",
+  "head": "a113a39e81a632abd1d0fa326b1f5f42438156ec",
+  "cpus": [
+    4,
+    5
+  ],
+  "GOMAXPROCS": 2,
+  "elapsed": 64.16505813598633,
+  "runs": [
+    {
+      "pair": 0,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1819.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 0,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2568.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 0,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1861.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 0,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2899.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 1,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1740.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 1,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2616.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 1,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1712.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 1,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2516.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 2,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1709.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 2,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2511.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 2,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1747.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 2,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2552.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 3,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1730.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 3,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2555.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 3,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1849.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 3,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2774.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 4,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1755.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 4,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2518.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 4,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1754.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 4,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2633.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 5,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1726.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 5,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2522.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 5,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1719.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 5,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2584.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 6,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1774.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 6,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2565.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 6,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1790.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 6,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2696.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 7,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1816.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 7,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2670.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 7,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1717.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 7,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2506.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 8,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1720.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 8,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2498.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 8,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1762.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 8,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2518.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 9,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1751.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 9,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2568.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 9,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1747.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 9,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2553.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 10,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1737.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 10,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2506.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 10,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1786.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 10,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2581.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 11,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1756.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 11,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2640.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 11,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1769.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 11,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2560.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 12,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1710.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 12,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2630.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 12,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1784.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 12,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2522.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 13,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1765.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 13,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2580.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 13,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1728.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 13,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2557.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 14,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1885.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 14,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2885.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 14,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 2392.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 14,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 8210.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 15,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 4656.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 15,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 3431.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 15,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1856.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 15,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2714.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 16,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1741.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 16,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2591.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 16,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1704.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 16,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2556.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 17,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1728.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 17,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2516.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 17,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1705.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 17,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2506.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 18,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1725.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 18,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2675.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 18,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1759.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 18,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2527.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 19,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1754.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 19,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2631.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 19,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1736.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 19,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2541.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 20,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1746.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 20,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2546.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 20,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1786.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 20,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2569.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 21,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1712.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 21,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2555.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 21,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1722.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 21,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2553.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 22,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1732.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 22,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2636.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 22,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1760.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 22,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2598.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 23,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1756.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 23,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2517.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 23,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1728.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 23,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2558.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 24,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1754.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 24,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2606.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 24,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1733.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 24,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2526.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 25,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1745.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 25,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2552.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 25,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1731.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 25,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 2558.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 26,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 1827.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 26,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 3789.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 26,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 5210.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 26,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 10215.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 27,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 8343.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 27,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 6461.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 27,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 5576.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 27,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 17590.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 28,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 8787.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 28,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 8087.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 28,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 3594.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 28,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 4911.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 29,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 4132.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 29,
+      "revision": "head",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 5118.0,
+      "bytes": 1504,
+      "allocs": 25
+    },
+    {
+      "pair": 29,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheHit",
+      "ns": 3629.0,
+      "bytes": 1256,
+      "allocs": 16
+    },
+    {
+      "pair": 29,
+      "revision": "base",
+      "benchmark": "BenchmarkCacheVaryHit",
+      "ns": 4057.0,
+      "bytes": 1504,
+      "allocs": 25
+    }
+  ]
+}
