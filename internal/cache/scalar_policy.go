@@ -4,6 +4,7 @@
 package cache
 
 import (
+	"jul/internal/cachemeta"
 	"time"
 
 	"jul/internal/config"
@@ -16,6 +17,7 @@ import (
 // Every cache decision loads exactly one snapshot, so it never mixes values
 // from two different configurations.
 type CachePolicy struct {
+	DecisionSamples      bool
 	DefaultTTL           time.Duration
 	StaleWhileRevalidate time.Duration
 	StaleIfError         time.Duration
@@ -92,6 +94,7 @@ func policyFromConfig(cfg config.CacheConfig) CachePolicy {
 		tagArr[i] = canonTags[i]
 	}
 	return CachePolicy{
+		DecisionSamples:      cfg.DecisionSamples,
 		DefaultTTL:           cfg.DefaultTTL.Std(),
 		StaleWhileRevalidate: cfg.StaleWhileRevalidate.Std(),
 		StaleIfError:         cfg.StaleIfError.Std(),
@@ -162,6 +165,7 @@ func (p *PreparedCacheUpdate) Commit() {
 	}
 	pol := p.policy
 	p.c.commitPolicyAndSyncTags(pol)
+	p.c.setDecisionSampling(pol.DecisionSamples)
 	p.c.mem.Resize(p.memMax)
 	if p.c.disk != nil {
 		if _, _, failed := p.c.disk.Resize(p.diskMax); failed > 0 {
@@ -188,12 +192,7 @@ func (c *Cache) DiskEvictionFailures() int64 {
 // TierStats is one tier's live occupancy: current bytes, the configured cap,
 // entry count, and cumulative LRU-capacity evictions since startup (not
 // explicit invalidation).
-type TierStats struct {
-	Bytes     int64
-	MaxBytes  int64
-	Entries   int
-	Evictions int64
-}
+type TierStats = cachemeta.TierStats
 
 // Stats returns a snapshot of every configured tier's live occupancy
 // (JUL-AUD-005): "cache is bounded" is otherwise an unfalsifiable claim

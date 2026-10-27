@@ -53,6 +53,8 @@ const (
 	AuditRead Permission = "audit:read"
 	// AuditExport allows exporting the durable audit sink.
 	AuditExport Permission = "audit:export"
+	// CacheInspect allows bounded read-only cache metadata and decision inspection.
+	CacheInspect Permission = "cache:inspect"
 	// CachePurge allows issuing cache purge operations.
 	CachePurge Permission = "cache:purge"
 	// ReloadTrigger allows manually triggering a configuration reload.
@@ -83,6 +85,7 @@ var catalog = []Permission{
 	ObservabilityRead,
 	AuditRead,
 	AuditExport,
+	CacheInspect,
 	CachePurge,
 	ReloadTrigger,
 	AdminManage,

@@ -103,6 +103,7 @@ func TestRouteTransportPolicyInventory(t *testing.T) {
 		"/api/v1/config/adopt-external/preview":   "tls_or_loopback",
 		"/api/v1/config/adopt-external":           "tls_or_loopback",
 		"/api/v1/config/pending-restart/discard":  "tls_or_loopback",
+		"/api/v1/cache/inspect":                   "tls_or_loopback",
 		"/api/v1/cache/purge/preview":             "tls_or_loopback",
 		"/api/v1/cache/purge":                     "tls_or_loopback",
 		"/api/v1/cache/purges/{operation_id}":     "tls_or_loopback",

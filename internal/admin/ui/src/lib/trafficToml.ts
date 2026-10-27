@@ -3,11 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import type {
-  CacheDraft,
-  CompressionDraft,
-  RateLimitDraft,
-} from "@/lib/trafficPatchBuilders.ts";
+import type { CacheDraft, CompressionDraft, RateLimitDraft } from "@/lib/trafficPatchBuilders.ts";
 
 export type { CacheDraft, CompressionDraft, RateLimitDraft } from "@/lib/trafficPatchBuilders.ts";
 
@@ -56,7 +52,12 @@ export function upsertTopLevelTable(raw: string, table: string, fragment: string
 
   const before = lines.slice(0, start).join("\n").trim();
   const after = lines.slice(end).join("\n").trim();
-  return [before, fragment, after].filter((part) => part.length > 0).join("\n\n").trim() + "\n";
+  return (
+    [before, fragment, after]
+      .filter((part) => part.length > 0)
+      .join("\n\n")
+      .trim() + "\n"
+  );
 }
 
 export function isValidCacheMaxRanges(draft: CacheDraft): boolean {
@@ -127,6 +128,8 @@ export function generateCacheToml(draft: CacheDraft): string {
     throw new Error("cache.max_ranges must be an integer between 0 and 16.");
   }
   const lines = ["[cache]", `enabled = ${String(draft.enabled)}`];
+  if (draft.decisionSamples !== undefined)
+    lines.push(`decision_samples = ${String(draft.decisionSamples)}`);
   if (draft.memoryMaxSize.trim() !== "") {
     lines.push(`memory_max_size = ${tomlString(draft.memoryMaxSize.trim())}`);
   }
@@ -164,7 +167,9 @@ export function generateCacheToml(draft: CacheDraft): string {
   const tagHeaders = (draft.tagHeaders ?? []).map((h) => h.trim()).filter((h) => h !== "");
   if (tagHeaders.length > 0) {
     if (!isValidCacheTagHeaders({ ...draft, tagHeaders })) {
-      throw new Error("cache.tag_headers must contain 1 to 8 unique non-reserved HTTP header token names.");
+      throw new Error(
+        "cache.tag_headers must contain 1 to 8 unique non-reserved HTTP header token names.",
+      );
     }
     lines.push(`tag_headers = [${tagHeaders.map(tomlString).join(", ")}]`);
     lines.push(`strip_tag_headers = ${String(draft.stripTagHeaders ?? true)}`);
@@ -177,7 +182,9 @@ export function compressionWarnings(draft: CompressionDraft): string[] {
   const types = draft.types.map((value) => value.toLowerCase());
   const alreadyCompressed = ["image/", "video/", "application/zip", "application/gzip"];
   return types.some((value) => alreadyCompressed.some((prefix) => value.startsWith(prefix)))
-    ? ["Compressing already-compressed assets (images, video, archives) wastes CPU for little gain."]
+    ? [
+        "Compressing already-compressed assets (images, video, archives) wastes CPU for little gain.",
+      ]
     : [];
 }
 
@@ -187,8 +194,13 @@ export function cacheWarnings(draft: CacheDraft): string[] {
   if (draft.diskPath.trim() === "" && draft.memoryMaxSize.trim() === "") {
     warnings.push("No memory cap or disk path is set; verify the effective cache defaults.");
   }
-  if (/^\d+\s*h/.test(draft.defaultTTL.trim()) || /^[1-9]\d{3,}\s*s/.test(draft.defaultTTL.trim())) {
-    warnings.push("A long default TTL can serve stale responses for dynamic data — verify per-route TTLs.");
+  if (
+    /^\d+\s*h/.test(draft.defaultTTL.trim()) ||
+    /^[1-9]\d{3,}\s*s/.test(draft.defaultTTL.trim())
+  ) {
+    warnings.push(
+      "A long default TTL can serve stale responses for dynamic data — verify per-route TTLs.",
+    );
   }
   return warnings;
 }
@@ -196,9 +208,12 @@ export function cacheWarnings(draft: CacheDraft): string[] {
 export function rateLimitWarnings(draft: RateLimitDraft): string[] {
   if (!draft.enabled) return [];
   const warnings: string[] = [];
-  if (draft.rate <= 0) warnings.push("A rate of 0 rejects every request once the burst is exhausted.");
+  if (draft.rate <= 0)
+    warnings.push("A rate of 0 rejects every request once the burst is exhausted.");
   if (draft.key.startsWith("header:")) {
-    warnings.push("Header-keyed limits are spoofable unless this server sits behind a trusted proxy.");
+    warnings.push(
+      "Header-keyed limits are spoofable unless this server sits behind a trusted proxy.",
+    );
   }
   return warnings;
 }
@@ -220,10 +235,14 @@ export interface LimitsDraft {
 export function generateLimitsToml(draft: LimitsDraft): string {
   const sections: string[] = [];
   const server: string[] = [];
-  if (draft.bodyLimit.trim()) server.push(`client_max_body_size = ${tomlString(draft.bodyLimit.trim())}`);
-  if (draft.readTimeout.trim()) server.push(`read_timeout = ${tomlString(draft.readTimeout.trim())}`);
-  if (draft.writeTimeout.trim()) server.push(`write_timeout = ${tomlString(draft.writeTimeout.trim())}`);
-  if (draft.idleTimeout.trim()) server.push(`idle_timeout = ${tomlString(draft.idleTimeout.trim())}`);
+  if (draft.bodyLimit.trim())
+    server.push(`client_max_body_size = ${tomlString(draft.bodyLimit.trim())}`);
+  if (draft.readTimeout.trim())
+    server.push(`read_timeout = ${tomlString(draft.readTimeout.trim())}`);
+  if (draft.writeTimeout.trim())
+    server.push(`write_timeout = ${tomlString(draft.writeTimeout.trim())}`);
+  if (draft.idleTimeout.trim())
+    server.push(`idle_timeout = ${tomlString(draft.idleTimeout.trim())}`);
   if (server.length > 0) sections.push(["# Under the [[servers]] block:", ...server].join("\n"));
 
   const proxy: string[] = [];
@@ -242,9 +261,12 @@ export function generateLimitsToml(draft: LimitsDraft): string {
 
   const retry: string[] = [];
   if (draft.maxFails > 0) retry.push(`max_fails = ${String(Math.floor(draft.maxFails))}`);
-  if (draft.failTimeout.trim()) retry.push(`fail_timeout = ${tomlString(draft.failTimeout.trim())}`);
+  if (draft.failTimeout.trim())
+    retry.push(`fail_timeout = ${tomlString(draft.failTimeout.trim())}`);
   if (retry.length > 0) {
-    sections.push(["# Under the [[upstreams]] block (passive retry / fail-over):", ...retry].join("\n"));
+    sections.push(
+      ["# Under the [[upstreams]] block (passive retry / fail-over):", ...retry].join("\n"),
+    );
   }
   return sections.length === 0
     ? "# No limits set — all values left at their defaults."
@@ -254,7 +276,9 @@ export function generateLimitsToml(draft: LimitsDraft): string {
 export function limitsWarnings(draft: LimitsDraft): string[] {
   const warnings: string[] = [];
   if (draft.readTimeout.trim() === "0" || draft.writeTimeout.trim() === "0") {
-    warnings.push("A timeout of 0 disables the deadline entirely, which can leak slow-loris connections.");
+    warnings.push(
+      "A timeout of 0 disables the deadline entirely, which can leak slow-loris connections.",
+    );
   }
   if (/^\d+\s*g/i.test(draft.bodyLimit.trim())) {
     warnings.push("A multi-gigabyte body limit can let a single upload exhaust memory or disk.");
@@ -263,7 +287,9 @@ export function limitsWarnings(draft: LimitsDraft): string[] {
     warnings.push("An upstream timeout of 0 lets a slow backend hold a connection indefinitely.");
   }
   if (draft.maxFails > 10) {
-    warnings.push("A high max_fails keeps sending traffic to a failing backend before retiring it.");
+    warnings.push(
+      "A high max_fails keeps sending traffic to a failing backend before retiring it.",
+    );
   }
   return warnings;
 }

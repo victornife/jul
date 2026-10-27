@@ -30,8 +30,10 @@ import (
 // process and every reload wraps the new handler tree with it, so cached data
 // survives an ordinary configuration reload.
 type Cache struct {
-	mem  *memStore
-	disk *diskStore
+	inspectKey [32]byte
+	samples    atomic.Pointer[decisionBuffer]
+	mem        *memStore
+	disk       *diskStore
 
 	// policy is the atomically-swappable scalar snapshot (#92): default TTL,
 	// stale-while-revalidate, stale-if-error, and the per-entry capture limit.
@@ -165,6 +167,10 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		keyGen: make(map[string]*keyGenState),
 	}
 	pol := policyFromConfig(cfg)
+	if err := c.initInspection(); err != nil {
+		return nil, err
+	}
+	c.setDecisionSampling(pol.DecisionSamples)
 	c.policy.Store(&pol)
 	c.mem = newMemStore(cfg.MemoryMaxSize.Bytes(), nil)
 	c.mem.pinVictims = func(victims []*memItem) {
@@ -173,6 +179,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		c.genMu.Unlock()
 	}
 	c.mem.onEvictItem = func(it *memItem) {
+		c.recordKeyDecision(it.key, "memory_eviction")
 		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) && !c.isPublicationFenced(it.gen, it.key, it.entry, nil) {
 			c.disk.setWithGenFull(it.key, it.entry, it.gen, it.gen, true, nil)
 		}
@@ -185,6 +192,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		if err != nil {
 			return nil, err
 		}
+		d.onEviction = func(k string) { c.recordKeyDecision(k, "disk_eviction") }
 		d.onSkip = c.captureSkipped
 		d.checkGen = c.isGenCurrent
 		d.canCommit = c.canCommitToDisk
@@ -288,6 +296,7 @@ type keyGenState struct {
 	memBytes               int64
 	diskBytes              int64
 	createdAt              time.Time
+	evidence               *publicationEvidence
 	expiresAt              time.Time
 	staleUntil             time.Time
 	varyFields             []string
@@ -1005,6 +1014,7 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 		// hijack. Only the cache is bypassed — authentication, rate limiting and
 		// the WAF wrap outside this handler and still run.
 		if isUpgradeRequest(r) {
+			c.recordDecision(r, "upgrade_bypass")
 			c.bypass(w, r, next, span)
 			return
 		}
@@ -1018,6 +1028,7 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 		// coordinates complete-object fills on eligible cold range misses.
 		if isRangeRequest(r) {
 			if !pol.RangeEnabled {
+				c.recordDecision(r, "range_bypass")
 				c.bypass(w, r, next, span)
 				return
 			}
@@ -1027,6 +1038,7 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 
 		reqPolicy := parseRequestPolicy(r)
 		if reqPolicy.NoStore {
+			c.recordDecision(r, "request_no_store")
 			// Request no-store opts this exchange out of the cache. It is not a
 			// purge: an entry another client stored stays exactly as it was.
 			c.bypass(w, r, next, span)
@@ -1070,6 +1082,7 @@ func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, ne
 			span.End()
 			return effKey, true
 		case reuseStale:
+			c.recordDecision(r, "stale_while_revalidate")
 			if !c.serve(w, r, e, stateStale, now) {
 				continue
 			}
@@ -1080,11 +1093,15 @@ func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, ne
 			c.startRevalidate(effKey, r, next, e)
 			return effKey, true
 		case reuseValidate:
+			c.recordDecision(r, "revalidation_required")
 			span.SetString("cache.status", "VALIDATE")
 			span.End()
 			c.validateAndServe(w, r, next, e, effKey, now)
 			return effKey, true
 		default:
+			if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
+				c.recordDecision(r, "auth_reuse_restricted")
+			}
 			return effKey, false
 		}
 	}
@@ -1217,6 +1234,9 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 		tagHeaders:      pol.TagHeaderSlice(),
 		stripTagHeaders: pol.StripTagHeaders,
 	}
+	cw.acct.onFailure = func() { c.recordDecision(r, "disk_capture_failed") }
+	cw.onDecision = func(reason string) { c.recordDecision(r, reason) }
+	cw.acct.onSkip = func(reason string) { c.captureSkipped(reason); c.recordDecision(r, "capture_"+reason) }
 	cw.headerCheck = func(code int, h http.Header) bool {
 		if pol.TagHeaderCount > 0 {
 			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
@@ -1224,7 +1244,11 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 				return false
 			}
 		}
-		return c.headerStorable(r, code, h, c.clock(), pol)
+		reason := c.storageReason(r, code, h, c.clock(), pol)
+		if reason != "" {
+			c.recordDecision(r, reason)
+		}
+		return reason == ""
 	}
 	defer cw.releaseCapture()
 	w.Header().Set("X-Cache", stateMiss)
@@ -1244,10 +1268,12 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	}
 
 	if tagSkipReason != "" {
+		c.recordDecision(r, "tag_capture_rejected")
 		c.tagSkipped(tagSkipReason)
 		return false
 	}
 	if !cw.storable() || cw.writeErr != nil || r.Context().Err() != nil {
+		c.recordDecision(r, "capture_not_stored")
 		return false
 	}
 	// cw.snapshot, not w.Header(): layers outside the cache (compression in
@@ -1263,7 +1289,13 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 		h = w.Header()
 	}
 	if e := c.buildEntryFromCapture(r, cw.status, h, cw.buf.Bytes(), cw.bodyLen, cw.diskStream != nil, now, pol); e != nil {
-		return c.storeCapturedWithStartGen(key(r), r, e, cw.diskStream, startGen, true)
+		stored := c.storeCapturedWithStartGen(key(r), r, e, cw.diskStream, startGen, true)
+		if stored {
+			c.recordDecision(r, "response_stored")
+		} else {
+			c.recordDecision(r, "publication_failed_or_fenced")
+		}
+		return stored
 	}
 	return false
 }
@@ -1361,6 +1393,8 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	pol := c.Policy()
 	rec := c.newRecorder(pol)
+	rec.onDecision = func(reason string) { c.recordDecision(req, reason) }
+	rec.acct.onFailure = func() { c.recordDecision(req, "disk_capture_failed") }
 	defer rec.releaseCapture()
 	next.ServeHTTP(rec, req)
 	now := c.clock()
@@ -1380,7 +1414,10 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	case rec.status == http.StatusNotModified:
 		// Upstream confirms freshness: republish a merged clone under the same
 		// (variant) key it already lives at.
-		refreshed, action := c.merge304(stale, rec.header, now)
+		refreshed, action, reason := c.merge304Decision(stale, rec.header, now)
+		if reason != "" {
+			c.recordDecision(req, reason)
+		}
 		switch action {
 		case mergeReplace:
 			if c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
@@ -1451,19 +1488,34 @@ func (c *Cache) buildEntry(r *http.Request, status int, h http.Header, body []by
 }
 
 func (c *Cache) headerStorable(r *http.Request, status int, h http.Header, now time.Time, pol CachePolicy) bool {
+	return c.storageReason(r, status, h, now, pol) == ""
+}
+
+// storageReason is the capture admission owner; callers record its actual
+// rejection without reconstructing policy from a later missing cache entry.
+func (c *Cache) storageReason(r *http.Request, status int, h http.Header, now time.Time, pol CachePolicy) string {
 	p := parseResponsePolicy(h)
 	if _, _, ok := c.freshnessWithPolicy(status, h, p, now, pol); !ok {
-		return false
+		switch {
+		case p.NoStore:
+			return "response_no_store"
+		case p.Private:
+			return "response_private"
+		case hasHeaderField(h, "Set-Cookie"):
+			return "response_set_cookie"
+		default:
+			return "response_policy_rejected"
+		}
 	}
 	if hasHeaderField(r.Header, "Authorization") && !p.sharedAuthStorable() {
-		return false
+		return "auth_storage_restricted"
 	}
 	for _, name := range varyFields(h) {
 		if name == "*" {
-			return false
+			return "vary_star"
 		}
 	}
-	return true
+	return ""
 }
 
 func (c *Cache) buildEntryWithPolicy(r *http.Request, status int, h http.Header, body []byte, now time.Time, pol CachePolicy) *Entry {
@@ -1488,12 +1540,14 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 	p := parseResponsePolicy(h)
 	ttl, swr, ok := c.freshnessWithPolicy(status, h, p, now, pol)
 	if !ok {
+		c.recordDecision(r, c.storageReason(r, status, h, now, pol))
 		return nil
 	}
 	// A response produced FOR an authenticated request enters the shared cache
 	// only with the origin's explicit permission. See sharedAuthStorable for why
 	// this is stricter than the §3.5 reuse rule.
 	if hasHeaderField(r.Header, "Authorization") && !p.sharedAuthStorable() {
+		c.recordDecision(r, "auth_storage_restricted")
 		return nil
 	}
 
@@ -1541,6 +1595,7 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 	if vary := varyFields(h); len(vary) > 0 {
 		for _, name := range vary {
 			if name == "*" {
+				c.recordDecision(r, "vary_star")
 				// Vary: * means the response is not reusable for any other
 				// request; do not store it.
 				return nil
@@ -1552,6 +1607,7 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 			e.VaryValues[name] = varyRequestValue(r.Header, name)
 		}
 	}
+	e.Evidence = c.entryEvidence(status, h, p, pol, now, ttl, swr)
 	return e
 }
 
@@ -1584,6 +1640,7 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 		var err error
 		bodyReader, err = e.OpenBody()
 		if err != nil {
+			c.recordDecision(r, "disk_read_failed")
 			return false
 		}
 		defer func() { _ = bodyReader.Close() }()
@@ -1633,6 +1690,14 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, e *Entry, state st
 	}
 	h.Set("Age", strconv.Itoa(age))
 	h.Set("X-Cache", state)
+	switch state {
+	case stateHit:
+		c.recordDecision(r, "fresh_hit")
+	case stateRevalidated:
+		c.recordDecision(r, "validated_reuse")
+	case stateStale:
+		c.recordDecision(r, "stale_reuse")
+	}
 
 	if !modified {
 		w.WriteHeader(http.StatusNotModified)
@@ -1660,20 +1725,25 @@ func (c *Cache) freshness(status int, h http.Header, p responsePolicy, now time.
 }
 
 func (c *Cache) freshnessWithPolicy(status int, h http.Header, p responsePolicy, now time.Time, pol CachePolicy) (ttl, swr time.Duration, ok bool) {
+	ttl, swr, _, ok = c.freshnessDecision(status, h, p, now, pol)
+	return ttl, swr, ok
+}
+
+func (c *Cache) freshnessDecision(status int, h http.Header, p responsePolicy, now time.Time, pol CachePolicy) (ttl, swr time.Duration, source string, ok bool) {
 	if !cacheableStatus[status] {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 	if len(h.Values("ETag")) > 1 || len(h.Values("Last-Modified")) > 1 {
 		// Validators are singleton fields. Selecting the first of conflicting
 		// values could validate a different representation on a later 304.
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 	if p.NoStore {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 	if p.Private {
 		// Jul is a shared cache; a private response belongs to one user agent.
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 	if hasHeaderField(h, "Set-Cookie") {
 		// Conservative shared-cache rule: a Set-Cookie is per-client state, and
@@ -1681,23 +1751,26 @@ func (c *Cache) freshnessWithPolicy(status int, h http.Header, p responsePolicy,
 		// that genuinely want a cookie-bearing response shared must say so with
 		// an explicit directive, which Jul does not currently honor for this
 		// case (recorded as a limitation in docs/cache.md).
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 
+	source = "gateway_fallback"
 	ttl = pol.DefaultTTL
 	switch {
 	case p.HasSMaxAge:
 		ttl = p.SMaxAge
+		source = "origin_s_maxage"
 	case p.HasMaxAge:
 		ttl = p.MaxAge
+		source = "origin_max_age"
 	case !p.Targeted:
 		if expires := h.Values("Expires"); len(expires) > 0 {
 			if len(expires) != 1 {
-				return 0, 0, false
+				return 0, 0, "", false
 			}
 			expiry, valid := parseCacheDate(expires[0], now)
 			if !valid {
-				return 0, 0, false
+				return 0, 0, "", false
 			}
 			// Expires is absolute, so it is measured against the origin's own
 			// Date when there is one; using Jul's clock instead would fold
@@ -1710,10 +1783,11 @@ func (c *Cache) freshnessWithPolicy(status int, h http.Header, p responsePolicy,
 				}
 			}
 			ttl = expiry.Sub(base)
+			source = "origin_expires"
 		}
 	}
 	if ttl <= 0 && !p.NoCache {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 
 	if p.NoCache {
@@ -1723,9 +1797,10 @@ func (c *Cache) freshnessWithPolicy(status int, h http.Header, p responsePolicy,
 		// retained and aged like anything else.
 		if ttl <= 0 {
 			ttl = pol.DefaultTTL
+			source = "gateway_fallback_no_cache"
 		}
 		if ttl <= 0 {
-			return 0, 0, false
+			return 0, 0, "", false
 		}
 	}
 
@@ -1738,7 +1813,10 @@ func (c *Cache) freshnessWithPolicy(status int, h http.Header, p responsePolicy,
 		// served without contacting the origin, so it has no stale window at all.
 		swr = 0
 	}
-	return ttl, swr, true
+	if p.Targeted {
+		source = "targeted_" + source
+	}
+	return ttl, swr, source, true
 }
 
 // staleOnErrorWindow is how long an entry may keep being served after the origin

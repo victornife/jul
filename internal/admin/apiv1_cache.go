@@ -1091,8 +1091,16 @@ func emptyOrDash(v string) string {
 }
 
 func (s *Server) verifyLivePurgePermission(w http.ResponseWriter, r *http.Request) bool {
+	return s.verifyLiveCachePermission(w, r, rbac.CachePurge)
+}
+
+func (s *Server) verifyLiveCachePermission(w http.ResponseWriter, r *http.Request, required rbac.Permission) bool {
 	snap := s.currentAuth()
 	now := time.Now()
+	if required == rbac.CacheInspect && snap.mode != authModeRBAC && snap.cfg.Token == "" {
+		s.writeUnauthenticated(w, r, "Cache inspection requires an admin token or RBAC authentication.")
+		return false
+	}
 	switch snap.mode {
 	case authModeBlocked:
 		writeRBACUnavailable(w, r)
@@ -1113,17 +1121,17 @@ func (s *Server) verifyLivePurgePermission(w http.ResponseWriter, r *http.Reques
 				s.writeUnauthenticated(w, r, "")
 				return false
 			}
-			if !snap.policy.Authorize(authID, rbac.CachePurge) {
-				s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(rbac.CachePurge))
-				writeForbidden(w, r, rbac.CachePurge, authID)
+			if !snap.policy.Authorize(authID, required) {
+				s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(required))
+				writeForbidden(w, r, required, authID)
 				return false
 			}
 			return true
 		}
-		if id, ok := rbacIdentityFromRequest(r); ok && !id.Legacy {
-			if !snap.policy.Authorize(id, rbac.CachePurge) {
-				s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(rbac.CachePurge))
-				writeForbidden(w, r, rbac.CachePurge, id)
+		if id, ok := rbacIdentityFromRequest(r); ok && !id.Legacy && required != rbac.CacheInspect {
+			if !snap.policy.Authorize(id, required) {
+				s.recordAudit(r, "authz.deny", r.URL.Path, "denied", string(required))
+				writeForbidden(w, r, required, id)
 				return false
 			}
 			return true

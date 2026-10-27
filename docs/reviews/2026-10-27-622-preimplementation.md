@@ -1,3 +1,5 @@
+> **Decision update, 2026-10-27:** the maintainer approved the recommendations ("I approve everything"). The explicit `cache:inspect` grant, unchanged built-in grants and bounded implementation design are approved. The text below preserves the pre-implementation proposal and baseline; it is not a final verification record.
+
 # CACHE-OPS-02: source baseline, proposed contract and acceptance ledger
 
 Status: **pre-implementation; permission decision pending**. References #622,

@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 424,
-    "schema_leaves": 357,
+    "schema_paths": 425,
+    "schema_leaves": 358,
     "resources": 9
   },
   "capability_build_tags": {
@@ -767,6 +767,18 @@
       "secret": true,
       "description": "Token, when set, requires `Authorization: Bearer <token>`",
       "anchor": "admin-token"
+    },
+    "cache.decision_samples": {
+      "kind": "scalar",
+      "scalar": "bool",
+      "go_type": "bool",
+      "optional": true,
+      "dynamic": false,
+      "subsystem": "cache",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)",
+      "description": "DecisionSamples opts into a memory-only, 256-record, 60-second cache decision buffer",
+      "anchor": "cache-decision_samples"
     },
     "cache.default_ttl": {
       "kind": "scalar",

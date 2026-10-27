@@ -701,3 +701,12 @@ existing meaning. Provision the key before starting or upgrading, including
 read-only and container deployments. See [effective versions, migration and
 recovery](effective-versions.md) for comparison rules, legacy pending-state
 handling, key backup/loss and the binary-downgrade boundary.
+
+
+## Cache inspection
+
+`POST /api/v1/cache/inspect` is a read-only, authenticated bounded metadata operation under `cache:inspect`. See [bounds, cursor authorization, errors and examples](cache.md#bounded-cache-inspection). Its request/response authority is the generated OpenAPI; it performs no origin request.
+
+Inspection `page_size` is an upper bound: encoded responses are also limited to
+2 MiB. Wide representation metadata can shorten a page. Follow `next_cursor`
+until absent, even when fewer than the requested resources were returned.

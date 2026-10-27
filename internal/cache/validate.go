@@ -73,6 +73,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	defer c.endInflightOriginOp(opID)
 
 	rec := c.newRecorder(pol)
+	rec.onDecision = func(reason string) { c.recordDecision(r, reason) }
+	rec.acct.onFailure = func() { c.recordDecision(r, "disk_capture_failed") }
 	defer rec.releaseCapture()
 	vreq := conditionalRequest(r.Clone(vctx), stored)
 	next.ServeHTTP(rec, vreq)
@@ -91,7 +93,10 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	switch {
 	case rec.status == http.StatusNotModified:
-		refreshed, action := c.merge304(stored, rec.header, now)
+		refreshed, action, reason := c.merge304Decision(stored, rec.header, now)
+		if reason != "" {
+			c.recordDecision(r, reason)
+		}
 		if action == mergeDiscard {
 			c.deleteAtMostGen(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
@@ -114,6 +119,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// an explicit stale-if-error window, and never when the origin said
 		// must-revalidate or proxy-revalidate.
 		if sie := c.staleOnErrorWindow(stored); sie > 0 {
+			c.recordDecision(r, "stale_if_error")
 			refreshed := stored.Clone()
 			refreshed.StaleUntil = now.Add(sie)
 			if !c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {

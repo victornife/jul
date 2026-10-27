@@ -742,3 +742,87 @@ test.describe("Configuration comparison confidentiality", () => {
     ).toBeDisabled();
   });
 });
+
+test("bounded cache inspection is keyboard-operable, read-only and explicit about unavailable evidence (#622)", async ({
+  page,
+}) => {
+  await setupApiMocks(page);
+  await page.route("/api/admin/me", (route) =>
+    json(route, {
+      principal: "cache-reader",
+      role: "inspect",
+      legacy: false,
+      permissions: ["status:read", "config:read", "cache:inspect"],
+    }),
+  );
+  let purges = 0;
+  let reads = 0;
+  await page.route("/api/v1/cache/purge", (route) => {
+    purges++;
+    return json(route, {}, 403);
+  });
+  await page.route("/api/v1/cache/inspect", (route) => {
+    reads++;
+    return json(route, {
+      api_version: "v1",
+      expires_at: new Date(Date.now() + 60000).toISOString(),
+      consistency: "bounded_metadata_capture_not_global_snapshot",
+      concurrent_change: "unknown_after_capture",
+      policy_source: "global inherited",
+      route_cache_state: "host scope",
+      inspection: {
+        state: "empty",
+        captured_at: new Date().toISOString(),
+        count_accuracy: "exact",
+        truncated: false,
+        matched_resources: 0,
+        matched_representations: 0,
+        memory_entries: 0,
+        disk_entries: 0,
+        matched_body_bytes: 0,
+        resources: [],
+        decisions: [],
+        evidence_state: "disabled",
+        warnings: [],
+        memory_occupancy: { bytes: 0, max_bytes: 64000000, entries: 0, evictions: 0 },
+        disk_occupancy: null,
+        policy: {
+          default_ttl_seconds: 60,
+          swr_seconds: 10,
+          sie_seconds: 5,
+          max_entry_bytes: 64000000,
+          range_enabled: false,
+          fill_lock_enabled: false,
+          tag_ingestion_enabled: false,
+        },
+      },
+    });
+  });
+  await page.goto("/traffic");
+  await page
+    .getByText("Cache", { exact: true })
+    .first()
+    .locator("..")
+    .getByRole("button", { name: "Edit" })
+    .click();
+  const inspector = page.getByRole("region", { name: "Cache inspector" });
+  await expect(inspector).toBeVisible();
+  const host = inspector.getByLabel("Configured hostname");
+  await host.focus();
+  await expect(host).toBeFocused();
+  await host.fill("portal.example.com");
+  const inspect = inspector.getByRole("button", { name: "Inspect / refresh" });
+  await inspect.focus();
+  await page.keyboard.press("Enter");
+  await expect(inspector.getByText(/No resource metadata/)).toBeVisible();
+  await expect(inspector.getByText(/Current global fallback/)).toBeVisible();
+  await expect(inspector.getByText(/Memory occupancy/)).toBeVisible();
+  await expect(inspector.getByText(/live entries may have changed/)).toBeVisible();
+  expect(reads).toBe(1);
+  expect(purges).toBe(0);
+  await expect(
+    page
+      .getByRole("dialog", { name: "Edit cache" })
+      .getByRole("button", { name: "Preview invalidation scope" }),
+  ).toBeDisabled();
+});

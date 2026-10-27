@@ -1330,3 +1330,8 @@ existing meaning. Provision the key before starting or upgrading, including
 read-only and container deployments. See [effective versions, migration and
 recovery](effective-versions.md) for comparison rules, legacy pending-state
 handling, key backup/loss and the binary-downgrade boundary.
+
+
+## Cache resource inspector
+
+Traffic Controls → Cache provides a lazy-loaded inspector with configured-host and exact/prefix/glob/tag filters, paginated metadata, policy provenance and recent observed stages. Permission, empty, disabled, partial, truncated, legacy, stale-evidence and failure states remain explicit. Existing purge controls keep their separate grants and confirmations. See [inspection](cache.md#bounded-cache-inspection).

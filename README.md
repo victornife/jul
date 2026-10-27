@@ -649,3 +649,5 @@ HTTP active health probes support bounded secret-bearing headers and virtual-hos
 routing; gRPC probes can override authority without changing backend TLS trust.
 See [health configuration](docs/health.md#probe-headers-and-routing-identity).
 For expiring media/download links, see the [signed-URL WASM recipe](examples/plugins/signed-url/README.md).
+
+Unreleased cache operations: [bounded metadata inspection and observed decision evidence](docs/cache.md#bounded-cache-inspection) complement the existing preview-confirmed invalidation workflow.

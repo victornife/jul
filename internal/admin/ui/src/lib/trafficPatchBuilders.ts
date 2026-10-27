@@ -29,6 +29,7 @@ export interface CompressionDraft {
 }
 
 export interface CacheDraft {
+  decisionSamples?: boolean;
   enabled: boolean;
   memoryMaxSize: string;
   diskPath: string;
@@ -88,13 +89,15 @@ export function buildGlobalPatch(
   current: GlobalSettingsDraft,
 ): ConfigPatch | null {
   const global: Extract<ConfigPatch, { op: "global_set" }>["global"] = {};
-  if (current.workerThreads !== initial.workerThreads) global.worker_threads = current.workerThreads;
+  if (current.workerThreads !== initial.workerThreads)
+    global.worker_threads = current.workerThreads;
   if (current.logLevel !== initial.logLevel) global.log_level = current.logLevel;
   if (current.logFormat !== initial.logFormat) global.log_format = current.logFormat;
   if (current.shutdownTimeout !== initial.shutdownTimeout) {
     global.shutdown_timeout = current.shutdownTimeout;
   }
-  if (current.reloadTimeout !== initial.reloadTimeout) global.reload_timeout = current.reloadTimeout;
+  if (current.reloadTimeout !== initial.reloadTimeout)
+    global.reload_timeout = current.reloadTimeout;
   if (current.redactMinSecretLength !== initial.redactMinSecretLength) {
     global.redact_min_secret_length = current.redactMinSecretLength;
   }
@@ -159,6 +162,7 @@ export function seedCache(current: TrafficControls): CacheDraft {
   const rawLockTimeout = cache?.lock_timeout ?? "";
   return {
     enabled: cache?.enabled ?? false,
+    ...(cache?.decision_samples !== undefined ? { decisionSamples: cache.decision_samples } : {}),
     memoryMaxSize: cache?.memory_max_size ?? cache?.memory_max ?? "",
     diskPath: cache?.disk_path ?? "",
     diskMaxSize: cache?.disk_max_size ?? "",
@@ -170,9 +174,7 @@ export function seedCache(current: TrafficControls): CacheDraft {
     lockTimeout: rawLockTimeout === "0s" ? "" : rawLockTimeout,
     rangeEnabled: cache?.range_enabled ?? false,
     maxRanges: cache?.max_ranges ?? 0,
-    ...(cache?.tag_headers !== undefined
-      ? { tagHeaders: [...cache.tag_headers] }
-      : {}),
+    ...(cache?.tag_headers !== undefined ? { tagHeaders: [...cache.tag_headers] } : {}),
     ...(cache?.strip_tag_headers !== undefined || (cache?.tag_headers?.length ?? 0) > 0
       ? { stripTagHeaders: cache?.strip_tag_headers ?? true }
       : {}),

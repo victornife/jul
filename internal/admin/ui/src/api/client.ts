@@ -202,7 +202,11 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
       };
       if (typeof body.error === "string") {
         if (body.error !== "") msg = body.error;
-      } else if (body.error !== undefined && typeof body.error.message === "string" && body.error.message !== "") {
+      } else if (
+        body.error !== undefined &&
+        typeof body.error.message === "string" &&
+        body.error.message !== ""
+      ) {
         msg = body.error.code ? `${body.error.code}: ${body.error.message}` : body.error.message;
       }
     } catch {
@@ -618,7 +622,7 @@ export const OverviewSchema = z.object({
       external: z.boolean().optional(),
       staged_at: z.string().optional(),
       staged_version: z.string().optional(),
-  version_comparison: z.string().optional(),
+      version_comparison: z.string().optional(),
       serving_version: z.string().optional(),
       subsystems: z.array(z.string()).optional(),
       discard_available: z.boolean(),
@@ -1123,6 +1127,7 @@ export const GlobalRateLimitProjectionSchema = z.object({
 export type GlobalRateLimitProjection = z.infer<typeof GlobalRateLimitProjectionSchema>;
 
 export const CacheProjectionSchema = z.object({
+  decision_samples: z.boolean().optional(),
   enabled: z.boolean(),
   memory_max_size: z.string().default(""),
   // One-release compatibility alias for older console consumers.
@@ -1391,7 +1396,19 @@ export const RouteTestResultSchema = z.object({
   base_version: z.string().optional(),
   selector_version: z.string().optional(),
   match_ordinal: z.number().optional(),
-  candidates: z.array(z.object({ match_type: z.string(), match: z.string(), tier: z.number(), match_ordinal: z.number(), selector_version: z.string().optional(), selected: z.boolean(), rejection: z.string().optional() })).optional(),
+  candidates: z
+    .array(
+      z.object({
+        match_type: z.string(),
+        match: z.string(),
+        tier: z.number(),
+        match_ordinal: z.number(),
+        selector_version: z.string().optional(),
+        selected: z.boolean(),
+        rejection: z.string().optional(),
+      }),
+    )
+    .optional(),
   matched: z.boolean(),
   listen: z.string().optional(),
   server_names: z.array(z.string()).optional(),
@@ -1522,14 +1539,7 @@ export async function purgeCache(key?: string): Promise<void> {
 
 // ── Scoped cache invalidation (/api/v1/cache/purge*, #621) ───────────────────
 
-export type CacheSelectorKind =
-  | "exact_url"
-  | "prefix"
-  | "glob"
-  | "tag"
-  | "host"
-  | "key"
-  | "all";
+export type CacheSelectorKind = "exact_url" | "prefix" | "glob" | "tag" | "host" | "key" | "all";
 
 export interface CacheSelector {
   kind: CacheSelectorKind;
@@ -1678,12 +1688,8 @@ export async function executeCachePurge(
   };
 }
 
-export async function fetchCachePurgeOperation(
-  operationId: string,
-): Promise<CachePurgeResponse> {
-  const data = await api<CachePurgeResponse>(
-    `/v1/cache/purges/${encodeURIComponent(operationId)}`,
-  );
+export async function fetchCachePurgeOperation(operationId: string): Promise<CachePurgeResponse> {
+  const data = await api<CachePurgeResponse>(`/v1/cache/purges/${encodeURIComponent(operationId)}`);
   return {
     ...data,
     warnings: Array.isArray(data.warnings) ? data.warnings : [],
@@ -2236,7 +2242,11 @@ export type ConfigPatch =
   | ({ op: "location_response_headers_clear" } & RouteTarget)
   | ({ op: "location_cors_set"; cors_set: CORSPatch } & RouteTarget)
   | ({ op: "location_cors_clear" } & RouteTarget)
-  | ({ op: "location_set_sharing"; sharing?: LocationSharingPatch; route_id?: string } & Partial<RouteTarget>)
+  | ({
+      op: "location_set_sharing";
+      sharing?: LocationSharingPatch;
+      route_id?: string;
+    } & Partial<RouteTarget>)
   | ({ op: "location_clear_sharing"; route_id?: string } & Partial<RouteTarget>)
   | ({
       op: "location_set_withdrawn";
@@ -3806,4 +3816,93 @@ export function patchListenerClientAddress(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_address: policy }),
   }).then((d) => ApplyResultSchema.parse(d));
+}
+
+export interface CacheInspectionPage {
+  concurrent_change: string;
+  api_version: string;
+  expires_at: string;
+  next_cursor?: string;
+  consistency: string;
+  policy_source: string;
+  route_cache_state: string;
+  inspection: {
+    state: string;
+    captured_at: string;
+    count_accuracy: string;
+    truncated: boolean;
+    matched_resources: number;
+    matched_representations: number;
+    memory_entries: number;
+    disk_entries: number;
+    matched_body_bytes: number;
+    memory_occupancy: { bytes: number; max_bytes: number; entries: number; evictions: number };
+    disk_occupancy: { bytes: number; max_bytes: number; entries: number; evictions: number } | null;
+    policy: {
+      default_ttl_seconds: number;
+      swr_seconds: number;
+      sie_seconds: number;
+      max_entry_bytes: number;
+      range_enabled: boolean;
+      fill_lock_enabled: boolean;
+      tag_ingestion_enabled: boolean;
+    };
+    evidence_state: string;
+    warnings: string[];
+    resources: Array<
+      CacheResourceSample & {
+        resource_id: string;
+        details_truncated?: boolean;
+        details: Array<{
+          id: string;
+          method: string;
+          tiers: string[];
+          body_bytes: number;
+          origin_age_seconds: number;
+          effective_sie_seconds?: number;
+          freshness_state: string;
+          vary_fields: string[];
+          evidence_state: string;
+          retained_policy: boolean;
+          evidence: {
+            inserted_at?: string;
+            validated_at?: string;
+            freshness_source: string;
+            freshness_seconds: number;
+            swr_source: string;
+            swr_seconds: number;
+            sie_source: string;
+            sie_seconds: number;
+            requires_validation: boolean;
+            must_revalidate: boolean;
+          };
+        }>;
+      }
+    >;
+    decisions: Array<{
+      resource_id: string;
+      host: string;
+      path: string;
+      reason: string;
+      summary?: string;
+      next_step?: string;
+      stage?: string;
+      source?: string;
+      observed_at: string;
+      expires_at: string;
+    }>;
+  };
+}
+
+export function inspectCache(
+  selector: CacheSelector,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<CacheInspectionPage> {
+  return api<CacheInspectionPage>("/v1/cache/inspect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selector, cursor, page_size: 50 }),
+    ...(signal ? { signal } : {}),
+  });
 }

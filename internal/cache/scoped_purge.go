@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"jul/internal/cachemeta"
 	"math"
 	"net/http"
 	"sort"
@@ -48,21 +49,7 @@ type selectorFence struct {
 // SafeResourceSummary is the secret-safe per-resource metadata summary shared
 // between #621 previews and #622 inspection (ADR 0027 §6.1). Raw query strings
 // and Vary request-header values are never exposed here.
-type SafeResourceSummary struct {
-	Host            string    `json:"host"`
-	Path            string    `json:"path"`
-	HasQuery        bool      `json:"has_query,omitempty"`
-	Methods         []string  `json:"methods"`
-	Representations int       `json:"representations"`
-	Tiers           []string  `json:"tiers"`
-	BodyBytes       int64     `json:"body_bytes"`
-	VaryFields      []string  `json:"vary_fields,omitempty"`
-	Tags            []string  `json:"tags,omitempty"`
-	FreshnessState  string    `json:"freshness_state"`
-	CreatedAt       time.Time `json:"created_at,omitempty"`
-	ExpiresAt       time.Time `json:"expires_at,omitempty"`
-	StaleUntil      time.Time `json:"stale_until,omitempty"`
-}
+type SafeResourceSummary = cachemeta.SafeResourceSummary
 
 // PreviewOptions configures a non-destructive cache invalidation preview.
 type PreviewOptions struct {
@@ -587,6 +574,7 @@ func (c *Cache) indexKeyEntryLocked(st *keyGenState, e *Entry) {
 	}
 	st.bodyBytes = e.BodyLen()
 	st.createdAt = e.CreatedAt
+	st.evidence = e.Evidence
 	st.expiresAt = e.ExpiresAt
 	st.staleUntil = e.StaleUntil
 	st.varyFields = append([]string(nil), e.Vary...)
@@ -895,6 +883,7 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 			Variants:               it.Variants,
 			Tags:                   it.Tags,
 			CreatedAt:              it.CreatedAt,
+			Evidence:               it.Evidence,
 			ExpiresAt:              it.ExpiresAt,
 			StaleUntil:             it.StaleUntil,
 			Vary:                   it.VaryFields,
@@ -1173,6 +1162,11 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 // PreviewScope performs a bounded, non-destructive dry-run evaluation of sel
 // against the live cache catalog (ADR 0027 §5.2).
 func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgePreview {
+	out, _ := c.previewScope(context.Background(), sel, opts, 50, false)
+	return out
+}
+
+func (c *Cache) previewScope(ctx context.Context, sel NormalizedSelector, opts PreviewOptions, maxSamples int, details bool) (PurgePreview, error) {
 	now := time.Now().UTC()
 	if c != nil {
 		now = c.clock().UTC()
@@ -1185,8 +1179,8 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 	if sampleLimit < 0 {
 		sampleLimit = 0
 	}
-	if sampleLimit > 50 {
-		sampleLimit = 50
+	if sampleLimit > maxSamples {
+		sampleLimit = maxSamples
 	}
 	if c == nil {
 		return PurgePreview{
@@ -1195,7 +1189,7 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 			ScanLimit:     scanLimit,
 			AsOf:          now,
 			BroadScope:    sel.BroadScope,
-		}
+		}, nil
 	}
 
 	pol := c.Policy()
@@ -1230,6 +1224,7 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 		createdAt  time.Time
 		expiresAt  time.Time
 		staleUntil time.Time
+		bases      []string
 	}
 	resources := make(map[string]*resourceAgg)
 	var resourceOrder []string
@@ -1240,6 +1235,9 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 	}
 
 	for _, bk := range candidates {
+		if err := ctx.Err(); err != nil {
+			return PurgePreview{}, err
+		}
 		if out.ScannedEntries >= scanLimit {
 			out.Truncated = true
 			out.CountAccuracy = "lower_bound_truncated"
@@ -1255,7 +1253,7 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 		if c.baseIndexedTags != nil {
 			tags = c.baseIndexedTags[resKey]
 		}
-		if sel.Kind != SelectorKey && !sel.MatchesResource(host, reqURI, tags) {
+		if (details || sel.Kind != SelectorKey) && !sel.MatchesResource(host, reqURI, tags) {
 			continue
 		}
 		if sel.Kind == SelectorKey && bk != baseKeyOf(sel.Key) {
@@ -1264,6 +1262,17 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 		memKeys, diskKeys, reps, bodyB, memB, diskB, stBase, live := c.collectOwnedKeysForBaseLocked(bk, exactFilter)
 		if !live {
 			continue
+		}
+		if details {
+			seen := map[string]bool{}
+			for _, ks := range [][]string{memKeys, diskKeys} {
+				for _, k := range ks {
+					if st := c.keyGen[k]; st != nil && !st.isVaryStub {
+						seen[k] = true
+					}
+				}
+			}
+			reps = len(seen)
 		}
 		out.MatchedRepresentations += reps
 		out.MemoryEntries += len(memKeys)
@@ -1288,7 +1297,8 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 			resources[resKey] = agg
 			resourceOrder = append(resourceOrder, resKey)
 		}
-		agg.methods = append(agg.methods, method)
+		agg.bases = append(agg.bases, bk)
+		agg.methods = append(agg.methods, strings.Clone(method))
 		agg.reps += reps
 		agg.bodyBytes += bodyB
 		if len(memKeys) > 0 {
@@ -1303,7 +1313,9 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 	if out.MatchedResources >= BroadScopeResourceThr || out.Truncated {
 		out.BroadScope = true
 	}
-	out.InflightFillsMatched, out.InflightTagUnknown = c.countMatchingInflightLocked(sel)
+	if !details {
+		out.InflightFillsMatched, out.InflightTagUnknown = c.countMatchingInflightLocked(sel)
+	}
 
 	if sampleLimit > 0 && len(resourceOrder) > 0 {
 		if len(resourceOrder) > sampleLimit {
@@ -1328,9 +1340,9 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 					freshState = "expired"
 				}
 			}
-			out.Samples = append(out.Samples, SafeResourceSummary{
-				Host:            agg.host,
-				Path:            stripQueryFromURI(agg.uri),
+			sm := SafeResourceSummary{
+				Host:            strings.Clone(agg.host),
+				Path:            strings.Clone(stripQueryFromURI(agg.uri)),
 				HasQuery:        strings.IndexByte(agg.uri, '?') >= 0,
 				Methods:         agg.methods,
 				Representations: agg.reps,
@@ -1342,10 +1354,14 @@ func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgeP
 				CreatedAt:       agg.createdAt,
 				ExpiresAt:       agg.expiresAt,
 				StaleUntil:      agg.staleUntil,
-			})
+			}
+			if details {
+				c.inspectDetailsLocked(&sm, agg.bases, now)
+			}
+			out.Samples = append(out.Samples, sm)
 		}
 	}
-	return out
+	return out, ctx.Err()
 }
 
 func (c *Cache) snapshotMatchedResourcesLocked(sel NormalizedSelector) map[string]struct{} {

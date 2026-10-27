@@ -640,3 +640,8 @@ manager statistics: tracked clients, active SSE totals/clients, clients above th
 captured cap, maximum streams held by one client, and rejection counters by closed
 class. The process-wide active SSE total is not compared directly with a per-client
 cap. No client identity is emitted as a metric label.
+
+
+## Bounded cache decision evidence
+
+The cache inspector can show opt-in recent owner-recorded decisions independently from aggregate metrics. It adds no per-URL logs or high-cardinality metric labels. Missing, disabled or expired samples are not negative historical evidence. See [privacy and reason codes](cache.md#recent-observed-decisions-and-privacy).

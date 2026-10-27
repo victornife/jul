@@ -52,9 +52,10 @@ func (b *captureBudget) release(n int64) {
 // captureAccount is one capture's share of the budget. A nil budget (writers
 // built directly in tests) means unbounded.
 type captureAccount struct {
-	budget   *captureBudget
-	reserved int64
-	onSkip   func(reason string)
+	budget    *captureBudget
+	reserved  int64
+	onSkip    func(reason string)
+	onFailure func()
 }
 
 func (a *captureAccount) grow(n int, limit int64) bool {
@@ -123,6 +124,7 @@ type cacheWriter struct {
 	hijacked          bool
 	writeErr          error
 	headerCheck       func(code int, h http.Header) bool
+	onDecision        func(string)
 	onAbandon         func()
 	tagHeaders        []string
 	stripTagHeaders   bool
@@ -200,7 +202,7 @@ func (w *cacheWriter) abandonCapture(reason string) {
 // storable reports whether the captured response may be considered for storage.
 func (w *cacheWriter) storable() bool { return !w.noStore && !w.tooBig }
 
-func captureInitDiskStream(cl, memLimit int64, disk *diskStore, onSkip func(string), diskStream **diskStreamCapture, abandon func(string), drop func()) {
+func captureInitDiskStream(cl, memLimit int64, disk *diskStore, onSkip func(string), onFailure func(), diskStream **diskStreamCapture, abandon func(string), drop func()) {
 	if cl <= memLimit {
 		return
 	}
@@ -208,7 +210,7 @@ func captureInitDiskStream(cl, memLimit int64, disk *diskStore, onSkip func(stri
 		abandon(captureSkipOversize)
 		return
 	}
-	stream := disk.beginStreamCapture(onSkip)
+	stream := disk.beginStreamCaptureObserved(onSkip, onFailure)
 	if stream == nil {
 		drop()
 		return
@@ -248,7 +250,7 @@ func captureWriteChunk(
 		prior := buf.Bytes()
 		*buf = bytes.Buffer{}
 		acct.release()
-		stream := disk.beginStreamCapture(acct.onSkip)
+		stream := disk.beginStreamCaptureObserved(acct.onSkip, acct.onFailure)
 		if stream == nil {
 			drop()
 			return
@@ -321,13 +323,20 @@ func (w *cacheWriter) WriteHeader(code int) {
 	// An event stream never ends, so capturing it would only grow a buffer that
 	// is discarded at the size limit.
 	if code < http.StatusOK || isEventStream(w.Header()) {
+		if w.onDecision != nil {
+			if isEventStream(w.Header()) {
+				w.onDecision("sse_bypass")
+			} else {
+				w.onDecision("upgrade_bypass")
+			}
+		}
 		w.dropCapture()
 	} else if !w.noStore && cl > w.limit {
 		w.abandonCapture(captureSkipOversize)
 	} else if w.headerCheck != nil && !w.headerCheck(code, w.snapshot) {
 		w.dropCapture()
 	} else if !w.noStore {
-		captureInitDiskStream(cl, w.effMemLimit(), w.disk, w.acct.onSkip, &w.diskStream, w.abandonCapture, w.dropCapture)
+		captureInitDiskStream(cl, w.effMemLimit(), w.disk, w.acct.onSkip, w.acct.onFailure, &w.diskStream, w.abandonCapture, w.dropCapture)
 	}
 	if w.stripTagHeaders && len(w.tagHeaders) > 0 {
 		stripOriginTagHeadersFromResponse(w.Header(), w.entrySnapshot, w.tagHeaders)
@@ -450,6 +459,7 @@ type recorder struct {
 	// say: an interim/protocol-switch status, or a live event stream.
 	noStore         bool
 	headerCheck     func(code int, h http.Header) bool
+	onDecision      func(string)
 	onAbandon       func()
 	tagHeaders      []string
 	stripTagHeaders bool
@@ -513,13 +523,20 @@ func (r *recorder) WriteHeader(code int) {
 	// an event stream never ends — buffering one would grow to the size limit
 	// before being discarded.
 	if code < http.StatusOK || isEventStream(r.Header()) {
+		if r.onDecision != nil {
+			if isEventStream(r.Header()) {
+				r.onDecision("sse_bypass")
+			} else {
+				r.onDecision("upgrade_bypass")
+			}
+		}
 		r.dropCapture()
 	} else if cl > r.limit {
 		r.abandon(captureSkipOversize)
 	} else if r.headerCheck != nil && !r.headerCheck(code, r.Header()) {
 		r.dropCapture()
 	} else {
-		captureInitDiskStream(cl, r.effMemLimit(), r.disk, r.acct.onSkip, &r.diskStream, r.abandon, r.dropCapture)
+		captureInitDiskStream(cl, r.effMemLimit(), r.disk, r.acct.onSkip, r.acct.onFailure, &r.diskStream, r.abandon, r.dropCapture)
 	}
 }
 

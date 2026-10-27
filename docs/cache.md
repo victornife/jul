@@ -1414,3 +1414,177 @@ paths.
 | 7 — Security / threat note | ✅ | Threat note above plus real authenticated identity-isolation and foreign-file tests |
 | 8 — Fuzzing/parser robustness | ✅ | `TestParseCacheControlIsTotal` and directive matrices |
 | 9 — Self-explanatory Console surface | ✅ | Runtime overview and cache purge/delete surfaces; lifecycle limitations remain explicit |
+
+## Bounded cache inspection
+
+The unreleased CACHE-OPS-02 inspector (#622) reads cache metadata without sending
+an origin request, invoking an application handler, populating the cache,
+changing LRU order, sweeping disk tombstones or leasing response files. Use the
+Full Console's Traffic Controls → Cache → **Inspect cached resources**, the
+versioned `POST /api/v1/cache/inspect` API, or `jul cache inspect`.
+
+Inspection requires an authenticated administrator and `cache:inspect` in RBAC
+mode. This new permission is **not** added to built-in viewer, operator or
+auditor roles. Assign it explicitly through a custom role; existing `*` and
+`cache:*` grants retain their normal wildcard semantics. Legacy token mode
+retains its existing all-actions authority, but an unconfigured/empty token is
+not accepted for inspection. `cache:purge` alone does not grant inspection;
+inspection does not grant purge or its existing preview. Configuration ownership
+(file-owned versus managed) does not prevent read-only inspection.
+
+Select an explicitly configured named host (literal request port is preserved)
+or an existing route with explicit server names. Whole-node `all`, unconfigured
+hosts and ambiguous unnamed/wildcard-only host enumeration are rejected. The
+existing selector parser supports exact URL/URI/key, segment prefix, anchored
+glob and trusted origin tags. Exact matching reuses the purge input/redaction
+contract; queries are matched exactly but omitted from output. Query-distinct
+resources can display the same path and have different opaque resource IDs.
+
+```sh
+jul cache inspect --endpoint https://admin.example.com --token-file admin.token \
+  --host portal.example.com --prefix /articles --json
+jul cache inspect --endpoint https://admin.example.com --token-file admin.token \
+  --host portal.example.com --uri /articles/42 --page-size 10
+```
+
+The API takes `{ "selector": { "kind": "host", "host": "portal.example.com" },
+"page_size": 50 }`. Repeat the **same selector** with the returned `cursor` to
+read another page. Keep exact-match secrets out of shell history/process lists;
+use a protected API JSON input when an exact URI contains sensitive values.
+No live probe is included. Inspection retries never automatically fetch an
+origin or retry a purge.
+
+### Bounds, pagination and consistency
+
+- A capture examines at most 10,000 catalog base-key candidates and retains at
+  most 256 logical resources, with at most 32 representation details per
+  resource. Vary/tag display lists and path lengths have separate bounds.
+- A page contains at most 1–50 resources (default limit 50) and at most 2 MiB
+  of encoded response metadata. Wide rows can shorten a page; follow its cursor.
+  Empty captures return an empty page. At most two builders execute
+  concurrently. Retention admits at most 16 snapshots and 8 MiB of aggregate
+  encoded metadata. A capture exceeding its byte limit is explicitly rejected.
+- Snapshots expire within 60 seconds (earlier when contained decision evidence expires) and are reclaimed by bounded timers even
+  without later inspection traffic. Cursor identities and page positions are
+  authenticated and bound to principal, normalized scope, authorization
+  generation and serving configuration identity. Every page reauthenticates;
+  revocation, scope/offset tampering, reload, restart and expiry reject reuse.
+- The captured catalog is not a global transaction with tier occupancy, current
+  configuration or recent decisions. Tier churn can occur immediately after
+  capture. Refresh obtains a new observation; it does not promise a future HIT.
+- `count_accuracy=lower_bound_truncated` means candidate enumeration was cut
+  short. `exact` describes the bounded catalog count when enumeration completed,
+  even if the resource list or detail list is truncated separately. Never sum
+  identical snapshot totals from multiple pages.
+- Cancellation discards the builder result before retention/publication.
+  The two-second build deadline is checked around bounded work; a wait on an
+  existing cache mutex is not instantaneously cancelable and can exceed that
+  deadline before returning. Large-purge contention remains tracked in #667.
+
+### Reading metadata and policy
+
+A **logical resource** is an authority plus exact request URI. A
+**representation** is an owned method/Vary member. Memory and disk can contain
+copies of the same representation. Vary lookup stubs count as tier entries,
+not response representations. Representation body bytes are distinct from
+measured physical tier occupancy (including metadata, retired files and
+pending tombstones) and configured byte limits. Memory occupancy uses the
+cache's existing footprint estimate; it is not a process RSS measurement.
+
+`origin_age_seconds` uses RFC-corrected origin age, not insertion age. New entries
+record insertion time; successful 304 merges record validation time while
+preserving known insertion time. Older disk metadata returns
+`legacy_unavailable` for missing publication provenance. No inspection body scan
+or new disk rehydration is performed. Fields missing on older entries are not
+reconstructed as historical facts.
+
+The server records origin s-maxage/max-age/Expires or gateway fallback provenance,
+targeted directive use, numeric freshness/SWR/SIE lifetimes and validation/auth
+restrictions at the owning policy decision. Current global fallback values and
+supported range/fill/tag controls appear separately. Route overrides and gateway
+freshness caps remain unsupported (#623). A route's cache boolean controls
+activation; cached entries can remain after disabling a route or ordinary
+reload. `retained_policy` compares recorded entry policy with current global
+policy. A displayed freshness lifetime is not an absolute wall-clock guarantee:
+origin age, validation, request restrictions, invalidation and eviction still
+matter. A MISS is not proof of storage.
+
+### Recent observed decisions and privacy
+
+Metadata inspection works with sampling disabled. To record actual recent
+cache-decision stages, explicitly enable:
+
+```toml
+[cache]
+enabled = true
+memory_max_size = "64m"
+default_ttl = "60s"
+decision_samples = true # default false; hot-reloadable
+```
+
+The buffer is memory-only, capped at 256 records. Each record expires after
+60 seconds; a cleanup timer may drop newer records early. Disabling sampling
+clears it. It is a lossy record of stages, not every request or permanent
+history. Resource correlation uses a process-local keyed HMAC; raw query values,
+Vary values, cookies, credentials, request headers, bodies and raw errors are
+not retained in samples. Overlong safe display input is not sampled. No URLs,
+resource IDs or tags become metric labels and no URL log is added.
+
+Reason codes originate at actual reuse, admission, capture, fill-lock and
+capacity-eviction owners. `fresh_hit`, `stale_while_revalidate`, `stale_reuse`,
+`stale_if_error`, `revalidation_required` and `validated_reuse` distinguish reuse
+and validation stages. Storage restrictions include `response_no_store`,
+`response_private`, `response_set_cookie`, `auth_storage_restricted`,
+`auth_reuse_restricted` and `vary_star`. Upgrade/range/SSE bypasses, capture
+oversize/budget/not-stored, publication failure/fencing, disk read failure,
+fill-lock fallbacks and memory/disk capacity evictions have separate reasons.
+A failed/fenced publication is not claimed to be a successful store.
+
+`evidence_state=disabled`, `no_record`, `observed` or `unavailable` is separate
+from resource availability. A tag-scoped search cannot infer tags on absent
+historical responses; use a safe exact lookup for their recent evidence.
+No record does not mean no request occurred or a resource was never cached.
+
+### Errors and recovery
+
+API states include available, empty, disabled, unavailable, partial and
+truncated; detail provenance can independently be legacy/unavailable. A failed
+disk tier is partial even when metadata remains cataloged. Stale/expired
+observations remain observations, not current protection evidence.
+
+401/403 require credentials or an explicit grant. 400 (`invalid_request`)
+requires correcting scope/page input or starting a new capture after cursor
+expiry/reload. 429 (`rate_limited`, `Retry-After: 1`) means builder/retention
+admission is full. 503 (`storage_unavailable`) means a build failed, was canceled
+or exceeded metadata bounds: narrow scope or retry a new inspection. Existing
+body/media-type errors retain the API error envelope. Successful CLI reads exit
+zero even for explicit partial/truncated states; automation must inspect those
+fields. There is no automatic cursor restart or page accumulation.
+
+Purge uses the existing preview → confirm → execute → observe/recover flow and
+its own permission. #666 (unfinished-purge restart protection), #667
+(large-purge latency) and #668 (legacy purge outcome visibility) remain inherited
+limitations; inspection does not implement them. No release, GA or soak claim is
+made. NGINX migration impact is **not applicable**: this is a Jul-specific
+operator interface and does not change imported request/cache semantics.
+
+
+New publication provenance uses one compact immutable record shared by resident
+copies and the catalog. The memory-tier footprint estimate charges 96 additional
+bytes per new representation (including pointer/allocation allowance); tiny-cache
+capacity and small-object resident counts can therefore decrease. Inspection
+itself never performs those evictions. Recorded publication SIE values are
+historical; `effective_sie_seconds` comes from the current existing stale-error
+decision owner and can change on reload. No-cache zero-TTL retention correctly
+reports the gateway retention fallback rather than attributing that lifetime to
+an origin zero directive.
+
+Route scopes intersect the existing selector with the configured exact/prefix
+path, using the shared route-path normalization. This is configured path scope,
+not historical request-route attribution: overlapping routes and predicates are
+not reconstructed from absent request state. Regex route-path inspection is
+explicitly unavailable; configured-host inspection remains available. Tag samples
+can be correlated to **current** selected resource membership, labeled
+`observed_current_membership`; historical tag membership remains unavailable.
+`concurrent_change` distinguishes observed sequence changes from unknown
+independent churn; an unchanged publication sequence does not prove no eviction.

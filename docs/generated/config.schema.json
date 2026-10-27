@@ -361,6 +361,10 @@
     "cache": {
       "additionalProperties": false,
       "properties": {
+        "decision_samples": {
+          "description": "DecisionSamples opts into a memory-only, 256-record, 60-second cache decision buffer",
+          "type": "boolean"
+        },
         "default_ttl": {
           "description": "DefaultTTL is applied when upstream gives no explicit freshness",
           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",

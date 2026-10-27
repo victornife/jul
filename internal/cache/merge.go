@@ -38,6 +38,11 @@ var notModifiedExcluded = []string{"Content-Length", "X-Cache"}
 // from the merged result. A stale entry that comes back from a 304 as a
 // no-cache or must-revalidate entry must behave that way immediately.
 func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry, mergeAction) {
+	e, a, _ := c.merge304Decision(stored, h304, now)
+	return e, a
+}
+
+func (c *Cache) merge304Decision(stored *Entry, h304 http.Header, now time.Time) (*Entry, mergeAction, string) {
 	pol := c.Policy()
 	var tags304 []string
 	var present304 bool
@@ -46,7 +51,7 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 		tags304, present304, skipReason = extractOriginTags(h304, pol.TagHeaderSlice())
 		if skipReason != "" {
 			c.tagSkipped(skipReason)
-			return nil, mergeDiscard
+			return nil, mergeDiscard, "tag_capture_rejected"
 		}
 	}
 
@@ -72,7 +77,7 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	// through a keying rule that no longer describes it, so the safe answer is
 	// to discard: the caller re-fetches and stores it under the correct key.
 	if !sameFields(stored.Vary, varyFields(merged)) {
-		return nil, mergeDiscard
+		return nil, mergeDiscard, "vary_changed"
 	}
 
 	p := parseResponsePolicy(merged)
@@ -80,7 +85,7 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	if !ok {
 		// The refreshed metadata says this must no longer be stored (no-store,
 		// private, an expired Expires, a Set-Cookie added by the 304).
-		return nil, mergeDiscard
+		return nil, mergeDiscard, c.storageReason(&http.Request{Header: http.Header{}}, stored.Status, merged, now, pol)
 	}
 
 	// Only a 304 that actually carries origin timing restarts the age clock; a
@@ -94,6 +99,13 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 	refreshed := stored.Clone()
 	refreshed.Header = merged
 	refreshed.CreatedAt = created
+	refreshed.Evidence = c.entryEvidence(stored.Status, merged, p, pol, now, ttl, swr)
+	if stored.Evidence != nil {
+		refreshed.Evidence.InsertedAt = stored.Evidence.InsertedAt
+	} else {
+		refreshed.Evidence.InsertedAt = 0
+	}
+	refreshed.Evidence.ValidatedAt = now.UnixNano()
 	refreshed.ExpiresAt = created.Add(ttl)
 	refreshed.StaleUntil = created.Add(ttl + swr)
 	refreshed.ETag = merged.Get("ETag")
@@ -111,5 +123,5 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 		refreshed.ingestedTagHeaders = pol.TagHeaders
 		refreshed.tagPolicyTracked = true
 	}
-	return refreshed, mergeReplace
+	return refreshed, mergeReplace, ""
 }

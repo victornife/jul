@@ -752,11 +752,14 @@ type Server struct {
 
 	// Scoped cache invalidation ledger, preview HMAC key, and active operation
 	// admission counter (#621, ADR 0027 §5).
-	purgeLedgerOnce    sync.Once
-	purgeLedger        *cachePurgeLedger
-	cachePurgeInflight atomic.Int32
-	previewKeyOnce     sync.Once
-	previewKey         []byte
+	inspectionMu        sync.Mutex
+	inspectionSnapshots map[string]*inspectionSnapshot
+	inspectionBuilders  atomic.Int32
+	purgeLedgerOnce     sync.Once
+	purgeLedger         *cachePurgeLedger
+	cachePurgeInflight  atomic.Int32
+	previewKeyOnce      sync.Once
+	previewKey          []byte
 }
 
 // RecordManagedApplyOutcome records the terminal async outcome of a managed

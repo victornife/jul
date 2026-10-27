@@ -83,6 +83,8 @@ var schemaTypes = map[string]reflect.Type{
 	"HistoryDiffResponse":  reflect.TypeFor[HistoryDiffResponse](),
 	"DiffEntry":            reflect.TypeFor[DiffEntry](),
 
+	"CacheInspectRequest":       reflect.TypeFor[CacheInspectRequest](),
+	"CacheInspectResponse":      reflect.TypeFor[CacheInspectResponse](),
 	"CacheSelector":             reflect.TypeFor[CacheSelector](),
 	"CacheGuidance":             reflect.TypeFor[CacheGuidance](),
 	"CacheResourceSample":       reflect.TypeFor[CacheResourceSample](),

@@ -43,6 +43,7 @@ const (
 var errCorruptDiskEntry = errors.New("cache: corrupt or incompatible disk cache file")
 
 type diskEntryMeta struct {
+	Evidence           *publicationEvidence
 	Status             int
 	Header             http.Header
 	CreatedAt          time.Time
@@ -74,6 +75,7 @@ func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLe
 	}
 	meta := diskEntryMeta{
 		Status:             e.Status,
+		Evidence:           e.Evidence,
 		Header:             e.Header,
 		CreatedAt:          e.CreatedAt,
 		ExpiresAt:          e.ExpiresAt,
@@ -193,6 +195,7 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 	copy(ingestedHeaders[:], meta.TagHeaders)
 	return &Entry{
 		Status:                 meta.Status,
+		Evidence:               meta.Evidence,
 		Header:                 meta.Header,
 		CreatedAt:              meta.CreatedAt,
 		ExpiresAt:              meta.ExpiresAt,
@@ -240,6 +243,7 @@ type diskStore struct {
 	tombstoneBytes int64 // physical on-disk bytes of unremoved tombstoned files awaiting retry
 	// evictions counts LRU-capacity evictions from evictLocked and Resize (not
 	// explicit del/purge calls), for jul_cache_evictions_total{tier="disk"}.
+	onEviction                     func(string)
 	evictions                      int64
 	ll                             *list.List // front = most recently used; values are *diskItem
 	items                          map[string]*list.Element
@@ -306,6 +310,7 @@ type diskItem struct {
 	tagHeaders       [8]string
 	tagHeaderCount   int
 	createdAt        time.Time
+	evidence         *publicationEvidence
 	expiresAt        time.Time
 	staleUntil       time.Time
 	varyFields       []string
@@ -324,6 +329,7 @@ type diskItemSnapshot struct {
 	TagHeaders       [8]string
 	TagHeaderCount   int
 	CreatedAt        time.Time
+	Evidence         *publicationEvidence
 	ExpiresAt        time.Time
 	StaleUntil       time.Time
 	VaryFields       []string
@@ -913,6 +919,7 @@ func (d *diskStore) rehydrate() {
 		tagHeaders       [8]string
 		tagHeaderCount   int
 		createdAt        time.Time
+		evidence         *publicationEvidence
 		expiresAt        time.Time
 		staleUntil       time.Time
 		varyFields       []string
@@ -968,6 +975,7 @@ func (d *diskStore) rehydrate() {
 			tagHeaders:       entryMeta.ingestedTagHeaders,
 			tagHeaderCount:   entryMeta.ingestedTagHeaderCount,
 			createdAt:        entryMeta.CreatedAt,
+			evidence:         entryMeta.Evidence,
 			expiresAt:        entryMeta.ExpiresAt,
 			staleUntil:       entryMeta.StaleUntil,
 			varyFields:       entryMeta.Vary,
@@ -995,6 +1003,7 @@ func (d *diskStore) rehydrate() {
 			tagHeaders:       f.tagHeaders,
 			tagHeaderCount:   f.tagHeaderCount,
 			createdAt:        f.createdAt,
+			evidence:         f.evidence,
 			expiresAt:        f.expiresAt,
 			staleUntil:       f.staleUntil,
 			varyFields:       f.varyFields,
@@ -1036,6 +1045,7 @@ func (d *diskStore) snapshotItemsLocked() []diskItemSnapshot {
 			TagHeaders:       it.tagHeaders,
 			TagHeaderCount:   it.tagHeaderCount,
 			CreatedAt:        it.createdAt,
+			Evidence:         it.evidence,
 			ExpiresAt:        it.expiresAt,
 			StaleUntil:       it.staleUntil,
 			VaryFields:       append([]string(nil), it.varyFields...),
@@ -1274,6 +1284,7 @@ func (d *diskStore) retireBlobLocked(hash string, b *diskBlob) error {
 // diskStreamCapture manages a temporary file receiving a streamed response body
 // larger than the memory tier (#525 Part 2).
 type diskStreamCapture struct {
+	onFailure func()
 	file      *os.File
 	seq       uint64
 	bodyLen   int64
@@ -1283,6 +1294,10 @@ type diskStreamCapture struct {
 }
 
 func (d *diskStore) beginStreamCapture(onSkip func(reason string)) *diskStreamCapture {
+	return d.beginStreamCaptureObserved(onSkip, nil)
+}
+
+func (d *diskStore) beginStreamCaptureObserved(onSkip func(string), onFailure func()) *diskStreamCapture {
 	seq := tempFileSeq.Add(1)
 	tmpPath := d.tempPath(seq)
 	tmpName := filepath.Base(tmpPath)
@@ -1291,12 +1306,16 @@ func (d *diskStore) beginStreamCapture(onSkip func(reason string)) *diskStreamCa
 	if err != nil {
 		d.activeTempFiles.Delete(tmpName)
 		d.recordWriteFailure(err)
+		if onFailure != nil {
+			onFailure()
+		}
 		return nil
 	}
 	return &diskStreamCapture{
-		file: tmp,
-		seq:  seq,
-		acct: captureAccount{budget: &d.tempBudget, onSkip: onSkip},
+		file:      tmp,
+		onFailure: onFailure,
+		seq:       seq,
+		acct:      captureAccount{budget: &d.tempBudget, onSkip: onSkip},
 	}
 }
 
@@ -1314,6 +1333,9 @@ func (d *diskStore) writeStream(s *diskStreamCapture, chunks ...[]byte) (ok bool
 		}
 		if _, err := s.file.Write(p); err != nil {
 			d.recordWriteFailure(err)
+			if s.onFailure != nil {
+				s.onFailure()
+			}
 			return false, ""
 		}
 		s.bodyLen += int64(len(p))
@@ -1380,6 +1402,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 	}
 	if _, err := s.file.Write(tail); err != nil {
 		d.recordWriteFailure(err)
+		if s.onFailure != nil {
+			s.onFailure()
+		}
 		return nil, false
 	}
 	if fault == "sync" {
@@ -1388,6 +1413,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 	}
 	if err := s.file.Sync(); err != nil {
 		d.recordWriteFailure(err)
+		if s.onFailure != nil {
+			s.onFailure()
+		}
 		return nil, false
 	}
 	if err := s.file.Close(); err != nil || fault == "close" {
@@ -1396,6 +1424,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 			err = errors.New("injected close failure")
 		}
 		d.recordWriteFailure(err)
+		if s.onFailure != nil {
+			s.onFailure()
+		}
 		return nil, false
 	}
 	s.closed = true
@@ -1442,6 +1473,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 		it := el.Value.(*diskItem)
 		if err := d.retireBlobLocked(hash, it.blob); err != nil {
 			d.recordWriteFailure(err)
+			if s.onFailure != nil {
+				s.onFailure()
+			}
 			return nil, false
 		}
 	}
@@ -1463,6 +1497,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 			d.notifyKeyDiskStateLocked(it.key, hash)
 		}
 		d.recordWriteFailure(err)
+		if s.onFailure != nil {
+			s.onFailure()
+		}
 		return nil, false
 	} else {
 		d.activeTempFiles.Delete(filepath.Base(tmpPath))
@@ -1499,6 +1536,7 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 		it.tagHeaders = e.ingestedTagHeaders
 		it.tagHeaderCount = e.ingestedTagHeaderCount
 		it.createdAt = e.CreatedAt
+		it.evidence = e.Evidence
 		it.expiresAt = e.ExpiresAt
 		it.staleUntil = e.StaleUntil
 		it.varyFields = append([]string(nil), e.Vary...)
@@ -1522,6 +1560,7 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 			tagHeaders:       e.ingestedTagHeaders,
 			tagHeaderCount:   e.ingestedTagHeaderCount,
 			createdAt:        e.CreatedAt,
+			evidence:         e.Evidence,
 			expiresAt:        e.ExpiresAt,
 			staleUntil:       e.StaleUntil,
 			varyFields:       append([]string(nil), e.Vary...),
@@ -1635,6 +1674,9 @@ func (d *diskStore) evictLocked() {
 		delete(d.items, it.hash)
 		d.curBytes -= it.size
 		d.physBytes -= it.fileSize
+		if d.onEviction != nil {
+			d.onEviction(it.key)
+		}
 		d.evictions++
 		evictedAny = true
 		d.notifyKeyDiskStateLocked(it.key, it.hash)
@@ -1898,6 +1940,9 @@ func (d *diskStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64
 		delete(d.items, it.hash)
 		d.curBytes -= it.size
 		d.physBytes -= it.fileSize
+		if d.onEviction != nil {
+			d.onEviction(it.key)
+		}
 		evictedCount++
 		evictedBytes += it.fileSize
 		d.notifyKeyDiskStateLocked(it.key, it.hash)

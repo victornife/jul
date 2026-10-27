@@ -48,6 +48,8 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0026](0026-application-sharing-contract.md) | Application-sharing contract: derived view, declared intent and complete withdrawal | Accepted | 2026-10-18 |
 | [0027](0027-scoped-cache-invalidation.md) | Scoped cache invalidation, trusted origin tags, and selector fences | Accepted — Beta/unreleased | 2026-10-25 |
 
+| [0028](0028-bounded-cache-inspection.md) | Bounded cache inspection and observed decision evidence | Accepted for implementation; verification pending (#622) | 2026-10-27 |
+
 ## Reading order
 
 - **What the product is and how work enters it:** [0013](0013-project-operating-model-and-completeness.md),
