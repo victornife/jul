@@ -1,7 +1,7 @@
 {
-  "covered": 920,
+  "covered": 924,
   "total": 975,
-  "percent": 94.35897435897436,
+  "percent": 94.76923076923077,
   "files": [
     "cmd/jul/remote_cli.go",
     "cmd/jul/remote_cli_inspect.go",
@@ -52,16 +52,6 @@
     [
       "internal/cache/cache.go",
       "1802.4,1803.1",
-      1
-    ],
-    [
-      "internal/cache/diskstore.go",
-      "1154.5,1156.25",
-      3
-    ],
-    [
-      "internal/cache/diskstore.go",
-      "1157.6,1158.1",
       1
     ],
     [

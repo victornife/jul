@@ -41,11 +41,11 @@ Commands use Go1.27.3 and the existing full tag set from Makefile:
 | `make generated-check` | PASS; owning API/schema/lifecycle projections remain in sync; no generated files hand-edited |
 | `make ci-pr` / `make test-race` | Results collected separately; environment Unix sockets/process probes remain unavailable. Missing/failing checks are not passing evidence |
 
-Move-aware changed Go at this checkpoint is **94.3589743590%=920/975**
+Move-aware changed Go at this checkpoint is **94.7692307692%=924/975**
 against78b458b8 ([raw result](622/review-correction-added-go.json)); the correction
-alone is **89.5833333333%=129/144** against4cc4e46e
+alone is **92.3611111111%=133/144** against4cc4e46e
 ([raw delta](622/review-correction-delta-go.json)). These are local Go statement
-reports, not the new-head Codecov PATCH report.55 statements remain
+reports, not the new-head Codecov PATCH report.51 statements remain
 uncovered in the complete diff, listed in the raw record; no exclusions/floors
 changed. Full-tag lint passes0 issues after removing the now-unused private
 headerStorable wrapper; the first lint attempt correctly failed that unused code.
@@ -125,4 +125,16 @@ regression proves an actual disk failure and its safe static reason.
 The read-side audit also found lookup open/metadata/body I/O failures preceding
 serve. A per-call failure sink now records only those actual failures, after
 existing cleanup; ordinary misses and failed leases remain ordinary misses.
-The regression covers open, corrupt metadata, truncated body and ordinary miss.
+The regression covers open, corrupt metadata, truncated file and ordinary miss.
+
+A write-through budget regression also proves the existing closed-reason metric
+fires exactly once, capture_budget is observed, and the memory entry still hits.
+The truncated-file fixture detects corrupted on-disk framing at metadata lookup;
+it does not claim to fault-inject every low-level short-read syscall.
+
+The independent valid-framed-file replacement short-reader probe is also
+maintained and passes: updated valid metadata declares2B while the already
+catalogued blob reader retains its original1B limit, exercising the actual
+ReadFull failure after metadata succeeds. Both independent8c production reviews
+report no unresolved concrete findings; the final test/docs-only delta is subject
+to exact-tree confirmation and fresh hosted gates.

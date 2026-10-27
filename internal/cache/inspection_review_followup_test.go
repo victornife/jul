@@ -495,7 +495,7 @@ func TestExternal622SmallWriteThroughDiskFailureReason(t *testing.T) {
 }
 
 func TestExternal622DiskLookupFailureReason(t *testing.T) {
-	for _, mode := range []string{"open", "metadata", "body", "ordinary_miss"} {
+	for _, mode := range []string{"open", "metadata", "truncated_file", "ordinary_miss"} {
 		t.Run(mode, func(t *testing.T) {
 			c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), DiskPath: t.TempDir(), DiskMaxSize: 1 << 20, DecisionSamples: true})
 			defer c.setDecisionSampling(false)
@@ -515,7 +515,7 @@ func TestExternal622DiskLookupFailureReason(t *testing.T) {
 					if err := os.WriteFile(path, []byte("invalid"), 0600); err != nil {
 						t.Fatal(err)
 					}
-				case "body":
+				case "truncated_file":
 					st, err := os.Stat(path)
 					if err != nil {
 						t.Fatal(err)
@@ -536,5 +536,60 @@ func TestExternal622DiskLookupFailureReason(t *testing.T) {
 				t.Fatal("disk lookup failure did not fall back", calls)
 			}
 		})
+	}
+}
+
+func TestExternal622DiskWriteThroughBudgetEvidence(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), DiskPath: t.TempDir(), DiskMaxSize: 1 << 20, DecisionSamples: true})
+	defer c.setDecisionSampling(false)
+	var skips atomic.Int64
+	c.SetCaptureSkipObserver(func(reason string) {
+		if reason != captureSkipBudget {
+			t.Errorf("unexpected skip: %s", reason)
+		}
+		skips.Add(1)
+	})
+	c.disk.tempBudget.inflight.Store(c.disk.availableBudgetCap())
+	defer c.disk.tempBudget.inflight.Store(0)
+	calls := 0
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; _, _ = w.Write([]byte("x")) }))
+	req := httptest.NewRequest("GET", "http://example.com/disk-budget", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	have := reviewDecisionReasons(t, c)
+	if !have["capture_budget"] || !have["response_stored"] || have["disk_capture_failed"] || skips.Load() != 1 {
+		t.Fatal(have, skips.Load())
+	}
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if calls != 1 || rr.Header().Get("X-Cache") != "HIT" {
+		t.Fatal(calls, rr.Header())
+	}
+}
+
+func TestOverlay622ActualBodyReadFailure(t *testing.T) {
+	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20, DefaultTTL: config.Duration(time.Minute), DiskPath: t.TempDir(), DiskMaxSize: 1 << 20, DecisionSamples: true})
+	defer c.setDecisionSampling(false)
+	h := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("x")) }))
+	req := httptest.NewRequest("GET", "http://example.com/body-reader-failure", nil)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	e, ok := c.get(key(req))
+	if !ok {
+		t.Fatal("fixture entry missing")
+	}
+	tail, err := encodeDiskTrailerAndMetaWithKeyGen(key(req), c.keyGen[key(req)].gen, e, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep valid framing and metadata while changing body length beneath the
+	// already-catalogued one-byte blob. Its reader's old section limit causes
+	// io.ReadFull to return a real short-body error after metadata succeeds.
+	if err = os.WriteFile(c.disk.path(hashKey(key(req))), append([]byte("xx"), tail...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c.mem.del(key(req))
+	resetReviewDecisions(c)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	if have := reviewDecisionReasons(t, c); !have["disk_read_failed"] {
+		t.Fatal(have)
 	}
 }
