@@ -64,10 +64,10 @@ project-wide gates have passed. Hosted evidence is bound to its actual SHA.
 | Existing destructive actions | Existing invalidation panel/API/client/CLI unchanged in ownership | Permission/confirmation regression suites, reader-only browser test | Console/cache examples | Local and published-head hosted browser checks pass; no second destructive flow |
 | CLI / client compatibility and automation | `jul cache inspect`, shared adminclient/DTOs | Actual HTTP/client/dispatch, flags/human/JSON/error/cancel; bounded wide page traversal | Remote CLI/help/runnable inspect.sh | Locally verified; one page per invocation, no silent restart/rescan |
 | Accessible Console states / filters / policy links | Lazy `CacheInspectorPanel` in existing cache drawer | 11 inspector unit tests; keyboard/read-only/state browser scenario; existing browser/frontend lanes | Console/cache links and fallback/error text | Published a113a39e browser/real-server/frontend lanes passed; later final head must be checked again |
-| Config/public contract completeness | Schema/default/lifecycle/projection/diff/typed patch/API route catalogue owners | Generation drift, config examples, route inventory; sampling-only config-diff regression | Generated schema/metadata/reference/lifecycle/OpenAPI; Unreleased README/changelog | Generated checks pass; no hand-edited generated assets; sampling diff follow-up requires re-review |
+| Config/public contract completeness | Schema/default/lifecycle/projection/diff/typed patch/API route catalogue owners | Generation drift, config examples, route inventory; sampling-only config-diff regression | Generated schema/metadata/reference/lifecycle/OpenAPI; Unreleased README/changelog | Generated checks pass; no hand-edited generated assets; sampling diff follow-up independently re-reviewed |
 | Performance / resource bounds | Reused catalog; no parallel index; compact immutable provenance; ring | Baseline/head paired hit benchmarks;0/256/2000/10001 resources;1/64 variants; saturated two-builder load; memory/reclamation | Limits and benchmark section below | Measured bounds below; timing tails/RSS/production soak not certified |
 | Coverage and project gates | Existing move-aware Go / package / security / Console machinery | Local complete changed Go95.0116%(819/862); admin subset95.2381%(200/210); frontend floors; ci-pr/full race/platform/browser | Source-bound raw coverage records below | Final-head Codecov PATCH strictly>90% still pending; earlier a113 report88.67% fails and is not superseded until actual upload/report |
-| Independent adversarial reviews | Two non-implementing read-only agents | Initial findings, fixes and independent re-review; SHA/tree verification | Review table below | Both clear a113 runtime tree; follow-up diff/evidence re-review pending |
+| Independent adversarial reviews | Two non-implementing read-only agents | Initial findings, fixes and independent re-review; SHA/tree verification | Review table below | Both clear a113 runtime tree; follow-up diff/evidence independently cleared at ad1b8130 |
 | Truthful programme status / maturity / closure | #622/#620/#62 updates and draft PR | Actual reviewed/published SHAs and check links | This ledger and live PR description | Selected/in progress; not complete. No merge/manual closure or maturity promotion |
 
 ## Commands and local outcomes
@@ -91,7 +91,7 @@ Profiles and timestamps are separate; a partial aggregate is not a passing gate.
 | `pnpm --dir internal/admin/ui exec playwright test --project=chromium -g 'bounded cache inspection'` | FAIL locally before execution: browser executable missing. Published a113 hosted browser smoke and real-server lanes subsequently PASS |
 | `python3 scripts/check-d11-certification.py` | PASS after explicit six-path rebuild reconciliation; initial hosted a113 docs-check failed stale D11 paths |
 | `python3 scripts/test_d11_certification.py` | PASS22 tests |
-| `python3 scripts/docs-check.py` | Prior runtime checkpoint PASS2538 checks; rerun after final evidence files required |
+| `python3 scripts/docs-check.py` | PASS2538 checks after final evidence files; independently reproduced |
 | `python3 scripts/test_docs_check.py` | PASS; printed FAIL examples are expected negative fixtures, final result OK |
 | `bash -n examples/cache-inspection/inspect.sh` | PASS |
 | `git diff --check` | PASS at recorded checkpoints; rerun before final commit |
@@ -143,8 +143,13 @@ claim the later final-head result. Use its actual check/report in the live PR.
 
 Reviewer work was read-only; implementation remained with the primary agent.
 Substantive follow-up: sampling-only human config diff is now explicit even when
-cache.enabled is unchanged, with regression tests. That small owner change and
-this evidence packet require independent re-review before readiness. No review
+cache.enabled is unchanged, with regression tests. Both reviewers independently re-reviewed that small owner change and this
+evidence packet at `ad1b813090c1ba005e267a206168ab673f047132`, with no new
+production/privacy findings. Security also independently reproduced the exact
+819/862 coverage result and2,538 docs checks. Correctness independently
+reproduced the paired bootstrap and214,048B retention bound, and requested the
+benchmark wording clarification incorporated here: maxima are maximum run
+averages, not maximum individual-operation latencies. No review
 is presented as a human audit, every-line proof or production soak.
 
 ## Benchmarks and resource evidence
@@ -181,17 +186,17 @@ variant/load fixtures):
 |0 resources|494.8ns|96B /1 allocation|
 |256 one-response resources|2.162ms|~922kB /8729 allocations|
 |2000 one-response resources|6.074ms|~1.75MB /19214 allocations|
-|10001 one-response resources,10000 scan cap|9.634ms(max12.911ms)|~5.50MB /67269 allocations; explicit truncation|
+|10001 one-response resources,10000 scan cap|9.634ms(maximum run average12.911ms)|~5.50MB /67269 allocations; explicit truncation|
 |256 resources x1 Vary representation|1.833ms|~0.964MB /10522 allocations|
-|256 resources x64 Vary representations|30.945ms(max35.421ms)|~20.77MB transient /135961 allocations; detail cap32 per resource|
+|256 resources x64 Vary representations|30.945ms(maximum run average35.421ms)|~20.77MB transient /135961 allocations; detail cap32 per resource|
 |2000 resources, no inspection worker|1621ns/hit|1192B /14 allocations in this separate fixture|
-|Same fixture,two continuous inspection workers|2251ns/hit(max2279)|~39% throughput-time cost under saturated metadata/GC load; reported B/op includes background allocations, not a hit-path allocation increase|
+|Same fixture,two continuous inspection workers|2251ns/hit(maximum run average2279)|~39% throughput-time cost under saturated metadata/GC load; reported B/op includes background allocations, not a hit-path allocation increase|
 
 [Variant/load raw observations](622/bench-variants-load.txt). Saturated workers
 exceed normal operator refresh traffic and share only two CPUs. Conservative
 local validation bounds: metadata scans at the declared scales <=250ms and mean
-warm hit under the declared saturated2000-resource load <=5us. Observed maxima
-are below these bounds; these are measured fixture budgets, not HTTP SLAs,
+warm hit under the declared saturated2000-resource load <=5us. All recorded benchmark-run averages
+are below these fixture thresholds; these are measured fixture budgets, not HTTP SLAs,
 global snapshot guarantees or a promise that all max-scale lock waits finish
 within the API's two-second context deadline. Existing mutex waits remain
 non-cancelable; #667 remains separate. Default warm-hit overhead is evaluated
@@ -254,8 +259,7 @@ Inherited limitations, verified still open at this checkpoint:
 #623 route policy, #624 cutover, #625 cross-Console catalogue and #586 sharing
 remain separate; no invented predecessor, maturity advancement or reopen of #621.
 
-Pre-merge remaining actions: independently re-review the small sampling-diff and
-new evidence/test changes; rerun final-head changed/package/security/docs/CI
+Pre-merge remaining actions: rerun final-head changed/package/security/docs/CI
 checks; verify actual final-head Codecov PATCH strictly>90% with measured files
 and counts where available; inspect final platform/browser outcomes. Keep draft
 status if any required gate remains blocked. Only after all pass may the PR be
