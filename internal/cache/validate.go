@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"jul/internal/background"
@@ -77,17 +78,31 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, r)
 	rejected := false
-	c.guardRevalidationCapture(rec, r, k.key, startGen, func() {
+	var rejectedStale *Entry
+	c.guardRevalidationCapture(rec, r, k.key, startGen, func(code int) {
 		if !rejected {
 			rejected = true
 			cancelValidation()
-			c.endRevalidate(k, call)
-			c.finishValidation(call, nil, outcomeUncacheable)
+			if code >= http.StatusInternalServerError {
+				rejectedStale = c.extendStaleOnError(stored, k.key, startGen, c.clock(), r)
+				c.endRevalidate(k, call)
+				c.finishValidation(call, rejectedStale, outcomeOriginError)
+			} else {
+				c.endRevalidate(k, call)
+				c.finishValidation(call, nil, outcomeUncacheable)
+			}
 		}
 	})
 	defer rec.releaseCapture()
 	vreq := conditionalRequest(r.Clone(vctx), stored)
-	next.ServeHTTP(rec, vreq)
+	func() {
+		defer func() {
+			if v := recover(); v != nil && (!rejected || v != http.ErrAbortHandler) {
+				panic(v)
+			}
+		}()
+		next.ServeHTTP(rec, vreq)
+	}()
 	if rec.status == 0 && rec.onHeaders != nil {
 		rec.onHeaders(http.StatusOK, rec.Header())
 	}
@@ -104,6 +119,9 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		c.fetchAndStore(w, r, next, c.clock())
 	}
 	if rejected {
+		if rejectedStale != nil && c.serve(w, r, rejectedStale, stateStale, c.clock()) {
+			return
+		}
 		fallbackAfterValidation()
 		return
 	}
@@ -135,20 +153,13 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// Validation failed. Serving the stored copy anyway is only permitted by
 		// an explicit stale-if-error window, and never when the origin said
 		// must-revalidate or proxy-revalidate.
-		if sie := c.staleOnErrorWindow(stored); sie > 0 {
-			c.recordDecision(r, "stale_if_error")
-			refreshed := stored.Clone()
-			refreshed.StaleUntil = now.Add(sie)
-			markStaleIfError(refreshed)
-			if !c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
-				c.recordDecision(r, "stale_if_error_extended")
-				c.finishValidation(call, refreshed, outcomeOriginError)
-				if c.serve(w, r, refreshed, stateStale, now) {
-					return
-				}
-				fallbackAfterValidation()
+		if refreshed := c.extendStaleOnError(stored, k.key, startGen, now, r); refreshed != nil {
+			c.finishValidation(call, refreshed, outcomeOriginError)
+			if c.serve(w, r, refreshed, stateStale, now) {
 				return
 			}
+			fallbackAfterValidation()
+			return
 		}
 		c.finishValidation(call, nil, outcomeOriginError)
 		if isRange || !rec.storable() || !writeRecorded(w, r, rec, nil, stateMiss) {
@@ -189,21 +200,37 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	}
 }
 
-func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64, onReject func()) {
+func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64, onReject func(int)) {
 	rec.onHeaders = func(code int, h http.Header) {
 		if sensitiveVaryHeader(h) {
 			c.recordDecision(original, "vary_sensitive_rejected")
 			if code < http.StatusInternalServerError {
 				c.deleteAtMostGen(key, startGen)
-				if onReject != nil {
-					onReject()
-				}
+			}
+			if onReject != nil {
+				onReject(code)
 			}
 		}
 	}
 	rec.headerCheck = func(_ int, h http.Header) bool {
 		return !sensitiveVaryHeader(h)
 	}
+}
+
+func (c *Cache) extendStaleOnError(stored *Entry, key string, startGen uint64, now time.Time, r *http.Request) *Entry {
+	sie := c.staleOnErrorWindow(stored)
+	if sie <= 0 {
+		return nil
+	}
+	c.recordDecision(r, "stale_if_error")
+	refreshed := stored.Clone()
+	refreshed.StaleUntil = now.Add(sie)
+	markStaleIfError(refreshed)
+	if c.setIfNotFenced(key, refreshed, startGen, stored.Tags) {
+		return nil
+	}
+	c.recordDecision(r, "stale_if_error_extended")
+	return refreshed
 }
 
 // awaitValidation waits for the leader's result instead of issuing a second
@@ -309,14 +336,25 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, publis
 	if r.Method != http.MethodHead {
 		if diskBody != nil {
 			_, _ = copyWithPooledBuffer(w, diskBody)
-			return true
+		} else {
+			// lgtm[go/reflected-xss] – This forwards the upstream response body
+			// unchanged, together with its own Content-Type. User input flows to the
+			// upstream application, which is responsible for sanitizing any output it
+			// generates. Buffering it to decide whether a 304 could be served instead
+			// does not make the cache the origin of the bytes.
+			_, _ = w.Write(rec.body.Bytes())
 		}
-		// lgtm[go/reflected-xss] – This forwards the upstream response body
-		// unchanged, together with its own Content-Type. User input flows to the
-		// upstream application, which is responsible for sanitizing any output it
-		// generates. Buffering it to decide whether a 304 could be served instead
-		// does not make the cache the origin of the bytes.
-		_, _ = w.Write(rec.body.Bytes())
+	}
+	declared := make(map[string]bool)
+	for _, line := range rec.committedHeader().Values("Trailer") {
+		for _, name := range parseList(line) {
+			declared[http.CanonicalHeaderKey(name)] = true
+		}
+	}
+	for name, values := range rec.Header() {
+		if declared[http.CanonicalHeaderKey(name)] || strings.HasPrefix(name, http.TrailerPrefix) {
+			h[name] = append([]string(nil), values...)
+		}
 	}
 	return true
 }

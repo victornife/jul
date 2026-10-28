@@ -1424,11 +1424,15 @@ func conditionalRequest(req *http.Request, stale *Entry) *http.Request {
 // removes the call state and releases every waiter on all paths, including a
 // panic in the downstream handler.
 func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *http.Request, next http.Handler, stale *Entry, call *revalidateCall, startGen uint64) {
+	rejected := false
 	defer func() {
 		// Ordering matters: drop the call state first so a later stale hit can
 		// start a fresh refresh the instant a waiter is released.
 		c.endRevalidate(k, call)
 		if v := recover(); v != nil {
+			if rejected && v == http.ErrAbortHandler {
+				return
+			}
 			call.finish(nil, outcomePanic, errRevalidatePanic)
 			c.observeRevalidation(outcomePanic)
 			// The panic value is unbounded, request-influenced data; log only
@@ -1448,14 +1452,20 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	opCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req = req.WithContext(opCtx)
-	rejected := false
-	c.guardRevalidationCapture(rec, origReq, k.key, startGen, func() {
+	c.guardRevalidationCapture(rec, origReq, k.key, startGen, func(code int) {
 		if !rejected {
 			rejected = true
 			cancel()
-			c.endRevalidate(k, call)
-			call.finish(nil, outcomeUncacheable, nil)
-			c.observeRevalidation(outcomeUncacheable)
+			if code >= http.StatusInternalServerError {
+				refreshed := c.extendStaleOnError(stale, k.key, startGen, c.clock(), origReq)
+				c.endRevalidate(k, call)
+				call.finish(refreshed, outcomeOriginError, nil)
+				c.observeRevalidation(outcomeOriginError)
+			} else {
+				c.endRevalidate(k, call)
+				call.finish(nil, outcomeUncacheable, nil)
+				c.observeRevalidation(outcomeUncacheable)
+			}
 		}
 	})
 	defer rec.releaseCapture()
@@ -1509,17 +1519,10 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		// Upstream error during revalidation: extend the stale-if-error window
 		// so the entry stays servable while the backend recovers. The published
 		// entry is replaced by a clone, never edited in place.
-		if sie := c.staleOnErrorWindow(stale); sie > 0 {
-			c.recordDecision(req, "stale_if_error")
-			refreshed := stale.Clone()
-			refreshed.StaleUntil = now.Add(sie)
-			markStaleIfError(refreshed)
-			if !c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
-				c.recordDecision(req, "stale_if_error_extended")
-				call.finish(refreshed, outcomeOriginError, nil)
-				c.observeRevalidation(outcomeOriginError)
-				return
-			}
+		if refreshed := c.extendStaleOnError(stale, k.key, startGen, now, req); refreshed != nil {
+			call.finish(refreshed, outcomeOriginError, nil)
+			c.observeRevalidation(outcomeOriginError)
+			return
 		}
 		call.finish(nil, outcomeOriginError, nil)
 		c.observeRevalidation(outcomeOriginError)
