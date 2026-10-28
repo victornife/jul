@@ -126,6 +126,7 @@ access.
 - **Probe trust follows the pool, not the route:** a route-level `backend_tls` override applies to that route's traffic only, since a pool may serve several routes with different overrides. `jul lint` still warns when an `https` pool with an active HTTP probe has no policy at all.
 - **Auxiliary egress is separate:** `[egress]` constrains configuration-driven auxiliary destinations; it is not backend certificate authentication and does not govern the data-plane reverse proxy.
 - **WAF request targets:** matched-rule warnings are path-only, bounded and secret-redacted. Raw queries and Coraza macro-expanded messages are omitted; metric labels contain no request target or matched value. Avoid secrets in URLs regardless of downstream or intermediary logging.
+- **Shared-cache Vary:** HTTP proxy responses varying on transformed request headers are rejected rather than matched against client-side values. This does not certify applications or FastCGI/uWSGI handlers, and permitted custom headers and URLs can still contain secrets. See [cache key and Vary](cache.md#cache-key-and-vary).
 
 ---
 

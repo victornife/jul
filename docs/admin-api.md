@@ -716,6 +716,9 @@ selected request. With opt-in decision sampling, an observed
 `response_hook_bypass` identifies a request that bypassed shared caching for an
 active response subscription; it does not predict whether future requests
 will subscribe.
+An observed `vary_proxy_rewrite_rejected` identifies a representation rejected
+because HTTP proxy request transformations prevent safe `Vary` matching; it
+does not expose request-header values.
 
 Inspection evidence timestamps with no known value are omitted (`inserted_at`,
 `validated_at`), rather than serialized as Go's zero date. Other known timestamps

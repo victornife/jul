@@ -43,15 +43,26 @@ const (
 // observability: it is unbounded, attacker-influenced data.
 var errRevalidatePanic = errors.New("cache: background revalidation panicked")
 
-var errSensitiveVaryRevalidation = errors.New("cache: sensitive Vary revalidation rejected")
+var errVaryRevalidationRejected = errors.New("cache: Vary revalidation rejected")
 
 // revalidateKey identifies an in-flight revalidation. It pairs the effective
 // storage key with the handler generation and route compatibility that own
 // the refresh, so an unrelated route or generation cannot delay or suppress it.
 type revalidateKey struct {
-	key   string
-	gen   uint64
-	scope RouteScope
+	key      string
+	gen      uint64
+	scope    RouteScope
+	baseGen  uint64
+	entryGen uint64
+}
+
+type validationVersion struct {
+	base, effective   string
+	baseGen, entryGen uint64
+}
+
+func (k revalidateKey) version() validationVersion {
+	return validationVersion{base: baseKeyOf(k.key), effective: k.key, baseGen: k.baseGen, entryGen: k.entryGen}
 }
 
 // revalidateCall is the shared state of one in-flight revalidation. Exactly one
@@ -131,16 +142,6 @@ func (c *Cache) endRevalidate(k revalidateKey, call *revalidateCall) {
 		delete(c.calls, k)
 	}
 	c.reMu.Unlock()
-}
-
-// lookupRevalidation returns the in-flight call for k, if any. It is the seam a
-// synchronous validator uses to wait on an existing refresh instead of issuing a
-// duplicate origin request.
-func (c *Cache) lookupRevalidation(k revalidateKey) (*revalidateCall, bool) {
-	c.reMu.Lock()
-	defer c.reMu.Unlock()
-	call, ok := c.calls[k]
-	return call, ok
 }
 
 // inflightRevalidations reports how many revalidation calls are registered. It

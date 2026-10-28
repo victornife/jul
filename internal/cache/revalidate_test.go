@@ -351,7 +351,7 @@ func TestRevalidationWaitersReleasedOnEveryOutcome(t *testing.T) {
 			h.ServeHTTP(httptest.NewRecorder(), r)
 
 			<-entered
-			call, ok := c.lookupRevalidation(revalidateKey{key: key(r), gen: 1})
+			call, ok := lookupUniqueRevalidation(c, revalidateKey{key: key(r), gen: 1})
 			if !ok {
 				t.Fatal("no revalidation call registered for the in-flight refresh")
 			}

@@ -981,6 +981,27 @@ func setCanonicalXForwardedWithVars(pr *httputil.ProxyRequest, vars *proxyVarCon
 // widely deployed pre-standard spelling and is stripped on the same terms.
 var certAssertionHeaders = []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"}
 
+// ProxyTransformedRequestHeaders reports fields that cannot be matched against
+// the incoming request after ReverseProxy, Rewrite, and Transport processing.
+// Connection-nominated fields are request-specific and are handled separately.
+func ProxyTransformedRequestHeaders(loc config.LocationConfig, limit int) ([]string, bool) {
+	names := []string{
+		"Host", "User-Agent", "Content-Length", "Accept-Encoding",
+		"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+		"Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
+		"Traceparent", "Tracestate", "Baggage",
+	}
+	names = append(names, certAssertionHeaders...)
+	if len(names) > limit || len(loc.Headers) > limit-len(names) {
+		return names, false
+	}
+	for name := range loc.Headers {
+		names = append(names, http.CanonicalHeaderKey(name))
+	}
+	return names, true
+}
+
 // setClientCertHeadersWithVars sanitizes the certificate-assertion channel and,
 // when the listener asks for it, emits Jul's own assertion.
 //

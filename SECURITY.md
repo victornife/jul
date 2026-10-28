@@ -210,6 +210,14 @@ states the boundary and relationship to #644.
 
 The unreleased cache inspector requires an explicit `cache:inspect` grant; built-in viewer/operator/auditor permissions are unchanged. Existing wildcard and legacy-token authority remain in effect. Every page reauthenticates and binds principal, scope and live authorization/configuration context. Safe output omits query/Vary values, bodies and credentials; malformed Vary names are filtered as unavailable metadata. Opt-in decision samples are bounded, memory-only and expiring. See [retention and threat boundaries](docs/cache.md#bounded-cache-inspection).
 
+The HTTP reverse proxy rejects shared-cache representations that vary on
+request fields it transforms before the origin. This protects matching across
+that transformation; it does not prove that an origin supplied correct cache
+directives, that another handler type has equivalent protection, or that
+arbitrary headers and URLs contain no secrets. See
+[cache key and Vary](docs/cache.md#cache-key-and-vary) for compatibility and
+upgrade consequences.
+
 Inspection-only Console access is a limited projection: `cache:inspect` alone
 returns only an `inspection_only` view marker from the Traffic entry endpoint.
 It does not read or expose editable configuration, configured-host lists, raw

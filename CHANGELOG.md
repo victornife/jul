@@ -11,6 +11,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Reject HTTP proxy responses whose `Vary` names a request field rewritten or
+  removed before reaching the origin, including configured and generated
+  fields (#623). This prevents matching against a different client-visible
+  value, but can reduce cache hits, including for `Vary: Accept-Encoding`.
+  Existing affected entries are ineligible; see the upgrade guidance in
+  [cache documentation](docs/cache.md#cache-key-and-vary).
+
 - Prevent cache reuse across incompatible route owners and bypass shared
   caching for active ABI v2 response-hook subscriptions (#623). Legacy and
   pre-restart entries without current ownership miss; routes without durable

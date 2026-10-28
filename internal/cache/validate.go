@@ -26,12 +26,12 @@ import (
 //
 // Deduplication reuses #131's call state, so a burst of concurrent validators
 // for one (effective key, generation) produces exactly one origin request.
-func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, effKey string, now time.Time) {
+func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, version validationVersion, now time.Time, startGen uint64) {
 	gen, _ := background.Generation(r.Context())
-	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r)}
+	k := revalidateKey{key: version.effective, gen: gen, scope: scopeForRequest(r), baseGen: version.baseGen, entryGen: version.entryGen}
 
 	if call, leader := c.beginRevalidate(k, stored.Tags); leader {
-		c.leadValidation(w, r, next, stored, k, call)
+		c.leadValidation(w, r, next, stored, k, call, startGen)
 	} else {
 		c.awaitValidation(w, r, next, call)
 	}
@@ -45,7 +45,7 @@ func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next ht
 // generation's bounded operation deadline for the waiters that remain. Without a
 // lease there is no owner for detached work, so the request context is used and
 // this client simply is the leader.
-func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, k revalidateKey, call *revalidateCall) {
+func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, k revalidateKey, call *revalidateCall, startGen uint64) {
 	vctx := r.Context()
 	if ctx, release, ok := background.Acquire(r.Context(), background.OpCacheRevalidate); ok {
 		defer release()
@@ -73,27 +73,24 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	}()
 
 	pol := c.Policy()
-	opID, startGen := c.beginInflightOriginOp()
-	defer c.endInflightOriginOp(opID)
-
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, r)
 	rejected := false
 	var rejectedStale *Entry
-	c.guardRevalidationCapture(rec, r, k.key, startGen, func(code int) {
+	c.guardRevalidationCapture(rec, r, k.key, startGen, func(code int, reason string) {
 		if !rejected {
 			rejected = true
 			cancelValidation()
 			if code >= http.StatusInternalServerError {
-				if r.Context().Err() == nil {
+				if reason == "vary_sensitive_rejected" && r.Context().Err() == nil {
 					rejectedStale = c.transientStaleOnError(stored, k.key, startGen, c.clock(), r)
 				}
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeOriginError, errSensitiveVaryRevalidation)
+				call.finish(nil, outcomeOriginError, errVaryRevalidationRejected)
 				c.observeRevalidation(outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeUncacheable, errSensitiveVaryRevalidation)
+				call.finish(nil, outcomeUncacheable, errVaryRevalidationRejected)
 				c.observeRevalidation(outcomeUncacheable)
 			}
 		}
@@ -143,7 +140,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			fallbackAfterValidation()
 			return
 		}
-		if c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
+		if c.setValidationIfCurrent(k.key, refreshed, startGen, stored.Tags, k.version()) {
 			c.delOneIfGenAtMost(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			fallbackAfterValidation()
@@ -158,7 +155,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// Validation failed. Serving the stored copy anyway is only permitted by
 		// an explicit stale-if-error window, and never when the origin said
 		// must-revalidate or proxy-revalidate.
-		if refreshed := c.extendStaleOnError(stored, k.key, startGen, now, r); refreshed != nil {
+		if refreshed := c.extendStaleOnError(stored, k.key, startGen, now, r, k.version()); refreshed != nil {
 			c.finishValidation(call, refreshed, outcomeOriginError)
 			if c.serve(w, r, refreshed, stateStale, now) {
 				return
@@ -183,7 +180,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	default:
 		e := c.buildEntryFromCapture(vreq, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGenAndTags(key(vreq), vreq, e, rec.diskStream, startGen, true, stored.Tags) {
+		version := k.version()
+		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGenAndTags(key(vreq), vreq, e, rec.diskStream, startGen, true, stored.Tags, &version) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
@@ -205,16 +203,16 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	}
 }
 
-func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64, onReject func(int)) {
+func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64, onReject func(int, string)) {
 	rec.onHeaders = func(code int, h http.Header) {
-		if sensitiveVaryHeader(h) {
-			c.recordDecision(original, "vary_sensitive_rejected")
+		if reason := varyRejectionHeader(original, nil, h); reason != "" {
+			c.recordDecision(original, reason)
 			var removed *keyGenState
 			if code < http.StatusInternalServerError {
 				removed = c.markOneRemovedAtMostGen(key, startGen)
 			}
 			if onReject != nil {
-				onReject(code)
+				onReject(code, reason)
 			}
 			if code < http.StatusInternalServerError {
 				c.finishOneRemoval(key, startGen, removed)
@@ -222,11 +220,11 @@ func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, 
 		}
 	}
 	rec.headerCheck = func(_ int, h http.Header) bool {
-		return !sensitiveVaryHeader(h)
+		return varyRejectionHeader(original, nil, h) == ""
 	}
 }
 
-func (c *Cache) extendStaleOnError(stored *Entry, key string, startGen uint64, now time.Time, r *http.Request) *Entry {
+func (c *Cache) extendStaleOnError(stored *Entry, key string, startGen uint64, now time.Time, r *http.Request, version validationVersion) *Entry {
 	sie := c.staleOnErrorWindow(stored)
 	if sie <= 0 {
 		return nil
@@ -235,7 +233,7 @@ func (c *Cache) extendStaleOnError(stored *Entry, key string, startGen uint64, n
 	refreshed := stored.Clone()
 	refreshed.StaleUntil = now.Add(sie)
 	markStaleIfError(refreshed)
-	if c.setIfNotFenced(key, refreshed, startGen, stored.Tags) {
+	if c.setValidationIfCurrent(key, refreshed, startGen, stored.Tags, version) {
 		return nil
 	}
 	c.recordDecision(r, "stale_if_error_extended")
@@ -278,7 +276,7 @@ func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next htt
 		// call state belongs to the leader.
 		return
 	}
-	if errors.Is(err, errSensitiveVaryRevalidation) {
+	if errors.Is(err, errVaryRevalidationRejected) {
 		if _, isRange := rangeSpecFromRequest(r); isRange {
 			c.observeRange(rangeOutcomeFallback)
 		}
@@ -315,7 +313,7 @@ func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next htt
 // freshness question is already settled — the origin was contacted during this
 // request — so only the keying and the shared-cache authorization rule remain.
 func validatedReusable(e *Entry, r *http.Request) bool {
-	if e.IsVaryStub || entryScopeMismatch(e, r, nil) != "" || sensitiveVaryEntry(e) || !e.matchesVary(r) {
+	if e.IsVaryStub || entryScopeMismatch(e, r, nil) != "" || varyRejectionEntry(r, nil, e) != "" || !e.matchesVary(r) {
 		return false
 	}
 	return !hasHeaderField(r.Header, "Authorization") || e.SharedAuthReuse

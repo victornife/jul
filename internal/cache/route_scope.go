@@ -20,6 +20,7 @@ type RouteCompatibility [16]byte
 type RouteScope struct {
 	Owner         RouteOwner
 	Compatibility RouteCompatibility
+	proxyVary     *proxyVaryPolicy
 }
 
 type routeScopeKey struct{}
@@ -81,7 +82,7 @@ func scopeForRequest(r *http.Request) RouteScope {
 	if scope == nil {
 		return RouteScope{}
 	}
-	return *scope
+	return RouteScope{Owner: scope.Owner, Compatibility: scope.Compatibility}
 }
 
 func entryScopeMismatch(e *Entry, r *http.Request, scope *RouteScope) string {

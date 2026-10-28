@@ -890,6 +890,9 @@ which route a request will select. Its recent decision list can show the
 server-owned `response_hook_bypass` reason when opt-in sampling observes an
 active response subscription; missing samples are not proof that no bypass
 occurred. See [route ownership and response hooks](cache.md#route-ownership-and-response-hooks).
+The same recent-decision list can report `vary_proxy_rewrite_rejected` for an
+HTTP proxy representation whose `Vary` cannot safely match transformed request
+fields; it does not show the request-header values.
 
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,

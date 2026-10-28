@@ -443,11 +443,16 @@ func (c *Cache) hasStoredKey(key string) bool {
 }
 
 func (c *Cache) get(key string) (*Entry, bool) {
+	e, _, ok := c.getWithGen(key)
+	return e, ok
+}
+
+func (c *Cache) getWithGen(key string) (*Entry, uint64, bool) {
 	if e, mgen, ok := c.mem.getWithGen(key); ok {
 		if lf := c.incompleteFenceGen.Load(); lf > 0 && mgen <= lf && c.isResidentEntryFenced(mgen, key, e) {
 			c.delOneIfGenAtMost(key, mgen)
 		} else {
-			return e, true
+			return e, mgen, true
 		}
 	}
 	if c.disk != nil {
@@ -458,7 +463,7 @@ func (c *Cache) get(key string) (*Entry, bool) {
 		e, diskGen, ok := c.disk.getWithMemCapObserved(key, memCap, func() { c.recordKeyDecision(key, "disk_read_failed") })
 		if !ok {
 			c.finishKeyOp(st)
-			return nil, false
+			return nil, 0, false
 		}
 		c.genMu.Lock()
 		curSt := c.keyGen[key]
@@ -482,7 +487,7 @@ func (c *Cache) get(key string) (*Entry, bool) {
 				c.delOneIfGenAtMost(key, diskGen)
 			}
 			c.finishKeyOp(st)
-			return c.mem.get(key)
+			return c.mem.getWithGen(key)
 		}
 		var victims []*memItem
 		if e.diskBody == nil {
@@ -496,9 +501,9 @@ func (c *Cache) get(key string) (*Entry, bool) {
 		c.genMu.Unlock()
 		c.mem.flushVictims(victims)
 		c.finishKeyOp(st)
-		return e, true
+		return e, diskGen, true
 	}
-	return nil, false
+	return nil, 0, false
 }
 
 func (c *Cache) set(key string, e *Entry) {
@@ -509,8 +514,8 @@ func (c *Cache) setWithResult(key string, e *Entry) bool {
 	return c.setWithStartGen(key, e, 0, false)
 }
 
-func (c *Cache) setIfNotFenced(key string, e *Entry, startGen uint64, extraTags []string) (fenced bool) {
-	_, fenced, _ = c.setCoreWithStartGen(key, e, startGen, true, extraTags)
+func (c *Cache) setValidationIfCurrent(key string, e *Entry, startGen uint64, extraTags []string, version validationVersion) (fenced bool) {
+	_, fenced, _ = c.setCoreWithPreconditions(key, e, startGen, true, extraTags, &version)
 	return fenced
 }
 
@@ -520,10 +525,18 @@ func (c *Cache) setWithStartGen(key string, e *Entry, startGen uint64, hasStartG
 }
 
 func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool, extraTags []string) (stored, fenced bool, publishedGen uint64) {
+	return c.setCoreWithPreconditions(key, e, startGen, hasStartGen, extraTags, nil)
+}
+
+func (c *Cache) setCoreWithPreconditions(key string, e *Entry, startGen uint64, hasStartGen bool, extraTags []string, version *validationVersion) (stored, fenced bool, publishedGen uint64) {
 	if sensitiveVaryEntry(e) {
 		return false, true, 0
 	}
 	c.genMu.Lock()
+	if version != nil && !c.isValidationCurrentLocked(*version) {
+		c.genMu.Unlock()
+		return false, true, 0
+	}
 	if e != nil && !e.IsVaryStub {
 		curPol := c.Policy()
 		if e.tagPolicyTracked {
@@ -757,40 +770,52 @@ func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
 }
 
 func (c *Cache) lookupWithOwner(base string, r *http.Request, scope *RouteScope) (*Entry, string, bool) {
+	e, effective, _, _, ok := c.lookupWithOwnerAndGen(base, r, scope)
+	return e, effective, ok
+}
+
+func (c *Cache) lookupWithOwnerAndGen(base string, r *http.Request, scope *RouteScope) (*Entry, string, uint64, uint64, bool) {
 	startGen := c.genSeq.Load()
-	e, ok := c.get(base)
+	e, baseGen, ok := c.getWithGen(base)
 	if !ok {
-		return nil, base, false
+		return nil, base, 0, 0, false
 	}
-	if sensitiveVaryEntry(e) {
-		c.recordDecision(r, "vary_sensitive_rejected")
-		c.cleanupSensitiveVary(base, e, startGen)
-		return nil, base, false
+	if reason := varyRejectionEntry(r, scope, e); reason != "" {
+		c.recordDecision(r, reason)
+		if reason == "vary_sensitive_rejected" {
+			c.cleanupSensitiveVary(base, e, startGen)
+		}
+		return nil, base, 0, 0, false
 	}
 	if reason := entryScopeMismatch(e, r, scope); reason != "" {
 		c.recordDecision(r, reason)
-		return nil, base, false
+		return nil, base, 0, 0, false
 	}
 	if e.IsVaryStub {
 		vk := variantKey(base, e.Vary, r)
 		if !e.ownsVariant(vk) {
-			return nil, vk, false
+			return nil, vk, 0, 0, false
 		}
-		e, ok = c.get(vk)
-		if ok && sensitiveVaryEntry(e) {
-			c.recordDecision(r, "vary_sensitive_rejected")
-			c.delOneIfGenAtMost(vk, startGen)
-			return nil, base, false
+		var entryGen uint64
+		e, entryGen, ok = c.getWithGen(vk)
+		if ok {
+			if reason := varyRejectionEntry(r, scope, e); reason != "" {
+				c.recordDecision(r, reason)
+				if reason == "vary_sensitive_rejected" {
+					c.delOneIfGenAtMost(vk, startGen)
+				}
+				return nil, base, 0, 0, false
+			}
 		}
 		if ok {
 			if reason := entryScopeMismatch(e, r, scope); reason != "" {
 				c.recordDecision(r, reason)
-				return nil, base, false
+				return nil, base, 0, 0, false
 			}
 		}
-		return e, vk, ok
+		return e, vk, baseGen, entryGen, ok
 	}
-	return e, base, true
+	return e, base, baseGen, baseGen, true
 }
 
 // Cleanup is opportunistic and generation-bounded: an entry published after
@@ -830,21 +855,25 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 // The returned generation belongs to this publication, not a later replacement,
 // and is the upper bound for any membership-publication rollback.
 func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (bool, uint64) {
-	return c.publishCapturedWithStartGenAndTags(k, e, stream, startGen, hasStartGen, nil)
+	return c.publishCapturedWithStartGenAndTags(k, e, stream, startGen, hasStartGen, nil, nil)
 }
 
-func (c *Cache) publishCapturedWithStartGenAndTags(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool, extraTags []string) (bool, uint64) {
+func (c *Cache) publishCapturedWithStartGenAndTags(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool, extraTags []string, version *validationVersion) (bool, uint64) {
 	if sensitiveVaryEntry(e) {
 		return false, 0
 	}
 	if stream == nil {
-		stored, _, gen := c.setCoreWithStartGen(k, e, startGen, hasStartGen, extraTags)
+		stored, _, gen := c.setCoreWithPreconditions(k, e, startGen, hasStartGen, extraTags, version)
 		return stored, gen
 	}
 	if c.disk == nil {
 		return false, 0
 	}
 	c.genMu.Lock()
+	if version != nil && !c.isValidationCurrentLocked(*version) {
+		c.genMu.Unlock()
+		return false, 0
+	}
 	if e != nil && !e.IsVaryStub {
 		curPol := c.Policy()
 		if e.tagPolicyTracked {
@@ -916,10 +945,10 @@ func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *di
 }
 
 func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (stored bool) {
-	return c.storeCapturedWithStartGenAndTags(base, r, e, stream, startGen, hasStartGen, nil)
+	return c.storeCapturedWithStartGenAndTags(base, r, e, stream, startGen, hasStartGen, nil, nil)
 }
 
-func (c *Cache) storeCapturedWithStartGenAndTags(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool, extraTags []string) (stored bool) {
+func (c *Cache) storeCapturedWithStartGenAndTags(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool, extraTags []string, version *validationVersion) (stored bool) {
 	defer func() {
 		if stored {
 			c.recordKeyDecision(base, "response_stored")
@@ -927,12 +956,12 @@ func (c *Cache) storeCapturedWithStartGenAndTags(base string, r *http.Request, e
 			c.recordKeyDecision(base, "publication_failed_or_fenced")
 		}
 	}()
-	if sensitiveVaryEntry(e) {
-		c.recordDecision(r, "vary_sensitive_rejected")
+	if reason := varyRejectionEntry(r, nil, e); reason != "" {
+		c.recordDecision(r, reason)
 		return false
 	}
 	if len(e.Vary) == 0 {
-		stored, _ := c.publishCapturedWithStartGenAndTags(base, e, stream, startGen, hasStartGen, extraTags)
+		stored, _ := c.publishCapturedWithStartGenAndTags(base, e, stream, startGen, hasStartGen, extraTags, version)
 		return stored
 	}
 	vk := variantKey(base, e.Vary, r)
@@ -950,7 +979,7 @@ func (c *Cache) storeCapturedWithStartGenAndTags(base string, r *http.Request, e
 	stub := c.stubFor(base, e.Vary, e.routeOwner, e.routeCompatibility, deleteGen)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
-	stored, variantGen := c.publishCapturedWithStartGenAndTags(vk, e, stream, startGen, hasStartGen, extraTags)
+	stored, variantGen := c.publishCapturedWithStartGenAndTags(vk, e, stream, startGen, hasStartGen, extraTags, version)
 	if !stored {
 		return false
 	}
@@ -966,7 +995,12 @@ func (c *Cache) storeCapturedWithStartGenAndTags(base string, r *http.Request, e
 	}
 	c.genMu.Unlock()
 	stub.Tags = mergeTagSets(varTagSets...)
-	stubStored, _, stubGen := c.setCoreWithStartGen(base, stub, startGen, hasStartGen, extraTags)
+	if version != nil && vk == version.effective {
+		nextVersion := *version
+		nextVersion.entryGen = variantGen
+		version = &nextVersion
+	}
+	stubStored, _, stubGen := c.setCoreWithPreconditions(base, stub, startGen, hasStartGen, extraTags, version)
 	if !stubStored {
 		c.delOneIfGenAtMost(vk, variantGen)
 		return false
@@ -1090,6 +1124,21 @@ func (c *Cache) HandlerForRoute(next http.Handler, scope RouteScope, policy Cach
 	return c.handler(next, &scope, &policy), nil
 }
 
+// HandlerForProxyRoute prevents reuse when the proxy transforms a Vary field.
+func (c *Cache) HandlerForProxyRoute(next http.Handler, scope RouteScope, policy CachePolicy, transformed []string, complete bool) (http.Handler, error) {
+	if !c.validRouteOwner(scope.Owner) || scope.Compatibility == (RouteCompatibility{}) {
+		return nil, errors.New("cache: route ownership or compatibility is unavailable")
+	}
+	policy = reusePolicy(policy)
+	varyPolicy := newProxyVaryPolicy(transformed)
+	varyPolicy.reject = varyPolicy.reject || !complete
+	if varyPolicy.reject {
+		c.log.Warn("cache: proxy Vary policy is incomplete; varied responses will not be shared")
+	}
+	scope.proxyVary = varyPolicy
+	return c.handler(next, &scope, &policy), nil
+}
+
 func (c *Cache) handler(next http.Handler, scope *RouteScope, policy *CachePolicy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -1110,8 +1159,8 @@ func (c *Cache) handler(next http.Handler, scope *RouteScope, policy *CachePolic
 			c.bypass(w, r, next, span)
 			return
 		}
-		if sensitiveVaryHeader(w.Header()) {
-			c.recordDecision(r, "vary_sensitive_rejected")
+		if reason := varyRejectionHeader(r, scope, w.Header()); reason != "" {
+			c.recordDecision(r, reason)
 			c.bypass(w, r, next, span)
 			return
 		}
@@ -1183,7 +1232,8 @@ func (c *Cache) serveCachedIfReusableWithOwner(w http.ResponseWriter, r *http.Re
 	for attempt := 0; attempt < 2; attempt++ {
 		var e *Entry
 		var ok bool
-		e, effKey, ok = c.lookupWithOwner(base, r, scope)
+		var baseGen, entryGen uint64
+		e, effKey, baseGen, entryGen, ok = c.lookupWithOwnerAndGen(base, r, scope)
 		if !ok || !e.matchesVary(r) {
 			return effKey, false
 		}
@@ -1203,13 +1253,21 @@ func (c *Cache) serveCachedIfReusableWithOwner(w http.ResponseWriter, r *http.Re
 			span.End()
 			// Start the background refresh before returning, so the lease
 			// is taken while this request still holds its generation.
-			c.startRevalidate(effKey, withRouteScope(r, scope), next, e)
+			c.startRevalidate(base, effKey, baseGen, entryGen, withRouteScope(r, scope), next, e)
 			return effKey, true
 		case reuseValidate:
-			c.recordDecision(r, "revalidation_required")
-			span.SetString("cache.status", "VALIDATE")
-			span.End()
-			c.validateAndServe(w, withRouteScope(r, scope), next, e, effKey, now)
+			version := validationVersion{base: base, effective: effKey, baseGen: baseGen, entryGen: entryGen}
+			opID, startGen, admitted := c.beginValidationIfCurrent(version)
+			if !admitted {
+				continue
+			}
+			func() {
+				defer c.endInflightOriginOp(opID)
+				c.recordDecision(r, "revalidation_required")
+				span.SetString("cache.status", "VALIDATE")
+				span.End()
+				c.validateAndServe(w, withRouteScope(r, scope), next, e, version, now, startGen)
+			}()
 			return effKey, true
 		default:
 			if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
@@ -1351,8 +1409,8 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	cw.onDecision = func(reason string) { c.recordDecision(r, reason) }
 	cw.acct.onSkip = func(reason string) { c.captureSkipped(reason); c.recordDecision(r, "capture_"+reason) }
 	cw.headerCheck = func(code int, h http.Header) bool {
-		if sensitiveVaryHeader(w.Header()) {
-			c.recordDecision(r, "vary_sensitive_rejected")
+		if reason := varyRejectionHeader(r, nil, w.Header()); reason != "" {
+			c.recordDecision(r, reason)
 			return false
 		}
 		if pol.TagHeaderCount > 0 {
@@ -1426,7 +1484,7 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 //  3. it clones the request onto the leased context here, not in the goroutine,
 //     because the originating *http.Request must not be touched after
 //     ServeHTTP returns.
-func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handler, stale *Entry) {
+func (c *Cache) startRevalidate(base, effKey string, baseGen, entryGen uint64, r *http.Request, next http.Handler, stale *Entry) {
 	ctx, release, ok := background.Acquire(r.Context(), background.OpCacheRevalidate)
 	if !ok {
 		c.observeRevalidation(outcomeNoLease)
@@ -1435,10 +1493,17 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 		return
 	}
 	gen, _ := background.Generation(r.Context())
-	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r)}
+	version := validationVersion{base: base, effective: effKey, baseGen: baseGen, entryGen: entryGen}
+	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r), baseGen: baseGen, entryGen: entryGen}
 
+	opID, startGen, admitted := c.beginValidationIfCurrent(version)
+	if !admitted {
+		release()
+		return
+	}
 	call, leader := c.beginRevalidate(k, stale.Tags)
 	if !leader {
+		c.endInflightOriginOp(opID)
 		release()
 		c.observeRevalidation(outcomeDeduplicated)
 		return
@@ -1447,8 +1512,6 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 	ctx = carryRouteScope(ctx, r)
 	origReq := r.Clone(ctx)
 	req := conditionalRequest(r.Clone(ctx), stale)
-	opID, startGen := c.beginInflightOriginOp()
-
 	go func() {
 		defer release()
 		defer c.endInflightOriginOp(opID)
@@ -1514,23 +1577,23 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	opCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req = req.WithContext(opCtx)
-	c.guardRevalidationCapture(rec, origReq, k.key, startGen, func(code int) {
+	c.guardRevalidationCapture(rec, origReq, k.key, startGen, func(code int, _ string) {
 		if !rejected {
 			rejected = true
 			cancel()
 			if err := ctx.Err(); err != nil {
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeCanceled, errors.Join(err, errSensitiveVaryRevalidation))
+				call.finish(nil, outcomeCanceled, errors.Join(err, errVaryRevalidationRejected))
 				c.observeRevalidation(outcomeCanceled)
 				return
 			}
 			if code >= http.StatusInternalServerError {
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeOriginError, errSensitiveVaryRevalidation)
+				call.finish(nil, outcomeOriginError, errVaryRevalidationRejected)
 				c.observeRevalidation(outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeUncacheable, errSensitiveVaryRevalidation)
+				call.finish(nil, outcomeUncacheable, errVaryRevalidationRejected)
 				c.observeRevalidation(outcomeUncacheable)
 			}
 		}
@@ -1566,7 +1629,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		}
 		switch action {
 		case mergeReplace:
-			if c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
+			if c.setValidationIfCurrent(k.key, refreshed, startGen, stale.Tags, k.version()) {
 				c.delOneIfGenAtMost(k.key, startGen)
 				call.finish(nil, outcomeUncacheable, nil)
 				c.observeRevalidation(outcomeUncacheable)
@@ -1586,7 +1649,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		// Upstream error during revalidation: extend the stale-if-error window
 		// so the entry stays servable while the backend recovers. The published
 		// entry is replaced by a clone, never edited in place.
-		if refreshed := c.extendStaleOnError(stale, k.key, startGen, now, req); refreshed != nil {
+		if refreshed := c.extendStaleOnError(stale, k.key, startGen, now, req, k.version()); refreshed != nil {
 			call.finish(refreshed, outcomeOriginError, nil)
 			c.observeRevalidation(outcomeOriginError)
 			return
@@ -1601,7 +1664,8 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	default:
 		e := c.buildEntryFromCapture(req, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags) {
+		version := k.version()
+		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags, &version) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
@@ -1649,8 +1713,8 @@ func (c *Cache) storageReason(r *http.Request, status int, h http.Header, now ti
 	if hasHeaderField(r.Header, "Authorization") && !p.sharedAuthStorable() {
 		return "auth_storage_restricted"
 	}
-	if sensitiveVaryHeader(h) {
-		return "vary_sensitive_rejected"
+	if reason := varyRejectionHeader(r, nil, h); reason != "" {
+		return reason
 	}
 	for _, name := range varyFields(h) {
 		if name == "*" {
@@ -1665,8 +1729,8 @@ func (c *Cache) buildEntryWithPolicy(r *http.Request, status int, h http.Header,
 }
 
 func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header, body []byte, bodyLen int64, streamBacked bool, now time.Time, pol CachePolicy) *Entry {
-	if sensitiveVaryHeader(h) {
-		c.recordDecision(r, "vary_sensitive_rejected")
+	if reason := varyRejectionHeader(r, nil, h); reason != "" {
+		c.recordDecision(r, reason)
 		return nil
 	}
 	if r.Method != http.MethodHead {

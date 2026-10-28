@@ -194,6 +194,10 @@ func (c *Cache) beginInflightOriginOp() (opID, startGen uint64) {
 	}
 	c.genMu.Lock()
 	defer c.genMu.Unlock()
+	return c.beginInflightOriginOpLocked()
+}
+
+func (c *Cache) beginInflightOriginOpLocked() (opID, startGen uint64) {
 	if c.inflightOps == nil {
 		c.inflightOps = make(map[uint64]uint64)
 	}
@@ -202,6 +206,23 @@ func (c *Cache) beginInflightOriginOp() (opID, startGen uint64) {
 	startGen = c.genSeq.Add(1)
 	c.inflightOps[opID] = startGen
 	return opID, startGen
+}
+
+func (c *Cache) isValidationCurrentLocked(version validationVersion) bool {
+	baseState, baseOK := c.keyGen[version.base]
+	entryState, entryOK := c.keyGen[version.effective]
+	return baseOK && entryOK && baseState.gen == version.baseGen && entryState.gen == version.entryGen &&
+		c.isGenCurrentLocked(version.base, version.baseGen) && c.isGenCurrentLocked(version.effective, version.entryGen)
+}
+
+func (c *Cache) beginValidationIfCurrent(version validationVersion) (opID, startGen uint64, ok bool) {
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
+	if !c.isValidationCurrentLocked(version) {
+		return 0, 0, false
+	}
+	opID, startGen = c.beginInflightOriginOpLocked()
+	return opID, startGen, true
 }
 
 func (c *Cache) endInflightOriginOp(opID uint64) {
@@ -1159,6 +1180,57 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 	return matched, tagUnknown
 }
 
+func (c *Cache) inflightTagResourcesLocked(sel NormalizedSelector, limit int) (map[string]struct{}, bool) {
+	if sel.Kind != SelectorTag {
+		return nil, false
+	}
+	var matched map[string]struct{}
+	c.reMu.Lock()
+	defer c.reMu.Unlock()
+	for rk, call := range c.calls {
+		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(rk.key))
+		if !ok {
+			continue
+		}
+		resKey := resourceKeyOf(host, reqURI)
+		if sel.MatchesResource(host, reqURI, mergeBaseTagSets(c.baseIndexedTags[resKey], call.tags)) {
+			if matched == nil {
+				matched = make(map[string]struct{})
+			}
+			if _, exists := matched[resKey]; !exists && limit > 0 && len(matched) >= limit {
+				return matched, true
+			}
+			matched[resKey] = struct{}{}
+		}
+	}
+	return matched, false
+}
+
+func (c *Cache) candidateBaseKeysWithInflightLocked(sel NormalizedSelector, maxScan int, inflight map[string]struct{}) (keys []string, scanned int, truncated bool, total int) {
+	keys, scanned, truncated, total = c.candidateBaseKeysLocked(sel, maxScan)
+	if len(inflight) == 0 {
+		return keys, scanned, truncated, total
+	}
+	extra, extraTruncated, extraTotal := c.resourceBaseKeysLocked(resourceIDsOf(inflight), maxScan)
+	seen := make(map[string]struct{}, len(keys)+len(extra))
+	for _, k := range keys {
+		seen[k] = struct{}{}
+	}
+	for _, k := range extra {
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		if maxScan > 0 && len(keys) >= maxScan {
+			truncated = true
+			break
+		}
+		keys = append(keys, k)
+		seen[k] = struct{}{}
+	}
+	sort.Strings(keys)
+	return keys, scanned + extraTotal, truncated || extraTruncated, total + extraTotal
+}
+
 // PreviewScope performs a bounded, non-destructive dry-run evaluation of sel
 // against the live cache catalog (ADR 0027 §5.2).
 func (c *Cache) PreviewScope(sel NormalizedSelector, opts PreviewOptions) PurgePreview {
@@ -1206,8 +1278,9 @@ func (c *Cache) previewScope(ctx context.Context, sel NormalizedSelector, opts P
 		TagIngestionEnabled: pol.TagHeaderCount > 0,
 	}
 
-	candidates, _, candTrunc, _ := c.candidateBaseKeysLocked(sel, scanLimit)
-	if candTrunc {
+	inflightResources, inflightTruncated := c.inflightTagResourcesLocked(sel, scanLimit)
+	candidates, _, candTrunc, _ := c.candidateBaseKeysWithInflightLocked(sel, scanLimit, inflightResources)
+	if candTrunc || inflightTruncated {
 		out.Truncated = true
 		out.CountAccuracy = "lower_bound_truncated"
 	}
@@ -1253,7 +1326,8 @@ func (c *Cache) previewScope(ctx context.Context, sel NormalizedSelector, opts P
 		if c.baseIndexedTags != nil {
 			tags = c.baseIndexedTags[resKey]
 		}
-		if (details || sel.Kind != SelectorKey) && !sel.MatchesResource(host, reqURI, tags) {
+		_, matchedInflight := inflightResources[resKey]
+		if (details || sel.Kind != SelectorKey) && !matchedInflight && !sel.MatchesResource(host, reqURI, tags) {
 			continue
 		}
 		if sel.Kind == SelectorKey && bk != baseKeyOf(sel.Key) {
@@ -1364,15 +1438,15 @@ func (c *Cache) previewScope(ctx context.Context, sel NormalizedSelector, opts P
 	return out, ctx.Err()
 }
 
-func (c *Cache) snapshotMatchedResourcesLocked(sel NormalizedSelector) map[string]struct{} {
+func (c *Cache) snapshotMatchedResourcesLocked(sel NormalizedSelector) (map[string]struct{}, error) {
 	if sel.Kind == SelectorAll || sel.Kind == SelectorKey {
-		return nil
+		return nil, nil
 	}
-	candidates, _, _, _ := c.candidateBaseKeysLocked(sel, MaxPurgeScanKeys)
-	if len(candidates) == 0 {
-		return nil
+	matched, inflightTruncated := c.inflightTagResourcesLocked(sel, MaxPurgeScanKeys)
+	candidates, _, candTrunc, _ := c.candidateBaseKeysWithInflightLocked(sel, MaxPurgeScanKeys, matched)
+	if inflightTruncated || candTrunc {
+		return nil, fmt.Errorf("cache selector scope exceeds maximum scan bound of %d; use kind = 'host' or 'all'", MaxPurgeScanKeys)
 	}
-	var matched map[string]struct{}
 	for _, bk := range candidates {
 		_, host, reqURI, _, ok := parseBaseKeyParts(bk)
 		if !ok {
@@ -1390,14 +1464,17 @@ func (c *Cache) snapshotMatchedResourcesLocked(sel NormalizedSelector) map[strin
 			matched[resKey] = struct{}{}
 		}
 	}
-	return matched
+	return matched, nil
 }
 
 // BeginSelectorFence installs an active selector fence at a new monotonic
 // generation and returns the fence sequence and a completion function
 // (reusable contract for #624, ADR 0027 §6.2).
 func (c *Cache) BeginSelectorFence(sel NormalizedSelector) (fenceGen uint64, complete func()) {
-	fenceGen, complete, _ = c.BeginSelectorFenceWithError(sel)
+	fenceGen, complete, err := c.BeginSelectorFenceWithError(sel)
+	if err != nil && c != nil {
+		c.log.Error("cache: failed to begin selector fence")
+	}
 	return fenceGen, complete
 }
 
@@ -1410,8 +1487,12 @@ func (c *Cache) BeginSelectorFenceWithError(sel NormalizedSelector) (fenceGen ui
 		return 0, func() {}, nil
 	}
 	c.genMu.Lock()
+	matchedRes, snapshotErr := c.snapshotMatchedResourcesLocked(sel)
+	if snapshotErr != nil {
+		c.genMu.Unlock()
+		return 0, func() {}, snapshotErr
+	}
 	fenceGen = c.genSeq.Add(1)
-	matchedRes := c.snapshotMatchedResourcesLocked(sel)
 	c.fences = append(c.fences, selectorFence{
 		gen:              fenceGen,
 		sel:              sel,
@@ -1512,6 +1593,15 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	isRetryFence := opts.ReuseFenceGen > 0
 	isFastAll := sel.Kind == SelectorAll && !isRetryFence
 	isTagRetry := isRetryFence && sel.Kind == SelectorTag
+	var inflightResources map[string]struct{}
+	if !isRetryFence {
+		var inflightTruncated bool
+		inflightResources, inflightTruncated = c.inflightTagResourcesLocked(sel, maxScan)
+		if inflightTruncated {
+			c.genMu.Unlock()
+			return InvalidateResult{}, fmt.Errorf("cache selector scope exceeds maximum scan bound of %d; use kind = 'host' or 'all'", maxScan)
+		}
+	}
 	resourceIDs := opts.ReuseResourceIDs
 	if isRetryFence {
 		if opts.CrossBootRetry && opts.ReuseFenceGen > c.startupHighWaterGen.Load() {
@@ -1543,15 +1633,14 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			scanCap = maxScan
 		}
 		var candTrunc bool
-		var totalCand int
 		if isTagRetry {
-			candidates, candTrunc, totalCand = c.resourceBaseKeysLocked(resourceIDs, scanCap)
+			candidates, candTrunc, _ = c.resourceBaseKeysLocked(resourceIDs, scanCap)
 		} else {
-			candidates, _, candTrunc, totalCand = c.candidateBaseKeysLocked(sel, scanCap)
+			candidates, _, candTrunc, _ = c.candidateBaseKeysWithInflightLocked(sel, scanCap, inflightResources)
 		}
 		if !isUnboundedHost && sel.Kind != SelectorAll && (candTrunc || len(candidates) > maxScan) {
 			c.genMu.Unlock()
-			return InvalidateResult{}, fmt.Errorf("cache selector scope (%d candidate resources) exceeds maximum scan bound of %d; use kind = 'host' or 'all'", totalCand, maxScan)
+			return InvalidateResult{}, fmt.Errorf("cache selector scope exceeds maximum scan bound of %d; use kind = 'host' or 'all'", maxScan)
 		}
 	}
 
@@ -1563,6 +1652,10 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 	var groups []matchedGroup
 	matchedResSet := make(map[string]struct{})
+	fenceResSet := make(map[string]struct{}, len(inflightResources))
+	for resource := range inflightResources {
+		fenceResSet[resource] = struct{}{}
+	}
 	skipped := 0
 	exactFilter := ""
 	if sel.Kind == SelectorKey {
@@ -1590,7 +1683,8 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				c.genMu.Unlock()
 				return InvalidateResult{}, fmt.Errorf("original tag purge resource snapshot does not match the selector host")
 			}
-			if !isTagRetry && sel.Kind != SelectorKey && !sel.MatchesResource(host, reqURI, tags) {
+			_, matchedInflight := inflightResources[resKey]
+			if !isTagRetry && sel.Kind != SelectorKey && !matchedInflight && !sel.MatchesResource(host, reqURI, tags) {
 				skipped++
 				continue
 			}
@@ -1604,6 +1698,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				continue
 			}
 			matchedResSet[resKey] = struct{}{}
+			fenceResSet[resKey] = struct{}{}
 			keySet := make(map[string]struct{}, len(memKeys)+len(diskKeys)+len(inflightKeys)+1)
 			var allKeys []string
 			for _, slice := range [][]string{memKeys, diskKeys, inflightKeys} {
@@ -1624,14 +1719,14 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				reps:    reps,
 			})
 		}
-		if opts.RequireBroadConfirm && len(matchedResSet) >= BroadScopeResourceThr {
+		if opts.RequireBroadConfirm && len(fenceResSet) >= BroadScopeResourceThr {
 			c.genMu.Unlock()
 			return InvalidateResult{}, ErrBroadConfirmRequired
 		}
 	}
 
 	if sel.Kind == SelectorTag && !isRetryFence {
-		resourceIDs = resourceIDsOf(matchedResSet)
+		resourceIDs = resourceIDsOf(fenceResSet)
 	}
 	if err := ctx.Err(); err != nil {
 		c.genMu.Unlock()
@@ -1657,7 +1752,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			}
 			if !foundFence {
 				c.fences = append(c.fences, selectorFence{
-					gen: fenceGen, sel: sel, matchedResources: matchedResSet,
+					gen: fenceGen, sel: sel, matchedResources: fenceResSet,
 				})
 			}
 			c.reclaimFencesLocked()
@@ -1678,11 +1773,11 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		for i := range c.fences {
 			if c.fences[i].gen == fenceGen {
 				c.fences[i].active = true
-				if len(matchedResSet) > 0 {
+				if len(fenceResSet) > 0 {
 					if c.fences[i].matchedResources == nil {
-						c.fences[i].matchedResources = make(map[string]struct{}, len(matchedResSet))
+						c.fences[i].matchedResources = make(map[string]struct{}, len(fenceResSet))
 					}
-					for rk := range matchedResSet {
+					for rk := range fenceResSet {
 						c.fences[i].matchedResources[rk] = struct{}{}
 					}
 				}
@@ -1695,7 +1790,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				gen:              fenceGen,
 				sel:              sel,
 				active:           true,
-				matchedResources: matchedResSet,
+				matchedResources: fenceResSet,
 			})
 		}
 	} else {
@@ -1703,7 +1798,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			gen:              fenceGen,
 			sel:              sel,
 			active:           true,
-			matchedResources: matchedResSet,
+			matchedResources: fenceResSet,
 		})
 	}
 	c.enforceFenceCapLocked()

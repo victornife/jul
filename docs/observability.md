@@ -644,4 +644,4 @@ cap. No client identity is emitted as a metric label.
 
 ## Bounded cache decision evidence
 
-The cache inspector can show opt-in recent owner-recorded decisions independently from aggregate metrics, including `response_hook_bypass` and `route_ownership_mismatch`. It adds no per-URL logs or high-cardinality metric labels. Missing, disabled or expired samples are not negative historical evidence. See [privacy and reason codes](cache.md#recent-observed-decisions-and-privacy).
+The cache inspector can show opt-in recent owner-recorded decisions independently from aggregate metrics, including `response_hook_bypass`, `route_ownership_mismatch` and `vary_proxy_rewrite_rejected`. It adds no per-URL logs or high-cardinality metric labels. Missing, disabled or expired samples are not negative historical evidence. See [privacy and reason codes](cache.md#recent-observed-decisions-and-privacy).

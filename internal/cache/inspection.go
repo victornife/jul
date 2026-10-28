@@ -104,8 +104,8 @@ func (c *Cache) captureMatchesRequest(e *Entry, r *http.Request) bool {
 	if e == nil {
 		return false
 	}
-	if sensitiveVaryEntry(e) {
-		c.recordDecision(r, "vary_sensitive_rejected")
+	if reason := varyRejectionEntry(r, nil, e); reason != "" {
+		c.recordDecision(r, reason)
 		return false
 	}
 	if !e.matchesVary(r) {
@@ -524,6 +524,7 @@ var decisionCatalog = map[string]decisionDescription{
 	"response_policy_rejected":       {"admission", "The response was not eligible under the existing storage policy.", "Review status, freshness, validators and origin directives."},
 	"vary_request_mismatch":          {"admission", "The captured representation varies on a request header modified for cache validation or range filling.", "A fresh origin response for the original request is required."},
 	"vary_sensitive_rejected":        {"admission", "The response varies on Cookie or Authorization and cannot be shared by this cache.", "Review origin Vary behavior; affected legacy entries are rejected and may require cache cleanup."},
+	"vary_proxy_rewrite_rejected":    {"admission", "The response varies on a request field transformed by the proxy and cannot be safely matched.", "Review origin Vary and proxy request-header transformations; affected responses are not shared."},
 	"response_hook_bypass":           {"bypass", "A response hook can change headers after the cache decision, so this request bypassed shared caching.", "Review response-hook subscriptions and origin load; configured capability does not mean every request subscribes."},
 	"cache_policy_transition_bypass": {"bypass", "The handler and cache scalar policies are not yet aligned, so this request bypassed shared caching.", "Wait for the configuration transition to finish and inspect reload status."},
 	"route_ownership_mismatch":       {"reuse", "The stored entry has no compatible route ownership for this request.", "The request fetches a fresh response; retained entries may remain until eviction or purge."},

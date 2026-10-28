@@ -50,14 +50,6 @@ func TestTagPurgeFencesScopedRevalidationDuringDiskPublication(t *testing.T) {
 				w.Header().Set("Cache-Tag", "tag-a")
 				_, _ = w.Write([]byte(strings.Repeat("old", 1024)))
 			}))
-			b, _ := scopedHandler(t, c, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.Header().Set("Cache-Control", "public, max-age=60")
-				w.Header().Set("Cache-Tag", "tag-b")
-				if vary {
-					w.Header().Set("Vary", "Accept-Language")
-				}
-				_, _ = w.Write([]byte(strings.Repeat("other", 1024)))
-			}))
 			req := func(validate bool) *http.Request {
 				r := httptest.NewRequest(http.MethodGet, "http://example.test/item", nil)
 				r.Header.Set("Accept-Language", "en")
@@ -70,7 +62,6 @@ func TestTagPurgeFencesScopedRevalidationDuringDiskPublication(t *testing.T) {
 			done := make(chan struct{})
 			go func() { defer close(done); a.ServeHTTP(httptest.NewRecorder(), req(true)) }()
 			awaitSignal(t, entered)
-			b.ServeHTTP(httptest.NewRecorder(), req(false))
 			var blocked atomic.Bool
 			c.onAfterDiskPublication = func(string, uint64) {
 				if blocked.CompareAndSwap(false, true) {
@@ -84,8 +75,14 @@ func TestTagPurgeFencesScopedRevalidationDuringDiskPublication(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if preview := c.PreviewScope(sel, PreviewOptions{}); preview.MatchedResources != 1 || preview.InflightFillsMatched < 1 {
+				t.Fatalf("preview missed the in-flight tag provenance: %+v", preview)
+			}
 			if result, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{}); err != nil || result.State != "succeeded" {
 				t.Fatalf("purge state %q: %v", result.State, err)
+			}
+			if _, _, found := c.lookupWithOwner(key(req(false)), req(false), &aScope); found {
+				t.Fatal("pre-purge disk entry remained reusable when purge returned")
 			}
 			diskOnce.Do(func() { close(releaseDisk) })
 			awaitSignal(t, done)

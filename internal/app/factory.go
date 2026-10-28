@@ -423,7 +423,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	responsePoint := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 		return pluginSet.ResponsePoint(append(append([]string(nil), srv.Plugins...), loc.Plugins...)...)
 	}
-	withCache := func(srv config.ServerConfig, loc config.LocationConfig, h http.Handler) (http.Handler, error) {
+	withCache := func(srv config.ServerConfig, loc config.LocationConfig, h http.Handler, proxy bool) (http.Handler, error) {
 		if !loc.Cache || loc.Withdrawn || f.Cache == nil {
 			return h, nil
 		}
@@ -457,6 +457,10 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		}
 		if err != nil {
 			return nil, fmt.Errorf("cache: create route owner: %w", err)
+		}
+		if proxy {
+			names, complete := handler.ProxyTransformedRequestHeaders(loc, cache.MaxProxyVaryNames)
+			return f.Cache.HandlerForProxyRoute(h, scope, policy, names, complete)
 		}
 		return f.Cache.HandlerForRoute(h, scope, policy)
 	}
@@ -510,7 +514,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if c, ok := h.(io.Closer); ok {
 				gen.Stage(c)
 			}
-			return withCache(srv, loc, h)
+			return withCache(srv, loc, h, true)
 		},
 		router.ActionFastCGI: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h, err := handler.NewFastCGI(ctx, srv, loc, upstreams, f.PoolReg, f.Log)
@@ -522,7 +526,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if c, ok := h.(io.Closer); ok {
 				gen.Stage(c)
 			}
-			return withCache(srv, loc, h)
+			return withCache(srv, loc, h, false)
 		},
 		router.ActionGRPCTranscode: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h, err := handler.NewGRPCTranscode(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCTranscode, f.Metrics.ObserveGRPCTranscodeStreamMsg)
@@ -541,7 +545,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if h == nil {
 				return nil, fmt.Errorf("handler plugin %q is not loaded", loc.Plugin)
 			}
-			return withCache(srv, loc, h)
+			return withCache(srv, loc, h, false)
 		},
 	}
 

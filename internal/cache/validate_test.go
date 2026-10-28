@@ -110,7 +110,7 @@ func awaitJoined(t *testing.T, c *Cache, k revalidateKey, n int) *revalidateCall
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if call, ok := c.lookupRevalidation(k); ok && int(call.joined.Load()) >= n {
+		if call, ok := lookupUniqueRevalidation(c, k); ok && int(call.joined.Load()) >= n {
 			return call
 		}
 		time.Sleep(time.Millisecond)
@@ -120,10 +120,26 @@ func awaitJoined(t *testing.T, c *Cache, k revalidateKey, n int) *revalidateCall
 }
 
 func joinedCount(c *Cache, k revalidateKey) int {
-	if call, ok := c.lookupRevalidation(k); ok {
+	if call, ok := lookupUniqueRevalidation(c, k); ok {
 		return int(call.joined.Load())
 	}
 	return -1
+}
+
+func lookupUniqueRevalidation(c *Cache, want revalidateKey) (*revalidateCall, bool) {
+	c.reMu.Lock()
+	defer c.reMu.Unlock()
+	var found *revalidateCall
+	for key, call := range c.calls {
+		if key.key != want.key || key.gen != want.gen || key.scope != want.scope {
+			continue
+		}
+		if found != nil {
+			return nil, false
+		}
+		found = call
+	}
+	return found, found != nil
 }
 
 // TestWaiterCancellationDoesNotCancelTheLeader is the requirement that the

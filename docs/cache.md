@@ -111,6 +111,43 @@ mixed lists and multiple field lines. Jul does not strip those fields or replace
 their values with hashes. Other header names may also carry secrets; Jul cannot
 identify all such application-specific values.
 
+For an HTTP reverse-proxy location, Jul also declines a representation when its
+`Vary` names a request field transformed on the way to the origin. This includes
+configured location `headers`, generated or removed forwarding and client
+certificate fields, hop-by-hop fields, `Host`, transport-generated
+`User-Agent`, `Accept-Encoding` and `Content-Length`, and trace propagation
+fields. Names nominated by any incoming `Connection` line are checked for that
+request. Matching is case-insensitive across all `Vary` lines. Jul does not
+strip the varied field, derive a new key from the forwarded value, or reuse an
+old representation that cannot be matched safely. Other `Vary` fields still
+work normally. This check is specific to the HTTP reverse proxy; it does not
+certify a FastCGI/uWSGI or plugin handler's own request transformations.
+
+The immutable route snapshot accepts at most 256 transformed-name entries,
+including built-in and configured entries. For a larger or invalid set, all
+varied responses on that route are ineligible; Jul logs a bounded warning when
+constructing that route. Responses without `Vary` are not rejected by this
+limit. A malformed
+`Connection`, more than 8,192 bytes across its lines, or more than 128
+nominated names likewise makes varied responses ineligible for that
+request, as do more than 128 `Connection` lines. Invalid or over-128-byte
+`Vary` field names, more than 128 `Vary` fields, or more than 8,192 bytes of
+`Vary` values are also ineligible on HTTP proxy routes. The opt-in
+recent-decision reason is `vary_proxy_rewrite_rejected`;
+it never includes the field's value. Existing entries are checked before
+variant-key lookup, including disk-reconstructed entries. A 304 introducing a
+transformed `Vary` causes a full origin fetch; it cannot authorize the old body
+or stale fallback if that full fetch fails. A stale response already admitted
+before a background 304 may have completed. Existing rejected files remain
+subject to normal eviction or purge.
+
+This is a compatibility change: in particular, origin responses with
+`Vary: Accept-Encoding` on HTTP proxy routes will no longer enter Jul's shared
+cache. Expect additional origin traffic and possible availability impact.
+Review origin capacity and cache hit rates before upgrading. An origin that
+depends on request identity but omits an appropriate `Vary` or cache
+restriction is not made safe by this safeguard.
+
 This is a compatibility change: affected responses that were previously cached
 now go to the origin and can increase its load or reduce availability during
 an outage. Requests merely carrying Cookie or Authorization are not
@@ -1629,7 +1666,8 @@ capacity-eviction owners. `fresh_hit`, `stale_while_revalidate`, `stale_reuse`,
 `stale_if_error`, `revalidation_required` and `validated_reuse` distinguish reuse
 and validation stages. Storage restrictions include `response_no_store`,
 `response_private`, `response_set_cookie`, `auth_storage_restricted`,
-`auth_reuse_restricted`, `vary_star` and `vary_sensitive_rejected`. Upgrade/range/SSE bypasses, capture
+`auth_reuse_restricted`, `vary_star`, `vary_sensitive_rejected` and
+`vary_proxy_rewrite_rejected`. Upgrade/range/SSE bypasses, capture
 oversize/budget/not-stored, publication failure/fencing, disk read failure,
 fill-lock fallbacks and memory/disk capacity evictions have separate reasons.
 A failed/fenced publication is not claimed to be a successful store.

@@ -453,7 +453,10 @@ The single-zone cache-enablement mapping remains supported; the existing
 `NGX_LOCATION_CACHE_IGNORE_HEADERS` remains blocking.
 
 Jul rejects shared-cache representations varying on Cookie or Authorization,
-and active Jul response-hook subscriptions bypass shared caching. It also
+and HTTP proxy representations varying on fields transformed before the
+origin, including `Accept-Encoding`. Active Jul response-hook subscriptions
+bypass shared caching. Arbitrary `proxy_set_header` remains blocking for
+translation. Jul also
 requires current route ownership and policy compatibility before reuse; old
 disk entries become ineligible after process restart. These are Jul runtime
 restrictions, not translations of NGINX cache directives. Assess origin load
