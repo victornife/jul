@@ -93,6 +93,18 @@ func newRevalidateCall() *revalidateCall {
 	return &revalidateCall{done: make(chan struct{})}
 }
 
+func (rc *revalidateCall) snapshotEligible() bool {
+	if rc.invalidated.Load() {
+		return false
+	}
+	select {
+	case <-rc.done:
+		return false
+	default:
+		return true
+	}
+}
+
 // finish publishes the call result and releases every waiter. It is idempotent,
 // so a deferred finish on the panic path cannot conflict with the normal one.
 func (rc *revalidateCall) finish(entry *Entry, outcome revalidateOutcome, err error) {

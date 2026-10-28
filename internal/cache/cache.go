@@ -701,9 +701,11 @@ func (c *Cache) markRetiredValidation(version validationVersion, startGen uint64
 	}
 	st := c.keyGen[version.effective]
 	if onlySelected && st != nil && st.gen != version.entryGen {
+		call.invalidated.Store(true)
 		c.genMu.Unlock()
 		return nil, 0
 	}
+	call.invalidated.Store(true)
 	c.reMu.Lock()
 	for other, key := range c.activeValidations {
 		if key.key == version.effective && other != call {
@@ -769,6 +771,11 @@ func (c *Cache) finishOneRemoval(key string, maxGen uint64, st *keyGenState) {
 func (c *Cache) Purge() {
 	c.genMu.Lock()
 	pGen := c.genSeq.Add(1)
+	for call := range c.activeValidations {
+		if call.startGen < pGen {
+			call.invalidated.Store(true)
+		}
+	}
 	c.purgeGen = pGen
 	c.fenceFloorGen = pGen
 	c.hostFenceFloorGen = nil

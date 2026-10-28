@@ -1205,6 +1205,9 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, inva
 	seen := make(map[*revalidateCall]struct{}, len(c.calls))
 	for rk, call := range c.calls {
 		seen[call] = struct{}{}
+		if !call.snapshotEligible() {
+			continue
+		}
 		covered, unknown, detachUnknown := matchValidation(rk, call)
 		tagUnknown = tagUnknown || unknown
 		if invalidate && covered && call.startGen <= cutoff {
@@ -1221,6 +1224,9 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, inva
 	}
 	for call, rk := range c.activeValidations {
 		if _, ok := seen[call]; ok {
+			continue
+		}
+		if !call.snapshotEligible() {
 			continue
 		}
 		covered, unknown, detachUnknown := matchValidation(rk, call)
@@ -1244,6 +1250,9 @@ func (c *Cache) inflightTagResourcesLocked(sel NormalizedSelector, limit int) (m
 	c.reMu.Lock()
 	defer c.reMu.Unlock()
 	add := func(rk revalidateKey, call *revalidateCall) bool {
+		if !call.snapshotEligible() {
+			return true
+		}
 		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(rk.key))
 		if !ok {
 			return true
@@ -1278,7 +1287,10 @@ func (c *Cache) addInflightRetryResourcesLocked(sel NormalizedSelector, ids []st
 	for _, id := range ids {
 		wanted[id] = struct{}{}
 	}
-	add := func(rk revalidateKey) error {
+	add := func(rk revalidateKey, call *revalidateCall) error {
+		if !call.snapshotEligible() {
+			return nil
+		}
 		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(rk.key))
 		if !ok {
 			return nil
@@ -1295,13 +1307,13 @@ func (c *Cache) addInflightRetryResourcesLocked(sel NormalizedSelector, ids []st
 	}
 	c.reMu.Lock()
 	defer c.reMu.Unlock()
-	for rk := range c.calls {
-		if err := add(rk); err != nil {
+	for rk, call := range c.calls {
+		if err := add(rk, call); err != nil {
 			return err
 		}
 	}
-	for _, rk := range c.activeValidations {
-		if err := add(rk); err != nil {
+	for call, rk := range c.activeValidations {
+		if err := add(rk, call); err != nil {
 			return err
 		}
 	}
