@@ -263,7 +263,20 @@ func (writer *sendTimeoutWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // inner is typically a struct embedding under, so Header falls through
 // automatically. Passing a nil inner or under is a programming error.
 func Wrap(inner, under http.ResponseWriter) http.ResponseWriter {
-	c := core{ResponseWriter: inner, under: under}
+	return wrap(inner, under, false)
+}
+
+// WrapController routes ResponseController operations through an inner writer
+// that implements Unwrap, while preserving under's optional interface set.
+func WrapController(inner interface {
+	http.ResponseWriter
+	Unwrap() http.ResponseWriter
+}, under http.ResponseWriter) http.ResponseWriter {
+	return wrap(inner, under, true)
+}
+
+func wrap(inner, under http.ResponseWriter, controllerInner bool) http.ResponseWriter {
+	c := core{ResponseWriter: inner, under: under, controllerInner: controllerInner}
 	var mask int
 	if _, ok := under.(http.Flusher); ok {
 		mask |= capFlush
@@ -293,12 +306,18 @@ const (
 type core struct {
 	http.ResponseWriter                     // inner
 	under               http.ResponseWriter // the writer whose capabilities are mirrored
+	controllerInner     bool
 }
 
 // Unwrap lets http.ResponseController traverse to the real writer, so
 // capabilities without a classic interface (read/write deadlines, full-duplex)
 // keep working through the wrapper.
-func (c core) Unwrap() http.ResponseWriter { return c.under }
+func (c core) Unwrap() http.ResponseWriter {
+	if c.controllerInner {
+		return c.ResponseWriter
+	}
+	return c.under
+}
 
 func (c core) flush() {
 	_ = c.flushError()

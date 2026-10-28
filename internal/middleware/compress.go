@@ -141,8 +141,14 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ep := c.negotiate(r)
 			cw := &compressWriter{ResponseWriter: w, c: c, r: r, chosen: ep, minSize: c.minSize}
-			defer cw.close()
-			next.ServeHTTP(respwriter.Wrap(cw, w), r)
+			completed := false
+			defer func() {
+				if completed || ep != nil || cw.sawHeader {
+					_ = cw.close()
+				}
+			}()
+			next.ServeHTTP(respwriter.WrapController(cw, w), r)
+			completed = true
 		})
 	}, nil
 }
@@ -193,6 +199,8 @@ type compressWriter struct {
 	hijacked      bool    // connection taken over (WebSocket): do not finalize
 	enc           encoder // nil once decided means pass-through
 }
+
+func (cw *compressWriter) Unwrap() http.ResponseWriter { return cw.ResponseWriter }
 
 func (cw *compressWriter) WriteHeader(code int) {
 	if cw.sawHeader {
@@ -250,8 +258,15 @@ func (cw *compressWriter) Write(b []byte) (int, error) {
 // Flush forces a decision so buffered bytes reach the client (SSE), then
 // flushes the encoder and the underlying writer.
 func (cw *compressWriter) Flush() {
+	_ = cw.FlushError()
+}
+
+func (cw *compressWriter) FlushError() error {
 	if cw.hijacked {
-		return
+		return http.ErrNotSupported
+	}
+	if !compressionFlushSupported(cw.ResponseWriter) {
+		return http.ErrNotSupported
 	}
 	if !cw.sawHeader {
 		cw.WriteHeader(http.StatusOK)
@@ -259,13 +274,35 @@ func (cw *compressWriter) Flush() {
 	if !cw.decided {
 		cw.decide()
 	}
-	_ = cw.flushBuf()
+	if err := cw.flushBuf(); err != nil {
+		return err
+	}
 	if cw.enc != nil {
-		_ = cw.enc.Flush()
+		if err := cw.enc.Flush(); err != nil {
+			return err
+		}
 	}
-	if f, ok := cw.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	return http.NewResponseController(cw.ResponseWriter).Flush()
+}
+
+func compressionFlushSupported(w http.ResponseWriter) bool {
+	for range 32 {
+		if w == nil {
+			return false
+		}
+		if _, ok := w.(interface{ FlushError() error }); ok {
+			return true
+		}
+		if _, ok := w.(http.Flusher); ok {
+			return true
+		}
+		inner, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false
+		}
+		w = inner.Unwrap()
 	}
+	return false
 }
 
 // Hijack forwards to the underlying writer for WebSocket upgrades. The upgrade
@@ -274,11 +311,7 @@ func (cw *compressWriter) Flush() {
 // respwriter.Wrap exposes this method only when the underlying writer can
 // actually hijack, so a handler's type assertion stays truthful.
 func (cw *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	h, ok := cw.ResponseWriter.(http.Hijacker)
-	if !ok {
-		return nil, nil, http.ErrNotSupported
-	}
-	conn, buf, err := h.Hijack()
+	conn, buf, err := http.NewResponseController(cw.ResponseWriter).Hijack()
 	if err == nil {
 		cw.hijacked = true
 	}

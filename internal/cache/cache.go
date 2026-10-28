@@ -1689,6 +1689,9 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		c.observeRevalidation(outcomeOriginError)
 
 	case !rec.storable():
+		if rec.status == http.StatusOK {
+			c.delOneIfGenAtMost(k.key, startGen)
+		}
 		c.recordDecision(req, "capture_not_stored")
 		call.finish(nil, outcomeUncacheable, nil)
 		c.observeRevalidation(outcomeUncacheable)
@@ -1696,7 +1699,13 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	default:
 		e := c.buildEntryFromCapture(req, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
 		version := k.version()
-		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags, &version) {
+		if !c.captureMatchesRequest(e, origReq) {
+			c.delOneIfGenAtMost(k.key, startGen)
+			call.finish(nil, outcomeUncacheable, nil)
+			c.observeRevalidation(outcomeUncacheable)
+			return
+		}
+		if !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags, &version) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return

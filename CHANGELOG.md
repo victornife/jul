@@ -20,6 +20,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   ineligible, while unaffected variants remain cacheable; see the upgrade
   guidance in [cache documentation](docs/cache.md#cache-key-and-vary).
 
+- Preserve panic recovery and flush errors with identity compression, and
+  retire an old cached entry when a background 200 is incompatible or cannot
+  be captured (#623).
+
 - Reject HTTP proxy responses whose `Vary` names a request field rewritten or
   removed before reaching the origin, including configured and generated
   fields (#623). This prevents matching against a different client-visible
