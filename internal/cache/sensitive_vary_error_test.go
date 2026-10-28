@@ -63,7 +63,7 @@ func TestSensitiveVaryErrorCancelsAndPreservesStaleIfError(t *testing.T) {
 	if recs[0].Header().Get("X-Cache") != stateStale || recs[0].Body.String() != "old-body" {
 		t.Fatal("explicit stale-if-error was not preserved for the leader")
 	}
-	if recs[1].Header().Get("X-Cache") != stateMiss || recs[1].Body.String() != "old-body" {
+	if recs[1].Header().Get("X-Cache") != stateBypass || recs[1].Body.String() != "old-body" {
 		t.Fatal("follower did not independently fetch from origin")
 	}
 	if calls.Load() != 3 {

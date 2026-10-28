@@ -89,7 +89,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 					rejectedStale = c.transientStaleOnError(stored, k.key, startGen, c.clock(), r)
 				}
 				c.endRevalidate(k, call)
-				c.finishValidation(call, nil, outcomeOriginError)
+				call.finish(nil, outcomeOriginError, errSensitiveVaryRevalidation)
+				c.observeRevalidation(outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)
 				call.finish(nil, outcomeUncacheable, errSensitiveVaryRevalidation)

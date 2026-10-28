@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"net/http"
@@ -1464,13 +1465,13 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 			cancel()
 			if err := ctx.Err(); err != nil {
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeCanceled, err)
+				call.finish(nil, outcomeCanceled, errors.Join(err, errSensitiveVaryRevalidation))
 				c.observeRevalidation(outcomeCanceled)
 				return
 			}
 			if code >= http.StatusInternalServerError {
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeOriginError, nil)
+				call.finish(nil, outcomeOriginError, errSensitiveVaryRevalidation)
 				c.observeRevalidation(outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)
