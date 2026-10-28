@@ -1495,6 +1495,12 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		call.finish(nil, outcomeOriginError, nil)
 		c.observeRevalidation(outcomeOriginError)
 
+	case sensitiveVaryHeader(rec.header):
+		c.recordDecision(origReq, "vary_sensitive_rejected")
+		c.deleteAtMostGen(k.key, startGen)
+		call.finish(nil, outcomeUncacheable, nil)
+		c.observeRevalidation(outcomeUncacheable)
+
 	case !rec.storable():
 		c.recordDecision(req, "capture_not_stored")
 		call.finish(nil, outcomeUncacheable, nil)
