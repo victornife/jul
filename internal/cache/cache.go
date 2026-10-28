@@ -180,7 +180,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	}
 	c.mem.onEvictItem = func(it *memItem) {
 		c.recordKeyDecision(it.key, "memory_eviction")
-		if c.disk != nil && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) && !c.isPublicationFenced(it.gen, it.key, it.entry, nil) {
+		if c.disk != nil && !sensitiveVaryEntry(it.entry) && !c.disk.hasKey(it.key) && c.isGenCurrent(it.key, it.gen) && !c.isPublicationFenced(it.gen, it.key, it.entry, nil) {
 			c.writeThroughObserved(it.key, it.entry, it.gen, it.gen, true, nil)
 		}
 		if it.pinnedState != nil {
@@ -515,6 +515,9 @@ func (c *Cache) setWithStartGen(key string, e *Entry, startGen uint64, hasStartG
 }
 
 func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasStartGen bool, extraTags []string) (stored, fenced bool, publishedGen uint64) {
+	if sensitiveVaryEntry(e) {
+		return false, true, 0
+	}
 	c.genMu.Lock()
 	if e != nil && !e.IsVaryStub {
 		curPol := c.Policy()
@@ -740,8 +743,14 @@ func keyFor(method, host, requestURI string) string {
 // what stops an invalidated variant from becoming reachable again, and what
 // makes a pre-#132 stub (which records no membership) fail closed.
 func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
+	startGen := c.genSeq.Load()
 	e, ok := c.get(base)
 	if !ok {
+		return nil, base, false
+	}
+	if sensitiveVaryEntry(e) {
+		c.recordDecision(r, "vary_sensitive_rejected")
+		c.cleanupSensitiveVary(base, e, startGen)
 		return nil, base, false
 	}
 	if e.IsVaryStub {
@@ -750,9 +759,31 @@ func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
 			return nil, vk, false
 		}
 		e, ok = c.get(vk)
+		if ok && sensitiveVaryEntry(e) {
+			c.recordDecision(r, "vary_sensitive_rejected")
+			c.delOneIfGenAtMost(vk, startGen)
+			return nil, base, false
+		}
 		return e, vk, ok
 	}
 	return e, base, true
+}
+
+// Cleanup is opportunistic and generation-bounded: an entry published after
+// lookup began must not be deleted. At most one stub and 64 variants are
+// touched; unvisited legacy files remain subject to normal eviction or purge.
+func (c *Cache) cleanupSensitiveVary(base string, e *Entry, startGen uint64) {
+	c.varyMu.Lock()
+	defer c.varyMu.Unlock()
+	if e.IsVaryStub {
+		for i, variant := range e.Variants {
+			if i == maxVariantsPerResource {
+				break
+			}
+			c.delOneIfGenAtMost(variant, startGen)
+		}
+	}
+	c.delOneIfGenAtMost(base, startGen)
 }
 
 // store writes an entry to the cache. A response without Vary is stored directly
@@ -775,6 +806,9 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 // The returned generation belongs to this publication, not a later replacement,
 // and is the upper bound for any membership-publication rollback.
 func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (bool, uint64) {
+	if sensitiveVaryEntry(e) {
+		return false, 0
+	}
 	if stream == nil {
 		stored, _, gen := c.setCoreWithStartGen(k, e, startGen, hasStartGen, nil)
 		return stored, gen
@@ -861,6 +895,10 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 			c.recordKeyDecision(base, "publication_failed_or_fenced")
 		}
 	}()
+	if sensitiveVaryEntry(e) {
+		c.recordDecision(r, "vary_sensitive_rejected")
+		return false
+	}
 	if len(e.Vary) == 0 {
 		return c.setCapturedWithStartGen(base, e, stream, startGen, hasStartGen)
 	}
@@ -1512,6 +1550,9 @@ func (c *Cache) storageReason(r *http.Request, status int, h http.Header, now ti
 	if hasHeaderField(r.Header, "Authorization") && !p.sharedAuthStorable() {
 		return "auth_storage_restricted"
 	}
+	if sensitiveVaryHeader(h) {
+		return "vary_sensitive_rejected"
+	}
 	for _, name := range varyFields(h) {
 		if name == "*" {
 			return "vary_star"
@@ -1525,6 +1566,10 @@ func (c *Cache) buildEntryWithPolicy(r *http.Request, status int, h http.Header,
 }
 
 func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header, body []byte, bodyLen int64, streamBacked bool, now time.Time, pol CachePolicy) *Entry {
+	if sensitiveVaryHeader(h) {
+		c.recordDecision(r, "vary_sensitive_rejected")
+		return nil
+	}
 	if r.Method != http.MethodHead {
 		if cl := declaredLength(h); cl >= 0 && bodyLen != cl {
 			c.recordDecision(r, "capture_incomplete")

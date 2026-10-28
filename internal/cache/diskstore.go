@@ -602,7 +602,7 @@ func (d *diskStore) recordTombstoneLocked(hash string, fileSize int64) {
 			d.unrecoverableInvalidation.Store(true)
 			d.recordWriteFailure(tErr)
 			d.log.Error("cache: durable invalidation failed (unlink, tombstone manifest, and truncate all failed)",
-				"dir", d.dir, "error", tErr)
+				"dir", d.dir, "error", safeDiskError(tErr))
 		}
 		d.recordWriteFailure(err)
 	}
@@ -1066,12 +1066,24 @@ func hashKey(key string) string {
 
 func (d *diskStore) path(hash string) string { return filepath.Join(d.dir, hash) }
 
+func safeDiskError(err error) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && isCacheFile(filepath.Base(pathErr.Path)) {
+		return fmt.Errorf("%s cache entry: %w", pathErr.Op, pathErr.Err)
+	}
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) && (isCacheFile(filepath.Base(linkErr.Old)) || isCacheFile(filepath.Base(linkErr.New))) {
+		return fmt.Errorf("%s cache entry: %w", linkErr.Op, linkErr.Err)
+	}
+	return err
+}
+
 func (d *diskStore) recordWriteFailure(err error) {
 	d.failing.Store(true)
 	total := d.writeFails.Add(1)
 	if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
 		suppressed := total - d.reported.Swap(total) - 1
-		d.log.Warn("cache: disk write failed; entry not stored on disk", "dir", d.dir, "error", err, "failed_writes", total, "suppressed", suppressed)
+		d.log.Warn("cache: disk write failed; entry not stored on disk", "dir", d.dir, "error", safeDiskError(err), "failed_writes", total, "suppressed", suppressed)
 	}
 }
 
@@ -1966,7 +1978,7 @@ func (d *diskStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64
 			continue
 		}
 		if err := d.retireBlobLocked(it.hash, it.blob); err != nil {
-			d.log.Warn("cache: disk eviction failed to remove file", "dir", d.dir, "error", err)
+			d.log.Warn("cache: disk eviction failed to remove file", "dir", d.dir, "error", safeDiskError(err))
 			failedRemovals++
 			break
 		}

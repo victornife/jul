@@ -90,11 +90,11 @@ cache = true
 
 ## Cache key and Vary
 
-The cache key is derived from the request method, the lowercased host, and the
-request URI — and from nothing else. No credential, cookie or other request
-header is ever part of a key; reuse restrictions are enforced by the stored
-entry's recorded policy instead, because a credential-derived key would silently
-turn a leak into an unbounded cache.
+The base cache key is derived from the request method, the lowercased host, and
+the request URI. Request headers are not part of the base key. A URI can itself
+contain sensitive data, and supported `Vary` fields add request-header values to
+variant keys and disk metadata. Do not put secrets in URLs or in headers named
+by cacheable `Vary` responses.
 
 When an upstream response carries `Vary` on one or more header lines, each
 combination of the varied request-header values (including every repeated
@@ -102,7 +102,27 @@ request field line) is stored as a **distinct variant** under its own key, so
 (for example) `Vary: Accept` keeps the JSON and XML representations of one URL
 cached at the same time instead of overwriting each other. A pointer entry under
 the base key records both the varied field names and the **membership list** of
-every variant key the resource owns.
+every variant key the resource owns. As a privacy safeguard, responses with
+`Vary: Cookie` or `Vary: Authorization` are not stored or reused, including
+mixed lists and multiple field lines. Jul does not strip those fields or replace
+their values with hashes. Other header names may also carry secrets; Jul cannot
+identify all such application-specific values.
+
+This is a compatibility change: affected responses that were previously cached
+now go to the origin and can increase its load or reduce availability during
+an outage. Requests merely carrying Cookie or Authorization are not
+automatically bypassed by this rule. The existing Authorization restrictions
+and origin cache directives still apply.
+
+Legacy affected entries are rejected before reuse, including after restart. On
+access Jul attempts to remove the affected pointer and at most 64 variants,
+without deleting a newer generation. Cleanup failures are reported through disk
+write health and logs; untouched legacy files can remain until normal eviction
+or an explicit cache purge. Removing a cache file does not guarantee secure
+erasure from storage, snapshots or backups. Review disk access and retention
+when upgrading. A 304 that introduces either field discards the old entry and
+requires a full origin response; a stale response admitted before that 304 may
+already have completed.
 
 Membership is authoritative on lookup: a variant key the base entry does not
 claim is a miss, even if the store still holds something under it. That is what
@@ -399,8 +419,9 @@ Consequences that are tested rather than assumed:
   response — the permission comes from the stored response, never from the
   credential;
 - `Vary: Authorization` is not a substitute for the permission;
-- credentials never enter a cache key, a stored header, a log, a metric label, a
-  tracing attribute or disk metadata.
+- `Vary: Authorization` and `Vary: Cookie` responses are not stored or reused.
+  Other varied request headers and the request URI can contain sensitive data;
+  operators must not treat cache-key construction as a general secret detector.
 
 ### Unsafe-method invalidation
 
@@ -502,7 +523,7 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/old/20
 | --- | --- | --- |
 | Strict expiry and age | Invalid/repeated `Expires` is expired; first `Age` member only; bounds and exact transitions | `TestStrictExpires`, `TestStrictAge`, `TestAgeFreshBoundary`, `TestMerge304IgnoresInvalidFirstAge` (`internal/cache`) |
 | RFC 9213 selection | Targeted dictionary replaces generic policy/Expires; malformed fallback, extensions, duplicates, auth and 304 restrictions; forwarding unchanged | `TestTargetedCacheControl`, `TestTargetedFreshnessPrecedence`, `TestTargetedEntryContracts`, `FuzzCachePolicy` (`internal/cache`); `TestRealTargetedCachePolicy`, `TestRealAuthenticatedIdentityIsolation` (`internal/handler`) |
-| Key construction | `METHOD\nhost.lower\nREQUEST_URI`; credentials and cookies never enter the key | `TestKeyConstruction`, `TestCredentialsNeverEnterTheCacheKey` (`internal/cache`) |
+| Key construction | Base key is `METHOD\nhost.lower\nREQUEST_URI`; supported Vary fields add request-header values. Cookie/Authorization Vary is rejected | `TestKeyConstruction`, `TestCredentialHeadersNotIncludedInBaseKey`, `TestSensitiveVaryAdmissionAndInspection` (`internal/cache`) |
 | GET/HEAD, unsafe and other methods | GET/HEAD may cache; successful unsafe methods invalidate GET+HEAD; OPTIONS/TRACE/CONNECT do not invalidate | `TestSuccessfulUnsafeMethodsInvalidateTheTarget`, `TestSafeMethodsNeverInvalidate`, `TestInvalidationStatusRules`, `TestHeadRangeRequestBypasses` |
 | Cacheable statuses | Only the documented status allow-list is stored; 1xx/101 and origin errors are not | `TestCacheableStatusSet`, `TestProtocolSwitchResponseNeverStored`, `TestResponseDirectiveStorage` |
 | Stored headers | Multiset difference against the map at cache-handler entry; a field an outer layer pre-set (`X-Request-ID`, `X-Cache`) is excluded unless the handler overwrote it with a different value | `TestHeaderDifference`, `TestCacheHitDoesNotReplayAStaleRequestID`, `TestCacheStoresAHandlerOverriddenRequestIDWithTheHandlersValue`, `TestStoredEntryExcludesOuterLayerOnlyHeaders` |
@@ -512,7 +533,7 @@ the complete audit record is [the 2026-08-07 cache recertification](audit/old/20
 | Response `no-cache` | Stored, but every reuse validates before serving | `TestResponseNoCacheRequiresValidationBeforeEveryReuse`, `TestConcurrentMandatoryValidatorsIssueOneOriginRequest` |
 | `must-revalidate` / `proxy-revalidate` | Forbid stale reuse and outrank stale-if-error | `TestMustRevalidateForbidsStaleReuse`, `TestStaleIfErrorRespectsMustRevalidate`, `TestFreshnessStaleWindowIsZeroWhenRevalidationIsMandatory` |
 | SWR/SIE | Bounded stale reuse; explicit response values replace global defaults; canceled work never extends SIE | `TestExplicitStaleIfErrorReplacesTheGlobalSetting`, `TestStaleOnErrorWindowContract`, `TestRevalidationCanceledByLeaseCancel`, `TestCacheRecertificationSoak` |
-| `Authorization` | Shared reuse only when explicitly permitted, including repeated field lines; identities and credentials never leak through keys or variants | `TestSharedReusePermissionMatrix`, `TestNoCrossIdentityLeakage`, `TestUnauthenticatedEntryIsNotReusableByAnAuthenticatedRequest`, `TestRepeatedAuthorizationDoesNotPublishPrivateResponse`, `TestRepeatedAuthorizationDoesNotReuseAnonymousEntry`, `TestVaryAuthorizationStillEnforcesTheSharedReuseRule`, `TestRealAuthenticatedIdentityIsolation` |
+| `Authorization` | Shared reuse only when explicitly permitted, including repeated field lines; responses varying on Authorization are rejected | `TestSharedReusePermissionMatrix`, `TestNoCrossIdentityLeakage`, `TestUnauthenticatedEntryIsNotReusableByAnAuthenticatedRequest`, `TestRepeatedAuthorizationDoesNotPublishPrivateResponse`, `TestRepeatedAuthorizationDoesNotReuseAnonymousEntry`, `TestSensitiveVaryLegacyDiskRejectedAfterRestart`, `TestRealAuthenticatedIdentityIsolation` |
 | `Set-Cookie` | Never stored, even when an earlier field line is empty | `TestResponseDirectiveStorage`, `TestRepeatedSetCookieResponseIsNotShared`, `TestSharedReusePermissionMatrix` |
 | `Vary` and membership | Distinct variants coexist across repeated request/response field lines; 64-entry membership cap; old first-value entries miss after upgrade; invalidation removes every owned memory/disk variant | `TestHandlerVaryVariantsCoexist`, `TestVaryDistinguishesRepeatedRequestHeaderValues`, `TestVaryHonorsEveryResponseFieldLine`, `TestFirstValueVaryEntriesFailClosedAfterUpgrade`, `TestUnsafeMethodRemovesEveryVaryVariant`, `TestDeletedVariantCannotBeResurrectedByANewStub`, `TestChangedVaryReplacesTheVariantSet` |
 | ETag / Last-Modified / 304 | ETag precedence; immutable metadata merge; changed/unsafe metadata discards; every `Connection` line's nominated fields excluded | `TestValidatorPrecedence`, `TestMerge304UpdatesMetadata`, `TestMerge304Discards`, `TestRemoveHopByHopFromEveryConnectionLine`, `TestMerge304NeverMutatesThePublishedEntry`, `TestMerge304AcrossBothTiers` |
@@ -628,11 +649,11 @@ range fills from #442):
 - **Waiter cancellation.** If a waiting client cancels its own request context,
   only that waiter exits (`outcome="canceled"`); the leader and any remaining
   waiters continue normally.
-- **Credential-free lock keys and labels.** When no `Vary` stub exists yet, the
+- **Bounded lock labels and header values.** When no `Vary` stub exists yet, the
   lock key is the primary cache key (`METHOD host URI`), which contains no
-  headers. When a `Vary` stub exists, the variant key is hashed with SHA-256
-  before indexing the lock table, so raw `Authorization`, `Cookie`, or other
-  header values never appear in lock keys, logs, or metric labels.
+  headers but may contain sensitive URI data. When a supported `Vary` stub
+  exists, the variant key is hashed with SHA-256 before indexing the lock
+  table. Request-header values are not used as fill-lock metric labels.
 - **Hot reload coherence.** Both `cache.lock` and `cache.lock_timeout` are
   `hot_reload` fields. Each miss loads one immutable `CachePolicy` snapshot at
   entry and uses that snapshot for the duration of the operation.
@@ -1354,16 +1375,13 @@ integrity, and availability:
    served to legitimate requests. Counter-measures: validate `Host` in the outer
    proxy; do not forward untrusted `X-Forwarded-Host` to Jul.IA.
 
-2. **Cross-user leakage through `Vary` misconfiguration.** An upstream that sets
-   `Vary: Cookie` without `Cache-Control: private` may cause one user's
-   authenticated page to be served to another user with the same `Cookie` header.
-   The cache does not treat cookies as a cache-bypass signal (only `private`,
-   `no-store` or a `Set-Cookie` in the response do). Requests carrying
-   `Authorization` are separately protected by the shared-reuse rule above, but
-   **cookie-based sessions are not**, because a `Cookie` header is not a
-   shared-cache authentication signal in RFC 9111. Counter-measures: upstreams
-   must set `private` for user-specific responses; operators should audit `Vary`
-   headers before enabling cache on cookie-authenticated routes.
+2. **Cross-user leakage from an incorrectly shared response.** Rejecting
+   `Vary: Cookie` does not make an application safe to cache: an origin may
+   return personalized content without that field. Cookies alone are not an
+   automatic bypass or shared-cache authentication signal. Requests carrying
+   `Authorization` remain subject to the separate shared-reuse rule above.
+   Upstreams should mark user-specific responses `private` or `no-store`, and
+   operators should assess application behavior before enabling shared caching.
 
 3. **Vary-header evasion (Web Cache Deception).** An attacker requests
    `/profile.jpg` with a `Accept: image/webp` header when the real page is
@@ -1535,7 +1553,7 @@ capacity-eviction owners. `fresh_hit`, `stale_while_revalidate`, `stale_reuse`,
 `stale_if_error`, `revalidation_required` and `validated_reuse` distinguish reuse
 and validation stages. Storage restrictions include `response_no_store`,
 `response_private`, `response_set_cookie`, `auth_storage_restricted`,
-`auth_reuse_restricted` and `vary_star`. Upgrade/range/SSE bypasses, capture
+`auth_reuse_restricted`, `vary_star` and `vary_sensitive_rejected`. Upgrade/range/SSE bypasses, capture
 oversize/budget/not-stored, publication failure/fencing, disk read failure,
 fill-lock fallbacks and memory/disk capacity evictions have separate reasons.
 A failed/fenced publication is not claimed to be a successful store.

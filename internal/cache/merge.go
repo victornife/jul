@@ -43,6 +43,9 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 }
 
 func (c *Cache) merge304Decision(stored *Entry, h304 http.Header, now time.Time) (*Entry, mergeAction, string) {
+	if sensitiveVaryEntry(stored) || sensitiveVaryHeader(h304) {
+		return nil, mergeDiscard, "vary_sensitive_rejected"
+	}
 	pol := c.Policy()
 	var tags304 []string
 	var present304 bool

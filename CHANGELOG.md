@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Reject shared-cache representations varying on Cookie or Authorization,
+  including legacy entries and 304 changes (#623). This compatibility change
+  can increase origin traffic; old disk files are cleaned opportunistically and
+  are not guaranteed to be securely erased. Other headers and URLs can still
+  contain sensitive data.
+
 - Protect exported WAF `external_digest` in `GET /api/security` (`waf_effective`)
   from offline dictionary guessing (#649 / EX01): compiled external rule,
   include, and operator-data file digests now use domain-separated

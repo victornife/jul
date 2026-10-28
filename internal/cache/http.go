@@ -727,6 +727,48 @@ func varyFields(h http.Header) []string {
 	return parseList(strings.Join(h.Values("Vary"), ","))
 }
 
+func sensitiveVary(fields []string) bool {
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if len(field) == len("Cookie") && strings.EqualFold(field, "Cookie") ||
+			len(field) == len("Authorization") && strings.EqualFold(field, "Authorization") {
+			return true
+		}
+	}
+	return false
+}
+
+func sensitiveVaryHeader(h http.Header) bool {
+	for _, line := range h.Values("Vary") {
+		for {
+			field, rest, more := strings.Cut(line, ",")
+			if sensitiveVary([]string{field}) {
+				return true
+			}
+			if !more {
+				break
+			}
+			line = rest
+		}
+	}
+	return false
+}
+
+func sensitiveVaryEntry(e *Entry) bool {
+	if e == nil {
+		return false
+	}
+	if sensitiveVary(e.Vary) || sensitiveVaryHeader(e.Header) {
+		return true
+	}
+	for name := range e.VaryValues {
+		if sensitiveVary([]string{name}) {
+			return true
+		}
+	}
+	return false
+}
+
 // Header presence, not the first line's value, controls conservative shared
 // cache decisions such as Authorization and Set-Cookie. An empty first line
 // must not hide a later credential or session cookie.
