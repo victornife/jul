@@ -260,6 +260,7 @@ type diskStore struct {
 	corruptTombstoneCleanupPending bool
 	failedRetired                  map[*diskBlob]struct{}
 	activeTempFiles                sync.Map
+	tempCleanupFailed              atomic.Bool
 	log                            *slog.Logger
 
 	// tempBudget bounds all concurrent temporary capture files in dir so
@@ -655,7 +656,10 @@ func (d *diskStore) sweepTombstonesLocked() {
 			changed = true
 			d.notifyKeyDiskStateLocked(key, h)
 		} else {
-			_ = d.truncatePath(d.path(h), 0)
+			d.recordCleanupFailure(err)
+			if truncateErr := d.truncatePath(d.path(h), 0); truncateErr != nil && !os.IsNotExist(truncateErr) {
+				d.recordCleanupFailure(truncateErr)
+			}
 		}
 	}
 	if changed {
@@ -940,7 +944,10 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		if isCacheTempFile(name) {
-			_ = d.removePath(filepath.Join(d.dir, name))
+			if removeErr := d.removePath(filepath.Join(d.dir, name)); removeErr != nil && !os.IsNotExist(removeErr) {
+				d.tempCleanupFailed.Store(true)
+				d.recordCleanupFailure(removeErr)
+			}
 			continue
 		}
 		if !isCacheFile(name) {
@@ -960,7 +967,9 @@ func (d *diskStore) rehydrate() {
 		fullPath := d.path(name)
 		entryMeta, entryKey, entryGen, bodyLen, fileSize, err := readDiskEntryMetaWithKeyGen(fullPath)
 		if err != nil || entryKey == "" || hashKey(entryKey) != name {
-			_ = d.removePath(fullPath)
+			if removeErr := d.removePath(fullPath); removeErr != nil && !os.IsNotExist(removeErr) {
+				d.recordCleanupFailure(removeErr)
+			}
 			continue
 		}
 		if entryGen > d.highWaterGen {
@@ -1084,6 +1093,15 @@ func (d *diskStore) recordWriteFailure(err error) {
 	if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
 		suppressed := total - d.reported.Swap(total) - 1
 		d.log.Warn("cache: disk write failed; entry not stored on disk", "dir", d.dir, "error", safeDiskError(err), "failed_writes", total, "suppressed", suppressed)
+	}
+}
+
+func (d *diskStore) recordCleanupFailure(err error) {
+	d.failing.Store(true)
+	total := d.writeFails.Add(1)
+	if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
+		suppressed := total - d.reported.Swap(total) - 1
+		d.log.Warn("cache: disk cleanup failed; a file may remain", "dir", d.dir, "error", safeDiskError(err), "failed_writes", total, "suppressed", suppressed)
 	}
 }
 
@@ -1327,13 +1345,14 @@ func (d *diskStore) retireBlobLocked(hash string, b *diskBlob) error {
 // diskStreamCapture manages a temporary file receiving a streamed response body
 // larger than the memory tier (#525 Part 2).
 type diskStreamCapture struct {
-	onFailure func()
-	file      *os.File
-	seq       uint64
-	bodyLen   int64
-	acct      captureAccount
-	closed    bool
-	published bool
+	onFailure     func()
+	file          *os.File
+	seq           uint64
+	bodyLen       int64
+	acct          captureAccount
+	closed        bool
+	published     bool
+	cleanupFailed bool
 }
 
 func (d *diskStore) beginStreamCapture(onSkip func(reason string)) *diskStreamCapture {
@@ -1341,6 +1360,12 @@ func (d *diskStore) beginStreamCapture(onSkip func(reason string)) *diskStreamCa
 }
 
 func (d *diskStore) beginStreamCaptureObserved(onSkip func(string), onFailure func()) *diskStreamCapture {
+	if d.tempCleanupFailed.Load() {
+		if onFailure != nil {
+			onFailure()
+		}
+		return nil
+	}
 	seq := tempFileSeq.Add(1)
 	tmpPath := d.tempPath(seq)
 	tmpName := filepath.Base(tmpPath)
@@ -1399,16 +1424,30 @@ func (d *diskStore) abortStream(s *diskStreamCapture) {
 	}
 	if !s.closed {
 		s.closed = true
-		_ = s.file.Close()
+		if err := s.file.Close(); err != nil && d != nil {
+			d.recordCleanupFailure(err)
+			if s.onFailure != nil {
+				s.onFailure()
+			}
+		}
 	}
 	if !s.published && s.seq != 0 && d != nil {
 		tmpPath := d.tempPath(s.seq)
 		// lgtm[go/path-injection] – d.dir is the operator-configured cache directory and s.seq is an internal atomic uint64 counter.
-		_ = os.Remove(tmpPath)
+		if err := d.removePath(tmpPath); err != nil && !os.IsNotExist(err) {
+			s.cleanupFailed = true
+			d.tempCleanupFailed.Store(true)
+			d.recordCleanupFailure(err)
+			if s.onFailure != nil {
+				s.onFailure()
+			}
+		}
 		d.activeTempFiles.Delete(filepath.Base(tmpPath))
 		s.seq = 0
 	}
-	s.acct.release()
+	if !s.cleanupFailed {
+		s.acct.release()
+	}
 }
 
 func (d *diskStore) publishStream(key string, e *Entry, s *diskStreamCapture) (*diskBlob, bool) {
@@ -1554,7 +1593,7 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 	}
 	s.published = true
 	s.acct.release()
-	if d.failing.Load() && !d.tombstoneDirty && !d.unrecoverableInvalidation.Load() {
+	if d.failing.Load() && !d.tombstoneDirty && !d.unrecoverableInvalidation.Load() && !d.tempCleanupFailed.Load() {
 		d.failing.Store(false)
 	}
 
@@ -1791,9 +1830,12 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 		return
 	}
 	if err := d.removePath(d.path(hash)); err != nil && !os.IsNotExist(err) {
+		d.recordCleanupFailure(err)
 		if st, stErr := os.Stat(d.path(hash)); stErr == nil {
 			d.rememberHashKeyLocked(hash, key)
 			d.recordTombstoneLocked(hash, st.Size())
+		} else if !os.IsNotExist(stErr) {
+			d.recordCleanupFailure(stErr)
 		}
 	}
 	d.notifyKeyDiskStateLocked(key, hash)

@@ -44,7 +44,7 @@ func TestSensitiveVaryPresetCannotHideOriginVary(t *testing.T) {
 					req.Header.Set(field, identity)
 					rec := httptest.NewRecorder()
 					outer.ServeHTTP(rec, req)
-					if rec.Header().Get("X-Cache") != stateMiss || mode != "no-write" && rec.Body.String() != identity {
+					if rec.Header().Get("X-Cache") != stateBypass || mode != "no-write" && rec.Body.String() != identity {
 						t.Fatal("response was reused across requests despite sensitive Vary")
 					}
 				}

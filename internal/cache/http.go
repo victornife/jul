@@ -459,6 +459,7 @@ type recorder struct {
 	// say: an interim/protocol-switch status, or a live event stream.
 	noStore         bool
 	headerCheck     func(code int, h http.Header) bool
+	onHeaders       func(code int, h http.Header)
 	onDecision      func(string)
 	onAbandon       func()
 	tagHeaders      []string
@@ -518,6 +519,9 @@ func (r *recorder) WriteHeader(code int) {
 		return
 	}
 	r.status = code
+	if r.onHeaders != nil {
+		r.onHeaders(code, r.Header())
+	}
 	cl := declaredLength(r.Header())
 	// A 1xx is an interim or protocol-switch response, not a representation, and
 	// an event stream never ends — buffering one would grow to the size limit

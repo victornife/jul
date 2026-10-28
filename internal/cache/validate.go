@@ -74,9 +74,13 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, r)
+	c.guardRevalidationCapture(rec, r, k.key, startGen)
 	defer rec.releaseCapture()
 	vreq := conditionalRequest(r.Clone(vctx), stored)
 	next.ServeHTTP(rec, vreq)
+	if rec.status == 0 && rec.onHeaders != nil {
+		rec.onHeaders(http.StatusOK, rec.Header())
+	}
 	now := c.clock()
 
 	_, isRange := rangeSpecFromRequest(r)
@@ -133,7 +137,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			}
 		}
 		c.finishValidation(call, nil, outcomeOriginError)
-		if isRange || !writeRecorded(w, r, rec, nil, stateMiss) {
+		if isRange || !rec.storable() || !writeRecorded(w, r, rec, nil, stateMiss) {
 			fallbackAfterValidation()
 		}
 
@@ -155,7 +159,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			// validation. The old copy described something that no longer exists.
 			c.delOneIfGenAtMost(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
-			if isRange || (e != nil && !e.matchesVary(r)) || !writeRecorded(w, r, rec, nil, stateMiss) {
+			if isRange || !varyCompatibleWithModifiedRequest(rec.header, vreq, r) || !writeRecorded(w, r, rec, nil, stateMiss) {
 				fallbackAfterValidation()
 			}
 		} else {
@@ -168,6 +172,20 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 				c.fetchAndStore(w, r, next, c.clock())
 			}
 		}
+	}
+}
+
+func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64) {
+	rec.onHeaders = func(code int, h http.Header) {
+		if sensitiveVaryHeader(h) {
+			c.recordDecision(original, "vary_sensitive_rejected")
+			if code < http.StatusInternalServerError {
+				c.deleteAtMostGen(key, startGen)
+			}
+		}
+	}
+	rec.headerCheck = func(_ int, h http.Header) bool {
+		return !sensitiveVaryHeader(h)
 	}
 }
 

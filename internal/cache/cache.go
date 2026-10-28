@@ -1055,6 +1055,12 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 		// its own (proxy) span. No-op unless the otel build wired a tracer.
 		_, span := tracing.Active().Start(r.Context(), "cache.lookup")
 
+		if sensitiveVaryHeader(w.Header()) {
+			c.recordDecision(r, "vary_sensitive_rejected")
+			c.bypass(w, r, next, span)
+			return
+		}
+
 		// A protocol upgrade leaves HTTP behind: the handler takes the connection
 		// and speaks another protocol on it. There is no representation to look up
 		// or store, and the handler must receive the untouched writer so it can
@@ -1439,8 +1445,12 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	pol := c.Policy()
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, req)
+	c.guardRevalidationCapture(rec, origReq, k.key, startGen)
 	defer rec.releaseCapture()
 	next.ServeHTTP(rec, req)
+	if rec.status == 0 && rec.onHeaders != nil {
+		rec.onHeaders(http.StatusOK, rec.Header())
+	}
 	now := c.clock()
 
 	// The handler may have returned early because the operation was canceled.
@@ -1500,8 +1510,6 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		c.observeRevalidation(outcomeOriginError)
 
 	case sensitiveVaryHeader(rec.header):
-		c.recordDecision(origReq, "vary_sensitive_rejected")
-		c.deleteAtMostGen(k.key, startGen)
 		call.finish(nil, outcomeUncacheable, nil)
 		c.observeRevalidation(outcomeUncacheable)
 

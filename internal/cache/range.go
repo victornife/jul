@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/textproto"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -482,7 +483,7 @@ func varyCompatibleWithModifiedRequest(h http.Header, modifiedReq, origReq *http
 		if name == "*" {
 			return false
 		}
-		if varyRequestValue(modifiedReq.Header, name) != varyRequestValue(origReq.Header, name) {
+		if !slices.Equal(modifiedReq.Header.Values(name), origReq.Header.Values(name)) {
 			return false
 		}
 	}

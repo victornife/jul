@@ -124,6 +124,14 @@ when upgrading. A 304 that introduces either field discards the old entry and
 requires a full origin response; a stale response admitted before that 304 may
 already have completed.
 
+If removal of an aborted temporary disk capture or a leftover temporary cache
+file fails, Jul reports the cleanup failure through disk-write health and logs,
+retains the active capture-budget charge when applicable, and stops starting
+new disk captures for that cache instance. Existing memory
+entries and readable disk entries remain subject to their normal rules. Resolve
+the filesystem problem and restart Jul so startup can retry temporary-file
+cleanup; a restart that cannot remove the file keeps disk captures disabled.
+
 Membership is authoritative on lookup: a variant key the base entry does not
 claim is a miss, even if the store still holds something under it. That is what
 lets unsafe-method invalidation remove *every* variant, and what stops a deleted
