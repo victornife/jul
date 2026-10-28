@@ -71,8 +71,10 @@ func (k revalidateKey) version() validationVersion {
 // path — success, origin error, cancellation and panic — so a waiter can never
 // be stranded.
 type revalidateCall struct {
-	done chan struct{}
-	tags []string
+	done        chan struct{}
+	tags        []string
+	startGen    uint64
+	invalidated atomic.Bool
 
 	// joined counts the callers that have waited on this call. It is what makes
 	// "the leader is still required by other waiters" an observable fact rather

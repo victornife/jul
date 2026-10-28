@@ -46,6 +46,9 @@ func TestResponseLayerControllerOnlyFlush(t *testing.T) {
 	for _, state := range []layerState{layerPassthrough, layerBuffering} {
 		parent := &responseControllerOnlyWriter{err: want}
 		layer := &responseLayer{parent: parent, state: state}
+		if layer.Unwrap() != parent {
+			t.Fatal("response layer did not unwrap to parent")
+		}
 		writer := respwriter.WrapController(layer, parent)
 		if _, ok := writer.(http.Flusher); ok {
 			t.Fatal("invented http.Flusher")
@@ -57,6 +60,22 @@ func TestResponseLayerControllerOnlyFlush(t *testing.T) {
 		if state == layerBuffering && err != nil {
 			t.Fatalf("buffered flush = %v, want nil", err)
 		}
+		layer.Flush()
+	}
+}
+
+func TestResponseLayerFlushRejectsUnsupportedAndUpgraded(t *testing.T) {
+	parent := struct{ http.ResponseWriter }{httptest.NewRecorder()}
+	layer := &responseLayer{parent: parent, state: layerPending}
+	if err := layer.FlushError(); !errors.Is(err, http.ErrNotSupported) {
+		t.Fatalf("unsupported flush = %v", err)
+	}
+	if layer.state != layerPending {
+		t.Fatal("unsupported flush changed response state")
+	}
+	layer.state = layerUpgraded
+	if err := layer.FlushError(); !errors.Is(err, http.ErrHijacked) {
+		t.Fatalf("upgraded flush = %v", err)
 	}
 }
 

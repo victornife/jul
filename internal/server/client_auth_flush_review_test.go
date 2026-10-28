@@ -52,10 +52,35 @@ func TestBareClientAuthChecksBeforeControllerFlush(t *testing.T) {
 	if _, ok := wrapped.(http.Flusher); ok {
 		t.Fatal("invented http.Flusher")
 	}
+
 	if err := http.NewResponseController(wrapped).Flush(); !errors.Is(err, want) {
 		t.Fatalf("flush error = %v, want %v", err, want)
 	}
 	if writer.status != http.StatusForbidden {
 		t.Fatalf("unauthenticated flush committed %d, want 403", writer.status)
 	}
+}
+
+func TestBareClientAuthClassicAndUnsupportedFlush(t *testing.T) {
+	holder := &dynamicClientAuth{}
+	holder.current.Store(&clientAuthBundle{mode: tls.RequireAndVerifyClientCert})
+	req := httptest.NewRequest(http.MethodGet, "https://example.test/", nil)
+	t.Run("classic", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		w := &bareClientAuthWriter{ResponseWriter: rec, req: req, caHolder: holder}
+		w.Flush()
+		if rec.Code != http.StatusForbidden || !rec.Flushed {
+			t.Fatalf("unauthenticated flush: status=%d flushed=%v", rec.Code, rec.Flushed)
+		}
+	})
+	t.Run("unsupported", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		w := &bareClientAuthWriter{ResponseWriter: struct{ http.ResponseWriter }{rec}, req: req, caHolder: holder}
+		if err := w.FlushError(); !errors.Is(err, http.ErrNotSupported) {
+			t.Fatalf("unsupported flush = %v", err)
+		}
+		if w.decided || rec.Flushed {
+			t.Fatal("unsupported flush changed authentication or response state")
+		}
+	})
 }

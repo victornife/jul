@@ -226,6 +226,9 @@ func (c *Cache) beginValidationIfCurrent(version validationVersion, key revalida
 	}
 	opID, startGen = c.beginInflightOriginOpLocked()
 	call, leader = c.beginRevalidate(key, tags)
+	if leader {
+		call.startGen = startGen
+	}
 	return opID, startGen, call, leader, true
 }
 
@@ -1123,15 +1126,15 @@ func (c *Cache) collectOwnedKeysForBaseLocked(baseKey string, exactKeyFilter str
 }
 
 func (c *Cache) countMatchingInflightLocked(sel NormalizedSelector) (matched int, tagUnknown bool) {
-	return c.visitMatchingInflightLocked(sel, false)
+	return c.visitMatchingInflightLocked(sel, false, false, 0)
 }
 
-func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector) int {
-	n, _ := c.visitMatchingInflightLocked(sel, true)
+func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector, cutoff uint64) int {
+	n, _ := c.visitMatchingInflightLocked(sel, true, true, cutoff)
 	return n
 }
 
-func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool) (matched int, tagUnknown bool) {
+func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, invalidate bool, cutoff uint64) (matched int, tagUnknown bool) {
 	c.fillMu.Lock()
 	for fk := range c.fills {
 		base := baseKeyOf(fk.key)
@@ -1181,12 +1184,18 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 				hit = true
 			} else if host == sel.Host {
 				tagUnknown = true
-				hit = detach && len(tags) == 0
+				hit = (detach || invalidate) && len(tags) == 0
 			}
 		default:
 			hit = sel.MatchesResource(host, reqURI, tags)
 		}
 		if hit {
+			if invalidate {
+				if call.startGen > cutoff {
+					continue
+				}
+				call.invalidated.Store(true)
+			}
 			if detach {
 				delete(c.calls, rk)
 			}
@@ -1523,7 +1532,7 @@ func (c *Cache) BeginSelectorFenceWithError(sel NormalizedSelector) (fenceGen ui
 		matchedResources: matchedRes,
 	})
 	c.enforceFenceCapLocked()
-	c.detachMatchingInflightLocked(sel)
+	c.detachMatchingInflightLocked(sel, fenceGen)
 	c.genMu.Unlock()
 	if c.disk != nil {
 		if hwErr := c.disk.recordHighWaterGen(fenceGen); hwErr != nil {
@@ -1778,6 +1787,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 					gen: fenceGen, sel: sel, matchedResources: fenceResSet,
 				})
 			}
+			c.visitMatchingInflightLocked(sel, false, true, fenceGen)
 			c.reclaimFencesLocked()
 			c.genMu.Unlock()
 			return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
@@ -1825,7 +1835,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		})
 	}
 	c.enforceFenceCapLocked()
-	fencedOps := c.detachMatchingInflightLocked(sel)
+	fencedOps := c.detachMatchingInflightLocked(sel, fenceGen)
 
 	if isFastAll {
 		c.purgeGen = fenceGen
