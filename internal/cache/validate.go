@@ -49,6 +49,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		defer release()
 		vctx = ctx
 	}
+	vctx, cancelValidation := context.WithCancel(vctx)
+	defer cancelValidation()
 
 	defer func() {
 		// Ordering matters: drop the call state first so a later request can
@@ -74,7 +76,15 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, r)
-	c.guardRevalidationCapture(rec, r, k.key, startGen)
+	rejected := false
+	c.guardRevalidationCapture(rec, r, k.key, startGen, func() {
+		if !rejected {
+			rejected = true
+			cancelValidation()
+			c.endRevalidate(k, call)
+			c.finishValidation(call, nil, outcomeUncacheable)
+		}
+	})
 	defer rec.releaseCapture()
 	vreq := conditionalRequest(r.Clone(vctx), stored)
 	next.ServeHTTP(rec, vreq)
@@ -93,10 +103,14 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		}
 		c.fetchAndStore(w, r, next, c.clock())
 	}
+	if rejected {
+		fallbackAfterValidation()
+		return
+	}
 
 	switch {
 	case rec.status == http.StatusNotModified:
-		refreshed, action, reason := c.merge304Decision(stored, rec.header, now)
+		refreshed, action, reason := c.merge304Decision(stored, rec.committedHeader(), now)
 		if reason != "" {
 			c.recordDecision(r, reason)
 		}
@@ -152,14 +166,14 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		fallbackAfterValidation()
 
 	default:
-		e := c.buildEntryFromCapture(vreq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
+		e := c.buildEntryFromCapture(vreq, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
 		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
 			c.delOneIfGenAtMost(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
-			if isRange || !varyCompatibleWithModifiedRequest(rec.header, vreq, r) || !writeRecorded(w, r, rec, nil, stateMiss) {
+			if isRange || !varyCompatibleWithModifiedRequest(rec.committedHeader(), vreq, r) || !writeRecorded(w, r, rec, nil, stateMiss) {
 				fallbackAfterValidation()
 			}
 		} else {
@@ -175,12 +189,15 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	}
 }
 
-func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64) {
+func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64, onReject func()) {
 	rec.onHeaders = func(code int, h http.Header) {
 		if sensitiveVaryHeader(h) {
 			c.recordDecision(original, "vary_sensitive_rejected")
 			if code < http.StatusInternalServerError {
 				c.deleteAtMostGen(key, startGen)
+				if onReject != nil {
+					onReject()
+				}
 			}
 		}
 	}
@@ -271,7 +288,7 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, publis
 	// Cache.serve: a multi-value field still reproduces in full, but a
 	// recorded field cannot stack beside a value an outer layer already set on
 	// this same map (#332).
-	for name, values := range rec.header {
+	for name, values := range rec.committedHeader() {
 		for i, v := range values {
 			if i == 0 {
 				h.Set(name, v)

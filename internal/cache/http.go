@@ -460,6 +460,7 @@ type recorder struct {
 	noStore         bool
 	headerCheck     func(code int, h http.Header) bool
 	onHeaders       func(code int, h http.Header)
+	snapshot        http.Header
 	onDecision      func(string)
 	onAbandon       func()
 	tagHeaders      []string
@@ -519,16 +520,17 @@ func (r *recorder) WriteHeader(code int) {
 		return
 	}
 	r.status = code
+	r.snapshot = cloneHeader(r.Header())
 	if r.onHeaders != nil {
-		r.onHeaders(code, r.Header())
+		r.onHeaders(code, r.snapshot)
 	}
-	cl := declaredLength(r.Header())
+	cl := declaredLength(r.snapshot)
 	// A 1xx is an interim or protocol-switch response, not a representation, and
 	// an event stream never ends — buffering one would grow to the size limit
 	// before being discarded.
-	if code < http.StatusOK || isEventStream(r.Header()) {
+	if code < http.StatusOK || isEventStream(r.snapshot) {
 		if r.onDecision != nil {
-			if isEventStream(r.Header()) {
+			if isEventStream(r.snapshot) {
 				r.onDecision("sse_bypass")
 			} else {
 				r.onDecision("upgrade_bypass")
@@ -537,7 +539,7 @@ func (r *recorder) WriteHeader(code int) {
 		r.dropCapture()
 	} else if cl > r.limit {
 		r.abandon(captureSkipOversize)
-	} else if r.headerCheck != nil && !r.headerCheck(code, r.Header()) {
+	} else if r.headerCheck != nil && !r.headerCheck(code, r.snapshot) {
 		r.dropCapture()
 	} else {
 		captureInitDiskStream(cl, r.effMemLimit(), r.disk, r.acct.onSkip, r.acct.onFailure, &r.diskStream, r.abandon, r.dropCapture)
@@ -569,6 +571,13 @@ func (r *recorder) Write(p []byte) (int, error) {
 // storable reports whether the captured response may be considered for storage,
 // and equivalently whether r.body holds the complete response bytes.
 func (r *recorder) storable() bool { return !r.noStore && !r.tooBig }
+
+func (r *recorder) committedHeader() http.Header {
+	if r.snapshot != nil {
+		return r.snapshot
+	}
+	return r.Header()
+}
 
 // statusWriter observes the status of a response the cache forwards but never
 // stores, so an unsafe method can decide whether it invalidates.

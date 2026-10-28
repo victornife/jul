@@ -1445,13 +1445,28 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	pol := c.Policy()
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, req)
-	c.guardRevalidationCapture(rec, origReq, k.key, startGen)
+	opCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	req = req.WithContext(opCtx)
+	rejected := false
+	c.guardRevalidationCapture(rec, origReq, k.key, startGen, func() {
+		if !rejected {
+			rejected = true
+			cancel()
+			c.endRevalidate(k, call)
+			call.finish(nil, outcomeUncacheable, nil)
+			c.observeRevalidation(outcomeUncacheable)
+		}
+	})
 	defer rec.releaseCapture()
 	next.ServeHTTP(rec, req)
 	if rec.status == 0 && rec.onHeaders != nil {
 		rec.onHeaders(http.StatusOK, rec.Header())
 	}
 	now := c.clock()
+	if rejected {
+		return
+	}
 
 	// The handler may have returned early because the operation was canceled.
 	// A canceled refresh must not be mistaken for an origin outage, so it never
@@ -1468,7 +1483,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	case rec.status == http.StatusNotModified:
 		// Upstream confirms freshness: republish a merged clone under the same
 		// (variant) key it already lives at.
-		refreshed, action, reason := c.merge304Decision(stale, rec.header, now)
+		refreshed, action, reason := c.merge304Decision(stale, rec.committedHeader(), now)
 		if reason != "" {
 			c.recordDecision(req, reason)
 		}
@@ -1509,17 +1524,13 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		call.finish(nil, outcomeOriginError, nil)
 		c.observeRevalidation(outcomeOriginError)
 
-	case sensitiveVaryHeader(rec.header):
-		call.finish(nil, outcomeUncacheable, nil)
-		c.observeRevalidation(outcomeUncacheable)
-
 	case !rec.storable():
 		c.recordDecision(req, "capture_not_stored")
 		call.finish(nil, outcomeUncacheable, nil)
 		c.observeRevalidation(outcomeUncacheable)
 
 	default:
-		e := c.buildEntryFromCapture(req, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
+		e := c.buildEntryFromCapture(req, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
 		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(key(req), req, e, rec.diskStream, startGen, true) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)

@@ -554,7 +554,7 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 	}
 
 	now := c.clock()
-	e := c.buildEntryFromCapture(fillReq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
+	e := c.buildEntryFromCapture(fillReq, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
 	if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(base, fillReq, e, rec.diskStream, startGen, true) {
 		return nil
 	}
