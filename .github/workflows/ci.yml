@@ -321,6 +321,12 @@ jobs:
           pattern: native-windows-coverage-*
           path: native-coverage
           merge-multiple: true
+      - name: Instrumented WASM guest fixture coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          JUL_GUEST_COVERPROFILE="$PWD/guest-v2.cover" go test -tags wasmplugins ./internal/plugins -run '^TestInstrumentedVaryCookieGuest$' -count=1
+          sed -i 's|^juliaplugins/|examples/plugins/|' guest-v2.cover
       - name: Load-generator regressions and complete changed Go coverage
         shell: bash
         run: |
@@ -329,7 +335,7 @@ jobs:
           go test -race -count=1 -coverprofile=http-load.cover scripts/burn-in-load.go scripts/burn-in-load_test.go
           python3 scripts/test_check_added_go_coverage.py
           git diff --unified=0 origin/main...HEAD -- '*.go' | python3 scripts/strip_moved_lines.py > stream-load.diff
-          python3 scripts/check-added-go-coverage.py --diff stream-load.diff --profile cover.out --profile stream-load.cover --profile http-load.cover --profile native-coverage/windows-lean.cover --profile native-coverage/windows-full.cover > stream-load-coverage.json
+          python3 scripts/check-added-go-coverage.py --diff stream-load.diff --profile cover.out --profile stream-load.cover --profile http-load.cover --profile guest-v2.cover --profile native-coverage/windows-lean.cover --profile native-coverage/windows-full.cover > stream-load-coverage.json
       - name: signed-URL policy coverage (separate guest module)
         shell: bash
         run: |
@@ -419,12 +425,13 @@ jobs:
             cover.out
             stream-load.cover
             http-load.cover
+            guest-v2.cover
             stream-load.diff
             stream-load-coverage.json
       - name: upload to Codecov
         uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5  # v7.1.1
         with:
-          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover,./http-load.cover,./native-coverage/windows-lean.cover,./native-coverage/windows-full.cover
+          files: ./cover.out,./signed-url-policy.cover,./stream-load.cover,./http-load.cover,./guest-v2.cover,./native-coverage/windows-lean.cover,./native-coverage/windows-full.cover
           disable_search: true
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
