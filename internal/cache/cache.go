@@ -1284,6 +1284,10 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	cw.onDecision = func(reason string) { c.recordDecision(r, reason) }
 	cw.acct.onSkip = func(reason string) { c.captureSkipped(reason); c.recordDecision(r, "capture_"+reason) }
 	cw.headerCheck = func(code int, h http.Header) bool {
+		if sensitiveVaryHeader(w.Header()) {
+			c.recordDecision(r, "vary_sensitive_rejected")
+			return false
+		}
 		if pol.TagHeaderCount > 0 {
 			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
 				tagSkipReason = skip
