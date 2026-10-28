@@ -8,6 +8,11 @@
 - Source: #430 (Wave 4). Builds on #420 (bounded instance pool), #428 (resource ownership), #429
   (module content identity). #444 (streaming bodies) stays out of scope.
 
+> **Cache safety amendment:** The later #623 response-hook safeguard bypasses
+> shared caching for requests with an active response subscription. The hook
+> still runs; request-only executions can cache. See
+> [route ownership and response hooks](../cache.md#route-ownership-and-response-hooks).
+
 ## Context
 
 `jul-abi/v1` is a request-phase contract. A guest's `handle_request` can inspect and mutate the
@@ -180,7 +185,7 @@ cache**. Consequences, each pinned by a test:
 
 | Concern | Decision |
 | --- | --- |
-| Cache | The hook runs on **every** response the location serves — miss, fill, hit, revalidated, stale — because the cache is inside it. The cache stores the **pre-plugin** (origin) representation; a plugin's output is never cached by Jul's cache and never depends on whether the entry was cached. The hook sees the cache's `X-Cache` header like any other header. |
+| Cache | Requests with an active response subscription bypass shared caching before lookup or storage; the hook still runs and sees `X-Cache: BYPASS`. Request-only executions without a subscription can cache normally, subject to route ownership and origin policy. |
 | WAF | WAF request inspection runs before the action and is not visible to the hook. WAF **response** inspection (`response_body_check`) inspects the **post-plugin** response, so a plugin cannot re-introduce content the WAF blocks. A WAF denial is not presented to the hook. |
 | Auth / RateLimit / ClientCert / preflight | Their denials happen before the response point and are never presented; a plugin cannot turn a 401/429/403 into a success. |
 | CORS / `response_headers` | Applied **after** the hook (ResponsePolicy is outside). A plugin cannot remove a `response_headers` `set`, and on a CORS-enabled location every `Access-Control-*` header a plugin sets is replaced by the policy. Where no policy exists, a plugin has the same authority over those headers as the origin. |
@@ -344,7 +349,7 @@ place to research bounded streaming.
 Golden: v1 unchanged; separate v2 golden for host imports, required/optional exports, every numeric
 constant. Compatibility: historical and current v1 fixtures, a v2 fixture, malformed/mismatched v2
 modules. Response semantics: status/header/body read and write, every error code, empty and
-oversized bodies, every unavailable reason. Pipeline: cache miss/fill/hit, gzip/brotli/zstd, WAF
+oversized bodies, every unavailable reason. Pipeline: response-hook cache bypass and request-only cache reuse, gzip/brotli/zstd, WAF
 response inspection, CORS and `response_headers`, access-log/metrics bytes, error responses.
 Protocol exclusions: SSE, WebSocket, gRPC, 206. Failure: trap, timeout, bad pointer, oversized
 write, reserved result, cancellation. Lifecycle: reload under active requests, v1↔v2 replacement,

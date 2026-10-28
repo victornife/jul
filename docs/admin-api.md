@@ -711,6 +711,12 @@ Inspection `page_size` is an upper bound: encoded responses are also limited to
 2 MiB. Wide representation metadata can shorten a page. Follow `next_cursor`
 until absent, even when fewer than the requested resources were returned.
 
+Inspection reports that route ownership is unavailable without an actual
+selected request. With opt-in decision sampling, an observed
+`response_hook_bypass` identifies a request that bypassed shared caching for an
+active response subscription; it does not predict whether future requests
+will subscribe.
+
 Inspection evidence timestamps with no known value are omitted (`inserted_at`,
 `validated_at`), rather than serialized as Go's zero date. Other known timestamps
 retain their existing format. The internal Console `GET /api/traffic-controls`

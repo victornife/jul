@@ -86,9 +86,9 @@ func (c *Cache) observeFillLock(outcome fillOutcome) {
 // When no Vary stub exists yet (effKey == base), the lock key is the primary
 // cache key (method + lowercased host + request URI), which contains no request
 // headers. When a Vary stub already exists (effKey != base), the variant key is
-// hashed with SHA-256 so that even a response varying on Authorization or
-// Cookie never places raw credentials or sensitive header values into the lock
-// table.
+// hashed with SHA-256 so varied header values are not copied directly into
+// the lock table. Hashing is not a general privacy guarantee: request targets
+// can contain secrets, as can other headers and their derived keys.
 func fillLockKey(base, effKey string) string {
 	if effKey == base {
 		return base

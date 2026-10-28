@@ -25,10 +25,12 @@ import (
 // produce a mutable copy.
 type Entry struct {
 	// Evidence is bounded publication provenance; zero means legacy/unavailable.
-	Evidence *publicationEvidence
-	Status   int
-	Header   http.Header
-	Body     []byte
+	Evidence           *publicationEvidence
+	routeOwner         RouteOwner
+	routeCompatibility RouteCompatibility
+	Status             int
+	Header             http.Header
+	Body               []byte
 	// diskBody is non-nil when the entry's payload lives in a reference-counted
 	// on-disk cache file rather than in Body (#525 Part 2, ADR 0023).
 	diskBody *diskBlob
@@ -161,7 +163,7 @@ func (e *Entry) OpenBody() (BodyReader, error) {
 
 // Size estimates the entry's memory footprint in bytes.
 func (e *Entry) Size() int64 {
-	n := int64(len(e.Body)) + 256
+	n := int64(len(e.Body)) + 304
 	if e.Evidence != nil {
 		n += 96
 	} // immutable provenance allocation and catalog pointer allowance

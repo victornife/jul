@@ -236,9 +236,8 @@ func TestMemStoreResizeDecreaseEvictsStrictLRUOrder(t *testing.T) {
 	// Touch "a" so it is no longer the least-recently-used.
 	m.get("a")
 
-	// Each ~556-byte entry (300-byte body + 256-byte fixed overhead); a cap of
-	// 1200 fits exactly two, so evicting the true LRU ("b") is enough.
-	count, bytes := m.Resize(1200)
+	// Each key has one byte; size the cap to hold exactly two entries.
+	count, bytes := m.Resize(2 * ((&Entry{Body: make([]byte, 300)}).Size() + 1))
 	if count != 1 || bytes == 0 {
 		t.Fatalf("Resize evicted count=%d bytes=%d, want exactly 1 eviction (b, the true LRU)", count, bytes)
 	}

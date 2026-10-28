@@ -46,6 +46,8 @@ var errDiskMetaTooLarge = fmt.Errorf("%w: metadata exceeds format limit", errCor
 
 type diskEntryMeta struct {
 	Evidence           *publicationEvidence
+	RouteOwner         RouteOwner
+	RouteCompatibility RouteCompatibility
 	Status             int
 	Header             http.Header
 	CreatedAt          time.Time
@@ -78,6 +80,8 @@ func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLe
 	meta := diskEntryMeta{
 		Status:             e.Status,
 		Evidence:           e.Evidence,
+		RouteOwner:         e.routeOwner,
+		RouteCompatibility: e.routeCompatibility,
 		Header:             e.Header,
 		CreatedAt:          e.CreatedAt,
 		ExpiresAt:          e.ExpiresAt,
@@ -201,6 +205,8 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 	return &Entry{
 		Status:                 meta.Status,
 		Evidence:               meta.Evidence,
+		routeOwner:             meta.RouteOwner,
+		routeCompatibility:     meta.RouteCompatibility,
 		Header:                 meta.Header,
 		CreatedAt:              meta.CreatedAt,
 		ExpiresAt:              meta.ExpiresAt,

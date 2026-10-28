@@ -2,8 +2,9 @@
 
 Jul.IA can cache upstream responses in front of proxied backends and FastCGI/uWSGI
 apps. The cache is **two-tier**: a fast in-memory tier backed by an optional
-on-disk overflow tier that survives process restarts. Both tiers are part of the
-core binary — there is no build tag to enable.
+on-disk overflow tier. Disk files survive process restarts, but their earlier
+route ownership is not reusable after restart. Both tiers are part of the core
+binary — there is no build tag to enable.
 
 The cache is opt-in per location (`cache = true`) and gated by the global
 `[cache].enabled` switch. Cacheability follows the shared-cache rules of RFC 9111
@@ -12,7 +13,9 @@ choice, is written out in [Shared-cache contract](#shared-cache-contract). The
 cache was recertified by #134 after the #131/#132/#133 correction programme.
 The final decision is to retain GA: no unresolved cache P0/P1 correctness defect
 was found, and the executable matrix, race/protocol suites, focused soak and
-benchmarks below were refreshed against the corrected implementation.
+benchmarks below were refreshed against that implementation. The later route
+ownership and response-hook changes described here are not covered by that
+historical soak or a release/GA promotion.
 
 ## Contents
 
@@ -40,13 +43,13 @@ benchmarks below were refreshed against the corrected implementation.
 | Tier | Backing store | Bound | Lifetime |
 | --- | --- | --- | --- |
 | Memory | in-process map, LRU by bytes | `memory_max_size` | process lifetime; survives reloads |
-| Disk (optional) | files under `disk_path`, LRU by bytes | `disk_max_size` (per-entry ceiling `max_entry_size`) | survives restarts |
+| Disk (optional) | files under `disk_path`, LRU by bytes | `disk_max_size` (per-entry ceiling `max_entry_size`) | files survive restart; earlier route owners are ineligible |
 
 A request is served from the memory tier first. Memory-eligible entries
 (`body <= min(memory_max_size, max_entry_size)`) are stored in the memory tier
 and written through to the disk tier (when `disk_path` is configured) under a
-monotonic per-key generation so they survive process restarts and remain backed
-by the larger disk LRU if evicted from memory. On a memory miss the disk tier is
+monotonic per-key generation, remaining backed by the larger disk LRU if evicted
+from memory. On a memory miss the disk tier is
 consulted: a disk hit whose body fits within `min(memory_max_size, max_entry_size)`
 is **promoted** back into the memory tier (provided its per-key generation is
 still current) so subsequent reads stay hot, whereas a large disk-backed object
@@ -54,8 +57,8 @@ still current) so subsequent reads stay hot, whereas a large disk-backed object
 on-disk file in 32 KiB chunks without entering or evicting the memory tier
 ([ADR 0023](adr/0023-large-object-disk-streamed-cache.md)).
 
-The cache instance is shared across configuration reloads, so a reload does not
-cold-start the cache.
+The cache instance is shared across configuration reloads, but route-owner
+changes can make retained entries ineligible, as described below.
 
 ## Configuration
 
@@ -155,6 +158,55 @@ A request whose varied values match no stored variant is a miss; `Vary: *`
 responses are never reused. Membership is capped at 64 variants per base
 resource; past the cap the oldest variant is deleted with its membership entry,
 so a pathological `Vary` cannot grow one record without bound.
+
+### Route ownership and response hooks
+
+The serving handler associates cache entries with an opaque route owner and a
+separate opaque policy-compatibility token, not a cookie, credential, predicate
+value or additional cache-key partition. Entries without both matching values
+are misses, including legacy metadata. A `Vary` stub and its representation
+must both match. Because the node still stores one representation set per base
+key, overlapping routes can evict each other's copies and increase origin
+traffic; storage limits remain shared node-wide. Scoped invalidation still
+targets the logical resource.
+
+An uninterrupted cached route with a `route_id` retains its owner across
+handler reloads; the ID alone is not proof of policy compatibility. Its
+compatibility token is retained only when scalar cache policy is unchanged and
+neither the previous nor the new generation has an effective plugin. A
+deleted or disabled route does not recover its old owner if its ID is reused.
+Routes without `route_id` receive a new owner and compatibility token on each
+published handler generation. Adding, removing, replacing or rolling back a
+plugin changes compatibility without making prior entries eligible. This also
+rotates compatibility for request-only plugins on reload because Jul cannot
+prove their request behavior unchanged from the response capability alone.
+After process restart all owners are new, including for routes with
+`route_id`, because the existing disk metadata cannot prove uninterrupted route
+ownership. This may produce a cold cache and origin load. Old files remain
+subject to normal eviction or explicit purge.
+
+While a handler's scalar cache policy differs from the currently committed
+cache policy, requests bypass the cache rather than using either policy partially.
+Retain-on-reload for unchanged ownership and compatibility still does not
+guarantee backend cutover: a target change can retain a previous response or a
+retired fill. Automatic route/backend cutover remains #624.
+
+When an effective ABI v2 plugin chain actually subscribes to the response
+phase, the request bypasses cache lookup, storage, revalidation and fill
+sharing (`X-Cache: BYPASS`). The hook still executes; unsafe methods still
+perform their normal invalidation. The response hook can add `Vary` only after
+the cache would otherwise have decided, so serving a stored origin response
+first is not safe for a cookie-dependent origin. Request-only executions that
+do not subscribe can cache normally when ownership and origin policy permit.
+The SDK can export `handle_response` even for a request-only guest; regardless
+of ABI, plugin-bearing generations rotate compatibility on reload even when a
+particular request does not subscribe. This safeguard can increase origin load
+and does not certify an application safe to cache.
+
+The server-owned `response_hook_bypass` decision appears in recent inspection
+when opt-in decision sampling records it. Inspection cannot establish which
+route a future request will select, and reports route ownership as unavailable
+rather than claiming an entry is reusable.
 
 The 2026-09-28 correction to repeated-field handling uses a new variant-value
 encoding. Existing disk entries written with the old first-value encoding
@@ -741,21 +793,20 @@ downstream handler.
 
 ### Cache data across reloads
 
-The cache instance is created once per process and is captured by every handler
-generation, so **cached data persists across ordinary configuration reloads**.
-This is the pre-existing, deliberately preserved policy: reloading configuration
-does not warm-start or flush the cache.
+The cache instance persists across handler generations, but retained entries
+are reusable only when their opaque route owner and compatibility token match.
+Routes without IDs get new owners on published reload. Compatibility rotates
+when a scalar policy changes or either generation has a plugin. A continuously
+named route without plugins and with unchanged scalar policy retains both
+tokens; changing its backend does not automatically invalidate the old response.
+A retired fill can still publish under its own tokens. See
+[route ownership and response hooks](#route-ownership-and-response-hooks).
 
-One consequence follows directly from it: a refresh that started on the old
-generation publishes into the process-shared cache even if it completes after a
-reload changed routes or backends. The result is the representation the **old**
-generation's route would have produced. Changing routing or backends therefore
-does not retroactively invalidate entries. After old-generation work drains,
-use the admin purge endpoint when the old representation must no longer be
-served. A restart alone clears the memory tier but **retains the disk tier**;
-changing `[cache].enabled` is itself restart-required. For a cutover that must
-exclude old entries, quiesce traffic and in-flight refreshes, restart if needed,
-purge both tiers, then resume traffic.
+A restart clears memory and leaves disk files, but all previous route owners
+become ineligible. Changing `[cache].enabled` is itself restart-required. For a
+cutover that must exclude old entries, quiesce traffic and in-flight refreshes,
+restart if needed, purge both tiers, then resume traffic. This ownership check
+is not the automatic backend-cutover contract tracked by #624.
 
 ### Observability
 
@@ -1270,14 +1321,13 @@ the standard:
 
 Lifecycle behavior:
 
-11. **A reload does not invalidate cached entries.** The cache is process-scoped
-    and survives configuration reloads by design, so a routing or backend change
-    does not retroactively drop entries stored under the previous configuration.
-    A refresh that was already in flight when the reload ran also completes
-    against the *old* generation's route and publishes its result. Purge after
-    old-generation refreshes drain; a restart alone does not clear the disk
-    tier. See [Cache data across reloads](#cache-data-across-reloads) for the
-    cutover sequence. Characterized by
+11. **Retained entries are not an automatic cutover.** Cache storage survives
+    reload, but route ownership can make entries ineligible. An unchanged named
+    route without plugins can retain entries and old-generation
+    publications even when its backend changes. Restart leaves disk files but
+    changes every route owner. See
+    [Cache data across reloads](#cache-data-across-reloads) for the cutover
+    sequence. Background generation behavior is characterized by
     `TestReloadWaitsForCacheRevalidationHoldingGeneration` and
     `TestReloadDuringMandatorySynchronousValidation` (`internal/server`) and the
     generation-isolation tests in `internal/cache`.

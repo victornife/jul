@@ -65,7 +65,8 @@ type HandlerFactory struct {
 	RT         *Runtime           // Tracer.Middleware, ACME
 	Versions   *versionid.Context // private effective-version context (#649)
 
-	mu sync.Mutex // serialises every build (startup, reload, preflight)
+	mu              sync.Mutex // serialises every build (startup, reload, preflight)
+	liveCacheOwners map[string]cacheRouteState
 
 	// genCounter assigns monotonically increasing IDs to handler generations.
 	// It is used to tag generation-scoped resources (redaction, pool snapshots)
@@ -83,6 +84,12 @@ type HandlerFactory struct {
 	// guarded by moduleMu.
 	liveWAF    *admin.WAFEffectivePolicy
 	wafDigests wafDigestRecord
+}
+
+type cacheRouteState struct {
+	scope      cache.RouteScope
+	hasPlugins bool
+	policy     cache.CachePolicy
 }
 
 type wafDigestRecord struct {
@@ -216,6 +223,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	var retirePrev func()
 	if commit {
 		retireHandlers := gen.Commit()
+		f.liveCacheOwners = gen.cacheRouteOwners
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)
@@ -280,6 +288,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		}
 		committed = true
 		retireHandlers := gen.Commit()
+		f.liveCacheOwners = gen.cacheRouteOwners
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)
@@ -410,11 +419,46 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return nil, fmt.Errorf("build aborted after plugin compilation: %w", err)
 	}
 
-	withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
-		if loc.Cache && f.Cache != nil {
-			return f.Cache.Handler(h)
+	gen.cacheRouteOwners = make(map[string]cacheRouteState)
+	responsePoint := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
+		return pluginSet.ResponsePoint(append(append([]string(nil), srv.Plugins...), loc.Plugins...)...)
+	}
+	withCache := func(srv config.ServerConfig, loc config.LocationConfig, h http.Handler) (http.Handler, error) {
+		if !loc.Cache || f.Cache == nil {
+			return h, nil
 		}
-		return h
+		hasPlugins := len(srv.Plugins) > 0 || len(loc.Plugins) > 0 || loc.Plugin != ""
+		policy := cache.PolicyForConfig(c.Cache)
+		policy.DecisionSamples = false
+		var scope cache.RouteScope
+		var err error
+		if loc.RouteID != nil && *loc.RouteID != "" {
+			old, ok := f.liveCacheOwners[*loc.RouteID]
+			if ok {
+				scope.Owner = old.scope.Owner
+			} else {
+				scope.Owner, err = f.Cache.NewRouteOwner()
+			}
+			if err == nil {
+				if ok && !old.hasPlugins && !hasPlugins && old.policy == policy {
+					scope.Compatibility = old.scope.Compatibility
+				} else {
+					scope.Compatibility, err = f.Cache.NewRouteCompatibility()
+				}
+			}
+			if err == nil {
+				gen.cacheRouteOwners[*loc.RouteID] = cacheRouteState{scope: scope, hasPlugins: hasPlugins, policy: policy}
+			}
+		} else {
+			scope.Owner, err = f.Cache.NewRouteOwner()
+			if err == nil {
+				scope.Compatibility, err = f.Cache.NewRouteCompatibility()
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("cache: create route owner: %w", err)
+		}
+		return f.Cache.HandlerForRoute(h, scope, policy)
 	}
 
 	// Static locations may serve precompressed .br/.gz sidecars when the
@@ -466,7 +510,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if c, ok := h.(io.Closer); ok {
 				gen.Stage(c)
 			}
-			return withCache(loc, h), nil
+			return withCache(srv, loc, h)
 		},
 		router.ActionFastCGI: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h, err := handler.NewFastCGI(ctx, srv, loc, upstreams, f.PoolReg, f.Log)
@@ -478,7 +522,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if c, ok := h.(io.Closer); ok {
 				gen.Stage(c)
 			}
-			return withCache(loc, h), nil
+			return withCache(srv, loc, h)
 		},
 		router.ActionGRPCTranscode: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h, err := handler.NewGRPCTranscode(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCTranscode, f.Metrics.ObserveGRPCTranscodeStreamMsg)
@@ -492,12 +536,12 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			}
 			return h, nil
 		},
-		router.ActionPlugin: func(_ config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
+		router.ActionPlugin: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h := pluginSet.Handler(loc.Plugin)
 			if h == nil {
 				return nil, fmt.Errorf("handler plugin %q is not loaded", loc.Plugin)
 			}
-			return withCache(loc, h), nil
+			return withCache(srv, loc, h)
 		},
 	}
 
@@ -722,13 +766,22 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		// Jul's own policy denials never reach a response hook; outside BodyLimit
 		// and the cache, so every served response (hit or miss) is presented and
 		// the cache stores the origin representation.
-		respPoint := pluginSet.ResponsePoint(append(append([]string(nil), srv.Plugins...), loc.Plugins...)...)
+		respPoint := responsePoint(srv, loc)
 		if au == nil && rl == nil && cc == nil && wf == nil && pf == nil && len(pluginMW) == 0 {
 			return nil
 		}
 		return func(next http.Handler) http.Handler {
 			h := next
 			if respPoint != nil {
+				if loc.Cache && f.Cache != nil {
+					action := h
+					h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if plugins.HasActiveResponseHook(r.Context()) {
+							r = cache.WithResponseHookBypass(r)
+						}
+						action.ServeHTTP(w, r)
+					})
+				}
 				h = respPoint(h)
 			}
 			// The WAF runs just inside authentication and outside rate

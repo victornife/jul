@@ -110,6 +110,16 @@ func policyFromConfig(cfg config.CacheConfig) CachePolicy {
 	}
 }
 
+// PolicyForConfig constructs the cache's scalar policy for a handler generation.
+func PolicyForConfig(cfg config.CacheConfig) CachePolicy {
+	return policyFromConfig(cfg)
+}
+
+func reusePolicy(p CachePolicy) CachePolicy {
+	p.DecisionSamples = false
+	return p
+}
+
 // Policy returns the currently active scalar policy snapshot.
 func (c *Cache) Policy() CachePolicy {
 	if c == nil {

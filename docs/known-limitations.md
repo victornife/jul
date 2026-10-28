@@ -836,3 +836,9 @@ mid-stream revocation are provided. Missing/invalid guest policy fails closed.
 ## Cache inspection evidence
 
 Inspection captures bounded metadata rather than a global cache/configuration transaction. Older disk entries may lack insertion/validation/policy provenance. Sampling is opt-in, lossy and expiring; no entry or sample is not proof a resource was never cached. Unnamed/wildcard-only host enumeration and live origin probes are unsupported. See [full boundaries and inherited follow-ups](cache.md#bounded-cache-inspection).
+
+Inspection cannot determine the route owner selected by an arbitrary future
+request. Opaque route ownership changes on process restart and, for routes
+without a durable ID, on handler generation changes. Compatibility also
+rotates on generation changes involving plugins. Cache hits may therefore
+become misses; this is not backend cutover.

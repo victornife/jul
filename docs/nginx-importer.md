@@ -452,6 +452,14 @@ The single-zone cache-enablement mapping remains supported; the existing
 `NGX_LOCATION_CACHE_VALID` approximation explains policy differences, and
 `NGX_LOCATION_CACHE_IGNORE_HEADERS` remains blocking.
 
+Jul rejects shared-cache representations varying on Cookie or Authorization,
+and active Jul response-hook subscriptions bypass shared caching. It also
+requires current route ownership and policy compatibility before reuse; old
+disk entries become ineligible after process restart. These are Jul runtime
+restrictions, not translations of NGINX cache directives. Assess origin load
+and cache warming during migration rather than assuming equivalent Vary or
+restart behavior.
+
 Standard NGINX proxy caching processes origin `Cache-Control`/`Expires` and
 gives `X-Accel-Expires` priority; `X-Accel-Expires: 0` disables storage. It does
 not consume arbitrary origin `CDN-Cache-Control` as policy. Jul selects valid

@@ -198,7 +198,10 @@ revisit triggers (e.g. circuit-breaker recovery/half-open-probe replay).
 **Cache dimensions deliberately not yet exercised here: `Vary`, `Range`, and
 stale-serving.** `cache-runtime` proves MISS, HIT, and the client-side
 `no-store` bypass — the three dispositions a migrated `proxy_cache` config
-most directly puts at risk of a silent behavior change. `Vary`-keyed
+most directly puts at risk of a silent behavior change. This corpus does not
+establish equivalence for Jul's Cookie/Authorization Vary rejection,
+response-hook bypass, or route-ownership cold starts. Those behaviors require
+separate validation against the intended origin and deployment. `Vary`-keyed
 multi-representation caching, `Range`/`If-Range` bypass, and
 `stale-while-revalidate`/`stale-if-error` serving are already covered by
 `internal/handler`'s own dedicated, extensive cache test suite (see

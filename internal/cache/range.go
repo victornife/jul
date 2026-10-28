@@ -354,7 +354,7 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 	if !hasHeaderField(r.Header, "Range") {
 		rClean := r.Clone(r.Context())
 		rClean.Header.Del("If-Range")
-		c.serveOrFillFull(w, rClean, next, reqPolicy, pol, span)
+		c.serveOrFillFull(w, rClean, next, reqPolicy, pol, span, nil)
 		return
 	}
 

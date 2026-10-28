@@ -32,6 +32,7 @@ import (
 // survives an ordinary configuration reload.
 type Cache struct {
 	inspectKey [32]byte
+	routeBoot  [16]byte
 	samples    atomic.Pointer[decisionBuffer]
 	mem        *memStore
 	disk       *diskStore
@@ -169,6 +170,9 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	}
 	pol := policyFromConfig(cfg)
 	if err := c.initInspection(); err != nil {
+		return nil, err
+	}
+	if err := c.initRouteOwnership(); err != nil {
 		return nil, err
 	}
 	c.setDecisionSampling(pol.DecisionSamples)
@@ -729,10 +733,9 @@ func (c *Cache) DiskWriteHealth() (failures int64, failing, ok bool) {
 
 // key derives the primary cache key from method, host, and request URI.
 //
-// It never includes a credential, a cookie or any other request header: the key
-// space is exactly (method, host, target), and reuse restrictions are enforced
-// by the stored entry's policy instead. Deriving a key from Authorization would
-// turn a leak into a silent per-credential cache.
+// The base key does not include request-header values. The target can itself
+// contain sensitive data, and permitted Vary variants can include values from
+// other headers. Reuse restrictions are enforced by the stored entry's policy.
 func key(r *http.Request) string {
 	return keyFor(r.Method, r.Host, r.URL.RequestURI())
 }
@@ -750,6 +753,10 @@ func keyFor(method, host, requestURI string) string {
 // what stops an invalidated variant from becoming reachable again, and what
 // makes a pre-#132 stub (which records no membership) fail closed.
 func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
+	return c.lookupWithOwner(base, r, nil)
+}
+
+func (c *Cache) lookupWithOwner(base string, r *http.Request, scope *RouteScope) (*Entry, string, bool) {
 	startGen := c.genSeq.Load()
 	e, ok := c.get(base)
 	if !ok {
@@ -758,6 +765,10 @@ func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
 	if sensitiveVaryEntry(e) {
 		c.recordDecision(r, "vary_sensitive_rejected")
 		c.cleanupSensitiveVary(base, e, startGen)
+		return nil, base, false
+	}
+	if reason := entryScopeMismatch(e, r, scope); reason != "" {
+		c.recordDecision(r, reason)
 		return nil, base, false
 	}
 	if e.IsVaryStub {
@@ -770,6 +781,12 @@ func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
 			c.recordDecision(r, "vary_sensitive_rejected")
 			c.delOneIfGenAtMost(vk, startGen)
 			return nil, base, false
+		}
+		if ok {
+			if reason := entryScopeMismatch(e, r, scope); reason != "" {
+				c.recordDecision(r, reason)
+				return nil, base, false
+			}
 		}
 		return e, vk, ok
 	}
@@ -921,7 +938,7 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 	if hasStartGen {
 		deleteGen = startGen
 	}
-	stub := c.stubFor(base, e.Vary, deleteGen)
+	stub := c.stubFor(base, e.Vary, e.routeOwner, e.routeCompatibility, deleteGen)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
 	stored, variantGen := c.publishCapturedWithStartGen(vk, e, stream, startGen, hasStartGen)
@@ -958,16 +975,16 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 // the same Vary field set is extended; a stub for a different Vary — the origin
 // changed what it varies on — is replaced, and the variants it owned are deleted
 // up to maxGen rather than deleting representations newer than the origin work.
-func (c *Cache) stubFor(base string, vary []string, maxGen uint64) *Entry {
+func (c *Cache) stubFor(base string, vary []string, owner RouteOwner, compatibility RouteCompatibility, maxGen uint64) *Entry {
 	if old, ok := c.get(base); ok && old.IsVaryStub {
-		if sameFields(old.Vary, vary) {
+		if old.routeOwner == owner && old.routeCompatibility == compatibility && sameFields(old.Vary, vary) {
 			return old.Clone()
 		}
 		for _, vk := range old.Variants {
 			c.delOneIfGenAtMost(vk, maxGen)
 		}
 	}
-	return &Entry{IsVaryStub: true, Vary: append([]string(nil), vary...)}
+	return &Entry{IsVaryStub: true, Vary: append([]string(nil), vary...), routeOwner: owner, routeCompatibility: compatibility}
 }
 
 // addVariant records vk in the stub, returning a variant key that must be
@@ -1052,16 +1069,38 @@ func varyRequestValue(header http.Header, name string) string {
 // that are cacheable per HTTP semantics are stored; an unsafe method is
 // forwarded and, when it succeeds, invalidates what it changed.
 func (c *Cache) Handler(next http.Handler) http.Handler {
+	return c.handler(next, nil, nil)
+}
+
+// HandlerForRoute binds cache reuse to an opaque owner selected at handler build.
+func (c *Cache) HandlerForRoute(next http.Handler, scope RouteScope, policy CachePolicy) (http.Handler, error) {
+	if !c.validRouteOwner(scope.Owner) || scope.Compatibility == (RouteCompatibility{}) {
+		return nil, errors.New("cache: route ownership or compatibility is unavailable")
+	}
+	policy = reusePolicy(policy)
+	return c.handler(next, &scope, &policy), nil
+}
+
+func (c *Cache) handler(next http.Handler, scope *RouteScope, policy *CachePolicy) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			c.serveUnsafe(w, r, next)
 			return
 		}
-
 		// Span over the lookup/decision only; the origin fetch on a miss keeps
 		// its own (proxy) span. No-op unless the otel build wired a tracer.
 		_, span := tracing.Active().Start(r.Context(), "cache.lookup")
 
+		if responseHookBypass(r) {
+			c.recordDecision(r, "response_hook_bypass")
+			c.bypass(w, r, next, span)
+			return
+		}
+		if policy != nil && reusePolicy(c.Policy()) != *policy {
+			c.recordDecision(r, "cache_policy_transition_bypass")
+			c.bypass(w, r, next, span)
+			return
+		}
 		if sensitiveVaryHeader(w.Header()) {
 			c.recordDecision(r, "vary_sensitive_rejected")
 			c.bypass(w, r, next, span)
@@ -1087,6 +1126,7 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 		// evaluates Range/If-Range against complete cached representations and
 		// coordinates complete-object fills on eligible cold range misses.
 		if isRangeRequest(r) {
+			r = withRouteScope(r, scope)
 			if !pol.RangeEnabled {
 				c.recordDecision(r, "range_bypass")
 				c.bypass(w, r, next, span)
@@ -1105,17 +1145,18 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		c.serveOrFillFull(w, r, next, reqPolicy, pol, span)
+		c.serveOrFillFull(w, r, next, reqPolicy, pol, span, scope)
 	})
 }
 
-func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next http.Handler, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span) {
+func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next http.Handler, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span, scope *RouteScope) {
 	k := key(r)
 	now := c.clock()
-	effKey, served := c.serveCachedIfReusable(w, r, next, k, reqPolicy, now, span)
+	effKey, served := c.serveCachedIfReusableWithOwner(w, r, next, k, reqPolicy, now, span, scope)
 	if served {
 		return
 	}
+	r = withRouteScope(r, scope)
 	if pol.Lock {
 		c.fillOrWait(w, r, next, k, effKey, reqPolicy, pol, span, effKey == k)
 		return
@@ -1126,10 +1167,14 @@ func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next htt
 }
 
 func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, now time.Time, span tracing.Span) (effKey string, served bool) {
+	return c.serveCachedIfReusableWithOwner(w, r, next, base, reqPolicy, now, span, nil)
+}
+
+func (c *Cache) serveCachedIfReusableWithOwner(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, now time.Time, span tracing.Span, scope *RouteScope) (effKey string, served bool) {
 	for attempt := 0; attempt < 2; attempt++ {
 		var e *Entry
 		var ok bool
-		e, effKey, ok = c.lookup(base, r)
+		e, effKey, ok = c.lookupWithOwner(base, r, scope)
 		if !ok || !e.matchesVary(r) {
 			return effKey, false
 		}
@@ -1149,13 +1194,13 @@ func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, ne
 			span.End()
 			// Start the background refresh before returning, so the lease
 			// is taken while this request still holds its generation.
-			c.startRevalidate(effKey, r, next, e)
+			c.startRevalidate(effKey, withRouteScope(r, scope), next, e)
 			return effKey, true
 		case reuseValidate:
 			c.recordDecision(r, "revalidation_required")
 			span.SetString("cache.status", "VALIDATE")
 			span.End()
-			c.validateAndServe(w, r, next, e, effKey, now)
+			c.validateAndServe(w, withRouteScope(r, scope), next, e, effKey, now)
 			return effKey, true
 		default:
 			if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
@@ -1666,7 +1711,10 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 		copiedBody = append([]byte(nil), body...)
 	}
 
+	scope := scopeForRequest(r)
 	e := &Entry{
+		routeOwner:             scope.Owner,
+		routeCompatibility:     scope.Compatibility,
 		Status:                 status,
 		Header:                 stored,
 		Body:                   copiedBody,

@@ -80,10 +80,7 @@ func get(h http.Handler, hdr ...string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestV2ResponsePhaseRunsOnCacheHitsAndCacheStoresOrigin: the hook runs for
-// the miss and the hit, and the cache stores the pre-plugin representation
-// (a non-idempotent transform proves it: "v1!" twice, never "v1!!").
-func TestV2ResponsePhaseRunsOnCacheHitsAndCacheStoresOrigin(t *testing.T) {
+func TestV2ResponseHookBypassesCacheButRequestOnlyCanCache(t *testing.T) {
 	var hits atomic.Int32
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
@@ -98,14 +95,20 @@ func TestV2ResponsePhaseRunsOnCacheHitsAndCacheStoresOrigin(t *testing.T) {
 	})
 	first := get(h, "X-Mode", "body")
 	second := get(h, "X-Mode", "body")
-	if first.Header().Get("X-Cache") != "MISS" || second.Header().Get("X-Cache") != "HIT" {
+	if first.Header().Get("X-Cache") != "BYPASS" || second.Header().Get("X-Cache") != "BYPASS" {
 		t.Fatalf("X-Cache = %q then %q", first.Header().Get("X-Cache"), second.Header().Get("X-Cache"))
 	}
 	if first.Body.String() != "v1!" || second.Body.String() != "v1!" {
-		t.Fatalf("bodies = %q, %q; want the transform applied once per response to the stored origin", first.Body.String(), second.Body.String())
+		t.Fatalf("bodies = %q, %q; want the transform applied once per response", first.Body.String(), second.Body.String())
 	}
-	if hits.Load() != 1 {
+	if hits.Load() != 2 {
 		t.Fatalf("backend hits = %d", hits.Load())
+	}
+	first = get(h, "X-Op", "req-only")
+	second = get(h, "X-Op", "req-only")
+	if first.Header().Get("X-Cache") != "MISS" || second.Header().Get("X-Cache") != "HIT" ||
+		first.Body.String() != "v1" || second.Body.String() != "v1" || hits.Load() != 3 {
+		t.Fatal("request-only execution did not retain normal cache reuse")
 	}
 }
 

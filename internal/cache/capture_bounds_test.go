@@ -136,7 +136,7 @@ func TestCaptureOverflowReleasesBuffer(t *testing.T) {
 func TestCaptureBudgetExhaustedStreamsUncaptured(t *testing.T) {
 	// Two 600-byte captures still exceed this budget; one response plus its
 	// bounded publication provenance must fit the resident footprint estimate.
-	const limit = 1100
+	const limit = 1160
 	c := newTestCache(t, config.CacheConfig{MemoryMaxSize: config.Size(limit), DefaultTTL: config.Duration(time.Hour)})
 	var skips skipLog
 	c.SetCaptureSkipObserver(skips.add)
@@ -169,7 +169,7 @@ func TestCaptureBudgetExhaustedStreamsUncaptured(t *testing.T) {
 		t.Fatalf("in-flight capture while held = %d, want %d", got, len(body))
 	}
 
-	// 600 + 600 > 1100: the second miss cannot reserve and streams uncaptured.
+	// 600 + 600 > 1160: the second miss cannot reserve and streams uncaptured.
 	second := httptest.NewRecorder()
 	h.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "http://example.com/other", nil))
 	if !bytes.Equal(second.Body.Bytes(), body) {

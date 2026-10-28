@@ -147,7 +147,7 @@ What that position means — each row is pinned by a test:
 
 | Concern | Behaviour |
 | --- | --- |
-| Cache | The hook runs on **every** response — miss, fill, hit, revalidated, stale. The cache stores the **origin** representation, so plugin output never depends on whether a response was cached and is never cached by Jul. |
+| Cache | A request with an active response subscription bypasses shared cache lookup and storage; the hook still runs. Request-only executions without a subscription can cache normally. See [route ownership and response hooks](cache.md#route-ownership-and-response-hooks). |
 | WAF | WAF **response** inspection (`response_body_check`) sees the **plugin's output**: a plugin cannot smuggle content past it. WAF request denials never reach the hook. |
 | Auth / rate limit / client cert / CORS preflight | Their denials happen before the response point and are never presented; a plugin cannot turn a 401/429/403 into a success. |
 | `response_headers` / CORS | Applied **after** the hook: a plugin cannot remove a `set` header, and on a CORS-enabled location Jul replaces every `Access-Control-*` header. |
@@ -212,7 +212,7 @@ A guest must treat any value it does not know as "not available".
 | Case | Body for a body subscription |
 | --- | --- |
 | Ordinary buffered response | `AVAILABLE` |
-| Cache hit / stale / revalidated | `AVAILABLE` (the stored origin body) |
+| Shared-cache reuse | Not applicable to an active response subscription; the request bypasses shared caching |
 | Compressed by Jul's `[compression]` | `AVAILABLE` — compression happens after the hook |
 | Compressed by the origin | not requested: Jul removes `Accept-Encoding` from the request it forwards, so the origin sends identity; an origin that compresses anyway yields `ENCODED` |
 | Range request | Jul removes `Range`/`If-Range` so the whole representation is presented; an origin `206` anyway yields `PARTIAL` |

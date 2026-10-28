@@ -288,3 +288,7 @@ Never place realistic credentials in repository examples or idempotency keys.
 ## Cache metadata inspection
 
 `jul cache inspect --endpoint URL --token-file FILE --host HOST [--uri URI | --prefix PREFIX | --glob GLOB | --tag TAG] [--cursor CURSOR] [--page-size N] [--json]` reads one bounded page. Exact `--url`/`--key` and configured `--route-id` scopes are also supported. Repeat the same selector for later pages; never automatically restart an expired capture. Successful reads exit zero even for explicit partial/truncated states: automation must inspect result fields. See [permissions, errors and limits](cache.md#bounded-cache-inspection).
+
+Route ownership cannot be established from the inspection selector alone.
+With decision sampling enabled, an observed `response_hook_bypass` reports an
+actual subscription bypass, not a prediction about future requests.

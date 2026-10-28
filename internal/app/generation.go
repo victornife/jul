@@ -72,7 +72,8 @@ type Generation struct {
 	pluginModules map[string]plugins.ModuleIdentity
 	// pluginResponse reports, per plugin, whether its serving module can
 	// subscribe to the jul-abi/v2 response phase (ADR 0020).
-	pluginResponse map[string]bool
+	pluginResponse   map[string]bool
+	cacheRouteOwners map[string]cacheRouteState
 	// wafPolicy is the compiled WAF policy of this generation (#440).
 	wafPolicy *admin.WAFEffectivePolicy
 	// wafGlobalDigest and wafDigestByLoc hold the engine-owned external source

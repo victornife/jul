@@ -33,7 +33,7 @@ func TestRemoteCacheInspectionCLIAndClient(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":{"code":"storage_unavailable","message":"inspection unavailable"}}`))
 			return
 		}
-		_ = json.NewEncoder(w).Encode(adminapi.CacheInspectResponse{APIVersion: "v1", NextCursor: "opaque.next", ExpiresAt: "2026-10-27T13:00:00Z", Inspection: cachemeta.Inspection{State: "partial", CountAccuracy: "exact", EvidenceState: "disabled", MatchedResources: 1, Resources: []cachemeta.SafeResourceSummary{{Host: "example.com", Path: "/a", FreshnessState: "fresh", BodyBytes: 1, Details: []cachemeta.RepresentationMetadata{}}}, Decisions: []cachemeta.CacheDecision{{Reason: "fresh_hit", Host: "example.com", Path: "/a"}}}})
+		_ = json.NewEncoder(w).Encode(adminapi.CacheInspectResponse{APIVersion: "v1", NextCursor: "opaque.next", ExpiresAt: "2026-10-27T13:00:00Z", Inspection: cachemeta.Inspection{State: "partial", CountAccuracy: "exact", EvidenceState: "disabled", MatchedResources: 1, Resources: []cachemeta.SafeResourceSummary{{Host: "example.com", Path: "/a", FreshnessState: "fresh", BodyBytes: 1, Details: []cachemeta.RepresentationMetadata{}}}, Decisions: []cachemeta.CacheDecision{{Reason: "response_hook_bypass", Host: "example.com", Path: "/a"}}, Warnings: []string{"route_ownership_unavailable"}}})
 	}))
 	defer ts.Close()
 	file := filepath.Join(t.TempDir(), "admin.token")
@@ -50,7 +50,9 @@ func TestRemoteCacheInspectionCLIAndClient(t *testing.T) {
 			if code := cmdRemoteCache(args); code != 0 {
 				t.Fatal(code, errOut.String())
 			}
-			if got.Selector.Kind != tc.kind || !strings.Contains(out.String(), "Metadata only") || strings.Contains(out.String(), "TOKEN") {
+			if got.Selector.Kind != tc.kind || !strings.Contains(out.String(), "Metadata only") ||
+				!strings.Contains(out.String(), "response_hook_bypass") || !strings.Contains(out.String(), "route_ownership_unavailable") ||
+				strings.Contains(out.String(), "TOKEN") {
 				t.Fatal(got, out.String())
 			}
 		})

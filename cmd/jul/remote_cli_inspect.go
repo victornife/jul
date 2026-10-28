@@ -76,6 +76,9 @@ func cmdRemoteCacheInspect(args []string) int {
 	for _, r := range d.Decisions {
 		fmt.Fprintf(stdout, "observed %s: %s %s%s at %s\n", r.Reason, r.Summary, r.Host, r.Path, r.ObservedAt.Format("2006-01-02T15:04:05Z07:00"))
 	}
+	for _, warning := range d.Warnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
+	}
 	if v.NextCursor != "" {
 		fmt.Fprintf(stdout, "next_cursor=%s expires_at=%s (repeat the same selector)\n", v.NextCursor, v.ExpiresAt)
 	}

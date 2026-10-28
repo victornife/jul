@@ -206,6 +206,12 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
                 Policy: {data.policy_source}. {data.route_cache_state}. Retained entries can reflect
                 prior policy after reload.
               </p>
+              {data.inspection.warnings.includes("route_ownership_unavailable") && (
+                <p>Inspection cannot establish the route selected by a request or guarantee entry reuse.</p>
+              )}
+              {data.inspection.warnings.includes("response_hook_bypass_when_subscribed") && (
+                <p>Requests using a response-hook subscription bypass shared caching; request-only executions can still cache.</p>
+              )}
               <ul>
                 {data.inspection.resources.map((r) => (
                   <li key={r.resource_id}>

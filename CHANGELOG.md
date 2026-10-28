@@ -11,6 +11,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Prevent cache reuse across incompatible route owners and bypass shared
+  caching for active ABI v2 response-hook subscriptions (#623). Legacy and
+  pre-restart entries without current ownership miss; routes without durable
+  IDs receive new owners on reload, and generations involving plugins receive
+  new compatibility tokens. This can increase origin traffic and does not
+  implement backend cutover.
+
 - Reject shared-cache representations varying on Cookie or Authorization,
   including legacy entries and 304 changes (#623). This compatibility change
   can increase origin traffic; old disk files are cleaned opportunistically and

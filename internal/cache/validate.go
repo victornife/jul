@@ -315,7 +315,7 @@ func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next htt
 // freshness question is already settled — the origin was contacted during this
 // request — so only the keying and the shared-cache authorization rule remain.
 func validatedReusable(e *Entry, r *http.Request) bool {
-	if e.IsVaryStub || sensitiveVaryEntry(e) || !e.matchesVary(r) {
+	if e.IsVaryStub || entryScopeMismatch(e, r, nil) != "" || sensitiveVaryEntry(e) || !e.matchesVary(r) {
 		return false
 	}
 	return !hasHeaderField(r.Header, "Authorization") || e.SharedAuthReuse

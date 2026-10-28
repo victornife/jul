@@ -114,6 +114,8 @@ func init() {
 			return sdk.Deliver
 		}
 		switch op {
+		case "vary-cookie":
+			_ = resp.AddHeader("Vary", "Cookie")
 		case "resp-surface":
 			responseSurface(resp)
 		case "echo":

@@ -119,10 +119,19 @@ describe("cache inspector", () => {
       selector: { kind: string; host: string; uri?: string };
       cursor?: string;
     }> = [];
+    const result = page();
+    result.inspection.warnings = ["route_ownership_unavailable", "response_hook_bypass_when_subscribed"];
+    const firstDecision = result.inspection.decisions[0];
+    if (!firstDecision) throw new Error("Expected an inspection decision");
+    result.inspection.decisions[0] = {
+      ...firstDecision,
+      reason: "response_hook_bypass",
+      summary: "A response hook bypassed shared caching.",
+    };
     globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
       if (typeof init?.body !== "string") throw new Error("Expected request JSON body");
       requests.push(JSON.parse(init.body) as (typeof requests)[number]);
-      return Promise.resolve(json(page()));
+      return Promise.resolve(json(result));
     });
     render(<CacheInspectorPanel serverNames={["example.com"]} />);
     fireEvent.change(screen.getByLabelText("Filter"), { target: { value: "exact_url" } });
@@ -135,6 +144,9 @@ describe("cache inspector", () => {
     expect(screen.getByText(/Current global fallback/)).toBeInTheDocument();
     expect(screen.getByText(/Concurrent-change evidence/)).toBeInTheDocument();
     expect(screen.getByText(/query omitted/)).toBeInTheDocument();
+    expect(screen.getByText(/cannot establish the route selected/)).toBeInTheDocument();
+    expect(screen.getByText(/response-hook subscription bypass/)).toBeInTheDocument();
+    expect(screen.getByText(/A response hook bypassed shared caching/)).toBeInTheDocument();
     expect(screen.queryByText(/SECRET/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next metadata page" }));
     await waitFor(() => {

@@ -885,6 +885,12 @@ preview; broad-scope selections (`host`, `all`, `>= 100` resources, or
 truncated previews) require an explicit confirmation checkbox before execution.
 The raw editor remains available.
 
+The read-only cache inspector reports that a metadata selector does not prove
+which route a request will select. Its recent decision list can show the
+server-owned `response_hook_bypass` reason when opt-in sampling observes an
+active response subscription; missing samples are not proof that no bypass
+occurred. See [route ownership and response hooks](cache.md#route-ownership-and-response-hooks).
+
 The **Streams** panel adds guided **creation and in-place editing** of L4
 (TCP/UDP) reverse-proxy listeners (`[[stream]]`): the listen address, protocol,
 default backend (`proxy_pass`), SNI routing table (TCP — enables SNI inspection

@@ -40,6 +40,12 @@ type phaseChain struct {
 	reached bool
 }
 
+// HasActiveResponseHook reports whether a response point is running for ctx.
+func HasActiveResponseHook(ctx context.Context) bool {
+	c, _ := ctx.Value(phaseKey{}).(*phaseChain)
+	return c != nil && c.reached && len(c.subs) > 0
+}
+
 // subscribe records a response subscription on r, returning the request to
 // pass on (a new one only when this is the request's first subscription).
 func subscribe(r *http.Request, p *plugin, mode uint32, state []byte) *http.Request {

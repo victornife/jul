@@ -797,7 +797,7 @@ for (const inspectionOnly of [false, true]) {
           resources: [],
           decisions: [],
           evidence_state: "disabled",
-          warnings: [],
+          warnings: ["route_ownership_unavailable", "response_hook_bypass_when_subscribed"],
           memory_occupancy: { bytes: 0, max_bytes: 64000000, entries: 0, evictions: 0 },
           disk_occupancy: null,
           policy: {
@@ -834,6 +834,8 @@ for (const inspectionOnly of [false, true]) {
     await expect(inspector.getByText(/Current global fallback/)).toBeVisible();
     await expect(inspector.getByText(/Memory occupancy/)).toBeVisible();
     await expect(inspector.getByText(/live entries may have changed/)).toBeVisible();
+    await expect(inspector.getByText(/cannot establish the route selected/)).toBeVisible();
+    await expect(inspector.getByText(/response-hook subscription.*bypass shared caching/)).toBeVisible();
     expect(reads).toBe(1);
     expect(purges).toBe(0);
     if (inspectionOnly) {

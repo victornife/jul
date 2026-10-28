@@ -116,5 +116,8 @@ func (*Set) Handler(string) http.Handler { return nil }
 // ResponsePoint returns nil in the lean build.
 func (*Set) ResponsePoint(...string) middleware.Middleware { return nil }
 
+// HasActiveResponseHook is always false without the plugin runtime.
+func HasActiveResponseHook(context.Context) bool { return false }
+
 // ABIs is empty in the lean build.
 func (*Set) ABIs() map[string]string { return nil }

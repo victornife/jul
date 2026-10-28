@@ -69,10 +69,10 @@ func TestCacheableStatusSet(t *testing.T) {
 
 func TestMemStoreEvictionOverflow(t *testing.T) {
 	var evicted []string
-	m := newMemStore(600, func(key string, e *Entry) { evicted = append(evicted, key) })
-
 	mk := func(n int) *Entry { return &Entry{Body: make([]byte, n)} }
-	m.set("a", mk(300)) // ~556 bytes
+	m := newMemStore(mk(300).Size()+1, func(key string, e *Entry) { evicted = append(evicted, key) })
+
+	m.set("a", mk(300))
 	m.set("b", mk(300)) // forces eviction of "a"
 
 	if len(evicted) != 1 || evicted[0] != "a" {
