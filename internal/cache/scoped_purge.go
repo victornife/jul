@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"jul/internal/cachemeta"
@@ -41,6 +42,8 @@ var ErrRetrySnapshotUnavailable = errors.New("original tag purge resource snapsh
 type selectorFence struct {
 	gen              uint64
 	sel              NormalizedSelector
+	retiredBase      [32]byte
+	retirement       bool
 	active           bool
 	remaining        int
 	matchedResources map[string]struct{}
@@ -254,10 +257,17 @@ func (c *Cache) enforceFenceCapLocked() {
 	// repeated purges for the same selector do not consume distinct slots.
 	if len(c.fences) > 1 {
 		dedup := make([]selectorFence, 0, len(c.fences))
-		completedIdxByDigest := make(map[[32]byte]int, len(c.fences))
+		type fenceDigest struct {
+			sum        [32]byte
+			retirement bool
+		}
+		completedIdxByDigest := make(map[fenceDigest]int, len(c.fences))
 		for _, f := range c.fences {
 			if !f.active && f.remaining == 0 {
-				d := f.sel.Digest()
+				d := fenceDigest{sum: f.sel.Digest(), retirement: f.retirement}
+				if f.retirement {
+					d.sum = f.retiredBase
+				}
 				if prevIdx, exists := completedIdxByDigest[d]; exists {
 					if f.gen > dedup[prevIdx].gen {
 						dedup[prevIdx].gen = f.gen
@@ -436,6 +446,12 @@ func (c *Cache) matchesAnyFenceLocked(entryGen uint64, key, host, reqURI string,
 	for i := range c.fences {
 		f := &c.fences[i]
 		if entryGen > f.gen || (onlyIncomplete && !f.active && f.remaining == 0) {
+			continue
+		}
+		if f.retirement {
+			if sha256.Sum256([]byte(baseKey)) == f.retiredBase {
+				return true
+			}
 			continue
 		}
 		if f.sel.Kind == SelectorKey {

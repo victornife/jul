@@ -8,6 +8,7 @@ package plugins
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -24,6 +25,40 @@ import (
 	"jul/internal/config"
 	"jul/internal/respwriter"
 )
+
+type responseControllerOnlyWriter struct {
+	header http.Header
+	err    error
+}
+
+func (w *responseControllerOnlyWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+func (w *responseControllerOnlyWriter) WriteHeader(int)             {}
+func (w *responseControllerOnlyWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (w *responseControllerOnlyWriter) FlushError() error           { return w.err }
+
+func TestResponseLayerControllerOnlyFlush(t *testing.T) {
+	want := errors.New("flush failure")
+	for _, state := range []layerState{layerPassthrough, layerBuffering} {
+		parent := &responseControllerOnlyWriter{err: want}
+		layer := &responseLayer{parent: parent, state: state}
+		writer := respwriter.WrapController(layer, parent)
+		if _, ok := writer.(http.Flusher); ok {
+			t.Fatal("invented http.Flusher")
+		}
+		err := http.NewResponseController(writer).Flush()
+		if state == layerPassthrough && !errors.Is(err, want) {
+			t.Fatalf("passthrough flush = %v, want %v", err, want)
+		}
+		if state == layerBuffering && err != nil {
+			t.Fatalf("buffered flush = %v, want nil", err)
+		}
+	}
+}
 
 type sendTimeoutCapture struct {
 	*httptest.ResponseRecorder

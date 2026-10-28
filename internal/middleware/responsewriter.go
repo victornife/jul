@@ -110,8 +110,10 @@ func NewRecorder(w http.ResponseWriter) *Recorder {
 // the recorder while exposing exactly the optional interfaces of the underlying
 // writer.
 func (r *Recorder) Writer() http.ResponseWriter {
-	return respwriter.Wrap(r, r.ResponseWriter)
+	return respwriter.WrapController(r, r.ResponseWriter)
 }
+
+func (r *Recorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
 
 // Status returns the response status code (200 if WriteHeader was never called).
 func (r *Recorder) Status() int { return r.status }
@@ -154,15 +156,20 @@ func (r *Recorder) Write(b []byte) (int, error) {
 // Flush forwards to the underlying writer. respwriter.Wrap exposes it only when
 // the underlying writer is a Flusher, so a handler's assertion stays truthful.
 func (r *Recorder) Flush() {
+	_ = r.FlushError()
+}
+
+func (r *Recorder) FlushError() error {
 	if r.hijacked {
-		return
+		return http.ErrHijacked
+	}
+	if !respwriter.SupportsFlush(r.ResponseWriter) {
+		return http.ErrNotSupported
 	}
 	if !r.wroteHeader {
 		r.WriteHeader(http.StatusOK)
 	}
-	if f, ok := r.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	return http.NewResponseController(r.ResponseWriter).Flush()
 }
 
 // Hijack hands the connection to the caller and stops recording: after a

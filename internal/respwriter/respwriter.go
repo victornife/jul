@@ -165,7 +165,7 @@ func WithSendTimeout(under http.ResponseWriter, timeout time.Duration, absoluteD
 		return under
 	}
 	inner := &sendTimeoutWriter{ResponseWriter: under, controller: http.NewResponseController(under), timeout: timeout, absoluteDeadline: absoluteDeadline}
-	return Wrap(inner, under)
+	return WrapController(inner, under)
 }
 
 type sendTimeoutWriter struct {
@@ -175,6 +175,8 @@ type sendTimeoutWriter struct {
 	absoluteDeadline time.Time
 	hijacked         bool
 }
+
+func (writer *sendTimeoutWriter) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
 
 func (writer *sendTimeoutWriter) refreshDeadline() error {
 	deadline := time.Now().Add(writer.timeout)
@@ -232,6 +234,9 @@ func (writer *sendTimeoutWriter) FlushError() error {
 	if writer.hijacked {
 		return http.ErrHijacked
 	}
+	if !SupportsFlush(writer.ResponseWriter) {
+		return http.ErrNotSupported
+	}
 	if err := writer.refreshDeadline(); err != nil {
 		return err
 	}
@@ -275,6 +280,30 @@ func WrapController(inner interface {
 	return wrap(inner, under, true)
 }
 
+// SupportsFlush checks the underlying capability without committing a response.
+func SupportsFlush(w http.ResponseWriter) bool {
+	for range 32 {
+		if w == nil {
+			return false
+		}
+		if s, ok := w.(interface{ SupportsFlush() bool }); ok {
+			return s.SupportsFlush()
+		}
+		if _, ok := w.(interface{ FlushError() error }); ok {
+			return true
+		}
+		if _, ok := w.(http.Flusher); ok {
+			return true
+		}
+		inner, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return false
+		}
+		w = inner.Unwrap()
+	}
+	return false
+}
+
 func wrap(inner, under http.ResponseWriter, controllerInner bool) http.ResponseWriter {
 	c := core{ResponseWriter: inner, under: under, controllerInner: controllerInner}
 	var mask int
@@ -308,6 +337,8 @@ type core struct {
 	under               http.ResponseWriter // the writer whose capabilities are mirrored
 	controllerInner     bool
 }
+
+func (c core) SupportsFlush() bool { return SupportsFlush(c.under) }
 
 // Unwrap lets http.ResponseController traverse to the real writer, so
 // capabilities without a classic interface (read/write deadlines, full-duplex)

@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"log/slog"
 	"math"
@@ -675,6 +676,38 @@ func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
 	c.finishOneRemoval(key, maxGen, st)
 }
 
+// retireValidation fences older origin work for this resource before removing
+// the selected representation. Existing unrelated variants remain resident.
+func (c *Cache) retireValidation(version validationVersion, startGen uint64) {
+	st := c.markRetiredValidation(version, startGen)
+	if st != nil {
+		c.finishOneRemoval(version.effective, startGen, st)
+	}
+}
+
+func (c *Cache) markRetiredValidation(version validationVersion, startGen uint64) *keyGenState {
+	c.genMu.Lock()
+	st := c.keyGen[version.effective]
+	if st != nil && (st.gen != version.entryGen || st.gen > startGen) {
+		c.genMu.Unlock()
+		return nil
+	}
+	c.fences = append(c.fences, selectorFence{
+		gen:         startGen,
+		retiredBase: sha256.Sum256([]byte(version.base)),
+		retirement:  true,
+	})
+	c.enforceFenceCapLocked()
+	st, _, _, _ = c.beginNextGenLocked(version.effective)
+	c.mem.delIfGenAtMost(version.effective, startGen)
+	st.inMem = c.mem.hasKey(version.effective)
+	if !st.inMem {
+		st.memBytes = 0
+	}
+	c.genMu.Unlock()
+	return st
+}
+
 func (c *Cache) markOneRemovedAtMostGen(key string, maxGen uint64) *keyGenState {
 	c.genMu.Lock()
 	if maxGen != math.MaxUint64 {
@@ -1316,7 +1349,7 @@ func (c *Cache) serveDownstreamWithStrip(w http.ResponseWriter, r *http.Request,
 		stripTagHeaders: true,
 		tagHeaders:      tagHeaders,
 	}
-	next.ServeHTTP(respwriter.Wrap(sw, w), r)
+	next.ServeHTTP(respwriter.WrapController(sw, w), r)
 	if !sw.wroteHeader && !sw.hijacked {
 		stripConfiguredTagHeaders(w.Header(), tagHeaders)
 	}
@@ -1394,7 +1427,7 @@ func (c *Cache) serveUnsafe(w http.ResponseWriter, r *http.Request, next http.Ha
 		stripTagHeaders: strip,
 		tagHeaders:      tagHeaders,
 	}
-	next.ServeHTTP(respwriter.Wrap(sw, w), r)
+	next.ServeHTTP(respwriter.WrapController(sw, w), r)
 	if !sw.wroteHeader && !sw.hijacked && strip {
 		stripConfiguredTagHeaders(w.Header(), tagHeaders)
 	}
@@ -1456,7 +1489,7 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	// entry the same way any other outer-layer pre-set field does (#332),
 	// rather than needing its own denylist entry in buildEntry.
 	cw.entrySnapshot = cloneHeader(w.Header())
-	next.ServeHTTP(respwriter.Wrap(cw, w), r)
+	next.ServeHTTP(respwriter.WrapController(cw, w), r)
 	if !cw.wroteHeader && !cw.hijacked {
 		cw.snapshot = headerDifference(w.Header(), cw.entrySnapshot)
 		if cw.headerCheck != nil && !cw.headerCheck(http.StatusOK, cw.snapshot) {
@@ -1601,7 +1634,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	opCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req = req.WithContext(opCtx)
-	c.guardRevalidationCapture(rec, origReq, k.key, startGen, func(code int, _ string) {
+	c.guardRevalidationCapture(rec, origReq, k.version(), startGen, func(code int, _ string) {
 		if !rejected {
 			rejected = true
 			cancel()
@@ -1647,7 +1680,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	case rec.status == http.StatusNotModified:
 		if !varyCompatibleWithValidation(stale, rec.committedHeader(), req, origReq) {
 			c.recordDecision(origReq, "vary_changed")
-			c.deleteAtMostGen(k.key, startGen)
+			c.retireValidation(k.version(), startGen)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
@@ -1661,7 +1694,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		switch action {
 		case mergeReplace:
 			if c.setValidationIfCurrent(k.key, refreshed, startGen, stale.Tags, k.version()) {
-				c.delOneIfGenAtMost(k.key, startGen)
+				c.retireValidation(k.version(), startGen)
 				call.finish(nil, outcomeUncacheable, nil)
 				c.observeRevalidation(outcomeUncacheable)
 				return
@@ -1671,7 +1704,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		case mergeDiscard:
 			// The 304 changed the representation's keying or made it
 			// unstorable; dropping the pre-validation generation is the only safe outcome.
-			c.deleteAtMostGen(k.key, startGen)
+			c.retireValidation(k.version(), startGen)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 		}
@@ -1689,23 +1722,31 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		c.observeRevalidation(outcomeOriginError)
 
 	case !rec.storable():
-		if rec.status == http.StatusOK {
-			c.delOneIfGenAtMost(k.key, startGen)
+		if rec.status >= http.StatusOK && rec.status < http.StatusInternalServerError &&
+			(rec.status != http.StatusOK || rec.complete(req.Method)) {
+			c.retireValidation(k.version(), startGen)
 		}
 		c.recordDecision(req, "capture_not_stored")
 		call.finish(nil, outcomeUncacheable, nil)
 		c.observeRevalidation(outcomeUncacheable)
 
 	default:
+		if rec.status == http.StatusOK && !rec.complete(req.Method) {
+			c.recordDecision(req, "capture_incomplete")
+			call.finish(nil, outcomeUncacheable, nil)
+			c.observeRevalidation(outcomeUncacheable)
+			return
+		}
 		e := c.buildEntryFromCapture(req, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
 		version := k.version()
 		if !c.captureMatchesRequest(e, origReq) {
-			c.delOneIfGenAtMost(k.key, startGen)
+			c.retireValidation(version, startGen)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
 		}
 		if !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags, &version) {
+			c.retireValidation(version, startGen)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return

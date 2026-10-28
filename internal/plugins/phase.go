@@ -98,7 +98,7 @@ func responsePoint(next http.Handler) http.Handler {
 		for i, s := range c.subs {
 			l := &responseLayer{parent: cur, req: r, sub: s, cancel: cancel, entry: entry}
 			layers[i] = l
-			cur = respwriter.Wrap(l, cur)
+			cur = respwriter.WrapController(l, cur)
 		}
 		serveInner(next, cur, inner, layers)
 		for i := len(layers) - 1; i >= 0; i-- {
@@ -158,7 +158,8 @@ type responseLayer struct {
 	failed  bool
 }
 
-func (l *responseLayer) Header() http.Header { return l.parent.Header() }
+func (l *responseLayer) Header() http.Header         { return l.parent.Header() }
+func (l *responseLayer) Unwrap() http.ResponseWriter { return l.parent }
 
 func (l *responseLayer) WriteHeader(code int) {
 	if l.state != layerPending {
@@ -225,15 +226,23 @@ func (l *responseLayer) Write(p []byte) (int, error) {
 // flush while buffering is absorbed: the body is bounded by max_response_body
 // and the reverse proxy flushes every response of unknown length.
 func (l *responseLayer) Flush() {
+	_ = l.FlushError()
+}
+
+func (l *responseLayer) FlushError() error {
+	if l.state == layerUpgraded {
+		return http.ErrHijacked
+	}
+	if !respwriter.SupportsFlush(l.parent) {
+		return http.ErrNotSupported
+	}
 	if l.state == layerPending {
 		l.WriteHeader(http.StatusOK)
 	}
 	if l.state != layerPassthrough {
-		return
+		return nil
 	}
-	if f, ok := l.parent.(http.Flusher); ok {
-		f.Flush()
-	}
+	return http.NewResponseController(l.parent).Flush()
 }
 
 // Hijack is exposed only when the parent is a Hijacker. Once the connection

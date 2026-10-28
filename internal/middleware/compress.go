@@ -143,8 +143,12 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 			cw := &compressWriter{ResponseWriter: w, c: c, r: r, chosen: ep, minSize: c.minSize}
 			completed := false
 			defer func() {
-				if completed || ep != nil || cw.sawHeader {
+				if completed {
 					_ = cw.close()
+				} else if cw.enc != nil {
+					cw.enc.Reset(io.Discard)
+					_ = cw.enc.Close()
+					cw.chosen.put(cw.enc)
 				}
 			}()
 			next.ServeHTTP(respwriter.WrapController(cw, w), r)
@@ -265,7 +269,7 @@ func (cw *compressWriter) FlushError() error {
 	if cw.hijacked {
 		return http.ErrNotSupported
 	}
-	if !compressionFlushSupported(cw.ResponseWriter) {
+	if !respwriter.SupportsFlush(cw.ResponseWriter) {
 		return http.ErrNotSupported
 	}
 	if !cw.sawHeader {
@@ -283,26 +287,6 @@ func (cw *compressWriter) FlushError() error {
 		}
 	}
 	return http.NewResponseController(cw.ResponseWriter).Flush()
-}
-
-func compressionFlushSupported(w http.ResponseWriter) bool {
-	for range 32 {
-		if w == nil {
-			return false
-		}
-		if _, ok := w.(interface{ FlushError() error }); ok {
-			return true
-		}
-		if _, ok := w.(http.Flusher); ok {
-			return true
-		}
-		inner, ok := w.(interface{ Unwrap() http.ResponseWriter })
-		if !ok {
-			return false
-		}
-		w = inner.Unwrap()
-	}
-	return false
 }
 
 // Hijack forwards to the underlying writer for WebSocket upgrades. The upgrade

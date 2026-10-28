@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"jul/internal/respwriter"
 )
 
 // Reasons a response was streamed without being captured for storage, reported
@@ -146,6 +148,8 @@ type cacheWriter struct {
 	// snapshot keeps only what changed relative to this baseline (#332).
 	entrySnapshot http.Header
 }
+
+func (w *cacheWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *cacheWriter) effMemLimit() int64 {
 	if w.memLimit > 0 && w.memLimit < w.limit {
@@ -371,8 +375,15 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 // responses. Unbounded accumulation is prevented by the event-stream rule above
 // and by the existing size limit.
 func (w *cacheWriter) Flush() {
+	_ = w.FlushError()
+}
+
+func (w *cacheWriter) FlushError() error {
 	if w.hijacked {
-		return
+		return http.ErrHijacked
+	}
+	if !respwriter.SupportsFlush(w.ResponseWriter) {
+		return http.ErrNotSupported
 	}
 	// Flush commits an implicit 200 on the wire even before a body is written.
 	// Capture that final status and its headers before the underlying writer
@@ -380,9 +391,12 @@ func (w *cacheWriter) Flush() {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	err := http.NewResponseController(w.ResponseWriter).Flush()
+	if err != nil {
+		w.writeErr = err
+		w.dropCapture()
 	}
+	return err
 }
 
 // Hijack hands the connection to the handler, which is how an HTTP/1.1 upgrade
@@ -451,6 +465,7 @@ type recorder struct {
 	memLimit       int64
 	memBudgetLimit int64
 	bodyLen        int64
+	received       int64
 	disk           *diskStore
 	diskStream     *diskStreamCapture
 	tooBig         bool
@@ -562,6 +577,7 @@ func (r *recorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
 		r.WriteHeader(http.StatusOK)
 	}
+	r.received += int64(len(p))
 	if !r.tooBig && !r.noStore && len(p) > 0 {
 		captureWriteChunk(p, &r.body, &r.bodyLen, r.limit, r.effMemLimit(), r.effMemBudgetLimit(), r.disk, &r.acct, &r.diskStream, r.abandon, r.dropCapture)
 	}
@@ -571,6 +587,14 @@ func (r *recorder) Write(p []byte) (int, error) {
 // storable reports whether the captured response may be considered for storage,
 // and equivalently whether r.body holds the complete response bytes.
 func (r *recorder) storable() bool { return !r.noStore && !r.tooBig }
+
+func (r *recorder) complete(method string) bool {
+	if method == http.MethodHead {
+		return true
+	}
+	length := declaredLength(r.committedHeader())
+	return length < 0 || r.received == length
+}
 
 func (r *recorder) committedHeader() http.Header {
 	if r.snapshot != nil {
@@ -594,6 +618,8 @@ type statusWriter struct {
 	stripTagHeaders bool
 	tagHeaders      []string
 }
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	h, ok := w.ResponseWriter.(http.Hijacker)
@@ -633,12 +659,20 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 }
 
 func (w *statusWriter) Flush() {
+	_ = w.FlushError()
+}
+
+func (w *statusWriter) FlushError() error {
+	if w.hijacked {
+		return http.ErrHijacked
+	}
+	if !respwriter.SupportsFlush(w.ResponseWriter) {
+		return http.ErrNotSupported
+	}
 	if w.status == 0 {
 		w.WriteHeader(http.StatusOK)
 	}
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 // isRangeRequest reports whether the request asks for part of a representation.

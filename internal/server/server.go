@@ -1210,7 +1210,19 @@ func wrapBareClientAuthCheck(w http.ResponseWriter, r *http.Request, caHolder *d
 		caHolder:       caHolder,
 		checked:        checked,
 	}
-	return respwriter.Wrap(bw, w)
+	return respwriter.WrapController(bw, w)
+}
+
+func (w *bareClientAuthWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *bareClientAuthWriter) Flush() { _ = w.FlushError() }
+
+func (w *bareClientAuthWriter) FlushError() error {
+	if !respwriter.SupportsFlush(w.ResponseWriter) {
+		return http.ErrNotSupported
+	}
+	w.checkOnce()
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 func (w *bareClientAuthWriter) checkOnce() bool {

@@ -27,6 +27,34 @@ func TestCompressionIdentityPanicDoesNotCommitSuccess(t *testing.T) {
 	}
 }
 
+func TestCompressionBufferedPanicDoesNotCommitSuccess(t *testing.T) {
+	for _, stage := range []string{"before-header", "after-header", "after-buffered-write"} {
+		t.Run(stage, func(t *testing.T) {
+			mw, err := NewCompression(CompressionOptions{Encoders: []string{"gzip"}, Types: []string{"text/plain"}, MinSize: 1024})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h := Recover(slog.New(slog.NewTextHandler(io.Discard, nil)))(mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if stage != "before-header" {
+					w.Header().Set("Content-Type", "text/plain")
+					w.WriteHeader(http.StatusOK)
+				}
+				if stage == "after-buffered-write" {
+					_, _ = w.Write([]byte("buffered"))
+				}
+				panic("fixture")
+			})))
+			req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+			req.Header.Set("Accept-Encoding", "gzip")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusInternalServerError || rec.Body.Len() != 0 {
+				t.Fatalf("panic produced status %d and body %q", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 type compressionFlushErrorWriter struct {
 	*httptest.ResponseRecorder
 	err error

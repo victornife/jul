@@ -473,10 +473,21 @@ client.
 | --- | --- |
 | Origin answers `304` | Metadata merged, entry replaced, stored body served as `REVALIDATED` |
 | Origin answers a new cacheable response | Stored and served as `MISS` |
-| Origin answers something unstorable | The superseded entry is **deleted**; the origin's response is served as `MISS` |
+| Origin answers something unstorable | The superseded entry is **deleted**; the origin's response is served as `MISS`, except an incomplete `200` is re-fetched |
 | Origin answers `5xx` | Stale reuse only if the policy below permits it, otherwise the origin's error is forwarded |
 | Origin's answer cannot be buffered (over `memory_max_size`, or a stream) | Re-fetched and streamed; one extra origin request on this path only, so a response is never truncated |
 | No generation lease available | A complete origin fetch. Never an unvalidated stored body |
+
+An authoritative non-`5xx` replacement, including an oversized `401` or `403`,
+retires the selected stale representation even when the replacement cannot be
+stored. Older in-flight origin work for that resource is fenced from
+republishing it; other resident variants and newer publications are retained.
+A `200` whose received byte count does not match its declared `Content-Length`
+is incomplete and is not treated as an authoritative replacement. For an
+unframed response Jul cannot detect truncation from a length mismatch. Requests
+already admitted to stale reuse before a background result arrives can finish.
+Removal failures use the existing disk cleanup health reporting and recovery
+limitations; this does not add crash recovery for unfinished purges (#666).
 
 ### Stale reuse after a failed validation
 

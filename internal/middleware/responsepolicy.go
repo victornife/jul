@@ -104,8 +104,10 @@ type policyWriter struct {
 
 // Writer returns the value to pass down the chain.
 func (p *policyWriter) Writer() http.ResponseWriter {
-	return respwriter.Wrap(p, p.ResponseWriter)
+	return respwriter.WrapController(p, p.ResponseWriter)
 }
+
+func (p *policyWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
 func (p *policyWriter) WriteHeader(code int) {
 	if p.wroteHeader || p.hijacked {
@@ -155,15 +157,20 @@ func (p *policyWriter) Write(b []byte) (int, error) {
 // Flush forwards to the underlying writer. respwriter.Wrap exposes it only
 // when the underlying writer is a Flusher.
 func (p *policyWriter) Flush() {
+	_ = p.FlushError()
+}
+
+func (p *policyWriter) FlushError() error {
 	if p.hijacked {
-		return
+		return http.ErrHijacked
+	}
+	if !respwriter.SupportsFlush(p.ResponseWriter) {
+		return http.ErrNotSupported
 	}
 	if !p.wroteHeader {
 		p.WriteHeader(http.StatusOK)
 	}
-	if f, ok := p.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
+	return http.NewResponseController(p.ResponseWriter).Flush()
 }
 
 // Hijack hands the connection to the caller. Once hijacked the response is no
