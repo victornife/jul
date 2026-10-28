@@ -18,18 +18,22 @@ func TestScopedRevalidationRetainsOwnershipWithLease(t *testing.T) {
 	for _, mode := range []string{"synchronous", "background"} {
 		for _, vary := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/vary=%t", mode, vary), func(t *testing.T) {
-				c := newTestCache(t, config.CacheConfig{
+				c, clock := conformanceCache(t, config.CacheConfig{
 					MemoryMaxSize: 1 << 20, StaleWhileRevalidate: config.Duration(time.Minute),
 				})
 				group := testLease(t, 17)
 				var version atomic.Int32
+				var validations atomic.Int32
 				version.Store(1)
-				h, _ := scopedHandler(t, c, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				h, _ := scopedHandler(t, c, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					v := version.Load()
 					if mode == "background" && v == 1 {
-						w.Header().Set("Cache-Control", "public, max-age=0, stale-while-revalidate=60")
+						w.Header().Set("Cache-Control", "public, max-age=1, stale-while-revalidate=60")
 					} else {
 						w.Header().Set("Cache-Control", "public, max-age=60")
+					}
+					if r.Header.Get("If-None-Match") != "" {
+						validations.Add(1)
 					}
 					if vary {
 						w.Header().Set("Vary", "Accept-Language")
@@ -47,16 +51,23 @@ func TestScopedRevalidationRetainsOwnershipWithLease(t *testing.T) {
 					h.ServeHTTP(rec, leased(req, group))
 					return rec
 				}
-				if rec := request(false); rec.Body.String() != "version-1" {
+				if rec := request(false); rec.Header().Get("X-Cache") != stateMiss || rec.Body.String() != "version-1" {
 					t.Fatal("initial response was not cached")
 				}
+				if mode == "background" {
+					clock.advance(2 * time.Second)
+				}
 				version.Store(2)
-				if rec := request(mode == "synchronous"); mode == "synchronous" && rec.Body.String() != "version-2" {
-					t.Fatal("synchronous validation did not fetch the replacement")
+				if rec := request(mode == "synchronous"); mode == "synchronous" && rec.Body.String() != "version-2" ||
+					mode == "background" && (rec.Header().Get("X-Cache") != stateStale || rec.Body.String() != "version-1") {
+					t.Fatal("request did not use the expected validation path")
 				}
 				if mode == "background" {
 					waitDrained(t, c)
 					waitLeaseReleased(t, group)
+				}
+				if validations.Load() != 1 {
+					t.Fatalf("origin validations = %d, want 1", validations.Load())
 				}
 				rec := request(false)
 				if rec.Header().Get("X-Cache") != stateHit || rec.Body.String() != "version-2" {

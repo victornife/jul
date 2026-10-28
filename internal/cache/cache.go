@@ -830,11 +830,15 @@ func (c *Cache) setCapturedWithStartGen(k string, e *Entry, stream *diskStreamCa
 // The returned generation belongs to this publication, not a later replacement,
 // and is the upper bound for any membership-publication rollback.
 func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (bool, uint64) {
+	return c.publishCapturedWithStartGenAndTags(k, e, stream, startGen, hasStartGen, nil)
+}
+
+func (c *Cache) publishCapturedWithStartGenAndTags(k string, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool, extraTags []string) (bool, uint64) {
 	if sensitiveVaryEntry(e) {
 		return false, 0
 	}
 	if stream == nil {
-		stored, _, gen := c.setCoreWithStartGen(k, e, startGen, hasStartGen, nil)
+		stored, _, gen := c.setCoreWithStartGen(k, e, startGen, hasStartGen, extraTags)
 		return stored, gen
 	}
 	if c.disk == nil {
@@ -854,7 +858,7 @@ func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStre
 			e.tagPolicyTracked = true
 		}
 	}
-	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, k, e.Tags, nil) {
+	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, k, e.Tags, extraTags) {
 		c.genMu.Unlock()
 		return false, 0
 	}
@@ -876,7 +880,7 @@ func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStre
 		c.indexKeyEntryLocked(st, e)
 	}
 	c.genMu.Unlock()
-	blob, ok := c.disk.publishStreamWithGenFull(k, e, stream, gen, startGen, hasStartGen, nil)
+	blob, ok := c.disk.publishStreamWithGenFull(k, e, stream, gen, startGen, hasStartGen, extraTags)
 	if !ok {
 		c.genMu.Lock()
 		if c.keyGen[k] == st && st.gen == gen {
@@ -898,7 +902,7 @@ func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStre
 	if c.onAfterDiskPublication != nil {
 		c.onAfterDiskPublication(k, gen)
 	}
-	if hasStartGen && c.isPublicationFenced(startGen, k, e, nil) {
+	if hasStartGen && c.isPublicationFenced(startGen, k, e, extraTags) {
 		c.delOneIfGenAtMost(k, gen)
 		c.finishKeyOp(st)
 		return false, 0
@@ -912,6 +916,10 @@ func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *di
 }
 
 func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (stored bool) {
+	return c.storeCapturedWithStartGenAndTags(base, r, e, stream, startGen, hasStartGen, nil)
+}
+
+func (c *Cache) storeCapturedWithStartGenAndTags(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool, extraTags []string) (stored bool) {
 	defer func() {
 		if stored {
 			c.recordKeyDecision(base, "response_stored")
@@ -924,14 +932,15 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 		return false
 	}
 	if len(e.Vary) == 0 {
-		return c.setCapturedWithStartGen(base, e, stream, startGen, hasStartGen)
+		stored, _ := c.publishCapturedWithStartGenAndTags(base, e, stream, startGen, hasStartGen, extraTags)
+		return stored
 	}
 	vk := variantKey(base, e.Vary, r)
 
 	c.varyMu.Lock()
 	defer c.varyMu.Unlock()
 
-	if hasStartGen && c.isPublicationFenced(startGen, base, e, nil) {
+	if hasStartGen && c.isPublicationFenced(startGen, base, e, extraTags) {
 		return false
 	}
 	deleteGen := uint64(math.MaxUint64)
@@ -941,7 +950,7 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 	stub := c.stubFor(base, e.Vary, e.routeOwner, e.routeCompatibility, deleteGen)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
-	stored, variantGen := c.publishCapturedWithStartGen(vk, e, stream, startGen, hasStartGen)
+	stored, variantGen := c.publishCapturedWithStartGenAndTags(vk, e, stream, startGen, hasStartGen, extraTags)
 	if !stored {
 		return false
 	}
@@ -957,7 +966,7 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 	}
 	c.genMu.Unlock()
 	stub.Tags = mergeTagSets(varTagSets...)
-	stubStored, _, stubGen := c.setCoreWithStartGen(base, stub, startGen, hasStartGen, nil)
+	stubStored, _, stubGen := c.setCoreWithStartGen(base, stub, startGen, hasStartGen, extraTags)
 	if !stubStored {
 		c.delOneIfGenAtMost(vk, variantGen)
 		return false
@@ -1428,7 +1437,7 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 	gen, _ := background.Generation(r.Context())
 	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r)}
 
-	call, leader := c.beginRevalidate(k)
+	call, leader := c.beginRevalidate(k, stale.Tags)
 	if !leader {
 		release()
 		c.observeRevalidation(outcomeDeduplicated)
@@ -1592,7 +1601,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	default:
 		e := c.buildEntryFromCapture(req, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(key(req), req, e, rec.diskStream, startGen, true) {
+		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags) {
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return

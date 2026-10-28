@@ -1123,7 +1123,7 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 	c.fillMu.Unlock()
 
 	c.reMu.Lock()
-	for rk := range c.calls {
+	for rk, call := range c.calls {
 		base := baseKeyOf(rk.key)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
@@ -1137,9 +1137,9 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 		hit := false
 		switch sel.Kind {
 		case SelectorKey:
-			hit = rk.key == sel.Key || base == baseKeyOf(rk.key)
+			hit = rk.key == sel.Key || base == baseKeyOf(sel.Key)
 		case SelectorTag:
-			if sel.MatchesResource(host, reqURI, tags) {
+			if sel.MatchesResource(host, reqURI, mergeBaseTagSets(tags, call.tags)) {
 				hit = true
 			} else if host == sel.Host {
 				tagUnknown = true

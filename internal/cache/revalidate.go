@@ -61,6 +61,7 @@ type revalidateKey struct {
 // be stranded.
 type revalidateCall struct {
 	done chan struct{}
+	tags []string
 
 	// joined counts the callers that have waited on this call. It is what makes
 	// "the leader is still required by other waiters" an observable fact rather
@@ -108,13 +109,14 @@ func (rc *revalidateCall) wait(ctx context.Context) (*Entry, revalidateOutcome, 
 // the caller that must run the refresh, and false for a caller that joined an
 // equivalent refresh already in flight. This bounds a burst of concurrent stale
 // hits to exactly one origin request per key and generation.
-func (c *Cache) beginRevalidate(k revalidateKey) (call *revalidateCall, leader bool) {
+func (c *Cache) beginRevalidate(k revalidateKey, tags []string) (call *revalidateCall, leader bool) {
 	c.reMu.Lock()
 	defer c.reMu.Unlock()
 	if existing, ok := c.calls[k]; ok {
 		return existing, false
 	}
 	call = newRevalidateCall()
+	call.tags = append([]string(nil), tags...)
 	c.calls[k] = call
 	return call, true
 }

@@ -1206,6 +1206,10 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    miss not yet in cache at preview time or whose origin tag is first learned
    when response headers arrive — is blocked from publishing into memory or disk
    upon completion while still delivering its response to its waiting client.
+   Revalidations retain the validated entry's tags for preview, detachment,
+   and publication fencing even if another route replaces the catalog entry or
+   the origin returns different tags. An exact-key purge does not detach
+   unrelated revalidations.
    Retries retain their original cutoffs even if execution completes out of
    order: an older full purge cannot clear a newer selector fence or lower a
    newer full-purge generation barrier. Fills started after a purge's cutoff

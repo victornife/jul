@@ -30,7 +30,7 @@ func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next ht
 	gen, _ := background.Generation(r.Context())
 	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r)}
 
-	if call, leader := c.beginRevalidate(k); leader {
+	if call, leader := c.beginRevalidate(k, stored.Tags); leader {
 		c.leadValidation(w, r, next, stored, k, call)
 	} else {
 		c.awaitValidation(w, r, next, call)
@@ -183,7 +183,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	default:
 		e := c.buildEntryFromCapture(vreq, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
+		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGenAndTags(key(vreq), vreq, e, rec.diskStream, startGen, true, stored.Tags) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
