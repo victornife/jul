@@ -396,6 +396,11 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 	fk := fillCoordinationKey(base, effKey, origReq)
 	call, leader := c.beginFill(fk)
 	if leader {
+		defer c.endInflightOriginOp(call.opID)
+		defer func() {
+			c.endFill(fk, call)
+			call.finish(false)
+		}()
 		if _, served := c.serveCachedIfReusable(w, rWithSpec, next, base, reqPolicy, c.clock(), span); served {
 			c.endFill(fk, call)
 			call.finish(true)
@@ -411,7 +416,7 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 		}
 		defer func() { release(false) }()
 
-		e := c.performRangeFill(origReq, next, base, pol, func() { release(false) })
+		e := c.performRangeFillWithStartGen(origReq, next, base, pol, call.startGen, func() { release(false) })
 		if e != nil && e.matchesVary(rWithSpec) {
 			release(true)
 			if c.serve(w, rWithSpec, e, stateMiss, c.clock()) {
@@ -504,10 +509,13 @@ func varyFieldsCompatibleWithModifiedRequest(fields []string, modifiedReq, origR
 // or exceeds capture bounds, the internal fetch context is canceled immediately
 // so an unbounded response is not downloaded in full.
 func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base string, pol CachePolicy, onAbandon func()) *Entry {
-	c.observeRange(rangeOutcomeFill)
 	opID, startGen := c.beginInflightOriginOp()
 	defer c.endInflightOriginOp(opID)
+	return c.performRangeFillWithStartGen(origReq, next, base, pol, startGen, onAbandon)
+}
 
+func (c *Cache) performRangeFillWithStartGen(origReq *http.Request, next http.Handler, base string, pol CachePolicy, startGen uint64, onAbandon func()) *Entry {
+	c.observeRange(rangeOutcomeFill)
 	fillCtx, cancelFill := context.WithCancel(origReq.Context())
 	defer cancelFill()
 

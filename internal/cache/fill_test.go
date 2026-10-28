@@ -1026,6 +1026,9 @@ func TestFillLockPostBeginFillLookupAndReloadCoherence(t *testing.T) {
 	if got := c.inflightFills(); got != 0 {
 		t.Fatalf("inflight fills = %d, want 0", got)
 	}
+	if got := c.IndexStats().InflightOriginOps; got != 0 {
+		t.Fatalf("inflight origin operations = %d, want 0", got)
+	}
 }
 
 // TestFillLockStressNoLeakOrDeadlock drives concurrent cold misses, timeouts,

@@ -59,10 +59,20 @@ type revalidateKey struct {
 type validationVersion struct {
 	base, effective   string
 	baseGen, entryGen uint64
+	// A varied response commits only when its membership stub is published.
+	publication      *revalidateCall
+	publicationFinal bool
 }
 
 func (k revalidateKey) version() validationVersion {
 	return validationVersion{base: baseKeyOf(k.key), effective: k.key, baseGen: k.baseGen, entryGen: k.entryGen}
+}
+
+func (k revalidateKey) publicationVersion(call *revalidateCall) validationVersion {
+	version := k.version()
+	version.publication = call
+	version.publicationFinal = true
+	return version
 }
 
 // revalidateCall is the shared state of one in-flight revalidation. Exactly one
@@ -75,6 +85,8 @@ type revalidateCall struct {
 	tags        []string
 	startGen    uint64
 	invalidated atomic.Bool
+	// Set under genMu after the final publication clears its purge fence.
+	publicationCommitted atomic.Bool
 
 	// joined counts the callers that have waited on this call. It is what makes
 	// "the leader is still required by other waiters" an observable fact rather

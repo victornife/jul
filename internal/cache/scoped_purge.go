@@ -1140,17 +1140,17 @@ func (c *Cache) collectOwnedKeysForBaseLocked(baseKey string, exactKeyFilter str
 }
 
 func (c *Cache) countMatchingInflightLocked(sel NormalizedSelector) (matched int, tagUnknown bool) {
-	return c.visitMatchingInflightLocked(sel, false, false, 0, nil)
+	return c.visitMatchingInflightLocked(sel, false, false, 0, nil, false)
 }
 
-func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector, cutoff uint64, resources map[string]struct{}) int {
-	n, _ := c.visitMatchingInflightLocked(sel, true, true, cutoff, resources)
+func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector, cutoff uint64, resources map[string]struct{}, snapshotOnly bool) int {
+	n, _ := c.visitMatchingInflightLocked(sel, true, true, cutoff, resources, snapshotOnly)
 	return n
 }
 
-func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, invalidate bool, cutoff uint64, resources map[string]struct{}) (matched int, tagUnknown bool) {
+func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, invalidate bool, cutoff uint64, resources map[string]struct{}, snapshotOnly bool) (matched int, tagUnknown bool) {
 	c.fillMu.Lock()
-	for fk := range c.fills {
+	for fk, call := range c.fills {
 		base := baseKeyOf(fk.key)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
@@ -1161,7 +1161,9 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, inva
 		case SelectorKey:
 			hit = fk.key == sel.Key || base == baseKeyOf(sel.Key)
 		case SelectorTag:
-			if host == sel.Host {
+			if snapshotOnly {
+				_, hit = resources[resourceKeyOf(host, reqURI)]
+			} else if host == sel.Host {
 				tagUnknown = true
 				hit = detach
 			}
@@ -1169,10 +1171,12 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, inva
 			hit = sel.MatchesResource(host, reqURI, nil)
 		}
 		if hit {
-			if detach {
+			if detach && call.startGen <= cutoff {
 				delete(c.fills, fk)
 			}
-			matched++
+			if !invalidate || call.startGen <= cutoff {
+				matched++
+			}
 		}
 	}
 	c.fillMu.Unlock()
@@ -1193,8 +1197,12 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, inva
 			covered = rk.key == sel.Key || base == baseKeyOf(sel.Key)
 		case SelectorTag:
 			_, fromSnapshot := resources[resKey]
-			covered = fromSnapshot || sel.MatchesResource(host, reqURI, mergeBaseTagSets(tags, call.tags))
-			unknown = !covered && host == sel.Host
+			effectiveTags := tags
+			if !call.publicationCommitted.Load() {
+				effectiveTags = mergeBaseTagSets(tags, call.tags)
+			}
+			covered = fromSnapshot || (!snapshotOnly && sel.MatchesResource(host, reqURI, effectiveTags))
+			unknown = !snapshotOnly && !covered && host == sel.Host
 			detachUnknown = unknown && len(tags) == 0
 		default:
 			covered = sel.MatchesResource(host, reqURI, tags)
@@ -1250,7 +1258,7 @@ func (c *Cache) inflightTagResourcesLocked(sel NormalizedSelector, limit int) (m
 	c.reMu.Lock()
 	defer c.reMu.Unlock()
 	add := func(rk revalidateKey, call *revalidateCall) bool {
-		if !call.snapshotEligible() {
+		if !call.snapshotEligible() || call.publicationCommitted.Load() {
 			return true
 		}
 		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(rk.key))
@@ -1287,11 +1295,8 @@ func (c *Cache) addInflightRetryResourcesLocked(sel NormalizedSelector, ids []st
 	for _, id := range ids {
 		wanted[id] = struct{}{}
 	}
-	add := func(rk revalidateKey, call *revalidateCall) error {
-		if !call.snapshotEligible() {
-			return nil
-		}
-		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(rk.key))
+	add := func(key string) error {
+		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(key))
 		if !ok {
 			return nil
 		}
@@ -1305,16 +1310,28 @@ func (c *Cache) addInflightRetryResourcesLocked(sel NormalizedSelector, ids []st
 		resources[resource] = struct{}{}
 		return nil
 	}
-	c.reMu.Lock()
-	defer c.reMu.Unlock()
-	for rk, call := range c.calls {
-		if err := add(rk, call); err != nil {
+	c.fillMu.Lock()
+	for fk := range c.fills {
+		if err := add(fk.key); err != nil {
+			c.fillMu.Unlock()
 			return err
 		}
 	}
+	c.fillMu.Unlock()
+	c.reMu.Lock()
+	defer c.reMu.Unlock()
+	for rk, call := range c.calls {
+		if call.snapshotEligible() {
+			if err := add(rk.key); err != nil {
+				return err
+			}
+		}
+	}
 	for call, rk := range c.activeValidations {
-		if err := add(rk, call); err != nil {
-			return err
+		if call.snapshotEligible() {
+			if err := add(rk.key); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -1620,7 +1637,7 @@ func (c *Cache) BeginSelectorFenceWithError(sel NormalizedSelector) (fenceGen ui
 		matchedResources: matchedRes,
 	})
 	c.enforceFenceCapLocked()
-	c.detachMatchingInflightLocked(sel, fenceGen, matchedRes)
+	c.detachMatchingInflightLocked(sel, fenceGen, matchedRes, false)
 	c.genMu.Unlock()
 	if c.disk != nil {
 		if hwErr := c.disk.recordHighWaterGen(fenceGen); hwErr != nil {
@@ -1881,7 +1898,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 					gen: fenceGen, sel: sel, matchedResources: fenceResSet,
 				})
 			}
-			c.visitMatchingInflightLocked(sel, false, true, fenceGen, fenceResSet)
+			c.visitMatchingInflightLocked(sel, false, true, fenceGen, fenceResSet, isTagRetry)
 			c.reclaimFencesLocked()
 			c.genMu.Unlock()
 			return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
@@ -1929,7 +1946,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		})
 	}
 	c.enforceFenceCapLocked()
-	fencedOps := c.detachMatchingInflightLocked(sel, fenceGen, fenceResSet)
+	fencedOps := c.detachMatchingInflightLocked(sel, fenceGen, fenceResSet, isTagRetry)
 
 	if isFastAll {
 		c.purgeGen = fenceGen

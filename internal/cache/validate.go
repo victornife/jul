@@ -144,7 +144,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			fallbackAfterValidation()
 			return
 		}
-		if c.setValidationIfCurrent(k.key, refreshed, startGen, stored.Tags, k.version()) {
+		if c.setValidationIfCurrent(k.key, refreshed, startGen, stored.Tags, k.publicationVersion(call)) {
 			c.retireValidationIfSelected(k.version(), startGen, call)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			fallbackAfterValidation()
@@ -159,7 +159,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// Validation failed. Serving the stored copy anyway is only permitted by
 		// an explicit stale-if-error window, and never when the origin said
 		// must-revalidate or proxy-revalidate.
-		if refreshed := c.extendStaleOnError(stored, k.key, startGen, now, r, k.version()); refreshed != nil {
+		if refreshed := c.extendStaleOnError(stored, k.key, startGen, now, r, k.publicationVersion(call)); refreshed != nil {
 			c.finishValidation(call, refreshed, outcomeOriginError)
 			if c.serve(w, r, refreshed, stateStale, now) {
 				return
@@ -192,12 +192,17 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		e := c.buildEntryFromCapture(vreq, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		version := k.version()
-		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGenAndTags(key(vreq), vreq, e, rec.diskStream, startGen, true, stored.Tags, &version) {
+		version := k.publicationVersion(call)
+		matches := c.captureMatchesRequest(e, r)
+		if !matches || !c.storeCapturedWithStartGenAndTags(key(vreq), vreq, e, rec.diskStream, startGen, true, stored.Tags, &version) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
-			c.retireValidation(version, startGen, call)
+			if matches && call.publicationCommitted.Load() {
+				c.retireValidationIfSelected(version, startGen, call)
+			} else {
+				c.retireValidation(version, startGen, call)
+			}
 			c.finishValidation(call, nil, outcomeUncacheable)
 			if isRange || !varyCompatibleWithModifiedRequest(rec.committedHeader(), vreq, r) || !writeRecorded(w, r, rec, nil, stateMiss) {
 				fallbackAfterValidation()
@@ -353,6 +358,9 @@ func validatedReusable(e *Entry, r *http.Request) bool {
 }
 
 func (c *Cache) finishValidation(call *revalidateCall, e *Entry, outcome revalidateOutcome) {
+	if c.onBeforeValidationFinish != nil {
+		c.onBeforeValidationFinish(outcome)
+	}
 	call.finish(e, outcome, nil)
 	c.observeRevalidation(outcome)
 }

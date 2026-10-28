@@ -94,6 +94,7 @@ type Cache struct {
 	onBeforeReclaim           func(key string)
 	onAfterFenceInstall       func(sel NormalizedSelector, fenceGen uint64)
 	onAfterDiskPublication    func(key string, gen uint64)
+	onBeforeValidationFinish  func(outcome revalidateOutcome)
 
 	// observe, when set, receives one bounded outcome per revalidation
 	// decision. It is installed by the composition root so the cache does not
@@ -587,8 +588,10 @@ func (c *Cache) setCoreWithPreconditions(key string, e *Entry, startGen uint64, 
 	}
 	c.genMu.Unlock()
 	c.mem.flushVictims(victims)
+	diskStored := false
 	if c.disk != nil {
-		if !c.writeThroughObserved(key, e, gen, startGen, hasStartGen, extraTags) {
+		diskStored = c.writeThroughObserved(key, e, gen, startGen, hasStartGen, extraTags)
+		if !diskStored {
 			if e != nil && e.diskBody != nil {
 				c.genMu.Lock()
 				if c.keyGen[key] == st && st.gen == gen {
@@ -619,6 +622,10 @@ func (c *Cache) setCoreWithPreconditions(key string, e *Entry, startGen uint64, 
 	if hasStartGen && e != nil {
 		c.genMu.Lock()
 		fencedAfter := c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags)
+		if !fencedAfter && version != nil && version.publicationFinal && version.publication != nil &&
+			c.keyGen[key] == st && st.gen == gen {
+			version.publication.publicationCommitted.Store(true)
+		}
 		c.genMu.Unlock()
 		if fencedAfter {
 			c.delOneIfGenAtMost(key, gen)
@@ -699,8 +706,7 @@ func (c *Cache) markRetiredValidation(version validationVersion, startGen uint64
 		c.genMu.Unlock()
 		return nil, 0
 	}
-	st := c.keyGen[version.effective]
-	if onlySelected && st != nil && st.gen != version.entryGen {
+	if onlySelected && !c.isValidationCurrentLocked(version) {
 		call.invalidated.Store(true)
 		c.genMu.Unlock()
 		return nil, 0
@@ -726,7 +732,7 @@ func (c *Cache) markRetiredValidation(version validationVersion, startGen uint64
 		retirement:  true,
 	})
 	c.enforceFenceCapLocked()
-	st, _, _, _ = c.beginNextGenLocked(version.effective)
+	st, _, _, _ := c.beginNextGenLocked(version.effective)
 	c.mem.delIfGenAtMost(version.effective, cutoff)
 	st.inMem = c.mem.hasKey(version.effective)
 	if !st.inMem {
@@ -997,7 +1003,14 @@ func (c *Cache) publishCapturedWithStartGenAndTags(k string, e *Entry, stream *d
 	if c.onAfterDiskPublication != nil {
 		c.onAfterDiskPublication(k, gen)
 	}
-	if hasStartGen && c.isPublicationFenced(startGen, k, e, extraTags) {
+	c.genMu.Lock()
+	fencedAfter := hasStartGen && c.isPublicationFencedLocked(startGen, k, e.Tags, extraTags)
+	if !fencedAfter && version != nil && version.publicationFinal && version.publication != nil &&
+		c.keyGen[k] == st && st.gen == gen && st.inDisk {
+		version.publication.publicationCommitted.Store(true)
+	}
+	c.genMu.Unlock()
+	if fencedAfter {
 		c.delOneIfGenAtMost(k, gen)
 		c.finishKeyOp(st)
 		return false, 0
@@ -1045,7 +1058,13 @@ func (c *Cache) storeCapturedWithStartGenAndTags(base string, r *http.Request, e
 	stub := c.stubFor(base, e.Vary, e.routeOwner, e.routeCompatibility, deleteGen)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
-	stored, variantGen := c.publishCapturedWithStartGenAndTags(vk, e, stream, startGen, hasStartGen, extraTags, version)
+	var variantVersion *validationVersion
+	if version != nil {
+		candidate := *version
+		candidate.publicationFinal = false
+		variantVersion = &candidate
+	}
+	stored, variantGen := c.publishCapturedWithStartGenAndTags(vk, e, stream, startGen, hasStartGen, extraTags, variantVersion)
 	if !stored {
 		return false
 	}
@@ -1483,7 +1502,10 @@ func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.
 func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time, pol CachePolicy, onAbandon func()) bool {
 	opID, startGen := c.beginInflightOriginOp()
 	defer c.endInflightOriginOp(opID)
+	return c.fetchAndStoreWithStartGenAndPolicy(w, r, next, now, pol, startGen, onAbandon)
+}
 
+func (c *Cache) fetchAndStoreWithStartGenAndPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time, pol CachePolicy, startGen uint64, onAbandon func()) bool {
 	var tagSkipReason string
 	cw := &cacheWriter{
 		ResponseWriter:  w,
@@ -1726,7 +1748,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		}
 		switch action {
 		case mergeReplace:
-			if c.setValidationIfCurrent(k.key, refreshed, startGen, stale.Tags, k.version()) {
+			if c.setValidationIfCurrent(k.key, refreshed, startGen, stale.Tags, k.publicationVersion(call)) {
 				c.retireValidationIfSelected(k.version(), startGen, call)
 				call.finish(nil, outcomeUncacheable, nil)
 				c.observeRevalidation(outcomeUncacheable)
@@ -1746,7 +1768,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		// Upstream error during revalidation: extend the stale-if-error window
 		// so the entry stays servable while the backend recovers. The published
 		// entry is replaced by a clone, never edited in place.
-		if refreshed := c.extendStaleOnError(stale, k.key, startGen, now, req, k.version()); refreshed != nil {
+		if refreshed := c.extendStaleOnError(stale, k.key, startGen, now, req, k.publicationVersion(call)); refreshed != nil {
 			call.finish(refreshed, outcomeOriginError, nil)
 			c.observeRevalidation(outcomeOriginError)
 			return
@@ -1771,7 +1793,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 			return
 		}
 		e := c.buildEntryFromCapture(req, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		version := k.version()
+		version := k.publicationVersion(call)
 		if !c.captureMatchesRequest(e, origReq) {
 			c.retireValidation(version, startGen, call)
 			call.finish(nil, outcomeUncacheable, nil)
@@ -1779,7 +1801,11 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 			return
 		}
 		if !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags, &version) {
-			c.retireValidation(version, startGen, call)
+			if call.publicationCommitted.Load() {
+				c.retireValidationIfSelected(version, startGen, call)
+			} else {
+				c.retireValidation(version, startGen, call)
+			}
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return

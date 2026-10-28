@@ -47,6 +47,8 @@ type fillCall struct {
 	done       chan struct{}
 	joined     atomic.Int32
 	stored     bool
+	opID       uint64
+	startGen   uint64
 	finishOnce sync.Once
 }
 
@@ -106,12 +108,15 @@ func fillCoordinationKey(base, effKey string, r *http.Request) fillCoordKey {
 }
 
 func (c *Cache) beginFill(fk fillCoordKey) (call *fillCall, leader bool) {
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
 	c.fillMu.Lock()
 	defer c.fillMu.Unlock()
 	if existing, ok := c.fills[fk]; ok {
 		return existing, false
 	}
 	call = newFillCall()
+	call.opID, call.startGen = c.beginInflightOriginOpLocked()
 	c.fills[fk] = call
 	return call, true
 }
@@ -138,6 +143,11 @@ func (c *Cache) fillOrWait(w http.ResponseWriter, r *http.Request, next http.Han
 	fk := fillCoordinationKey(base, effKey, r)
 	call, leader := c.beginFill(fk)
 	if leader {
+		defer c.endInflightOriginOp(call.opID)
+		defer func() {
+			c.endFill(fk, call)
+			call.finish(false)
+		}()
 		// Re-check lookup after acquiring leadership in case a previous leader
 		// published its entry immediately before removing its fillCall.
 		if _, served := c.serveCachedIfReusable(w, r, next, base, reqPolicy, c.clock(), span); served {
@@ -162,7 +172,7 @@ func (c *Cache) leadFill(w http.ResponseWriter, r *http.Request, next http.Handl
 	defer func() {
 		release(stored)
 	}()
-	stored = c.fetchAndStoreWithPolicy(w, r, next, c.clock(), pol, func() {
+	stored = c.fetchAndStoreWithStartGenAndPolicy(w, r, next, c.clock(), pol, call.startGen, func() {
 		release(false)
 	})
 }

@@ -1280,6 +1280,11 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    miss not yet in cache at preview time or whose origin tag is first learned
    when response headers arrive — is blocked from publishing into memory or disk
    upon completion while still delivering its response to its waiting client.
+   For a fill-lock leader, the operation generation is assigned when leadership
+   is admitted, before the cache recheck and origin request; a purge between
+   admission and the origin request therefore cannot make the detached fill
+   eligible to overwrite a newer publication. Range-fill leaders use the same
+   boundary.
    Revalidations retain the validated entry's tags for preview, detachment,
    and publication fencing even if another route replaces the catalog entry or
    the origin returns different tags. An exact-key purge does not detach
