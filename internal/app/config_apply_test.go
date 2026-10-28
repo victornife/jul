@@ -1222,6 +1222,7 @@ func TestCoordinatorApplyRawUsesServingReloadTimeout(t *testing.T) {
 		t.Fatalf("write seed: %v", err)
 	}
 
+	clock := newFakeClock(time.Unix(0, 0).UTC())
 	var gotDeadline time.Time
 	var watchDigest atomicPointer32
 	c := &ConfigApplyCoordinator{
@@ -1230,6 +1231,8 @@ func TestCoordinatorApplyRawUsesServingReloadTimeout(t *testing.T) {
 		Preflight: testPreflight(),
 		SubmitReload: func(req server.ReloadRequest) error {
 			gotDeadline = req.Deadline
+			// Simulate time spent applying without depending on host scheduling.
+			clock.Advance(2 * time.Second)
 			go func() {
 				req.Result <- server.ReloadResult{
 					ID:        req.ID,
@@ -1247,17 +1250,30 @@ func TestCoordinatorApplyRawUsesServingReloadTimeout(t *testing.T) {
 		},
 		WatchDigest:    &watchDigest,
 		PlannedRestart: &PlannedRestartStore{},
+		clock:          clock,
 	}
 
 	// Candidate changes reload_timeout to 1s; serving config says 7s.
-	newRaw := validConfigRaw(t, ":8081")
-	if _, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot); err != nil {
+	candidate := config.ProxyTarget("127.0.0.1:9000", ":8081")
+	candidate.Global.ReloadTimeout = config.Duration(time.Second)
+	newRaw, err := config.Marshal(candidate)
+	if err != nil {
+		t.Fatalf("marshal candidate: %v", err)
+	}
+	startedAt := clock.Now()
+	res, err := c.ApplyRaw(admin.ApplyRequestContext{}, newRaw, ApplyHot)
+	if err != nil {
 		t.Fatalf("apply error: %v", err)
 	}
+	if !res.OK {
+		t.Fatalf("apply failed: %+v", res)
+	}
 
-	slack := time.Until(gotDeadline)
-	if slack < 6*time.Second || slack > 8*time.Second {
-		t.Errorf("reload deadline slack = %v, want ~7s (serving reload_timeout)", slack)
+	// Compare the original absolute deadline, not time remaining after apply:
+	// real persistence/scheduling delays can consume any of the serving budget.
+	wantDeadline := startedAt.Add(7 * time.Second)
+	if !gotDeadline.Equal(wantDeadline) {
+		t.Errorf("reload deadline = %v, want %v (serving reload_timeout)", gotDeadline, wantDeadline)
 	}
 }
 
