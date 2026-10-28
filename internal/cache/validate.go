@@ -84,9 +84,11 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			rejected = true
 			cancelValidation()
 			if code >= http.StatusInternalServerError {
-				rejectedStale = c.extendStaleOnError(stored, k.key, startGen, c.clock(), r)
+				if r.Context().Err() == nil {
+					rejectedStale = c.transientStaleOnError(stored, k.key, startGen, c.clock(), r)
+				}
 				c.endRevalidate(k, call)
-				c.finishValidation(call, rejectedStale, outcomeOriginError)
+				c.finishValidation(call, nil, outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)
 				c.finishValidation(call, nil, outcomeUncacheable)
@@ -233,6 +235,28 @@ func (c *Cache) extendStaleOnError(stored *Entry, key string, startGen uint64, n
 	return refreshed
 }
 
+func (c *Cache) transientStaleOnError(stored *Entry, key string, startGen uint64, now time.Time, r *http.Request) *Entry {
+	sie := c.staleOnErrorWindow(stored)
+	if sie <= 0 || c.isPublicationFenced(startGen, key, stored, nil) {
+		return nil
+	}
+	c.recordDecision(r, "stale_if_error")
+	refreshed := stored.Clone()
+	refreshed.StaleUntil = now.Add(sie)
+	markStaleIfError(refreshed)
+	return refreshed
+}
+
+func isConfiguredTagTrailer(name string, tags []string) bool {
+	name = strings.TrimPrefix(name, http.TrailerPrefix)
+	for _, tag := range tags {
+		if strings.EqualFold(name, tag) {
+			return true
+		}
+	}
+	return false
+}
+
 // awaitValidation waits for the leader's result instead of issuing a second
 // origin request. The wait honors this client's own cancellation and nothing
 // else, so giving up here never affects the leader or the other waiters.
@@ -316,6 +340,9 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, publis
 	// recorded field cannot stack beside a value an outer layer already set on
 	// this same map (#332).
 	for name, values := range rec.committedHeader() {
+		if rec.stripTagHeaders && isConfiguredTagTrailer(name, rec.tagHeaders) {
+			continue
+		}
 		for i, v := range values {
 			if i == 0 {
 				h.Set(name, v)
@@ -326,6 +353,18 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, publis
 	}
 	if rec.stripTagHeaders && len(rec.tagHeaders) > 0 {
 		stripConfiguredTagHeaders(h, rec.tagHeaders)
+		var allowed []string
+		for _, line := range h.Values("Trailer") {
+			for _, name := range parseList(line) {
+				if !isConfiguredTagTrailer(name, rec.tagHeaders) {
+					allowed = append(allowed, name)
+				}
+			}
+		}
+		h.Del("Trailer")
+		if len(allowed) > 0 {
+			h.Set("Trailer", strings.Join(allowed, ", "))
+		}
 	}
 	h.Set("X-Cache", state)
 	status := rec.status
@@ -352,7 +391,8 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, publis
 		}
 	}
 	for name, values := range rec.Header() {
-		if declared[http.CanonicalHeaderKey(name)] || strings.HasPrefix(name, http.TrailerPrefix) {
+		if (declared[http.CanonicalHeaderKey(name)] || strings.HasPrefix(name, http.TrailerPrefix)) &&
+			(!rec.stripTagHeaders || !isConfiguredTagTrailer(name, rec.tagHeaders)) {
 			h[name] = append([]string(nil), values...)
 		}
 	}

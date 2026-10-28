@@ -1456,10 +1456,15 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		if !rejected {
 			rejected = true
 			cancel()
-			if code >= http.StatusInternalServerError {
-				refreshed := c.extendStaleOnError(stale, k.key, startGen, c.clock(), origReq)
+			if err := ctx.Err(); err != nil {
 				c.endRevalidate(k, call)
-				call.finish(refreshed, outcomeOriginError, nil)
+				call.finish(nil, outcomeCanceled, err)
+				c.observeRevalidation(outcomeCanceled)
+				return
+			}
+			if code >= http.StatusInternalServerError {
+				c.endRevalidate(k, call)
+				call.finish(nil, outcomeOriginError, nil)
 				c.observeRevalidation(outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)

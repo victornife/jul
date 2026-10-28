@@ -60,12 +60,13 @@ func TestSensitiveVaryErrorCancelsAndPreservesStaleIfError(t *testing.T) {
 		<-done
 		t.Fatal("sensitive 5xx validation did not cancel promptly")
 	}
-	for _, rec := range recs {
-		if rec.Header().Get("X-Cache") != stateStale || rec.Body.String() != "old-body" {
-			t.Fatal("explicit stale-if-error was not preserved")
-		}
+	if recs[0].Header().Get("X-Cache") != stateStale || recs[0].Body.String() != "old-body" {
+		t.Fatal("explicit stale-if-error was not preserved for the leader")
 	}
-	if calls.Load() != 2 {
-		t.Fatalf("origin calls = %d, want warm-up and one validation", calls.Load())
+	if recs[1].Header().Get("X-Cache") != stateMiss || recs[1].Body.String() != "old-body" {
+		t.Fatal("follower did not independently fetch from origin")
+	}
+	if calls.Load() != 3 {
+		t.Fatalf("origin calls = %d, want warm-up, validation and follower fetch", calls.Load())
 	}
 }
