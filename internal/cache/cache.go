@@ -1474,7 +1474,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 				c.observeRevalidation(outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)
-				call.finish(nil, outcomeUncacheable, nil)
+				call.finish(nil, outcomeUncacheable, errSensitiveVaryRevalidation)
 				c.observeRevalidation(outcomeUncacheable)
 			}
 		}

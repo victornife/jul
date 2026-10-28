@@ -5,6 +5,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -91,7 +92,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 				c.finishValidation(call, nil, outcomeOriginError)
 			} else {
 				c.endRevalidate(k, call)
-				c.finishValidation(call, nil, outcomeUncacheable)
+				call.finish(nil, outcomeUncacheable, errSensitiveVaryRevalidation)
+				c.observeRevalidation(outcomeUncacheable)
 			}
 		}
 	})
@@ -269,10 +271,18 @@ func isConfiguredTagTrailer(name string, tags []string) bool {
 // origin request. The wait honors this client's own cancellation and nothing
 // else, so giving up here never affects the leader or the other waiters.
 func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next http.Handler, call *revalidateCall) {
-	entry, outcome, _ := call.wait(r.Context())
+	entry, outcome, err := call.wait(r.Context())
 	if r.Context().Err() != nil {
 		// This client is gone. Nothing to serve, and nothing to clean up: the
 		// call state belongs to the leader.
+		return
+	}
+	if errors.Is(err, errSensitiveVaryRevalidation) {
+		if _, isRange := rangeSpecFromRequest(r); isRange {
+			c.observeRange(rangeOutcomeFallback)
+		}
+		w.Header().Set("X-Cache", stateBypass)
+		c.serveDownstreamWithStrip(w, r, next)
 		return
 	}
 	if entry != nil && validatedReusable(entry, r) {

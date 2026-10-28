@@ -124,7 +124,9 @@ when upgrading. A 304 that introduces either field discards the old entry and
 requires a full origin response; a stale response admitted before that 304 may
 already have completed. A sensitive-Vary 5xx may trigger explicitly permitted
 stale-if-error for its own request, but does not extend a shared stale window or
-authorize validation followers to reuse that request's error decision.
+authorize validation followers to reuse that request's error decision. Followers
+of a rejected sensitive-Vary validation fetch their own response without cache
+lookup or storage, so they do not wait for the rejected entry's disk cleanup.
 
 When a previously non-sensitive entry is retired because a later validation
 declares sensitive Vary, physical disk cleanup can still block the validating

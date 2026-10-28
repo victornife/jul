@@ -32,8 +32,8 @@ func TestSensitiveVaryFollowersDoNotWaitForDiskCleanup(t *testing.T) {
 			return
 		}
 		if r.Header.Get("X-Fixture-Identity") != "" {
-			w.Header().Set("Cache-Control", "no-store")
-			_, _ = w.Write([]byte(r.Header.Get("X-Fixture-Identity")))
+			w.Header().Set("Cache-Control", "public, max-age=60")
+			_, _ = w.Write([]byte(strings.Repeat(r.Header.Get("X-Fixture-Identity"), 200)))
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")
@@ -83,7 +83,8 @@ func TestSensitiveVaryFollowersDoNotWaitForDiskCleanup(t *testing.T) {
 	}
 	releaseOnce.Do(func() { close(releaseDisk) })
 	wg.Wait()
-	if recs[1].Body.String() != "fixture-bob" {
+	if recs[1].Header().Get("X-Cache") != stateBypass ||
+		recs[1].Body.String() != strings.Repeat("fixture-bob", 200) {
 		t.Fatal("follower did not receive its own origin response")
 	}
 }

@@ -43,6 +43,8 @@ const (
 // observability: it is unbounded, attacker-influenced data.
 var errRevalidatePanic = errors.New("cache: background revalidation panicked")
 
+var errSensitiveVaryRevalidation = errors.New("cache: sensitive Vary revalidation rejected")
+
 // revalidateKey identifies an in-flight revalidation. It pairs the effective
 // storage key with the handler generation that owns the refresh, so a reload
 // installs a fresh key space: a new generation is never made to wait on — or be
