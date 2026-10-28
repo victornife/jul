@@ -676,36 +676,48 @@ func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
 	c.finishOneRemoval(key, maxGen, st)
 }
 
-// retireValidation fences older origin work for this resource before removing
-// the selected representation. Existing unrelated variants remain resident.
-func (c *Cache) retireValidation(version validationVersion, startGen uint64) {
-	st := c.markRetiredValidation(version, startGen)
+// retireValidation fences work already in flight before retiring the selected
+// key. Existing unrelated variants and publications after the fence remain.
+func (c *Cache) retireValidation(version validationVersion, startGen uint64, tags []string) {
+	st, cutoff := c.markRetiredValidation(version, startGen, tags, false)
 	if st != nil {
-		c.finishOneRemoval(version.effective, startGen, st)
+		c.finishOneRemoval(version.effective, cutoff, st)
 	}
 }
 
-func (c *Cache) markRetiredValidation(version validationVersion, startGen uint64) *keyGenState {
-	c.genMu.Lock()
-	st := c.keyGen[version.effective]
-	if st != nil && (st.gen != version.entryGen || st.gen > startGen) {
-		c.genMu.Unlock()
-		return nil
+func (c *Cache) retireValidationIfSelected(version validationVersion, startGen uint64, tags []string) {
+	st, cutoff := c.markRetiredValidation(version, startGen, tags, true)
+	if st != nil {
+		c.finishOneRemoval(version.effective, cutoff, st)
 	}
+}
+
+func (c *Cache) markRetiredValidation(version validationVersion, startGen uint64, tags []string, onlySelected bool) (*keyGenState, uint64) {
+	c.genMu.Lock()
+	if c.isPublicationFencedLocked(startGen, version.effective, tags, nil) {
+		c.genMu.Unlock()
+		return nil, 0
+	}
+	st := c.keyGen[version.effective]
+	cutoff := c.genSeq.Add(1)
 	c.fences = append(c.fences, selectorFence{
-		gen:         startGen,
+		gen:         cutoff,
 		retiredBase: sha256.Sum256([]byte(version.base)),
 		retirement:  true,
 	})
 	c.enforceFenceCapLocked()
+	if onlySelected && st != nil && st.gen != version.entryGen {
+		c.genMu.Unlock()
+		return nil, cutoff
+	}
 	st, _, _, _ = c.beginNextGenLocked(version.effective)
-	c.mem.delIfGenAtMost(version.effective, startGen)
+	c.mem.delIfGenAtMost(version.effective, cutoff)
 	st.inMem = c.mem.hasKey(version.effective)
 	if !st.inMem {
 		st.memBytes = 0
 	}
 	c.genMu.Unlock()
-	return st
+	return st, cutoff
 }
 
 func (c *Cache) markOneRemovedAtMostGen(key string, maxGen uint64) *keyGenState {
@@ -1634,7 +1646,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	opCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	req = req.WithContext(opCtx)
-	c.guardRevalidationCapture(rec, origReq, k.version(), startGen, func(code int, _ string) {
+	c.guardRevalidationCapture(rec, origReq, k.version(), startGen, stale.Tags, func(code int, _ string) {
 		if !rejected {
 			rejected = true
 			cancel()
@@ -1657,8 +1669,8 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	})
 	defer rec.releaseCapture()
 	next.ServeHTTP(rec, req)
-	if rec.status == 0 && rec.onHeaders != nil {
-		rec.onHeaders(http.StatusOK, rec.Header())
+	if rec.status == 0 {
+		rec.WriteHeader(http.StatusOK)
 	}
 	now := c.clock()
 	if rejected {
@@ -1680,7 +1692,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	case rec.status == http.StatusNotModified:
 		if !varyCompatibleWithValidation(stale, rec.committedHeader(), req, origReq) {
 			c.recordDecision(origReq, "vary_changed")
-			c.retireValidation(k.version(), startGen)
+			c.retireValidation(k.version(), startGen, stale.Tags)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
@@ -1694,7 +1706,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		switch action {
 		case mergeReplace:
 			if c.setValidationIfCurrent(k.key, refreshed, startGen, stale.Tags, k.version()) {
-				c.retireValidation(k.version(), startGen)
+				c.retireValidationIfSelected(k.version(), startGen, stale.Tags)
 				call.finish(nil, outcomeUncacheable, nil)
 				c.observeRevalidation(outcomeUncacheable)
 				return
@@ -1704,7 +1716,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		case mergeDiscard:
 			// The 304 changed the representation's keying or made it
 			// unstorable; dropping the pre-validation generation is the only safe outcome.
-			c.retireValidation(k.version(), startGen)
+			c.retireValidation(k.version(), startGen, stale.Tags)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 		}
@@ -1724,7 +1736,7 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 	case !rec.storable():
 		if rec.status >= http.StatusOK && rec.status < http.StatusInternalServerError &&
 			(rec.status != http.StatusOK || rec.complete(req.Method)) {
-			c.retireValidation(k.version(), startGen)
+			c.retireValidation(k.version(), startGen, stale.Tags)
 		}
 		c.recordDecision(req, "capture_not_stored")
 		call.finish(nil, outcomeUncacheable, nil)
@@ -1740,13 +1752,13 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		e := c.buildEntryFromCapture(req, rec.status, rec.committedHeader(), rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
 		version := k.version()
 		if !c.captureMatchesRequest(e, origReq) {
-			c.retireValidation(version, startGen)
+			c.retireValidation(version, startGen, stale.Tags)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
 		}
 		if !c.storeCapturedWithStartGenAndTags(key(req), req, e, rec.diskStream, startGen, true, stale.Tags, &version) {
-			c.retireValidation(version, startGen)
+			c.retireValidation(version, startGen, stale.Tags)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return

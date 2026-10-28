@@ -480,8 +480,12 @@ client.
 
 An authoritative non-`5xx` replacement, including an oversized `401` or `403`,
 retires the selected stale representation even when the replacement cannot be
-stored. Older in-flight origin work for that resource is fenced from
-republishing it; other resident variants and newer publications are retained.
+stored. Origin work already in flight at the retirement decision is fenced
+from republishing that resource; other resident variants and publications
+started after that decision are retained. A competing publication of the
+selected variant completed before the decision is also retired: its origin
+work cannot be proven newer than the denial or other authoritative response.
+This conservative choice can cause another origin request.
 A `200` whose received byte count does not match its declared `Content-Length`
 is incomplete and is not treated as an authoritative replacement. For an
 unframed response Jul cannot detect truncation from a length mismatch. Requests

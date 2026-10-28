@@ -514,7 +514,7 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 		ResponseWriter: w,
 		ex:             ex,
 	}
-	wrappedW := Wrap(ew, w)
+	wrappedW := WrapController(ew, w)
 	if slot, ok := req.Context().Value(exchangeSlotCtxKey{}).(*atomic.Pointer[ActiveExchange]); ok && slot != nil {
 		slot.Store(ex)
 	}
@@ -1043,6 +1043,8 @@ type exchangeResponseWriter struct {
 	ex *ActiveExchange
 }
 
+func (w *exchangeResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *exchangeResponseWriter) WriteHeader(code int) {
 	ex := w.ex
 	if ex.IsRetired() && code != http.StatusSwitchingProtocols {
@@ -1074,13 +1076,24 @@ func (w *exchangeResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (w *exchangeResponseWriter) Flush() {
+	_ = w.FlushError()
+}
+
+func (w *exchangeResponseWriter) FlushError() error {
 	if w.ex.IsRetired() {
 		w.ex.abortStream.Store(true)
-		return
+		return io.ErrClosedPipe
 	}
-	if fl, ok := w.ResponseWriter.(http.Flusher); ok {
-		fl.Flush()
+	if !SupportsFlush(w.ResponseWriter) {
+		return http.ErrNotSupported
 	}
+	w.ex.mu.Lock()
+	if !w.ex.wroteHeader {
+		w.ex.wroteHeader = true
+		w.ex.statusCode = http.StatusOK
+	}
+	w.ex.mu.Unlock()
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 func (w *exchangeResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

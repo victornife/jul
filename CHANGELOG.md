@@ -23,7 +23,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 - Preserve panic recovery and controller flush errors across compression and
   response-observing wrappers. Retire superseded stale entries on authoritative
   unstorable replacements, including oversized authorization denials, and
-  fence older in-flight fills; retain an entry on a truncated `200` (#623).
+  fence in-flight fills at the retirement decision; retain an entry on a
+  truncated `200` (#623).
 
 - Reject HTTP proxy responses whose `Vary` names a request field rewritten or
   removed before reaching the origin, including configured and generated

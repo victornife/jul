@@ -74,7 +74,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	c.observeRecorder(rec, r)
 	rejected := false
 	var rejectedStale *Entry
-	c.guardRevalidationCapture(rec, r, k.version(), startGen, func(code int, reason string) {
+	c.guardRevalidationCapture(rec, r, k.version(), startGen, stored.Tags, func(code int, reason string) {
 		if !rejected {
 			rejected = true
 			cancelValidation()
@@ -102,8 +102,8 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		}()
 		next.ServeHTTP(rec, vreq)
 	}()
-	if rec.status == 0 && rec.onHeaders != nil {
-		rec.onHeaders(http.StatusOK, rec.Header())
+	if rec.status == 0 {
+		rec.WriteHeader(http.StatusOK)
 	}
 	now := c.clock()
 
@@ -129,7 +129,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	case rec.status == http.StatusNotModified:
 		if !varyCompatibleWithValidation(stored, rec.committedHeader(), vreq, r) {
 			c.recordDecision(r, "vary_changed")
-			c.retireValidation(k.version(), startGen)
+			c.retireValidation(k.version(), startGen, stored.Tags)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			fallbackAfterValidation()
 			return
@@ -139,13 +139,13 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			c.recordDecision(r, reason)
 		}
 		if action == mergeDiscard {
-			c.retireValidation(k.version(), startGen)
+			c.retireValidation(k.version(), startGen, stored.Tags)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			fallbackAfterValidation()
 			return
 		}
 		if c.setValidationIfCurrent(k.key, refreshed, startGen, stored.Tags, k.version()) {
-			c.retireValidation(k.version(), startGen)
+			c.retireValidationIfSelected(k.version(), startGen, stored.Tags)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			fallbackAfterValidation()
 			return
@@ -179,7 +179,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		// origin request, bounded to this path, in exchange for never
 		// truncating a response.
 		if rec.status != http.StatusOK || rec.complete(vreq.Method) {
-			c.retireValidation(k.version(), startGen)
+			c.retireValidation(k.version(), startGen, stored.Tags)
 		}
 		c.finishValidation(call, nil, outcomeUncacheable)
 		fallbackAfterValidation()
@@ -197,7 +197,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
-			c.retireValidation(version, startGen)
+			c.retireValidation(version, startGen, stored.Tags)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			if isRange || !varyCompatibleWithModifiedRequest(rec.committedHeader(), vreq, r) || !writeRecorded(w, r, rec, nil, stateMiss) {
 				fallbackAfterValidation()
@@ -229,19 +229,20 @@ func varyCompatibleWithValidation(stored *Entry, h304 http.Header, modifiedReq, 
 	return true
 }
 
-func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, version validationVersion, startGen uint64, onReject func(int, string)) {
+func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, version validationVersion, startGen uint64, tags []string, onReject func(int, string)) {
 	rec.onHeaders = func(code int, h http.Header) {
 		if reason := varyRejectionHeader(original, nil, h); reason != "" {
 			c.recordDecision(original, reason)
 			var removed *keyGenState
+			var cutoff uint64
 			if code < http.StatusInternalServerError {
-				removed = c.markRetiredValidation(version, startGen)
+				removed, cutoff = c.markRetiredValidation(version, startGen, tags, false)
 			}
 			if onReject != nil {
 				onReject(code, reason)
 			}
 			if removed != nil {
-				c.finishOneRemoval(version.effective, startGen, removed)
+				c.finishOneRemoval(version.effective, cutoff, removed)
 			}
 		}
 	}

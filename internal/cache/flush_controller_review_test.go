@@ -13,6 +13,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/respwriter"
 )
 
 type controllerOnlyWriter struct {
@@ -140,4 +141,45 @@ func TestUnsupportedFlushDoesNotCommitThroughMiddleware(t *testing.T) {
 		}
 	})))
 	h.ServeHTTP(middleware.NewRecorder(basicResponseWriter{w: writer}).Writer(), httptest.NewRequest(http.MethodGet, "http://example.test/item", nil))
+}
+
+type classicFlushErrorWriter struct {
+	*httptest.ResponseRecorder
+	err error
+}
+
+func (w *classicFlushErrorWriter) FlushError() error { return w.err }
+
+func TestFlushErrorThroughExchangePreventsCachePublication(t *testing.T) {
+	c, _ := conformanceCache(t, config.CacheConfig{MemoryMaxSize: 1 << 20})
+	want := errors.New("transport flush failure")
+	var calls atomic.Int32
+	var got error
+	origin := c.Handler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		got = http.NewResponseController(w).Flush()
+		_, _ = w.Write([]byte("body"))
+	}))
+	reg := respwriter.NewExchangeRegistry()
+	compress, err := middleware.NewCompression(middleware.CompressionOptions{Encoders: []string{"gzip"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := compress(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exchange, request, _, release := reg.Admit(w, r, respwriter.EntryCoord{GenID: 1})
+		defer release()
+		origin.ServeHTTP(exchange, request)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/item", nil)
+	for range 2 {
+		writer := &classicFlushErrorWriter{ResponseRecorder: httptest.NewRecorder(), err: want}
+		h.ServeHTTP(middleware.NewRecorder(writer).Writer(), req)
+		if !errors.Is(got, want) {
+			t.Fatalf("flush error = %v, want %v", got, want)
+		}
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("failed flush response was cached: %d origin calls", calls.Load())
+	}
 }

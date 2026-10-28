@@ -25,6 +25,7 @@ func TestBackgroundRetirementDecisions(t *testing.T) {
 		wantRetired bool
 	}{
 		{name: "truncated", status: 200, body: "short", length: 10},
+		{name: "implicit-truncated", status: 0, length: 10},
 		{name: "oversized-truncated", status: 200, body: strings.Repeat("x", 80), length: 120},
 		{name: "oversized-complete", status: 200, body: strings.Repeat("x", 80), length: 80, wantRetired: true},
 		{name: "oversized-401", status: 401, body: strings.Repeat("x", 80), length: 80, wantRetired: true},
@@ -43,8 +44,12 @@ func TestBackgroundRetirementDecisions(t *testing.T) {
 						w.Header().Set("Cache-Tag", "replacement-tag")
 					}
 					w.Header().Set("Content-Length", strconv.Itoa(tt.length))
-					w.WriteHeader(tt.status)
-					_, _ = w.Write([]byte(tt.body))
+					if tt.status != 0 {
+						w.WriteHeader(tt.status)
+					}
+					if tt.body != "" {
+						_, _ = w.Write([]byte(tt.body))
+					}
 					return
 				}
 				_, _ = w.Write([]byte("old"))
