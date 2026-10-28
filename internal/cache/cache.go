@@ -90,6 +90,7 @@ type Cache struct {
 	startupHighWaterGen       atomic.Uint64
 	originOpSeq               uint64
 	inflightOps               map[uint64]uint64
+	activeValidations         map[*revalidateCall]revalidateKey
 	onBeforeReclaim           func(key string)
 	onAfterFenceInstall       func(sel NormalizedSelector, fenceGen uint64)
 	onAfterDiskPublication    func(key string, gen uint64)
@@ -704,6 +705,11 @@ func (c *Cache) markRetiredValidation(version validationVersion, startGen uint64
 		return nil, 0
 	}
 	c.reMu.Lock()
+	for other, key := range c.activeValidations {
+		if key.key == version.effective && other != call {
+			other.invalidated.Store(true)
+		}
+	}
 	for key, other := range c.calls {
 		if key.key == version.effective && other != call {
 			other.invalidated.Store(true)
@@ -1330,7 +1336,7 @@ func (c *Cache) serveCachedIfReusableWithOwner(w http.ResponseWriter, r *http.Re
 				continue
 			}
 			func() {
-				defer c.endInflightOriginOp(opID)
+				defer c.endInflightValidationOp(opID, call, leader)
 				if leader {
 					defer func() {
 						c.endRevalidate(k, call)
@@ -1591,7 +1597,7 @@ func (c *Cache) startRevalidate(base, effKey string, baseGen, entryGen uint64, r
 	req := conditionalRequest(r.Clone(ctx), stale)
 	go func() {
 		defer release()
-		defer c.endInflightOriginOp(opID)
+		defer c.endInflightValidationOp(opID, call, true)
 		c.revalidate(ctx, k, req, origReq, next, stale, call, startGen)
 	}()
 }

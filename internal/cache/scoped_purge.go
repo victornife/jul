@@ -228,8 +228,22 @@ func (c *Cache) beginValidationIfCurrent(version validationVersion, key revalida
 	call, leader = c.beginRevalidate(key, tags)
 	if leader {
 		call.startGen = startGen
+		if c.activeValidations == nil {
+			c.activeValidations = make(map[*revalidateCall]revalidateKey)
+		}
+		c.activeValidations[call] = key
 	}
 	return opID, startGen, call, leader, true
+}
+
+func (c *Cache) endInflightValidationOp(opID uint64, call *revalidateCall, leader bool) {
+	c.genMu.Lock()
+	if leader {
+		delete(c.activeValidations, call)
+	}
+	delete(c.inflightOps, opID)
+	c.reclaimFencesLocked()
+	c.genMu.Unlock()
 }
 
 func (c *Cache) endInflightOriginOp(opID uint64) {
@@ -1126,15 +1140,15 @@ func (c *Cache) collectOwnedKeysForBaseLocked(baseKey string, exactKeyFilter str
 }
 
 func (c *Cache) countMatchingInflightLocked(sel NormalizedSelector) (matched int, tagUnknown bool) {
-	return c.visitMatchingInflightLocked(sel, false, false, 0)
+	return c.visitMatchingInflightLocked(sel, false, false, 0, nil)
 }
 
-func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector, cutoff uint64) int {
-	n, _ := c.visitMatchingInflightLocked(sel, true, true, cutoff)
+func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector, cutoff uint64, resources map[string]struct{}) int {
+	n, _ := c.visitMatchingInflightLocked(sel, true, true, cutoff, resources)
 	return n
 }
 
-func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, invalidate bool, cutoff uint64) (matched int, tagUnknown bool) {
+func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, invalidate bool, cutoff uint64, resources map[string]struct{}) (matched int, tagUnknown bool) {
 	c.fillMu.Lock()
 	for fk := range c.fills {
 		base := baseKeyOf(fk.key)
@@ -1163,42 +1177,58 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach, inva
 	}
 	c.fillMu.Unlock()
 
-	c.reMu.Lock()
-	for rk, call := range c.calls {
+	matchValidation := func(rk revalidateKey, call *revalidateCall) (covered, unknown, detachUnknown bool) {
 		base := baseKeyOf(rk.key)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
-			continue
+			return false, false, false
 		}
 		resKey := resourceKeyOf(host, reqURI)
 		var tags []string
 		if c.baseIndexedTags != nil {
 			tags = c.baseIndexedTags[resKey]
 		}
-		hit := false
 		switch sel.Kind {
 		case SelectorKey:
-			hit = rk.key == sel.Key || base == baseKeyOf(sel.Key)
+			covered = rk.key == sel.Key || base == baseKeyOf(sel.Key)
 		case SelectorTag:
-			if sel.MatchesResource(host, reqURI, mergeBaseTagSets(tags, call.tags)) {
-				hit = true
-			} else if host == sel.Host {
-				tagUnknown = true
-				hit = (detach || invalidate) && len(tags) == 0
-			}
+			_, fromSnapshot := resources[resKey]
+			covered = fromSnapshot || sel.MatchesResource(host, reqURI, mergeBaseTagSets(tags, call.tags))
+			unknown = !covered && host == sel.Host
+			detachUnknown = unknown && len(tags) == 0
 		default:
-			hit = sel.MatchesResource(host, reqURI, tags)
+			covered = sel.MatchesResource(host, reqURI, tags)
 		}
-		if hit {
-			if invalidate {
-				if call.startGen > cutoff {
-					continue
-				}
-				call.invalidated.Store(true)
-			}
-			if detach {
+		return covered, unknown, detachUnknown
+	}
+	c.reMu.Lock()
+	seen := make(map[*revalidateCall]struct{}, len(c.calls))
+	for rk, call := range c.calls {
+		seen[call] = struct{}{}
+		covered, unknown, detachUnknown := matchValidation(rk, call)
+		tagUnknown = tagUnknown || unknown
+		if invalidate && covered && call.startGen <= cutoff {
+			call.invalidated.Store(true)
+		}
+		if covered || (detach && detachUnknown) {
+			if detach && call.startGen <= cutoff {
 				delete(c.calls, rk)
 			}
+			if !invalidate || call.startGen <= cutoff {
+				matched++
+			}
+		}
+	}
+	for call, rk := range c.activeValidations {
+		if _, ok := seen[call]; ok {
+			continue
+		}
+		covered, unknown, detachUnknown := matchValidation(rk, call)
+		tagUnknown = tagUnknown || unknown
+		if invalidate && covered && call.startGen <= cutoff {
+			call.invalidated.Store(true)
+		}
+		if (covered || (detach && detachUnknown)) && (!invalidate || call.startGen <= cutoff) {
 			matched++
 		}
 	}
@@ -1213,10 +1243,10 @@ func (c *Cache) inflightTagResourcesLocked(sel NormalizedSelector, limit int) (m
 	var matched map[string]struct{}
 	c.reMu.Lock()
 	defer c.reMu.Unlock()
-	for rk, call := range c.calls {
+	add := func(rk revalidateKey, call *revalidateCall) bool {
 		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(rk.key))
 		if !ok {
-			continue
+			return true
 		}
 		resKey := resourceKeyOf(host, reqURI)
 		if sel.MatchesResource(host, reqURI, mergeBaseTagSets(c.baseIndexedTags[resKey], call.tags)) {
@@ -1224,12 +1254,58 @@ func (c *Cache) inflightTagResourcesLocked(sel NormalizedSelector, limit int) (m
 				matched = make(map[string]struct{})
 			}
 			if _, exists := matched[resKey]; !exists && limit > 0 && len(matched) >= limit {
-				return matched, true
+				return false
 			}
 			matched[resKey] = struct{}{}
 		}
+		return true
+	}
+	for rk, call := range c.calls {
+		if !add(rk, call) {
+			return matched, true
+		}
+	}
+	for call, rk := range c.activeValidations {
+		if !add(rk, call) {
+			return matched, true
+		}
 	}
 	return matched, false
+}
+
+func (c *Cache) addInflightRetryResourcesLocked(sel NormalizedSelector, ids []string, resources map[string]struct{}) error {
+	wanted := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		wanted[id] = struct{}{}
+	}
+	add := func(rk revalidateKey) error {
+		_, host, reqURI, _, ok := parseBaseKeyParts(baseKeyOf(rk.key))
+		if !ok {
+			return nil
+		}
+		resource := resourceKeyOf(host, reqURI)
+		if _, ok := wanted[hashKey(resource)]; !ok {
+			return nil
+		}
+		if !sel.matchesHost(host) {
+			return fmt.Errorf("original tag purge resource snapshot does not match the selector host")
+		}
+		resources[resource] = struct{}{}
+		return nil
+	}
+	c.reMu.Lock()
+	defer c.reMu.Unlock()
+	for rk := range c.calls {
+		if err := add(rk); err != nil {
+			return err
+		}
+	}
+	for _, rk := range c.activeValidations {
+		if err := add(rk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *Cache) candidateBaseKeysWithInflightLocked(sel NormalizedSelector, maxScan int, inflight map[string]struct{}) (keys []string, scanned int, truncated bool, total int) {
@@ -1532,7 +1608,7 @@ func (c *Cache) BeginSelectorFenceWithError(sel NormalizedSelector) (fenceGen ui
 		matchedResources: matchedRes,
 	})
 	c.enforceFenceCapLocked()
-	c.detachMatchingInflightLocked(sel, fenceGen)
+	c.detachMatchingInflightLocked(sel, fenceGen, matchedRes)
 	c.genMu.Unlock()
 	if c.disk != nil {
 		if hwErr := c.disk.recordHighWaterGen(fenceGen); hwErr != nil {
@@ -1688,6 +1764,12 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	for resource := range inflightResources {
 		fenceResSet[resource] = struct{}{}
 	}
+	if isTagRetry {
+		if err := c.addInflightRetryResourcesLocked(sel, resourceIDs, fenceResSet); err != nil {
+			c.genMu.Unlock()
+			return InvalidateResult{}, err
+		}
+	}
 	skipped := 0
 	exactFilter := ""
 	if sel.Kind == SelectorKey {
@@ -1787,7 +1869,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 					gen: fenceGen, sel: sel, matchedResources: fenceResSet,
 				})
 			}
-			c.visitMatchingInflightLocked(sel, false, true, fenceGen)
+			c.visitMatchingInflightLocked(sel, false, true, fenceGen, fenceResSet)
 			c.reclaimFencesLocked()
 			c.genMu.Unlock()
 			return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
@@ -1835,7 +1917,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		})
 	}
 	c.enforceFenceCapLocked()
-	fencedOps := c.detachMatchingInflightLocked(sel, fenceGen)
+	fencedOps := c.detachMatchingInflightLocked(sel, fenceGen, fenceResSet)
 
 	if isFastAll {
 		c.purgeGen = fenceGen
