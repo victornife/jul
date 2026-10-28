@@ -96,7 +96,16 @@ func fillLockKey(base, effKey string) string {
 	return base + "\x00" + hashKey(effKey)
 }
 
-func (c *Cache) beginFill(fk string) (call *fillCall, leader bool) {
+type fillCoordKey struct {
+	key   string
+	scope RouteScope
+}
+
+func fillCoordinationKey(base, effKey string, r *http.Request) fillCoordKey {
+	return fillCoordKey{key: fillLockKey(base, effKey), scope: scopeForRequest(r)}
+}
+
+func (c *Cache) beginFill(fk fillCoordKey) (call *fillCall, leader bool) {
 	c.fillMu.Lock()
 	defer c.fillMu.Unlock()
 	if existing, ok := c.fills[fk]; ok {
@@ -107,7 +116,7 @@ func (c *Cache) beginFill(fk string) (call *fillCall, leader bool) {
 	return call, true
 }
 
-func (c *Cache) endFill(fk string, call *fillCall) {
+func (c *Cache) endFill(fk fillCoordKey, call *fillCall) {
 	c.fillMu.Lock()
 	if c.fills[fk] == call {
 		delete(c.fills, fk)
@@ -126,7 +135,7 @@ func (c *Cache) inflightFills() int {
 // pol.LockTimeout and then re-evaluate lookup, Vary, freshness, and shared-cache
 // authorization rules against the store.
 func (c *Cache) fillOrWait(w http.ResponseWriter, r *http.Request, next http.Handler, base, effKey string, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span, allowVariantRetry bool) {
-	fk := fillLockKey(base, effKey)
+	fk := fillCoordinationKey(base, effKey, r)
 	call, leader := c.beginFill(fk)
 	if leader {
 		// Re-check lookup after acquiring leadership in case a previous leader
@@ -144,7 +153,7 @@ func (c *Cache) fillOrWait(w http.ResponseWriter, r *http.Request, next http.Han
 	c.awaitFill(w, r, next, base, fk, call, reqPolicy, pol, span, allowVariantRetry)
 }
 
-func (c *Cache) leadFill(w http.ResponseWriter, r *http.Request, next http.Handler, fk string, call *fillCall, pol CachePolicy) {
+func (c *Cache) leadFill(w http.ResponseWriter, r *http.Request, next http.Handler, fk fillCoordKey, call *fillCall, pol CachePolicy) {
 	stored := false
 	release := func(didStore bool) {
 		c.endFill(fk, call)
@@ -158,7 +167,7 @@ func (c *Cache) leadFill(w http.ResponseWriter, r *http.Request, next http.Handl
 	})
 }
 
-func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Handler, base, fk string, call *fillCall, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span, allowVariantRetry bool) {
+func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Handler, base string, fk fillCoordKey, call *fillCall, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span, allowVariantRetry bool) {
 	c.observeFillLock(fillOutcomeWait)
 	call.joined.Add(1)
 
@@ -204,7 +213,7 @@ func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Hand
 
 	c.recordDecision(r, "fill_lock_not_reusable")
 	c.observeFillLock(fillOutcomeNotReusable)
-	if allowVariantRetry && latestEffKey != base && fillLockKey(base, latestEffKey) != fk {
+	if allowVariantRetry && latestEffKey != base && fillCoordinationKey(base, latestEffKey, r) != fk {
 		c.fillOrWait(w, r, next, base, latestEffKey, reqPolicy, pol, span, false)
 		return
 	}

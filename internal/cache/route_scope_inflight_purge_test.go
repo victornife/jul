@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
@@ -25,7 +26,10 @@ func TestScopedInvalidationFencesConcurrentRoutePublications(t *testing.T) {
 	for _, sel := range selectors {
 		for _, disk := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/disk=%t", sel.Kind, disk), func(t *testing.T) {
-				cfg := config.CacheConfig{MemoryMaxSize: 1 << 20, TagHeaders: []string{"Cache-Tag"}}
+				cfg := config.CacheConfig{
+					MemoryMaxSize: 1 << 20, TagHeaders: []string{"Cache-Tag"},
+					Lock: true, LockTimeout: config.Duration(5 * time.Second),
+				}
 				if disk {
 					cfg.DiskPath = t.TempDir()
 					cfg.DiskMaxSize = 8 << 20
@@ -72,6 +76,9 @@ func TestScopedInvalidationFencesConcurrentRoutePublications(t *testing.T) {
 				}
 				awaitSignal(t, entered)
 				awaitSignal(t, entered)
+				if preview := c.PreviewScope(selector, PreviewOptions{}); sel.Kind != SelectorTag && preview.InflightFillsMatched < 2 {
+					t.Fatalf("preview missed scoped in-flight fills: %+v", preview)
+				}
 				result, err := c.InvalidateScope(context.Background(), selector, InvalidateOptions{})
 				if err != nil || result.State != "succeeded" {
 					t.Fatalf("invalidation state %q: %v", result.State, err)

@@ -46,12 +46,12 @@ var errRevalidatePanic = errors.New("cache: background revalidation panicked")
 var errSensitiveVaryRevalidation = errors.New("cache: sensitive Vary revalidation rejected")
 
 // revalidateKey identifies an in-flight revalidation. It pairs the effective
-// storage key with the handler generation that owns the refresh, so a reload
-// installs a fresh key space: a new generation is never made to wait on — or be
-// suppressed by — a call still running against the retired handler tree.
+// storage key with the handler generation and route compatibility that own
+// the refresh, so an unrelated route or generation cannot delay or suppress it.
 type revalidateKey struct {
-	key string
-	gen uint64
+	key   string
+	gen   uint64
+	scope RouteScope
 }
 
 // revalidateCall is the shared state of one in-flight revalidation. Exactly one

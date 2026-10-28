@@ -43,10 +43,10 @@ func awaitSignal(t *testing.T, ch <-chan struct{}) {
 	}
 }
 
-func TestRouteScopeFillFollowersRejectIncompatibleLeaders(t *testing.T) {
+func TestRouteScopeFillDoesNotWaitForIncompatibleLeader(t *testing.T) {
 	for _, dimension := range []string{"owner", "compatibility"} {
 		t.Run(dimension, func(t *testing.T) {
-			c := newTestCache(t, lockCfg(5*time.Second))
+			c := newTestCache(t, lockCfg(30*time.Second))
 			entered, release := make(chan struct{}), make(chan struct{})
 			var once sync.Once
 			t.Cleanup(func() { once.Do(func() { close(release) }) })
@@ -61,36 +61,28 @@ func TestRouteScopeFillFollowersRejectIncompatibleLeaders(t *testing.T) {
 				_, _ = w.Write([]byte("route-b"))
 			}))
 			req := func() *http.Request { return httptest.NewRequest(http.MethodGet, "http://example.test/item", nil) }
-			leader, follower := httptest.NewRecorder(), httptest.NewRecorder()
+			leader, independent := httptest.NewRecorder(), httptest.NewRecorder()
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() { defer wg.Done(); a.ServeHTTP(leader, req()) }()
 			awaitSignal(t, entered)
-			c.fillMu.Lock()
-			call := c.fills[key(req())]
-			c.fillMu.Unlock()
-			if call == nil {
-				t.Fatal("leader has no fill lock")
-			}
+			done := make(chan struct{})
 			wg.Add(1)
-			go func() { defer wg.Done(); b.ServeHTTP(follower, req()) }()
-			deadline := time.Now().Add(5 * time.Second)
-			for call.joined.Load() < 1 {
-				if time.Now().After(deadline) {
-					t.Fatal("follower did not join the fill")
-				}
-				time.Sleep(time.Millisecond)
+			go func() { defer wg.Done(); defer close(done); b.ServeHTTP(independent, req()) }()
+			awaitSignal(t, done)
+			if independent.Body.String() != "route-b" {
+				t.Fatalf("independent fill got %q", independent.Body.String())
 			}
 			once.Do(func() { close(release) })
 			wg.Wait()
-			if leader.Body.String() != "route-a" || follower.Body.String() != "route-b" {
-				t.Fatalf("incompatible fill: leader=%q follower=%q", leader.Body.String(), follower.Body.String())
+			if leader.Body.String() != "route-a" {
+				t.Fatalf("leader got %q", leader.Body.String())
 			}
 		})
 	}
 }
 
-func TestRouteScopeValidationFollowersRejectIncompatibleLeaders(t *testing.T) {
+func TestRouteScopeValidationDoesNotWaitForIncompatibleLeader(t *testing.T) {
 	for _, dimension := range []string{"owner", "compatibility"} {
 		t.Run(dimension, func(t *testing.T) {
 			c := newTestCache(t, lockCfg(5*time.Second))
@@ -122,19 +114,23 @@ func TestRouteScopeValidationFollowersRejectIncompatibleLeaders(t *testing.T) {
 				return r
 			}
 			a.ServeHTTP(httptest.NewRecorder(), req(false))
-			leader, follower := httptest.NewRecorder(), httptest.NewRecorder()
+			leader, independent := httptest.NewRecorder(), httptest.NewRecorder()
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() { defer wg.Done(); a.ServeHTTP(leader, req(true)) }()
 			awaitSignal(t, entered)
 			b.ServeHTTP(httptest.NewRecorder(), req(false))
+			done := make(chan struct{})
 			wg.Add(1)
-			go func() { defer wg.Done(); b.ServeHTTP(follower, req(true)) }()
-			awaitJoined(t, c, revalidateKey{key: key(req(false))}, 1)
+			go func() { defer wg.Done(); defer close(done); b.ServeHTTP(independent, req(true)) }()
+			awaitSignal(t, done)
+			if independent.Body.String() != "route-b" {
+				t.Fatalf("independent validation got %q", independent.Body.String())
+			}
 			once.Do(func() { close(release) })
 			wg.Wait()
-			if leader.Body.String() != "route-a" || follower.Body.String() != "route-b" {
-				t.Fatalf("incompatible validation: leader=%q follower=%q", leader.Body.String(), follower.Body.String())
+			if leader.Body.String() != "route-a" {
+				t.Fatalf("leader got %q", leader.Body.String())
 			}
 		})
 	}

@@ -28,7 +28,7 @@ import (
 // for one (effective key, generation) produces exactly one origin request.
 func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, effKey string, now time.Time) {
 	gen, _ := background.Generation(r.Context())
-	k := revalidateKey{key: effKey, gen: gen}
+	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r)}
 
 	if call, leader := c.beginRevalidate(k); leader {
 		c.leadValidation(w, r, next, stored, k, call)
@@ -49,7 +49,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	vctx := r.Context()
 	if ctx, release, ok := background.Acquire(r.Context(), background.OpCacheRevalidate); ok {
 		defer release()
-		vctx = ctx
+		vctx = carryRouteScope(ctx, r)
 	}
 	vctx, cancelValidation := context.WithCancel(vctx)
 	defer cancelValidation()

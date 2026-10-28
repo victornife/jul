@@ -393,7 +393,7 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 }
 
 func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.Request, next http.Handler, base, effKey string, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span, allowVariantRetry bool) {
-	fk := fillLockKey(base, effKey)
+	fk := fillCoordinationKey(base, effKey, origReq)
 	call, leader := c.beginFill(fk)
 	if leader {
 		if _, served := c.serveCachedIfReusable(w, rWithSpec, next, base, reqPolicy, c.clock(), span); served {
@@ -471,7 +471,7 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 
 	c.recordDecision(origReq, "fill_lock_not_reusable")
 	c.observeFillLock(fillOutcomeNotReusable)
-	if allowVariantRetry && latestEffKey != base && fillLockKey(base, latestEffKey) != fk {
+	if allowVariantRetry && latestEffKey != base && fillCoordinationKey(base, latestEffKey, origReq) != fk {
 		c.rangeFillOrWait(w, origReq, rWithSpec, next, base, latestEffKey, reqPolicy, pol, span, false)
 		return
 	}

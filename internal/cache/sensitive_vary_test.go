@@ -249,7 +249,7 @@ func TestSensitiveVaryFillFollowersFetchTheirOwnResponses(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for {
 		c.fillMu.Lock()
-		call := c.fills[key(httptest.NewRequest(http.MethodGet, "http://example.com/item", nil))]
+		call := c.fills[fillCoordKey{key: key(httptest.NewRequest(http.MethodGet, "http://example.com/item", nil))}]
 		c.fillMu.Unlock()
 		if call != nil && call.joined.Load() >= 1 {
 			break

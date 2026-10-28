@@ -424,7 +424,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return pluginSet.ResponsePoint(append(append([]string(nil), srv.Plugins...), loc.Plugins...)...)
 	}
 	withCache := func(srv config.ServerConfig, loc config.LocationConfig, h http.Handler) (http.Handler, error) {
-		if !loc.Cache || f.Cache == nil {
+		if !loc.Cache || loc.Withdrawn || f.Cache == nil {
 			return h, nil
 		}
 		hasPlugins := len(srv.Plugins) > 0 || len(loc.Plugins) > 0 || loc.Plugin != ""

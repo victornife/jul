@@ -1096,7 +1096,7 @@ func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector) int {
 func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool) (matched int, tagUnknown bool) {
 	c.fillMu.Lock()
 	for fk := range c.fills {
-		base := baseKeyOf(fk)
+		base := baseKeyOf(fk.key)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
 			continue
@@ -1104,7 +1104,7 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 		hit := false
 		switch sel.Kind {
 		case SelectorKey:
-			hit = fk == sel.Key || base == baseKeyOf(sel.Key)
+			hit = fk.key == sel.Key || base == baseKeyOf(sel.Key)
 		case SelectorTag:
 			if host == sel.Host {
 				tagUnknown = true

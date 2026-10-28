@@ -107,6 +107,14 @@ func withRouteScope(r *http.Request, scope *RouteScope) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), routeScopeKey{}, scope))
 }
 
+func carryRouteScope(ctx context.Context, r *http.Request) context.Context {
+	scope, _ := r.Context().Value(routeScopeKey{}).(*RouteScope)
+	if scope == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, routeScopeKey{}, scope)
+}
+
 // WithResponseHookBypass marks a request whose outer response hook can mutate
 // final response headers after the cache's admission decision.
 func WithResponseHookBypass(r *http.Request) *http.Request {

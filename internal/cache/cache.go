@@ -52,7 +52,7 @@ type Cache struct {
 	calls map[revalidateKey]*revalidateCall // in-flight revalidations
 
 	fillMu     sync.Mutex
-	fills      map[string]*fillCall // in-flight cold-miss fills (#525)
+	fills      map[fillCoordKey]*fillCall // in-flight cold-miss fills (#525)
 	onFillLock func(outcome string)
 	onRange    func(outcome string)
 
@@ -165,7 +165,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 	c := &Cache{
 		log:    logger,
 		calls:  make(map[revalidateKey]*revalidateCall),
-		fills:  make(map[string]*fillCall),
+		fills:  make(map[fillCoordKey]*fillCall),
 		keyGen: make(map[string]*keyGenState),
 	}
 	pol := policyFromConfig(cfg)
@@ -1426,7 +1426,7 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 		return
 	}
 	gen, _ := background.Generation(r.Context())
-	k := revalidateKey{key: effKey, gen: gen}
+	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r)}
 
 	call, leader := c.beginRevalidate(k)
 	if !leader {
@@ -1435,6 +1435,7 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 		return
 	}
 
+	ctx = carryRouteScope(ctx, r)
 	origReq := r.Clone(ctx)
 	req := conditionalRequest(r.Clone(ctx), stale)
 	opID, startGen := c.beginInflightOriginOp()

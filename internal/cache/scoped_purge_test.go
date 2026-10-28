@@ -962,9 +962,9 @@ func TestScopedPurgeNegativeOracleVerification(t *testing.T) {
 	fillKey := keyFor(http.MethodGet, "portal.example.com", "/articles/inflight-1")
 	c.fillMu.Lock()
 	if c.fills == nil {
-		c.fills = make(map[string]*fillCall)
+		c.fills = make(map[fillCoordKey]*fillCall)
 	}
-	c.fills[fillKey] = &fillCall{done: make(chan struct{})}
+	c.fills[fillCoordKey{key: fillKey}] = &fillCall{done: make(chan struct{})}
 	c.fillMu.Unlock()
 
 	c.reMu.Lock()

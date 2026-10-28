@@ -104,7 +104,7 @@ func TestFillLockConcurrentColdMissesCoalesceToOneOriginFetch(t *testing.T) {
 
 	baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/popular", nil))
 	c.fillMu.Lock()
-	activeCall := c.fills[baseKey]
+	activeCall := c.fills[fillCoordKey{key: baseKey}]
 	c.fillMu.Unlock()
 	if activeCall == nil {
 		t.Fatal("expected an active fillCall while the leader is in flight")
@@ -252,7 +252,7 @@ func TestFillLockVaryIncompatibleWaitersNeverReceiveWrongRepresentation(t *testi
 
 	baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/asset", nil))
 	c.fillMu.Lock()
-	activeCall := c.fills[baseKey]
+	activeCall := c.fills[fillCoordKey{key: baseKey}]
 	c.fillMu.Unlock()
 
 	const gzipFollowers = 3
@@ -357,7 +357,7 @@ func TestFillLockAuthorizationAndPrivateRulesEnforced(t *testing.T) {
 
 		baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/acct", nil))
 		c.fillMu.Lock()
-		activeCall := c.fills[baseKey]
+		activeCall := c.fills[fillCoordKey{key: baseKey}]
 		c.fillMu.Unlock()
 
 		wg.Add(1)
@@ -426,7 +426,7 @@ func TestFillLockAuthorizationAndPrivateRulesEnforced(t *testing.T) {
 
 		baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/me", nil))
 		c.fillMu.Lock()
-		activeCall := c.fills[baseKey]
+		activeCall := c.fills[fillCoordKey{key: baseKey}]
 		c.fillMu.Unlock()
 
 		wg.Add(2)
@@ -651,7 +651,7 @@ func TestFillLockUncacheableAndFailedResponsesReleaseWaitersPromptly(t *testing.
 
 			baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/item", nil))
 			c.fillMu.Lock()
-			activeCall := c.fills[baseKey]
+			activeCall := c.fills[fillCoordKey{key: baseKey}]
 			c.fillMu.Unlock()
 
 			waiterDone := make(chan *httptest.ResponseRecorder, 1)
@@ -739,7 +739,7 @@ func TestFillLockFailureCancellationAndDisconnectReleaseWaiters(t *testing.T) {
 
 		baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/eof", nil))
 		c.fillMu.Lock()
-		activeCall := c.fills[baseKey]
+		activeCall := c.fills[fillCoordKey{key: baseKey}]
 		c.fillMu.Unlock()
 
 		waiterRec := httptest.NewRecorder()
@@ -795,7 +795,7 @@ func TestFillLockFailureCancellationAndDisconnectReleaseWaiters(t *testing.T) {
 
 		baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/cancel-leader", nil))
 		c.fillMu.Lock()
-		activeCall := c.fills[baseKey]
+		activeCall := c.fills[fillCoordKey{key: baseKey}]
 		c.fillMu.Unlock()
 
 		waiterRec := httptest.NewRecorder()
@@ -857,7 +857,7 @@ func TestFillLockFailureCancellationAndDisconnectReleaseWaiters(t *testing.T) {
 
 		baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/disconnect", nil))
 		c.fillMu.Lock()
-		activeCall := c.fills[baseKey]
+		activeCall := c.fills[fillCoordKey{key: baseKey}]
 		c.fillMu.Unlock()
 
 		waiterDone := make(chan *httptest.ResponseRecorder, 1)
@@ -913,7 +913,7 @@ func TestFillLockFailureCancellationAndDisconnectReleaseWaiters(t *testing.T) {
 
 		baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/panic", nil))
 		c.fillMu.Lock()
-		activeCall := c.fills[baseKey]
+		activeCall := c.fills[fillCoordKey{key: baseKey}]
 		c.fillMu.Unlock()
 
 		waiterRec := httptest.NewRecorder()
@@ -963,7 +963,7 @@ func TestFillLockFailureCancellationAndDisconnectReleaseWaiters(t *testing.T) {
 
 		baseKey := key(httptest.NewRequest(http.MethodGet, "http://example.com/wait-cancel", nil))
 		c.fillMu.Lock()
-		activeCall := c.fills[baseKey]
+		activeCall := c.fills[fillCoordKey{key: baseKey}]
 		c.fillMu.Unlock()
 
 		waiterCtx, cancelWaiter := context.WithCancel(context.Background())

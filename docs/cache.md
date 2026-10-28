@@ -174,7 +174,8 @@ An uninterrupted cached route with a `route_id` retains its owner across
 handler reloads; the ID alone is not proof of policy compatibility. Its
 compatibility token is retained only when scalar cache policy is unchanged and
 neither the previous nor the new generation has an effective plugin. A
-deleted or disabled route does not recover its old owner if its ID is reused.
+deleted, disabled, or withdrawn route does not recover its old owner if it is
+later reactivated or its ID is reused.
 Routes without `route_id` receive a new owner and compatibility token on each
 published handler generation. Adding, removing, replacing or rolling back a
 plugin changes compatibility without making prior entries eligible. This also
@@ -682,7 +683,8 @@ range fills from #442):
 
 - **Leader selection and parallel keys.** The first cold miss for a cache key
   becomes the fill leader and performs the origin fetch and capture. Unrelated
-  cache keys execute in parallel and never block each other.
+  cache keys and incompatible route scopes execute in parallel and never block
+  each other. The lock configuration remains node-wide, not per route.
 - **Default timeout (`5s`).** When `lock = true` and `lock_timeout` is omitted
   or zero, `lock_timeout` defaults to `5s`. This matches NGINX's
   `proxy_cache_lock_timeout 5s` default and Jul's 5s sub-operation convention
@@ -785,9 +787,10 @@ rooted in the process lifetime that carries an explicit allow-list of values:
 At most one refresh runs per (effective cache key, handler generation). A burst
 of concurrent stale hits therefore produces exactly one origin request.
 
-Generation is part of the key on purpose: a refresh still running on a retiring
-generation must never suppress the new generation's refresh of the same key. The
-call state is removed, and every waiter released, on **every** outcome —
+Generation and route compatibility are part of the coordination identity: a
+refresh on a retiring generation or incompatible route must never suppress the
+current route's refresh of the same key. The call state is removed, and every
+waiter released, on **every** outcome —
 success, `304`, uncacheable, origin error, cancellation and panic in the
 downstream handler.
 
