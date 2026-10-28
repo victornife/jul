@@ -53,7 +53,8 @@ func TestInstrumentedVaryCookieGuest(t *testing.T) {
 	}
 	builder := runtime.NewHostModuleBuilder("jul-abi/v2")
 	seen := map[string]bool{}
-	var added bool
+	var added, preset bool
+	var requestHeaderCalls int
 	for _, def := range compiled.ImportedFunctions() {
 		module, name, imported := def.Import()
 		if !imported || module != "jul-abi/v2" || seen[name] {
@@ -68,6 +69,10 @@ func TestInstrumentedVaryCookieGuest(t *testing.T) {
 					panic("unexpected guest request header")
 				}
 				value := []byte("vary-cookie")
+				requestHeaderCalls++
+				if requestHeaderCalls == 2 {
+					value = []byte("req-preset-vary")
+				}
 				if uint32(stack[3]) < uint32(len(value)) || !mod.Memory().Write(uint32(stack[2]), value) {
 					panic("guest request-header buffer is too small")
 				}
@@ -85,6 +90,16 @@ func TestInstrumentedVaryCookieGuest(t *testing.T) {
 				}
 				added = true
 				stack[0] = 0
+			case "set_response_header":
+				header, ok := mod.Memory().Read(uint32(stack[0]), uint32(stack[1]))
+				if !ok {
+					panic("invalid guest preset header")
+				}
+				value, ok := mod.Memory().Read(uint32(stack[2]), uint32(stack[3]))
+				if !ok || string(header) != "Vary" || string(value) != "X-Fixture-Identity" {
+					panic("unexpected guest preset header")
+				}
+				preset = true
 			default:
 				panic(fmt.Sprintf("unexpected guest ABI call %q", name))
 			}
@@ -106,6 +121,9 @@ func TestInstrumentedVaryCookieGuest(t *testing.T) {
 	}
 	if !added {
 		t.Fatal("guest did not emit Vary: Cookie")
+	}
+	if !preset {
+		t.Fatal("guest did not preset Vary in the request phase")
 	}
 	coverage, err := os.ReadFile(filepath.Join(dir, "guest.cover"))
 	if err != nil {

@@ -16,4 +16,7 @@ func TestVaryCookieFixture(t *testing.T) {
 	if got := sdk.HandleResponse(&sdk.Response{}); got != sdk.Deliver {
 		t.Fatalf("response verdict = %d, want Deliver", got)
 	}
+	if got := sdk.HandleRequest(&sdk.Request{}); got != sdk.Continue {
+		t.Fatalf("request action = %d, want Continue", got)
+	}
 }

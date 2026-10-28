@@ -21,8 +21,10 @@ const (
 )
 
 type proxyVaryPolicy struct {
-	names  map[string]struct{}
-	reject bool
+	names    map[string]struct{}
+	prefixes []string
+	reject   bool
+	cgi      bool
 }
 
 func newProxyVaryPolicy(names []string) *proxyVaryPolicy {
@@ -40,6 +42,34 @@ func newProxyVaryPolicy(names []string) *proxyVaryPolicy {
 		p.names[name] = struct{}{}
 	}
 	return p
+}
+
+func newCGIVaryPolicy(names, prefixes []string) *proxyVaryPolicy {
+	p := newProxyVaryPolicy(names)
+	p.cgi = true
+	normalized := make(map[string]struct{}, len(p.names))
+	for name := range p.names {
+		normalized[strings.ReplaceAll(name, "-", "_")] = struct{}{}
+	}
+	p.names = normalized
+	if len(names)+len(prefixes) > MaxProxyVaryNames {
+		p.reject = true
+	}
+	for _, prefix := range prefixes {
+		if !httpguts.ValidHeaderFieldName(prefix) {
+			p.reject = true
+			break
+		}
+		p.prefixes = append(p.prefixes, strings.ReplaceAll(strings.ToLower(prefix), "-", "_"))
+	}
+	return p
+}
+
+func varyRewriteReason(policy *proxyVaryPolicy) string {
+	if policy != nil && policy.cgi {
+		return "vary_cgi_rewrite_rejected"
+	}
+	return "vary_proxy_rewrite_rejected"
 }
 
 func proxyVaryPolicyFor(r *http.Request, scope *RouteScope) *proxyVaryPolicy {
@@ -70,10 +100,31 @@ func proxyVaryField(r *http.Request, policy *proxyVaryPolicy, name string) bool 
 		if b >= 'A' && b <= 'Z' {
 			b += 'a' - 'A'
 		}
+		if policy.cgi && b == '-' {
+			b = '_'
+		}
 		lower[i] = b
 	}
-	if _, rewritten := policy.names[string(lower[:len(name)])]; rewritten {
+	normalized := string(lower[:len(name)])
+	if _, rewritten := policy.names[normalized]; rewritten {
 		return true
+	}
+	if policy.cgi {
+		for _, prefix := range policy.prefixes {
+			if strings.HasPrefix(normalized, prefix) {
+				return true
+			}
+		}
+		if len(r.Header) > MaxProxyVaryNames {
+			return true
+		}
+		for header := range r.Header {
+			if len(header) == len(name) && !strings.EqualFold(header, name) &&
+				strings.EqualFold(strings.ReplaceAll(header, "-", "_"), normalized) {
+				return true
+			}
+		}
+		return false
 	}
 
 	lines := r.Header.Values("Connection")
@@ -108,11 +159,11 @@ func varyRejectionFields(r *http.Request, scope *RouteScope, fields []string) st
 	}
 	policy := proxyVaryPolicyFor(r, scope)
 	if policy != nil && len(fields) > maxProxyVaryFields {
-		return "vary_proxy_rewrite_rejected"
+		return varyRewriteReason(policy)
 	}
 	for _, field := range fields {
 		if proxyVaryField(r, policy, field) {
-			return "vary_proxy_rewrite_rejected"
+			return varyRewriteReason(policy)
 		}
 	}
 	return ""
@@ -130,13 +181,13 @@ func varyRejectionHeader(r *http.Request, scope *RouteScope, h http.Header) stri
 	for _, line := range h.Values("Vary") {
 		bytes += len(line)
 		if bytes > maxProxyVaryBytes {
-			return "vary_proxy_rewrite_rejected"
+			return varyRewriteReason(policy)
 		}
 		for {
 			field, rest, more := strings.Cut(line, ",")
 			count++
 			if count > maxProxyVaryFields || proxyVaryField(r, policy, field) {
-				return "vary_proxy_rewrite_rejected"
+				return varyRewriteReason(policy)
 			}
 			if !more {
 				break
@@ -161,7 +212,7 @@ func varyRejectionEntry(r *http.Request, scope *RouteScope, e *Entry) string {
 		return reason
 	}
 	if proxyVaryPolicyFor(r, scope) != nil && len(e.VaryValues) > maxProxyVaryFields {
-		return "vary_proxy_rewrite_rejected"
+		return varyRewriteReason(proxyVaryPolicyFor(r, scope))
 	}
 	for name := range e.VaryValues {
 		if reason := varyRejectionFields(r, scope, []string{name}); reason != "" {

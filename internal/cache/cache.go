@@ -1126,14 +1126,22 @@ func (c *Cache) HandlerForRoute(next http.Handler, scope RouteScope, policy Cach
 
 // HandlerForProxyRoute prevents reuse when the proxy transforms a Vary field.
 func (c *Cache) HandlerForProxyRoute(next http.Handler, scope RouteScope, policy CachePolicy, transformed []string, complete bool) (http.Handler, error) {
+	return c.handlerForTransformedRoute(next, scope, policy, newProxyVaryPolicy(transformed), complete)
+}
+
+// HandlerForCGIRoute prevents reuse when CGI changes a varied request field.
+func (c *Cache) HandlerForCGIRoute(next http.Handler, scope RouteScope, policy CachePolicy, transformed, prefixes []string, complete bool) (http.Handler, error) {
+	return c.handlerForTransformedRoute(next, scope, policy, newCGIVaryPolicy(transformed, prefixes), complete)
+}
+
+func (c *Cache) handlerForTransformedRoute(next http.Handler, scope RouteScope, policy CachePolicy, varyPolicy *proxyVaryPolicy, complete bool) (http.Handler, error) {
 	if !c.validRouteOwner(scope.Owner) || scope.Compatibility == (RouteCompatibility{}) {
 		return nil, errors.New("cache: route ownership or compatibility is unavailable")
 	}
 	policy = reusePolicy(policy)
-	varyPolicy := newProxyVaryPolicy(transformed)
 	varyPolicy.reject = varyPolicy.reject || !complete
 	if varyPolicy.reject {
-		c.log.Warn("cache: proxy Vary policy is incomplete; varied responses will not be shared")
+		c.log.Warn("cache: transformed Vary policy is incomplete; varied responses will not be shared")
 	}
 	scope.proxyVary = varyPolicy
 	return c.handler(next, &scope, &policy), nil
@@ -1161,6 +1169,11 @@ func (c *Cache) handler(next http.Handler, scope *RouteScope, policy *CachePolic
 		}
 		if reason := varyRejectionHeader(r, scope, w.Header()); reason != "" {
 			c.recordDecision(r, reason)
+			c.bypass(w, r, next, span)
+			return
+		}
+		if len(w.Header().Values("Vary")) != 0 {
+			c.recordDecision(r, "vary_preset_bypass")
 			c.bypass(w, r, next, span)
 			return
 		}
@@ -1257,16 +1270,28 @@ func (c *Cache) serveCachedIfReusableWithOwner(w http.ResponseWriter, r *http.Re
 			return effKey, true
 		case reuseValidate:
 			version := validationVersion{base: base, effective: effKey, baseGen: baseGen, entryGen: entryGen}
-			opID, startGen, admitted := c.beginValidationIfCurrent(version)
+			gen, _ := background.Generation(r.Context())
+			k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(withRouteScope(r, scope)), baseGen: baseGen, entryGen: entryGen}
+			opID, startGen, call, leader, admitted := c.beginValidationIfCurrent(version, k, e.Tags)
 			if !admitted {
 				continue
 			}
 			func() {
 				defer c.endInflightOriginOp(opID)
+				if leader {
+					defer func() {
+						c.endRevalidate(k, call)
+						if v := recover(); v != nil {
+							call.finish(nil, outcomePanic, errRevalidatePanic)
+							panic(v)
+						}
+						call.finish(nil, outcomeCanceled, context.Canceled)
+					}()
+				}
 				c.recordDecision(r, "revalidation_required")
 				span.SetString("cache.status", "VALIDATE")
 				span.End()
-				c.validateAndServe(w, withRouteScope(r, scope), next, e, version, now, startGen)
+				c.validateAndServe(w, withRouteScope(r, scope), next, e, k, call, leader, startGen)
 			}()
 			return effKey, true
 		default:
@@ -1496,12 +1521,11 @@ func (c *Cache) startRevalidate(base, effKey string, baseGen, entryGen uint64, r
 	version := validationVersion{base: base, effective: effKey, baseGen: baseGen, entryGen: entryGen}
 	k := revalidateKey{key: effKey, gen: gen, scope: scopeForRequest(r), baseGen: baseGen, entryGen: entryGen}
 
-	opID, startGen, admitted := c.beginValidationIfCurrent(version)
+	opID, startGen, call, leader, admitted := c.beginValidationIfCurrent(version, k, stale.Tags)
 	if !admitted {
 		release()
 		return
 	}
-	call, leader := c.beginRevalidate(k, stale.Tags)
 	if !leader {
 		c.endInflightOriginOp(opID)
 		release()
@@ -1621,6 +1645,13 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	switch {
 	case rec.status == http.StatusNotModified:
+		if !varyCompatibleWithValidation(stale, rec.committedHeader(), req, origReq) {
+			c.recordDecision(origReq, "vary_changed")
+			c.deleteAtMostGen(k.key, startGen)
+			call.finish(nil, outcomeUncacheable, nil)
+			c.observeRevalidation(outcomeUncacheable)
+			return
+		}
 		// Upstream confirms freshness: republish a merged clone under the same
 		// (variant) key it already lives at.
 		refreshed, action, reason := c.merge304Decision(stale, rec.committedHeader(), now)

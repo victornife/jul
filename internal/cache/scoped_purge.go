@@ -215,14 +215,15 @@ func (c *Cache) isValidationCurrentLocked(version validationVersion) bool {
 		c.isGenCurrentLocked(version.base, version.baseGen) && c.isGenCurrentLocked(version.effective, version.entryGen)
 }
 
-func (c *Cache) beginValidationIfCurrent(version validationVersion) (opID, startGen uint64, ok bool) {
+func (c *Cache) beginValidationIfCurrent(version validationVersion, key revalidateKey, tags []string) (opID, startGen uint64, call *revalidateCall, leader, ok bool) {
 	c.genMu.Lock()
 	defer c.genMu.Unlock()
 	if !c.isValidationCurrentLocked(version) {
-		return 0, 0, false
+		return 0, 0, nil, false, false
 	}
 	opID, startGen = c.beginInflightOriginOpLocked()
-	return opID, startGen, true
+	call, leader = c.beginRevalidate(key, tags)
+	return opID, startGen, call, leader, true
 }
 
 func (c *Cache) endInflightOriginOp(opID uint64) {
@@ -1384,7 +1385,13 @@ func (c *Cache) previewScope(ctx context.Context, sel NormalizedSelector, opts P
 	}
 
 	out.MatchedResources = len(resources)
-	if out.MatchedResources >= BroadScopeResourceThr || out.Truncated {
+	broadResources := len(resources)
+	for resource := range inflightResources {
+		if _, exists := resources[resource]; !exists {
+			broadResources++
+		}
+	}
+	if broadResources >= BroadScopeResourceThr || out.Truncated {
 		out.BroadScope = true
 	}
 	if !details {

@@ -479,7 +479,14 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 }
 
 func varyCompatibleWithModifiedRequest(h http.Header, modifiedReq, origReq *http.Request) bool {
-	for _, name := range varyFields(h) {
+	return varyFieldsCompatibleWithModifiedRequest(varyFields(h), modifiedReq, origReq)
+}
+
+func varyFieldsCompatibleWithModifiedRequest(fields []string, modifiedReq, origReq *http.Request) bool {
+	if varyRejectionFields(modifiedReq, nil, fields) != "" || varyRejectionFields(origReq, nil, fields) != "" {
+		return false
+	}
+	for _, name := range fields {
 		if name == "*" {
 			return false
 		}

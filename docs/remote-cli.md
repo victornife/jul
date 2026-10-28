@@ -292,5 +292,7 @@ Never place realistic credentials in repository examples or idempotency keys.
 Route ownership cannot be established from the inspection selector alone.
 With decision sampling enabled, an observed `response_hook_bypass` reports an
 actual subscription bypass, not a prediction about future requests.
-The bounded `vary_proxy_rewrite_rejected` reason reports an actual HTTP proxy
-`Vary` mismatch without exposing request-header values.
+The bounded `vary_proxy_rewrite_rejected` and `vary_cgi_rewrite_rejected`
+reasons report actual request-transformation mismatches, and
+`vary_preset_bypass` reports an outer preset `Vary`, without exposing
+request-header values.

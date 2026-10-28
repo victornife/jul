@@ -26,11 +26,8 @@ import (
 //
 // Deduplication reuses #131's call state, so a burst of concurrent validators
 // for one (effective key, generation) produces exactly one origin request.
-func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, version validationVersion, now time.Time, startGen uint64) {
-	gen, _ := background.Generation(r.Context())
-	k := revalidateKey{key: version.effective, gen: gen, scope: scopeForRequest(r), baseGen: version.baseGen, entryGen: version.entryGen}
-
-	if call, leader := c.beginRevalidate(k, stored.Tags); leader {
+func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, k revalidateKey, call *revalidateCall, leader bool, startGen uint64) {
+	if leader {
 		c.leadValidation(w, r, next, stored, k, call, startGen)
 	} else {
 		c.awaitValidation(w, r, next, call)
@@ -83,7 +80,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			cancelValidation()
 			if code >= http.StatusInternalServerError {
 				if reason == "vary_sensitive_rejected" && r.Context().Err() == nil {
-					rejectedStale = c.transientStaleOnError(stored, k.key, startGen, c.clock(), r)
+					rejectedStale = c.transientStaleOnError(stored, k.key, startGen, c.clock(), r, k.version())
 				}
 				c.endRevalidate(k, call)
 				call.finish(nil, outcomeOriginError, errVaryRevalidationRejected)
@@ -130,6 +127,13 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 
 	switch {
 	case rec.status == http.StatusNotModified:
+		if !varyCompatibleWithValidation(stored, rec.committedHeader(), vreq, r) {
+			c.recordDecision(r, "vary_changed")
+			c.deleteAtMostGen(k.key, startGen)
+			c.finishValidation(call, nil, outcomeUncacheable)
+			fallbackAfterValidation()
+			return
+		}
 		refreshed, action, reason := c.merge304Decision(stored, rec.committedHeader(), now)
 		if reason != "" {
 			c.recordDecision(r, reason)
@@ -203,6 +207,20 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	}
 }
 
+func varyCompatibleWithValidation(stored *Entry, h304 http.Header, modifiedReq, origReq *http.Request) bool {
+	if !varyFieldsCompatibleWithModifiedRequest(stored.Vary, modifiedReq, origReq) ||
+		!varyCompatibleWithModifiedRequest(stored.Header, modifiedReq, origReq) ||
+		!varyCompatibleWithModifiedRequest(h304, modifiedReq, origReq) {
+		return false
+	}
+	for name := range stored.VaryValues {
+		if !varyFieldsCompatibleWithModifiedRequest([]string{name}, modifiedReq, origReq) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, key string, startGen uint64, onReject func(int, string)) {
 	rec.onHeaders = func(code int, h http.Header) {
 		if reason := varyRejectionHeader(original, nil, h); reason != "" {
@@ -240,9 +258,15 @@ func (c *Cache) extendStaleOnError(stored *Entry, key string, startGen uint64, n
 	return refreshed
 }
 
-func (c *Cache) transientStaleOnError(stored *Entry, key string, startGen uint64, now time.Time, r *http.Request) *Entry {
+func (c *Cache) transientStaleOnError(stored *Entry, key string, startGen uint64, now time.Time, r *http.Request, version validationVersion) *Entry {
 	sie := c.staleOnErrorWindow(stored)
-	if sie <= 0 || c.isPublicationFenced(startGen, key, stored, nil) {
+	if sie <= 0 {
+		return nil
+	}
+	c.genMu.Lock()
+	current := c.isValidationCurrentLocked(version) && !c.isPublicationFencedLocked(startGen, key, stored.Tags, nil)
+	c.genMu.Unlock()
+	if !current {
 		return nil
 	}
 	c.recordDecision(r, "stale_if_error")

@@ -88,6 +88,9 @@ func init() {
 		case "req-only":
 			req.SetResponseHeader("X-V2-Request", "1")
 			return sdk.Continue
+		case "req-preset-vary":
+			req.SetResponseHeader("Vary", "X-Fixture-Identity")
+			return sdk.Continue
 		}
 		mode := sdk.Headers
 		if m, _ := req.Header("X-Mode"); m == "body" {

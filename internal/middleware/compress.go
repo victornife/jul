@@ -140,13 +140,6 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ep := c.negotiate(r)
-			if ep == nil {
-				// Client accepts none of our codings: never compress, but the
-				// response still varies by Accept-Encoding for caches.
-				addVary(w.Header(), "Accept-Encoding")
-				next.ServeHTTP(w, r)
-				return
-			}
 			cw := &compressWriter{ResponseWriter: w, c: c, r: r, chosen: ep, minSize: c.minSize}
 			defer cw.close()
 			next.ServeHTTP(respwriter.Wrap(cw, w), r)
@@ -220,7 +213,8 @@ func (cw *compressWriter) WriteHeader(code int) {
 	// Responses without a body, responses already encoded, and representations
 	// that prohibit intermediary transformation never get compressed. The Vary
 	// header is added in flushHeader so it is guaranteed even for empty bodies.
-	if !bodyAllowed(code) ||
+	if cw.chosen == nil ||
+		!bodyAllowed(code) ||
 		len(cw.Header().Values("Content-Encoding")) != 0 ||
 		cacheControlNoTransform(cw.r.Header) ||
 		cacheControlNoTransform(cw.Header()) {

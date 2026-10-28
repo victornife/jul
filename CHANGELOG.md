@@ -11,6 +11,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Bypass shared caching when an outer handler or request plugin has preset
+  `Vary` (#623), preventing a preset dimension from disappearing from the
+  cached representation. Affected requests can increase origin traffic.
+
+- Reject FastCGI/uWSGI representations whose `Vary` fields are transformed or
+  ambiguously mapped to CGI parameters (#623). Existing affected entries are
+  ineligible, while unaffected variants remain cacheable; see the upgrade
+  guidance in [cache documentation](docs/cache.md#cache-key-and-vary).
+
 - Reject HTTP proxy responses whose `Vary` names a request field rewritten or
   removed before reaching the origin, including configured and generated
   fields (#623). This prevents matching against a different client-visible

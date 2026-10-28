@@ -120,8 +120,17 @@ fields. Names nominated by any incoming `Connection` line are checked for that
 request. Matching is case-insensitive across all `Vary` lines. Jul does not
 strip the varied field, derive a new key from the forwarded value, or reuse an
 old representation that cannot be matched safely. Other `Vary` fields still
-work normally. This check is specific to the HTTP reverse proxy; it does not
-certify a FastCGI/uWSGI or plugin handler's own request transformations.
+work normally.
+
+FastCGI and uWSGI routes apply the same restriction to fields generated,
+removed or overridden during CGI parameter mapping. This includes client
+certificate and forwarding assertions, the sanitized forwarding/SSL parameter
+families, `Host`, `Proxy`, `Content-Length`, and configured `HTTP_*`,
+`CONTENT_TYPE` or `CONTENT_LENGTH` overrides. CGI maps hyphens and underscores to the same parameter
+name; when another incoming header aliases a varied field, that request also
+cannot use or publish the representation. Unaffected fields such as
+`Accept-Language` remain cacheable. This does not certify applications or
+plugin handlers whose own behavior depends on an undeclared request dimension.
 
 The immutable route snapshot accepts at most 256 transformed-name entries,
 including built-in and configured entries. For a larger or invalid set, all
@@ -132,18 +141,22 @@ limit. A malformed
 nominated names likewise makes varied responses ineligible for that
 request, as do more than 128 `Connection` lines. Invalid or over-128-byte
 `Vary` field names, more than 128 `Vary` fields, or more than 8,192 bytes of
-`Vary` values are also ineligible on HTTP proxy routes. The opt-in
-recent-decision reason is `vary_proxy_rewrite_rejected`;
-it never includes the field's value. Existing entries are checked before
+`Vary` values are also ineligible on HTTP proxy and CGI routes. CGI requests
+with more than 256 incoming header names also reject varied representations.
+The opt-in recent-decision reasons are `vary_proxy_rewrite_rejected` and
+`vary_cgi_rewrite_rejected`; neither includes the field's value. Existing entries are checked before
 variant-key lookup, including disk-reconstructed entries. A 304 introducing a
 transformed `Vary` causes a full origin fetch; it cannot authorize the old body
-or stale fallback if that full fetch fails. A stale response already admitted
+or stale fallback if that full fetch fails. A 304 also cannot validate a stored
+representation when Jul's conditional request changed one of its `Vary`
+fields; Jul must fetch a full response instead. A stale response already admitted
 before a background 304 may have completed. Existing rejected files remain
 subject to normal eviction or purge.
 
 This is a compatibility change: in particular, origin responses with
-`Vary: Accept-Encoding` on HTTP proxy routes will no longer enter Jul's shared
-cache. Expect additional origin traffic and possible availability impact.
+`Vary: Accept-Encoding` on HTTP proxy routes, and CGI responses varying on
+transformed identity fields, will no longer enter Jul's shared cache. Expect
+additional origin traffic and possible availability impact.
 Review origin capacity and cache hit rates before upgrading. An origin that
 depends on request identity but omits an appropriate `Vary` or cache
 restriction is not made safe by this safeguard.
@@ -227,7 +240,11 @@ While a handler's scalar cache policy differs from the currently committed
 cache policy, requests bypass the cache rather than using either policy partially.
 Retain-on-reload for unchanged ownership and compatibility still does not
 guarantee backend cutover: a target change can retain a previous response or a
-retired fill. Automatic route/backend cutover remains #624.
+retired fill. Changes to authentication or route policy can likewise leave a
+previously admitted response eligible under the same route ownership. Before
+changing a security or backend boundary, operators must arrange a traffic
+drain, complete the appropriate cache purge, and verify the cutover before
+resuming traffic. Automatic route/backend cutover remains #624.
 
 When an effective ABI v2 plugin chain actually subscribes to the response
 phase, the request bypasses cache lookup, storage, revalidation and fill
@@ -235,7 +252,12 @@ sharing (`X-Cache: BYPASS`). The hook still executes; unsafe methods still
 perform their normal invalidation. The response hook can add `Vary` only after
 the cache would otherwise have decided, so serving a stored origin response
 first is not safe for a cookie-dependent origin. Request-only executions that
-do not subscribe can cache normally when ownership and origin policy permit.
+do not subscribe can cache normally when ownership and origin policy permit,
+except when an outer handler or request plugin has already set `Vary`. Those
+requests bypass lookup, fill sharing and storage (`vary_preset_bypass`): Jul
+cannot safely separate the preset dimensions from the origin's own headers.
+This conservative safeguard can increase origin traffic and reduce availability
+when the origin is unavailable.
 The SDK can export `handle_response` even for a request-only guest; regardless
 of ABI, plugin-bearing generations rotate compatibility on reload even when a
 particular request does not subscribe. This safeguard can increase origin load
@@ -1667,7 +1689,8 @@ capacity-eviction owners. `fresh_hit`, `stale_while_revalidate`, `stale_reuse`,
 and validation stages. Storage restrictions include `response_no_store`,
 `response_private`, `response_set_cookie`, `auth_storage_restricted`,
 `auth_reuse_restricted`, `vary_star`, `vary_sensitive_rejected` and
-`vary_proxy_rewrite_rejected`. Upgrade/range/SSE bypasses, capture
+`vary_proxy_rewrite_rejected`, `vary_cgi_rewrite_rejected` and
+`vary_preset_bypass`. Upgrade/range/SSE bypasses, capture
 oversize/budget/not-stored, publication failure/fencing, disk read failure,
 fill-lock fallbacks and memory/disk capacity evictions have separate reasons.
 A failed/fenced publication is not claimed to be a successful store.

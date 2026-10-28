@@ -23,7 +23,12 @@ func TestTransientStaleSharesImmutableBody(t *testing.T) {
 		Evidence:        &publicationEvidence{},
 	}
 	c.set(key(req), entry)
-	transient := c.transientStaleOnError(entry, key(req), c.genSeq.Load(), time.Now(), req)
+	_, effective, baseGen, entryGen, ok := c.lookupWithOwnerAndGen(key(req), req, nil)
+	if !ok {
+		t.Fatal("entry not found")
+	}
+	version := validationVersion{base: key(req), effective: effective, baseGen: baseGen, entryGen: entryGen}
+	transient := c.transientStaleOnError(entry, key(req), c.genSeq.Load(), time.Now(), req, version)
 	if transient == nil || &transient.Body[0] != &entry.Body[0] {
 		t.Fatal("transient stale reuse copied the immutable body")
 	}
