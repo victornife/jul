@@ -122,7 +122,16 @@ or an explicit cache purge. Removing a cache file does not guarantee secure
 erasure from storage, snapshots or backups. Review disk access and retention
 when upgrading. A 304 that introduces either field discards the old entry and
 requires a full origin response; a stale response admitted before that 304 may
-already have completed.
+already have completed. A sensitive-Vary 5xx may trigger explicitly permitted
+stale-if-error for its own request, but does not extend a shared stale window or
+authorize validation followers to reuse that request's error decision.
+
+When a previously non-sensitive entry is retired because a later validation
+declares sensitive Vary, physical disk cleanup can still block the validating
+leader. If that cleanup is interrupted before it completes, the old disk entry
+does not itself carry the new Vary restriction and can reappear after restart.
+This is the unfinished-invalidation recovery boundary tracked by #666, not a
+claim of restart-safe cleanup for an interrupted operation.
 
 If removal of an aborted temporary disk capture or a leftover temporary cache
 file fails, Jul reports the cleanup failure through disk-write health and logs,

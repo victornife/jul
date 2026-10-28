@@ -206,11 +206,15 @@ func (c *Cache) guardRevalidationCapture(rec *recorder, original *http.Request, 
 	rec.onHeaders = func(code int, h http.Header) {
 		if sensitiveVaryHeader(h) {
 			c.recordDecision(original, "vary_sensitive_rejected")
+			var removed *keyGenState
 			if code < http.StatusInternalServerError {
-				c.deleteAtMostGen(key, startGen)
+				removed = c.markOneRemovedAtMostGen(key, startGen)
 			}
 			if onReject != nil {
 				onReject(code)
+			}
+			if code < http.StatusInternalServerError {
+				c.finishOneRemoval(key, startGen, removed)
 			}
 		}
 	}
@@ -241,10 +245,14 @@ func (c *Cache) transientStaleOnError(stored *Entry, key string, startGen uint64
 		return nil
 	}
 	c.recordDecision(r, "stale_if_error")
-	refreshed := stored.Clone()
+	refreshed := *stored
+	if stored.Evidence != nil {
+		evidence := *stored.Evidence
+		refreshed.Evidence = &evidence
+	}
 	refreshed.StaleUntil = now.Add(sie)
-	markStaleIfError(refreshed)
-	return refreshed
+	markStaleIfError(&refreshed)
+	return &refreshed
 }
 
 func isConfiguredTagTrailer(name string, tags []string) bool {

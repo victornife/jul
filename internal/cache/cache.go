@@ -653,16 +653,16 @@ func (c *Cache) delOne(key string) {
 }
 
 func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
+	st := c.markOneRemovedAtMostGen(key, maxGen)
+	c.finishOneRemoval(key, maxGen, st)
+}
+
+func (c *Cache) markOneRemovedAtMostGen(key string, maxGen uint64) *keyGenState {
 	c.genMu.Lock()
 	if maxGen != math.MaxUint64 {
 		if existing, ok := c.keyGen[key]; ok && existing.gen > maxGen {
 			c.genMu.Unlock()
-			// An older disk publication may outlive the catalog generation
-			// that invalidated it. Preserve newer entries, not that old file.
-			if c.disk != nil {
-				c.disk.delIfOlderGen(key, maxGen+1)
-			}
-			return
+			return nil
 		}
 	}
 	st, _, _, _ := c.beginNextGenLocked(key)
@@ -672,6 +672,10 @@ func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
 		st.memBytes = 0
 	}
 	c.genMu.Unlock()
+	return st
+}
+
+func (c *Cache) finishOneRemoval(key string, maxGen uint64, st *keyGenState) {
 	if c.disk != nil {
 		if maxGen == math.MaxUint64 {
 			c.disk.del(key)
@@ -679,7 +683,9 @@ func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
 			c.disk.delIfOlderGen(key, maxGen+1)
 		}
 	}
-	c.finishKeyOp(st)
+	if st != nil {
+		c.finishKeyOp(st)
+	}
 }
 
 // Purge clears both tiers.
