@@ -30,6 +30,7 @@ import (
 
 	"jul/internal/atomicfile"
 	"jul/internal/logthrottle"
+	"jul/internal/versionid"
 )
 
 const (
@@ -1103,13 +1104,19 @@ func (d *diskStore) snapshotItemsLocked() []diskItemSnapshot {
 	return out
 }
 
-func (d *diskStore) loadRouteEpochs() map[string]uint64 {
+type routeEpochManifest struct {
+	Version  int               `json:"version"`
+	Epochs   map[string]uint64 `json:"epochs"`
+	Matchers map[string]string `json:"matchers,omitempty"`
+}
+
+func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
 	if d == nil || d.dir == "" {
-		return nil
+		return nil, nil
 	}
 	f, err := os.Open(filepath.Join(d.dir, diskRouteEpochsFile))
 	if os.IsNotExist(err) {
-		return nil
+		return nil, nil
 	}
 	var raw []byte
 	if err == nil {
@@ -1117,9 +1124,32 @@ func (d *diskStore) loadRouteEpochs() map[string]uint64 {
 		_ = f.Close()
 	}
 	var epochs map[string]uint64
-	valid := err == nil && len(raw) <= maxDiskMetaBytes && json.Unmarshal(raw, &epochs) == nil && epochs != nil
+	var matchers map[string]string
+	var object map[string]json.RawMessage
+	valid := err == nil && len(raw) <= maxDiskMetaBytes && json.Unmarshal(raw, &object) == nil && object != nil
+	if valid {
+		if _, versioned := object["version"]; versioned {
+			var manifest routeEpochManifest
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.DisallowUnknownFields()
+			valid = decoder.Decode(&manifest) == nil && manifest.Version == 1 && manifest.Epochs != nil
+			epochs, matchers = manifest.Epochs, manifest.Matchers
+			if matchers == nil {
+				matchers = make(map[string]string)
+			}
+		} else {
+			// Legacy epochs have no matcher proof. The next route commit must
+			// invalidate any resident scope before establishing its first proof.
+			valid = json.Unmarshal(raw, &epochs) == nil && epochs != nil
+		}
+	}
 	for scope, ep := range epochs {
 		if scope == "" || ep > math.MaxInt64 {
+			valid = false
+		}
+	}
+	for scope, proof := range matchers {
+		if _, ok := versionid.Parse(proof); scope == "" || !ok {
 			valid = false
 		}
 	}
@@ -1127,18 +1157,18 @@ func (d *diskStore) loadRouteEpochs() map[string]uint64 {
 		d.mu.Lock()
 		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
 		d.mu.Unlock()
-		return nil
+		return nil, nil
 	}
-	return epochs
+	return epochs, matchers
 }
 
-func (d *diskStore) persistRouteEpochs(epochs map[string]uint64) {
+func (d *diskStore) persistRouteEpochs(epochs map[string]uint64, matchers map[string]string) {
 	if d == nil || d.dir == "" {
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	raw, _ := json.Marshal(epochs) // map[string]uint64 is always JSON encodable
+	raw, _ := json.Marshal(routeEpochManifest{Version: 1, Epochs: epochs, Matchers: matchers})
 	err := d.testPersistRouteEpochErr
 	if len(raw) > maxDiskMetaBytes {
 		err = errDiskMetaTooLarge

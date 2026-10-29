@@ -17,7 +17,9 @@ import (
 	"testing"
 	"time"
 
+	"bytes"
 	"jul/internal/config"
+	"jul/internal/versionid"
 )
 
 func routeEpochFixture(t *testing.T, disk bool) (config.CacheConfig, *Cache, RouteCacheConfig, http.Handler) {
@@ -228,8 +230,9 @@ func BenchmarkRoutePolicyManyRoutes(b *testing.B) {
 			b.ResetTimer()
 			for b.Loop() {
 				routes := make([]RouteCacheConfig, count)
+				scopes := RouteScopes(srv)
 				for i, loc := range srv.Locations {
-					routes[i] = CompileRouteCacheConfig(RouteScope(srv, loc, i), true, nil)
+					routes[i] = CompileRouteCacheConfig(scopes[i], true, nil).WithMatcher(loc, nil)
 				}
 				c.CommitRoutePolicies(routes)
 			}
@@ -287,19 +290,16 @@ func TestRouteScopeNeverHashesPredicateValues(t *testing.T) {
 		if b := RouteScope(srv, loc); a != b {
 			t.Fatal("predicate values affected persistent partition")
 		}
-		if !strings.HasPrefix(a, "volatile:") {
-			t.Fatal("predicate route lacks process-local identity")
-		}
 		c, err := New(config.CacheConfig{Enabled: true, MemoryMaxSize: 1 << 20}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		rc := CompileRouteCacheConfig(a, true, nil)
+		rc := CompileRouteCacheConfig(a, true, nil).WithMatcher(loc, nil)
 		c.CommitRoutePolicies([]RouteCacheConfig{rc})
 		before := c.CurrentRouteEpoch(a)
 		c.CommitRoutePolicies([]RouteCacheConfig{rc})
-		if c.CurrentRouteEpoch(a) <= before {
-			t.Fatal("predicate slot reload did not invalidate former ownership")
+		if c.CurrentRouteEpoch(a) != before {
+			t.Fatal("unchanged predicate reload invalidated compatible ownership")
 		}
 	}
 }
@@ -320,8 +320,8 @@ func TestRouteVaryMembershipBoundedUnderRouteChurn(t *testing.T) {
 	}
 }
 
-// A real second process proves the privacy trade-off does not make ordinary
-// routes cold, while a predicate route cannot inherit the old process's slot.
+// A real second process proves stable private compatibility evidence preserves
+// warm ordinary and predicate routes with the same durable version context.
 func TestRouteScopeRestartCompatibility(t *testing.T) {
 	dir := os.Getenv("JUL_ROUTE_SCOPE_TEST_DIR")
 	child := dir != ""
@@ -336,7 +336,17 @@ func TestRouteScopeRestartCompatibility(t *testing.T) {
 	static := config.LocationConfig{Match: config.MatchConfig{Path: "/static"}}
 	predicate := config.LocationConfig{Match: config.MatchConfig{Path: "/predicate", Methods: []string{"GET"}}}
 	srv := config.ServerConfig{Listen: ":8080", Locations: []config.LocationConfig{static, predicate}}
-	routes := []RouteCacheConfig{CompileRouteCacheConfig(RouteScope(srv, static), true, nil), CompileRouteCacheConfig(RouteScope(srv, predicate), true, nil)}
+	mode := os.Getenv("JUL_ROUTE_SCOPE_TEST_MODE")
+	keyByte := byte(0x73)
+	if child && mode == "changed-key" {
+		keyByte = 0x74
+	}
+	if child && mode == "changed-matcher" {
+		predicate.Match.Methods = []string{"GET", "HEAD"}
+		srv.Locations[1] = predicate
+	}
+	versions, _ := versionid.New(bytes.Repeat([]byte{keyByte}, 32))
+	routes := []RouteCacheConfig{CompileRouteCacheConfig(RouteScope(srv, static), true, nil).WithMatcher(static, versions), CompileRouteCacheConfig(RouteScope(srv, predicate), true, nil).WithMatcher(predicate, versions)}
 	c.CommitRoutePolicies(routes)
 	for i, path := range []string{"/static", "/predicate"} {
 		body := "version-1"
@@ -350,18 +360,30 @@ func TestRouteScopeRestartCompatibility(t *testing.T) {
 		r := httptest.NewRecorder()
 		h.ServeHTTP(r, httptest.NewRequest("GET", "http://example.com"+path, nil))
 		want := "version-1"
-		if child && i == 1 {
+		miss := child && (mode == "changed-key" || (mode == "changed-matcher" && i == 1))
+		if miss {
 			want = "version-2"
+		}
+		if child {
+			state := "HIT"
+			if miss {
+				state = "MISS"
+			}
+			if r.Header().Get("X-Cache") != state {
+				t.Fatalf("restart mode %s %s: got %s want %s", mode, path, r.Header().Get("X-Cache"), state)
+			}
 		}
 		if r.Body.String() != want {
 			t.Fatalf("restart %s: got %q want %q", path, r.Body.String(), want)
 		}
 	}
 	if !child {
-		cmd := exec.Command(os.Args[0], "-test.run=^TestRouteScopeRestartCompatibility$", "-test.timeout=15s")
-		cmd.Env = append(os.Environ(), "JUL_ROUTE_SCOPE_TEST_DIR="+dir)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("restart: %v\n%s", err, out)
+		for _, mode := range []string{"unchanged", "changed-matcher", "changed-key"} {
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRouteScopeRestartCompatibility$", "-test.timeout=15s")
+			cmd.Env = append(os.Environ(), "JUL_ROUTE_SCOPE_TEST_DIR="+dir, "JUL_ROUTE_SCOPE_TEST_MODE="+mode)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("restart %s: %v\n%s", mode, err, out)
+			}
 		}
 	}
 }

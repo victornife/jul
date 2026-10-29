@@ -399,9 +399,12 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
 - **Reload is not a backend-cutover purge.** Path-only routes retain compatible
   cached entries across reload/restart; route-policy tightening is enforced on
   reuse and publication, and removal/cache disable advances route ownership.
-  Predicate-bearing routes become cold on reload/restart to avoid persisting
-  predicate-derived identities. Epoch-history compaction can make other scoped
-  routes cold. Backend-target changes do not themselves invalidate compatible
+  Unchanged predicate routes also remain warm: a separate keyed matcher proof
+  under the existing durable version context establishes compatibility. Changed
+  matching, incomparable key contexts or unverifiable old state cause affected
+  scopes to become cold. Anonymous same-path slot edits can lose reuse; explicit
+  route IDs preserve identity through reordering. Epoch-history compaction can
+  make other scoped routes cold. Backend-target changes do not themselves invalidate compatible
   entries (#624); use an explicit purge for content cutover. Route-epoch write
   failure disables and retires disk caching until a later successful route
   commit. If all durable invalidation/cleanup operations fail, restore disk

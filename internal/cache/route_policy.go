@@ -4,7 +4,6 @@
 package cache
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -17,69 +16,87 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/versionid"
 )
-
-// Predicate route identities are process-local: no predicate value or digest
-// of one becomes a persistent partition. Reload conservatively advances their
-// epochs because slot ownership may have changed. Ordinary routes stay warm.
-var predicateRouteProcess = rand.Text()
 
 const routeEpochFloorKey = "\x00floor"
 
-// RouteScope builds cache ownership from non-predicate route coordinates and
-// optional route_id. Predicate routes additionally use a process-local slot;
-// they intentionally do not retain warm entries across reload or restart.
-// Backend targets remain outside this identity (#624).
-func RouteScope(srv config.ServerConfig, loc config.LocationConfig, slotIndex ...int) string {
+// RouteScope builds restart-stable ownership without predicate values or their
+// digests. Explicit route IDs survive reordering. Anonymous predicates use an
+// ordinal among anonymous predicates with the same path/type; unrelated paths
+// do not shift that identity. Matcher compatibility is proved separately.
+// anonymousSlot, when supplied by RouteScopes, avoids scanning the server.
+// Backend targets remain outside ownership and compatibility (#624).
+func RouteScope(srv config.ServerConfig, loc config.LocationConfig, anonymousSlot ...int) string {
 	names := make([]string, len(srv.ServerNames))
 	for i, n := range srv.ServerNames {
 		names[i] = config.NormalizeHostPattern(n)
 	}
 	sort.Strings(names)
-
 	matchType := loc.Match.Type
 	if matchType == "" {
 		matchType = "prefix"
 	}
-
 	h := sha256.New()
-	writeScopeField := func(parts ...string) {
+	write := func(parts ...string) {
 		for _, p := range parts {
 			fmt.Fprintf(h, "%d:%s\n", len(p), p)
 		}
 	}
-	writeScopeField("route-scope-v2", srv.Listen, strconv.Itoa(len(names)))
-	writeScopeField(names...)
-	writeScopeField(matchType, loc.Match.Path)
-	if loc.RouteID != nil {
-		writeScopeField("route_id", *loc.RouteID)
-	}
-	if loc.Match.HasPredicates() {
-		// Compare matcher semantics only in memory to find the configured slot.
-		// Neither the comparison input nor its hash is written to the scope.
-		slot := -1
-		if len(slotIndex) > 0 {
-			slot = slotIndex[0]
-		} else {
-			predicates := loc.Match.CanonicalPredicates()
-			for i, candidate := range srv.Locations {
-				if candidate.Match.Type == loc.Match.Type && candidate.Match.Path == loc.Match.Path &&
-					candidate.Match.CanonicalPredicates() == predicates {
-					slot = i
-					break
+	write("route-scope-v3", config.CanonicalListenAddr(srv.Listen), strconv.Itoa(len(names)))
+	write(names...)
+	if loc.RouteID != nil && *loc.RouteID != "" {
+		write("route_id", *loc.RouteID)
+	} else {
+		write("anonymous", matchType, loc.Match.Path)
+		if loc.Match.HasPredicates() {
+			slot := 0
+			if len(anonymousSlot) > 0 {
+				slot = anonymousSlot[0]
+			} else {
+				predicates := loc.Match.CanonicalPredicates()
+				for _, candidate := range srv.Locations {
+					if !anonymousPredicateCoordinate(candidate, matchType, loc.Match.Path) {
+						continue
+					}
+					if candidate.Match.CanonicalPredicates() == predicates {
+						break
+					}
+					slot++
 				}
 			}
+			write("predicate-slot", strconv.Itoa(slot))
 		}
-		writeScopeField("slot", strconv.Itoa(slot))
 	}
-	if config.LocationPreflightWidening(loc) {
-		writeScopeField("preflight_widening")
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+func anonymousPredicateCoordinate(loc config.LocationConfig, matchType, path string) bool {
+	typ := loc.Match.Type
+	if typ == "" {
+		typ = "prefix"
 	}
-	base := hex.EncodeToString(h.Sum(nil)[:16])
-	if loc.Match.HasPredicates() {
-		return "volatile:" + predicateRouteProcess + ":" + base
+	return (loc.RouteID == nil || *loc.RouteID == "") && loc.Match.HasPredicates() && typ == matchType && loc.Match.Path == path
+}
+
+// RouteScopes compiles all location identities in linear time. Scope derivation
+// and inspection share RouteScope; no persistent route-identity registry exists.
+func RouteScopes(srv config.ServerConfig) []string {
+	type coordinate struct{ typ, path string }
+	counts := make(map[coordinate]int)
+	out := make([]string, len(srv.Locations))
+	for i, loc := range srv.Locations {
+		typ := loc.Match.Type
+		if typ == "" {
+			typ = "prefix"
+		}
+		coord := coordinate{typ, loc.Match.Path}
+		out[i] = RouteScope(srv, loc, counts[coord])
+		if anonymousPredicateCoordinate(loc, typ, loc.Match.Path) {
+			counts[coord]++
+		}
 	}
-	return base
+	return out
 }
 
 const (
@@ -106,6 +123,24 @@ type RouteCacheConfig struct {
 	BypassCookieCount    int
 	BypassCookies        [config.MaxBypassCookies]string
 	varyGuard            *varyTransformPolicy
+	// matcherProof belongs only in the compatibility manifest, never keys or entries.
+	matcherProof string
+}
+
+// WithMatcher binds the resolved matcher to compatibility using the existing
+// confidential-version context. Nil uses the embedding process context: reload
+// reuse works, while restart safely invalidates that non-durable context.
+func (rc RouteCacheConfig) WithMatcher(loc config.LocationConfig, versions *versionid.Context) RouteCacheConfig {
+	typ := loc.Match.Type
+	if typ == "" {
+		typ = "prefix"
+	}
+	var data strings.Builder
+	for _, field := range []string{rc.Scope, typ, loc.Match.Path, loc.Match.CanonicalPredicates(), strconv.FormatBool(config.LocationPreflightWidening(loc))} {
+		fmt.Fprintf(&data, "%d:%s\n", len(field), field)
+	}
+	rc.matcherProof = versions.Digest("cache-route-matcher-v1", []byte(data.String()))
+	return rc
 }
 
 // CompileRouteCacheConfig compiles a LocationCachePolicy and route scope into
@@ -350,9 +385,9 @@ func evaluateCookieBypass(r *http.Request, pol CachePolicy) string {
 }
 
 // CurrentRouteEpoch returns the current ownership epoch for scope. An epoch
-// starts at 0 and increments only when a previously active route scope is
-// deleted or has caching disabled, preventing a later recreated route with a
-// reused route_id from inheriting pre-deletion entries (#623).
+// starts at 0 and advances when matching compatibility changes, a route is
+// removed/disabled, or bounded history compacts. A retired or changed route
+// cannot inherit entries from its earlier ownership epoch (#623).
 func (c *Cache) CurrentRouteEpoch(scope string) uint64 {
 	if c == nil || scope == "" {
 		return 0
@@ -390,17 +425,28 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	}
 	active := make(map[string][16]byte, len(routes))
 	configs := make(map[string]RouteCacheConfig, len(routes))
+	matchers := make(map[string]string, len(routes))
 	for _, rc := range routes {
 		if rc.Scope != "" {
 			configs[rc.Scope] = rc
+			if rc.matcherProof != "" {
+				matchers[rc.Scope] = rc.matcherProof
+			}
 		}
 	}
 	// Retire before computing the active digests, so every digest includes the
 	// post-compaction epoch. The floor is compatibility evidence for all scopes
 	// forgotten by compaction, including disk-only entries and in-flight fills.
+	previous := make(map[string]bool, len(c.routePolicyDigest)+len(c.routeMatchers))
 	for scope := range c.routePolicyDigest {
+		previous[scope] = true
+	}
+	for scope := range c.routeMatchers {
+		previous[scope] = true
+	}
+	for scope := range previous {
 		_, stillActive := configs[scope]
-		if !stillActive || strings.HasPrefix(scope, "volatile:") {
+		if !stillActive || c.routeMatchers[scope] != matchers[scope] {
 			epochSnap[scope] = max(epochSnap[scope], epochSnap[routeEpochFloorKey]) + 1
 		}
 	}
@@ -422,11 +468,18 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 		active[rc.Scope] = digest
 		configs[rc.Scope] = rc
 	}
+	// An unchanged durable proof needs no rewrite/fsync. Besides avoiding I/O
+	// on no-op reloads, this keeps healthy warm entries usable when writes are
+	// temporarily unavailable. Nil distinguishes missing/legacy durable proof.
+	persist := c.routeMatchers == nil || !maps.Equal(epochSnap, c.routeEpoch) || !maps.Equal(matchers, c.routeMatchers)
+	if c.disk != nil && c.disk.routeEpochFailed.Load() {
+		persist = true
+	}
 	c.genMu.Unlock()
 	// Durability precedes visibility. A crash after this write may make the
 	// cache colder, but cannot restore pre-retirement compatibility evidence.
-	if c.disk != nil {
-		c.disk.persistRouteEpochs(epochSnap)
+	if c.disk != nil && persist {
+		c.disk.persistRouteEpochs(epochSnap, matchers)
 	}
 	c.genMu.Lock()
 	for scope, prev := range c.routePolicyDigest {
@@ -438,6 +491,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	c.routeEpochsSnap.Store(&epochSnap)
 	c.routePolicyDigest = active
 	c.routeConfigs = configs
+	c.routeMatchers = matchers
 	if len(c.routePolicyFloor) > 1024 && c.minInflightStartGenLocked() == ^uint64(0) {
 		c.routePolicyFloor = make(map[string]uint64)
 	}

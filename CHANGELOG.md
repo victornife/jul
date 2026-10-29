@@ -12,8 +12,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ### Security
 
 - Keep predicate values and their hashes out of persistent route-cache
-  partitions. Predicate routes become cold on reload/restart; path-only routes
-  retain stable ownership. Bound epoch history with a durable global floor so
+  partitions. Separate private, route-specific matcher proofs preserve unchanged
+  route reuse across reload/restart and advance ownership only on incompatible
+  or unverifiable matching. IDs stay optional; explicit IDs survive reordering. Bound epoch history with a durable global floor so
   retired routes cannot resurrect old memory or disk responses after churn.
   Recover corrupt populated route-epoch metadata without startup deadlock and
   retire/disable disk caching on epoch-persistence failure (#623, #672, #673).

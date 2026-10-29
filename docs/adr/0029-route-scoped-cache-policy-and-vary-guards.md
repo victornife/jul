@@ -82,21 +82,42 @@ take precedence over route overrides.
 
 ### 3. Multi-Route Isolation without One-Slot Thrashing
 
-- Ordinary path-only locations receive a stable `RouteScope` derived from
-  listener, normalized `server_names`, match type, path, preflight widening,
-  and optional `route_id`. Predicate values and their digests are excluded.
-  Backend targets remain outside this identity (`#624` owns backend cutover).
-- Predicate-bearing locations use these non-predicate coordinates plus their
-  configured slot and a random process-local namespace. Predicate comparisons
-  locate slots only in memory; no predicate digest is persisted as ownership
-  or compatibility evidence, including when `route_id` exists. The ID remains
-  optional. Every committed reload advances surviving predicate-route epochs;
-  restart changes their namespace. These routes deliberately lose warm hits on
-  reload/restart, while ordinary routes retain them. A slot cannot silently
-  inherit a previous matcher's responses after reordering or predicate edits.
-  This bounded compatibility cost avoids a persistent route registry or a
-  secret-derived partition. It does not claim paths, arbitrary URLs, other
-  Vary inputs, or operator-selected route IDs can never contain secrets.
+- Cache ownership and matching compatibility are separate. `RouteScope` is
+  restart-stable and excludes predicate values and their digests. A configured
+  `route_id` supplies identity within its listener/normalized-server-name
+  boundary and survives declaration reordering. IDs remain optional.
+- Without an ID, ordinary routes use match type/path coordinates. Anonymous
+  predicate routes additionally use an ordinal among anonymous predicates on
+  that same path/type. Inserting unrelated paths or identified routes does not
+  shift them. Reordering/inserting ambiguous anonymous same-path predicates can
+  make affected slots cold; use IDs to preserve ownership through those edits.
+  There is no new persistent identity registry or key provisioning requirement.
+- Every compiled production route carries a separate matcher compatibility
+  proof: HMAC-SHA-256 through the existing private `versionid.Context`, domain
+  `cache-route-matcher-v1`. Its length-framed input binds scope, normalized match
+  type, path, canonical method/header/query predicates and preflight widening.
+  Backend targets remain excluded (`#624`). The proof is retained only for
+  active routes in the versioned `.jul-cache-route-epochs` manifest, never in
+  cache keys, response-entry metadata, logs, inspection output or metrics.
+- Matching proofs in the same durable key context preserve the epoch and warm
+  memory/disk entries across unchanged or unrelated reloads and process restarts.
+  Changed predicates (including changes while stopped), preflight changes,
+  incomparable key contexts, or unverifiable previous matcher state advance the
+  affected route's epoch before reuse/publication. Returning to an earlier
+  predicate never resets its epoch. Existing route policy tightening is still
+  evaluated separately; matching proof equality cannot weaken it.
+- Production uses the already-provisioned effective-version key (ADR 0025).
+  Missing/unprotected keys still fail startup through that owner's contract.
+  Embeddings with no supplied context use `versionid.Process()`: unchanged
+  reloads remain warm but restart uses an incomparable context and becomes cold.
+  This is an explicit fallback for embeddings, not production's normal behavior.
+- The unkeyed-predicate-hash design provides an offline guessing verifier; a
+  process nonce loses restart reuse; unconditional reload invalidation discards
+  compatible state; full-configuration proof changes invalidate unrelated routes.
+  A route-specific keyed proof outside ownership provides the required equality
+  with bounded reuse loss and reuses Jul's existing confidentiality authority.
+  No raw predicate or unkeyed predicate verifier is persisted. This does not
+  claim arbitrary URLs, other Vary inputs, or operator IDs never contain secrets.
 - Entries without compatible route ownership (including pre-feature or prior
   scope-encoding entries) incur a one-time cold miss. Freshness evidence uses a
   versioned binary policy digest; older evidence is conservatively recomputed
@@ -111,9 +132,14 @@ take precedence over route overrides.
   route churn cannot accumulate unbounded route records behind a bounded
   representation list. This shares the existing per-resource capacity limit;
   it does not add per-route storage quotas.
-- `RouteEpoch` starts at `0` and advances on route removal/cache disable and
-  predicate-route reload. `.jul-cache-route-epochs` is persisted before the new
-  epoch snapshot and publication floors become visible. Epoch metadata is
+- `RouteEpoch` starts at `0` and advances on incompatible/unverifiable matching,
+  route removal/cache disable, and bounded-history compaction. The manifest's
+  version 1 envelope carries epochs and active keyed matcher proofs; legacy flat
+  epoch maps retain invalidation evidence but cannot establish matcher equality,
+  so resident scopes incur a one-time cold miss. Changed manifest state is
+  persisted before the new epoch snapshot and publication floors become visible.
+  Unchanged modern evidence needs no rewrite/fsync; a previous write failure
+  still requires a successful repair before the disk tier is re-enabled. Epoch metadata is
   recovered once, before attaching disk callbacks and snapshotting the disk
   catalog; recovery never performs disk cleanup while holding `genMu`.
 - Retired history is bounded by 1,024 plus the configured active-route count.
@@ -122,7 +148,8 @@ take precedence over route overrides.
   including disk-only entries. Only then can individual tombstones be forgotten.
   Compaction may make other scoped routes cold; it cannot reset forgotten
   compatibility evidence to zero.
-- Unreadable, malformed, null, overflowing, or oversized epoch metadata invokes
+- Unreadable, malformed, null, overflowing, oversized or unknown-version epoch
+  metadata, including malformed matcher proofs/unknown envelope fields, invokes
   existing fail-closed disk cleanup before rehydration. Reads are bounded to
   1 MiB. A persistence/sync failure retires the disk dataset through existing
   tombstone recovery, attempts to leave a corrupt restart marker, and disables

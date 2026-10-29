@@ -419,11 +419,12 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	totalCachedLocs := 0
 	cacheScopes := make(map[string]string)
 	for i := range c.Servers {
+		scopes := cache.RouteScopes(c.Servers[i])
 		for j := range c.Servers[i].Locations {
 			if c.Servers[i].Locations[j].Cache && !c.Servers[i].Locations[j].Withdrawn {
 				totalCachedLocs++
 				srv, loc := c.Servers[i], c.Servers[i].Locations[j]
-				cacheScopes[LocationScope(srv, loc)] = cache.RouteScope(srv, loc, j)
+				cacheScopes[LocationScope(srv, loc)] = scopes[j]
 			}
 		}
 	}
@@ -434,7 +435,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		}
 		scope := cacheScopes[LocationScope(srv, loc)]
 		multiOverlap := totalCachedLocs > 1 || loc.Match.HasPredicates()
-		rc := cache.CompileRouteCacheConfig(scope, multiOverlap, loc.CachePolicy)
+		rc := cache.CompileRouteCacheConfig(scope, multiOverlap, loc.CachePolicy).WithMatcher(loc, f.Versions)
 		rc.Epoch = f.Cache.CurrentRouteEpoch(scope)
 		switch action {
 		case router.ActionProxy:

@@ -474,16 +474,26 @@ present ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
    `stale_if_error`, or cookie bypass takes effect immediately on stored memory
    and disk entries and fences in-flight fills started under the prior policy.
 
-Path-only routes retain warm entries across ordinary reloads and restarts.
-Predicate-bearing routes use process-local slot identities, without persisting
-predicate values or hashes, even when `route_id` is set. They become cold on
-every committed reload and restart; `route_id` remains optional. Backend
-cutover remains owned by #624. Retired-epoch history is bounded: compaction
-advances a durable global epoch floor before forgetting old scopes, potentially
-making other scoped routes cold. A retired scope cannot regain old entries by
-cycling through many other routes.
-Entries from versions without compatible route ownership incur a one-time cold
-miss. A resource's route-Vary records share its existing 64-variant cap.
+Unchanged routes, including predicate-bearing routes, retain warm memory/disk
+entries across reloads and restarts. Ownership excludes predicate values and
+hashes. Jul records a separate route-specific HMAC compatibility proof in its
+bounded epoch manifest, using the existing private effective-version key; the
+proof never enters cache keys or response-entry metadata. Changed matching rules,
+key context changes, or unverifiable prior matching state advance only affected
+route epochs before reuse. Route policy tightening remains independently enforced.
+
+`route_id` is optional. Setting it preserves identity through route reordering.
+Anonymous predicates use a slot among anonymous predicates sharing the same
+path/type; unrelated paths do not shift it. Edits to those ambiguous same-path
+slots can cause safe cold misses. Embeddings using a process-only version context
+can retain reload hits but become cold on restart; production already supplies
+its durable effective-version context. Backend cutover remains owned by #624.
+
+Retired-epoch history is bounded: compaction advances a durable global epoch floor
+before forgetting scopes, potentially making other scoped routes cold. A retired
+scope cannot regain old entries by cycling through many other routes. Legacy
+entries/manifests without compatible route ownership or matcher proof incur a
+one-time cold miss. A resource's route-Vary records share its 64-variant cap.
 
 Corrupt/unreadable route-epoch metadata is cleaned up before disk rehydration.
 If persisting epochs fails, Jul retires the disk dataset and disables disk reuse

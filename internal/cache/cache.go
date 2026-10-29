@@ -88,6 +88,7 @@ type Cache struct {
 	originOpSeq               uint64
 	inflightOps               map[uint64]uint64
 	routePolicyDigest         map[string][16]byte
+	routeMatchers             map[string]string
 	routeCommitMu             sync.Mutex
 	routePolicyFloor          map[string]uint64
 	routeEpoch                map[string]uint64
@@ -201,7 +202,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		}
 		// Recover before attaching callbacks: corrupt metadata cleanup can call
 		// back into genMu, and must finish before taking the item snapshot.
-		c.routeEpoch = d.loadRouteEpochs()
+		c.routeEpoch, c.routeMatchers = d.loadRouteEpochs()
 		d.onEviction = func(k string) { c.recordKeyDecision(k, "disk_eviction") }
 		d.onSkip = c.captureSkipped
 		d.checkGen = c.isGenCurrent

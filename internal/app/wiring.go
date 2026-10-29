@@ -107,8 +107,8 @@ func WAFScope(srv config.ServerConfig, loc config.LocationConfig) string {
 	return LocationScope(srv, loc)
 }
 
-// CacheRouteScope delegates cache ownership to the cache package. Predicate
-// routes use process-local slots; ordinary routes retain durable coordinates.
+// CacheRouteScope delegates stable, non-predicate-derived ownership to cache.
+// Matching compatibility is proved separately under the private version key.
 // Backend targets remain independent (#624).
 func CacheRouteScope(srv config.ServerConfig, loc config.LocationConfig) string {
 	return cache.RouteScope(srv, loc)

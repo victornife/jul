@@ -1,5 +1,10 @@
 # PR #673 — corrective review and adversarial verification
 
+> **Follow-up:** The predicate cold-on-every-reload/restart design reviewed in
+> this historical commit is superseded by the [warm-reuse correction](2026-10-29-pr673-warm-reuse-review.md).
+> Its measurements and verdict remain evidence for the original reviewed source.
+
+
 Date: 2026-10-29. Author/reviewer: OpenAI engineering agent acting on the user's requested review. This is author-side verification, not an independent human or second-reviewer approval.
 
 Original reviewed head: `6c10002aa2cc7e61b315dbb29c1cd01b5e859b0f`.

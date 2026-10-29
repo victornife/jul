@@ -4,13 +4,17 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"jul/internal/cache"
 	"jul/internal/config"
+	"jul/internal/versionid"
 )
 
 func TestCacheRouteOwnershipIsolatesPredicatesAndFallbackWithoutThrashing(t *testing.T) {
@@ -75,4 +79,74 @@ func TestCacheRouteOwnershipIsolatesPredicatesAndFallbackWithoutThrashing(t *tes
 			t.Fatalf("route %q got state %q and body %q, want %q and %q", step.route, rec.Header().Get("X-Cache"), rec.Body.String(), step.state, step.body)
 		}
 	}
+}
+
+func TestCacheMatcherFactoryWarmReloadPreflightAndRestart(t *testing.T) {
+	var calls atomic.Int32
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = fmt.Fprintf(w, "origin-%d", calls.Add(1))
+	}))
+	defer origin.Close()
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+	key, _ := versionid.New(bytes.Repeat([]byte{0x73}, 32))
+	f.Versions = key
+	cacheCfg := config.CacheConfig{Enabled: true, MemoryMaxSize: 4 << 20, DiskPath: t.TempDir(), DiskMaxSize: 16 << 20}
+	var err error
+	f.Cache, err = cache.New(cacheCfg, f.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, predicate := "stable-route", "before"
+	cfg := &config.Config{Cache: cacheCfg, Servers: []config.ServerConfig{{Listen: "127.0.0.1:0", Locations: []config.LocationConfig{{
+		RouteID: &id, Cache: true, ProxyPass: origin.URL,
+		Match: config.MatchConfig{Type: "prefix", Path: "/", Headers: []config.HeaderMatch{{Name: "X-Tenant", Op: "exact", Value: &predicate}}},
+	}}}}}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatal(err)
+	}
+	build := func(factory *HandlerFactory, commit bool) http.Handler {
+		t.Helper()
+		handlers, retire, err := factory.Build(context.Background(), cfg, commit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if retire != nil {
+			t.Cleanup(retire)
+		}
+		return handlers["127.0.0.1:0"]
+	}
+	request := func(h http.Handler, predicate, wantState, wantBody string) {
+		t.Helper()
+		r := httptest.NewRequest("GET", "http://example.test/item", nil)
+		r.Header.Set("X-Tenant", predicate)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Header().Get("X-Cache") != wantState || w.Body.String() != wantBody {
+			t.Fatalf("state=%s body=%q, want %s %q", w.Header().Get("X-Cache"), w.Body.String(), wantState, wantBody)
+		}
+	}
+	h := build(f, true)
+	request(h, "before", "MISS", "origin-1")
+	h = build(f, true)
+	request(h, "before", "HIT", "origin-1")
+	// The candidate's changed predicate must not retire the live route until
+	// the generation commits. Prepare/dry-run performs no manifest write.
+	changed := "after"
+	cfg.Servers[0].Locations[0].Match.Headers[0].Value = &changed
+	_ = build(f, false)
+	request(h, "before", "HIT", "origin-1")
+	h = build(f, true)
+	request(h, "after", "MISS", "origin-2")
+	request(h, "after", "HIT", "origin-2")
+	// Reconstruct factory/cache with the same durable version context.
+	f2, cleanup2 := minimalFactory(t)
+	defer cleanup2()
+	f2.Versions = key
+	f2.Cache, err = cache.New(cacheCfg, f2.Log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request(build(f2, true), "after", "HIT", "origin-2")
 }

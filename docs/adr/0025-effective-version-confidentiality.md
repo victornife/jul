@@ -91,6 +91,18 @@ ACL execution and complete cross-platform coverage remain merge gates.
 
 See [operator recovery and deployment patterns](../effective-versions.md).
 
+## Route-cache compatibility context
+
+ADR 0029 also reuses the established durable context for private matcher
+compatibility proofs (`cache-route-matcher-v1`). Each proof covers one compiled
+route's matching semantics, separate from its non-predicate-derived cache
+identity. Proof equality preserves warm reuse through unchanged reload/restart;
+changed/incomparable proofs advance the route's ownership epoch. Proofs live in
+the bounded cache epoch manifest, never cache keys, response-entry metadata,
+metrics or public inspection. Key rotation makes these proofs incomparable and
+causes affected routes to become cold. Startup/key-protection requirements and
+provisioning remain owned here; no second key or key registry is introduced.
+
 ## Sharing context
 
 #640 remains Proposed. Sharing postconditions keep raw configuration as their
