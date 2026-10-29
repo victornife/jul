@@ -4,23 +4,33 @@
 package cache
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/textproto"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"jul/internal/config"
 )
 
-// RouteScope builds the deterministic cache route-ownership identity for a
-// location (#623): it combines listener, normalized server_names, match type,
-// match path, canonical predicates, preflight widening, and optional route_id
-// while remaining independent of backend targets (which #624 owns).
-func RouteScope(srv config.ServerConfig, loc config.LocationConfig) string {
+// Predicate route identities are process-local: no predicate value or digest
+// of one becomes a persistent partition. Reload conservatively advances their
+// epochs because slot ownership may have changed. Ordinary routes stay warm.
+var predicateRouteProcess = rand.Text()
+
+const routeEpochFloorKey = "\x00floor"
+
+// RouteScope builds cache ownership from non-predicate route coordinates and
+// optional route_id. Predicate routes additionally use a process-local slot;
+// they intentionally do not retain warm entries across reload or restart.
+// Backend targets remain outside this identity (#624).
+func RouteScope(srv config.ServerConfig, loc config.LocationConfig, slotIndex ...int) string {
 	names := make([]string, len(srv.ServerNames))
 	for i, n := range srv.ServerNames {
 		names[i] = config.NormalizeHostPattern(n)
@@ -38,15 +48,36 @@ func RouteScope(srv config.ServerConfig, loc config.LocationConfig) string {
 			fmt.Fprintf(h, "%d:%s\n", len(p), p)
 		}
 	}
-	writeScopeField(srv.Listen)
+	writeScopeField("route-scope-v2", srv.Listen, strconv.Itoa(len(names)))
 	writeScopeField(names...)
-	writeScopeField(matchType, loc.Match.Path, loc.Match.CanonicalPredicates())
+	writeScopeField(matchType, loc.Match.Path)
+	if loc.RouteID != nil {
+		writeScopeField("route_id", *loc.RouteID)
+	}
+	if loc.Match.HasPredicates() {
+		// Compare matcher semantics only in memory to find the configured slot.
+		// Neither the comparison input nor its hash is written to the scope.
+		slot := -1
+		if len(slotIndex) > 0 {
+			slot = slotIndex[0]
+		} else {
+			predicates := loc.Match.CanonicalPredicates()
+			for i, candidate := range srv.Locations {
+				if candidate.Match.Type == loc.Match.Type && candidate.Match.Path == loc.Match.Path &&
+					candidate.Match.CanonicalPredicates() == predicates {
+					slot = i
+					break
+				}
+			}
+		}
+		writeScopeField("slot", strconv.Itoa(slot))
+	}
 	if config.LocationPreflightWidening(loc) {
 		writeScopeField("preflight_widening")
 	}
 	base := hex.EncodeToString(h.Sum(nil)[:16])
-	if loc.RouteID != nil && *loc.RouteID != "" {
-		return base + ":" + *loc.RouteID
+	if loc.Match.HasPredicates() {
+		return "volatile:" + predicateRouteProcess + ":" + base
 	}
 	return base
 }
@@ -153,7 +184,7 @@ func (c *Cache) effectivePolicy(route *RouteCacheConfig) CachePolicy {
 	pol.RouteEpoch = route.Epoch
 	if route.Scope != "" {
 		if snap := c.routeEpochsSnap.Load(); snap != nil {
-			if ep := (*snap)[route.Scope]; ep > pol.RouteEpoch {
+			if ep := max((*snap)[route.Scope], (*snap)[routeEpochFloorKey]); ep > pol.RouteEpoch {
 				pol.RouteEpoch = ep
 			}
 		}
@@ -328,7 +359,7 @@ func (c *Cache) CurrentRouteEpoch(scope string) uint64 {
 	}
 	c.genMu.Lock()
 	defer c.genMu.Unlock()
-	return c.routeEpoch[scope]
+	return max(c.routeEpoch[scope], c.routeEpoch[routeEpochFloorKey])
 }
 
 // CommitRoutePolicies records the active route policy digests and advances the
@@ -339,8 +370,11 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	if c == nil {
 		return
 	}
+	// Serialize durable commits without holding genMu during disk I/O or
+	// recovery callbacks (disk -> genMu is the established lock order).
+	c.routeCommitMu.Lock()
+	defer c.routeCommitMu.Unlock()
 	c.genMu.Lock()
-	defer c.genMu.Unlock()
 	if c.routePolicyDigest == nil {
 		c.routePolicyDigest = make(map[string][16]byte, len(routes))
 	}
@@ -350,53 +384,62 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	if c.routeEpoch == nil {
 		c.routeEpoch = make(map[string]uint64, len(routes))
 	}
+	epochSnap := make(map[string]uint64, len(c.routeEpoch))
+	for k, v := range c.routeEpoch {
+		epochSnap[k] = v
+	}
 	active := make(map[string][16]byte, len(routes))
 	configs := make(map[string]RouteCacheConfig, len(routes))
+	for _, rc := range routes {
+		if rc.Scope != "" {
+			configs[rc.Scope] = rc
+		}
+	}
+	// Retire before computing the active digests, so every digest includes the
+	// post-compaction epoch. The floor is compatibility evidence for all scopes
+	// forgotten by compaction, including disk-only entries and in-flight fills.
+	for scope := range c.routePolicyDigest {
+		_, stillActive := configs[scope]
+		if !stillActive || strings.HasPrefix(scope, "volatile:") {
+			epochSnap[scope] = max(epochSnap[scope], epochSnap[routeEpochFloorKey]) + 1
+		}
+	}
+	if len(epochSnap) > 1024+len(configs) {
+		floor := epochSnap[routeEpochFloorKey]
+		for _, ep := range epochSnap {
+			floor = max(floor, ep)
+		}
+		epochSnap = map[string]uint64{routeEpochFloorKey: floor + 1}
+	}
 	for i := range routes {
 		rc := routes[i]
 		if rc.Scope == "" {
 			continue
 		}
-		rc.Epoch = c.routeEpoch[rc.Scope]
+		rc.Epoch = max(epochSnap[rc.Scope], epochSnap[routeEpochFloorKey])
 		eff := c.effectivePolicy(&rc)
 		digest := routeConfigDigest(eff)
 		active[rc.Scope] = digest
 		configs[rc.Scope] = rc
-		if prev, ok := c.routePolicyDigest[rc.Scope]; ok && prev != digest {
-			c.routePolicyFloor[rc.Scope] = c.genSeq.Add(1)
-		}
 	}
-	// Routes removed or whose cache was disabled advance their floor and epoch
-	// so any pre-reload in-flight origin op on that route cannot publish late
-	// and a later recreated route with the same ID cannot reuse old entries.
-	epochAdvanced := false
-	for scope := range c.routePolicyDigest {
-		if _, stillActive := active[scope]; !stillActive {
+	c.genMu.Unlock()
+	// Durability precedes visibility. A crash after this write may make the
+	// cache colder, but cannot restore pre-retirement compatibility evidence.
+	if c.disk != nil {
+		c.disk.persistRouteEpochs(epochSnap)
+	}
+	c.genMu.Lock()
+	for scope, prev := range c.routePolicyDigest {
+		if next, ok := active[scope]; !ok || next != prev {
 			c.routePolicyFloor[scope] = c.genSeq.Add(1)
-			c.routeEpoch[scope]++
-			epochAdvanced = true
 		}
 	}
-	epochSnap := make(map[string]uint64, len(c.routeEpoch))
-	for k, v := range c.routeEpoch {
-		epochSnap[k] = v
-	}
+	c.routeEpoch = maps.Clone(epochSnap)
 	c.routeEpochsSnap.Store(&epochSnap)
 	c.routePolicyDigest = active
 	c.routeConfigs = configs
-	if epochAdvanced && c.disk != nil {
-		c.disk.persistRouteEpochs(epochSnap)
-	}
 	if len(c.routePolicyFloor) > 1024 && c.minInflightStartGenLocked() == ^uint64(0) {
 		c.routePolicyFloor = make(map[string]uint64)
 	}
-	if len(c.routeEpoch) > 1024 {
-		trimmed := make(map[string]uint64, len(active))
-		for scope := range active {
-			if ep := c.routeEpoch[scope]; ep > 0 {
-				trimmed[scope] = ep
-			}
-		}
-		c.routeEpoch = trimmed
-	}
+	c.genMu.Unlock()
 }

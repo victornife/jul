@@ -886,13 +886,6 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 	if c.routePolicyDigest == nil {
 		c.routePolicyDigest = make(map[string][16]byte)
 	}
-	if c.disk != nil {
-		for scope, ep := range c.disk.loadRouteEpochs() {
-			if ep > c.routeEpoch[scope] {
-				c.routeEpoch[scope] = ep
-			}
-		}
-	}
 	pol := c.Policy()
 	diskSeen := make(map[string]struct{}, len(items))
 	seenRetire := make(map[string]struct{})

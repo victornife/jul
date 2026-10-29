@@ -11,6 +11,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Keep predicate values and their hashes out of persistent route-cache
+  partitions. Predicate routes become cold on reload/restart; path-only routes
+  retain stable ownership. Bound epoch history with a durable global floor so
+  retired routes cannot resurrect old memory or disk responses after churn.
+  Recover corrupt populated route-epoch metadata without startup deadlock and
+  retire/disable disk caching on epoch-persistence failure (#623, #672, #673).
+  Prune route-Vary ownership with bounded variant membership and replace
+  per-hit policy formatting with a versioned binary digest.
+
 - Reject shared-cache storage and reuse for `Vary: Cookie`, `Vary: Authorization`,
   and responses varying on request headers rewritten, synthesized, or stripped
   by the HTTP reverse proxy or FastCGI/uWSGI handlers, and isolate cached

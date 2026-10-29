@@ -396,12 +396,16 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   the entry serves from memory or the upstream.
 - **No distributed / shared cache.** Cache state is local to the single Jul.IA
   process. Multi-node setups each maintain independent cache pools.
-- **A reload does not invalidate cached entries.** The cache is process-scoped
-  and deliberately survives configuration reloads, so a routing or backend change
-  does not retroactively drop entries stored under the previous configuration. A
-  background refresh that was already in flight when the reload ran also
-  completes against the *old* generation's route and publishes its result. Purge
-  or restart when a configuration change must invalidate content.
+- **Reload is not a backend-cutover purge.** Path-only routes retain compatible
+  cached entries across reload/restart; route-policy tightening is enforced on
+  reuse and publication, and removal/cache disable advances route ownership.
+  Predicate-bearing routes become cold on reload/restart to avoid persisting
+  predicate-derived identities. Epoch-history compaction can make other scoped
+  routes cold. Backend-target changes do not themselves invalidate compatible
+  entries (#624); use an explicit purge for content cutover. Route-epoch write
+  failure disables and retires disk caching until a later successful route
+  commit. If all durable invalidation/cleanup operations fail, restore disk
+  health and clear affected files before restart. See [cache.md](cache.md).
 - **A background refresh or a synchronous validation delays retirement of its
   generation.** While either runs, the handler generation that started it keeps
   its gRPC connections, plugin runtimes and static roots open. The delay is

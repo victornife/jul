@@ -8,8 +8,8 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-	"fmt"
 	"jul/internal/cachemeta"
 	"net/http"
 	"sort"
@@ -149,10 +149,40 @@ func evidenceTime(n int64) time.Time {
 }
 
 func policyID(p CachePolicy) [32]byte {
-	p.DecisionSamples = false // collection does not change reuse policy
-	p.MultiRouteOverlap = false
-	p.varyGuard = nil
-	return sha256.Sum256([]byte(fmt.Sprintf("%#v", p)))
+	// A stable, length-prefixed encoding avoids formatting the large fixed
+	// cookie-name array on every hit. Collection, overlap bookkeeping and Vary
+	// guards are excluded: they do not change freshness evidence. New policy
+	// fields must be registered here (the completeness test enforces that).
+	var storage [512]byte
+	buf := append(storage[:0], "jul-cache-policy-v2\x00"...)
+	for _, n := range []uint64{
+		uint64(p.DefaultTTL), uint64(p.StaleWhileRevalidate), uint64(p.StaleIfError),
+		uint64(p.MemoryMaxBytes), uint64(p.MaxEntryBytes), uint64(p.LockTimeout),
+		uint64(p.MaxRanges), uint64(p.TagHeaderCount), p.RouteEpoch,
+		uint64(p.MaxTTL), uint64(p.BypassCookieCount),
+	} {
+		buf = binary.AppendUvarint(buf, n)
+	}
+	for _, flag := range []bool{p.Lock, p.RangeEnabled, p.StripTagHeaders, p.HasRouteDefaultTTL,
+		p.HasMaxTTL, p.HasRouteSWR, p.HasRouteSIE, p.BypassAnyCookie} {
+		if flag {
+			buf = append(buf, 1)
+		} else {
+			buf = append(buf, 0)
+		}
+	}
+	appendString := func(value string) {
+		buf = binary.AppendUvarint(buf, uint64(len(value)))
+		buf = append(buf, value...)
+	}
+	appendString(p.RouteScope)
+	for _, value := range p.TagHeaders {
+		appendString(value)
+	}
+	for _, value := range p.BypassCookies {
+		appendString(value)
+	}
+	return sha256.Sum256(buf)
 }
 
 func (c *Cache) entryEvidence(status int, h http.Header, p responsePolicy, pol CachePolicy, now time.Time, ttl, swr time.Duration) *publicationEvidence {
@@ -351,7 +381,7 @@ func (c *Cache) InspectScope(ctx context.Context, sel NormalizedSelector) (Inspe
 	if out.Truncated {
 		out.State = "truncated"
 	}
-	if c.disk != nil && c.disk.unrecoverableInvalidation.Load() {
+	if c.disk != nil && (c.disk.unrecoverableInvalidation.Load() || c.disk.routeEpochFailed.Load()) {
 		out.State = "partial"
 		out.Warnings = append(out.Warnings, "disk_unavailable")
 	}

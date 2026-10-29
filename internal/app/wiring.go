@@ -107,9 +107,9 @@ func WAFScope(srv config.ServerConfig, loc config.LocationConfig) string {
 	return LocationScope(srv, loc)
 }
 
-// CacheRouteScope builds the deterministic cache route-ownership identity for
-// a location (#623): it combines LocationScope with the optional durable
-// route_id while remaining independent of backend targets (which #624 owns).
+// CacheRouteScope delegates cache ownership to the cache package. Predicate
+// routes use process-local slots; ordinary routes retain durable coordinates.
+// Backend targets remain independent (#624).
 func CacheRouteScope(srv config.ServerConfig, loc config.LocationConfig) string {
 	return cache.RouteScope(srv, loc)
 }

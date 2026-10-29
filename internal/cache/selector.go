@@ -1187,7 +1187,7 @@ func ParseInspectionSelector(in Selector, cfg *config.Config) (NormalizedSelecto
 		return s, err
 	}
 	for _, srv := range cfg.Servers {
-		for _, loc := range srv.Locations {
+		for slot, loc := range srv.Locations {
 			if loc.RouteID == nil || *loc.RouteID != s.RouteID {
 				continue
 			}
@@ -1210,7 +1210,7 @@ func ParseInspectionSelector(in Selector, cfg *config.Config) (NormalizedSelecto
 			default:
 				return NormalizedSelector{}, selErr("route_id", "inspection of regex route paths is unavailable; use configured-host scope")
 			}
-			s.inspectionRouteScope = RouteScope(srv, loc)
+			s.inspectionRouteScope = RouteScope(srv, loc, slot)
 			s.digest = computeSelectorDigest(s)
 			return s, nil
 		}

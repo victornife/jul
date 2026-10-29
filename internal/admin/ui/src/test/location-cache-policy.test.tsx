@@ -250,6 +250,7 @@ describe("LocationCachePolicyEditor and RouteDetail integration", () => {
 
     expect(screen.getByLabelText("Effective route cache posture")).toBeInTheDocument();
     expect(screen.getByText(/explicit_zero/)).toBeInTheDocument();
+    expect(screen.getByText(/disable fresh storage when/)).toBeInTheDocument();
 
     // Exercise form input and radio button handlers, warnings, and errors
     fireEvent.click(screen.getByLabelText(/Enable caching on this route/i));
@@ -271,7 +272,9 @@ describe("LocationCachePolicyEditor and RouteDetail integration", () => {
     fireEvent.change(screen.getByPlaceholderText(/session_id, __Host-auth/i), {
       target: { value: "sid, auth_token" },
     });
-    expect(screen.getByText(/default_ttl \(2m\) must not exceed max_ttl \(1m\)/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/default_ttl \(2m\) must not exceed max_ttl \(1m\)/i),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Route cache is disabled/i)).toBeInTheDocument();
 
     // Click the Static / versioned assets starter

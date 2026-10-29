@@ -82,18 +82,56 @@ take precedence over route overrides.
 
 ### 3. Multi-Route Isolation without One-Slot Thrashing
 
-- Every cached location receives a deterministic `RouteScope` derived from its
-  listener, normalized `server_names`, match type, path, canonical predicates,
-  preflight widening, and optional `route_id` (excluding backend targets so
-  `#624` retains clean ownership of backend-cutover invalidation).
+- Ordinary path-only locations receive a stable `RouteScope` derived from
+  listener, normalized `server_names`, match type, path, preflight widening,
+  and optional `route_id`. Predicate values and their digests are excluded.
+  Backend targets remain outside this identity (`#624` owns backend cutover).
+- Predicate-bearing locations use these non-predicate coordinates plus their
+  configured slot and a random process-local namespace. Predicate comparisons
+  locate slots only in memory; no predicate digest is persisted as ownership
+  or compatibility evidence, including when `route_id` exists. The ID remains
+  optional. Every committed reload advances surviving predicate-route epochs;
+  restart changes their namespace. These routes deliberately lose warm hits on
+  reload/restart, while ordinary routes retain them. A slot cannot silently
+  inherit a previous matcher's responses after reordering or predicate edits.
+  This bounded compatibility cost avoids a persistent route registry or a
+  secret-derived partition. It does not claim paths, arbitrary URLs, other
+  Vary inputs, or operator-selected route IDs can never contain secrets.
+- Entries without compatible route ownership (including pre-feature or prior
+  scope-encoding entries) incur a one-time cold miss. Freshness evidence uses a
+  versioned binary policy digest; older evidence is conservatively recomputed
+  from retained response headers. The digest encodes every reuse-policy field
+  and excludes collection/overlap bookkeeping and the separately enforced Vary
+  guard. This avoids per-hit formatting/allocation of the expanded policy.
 - When multiple cached locations or predicate-bearing routes share a server,
   base-key Vary stubs maintain `RouteVary map[string][]string` and variant keys
   include `route\x1f<RouteScope>`, allowing overlapping routes to coexist in
   memory and on disk without overwriting each other.
-- `RouteEpoch` starts at `0` (preserving warm memory and disk hits across
-  reloads and restarts) and increments only when a previously active route
-  scope is removed or has `cache = false`, preventing a later recreated route
-  with a reused `route_id` from inheriting pre-deletion entries.
+- `RouteVary` records are pruned with the stub's 64-variant membership cap, so
+  route churn cannot accumulate unbounded route records behind a bounded
+  representation list. This shares the existing per-resource capacity limit;
+  it does not add per-route storage quotas.
+- `RouteEpoch` starts at `0` and advances on route removal/cache disable and
+  predicate-route reload. `.jul-cache-route-epochs` is persisted before the new
+  epoch snapshot and publication floors become visible. Epoch metadata is
+  recovered once, before attaching disk callbacks and snapshotting the disk
+  catalog; recovery never performs disk cleanup while holding `genMu`.
+- Retired history is bounded by 1,024 plus the configured active-route count.
+  Compaction first advances a durable global epoch floor above every retained
+  epoch. All older scoped entries and in-flight publications become ineligible,
+  including disk-only entries. Only then can individual tombstones be forgotten.
+  Compaction may make other scoped routes cold; it cannot reset forgotten
+  compatibility evidence to zero.
+- Unreadable, malformed, null, overflowing, or oversized epoch metadata invokes
+  existing fail-closed disk cleanup before rehydration. Reads are bounded to
+  1 MiB. A persistence/sync failure retires the disk dataset through existing
+  tombstone recovery, attempts to leave a corrupt restart marker, and disables
+  disk reads/publication until a later route commit persists successfully.
+  Memory remains protected by the live epochs. This is best-effort durable
+  cleanup, not secure erasure: if the filesystem refuses metadata writes,
+  invalidation, and cleanup, Jul cannot guarantee recovery after a crash. Disk
+  failure is logged; restore filesystem health and clear affected cache files
+  before restart. Existing purge-recovery limits remain owned by `#666`.
 
 ### 4. Sensitive and Proxy/CGI-Transformed `Vary` Guards (`#672`)
 

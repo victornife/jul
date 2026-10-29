@@ -115,7 +115,7 @@ export function LocationCachePolicyEditor({
           <p>
             Leave a duration blank to inherit from global <span className="font-mono">[cache]</span>.
             Set an explicit <span className="font-mono">0s</span> to disable that fallback or stale
-            window on this route (or to require conditional revalidation when{" "}
+            window on this route (or to disable fresh storage when{" "}
             <span className="font-mono">max_ttl = &quot;0s&quot;</span>).
           </p>
         </div>

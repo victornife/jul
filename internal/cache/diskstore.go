@@ -288,6 +288,7 @@ type diskStore struct {
 	onKeyDiskState            func(key string, inDisk bool)
 	onRehydrate               func(items []diskItemSnapshot)
 	unrecoverableInvalidation atomic.Bool
+	routeEpochFailed          atomic.Bool
 
 	// Test hooks for deterministic fault and concurrency-window injection.
 	testPublishFault         string
@@ -298,6 +299,7 @@ type diskStore struct {
 	testReadDir              func(path string) ([]os.DirEntry, error)
 	testSyncDir              func(dir string) error
 	testPersistTombstoneErr  error
+	testPersistRouteEpochErr error
 	testWriteHighWaterErr    error
 	onLookupLeaseAcquire     func()
 	onBeforePublishLock      func(key string, gen uint64)
@@ -1105,17 +1107,23 @@ func (d *diskStore) loadRouteEpochs() map[string]uint64 {
 	if d == nil || d.dir == "" {
 		return nil
 	}
-	raw, err := os.ReadFile(filepath.Join(d.dir, diskRouteEpochsFile))
-	if err != nil {
-		if !os.IsNotExist(err) {
-			d.mu.Lock()
-			d.purgeAllCacheFilesOnCorruptTombstoneLocked()
-			d.mu.Unlock()
-		}
+	f, err := os.Open(filepath.Join(d.dir, diskRouteEpochsFile))
+	if os.IsNotExist(err) {
 		return nil
 	}
+	var raw []byte
+	if err == nil {
+		raw, err = io.ReadAll(io.LimitReader(f, maxDiskMetaBytes+1))
+		_ = f.Close()
+	}
 	var epochs map[string]uint64
-	if json.Unmarshal(raw, &epochs) != nil {
+	valid := err == nil && len(raw) <= maxDiskMetaBytes && json.Unmarshal(raw, &epochs) == nil && epochs != nil
+	for scope, ep := range epochs {
+		if scope == "" || ep > math.MaxInt64 {
+			valid = false
+		}
+	}
+	if !valid {
 		d.mu.Lock()
 		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
 		d.mu.Unlock()
@@ -1125,17 +1133,35 @@ func (d *diskStore) loadRouteEpochs() map[string]uint64 {
 }
 
 func (d *diskStore) persistRouteEpochs(epochs map[string]uint64) {
-	if d == nil || d.dir == "" || len(epochs) == 0 {
+	if d == nil || d.dir == "" {
 		return
 	}
-	raw, err := json.Marshal(epochs)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	raw, _ := json.Marshal(epochs) // map[string]uint64 is always JSON encodable
+	err := d.testPersistRouteEpochErr
+	if len(raw) > maxDiskMetaBytes {
+		err = errDiskMetaTooLarge
+	}
+	if err == nil {
+		err = atomicfile.Write(filepath.Join(d.dir, diskRouteEpochsFile), raw, 0o600)
+	}
+	if err == nil {
+		err = d.syncDirLocked()
+	}
 	if err != nil {
+		// A stale manifest must not authorize pre-retirement entries after a
+		// restart. Leave a corrupt marker where possible and retire the disk
+		// dataset through the existing durable tombstone recovery. Keep the
+		// disk tier disabled until a later route commit persists successfully;
+		// ordinary tombstone reconciliation must not clear this failure.
+		d.routeEpochFailed.Store(true)
+		_ = d.truncatePath(filepath.Join(d.dir, diskRouteEpochsFile), 0)
+		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
+		d.recordWriteFailure(err)
 		return
 	}
-	if err := atomicfile.Write(filepath.Join(d.dir, diskRouteEpochsFile), raw, 0o600); err != nil {
-		d.unrecoverableInvalidation.Store(true)
-		d.recordWriteFailure(err)
-	}
+	d.routeEpochFailed.Store(false)
 }
 
 func hashKey(key string) string {
@@ -1194,7 +1220,7 @@ func (d *diskStore) getWithMemCapObserved(key string, memCap int64, onFailure fu
 	hash := hashKey(key)
 	d.mu.Lock()
 	d.sweepTombstonesLocked()
-	if d.unrecoverableInvalidation.Load() {
+	if d.unrecoverableInvalidation.Load() || d.routeEpochFailed.Load() {
 		d.mu.Unlock()
 		return nil, 0, false
 	}
@@ -1572,6 +1598,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.sweepTombstonesLocked()
+	if d.routeEpochFailed.Load() {
+		return nil, false
+	}
 	if s.bodyLen > d.maxBytes || int64(len(tail)) > maxDiskMetaEnvelope {
 		if s.acct.onSkip != nil {
 			s.acct.onSkip(captureSkipOversize)

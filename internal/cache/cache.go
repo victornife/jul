@@ -88,6 +88,7 @@ type Cache struct {
 	originOpSeq               uint64
 	inflightOps               map[uint64]uint64
 	routePolicyDigest         map[string][16]byte
+	routeCommitMu             sync.Mutex
 	routePolicyFloor          map[string]uint64
 	routeEpoch                map[string]uint64
 	routeConfigs              map[string]RouteCacheConfig
@@ -198,6 +199,9 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Recover before attaching callbacks: corrupt metadata cleanup can call
+		// back into genMu, and must finish before taking the item snapshot.
+		c.routeEpoch = d.loadRouteEpochs()
 		d.onEviction = func(k string) { c.recordKeyDecision(k, "disk_eviction") }
 		d.onSkip = c.captureSkipped
 		d.checkGen = c.isGenCurrent
@@ -974,6 +978,25 @@ func (c *Cache) storeCapturedWithPolicy(base string, r *http.Request, e *Entry, 
 	}
 	if evicted := stub.addVariant(vk); evicted != "" {
 		c.delOneIfGenAtMost(evicted, deleteGen)
+	}
+	// Route-level Vary ownership must have the same bound as representation
+	// membership. Otherwise route churn retains an ever-growing map even as
+	// addVariant evicts the old representations.
+	if stub.RouteVary != nil {
+		liveScopes := make(map[string]bool, len(stub.Variants))
+		prefix := base + "\x00route\x1f"
+		for _, member := range stub.Variants {
+			if suffix, ok := strings.CutPrefix(member, prefix); ok {
+				scope, _, _ := strings.Cut(suffix, "\x00")
+				liveScopes[scope] = true
+			}
+		}
+		for scope := range stub.RouteVary {
+			if !liveScopes[scope] {
+				delete(stub.RouteVary, scope)
+			}
+		}
+		stub.Vary = mergeRouteVaryFields(stub.RouteVary)
 	}
 	var varTagSets [][]string
 	c.genMu.Lock()

@@ -1,0 +1,56 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: AMD EPYC 9V74 80-Core Processor                
+BenchmarkCacheHit-2             	  152683	      1877 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  181892	      1271 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  183097	      1241 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  172131	      1308 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  167653	      1429 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  166627	      1315 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  180296	      1244 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  188436	      1695 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  182811	      1645 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2             	  179404	      1488 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheMiss-2            	   12560	     17165 ns/op	   12566 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   13045	     15478 ns/op	   12553 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   14464	     16226 ns/op	   12714 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   15224	     15522 ns/op	   12791 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   14858	     19522 ns/op	   12787 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   14366	     17381 ns/op	   12686 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   12282	     16782 ns/op	   12574 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   15566	     16834 ns/op	   12786 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   15123	     16373 ns/op	   12802 B/op	      82 allocs/op
+BenchmarkCacheMiss-2            	   14030	     17911 ns/op	   12618 B/op	      82 allocs/op
+BenchmarkCacheVaryHit-2         	  100316	      2160 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  110186	      2183 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  101239	      2152 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  119050	      2097 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  112396	      2227 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  103191	      2157 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  113512	      2177 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  103533	      2237 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  107337	      2145 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2         	  105476	      2118 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  182880	      1373 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  175922	      1393 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  191443	      1402 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  177580	      1482 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  179838	      1493 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  174134	      1541 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  155616	      1621 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  162181	      1546 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  163446	      1506 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  159147	      1425 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  155710	      1736 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  164725	      1646 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  148129	      1600 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  156957	      1655 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  123826	      1666 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  145141	      1584 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  150405	      1569 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  155319	      1505 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  138397	      1602 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  149911	      1537 ns/op	    1256 B/op	      16 allocs/op
+PASS
+ok  	jul/internal/cache	14.475s
