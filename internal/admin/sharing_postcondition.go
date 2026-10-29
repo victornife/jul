@@ -327,6 +327,7 @@ func IsPatchOpRepeatable(op patchRequest) bool {
 		"location_set_predicates",
 		"location_response_headers_set",
 		"location_cors_set",
+		"location_cache_policy_set",
 		"location_toggle_require_client_cert",
 		"server_set_limits",
 		"server_toggle_http3",

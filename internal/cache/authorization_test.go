@@ -252,10 +252,9 @@ func TestCredentialsNeverEnterTheCacheKey(t *testing.T) {
 	}
 }
 
-// TestCredentialsNeverReachStoredMetadataOrObservability proves the credential
-// does not survive into anything that is persisted, logged or exported: not the
-// stored headers, not the variant key, not the revalidation outcome label.
-func TestCredentialsNeverReachStoredMetadataOrObservability(t *testing.T) {
+// TestVaryAuthorizationIsNotStoredOrExposed checks this response's admission
+// and the bounded revalidation observer. It is not a general secret detector.
+func TestVaryAuthorizationIsNotStoredOrExposed(t *testing.T) {
 	c, _ := conformanceCache(t, config.CacheConfig{MemoryMaxSize: config.Size(1 << 20), DefaultTTL: config.Duration(time.Hour)})
 	var outcomes []string
 	c.SetRevalidationObserver(func(o string) { outcomes = append(outcomes, o) })
@@ -270,20 +269,14 @@ func TestCredentialsNeverReachStoredMetadataOrObservability(t *testing.T) {
 		_, _ = w.Write([]byte("body"))
 	}))
 
-	get(t, h, "http://x/a", "Authorization", aliceCred)
-	get(t, h, "http://x/a", "Authorization", aliceCred)
-
-	// The variant key legitimately contains the varied header value, but nothing
-	// the cache EXPORTS may. Assert the exported surfaces directly.
-	r := httptest.NewRequest(http.MethodGet, "http://x/a", nil)
-	if stub, ok := c.get(key(r)); ok {
-		for name, values := range stub.Header {
-			for _, v := range values {
-				if strings.Contains(v, "alice-secret-token") {
-					t.Fatalf("credential leaked into stored header %s", name)
-				}
-			}
+	for i := 0; i < 2; i++ {
+		if rec := get(t, h, "http://x/a", "Authorization", aliceCred); rec.Header().Get("X-Cache") != stateMiss {
+			t.Fatal("Vary: Authorization representation was reused")
 		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "http://x/a", nil)
+	if _, ok := c.get(key(r)); ok {
+		t.Fatal("Vary: Authorization representation was stored")
 	}
 	for _, o := range outcomes {
 		if strings.Contains(o, "alice") || strings.Contains(o, "Bearer") || strings.Contains(o, "/") {

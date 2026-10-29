@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Reject shared-cache storage and reuse for `Vary: Cookie`, `Vary: Authorization`,
+  and responses varying on request headers rewritten, synthesized, or stripped
+  by the HTTP reverse proxy or FastCGI/uWSGI handlers, and isolate cached
+  representations across overlapping predicate-scoped routes (#672, #623,
+  [ADR 0029](docs/adr/0029-route-scoped-cache-policy-and-vary-guards.md)).
+
 - Protect exported WAF `external_digest` in `GET /api/security` (`waf_effective`)
   from offline dictionary guessing (#649 / EX01): compiled external rule,
   include, and operator-data file digests now use domain-separated
@@ -27,6 +33,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 
 ### Added
+
+- Route-scoped cache policy overrides, freshness caps (`max_ttl`), and
+  conservative request-cookie bypass (`bypass_cookies`, `bypass_any_cookie`) in
+  `[servers.locations.cache_policy]` with hot-reload enforcement, `/api/routes`
+  and `/api/v1/routes` effective policy projections, `/api/v1/cache/inspect`
+  and `jul cache inspect` route policy reporting, and the Console route cache
+  policy editor with curated starters (#623 / `CACHE-OPS-03`,
+  [ADR 0029](docs/adr/0029-route-scoped-cache-policy-and-vary-guards.md)).
 
 - Bounded read-only cache metadata inspection and opt-in recent cache-decision
   evidence across the admin API, remote CLI and Full Console (#622). Separate

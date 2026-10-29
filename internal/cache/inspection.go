@@ -10,13 +10,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"golang.org/x/net/http/httpguts"
 	"jul/internal/cachemeta"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // Inspection bounds apply independently of the normal cache capacity.
@@ -51,6 +52,7 @@ type publicationEvidence struct {
 // new provenance and clears it. Legacy entries without provenance stay unknown.
 const evidenceStaleIfError uint8 = 8
 const evidenceStaleBasisKnown uint8 = 16
+const evidenceNoRequestCookies uint8 = 32
 
 func markStaleIfError(e *Entry) {
 	if e.Evidence != nil {
@@ -111,8 +113,25 @@ func (c *Cache) captureMatchesRequest(e *Entry, r *http.Request) bool {
 	return true
 }
 
-var freshnessSources = [...]string{"", "gateway_fallback", "origin_s_maxage", "origin_max_age", "origin_expires", "gateway_fallback_no_cache", "targeted_gateway_fallback", "targeted_origin_s_maxage", "targeted_origin_max_age", "targeted_gateway_fallback_no_cache"}
-var windowSources = [...]string{"", "gateway_fallback", "origin", "mandatory_validation"}
+var freshnessSources = [...]string{
+	"",
+	"gateway_fallback",
+	"origin_s_maxage",
+	"origin_max_age",
+	"origin_expires",
+	"gateway_fallback_no_cache",
+	"targeted_gateway_fallback",
+	"targeted_origin_s_maxage",
+	"targeted_origin_max_age",
+	"targeted_gateway_fallback_no_cache",
+	"route_default_ttl",
+	"route_default_ttl_no_cache",
+	"targeted_route_default_ttl",
+	"targeted_route_default_ttl_no_cache",
+	"route_max_ttl_cap",
+	"targeted_route_max_ttl_cap",
+}
+var windowSources = [...]string{"", "gateway_fallback", "origin", "mandatory_validation", "route_policy"}
 
 func sourceCode(s string, values []string) uint8 {
 	for i, v := range values {
@@ -131,12 +150,24 @@ func evidenceTime(n int64) time.Time {
 
 func policyID(p CachePolicy) [32]byte {
 	p.DecisionSamples = false // collection does not change reuse policy
+	p.MultiRouteOverlap = false
+	p.varyGuard = nil
 	return sha256.Sum256([]byte(fmt.Sprintf("%#v", p)))
 }
 
 func (c *Cache) entryEvidence(status int, h http.Header, p responsePolicy, pol CachePolicy, now time.Time, ttl, swr time.Duration) *publicationEvidence {
+	return c.entryEvidenceForRequest(nil, status, h, p, pol, now, ttl, swr)
+}
+
+func (c *Cache) entryEvidenceForRequest(r *http.Request, status int, h http.Header, p responsePolicy, pol CachePolicy, now time.Time, ttl, swr time.Duration) *publicationEvidence {
 	_, _, source, _ := c.freshnessDecision(status, h, p, now, pol)
 	swrSource, sieSource := "gateway_fallback", "gateway_fallback"
+	if pol.HasRouteSWR {
+		swrSource = "route_policy"
+	}
+	if pol.HasRouteSIE {
+		sieSource = "route_policy"
+	}
 	if p.HasSWR {
 		swrSource = "origin"
 	}
@@ -163,6 +194,9 @@ func (c *Cache) entryEvidence(status int, h http.Header, p responsePolicy, pol C
 	if p.sharedAuthReuse() {
 		flags |= 4
 	}
+	if r != nil && len(r.Header.Values("Cookie")) == 0 {
+		flags |= evidenceNoRequestCookies
+	}
 	return &publicationEvidence{InsertedAt: now.UnixNano(), PolicyID: policyID(pol), SWR: swr, SIE: sie, FreshnessSource: sourceCode(source, freshnessSources[:]), SWRSource: sourceCode(swrSource, windowSources[:]), SIESource: sourceCode(sieSource, windowSources[:]), Flags: flags}
 }
 
@@ -182,7 +216,7 @@ func (c *Cache) inspectionID(key string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (c *Cache) inspectDetailsLocked(sm *SafeResourceSummary, bases []string, now time.Time) {
+func (c *Cache) inspectDetailsLocked(sm *SafeResourceSummary, bases []string, routeScopeFilter string, now time.Time) {
 	sm.Details = []RepresentationMetadata{}
 	if len(bases) == 0 {
 		return
@@ -198,7 +232,8 @@ func (c *Cache) inspectDetailsLocked(sm *SafeResourceSummary, bases []string, no
 		sm.Path = "[path omitted: length limit]"
 		sm.DetailsTruncated = true
 	}
-	current := policyID(c.Policy())
+	globalPol := c.Policy()
+	globalPolicyID := policyID(globalPol)
 	for _, base := range bases {
 		mem, disk, _, _, _, _, _, _ := c.collectOwnedKeysForBaseLocked(base, "")
 		keys := make(map[string]bool, len(mem)+len(disk))
@@ -216,6 +251,9 @@ func (c *Cache) inspectDetailsLocked(sm *SafeResourceSummary, bases []string, no
 		for _, k := range ordered {
 			st := c.keyGen[k]
 			if st == nil || st.isVaryStub {
+				continue
+			}
+			if routeScopeFilter != "" && st.routeScope != "" && st.routeScope != routeScopeFilter {
 				continue
 			}
 			if len(sm.Details) >= MaxInspectionDetails {
@@ -242,14 +280,22 @@ func (c *Cache) inspectDetailsLocked(sm *SafeResourceSummary, bases []string, no
 			}
 			fields, limited := boundedInspectionVary(st.varyFields)
 			sm.DetailsTruncated = sm.DetailsTruncated || limited
+			activePol := globalPol
+			activePolicyID := globalPolicyID
+			if st.routeScope != "" && c.routeConfigs != nil {
+				if rc, ok := c.routeConfigs[st.routeScope]; ok {
+					activePol = c.effectivePolicy(&rc)
+					activePolicyID = policyID(activePol)
+				}
+			}
 			var effectiveSIE *float64
 			if evidence == "recorded" {
-				v := c.staleOnErrorWindow(&Entry{RequiresValidation: st.evidence.Flags&1 != 0, MustRevalidate: st.evidence.Flags&2 != 0, HasStaleIfError: st.evidence.SIESource == 2, StaleIfError: st.evidence.SIE}).Seconds()
+				v := c.staleOnErrorWindowWithPolicy(&Entry{RequiresValidation: st.evidence.Flags&1 != 0, MustRevalidate: st.evidence.Flags&2 != 0, HasStaleIfError: st.evidence.SIESource == 2, StaleIfError: st.evidence.SIE}, activePol).Seconds()
 				effectiveSIE = &v
 			}
 			sm.Details = append(sm.Details, RepresentationMetadata{EffectiveSIESeconds: effectiveSIE, ID: c.inspectionID(k), Method: strings.Clone(st.method), Tiers: tiers, BodyBytes: st.bodyBytes,
 				OriginAgeSeconds: max(0, now.Sub(st.createdAt).Seconds()), FreshnessState: freshness, VaryFields: fields,
-				EvidenceState: evidence, Evidence: evidenceValue(st.evidence, st), RetainedPolicy: evidence == "recorded" && st.evidence.PolicyID != current})
+				EvidenceState: evidence, Evidence: evidenceValue(st.evidence, st), RetainedPolicy: evidence == "recorded" && st.evidence.PolicyID != activePolicyID})
 		}
 	}
 	if len(sm.Details) > 0 {
@@ -283,13 +329,13 @@ func (c *Cache) InspectScope(ctx context.Context, sel NormalizedSelector) (Inspe
 	out := Inspection{State: "available", CapturedAt: p.AsOf, CacheSequence: p.CacheSequence, CountAccuracy: p.CountAccuracy,
 		Truncated: p.Truncated || p.MatchedResources > len(p.Samples), MatchedResources: p.MatchedResources, MatchedRepresentations: p.MatchedRepresentations,
 		MemoryEntries: p.MemoryEntries, DiskEntries: p.DiskEntries, MatchedBodyBytes: p.MatchedBytes, Resources: append([]SafeResourceSummary{}, p.Samples...),
-		Decisions: []CacheDecision{}, EvidenceState: "disabled", Warnings: []string{"metadata_only_no_request_performed", "tier_entry_counts_include_vary_stubs", "not_a_global_snapshot", "absence_does_not_explain_history", "route_policy_overrides_unsupported", "no_gateway_freshness_cap"}}
+		Decisions: []CacheDecision{}, EvidenceState: "disabled", Warnings: []string{"metadata_only_no_request_performed", "tier_entry_counts_include_vary_stubs", "not_a_global_snapshot", "absence_does_not_explain_history"}}
 	if c == nil {
 		out.State = "disabled"
 		return out, nil
 	}
 	pol := c.Policy()
-	out.Policy = cachemeta.EffectivePolicy{DefaultTTLSeconds: pol.DefaultTTL.Seconds(), SWRSeconds: pol.StaleWhileRevalidate.Seconds(), SIESeconds: pol.StaleIfError.Seconds(), MaxEntryBytes: pol.MaxEntryBytes, RangeEnabled: pol.RangeEnabled, FillLockEnabled: pol.Lock, TagIngestionEnabled: pol.TagHeaderCount > 0}
+	out.Policy = cachemeta.EffectivePolicy{DefaultTTLSeconds: pol.DefaultTTL.Seconds(), SWRSeconds: pol.StaleWhileRevalidate.Seconds(), SIESeconds: pol.StaleIfError.Seconds(), MaxEntryBytes: pol.MaxEntryBytes, RangeEnabled: pol.RangeEnabled, FillLockEnabled: pol.Lock, TagIngestionEnabled: pol.TagHeaderCount > 0, RouteOverridesSupported: true, GatewayFreshnessCapSupported: true}
 	// Stats() intentionally sweeps pending disk tombstones. Inspection must
 	// perform no filesystem cleanup or cache mutation, even on a failed tier.
 	bytes, capBytes, entries, evictions := c.mem.stats()
@@ -537,4 +583,11 @@ var decisionCatalog = map[string]decisionDescription{
 	"disk_eviction":                {"eviction", "A disk copy was evicted for capacity.", "A memory copy may remain; inspect tier residency and configured capacity."},
 	"capture_incomplete":           {"admission", "Captured body length differs from the declared Content-Length.", "Check origin response framing; the incomplete representation was not stored."},
 	"tag_capture_rejected":         {"admission", "Trusted origin tag ingestion was rejected.", "Review configured tag names and bounded tag syntax."},
+	"cookie_bypass":                {"bypass", "The request matched the route's configured cookie bypass policy and skipped cache lookup and storage.", "Inspect the route's cache_policy.bypass_cookies or bypass_any_cookie settings; cookie values are never recorded."},
+	"cookie_bypass_malformed":      {"bypass", "The request carried a malformed or oversized Cookie header while route cookie bypass was active, conservatively skipping lookup and storage.", "Inspect client Cookie header formatting and size bounds; cookie values are never recorded."},
+	"vary_sensitive_rejected":      {"admission", "The representation varies on Cookie or Authorization and was rejected to prevent shared-cache credential retention or reuse.", "Use Cache-Control: private/no-store or route cookie bypass for personalized responses instead of Vary: Cookie or Authorization."},
+	"vary_proxy_rewrite_rejected":  {"admission", "The representation varies on a request header rewritten, generated or stripped by the HTTP proxy and could not be matched safely.", "Avoid varying on proxy-rewritten identity or forwarding headers, or disable caching on this route."},
+	"vary_cgi_rewrite_rejected":    {"admission", "The representation varies on a CGI-sanitized, overridden or underscore-aliased request header and could not be matched safely.", "Avoid varying on CGI-transformed or underscore-aliased headers, or disable caching on this route."},
+	"route_ownership_mismatch":     {"reuse", "The stored representation belongs to a different route context and was not reused.", "Overlapping routes sharing a hostname and URL isolate their cached representations."},
+	"route_policy_mismatch":        {"reuse", "The stored representation does not satisfy the active route cache policy and was not reused.", "Tightened route freshness, caps or cookie-bypass rules apply immediately to new requests."},
 }

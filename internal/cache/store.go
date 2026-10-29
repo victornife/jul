@@ -89,6 +89,15 @@ type Entry struct {
 	ingestedTagHeaderCount int
 	ingestedTagHeaders     [8]string
 	tagPolicyTracked       bool
+
+	// RouteScope, RouteEpoch, BypassDigest, RouteConfigDigest, and RouteVary
+	// record route-level ownership, cookie-bypass provenance, and multi-route
+	// Vary stub membership (#623 / #672).
+	RouteScope        string
+	RouteEpoch        uint64
+	BypassDigest      [16]byte
+	RouteConfigDigest [16]byte
+	RouteVary         map[string][]string
 }
 
 // maxVariantsPerResource caps one base resource's membership list. A pathological
@@ -128,6 +137,12 @@ func (e *Entry) Clone() *Entry {
 	}
 	if e.Tags != nil {
 		cp.Tags = append([]string(nil), e.Tags...)
+	}
+	if e.RouteVary != nil {
+		cp.RouteVary = make(map[string][]string, len(e.RouteVary))
+		for k, vs := range e.RouteVary {
+			cp.RouteVary[k] = append([]string(nil), vs...)
+		}
 	}
 	return &cp
 }
@@ -183,7 +198,13 @@ func (e *Entry) Size() int64 {
 	for _, tag := range e.Tags {
 		n += int64(len(tag))
 	}
-	n += int64(len(e.ETag) + len(e.LastModified))
+	for k, vs := range e.RouteVary {
+		n += int64(len(k))
+		for _, v := range vs {
+			n += int64(len(v))
+		}
+	}
+	n += int64(len(e.RouteScope) + len(e.ETag) + len(e.LastModified))
 	return n
 }
 

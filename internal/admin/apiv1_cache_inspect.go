@@ -17,6 +17,7 @@ import (
 
 	"jul/internal/adminapi"
 	"jul/internal/cache"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/rbac"
@@ -70,6 +71,192 @@ func configuredInspectionScope(sel cache.NormalizedSelector, cfg *config.Config)
 	// Unnamed/wildcard hosts need an explicit named configuration before generic
 	// enumeration; this does not widen purge or router wildcard semantics.
 	return false
+}
+
+func applyRoutePolicyToEffective(cfg *config.Config, loc config.LocationConfig, pol cachemeta.EffectivePolicy) (cachemeta.EffectivePolicy, bool) {
+	pol.RouteOverridesSupported = true
+	pol.GatewayFreshnessCapSupported = true
+	if cfg != nil {
+		pol.DefaultTTLSeconds = cfg.Cache.DefaultTTL.Std().Seconds()
+		pol.SWRSeconds = cfg.Cache.StaleWhileRevalidate.Std().Seconds()
+		pol.SIESeconds = cfg.Cache.StaleIfError.Std().Seconds()
+	}
+	pol.MaxTTLSeconds = nil
+	pol.BypassCookies = nil
+	pol.BypassAnyCookie = false
+	hasOverride := false
+	if cp := loc.CachePolicy; cp != nil {
+		if cp.DefaultTTL != nil {
+			pol.DefaultTTLSeconds = cp.DefaultTTL.Std().Seconds()
+			hasOverride = true
+		}
+		if cp.MaxTTL != nil {
+			v := cp.MaxTTL.Std().Seconds()
+			pol.MaxTTLSeconds = &v
+			hasOverride = true
+		}
+		if cp.StaleWhileRevalidate != nil {
+			pol.SWRSeconds = cp.StaleWhileRevalidate.Std().Seconds()
+			hasOverride = true
+		}
+		if cp.StaleIfError != nil {
+			pol.SIESeconds = cp.StaleIfError.Std().Seconds()
+			hasOverride = true
+		}
+		if len(cp.BypassCookies) > 0 {
+			pol.BypassCookies = append([]string(nil), cp.BypassCookies...)
+			hasOverride = true
+		}
+		if cp.BypassAnyCookie {
+			pol.BypassAnyCookie = true
+			hasOverride = true
+		}
+	}
+	return pol, hasOverride
+}
+
+func locationHasPredicates(loc config.LocationConfig) bool {
+	return loc.Match.HasPredicates()
+}
+
+func locationMatchesInspectionSelector(loc config.LocationConfig, sel cache.NormalizedSelector) bool {
+	targetPath := ""
+	switch sel.Kind {
+	case cache.SelectorExactURL:
+		targetPath = sel.URI
+		if q := strings.IndexByte(targetPath, '?'); q >= 0 {
+			targetPath = targetPath[:q]
+		}
+	case cache.SelectorKey:
+		parts := strings.Split(sel.Key, "\n")
+		if len(parts) == 3 {
+			targetPath = parts[2]
+			if nl := strings.IndexByte(targetPath, 0x00); nl >= 0 {
+				targetPath = targetPath[:nl]
+			}
+			if q := strings.IndexByte(targetPath, '?'); q >= 0 {
+				targetPath = targetPath[:q]
+			}
+		}
+	case cache.SelectorPrefix:
+		switch loc.Match.Type {
+		case "exact":
+			return strings.HasPrefix(loc.Match.Path, sel.Prefix)
+		case "prefix", "":
+			return strings.HasPrefix(loc.Match.Path, sel.Prefix) || strings.HasPrefix(sel.Prefix, loc.Match.Path)
+		default:
+			return true
+		}
+	default:
+		return true
+	}
+	if targetPath == "" {
+		return true
+	}
+	switch loc.Match.Type {
+	case "exact":
+		return targetPath == loc.Match.Path
+	case "prefix", "":
+		return strings.HasPrefix(targetPath, loc.Match.Path)
+	default:
+		return true
+	}
+}
+
+func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Config, base cachemeta.EffectivePolicy) (cachemeta.EffectivePolicy, string, string, []string) {
+	base.RouteOverridesSupported = true
+	base.GatewayFreshnessCapSupported = true
+	defaultSource := "global_inherited_origin_precedence"
+	defaultRouteState := "host_scope_may_include_disabled_routes"
+	if cfg == nil {
+		return base, defaultSource, defaultRouteState, nil
+	}
+	if sel.RouteID != "" {
+		for _, srv := range cfg.Servers {
+			for _, loc := range srv.Locations {
+				if loc.RouteID != nil && *loc.RouteID == sel.RouteID {
+					routeState := "disabled_retained_entries_may_exist"
+					if loc.Cache {
+						routeState = "enabled"
+					}
+					pol, hasOverride := applyRoutePolicyToEffective(cfg, loc, base)
+					if hasOverride {
+						return pol, "route_override_with_global_inheritance", routeState, nil
+					}
+					return pol, defaultSource, routeState, nil
+				}
+			}
+		}
+		return base, defaultSource, defaultRouteState, nil
+	}
+	host := sel.Host
+	if sel.Kind == cache.SelectorKey {
+		parts := strings.Split(sel.Key, "\n")
+		if len(parts) == 3 {
+			host = parts[1]
+		}
+	}
+	bare := middleware.CanonicalHTTPHost(host)
+	var candidates []config.LocationConfig
+	for _, srv := range cfg.Servers {
+		matchedServer := false
+		for _, name := range srv.ServerNames {
+			norm := config.NormalizeHostPattern(name)
+			if norm == host || norm == bare {
+				matchedServer = true
+				break
+			}
+		}
+		if !matchedServer {
+			continue
+		}
+		for _, loc := range srv.Locations {
+			if locationMatchesInspectionSelector(loc, sel) {
+				candidates = append(candidates, loc)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return base, defaultSource, defaultRouteState, nil
+	}
+	if len(candidates) == 1 && !locationHasPredicates(candidates[0]) {
+		pol, hasOverride := applyRoutePolicyToEffective(cfg, candidates[0], base)
+		source := defaultSource
+		if hasOverride {
+			source = "route_override_with_global_inheritance"
+		}
+		routeState := defaultRouteState
+		if sel.Kind == cache.SelectorExactURL || sel.Kind == cache.SelectorKey {
+			if candidates[0].Cache {
+				routeState = "enabled"
+			} else {
+				routeState = "disabled_retained_entries_may_exist"
+			}
+		}
+		return pol, source, routeState, nil
+	}
+	// Multiple candidate routes (or a predicate-scoped route) match this selector without route_id.
+	// Check whether any candidate uses route cache overrides, predicates, or differing cache toggles.
+	firstPol, firstHasOverride := applyRoutePolicyToEffective(cfg, candidates[0], base)
+	ambiguous := locationHasPredicates(candidates[0]) && firstHasOverride
+	for i := 1; i < len(candidates); i++ {
+		nextPol, nextHasOverride := applyRoutePolicyToEffective(cfg, candidates[i], base)
+		if locationHasPredicates(candidates[i]) || candidates[i].Cache != candidates[0].Cache || nextHasOverride != firstHasOverride ||
+			nextPol.DefaultTTLSeconds != firstPol.DefaultTTLSeconds || nextPol.SWRSeconds != firstPol.SWRSeconds || nextPol.SIESeconds != firstPol.SIESeconds ||
+			(nextPol.MaxTTLSeconds == nil) != (firstPol.MaxTTLSeconds == nil) ||
+			(nextPol.MaxTTLSeconds != nil && firstPol.MaxTTLSeconds != nil && *nextPol.MaxTTLSeconds != *firstPol.MaxTTLSeconds) ||
+			nextPol.BypassAnyCookie != firstPol.BypassAnyCookie || strings.Join(nextPol.BypassCookies, ",") != strings.Join(firstPol.BypassCookies, ",") {
+			ambiguous = true
+			break
+		}
+	}
+	if ambiguous {
+		return base, "ambiguous_multiple_routes_use_route_id", defaultRouteState, []string{"ambiguous_route_policy_use_route_id"}
+	}
+	if firstHasOverride {
+		return firstPol, "route_override_with_global_inheritance", defaultRouteState, nil
+	}
+	return firstPol, defaultSource, defaultRouteState, nil
 }
 
 func (s *Server) handleV1CacheInspect(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +354,9 @@ func (s *Server) handleV1CacheInspect(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
+		effPol, _, _, extraWarnings := resolveInspectionRoutePolicy(sel, cfg, data.Policy)
+		data.Policy = effPol
+		data.Warnings = append(data.Warnings, extraWarnings...)
 		b, e := json.Marshal(data)
 		if e != nil {
 			fail(adminapi.CodeStorageUnavailable, "inspection metadata could not be encoded")
@@ -224,20 +414,8 @@ func (s *Server) handleV1CacheInspect(w http.ResponseWriter, r *http.Request) {
 			change = "observed_change_since_capture"
 		}
 	}
-	resp := adminapi.CacheInspectResponse{ConcurrentChange: change, APIVersion: adminapi.APIVersion, Selector: fromCacheSelector(sel.RedactedSummary()), Inspection: data, ExpiresAt: adminapi.Timestamp(snap.expires), Consistency: "bounded_metadata_capture_not_global_snapshot", PolicySource: "global_inherited_origin_precedence_route_overrides_unsupported", RouteCacheState: "host_scope_may_include_disabled_routes", AuthorityState: s.v1AuthorityState()}
-	if sel.RouteID != "" {
-		for _, srv := range cfg.Servers {
-			for _, loc := range srv.Locations {
-				if loc.RouteID != nil && *loc.RouteID == sel.RouteID {
-					if loc.Cache {
-						resp.RouteCacheState = "enabled"
-					} else {
-						resp.RouteCacheState = "disabled_retained_entries_may_exist"
-					}
-				}
-			}
-		}
-	}
+	_, policySource, routeCacheState, _ := resolveInspectionRoutePolicy(sel, cfg, data.Policy)
+	resp := adminapi.CacheInspectResponse{ConcurrentChange: change, APIVersion: adminapi.APIVersion, Selector: fromCacheSelector(sel.RedactedSummary()), Inspection: data, ExpiresAt: adminapi.Timestamp(snap.expires), Consistency: "bounded_metadata_capture_not_global_snapshot", PolicySource: policySource, RouteCacheState: routeCacheState, AuthorityState: s.v1AuthorityState()}
 	// page_size is an upper bound. Wide representations must remain usable by
 	// the shared client without raising its response safety limit. Include the
 	// cursor and complete envelope when measuring the actual encoded response.

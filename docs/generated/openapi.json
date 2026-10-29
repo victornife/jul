@@ -5248,6 +5248,15 @@
               "policy": {
                 "type": "object",
                 "properties": {
+                  "bypass_any_cookie": {
+                    "type": "boolean"
+                  },
+                  "bypass_cookies": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "default_ttl_seconds": {
                     "type": "number"
                   },
@@ -5260,6 +5269,9 @@
                   "max_entry_bytes": {
                     "type": "integer",
                     "format": "int64"
+                  },
+                  "max_ttl_seconds": {
+                    "type": "number"
                   },
                   "range_enabled": {
                     "type": "boolean"
@@ -8153,6 +8165,36 @@
                   ],
                   "additionalProperties": false
                 },
+                "cache_policy": {
+                  "type": "object",
+                  "properties": {
+                    "bypass_any_cookie": {
+                      "type": "boolean"
+                    },
+                    "bypass_cookies": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "cache": {
+                      "type": "boolean"
+                    },
+                    "default_ttl": {
+                      "type": "string"
+                    },
+                    "max_ttl": {
+                      "type": "string"
+                    },
+                    "stale_if_error": {
+                      "type": "string"
+                    },
+                    "stale_while_revalidate": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
                 "client_address": {
                   "type": "object",
                   "properties": {
@@ -10196,6 +10238,9 @@
           "cache": {
             "type": "boolean"
           },
+          "cache_policy": {
+            "$ref": "#/components/schemas/RouteCachePolicy"
+          },
           "methods": {
             "type": "array",
             "items": {
@@ -10244,6 +10289,42 @@
           "waf",
           "withdrawn"
         ],
+        "additionalProperties": false
+      },
+      "RouteCachePolicy": {
+        "type": "object",
+        "properties": {
+          "bypass_any_cookie": {
+            "type": "boolean"
+          },
+          "bypass_cookies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default_ttl": {
+            "type": "string"
+          },
+          "effective_default_ttl": {
+            "type": "string"
+          },
+          "effective_stale_if_error": {
+            "type": "string"
+          },
+          "effective_stale_while_revalidate": {
+            "type": "string"
+          },
+          "max_ttl": {
+            "type": "string"
+          },
+          "stale_if_error": {
+            "type": "string"
+          },
+          "stale_while_revalidate": {
+            "type": "string"
+          }
+        },
         "additionalProperties": false
       },
       "RouteResponse": {

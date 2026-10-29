@@ -372,7 +372,7 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 	rWithSpec := withRangeSpec(r, spec)
 	k := key(rWithSpec)
 	now := c.clock()
-	effKey, served := c.serveCachedIfReusable(w, rWithSpec, next, k, reqPolicy, now, span)
+	effKey, served := c.serveCachedIfReusableWithPolicy(w, rWithSpec, next, k, reqPolicy, pol, now, span)
 	if served {
 		return
 	}
@@ -392,10 +392,10 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 }
 
 func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.Request, next http.Handler, base, effKey string, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span, allowVariantRetry bool) {
-	fk := fillLockKey(base, effKey)
+	fk := fillLockKeyForPolicy(base, effKey, pol)
 	call, leader := c.beginFill(fk)
 	if leader {
-		if _, served := c.serveCachedIfReusable(w, rWithSpec, next, base, reqPolicy, c.clock(), span); served {
+		if _, served := c.serveCachedIfReusableWithPolicy(w, rWithSpec, next, base, reqPolicy, pol, c.clock(), span); served {
 			c.endFill(fk, call)
 			call.finish(true)
 			return
@@ -462,7 +462,7 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 		return
 	}
 
-	latestEffKey, served := c.serveCachedIfReusable(w, rWithSpec, next, base, reqPolicy, c.clock(), span)
+	latestEffKey, served := c.serveCachedIfReusableWithPolicy(w, rWithSpec, next, base, reqPolicy, pol, c.clock(), span)
 	if served {
 		c.observeFillLock(fillOutcomeReused)
 		return
@@ -470,7 +470,7 @@ func (c *Cache) rangeFillOrWait(w http.ResponseWriter, origReq, rWithSpec *http.
 
 	c.recordDecision(origReq, "fill_lock_not_reusable")
 	c.observeFillLock(fillOutcomeNotReusable)
-	if allowVariantRetry && latestEffKey != base && fillLockKey(base, latestEffKey) != fk {
+	if allowVariantRetry && latestEffKey != base && fillLockKeyForPolicy(base, latestEffKey, pol) != fk {
 		c.rangeFillOrWait(w, origReq, rWithSpec, next, base, latestEffKey, reqPolicy, pol, span, false)
 		return
 	}
@@ -554,7 +554,7 @@ func (c *Cache) performRangeFill(origReq *http.Request, next http.Handler, base 
 
 	now := c.clock()
 	e := c.buildEntryFromCapture(fillReq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-	if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(base, fillReq, e, rec.diskStream, startGen, true) {
+	if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithPolicy(base, fillReq, e, rec.diskStream, pol, startGen, true) {
 		return nil
 	}
 	return e

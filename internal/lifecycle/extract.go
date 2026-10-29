@@ -566,6 +566,26 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 				return locs
 			})
 		}, true
+	case "servers.*.locations.*.cache_policy.bypass_cookies":
+		return func(cfg *config.Config) any {
+			return perServer(cfg, func(s *config.ServerConfig) any {
+				locs := make(map[string]any, len(s.Locations))
+				for j := range s.Locations {
+					l := &s.Locations[j]
+					if l.CachePolicy == nil || len(l.CachePolicy.BypassCookies) == 0 {
+						locs[locationKey(l)] = []string(nil)
+						continue
+					}
+					out := make([]string, len(l.CachePolicy.BypassCookies))
+					for k, c := range l.CachePolicy.BypassCookies {
+						out[k] = strings.ToLower(strings.TrimSpace(c))
+					}
+					sort.Strings(out)
+					locs[locationKey(l)] = out
+				}
+				return locs
+			})
+		}, true
 	}
 	return nil, false
 }

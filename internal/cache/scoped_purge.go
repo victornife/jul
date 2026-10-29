@@ -578,6 +578,7 @@ func (c *Cache) indexKeyEntryLocked(st *keyGenState, e *Entry) {
 	st.expiresAt = e.ExpiresAt
 	st.staleUntil = e.StaleUntil
 	st.varyFields = append([]string(nil), e.Vary...)
+	st.routeScope = e.RouteScope
 	st.indexed = true
 
 	if c.byHost == nil {
@@ -791,6 +792,35 @@ func (c *Cache) refreshBaseTagsLocked(host, baseKey string) {
 	}
 }
 
+func (c *Cache) isPolicyPublicationFencedLocked(startGen uint64, e *Entry) bool {
+	if e == nil || e.IsVaryStub || e.Evidence == nil {
+		return false
+	}
+	if e.RouteScope != "" {
+		floor := c.routePolicyFloor[e.RouteScope]
+		if c.globalPolicyFloorGen > floor {
+			floor = c.globalPolicyFloorGen
+		}
+		if floor > 0 && startGen <= floor {
+			curDigest, active := c.routePolicyDigest[e.RouteScope]
+			if !active || e.RouteConfigDigest != curDigest {
+				return true
+			}
+			if c.globalPolicyFloorGen > 0 && startGen <= c.globalPolicyFloorGen {
+				rc := c.routeConfigs[e.RouteScope]
+				if e.Evidence.PolicyID != policyID(c.effectivePolicy(&rc)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	if c.globalPolicyFloorGen > 0 && startGen <= c.globalPolicyFloorGen {
+		return e.Evidence.PolicyID != policyID(c.Policy())
+	}
+	return false
+}
+
 func (c *Cache) commitPolicyAndSyncTags(newPol CachePolicy) {
 	if c == nil {
 		return
@@ -798,6 +828,9 @@ func (c *Cache) commitPolicyAndSyncTags(newPol CachePolicy) {
 	var retireBases []string
 	c.genMu.Lock()
 	prevPol := c.Policy()
+	if policyID(prevPol) != policyID(newPol) {
+		c.globalPolicyFloorGen = c.genSeq.Add(1)
+	}
 	c.policy.Store(&newPol)
 	if newPol.TagHeaderCount == 0 {
 		c.tagIndex = nil
@@ -847,6 +880,19 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 	if c.keyGen == nil {
 		c.keyGen = make(map[string]*keyGenState)
 	}
+	if c.routeEpoch == nil {
+		c.routeEpoch = make(map[string]uint64)
+	}
+	if c.routePolicyDigest == nil {
+		c.routePolicyDigest = make(map[string][16]byte)
+	}
+	if c.disk != nil {
+		for scope, ep := range c.disk.loadRouteEpochs() {
+			if ep > c.routeEpoch[scope] {
+				c.routeEpoch[scope] = ep
+			}
+		}
+	}
 	pol := c.Policy()
 	diskSeen := make(map[string]struct{}, len(items))
 	seenRetire := make(map[string]struct{})
@@ -876,6 +922,14 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 		} else if it.Gen > st.gen {
 			st.gen = it.Gen
 		}
+		if it.RouteScope != "" {
+			if it.RouteEpoch > c.routeEpoch[it.RouteScope] {
+				c.routeEpoch[it.RouteScope] = it.RouteEpoch
+			}
+			if _, exists := c.routePolicyDigest[it.RouteScope]; !exists {
+				c.routePolicyDigest[it.RouteScope] = it.RouteConfigDigest
+			}
+		}
 		st.inDisk = true
 		st.diskBytes = it.FileSize
 		e := &Entry{
@@ -887,6 +941,7 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 			ExpiresAt:              it.ExpiresAt,
 			StaleUntil:             it.StaleUntil,
 			Vary:                   it.VaryFields,
+			RouteScope:             it.RouteScope,
 			tagPolicyTracked:       it.TagPolicyTracked,
 			ingestedTagHeaders:     it.TagHeaders,
 			ingestedTagHeaderCount: it.TagHeaderCount,
@@ -913,6 +968,13 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 				}
 			}
 		}
+	}
+	if len(c.routeEpoch) > 0 {
+		epochSnap := make(map[string]uint64, len(c.routeEpoch))
+		for k, v := range c.routeEpoch {
+			epochSnap[k] = v
+		}
+		c.routeEpochsSnap.Store(&epochSnap)
 	}
 	c.genMu.Unlock()
 	for _, rk := range retireKeys {
@@ -1264,15 +1326,43 @@ func (c *Cache) previewScope(ctx context.Context, sel NormalizedSelector, opts P
 			continue
 		}
 		if details {
+			if sel.inspectionRouteScope != "" {
+				filterRouteKeys := func(in []string) []string {
+					var kept []string
+					for _, k := range in {
+						st := c.keyGen[k]
+						if st == nil || st.isVaryStub {
+							continue
+						}
+						if st.routeScope != "" && st.routeScope != sel.inspectionRouteScope {
+							continue
+						}
+						kept = append(kept, k)
+					}
+					return kept
+				}
+				memKeys = filterRouteKeys(memKeys)
+				diskKeys = filterRouteKeys(diskKeys)
+				if len(memKeys) == 0 && len(diskKeys) == 0 {
+					continue
+				}
+			}
 			seen := map[string]bool{}
+			var repBytes int64
 			for _, ks := range [][]string{memKeys, diskKeys} {
 				for _, k := range ks {
 					if st := c.keyGen[k]; st != nil && !st.isVaryStub {
-						seen[k] = true
+						if !seen[k] {
+							seen[k] = true
+							repBytes += st.bodyBytes
+						}
 					}
 				}
 			}
 			reps = len(seen)
+			if sel.inspectionRouteScope != "" {
+				bodyB = repBytes
+			}
 		}
 		out.MatchedRepresentations += reps
 		out.MemoryEntries += len(memKeys)
@@ -1356,7 +1446,7 @@ func (c *Cache) previewScope(ctx context.Context, sel NormalizedSelector, opts P
 				StaleUntil:      agg.staleUntil,
 			}
 			if details {
-				c.inspectDetailsLocked(&sm, agg.bases, now)
+				c.inspectDetailsLocked(&sm, agg.bases, sel.inspectionRouteScope, now)
 			}
 			out.Samples = append(out.Samples, sm)
 		}

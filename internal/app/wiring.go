@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 
 	"jul/internal/auth"
+	"jul/internal/cache"
 	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/middleware"
@@ -104,6 +105,13 @@ func AuthScope(srv config.ServerConfig, loc config.LocationConfig) string {
 // pre-built Firewall back to the location during router construction.
 func WAFScope(srv config.ServerConfig, loc config.LocationConfig) string {
 	return LocationScope(srv, loc)
+}
+
+// CacheRouteScope builds the deterministic cache route-ownership identity for
+// a location (#623): it combines LocationScope with the optional durable
+// route_id while remaining independent of backend targets (which #624 owns).
+func CacheRouteScope(srv config.ServerConfig, loc config.LocationConfig) string {
+	return cache.RouteScope(srv, loc)
 }
 
 // EffectiveWAF resolves the WAF policy that applies to a location: its own [waf]

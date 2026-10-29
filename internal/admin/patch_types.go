@@ -193,6 +193,24 @@ type patchRequest struct {
 	// (ADR 0026 Decision 2, spec §4.5). Requires a literal route_id on the
 	// target route (editing never mints a route_id).
 	Sharing *locationSharingPatch `json:"sharing,omitempty"`
+
+	// location_cache_policy_set payload: the route's [cache_policy] block and
+	// optional cache enablement toggle (#623 / CACHE-OPS-03).
+	CachePolicy *locationCachePolicyPatch `json:"cache_policy,omitempty"`
+}
+
+// locationCachePolicyPatch carries a location's [cache_policy] block and
+// optional Cache boolean for location_cache_policy_set. Nil duration pointers
+// inherit from [cache] (or apply no route cap for max_ttl); an explicit "0s"
+// disables that fallback/stale window (or caps fresh lifetime to zero).
+type locationCachePolicyPatch struct {
+	Cache                *bool    `json:"cache,omitempty"`
+	DefaultTTL           *string  `json:"default_ttl,omitempty"`
+	MaxTTL               *string  `json:"max_ttl,omitempty"`
+	StaleWhileRevalidate *string  `json:"stale_while_revalidate,omitempty"`
+	StaleIfError         *string  `json:"stale_if_error,omitempty"`
+	BypassCookies        []string `json:"bypass_cookies,omitempty"`
+	BypassAnyCookie      bool     `json:"bypass_any_cookie,omitempty"`
 }
 
 // locationSharingPatch carries the location's [sharing] block for

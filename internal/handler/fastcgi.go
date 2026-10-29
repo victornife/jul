@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -582,15 +583,72 @@ func buildCGIParams(loc config.LocationConfig, r *http.Request) map[string]strin
 	return p
 }
 
+var cgiIdentityPrefixes = []string{"HTTP_X_FORWARDED_", "HTTP_X_SSL_CLIENT_", "HTTP_SSL_CLIENT_"}
+var cgiIdentityFields = []string{"HTTP_FORWARDED", "HTTP_X_REAL_IP", "HTTP_CLIENT_CERT", "HTTP_CLIENT_CERT_CHAIN", "HTTP_X_FORWARDED_CLIENT_CERT", "HTTP_X_CLIENT_CERT", "HTTP_X_CLIENT_VERIFY"}
+
+// CGITransformedRequestHeaders describes HTTP request headers whose CGI
+// parameters are generated, removed, or overridden by buildCGIParams and
+// sanitizeCGIIdentityParams (#672).
+func CGITransformedRequestHeaders(loc config.LocationConfig, limit int) (names, prefixes []string, complete bool) {
+	if limit <= 0 {
+		return nil, nil, false
+	}
+	add := func(param string, dst *[]string) bool {
+		if !strings.HasPrefix(param, "HTTP_") {
+			return true
+		}
+		if len(names)+len(prefixes) >= limit {
+			return false
+		}
+		*dst = append(*dst, strings.ReplaceAll(strings.TrimPrefix(param, "HTTP_"), "_", "-"))
+		return true
+	}
+	for _, param := range cgiIdentityFields {
+		if !add(param, &names) {
+			return names, prefixes, false
+		}
+	}
+	for _, param := range cgiIdentityPrefixes {
+		if !add(param, &prefixes) {
+			return names, prefixes, false
+		}
+	}
+	for _, param := range []string{"HTTP_HOST", "HTTP_PROXY", "HTTP_CONTENT_LENGTH"} {
+		if !add(param, &names) {
+			return names, prefixes, false
+		}
+	}
+	if len(loc.FastCGIParams) > 0 {
+		keys := make([]string, 0, len(loc.FastCGIParams))
+		for k := range loc.FastCGIParams {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, param := range keys {
+			upper := strings.ToUpper(strings.TrimSpace(param))
+			if upper == "CONTENT_TYPE" || upper == "CONTENT_LENGTH" {
+				upper = "HTTP_" + upper
+			}
+			if !add(upper, &names) {
+				return names, prefixes, false
+			}
+		}
+	}
+	return names, prefixes, true
+}
+
 // CGI backends commonly trust HTTP_* identity assertions. Rebuild those
 // fields from the listener's canonical view, never from client headers.
 func sanitizeCGIIdentityParams(p map[string]string, r *http.Request) {
 	for name := range p {
-		if strings.HasPrefix(name, "HTTP_X_FORWARDED_") || strings.HasPrefix(name, "HTTP_X_SSL_CLIENT_") || strings.HasPrefix(name, "HTTP_SSL_CLIENT_") {
-			delete(p, name)
+		for _, prefix := range cgiIdentityPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				delete(p, name)
+				break
+			}
 		}
 	}
-	for _, name := range []string{"HTTP_FORWARDED", "HTTP_X_REAL_IP", "HTTP_CLIENT_CERT", "HTTP_CLIENT_CERT_CHAIN", "HTTP_X_FORWARDED_CLIENT_CERT", "HTTP_X_CLIENT_CERT", "HTTP_X_CLIENT_VERIFY"} {
+	for _, name := range cgiIdentityFields {
 		delete(p, name)
 	}
 	client, peer := forwardedAddrs(r)

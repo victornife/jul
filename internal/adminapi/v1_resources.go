@@ -49,14 +49,29 @@ type Route struct {
 	Upstream string   `json:"upstream,omitempty"`
 	Methods  []string `json:"methods,omitempty"`
 
-	TLS               bool          `json:"tls"`
-	Auth              bool          `json:"auth"`
-	RequireClientCert bool          `json:"require_client_cert"`
-	Withdrawn         bool          `json:"withdrawn"`
-	Cache             bool          `json:"cache"`
-	RateLimit         bool          `json:"rate_limit"`
-	WAF               bool          `json:"waf"`
-	Sharing           *RouteSharing `json:"sharing,omitempty"`
+	TLS               bool              `json:"tls"`
+	Auth              bool              `json:"auth"`
+	RequireClientCert bool              `json:"require_client_cert"`
+	Withdrawn         bool              `json:"withdrawn"`
+	Cache             bool              `json:"cache"`
+	CachePolicy       *RouteCachePolicy `json:"cache_policy,omitempty"`
+	RateLimit         bool              `json:"rate_limit"`
+	WAF               bool              `json:"waf"`
+	Sharing           *RouteSharing     `json:"sharing,omitempty"`
+}
+
+// RouteCachePolicy is the optional route-scoped response-cache policy on a
+// location ([servers.locations.cache_policy], #623 / CACHE-OPS-03).
+type RouteCachePolicy struct {
+	DefaultTTL           *string  `json:"default_ttl,omitempty"`
+	MaxTTL               *string  `json:"max_ttl,omitempty"`
+	StaleWhileRevalidate *string  `json:"stale_while_revalidate,omitempty"`
+	StaleIfError         *string  `json:"stale_if_error,omitempty"`
+	BypassCookies        []string `json:"bypass_cookies,omitempty"`
+	BypassAnyCookie      bool     `json:"bypass_any_cookie,omitempty"`
+	EffectiveDefaultTTL  string   `json:"effective_default_ttl,omitempty"`
+	EffectiveSWR         string   `json:"effective_stale_while_revalidate,omitempty"`
+	EffectiveSIE         string   `json:"effective_stale_if_error,omitempty"`
 }
 
 // RouteSharing is the optional operator-declared sharing posture on a route

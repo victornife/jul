@@ -46,6 +46,20 @@ type CachePolicy struct {
 	// StripTagHeaders removes configured TagHeaders from downstream responses
 	// and stored headers (defaults to true when TagHeaderCount > 0).
 	StripTagHeaders bool
+
+	// Route-scoped policy overrides and isolation (#623 / #672).
+	RouteScope         string
+	RouteEpoch         uint64
+	MultiRouteOverlap  bool
+	HasRouteDefaultTTL bool
+	HasMaxTTL          bool
+	MaxTTL             time.Duration
+	HasRouteSWR        bool
+	HasRouteSIE        bool
+	BypassAnyCookie    bool
+	BypassCookieCount  int
+	BypassCookies      [config.MaxBypassCookies]string
+	varyGuard          *varyTransformPolicy
 }
 
 // TagHeaderSlice returns the active canonicalized origin tag header names.

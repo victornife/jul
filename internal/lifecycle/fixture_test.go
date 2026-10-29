@@ -206,7 +206,15 @@ func fullConfig() *config.Config {
 				}},
 				Headers: map[string]string{"X-Frame-Options": "DENY"},
 
-				Cache:             true,
+				Cache: true,
+				CachePolicy: &config.LocationCachePolicy{
+					DefaultTTL:           durationPtr(30 * time.Second),
+					MaxTTL:               durationPtr(5 * time.Minute),
+					StaleWhileRevalidate: durationPtr(15 * time.Second),
+					StaleIfError:         durationPtr(time.Minute),
+					BypassCookies:        []string{"session_id"},
+					BypassAnyCookie:      true,
+				},
 				ClientMaxBodySize: config.Size(2048),
 				RequireClientCert: true,
 

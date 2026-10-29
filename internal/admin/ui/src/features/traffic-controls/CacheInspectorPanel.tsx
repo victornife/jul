@@ -206,6 +206,26 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
                 Policy: {data.policy_source}. {data.route_cache_state}. Retained entries can reflect
                 prior policy after reload.
               </p>
+              <p>
+                Effective policy: default TTL {data.inspection.policy.default_ttl_seconds}s
+                {data.inspection.policy.max_ttl_seconds !== undefined
+                  ? `, max TTL cap ${String(data.inspection.policy.max_ttl_seconds)}s`
+                  : ""}
+                , SWR {data.inspection.policy.swr_seconds}s, stale-if-error{" "}
+                {data.inspection.policy.sie_seconds}s.
+                {data.inspection.policy.bypass_any_cookie
+                  ? " Cookie bypass: any cookie."
+                  : data.inspection.policy.bypass_cookies &&
+                      data.inspection.policy.bypass_cookies.length > 0
+                    ? ` Cookie bypass: ${data.inspection.policy.bypass_cookies.join(", ")}.`
+                    : ""}
+              </p>
+              {data.inspection.warnings.includes("ambiguous_route_policy_use_route_id") && (
+                <p role="status">
+                  Multiple routes with distinct cache policies or predicates match this host/path
+                  scope. Inspect by route_id to view an exact route-scoped effective policy.
+                </p>
+              )}
               <ul>
                 {data.inspection.resources.map((r) => (
                   <li key={r.resource_id}>

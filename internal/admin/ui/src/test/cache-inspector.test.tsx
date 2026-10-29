@@ -36,12 +36,14 @@ function page(): CacheInspectionPage {
       disk_occupancy: null,
       policy: {
         default_ttl_seconds: 60,
+        max_ttl_seconds: 120,
         swr_seconds: 10,
         sie_seconds: 5,
         max_entry_bytes: 1000,
         range_enabled: false,
         fill_lock_enabled: false,
         tag_ingestion_enabled: true,
+        bypass_cookies: ["session_id"],
       },
       resources: [
         {

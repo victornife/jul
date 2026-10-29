@@ -62,6 +62,7 @@ var schemaTypes = map[string]reflect.Type{
 	"RoutesResponse":    reflect.TypeFor[RoutesResponse](),
 	"RouteResponse":     reflect.TypeFor[RouteResponse](),
 	"Route":             reflect.TypeFor[Route](),
+	"RouteCachePolicy":  reflect.TypeFor[RouteCachePolicy](),
 	"RouteSharing":      reflect.TypeFor[RouteSharing](),
 	"RouteSelector":     reflect.TypeFor[RouteSelector](),
 	"UpstreamsResponse": reflect.TypeFor[UpstreamsResponse](),

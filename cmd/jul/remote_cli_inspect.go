@@ -70,6 +70,14 @@ func cmdRemoteCacheInspect(args []string) int {
 	}
 	d := v.Inspection
 	fmt.Fprintf(stdout, "cache inspection: %s; resources=%d representations=%d accuracy=%s evidence=%s\n", d.State, d.MatchedResources, d.MatchedRepresentations, d.CountAccuracy, d.EvidenceState)
+	if v.PolicySource != "" || v.RouteCacheState != "" {
+		maxTTL := "none"
+		if d.Policy.MaxTTLSeconds != nil {
+			maxTTL = fmt.Sprintf("%.0fs", *d.Policy.MaxTTLSeconds)
+		}
+		fmt.Fprintf(stdout, "policy: source=%s route_state=%s default_ttl=%.0fs max_ttl=%s swr=%.0fs sie=%.0fs bypass_any_cookie=%t bypass_cookies=%d\n",
+			v.PolicySource, v.RouteCacheState, d.Policy.DefaultTTLSeconds, maxTTL, d.Policy.SWRSeconds, d.Policy.SIESeconds, d.Policy.BypassAnyCookie, len(d.Policy.BypassCookies))
+	}
 	for _, r := range d.Resources {
 		fmt.Fprintf(stdout, "%s%s representations=%d state=%s bytes=%d\n", r.Host, r.Path, r.Representations, r.FreshnessState, r.BodyBytes)
 	}

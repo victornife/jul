@@ -80,12 +80,23 @@ tag_headers            = ["Cache-Tag", "Surrogate-Key"] # opt-in trusted origin 
 strip_tag_headers      = true     # strip configured tag_headers from client responses (default true when tag_headers is set)
 ```
 
-Per-location opt-in is still required:
+Per-location opt-in is still required, and each location may optionally override
+freshness, caps, stale windows, and request-cookie bypass via
+`[servers.locations.cache_policy]` ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
 
 ```toml
 [[servers.locations]]
-path  = "/static/"
-cache = true
+route_id = "api-public"
+match    = { type = "prefix", path = "/api/catalog" }
+proxy_pass = "http://catalog"
+cache    = true
+
+  [servers.locations.cache_policy]
+  default_ttl            = "0s"     # require explicit origin freshness on this route
+  max_ttl                = "2m"     # cap origin s-maxage / max-age / Expires to 2m
+  stale_while_revalidate = "30s"
+  stale_if_error         = "5m"
+  bypass_cookies         = ["session_id", "__Host-auth"] # or bypass_any_cookie = true
 ```
 
 ## Cache key and Vary
@@ -418,6 +429,70 @@ made obsolete (RFC 9111 §4.4).
   removed, together with **every `Vary` variant** they own.
 - **Cross-origin targets are never invalidated.** A `Location` naming another
   host is skipped, as is a value that does not parse, is opaque (`mailto:`), uses
+
+### Route-scoped cache policy, cookie bypass, and Vary guards (#623 / #672)
+
+Each cache-enabled location (`cache = true`) inherits global `[cache]` settings
+by default and may declare `[servers.locations.cache_policy]` to tune route
+freshness, cap upstream TTLs, or bypass caching when request cookies are
+present ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
+
+| Field | Type | Default (omitted) | Explicit `"0s"` / `false` |
+| --- | --- | --- | --- |
+| `default_ttl` | duration | Inherits `[cache].default_ttl` | `"0s"` disables fallback caching when the origin omits explicit freshness (`s-maxage`, `max-age`, `Expires`) |
+| `max_ttl` | duration | None (no route cap) | `"0s"` caps fresh lifetime to zero (disabling fresh storage on the route) |
+| `stale_while_revalidate` | duration | Inherits `[cache].stale_while_revalidate` | `"0s"` disables fallback SWR when the origin omits `stale-while-revalidate` |
+| `stale_if_error` | duration | Inherits `[cache].stale_if_error` | `"0s"` disables fallback `stale-if-error` when the origin omits `stale-if-error` |
+| `bypass_cookies` | list of 1..32 cookie names | `[]` | Case-insensitive RFC 6265 cookie-name tokens (`<= 128` bytes each); mutually exclusive with `bypass_any_cookie = true` |
+| `bypass_any_cookie` | bool | `false` | When `true`, any request carrying a `Cookie` header bypasses lookup and storage |
+
+#### Precedence model
+
+1. **Explicit origin exclusion always wins**: `Cache-Control: no-store`,
+   `private`, `Set-Cookie`, `Vary: *`, `Vary: Cookie`, `Vary: Authorization`,
+   and uncacheable `Authorization` responses are never stored regardless of
+   route `default_ttl` or `max_ttl`.
+2. **Request cookie bypass**: when `bypass_any_cookie = true` or a request
+   `Cookie` header contains a cookie name in `bypass_cookies`, Jul skips both
+   cache lookup and storage (`X-Cache: BYPASS`, decision `cookie_bypass`).
+   Cookie values are never inspected, logged, or included in cache keys. If a
+   request's `Cookie` headers are malformed or exceed `16` lines, `8192` bytes,
+   or `128` pairs while cookie bypass is configured, Jul fails closed and
+   bypasses the cache (`cookie_bypass_malformed`).
+3. **Base freshness**: origin `CDN-Cache-Control` (when valid) or
+   `Cache-Control: s-maxage` -> `max-age` -> `Expires` -> route `default_ttl`
+   (if set) -> global `[cache].default_ttl`.
+4. **Route freshness cap (`max_ttl`)**: when `max_ttl` is set on the route,
+   `effective_ttl = min(base_ttl, max_ttl)`. A route `max_ttl` caps longer
+   origin or fallback lifetimes from above and never extends a shorter origin
+   lifetime.
+5. **Overlapping route isolation and hot reload**: routes sharing a hostname and
+   URL (for example via method, header, query, or cookie route predicates)
+   isolate their cached representations by route scope without evicting sibling
+   routes' variants. All `[servers.locations.cache_policy]` fields are
+   `hot_reload`: tightening `max_ttl`, `default_ttl`, `stale_while_revalidate`,
+   `stale_if_error`, or cookie bypass takes effect immediately on stored memory
+   and disk entries and fences in-flight fills started under the prior policy.
+
+#### Sensitive and proxy/CGI-transformed `Vary` guards (#672)
+
+- **Sensitive `Vary` rejection (`vary_sensitive_rejected`)**: responses carrying
+  `Vary: Cookie` or `Vary: Authorization` (case-insensitively, including on
+  `304 Not Modified` merges, `5xx` `stale-if-error` checks, Range fills, and
+  legacy on-disk entries across restarts) are never stored or reused in the
+  shared cache.
+- **Proxy and CGI transformed-header `Vary` rejection
+  (`vary_proxy_rewrite_rejected`, `vary_cgi_rewrite_rejected`)**: when an HTTP
+  reverse-proxy or FastCGI/uWSGI route rewrites, synthesizes, or strips a
+  request header before forwarding to the upstream (including `Forwarded`,
+  `X-Forwarded-*`, `X-Real-IP`, hop-by-hop headers, per-request `Connection`
+  nominations, `proxy_headers` `set_*`/`remove`, `fastcgi_params` `HTTP_*`
+  overrides, or CGI hyphen/underscore aliases such as `X-Custom` vs
+  `X_Custom`), a response that varies on that header cannot be matched safely
+  against the downstream client's original request header and is excluded from
+  shared cache storage and reuse. Standard content-negotiation headers
+  (`Accept-Encoding`, `Accept-Language`, `Accept`, `User-Agent`) remain
+  cacheable as normal.
   a non-HTTP scheme, or spells the authority differently.
 
 A user-controlled header cannot reach the filesystem through this path: an

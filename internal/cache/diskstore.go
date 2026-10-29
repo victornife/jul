@@ -68,6 +68,11 @@ type diskEntryMeta struct {
 	Tags               []string
 	TagPolicyTracked   bool
 	TagHeaders         []string
+	RouteScope         string
+	RouteEpoch         uint64
+	BypassDigest       [16]byte
+	RouteConfigDigest  [16]byte
+	RouteVary          map[string][]string
 }
 
 func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLen int64) ([]byte, error) {
@@ -99,6 +104,11 @@ func encodeDiskTrailerAndMetaWithKeyGen(key string, gen uint64, e *Entry, bodyLe
 		Tags:               e.Tags,
 		TagPolicyTracked:   e.tagPolicyTracked,
 		TagHeaders:         tagHeaders,
+		RouteScope:         e.RouteScope,
+		RouteEpoch:         e.RouteEpoch,
+		BypassDigest:       e.BypassDigest,
+		RouteConfigDigest:  e.RouteConfigDigest,
+		RouteVary:          e.RouteVary,
 	}
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(&meta); err != nil {
@@ -220,6 +230,11 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 		ingestedTagHeaders:     ingestedHeaders,
 		ingestedTagHeaderCount: len(meta.TagHeaders),
 		tagPolicyTracked:       meta.TagPolicyTracked,
+		RouteScope:             meta.RouteScope,
+		RouteEpoch:             meta.RouteEpoch,
+		BypassDigest:           meta.BypassDigest,
+		RouteConfigDigest:      meta.RouteConfigDigest,
+		RouteVary:              meta.RouteVary,
 	}, meta.Key, meta.Gen, bodyLen, fileSize, nil
 }
 
@@ -236,6 +251,7 @@ const (
 	diskTombstoneMagic  = "JULTOMB1"
 	diskPurgeLedgerFile = ".jul-cache-purge-ledger"
 	diskHighWaterFile   = ".jul-cache-gen"
+	diskRouteEpochsFile = ".jul-cache-route-epochs"
 )
 
 type diskStore struct {
@@ -301,43 +317,49 @@ type diskStore struct {
 const diskWriteFailureLogInterval = 10 * time.Second
 
 type diskItem struct {
-	hash             string
-	key              string
-	gen              uint64
-	size             int64
-	fileSize         int64
-	bodyLen          int64
-	metaLen          int64
-	isVaryStub       bool
-	variants         []string
-	tags             []string
-	tagPolicyTracked bool
-	tagHeaders       [8]string
-	tagHeaderCount   int
-	createdAt        time.Time
-	evidence         *publicationEvidence
-	expiresAt        time.Time
-	staleUntil       time.Time
-	varyFields       []string
-	blob             *diskBlob
+	hash              string
+	key               string
+	gen               uint64
+	size              int64
+	fileSize          int64
+	bodyLen           int64
+	metaLen           int64
+	isVaryStub        bool
+	variants          []string
+	tags              []string
+	tagPolicyTracked  bool
+	tagHeaders        [8]string
+	tagHeaderCount    int
+	createdAt         time.Time
+	evidence          *publicationEvidence
+	expiresAt         time.Time
+	staleUntil        time.Time
+	varyFields        []string
+	routeScope        string
+	routeEpoch        uint64
+	routeConfigDigest [16]byte
+	blob              *diskBlob
 }
 
 type diskItemSnapshot struct {
-	Key              string
-	Gen              uint64
-	FileSize         int64
-	BodyLen          int64
-	IsVaryStub       bool
-	Variants         []string
-	Tags             []string
-	TagPolicyTracked bool
-	TagHeaders       [8]string
-	TagHeaderCount   int
-	CreatedAt        time.Time
-	Evidence         *publicationEvidence
-	ExpiresAt        time.Time
-	StaleUntil       time.Time
-	VaryFields       []string
+	Key               string
+	Gen               uint64
+	FileSize          int64
+	BodyLen           int64
+	IsVaryStub        bool
+	Variants          []string
+	Tags              []string
+	TagPolicyTracked  bool
+	TagHeaders        [8]string
+	TagHeaderCount    int
+	CreatedAt         time.Time
+	Evidence          *publicationEvidence
+	ExpiresAt         time.Time
+	StaleUntil        time.Time
+	VaryFields        []string
+	RouteScope        string
+	RouteEpoch        uint64
+	RouteConfigDigest [16]byte
 }
 
 func (it *diskItem) effectiveSize(maxBytes int64) int64 {
@@ -602,7 +624,7 @@ func (d *diskStore) recordTombstoneLocked(hash string, fileSize int64) {
 			d.unrecoverableInvalidation.Store(true)
 			d.recordWriteFailure(tErr)
 			d.log.Error("cache: durable invalidation failed (unlink, tombstone manifest, and truncate all failed)",
-				"dir", d.dir, "error", tErr)
+				"dir", d.dir, "error", safeDiskError(tErr))
 		}
 		d.recordWriteFailure(err)
 	}
@@ -863,7 +885,9 @@ func isCacheTempFile(name string) bool {
 		strings.HasPrefix(name, diskTombstoneFile+".tmp-") ||
 		strings.HasPrefix(name, "."+diskTombstoneFile+".tmp-") ||
 		strings.HasPrefix(name, diskHighWaterFile+".tmp-") ||
-		strings.HasPrefix(name, "."+diskHighWaterFile+".tmp-") {
+		strings.HasPrefix(name, "."+diskHighWaterFile+".tmp-") ||
+		strings.HasPrefix(name, diskRouteEpochsFile+".tmp-") ||
+		strings.HasPrefix(name, "."+diskRouteEpochsFile+".tmp-") {
 		return true
 	}
 	if strings.HasPrefix(name, ".") {
@@ -911,23 +935,26 @@ func (d *diskStore) rehydrate() {
 		return
 	}
 	type fi struct {
-		hash             string
-		key              string
-		gen              uint64
-		size             int64
-		bodyLen          int64
-		mod              int64
-		isVaryStub       bool
-		variants         []string
-		tags             []string
-		tagPolicyTracked bool
-		tagHeaders       [8]string
-		tagHeaderCount   int
-		createdAt        time.Time
-		evidence         *publicationEvidence
-		expiresAt        time.Time
-		staleUntil       time.Time
-		varyFields       []string
+		hash              string
+		key               string
+		gen               uint64
+		size              int64
+		bodyLen           int64
+		mod               int64
+		isVaryStub        bool
+		variants          []string
+		tags              []string
+		tagPolicyTracked  bool
+		tagHeaders        [8]string
+		tagHeaderCount    int
+		createdAt         time.Time
+		evidence          *publicationEvidence
+		expiresAt         time.Time
+		staleUntil        time.Time
+		varyFields        []string
+		routeScope        string
+		routeEpoch        uint64
+		routeConfigDigest [16]byte
 	}
 	var files []fi
 	var foreign int
@@ -936,11 +963,13 @@ func (d *diskStore) rehydrate() {
 			continue
 		}
 		name := e.Name()
-		if name == diskTombstoneFile || name == diskPurgeLedgerFile || name == diskHighWaterFile {
+		if name == diskTombstoneFile || name == diskPurgeLedgerFile || name == diskHighWaterFile || name == diskRouteEpochsFile {
 			continue
 		}
 		if isCacheTempFile(name) {
-			_ = d.removePath(filepath.Join(d.dir, name))
+			if removeErr := d.removePath(filepath.Join(d.dir, name)); removeErr != nil && !os.IsNotExist(removeErr) {
+				d.recordWriteFailure(removeErr)
+			}
 			continue
 		}
 		if !isCacheFile(name) {
@@ -950,6 +979,8 @@ func (d *diskStore) rehydrate() {
 		if _, isTomb := d.tombstones[name]; isTomb {
 			if err := d.removePath(d.path(name)); err == nil || os.IsNotExist(err) {
 				d.clearTombstoneLocked(name)
+			} else {
+				d.recordWriteFailure(err)
 			}
 			continue
 		}
@@ -960,30 +991,35 @@ func (d *diskStore) rehydrate() {
 		fullPath := d.path(name)
 		entryMeta, entryKey, entryGen, bodyLen, fileSize, err := readDiskEntryMetaWithKeyGen(fullPath)
 		if err != nil || entryKey == "" || hashKey(entryKey) != name {
-			_ = d.removePath(fullPath)
+			if removeErr := d.removePath(fullPath); removeErr != nil && !os.IsNotExist(removeErr) {
+				d.recordWriteFailure(removeErr)
+			}
 			continue
 		}
 		if entryGen > d.highWaterGen {
 			d.highWaterGen = entryGen
 		}
 		files = append(files, fi{
-			hash:             name,
-			key:              entryKey,
-			gen:              entryGen,
-			size:             fileSize,
-			bodyLen:          bodyLen,
-			mod:              info.ModTime().UnixNano(),
-			isVaryStub:       entryMeta.IsVaryStub,
-			variants:         entryMeta.Variants,
-			tags:             entryMeta.Tags,
-			tagPolicyTracked: entryMeta.tagPolicyTracked,
-			tagHeaders:       entryMeta.ingestedTagHeaders,
-			tagHeaderCount:   entryMeta.ingestedTagHeaderCount,
-			createdAt:        entryMeta.CreatedAt,
-			evidence:         entryMeta.Evidence,
-			expiresAt:        entryMeta.ExpiresAt,
-			staleUntil:       entryMeta.StaleUntil,
-			varyFields:       entryMeta.Vary,
+			hash:              name,
+			key:               entryKey,
+			gen:               entryGen,
+			size:              fileSize,
+			bodyLen:           bodyLen,
+			mod:               info.ModTime().UnixNano(),
+			isVaryStub:        entryMeta.IsVaryStub,
+			variants:          entryMeta.Variants,
+			tags:              entryMeta.Tags,
+			tagPolicyTracked:  entryMeta.tagPolicyTracked,
+			tagHeaders:        entryMeta.ingestedTagHeaders,
+			tagHeaderCount:    entryMeta.ingestedTagHeaderCount,
+			createdAt:         entryMeta.CreatedAt,
+			evidence:          entryMeta.Evidence,
+			expiresAt:         entryMeta.ExpiresAt,
+			staleUntil:        entryMeta.StaleUntil,
+			varyFields:        entryMeta.Vary,
+			routeScope:        entryMeta.RouteScope,
+			routeEpoch:        entryMeta.RouteEpoch,
+			routeConfigDigest: entryMeta.RouteConfigDigest,
 		})
 	}
 	if foreign > 0 {
@@ -995,24 +1031,27 @@ func (d *diskStore) rehydrate() {
 	for _, f := range files {
 		blob := d.newBlob(f.hash, d.path(f.hash), f.bodyLen, f.size)
 		it := &diskItem{
-			hash:             f.hash,
-			key:              f.key,
-			gen:              f.gen,
-			fileSize:         f.size,
-			bodyLen:          f.bodyLen,
-			metaLen:          f.size - f.bodyLen,
-			isVaryStub:       f.isVaryStub,
-			variants:         f.variants,
-			tags:             f.tags,
-			tagPolicyTracked: f.tagPolicyTracked,
-			tagHeaders:       f.tagHeaders,
-			tagHeaderCount:   f.tagHeaderCount,
-			createdAt:        f.createdAt,
-			evidence:         f.evidence,
-			expiresAt:        f.expiresAt,
-			staleUntil:       f.staleUntil,
-			varyFields:       f.varyFields,
-			blob:             blob,
+			hash:              f.hash,
+			key:               f.key,
+			gen:               f.gen,
+			fileSize:          f.size,
+			bodyLen:           f.bodyLen,
+			metaLen:           f.size - f.bodyLen,
+			isVaryStub:        f.isVaryStub,
+			variants:          f.variants,
+			tags:              f.tags,
+			tagPolicyTracked:  f.tagPolicyTracked,
+			tagHeaders:        f.tagHeaders,
+			tagHeaderCount:    f.tagHeaderCount,
+			createdAt:         f.createdAt,
+			evidence:          f.evidence,
+			expiresAt:         f.expiresAt,
+			staleUntil:        f.staleUntil,
+			varyFields:        f.varyFields,
+			routeScope:        f.routeScope,
+			routeEpoch:        f.routeEpoch,
+			routeConfigDigest: f.routeConfigDigest,
+			blob:              blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
 		el := d.ll.PushFront(it)
@@ -1039,24 +1078,64 @@ func (d *diskStore) snapshotItemsLocked() []diskItemSnapshot {
 			continue
 		}
 		out = append(out, diskItemSnapshot{
-			Key:              it.key,
-			Gen:              it.gen,
-			FileSize:         it.fileSize,
-			BodyLen:          it.bodyLen,
-			IsVaryStub:       it.isVaryStub,
-			Variants:         append([]string(nil), it.variants...),
-			Tags:             append([]string(nil), it.tags...),
-			TagPolicyTracked: it.tagPolicyTracked,
-			TagHeaders:       it.tagHeaders,
-			TagHeaderCount:   it.tagHeaderCount,
-			CreatedAt:        it.createdAt,
-			Evidence:         it.evidence,
-			ExpiresAt:        it.expiresAt,
-			StaleUntil:       it.staleUntil,
-			VaryFields:       append([]string(nil), it.varyFields...),
+			Key:               it.key,
+			Gen:               it.gen,
+			FileSize:          it.fileSize,
+			BodyLen:           it.bodyLen,
+			IsVaryStub:        it.isVaryStub,
+			Variants:          append([]string(nil), it.variants...),
+			Tags:              append([]string(nil), it.tags...),
+			TagPolicyTracked:  it.tagPolicyTracked,
+			TagHeaders:        it.tagHeaders,
+			TagHeaderCount:    it.tagHeaderCount,
+			CreatedAt:         it.createdAt,
+			Evidence:          it.evidence,
+			ExpiresAt:         it.expiresAt,
+			StaleUntil:        it.staleUntil,
+			VaryFields:        append([]string(nil), it.varyFields...),
+			RouteScope:        it.routeScope,
+			RouteEpoch:        it.routeEpoch,
+			RouteConfigDigest: it.routeConfigDigest,
 		})
 	}
 	return out
+}
+
+func (d *diskStore) loadRouteEpochs() map[string]uint64 {
+	if d == nil || d.dir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(d.dir, diskRouteEpochsFile))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			d.mu.Lock()
+			d.purgeAllCacheFilesOnCorruptTombstoneLocked()
+			d.mu.Unlock()
+		}
+		return nil
+	}
+	var epochs map[string]uint64
+	if json.Unmarshal(raw, &epochs) != nil {
+		d.mu.Lock()
+		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
+		d.mu.Unlock()
+		return nil
+	}
+	return epochs
+}
+
+func (d *diskStore) persistRouteEpochs(epochs map[string]uint64) {
+	if d == nil || d.dir == "" || len(epochs) == 0 {
+		return
+	}
+	raw, err := json.Marshal(epochs)
+	if err != nil {
+		return
+	}
+	if err := atomicfile.Write(filepath.Join(d.dir, diskRouteEpochsFile), raw, 0o600); err != nil {
+		d.unrecoverableInvalidation.Store(true)
+		d.recordWriteFailure(err)
+	}
 }
 
 func hashKey(key string) string {
@@ -1066,12 +1145,24 @@ func hashKey(key string) string {
 
 func (d *diskStore) path(hash string) string { return filepath.Join(d.dir, hash) }
 
+func safeDiskError(err error) error {
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && isCacheFile(filepath.Base(pathErr.Path)) {
+		return fmt.Errorf("%s cache entry: %w", pathErr.Op, pathErr.Err)
+	}
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) && (isCacheFile(filepath.Base(linkErr.Old)) || isCacheFile(filepath.Base(linkErr.New))) {
+		return fmt.Errorf("%s cache entry: %w", linkErr.Op, linkErr.Err)
+	}
+	return err
+}
+
 func (d *diskStore) recordWriteFailure(err error) {
 	d.failing.Store(true)
 	total := d.writeFails.Add(1)
 	if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
 		suppressed := total - d.reported.Swap(total) - 1
-		d.log.Warn("cache: disk write failed; entry not stored on disk", "dir", d.dir, "error", err, "failed_writes", total, "suppressed", suppressed)
+		d.log.Warn("cache: disk write failed; entry not stored on disk", "dir", d.dir, "error", safeDiskError(err), "failed_writes", total, "suppressed", suppressed)
 	}
 }
 
@@ -1392,7 +1483,12 @@ func (d *diskStore) abortStream(s *diskStreamCapture) {
 	if !s.published && s.seq != 0 && d != nil {
 		tmpPath := d.tempPath(s.seq)
 		// lgtm[go/path-injection] – d.dir is the operator-configured cache directory and s.seq is an internal atomic uint64 counter.
-		_ = os.Remove(tmpPath)
+		if err := d.removePath(tmpPath); err != nil && !os.IsNotExist(err) {
+			d.recordWriteFailure(err)
+			if s.onFailure != nil {
+				s.onFailure()
+			}
+		}
 		d.activeTempFiles.Delete(filepath.Base(tmpPath))
 		s.seq = 0
 	}
@@ -1574,6 +1670,9 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 		it.expiresAt = e.ExpiresAt
 		it.staleUntil = e.StaleUntil
 		it.varyFields = append([]string(nil), e.Vary...)
+		it.routeScope = e.RouteScope
+		it.routeEpoch = e.RouteEpoch
+		it.routeConfigDigest = e.RouteConfigDigest
 		it.size = it.effectiveSize(d.maxBytes)
 		it.blob = blob
 		d.curBytes += it.size
@@ -1581,24 +1680,27 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 		d.ll.MoveToFront(el)
 	} else {
 		it := &diskItem{
-			hash:             hash,
-			key:              key,
-			gen:              gen,
-			fileSize:         totalSize,
-			bodyLen:          s.bodyLen,
-			metaLen:          int64(len(tail)),
-			isVaryStub:       e.IsVaryStub,
-			variants:         append([]string(nil), e.Variants...),
-			tags:             append([]string(nil), e.Tags...),
-			tagPolicyTracked: e.tagPolicyTracked,
-			tagHeaders:       e.ingestedTagHeaders,
-			tagHeaderCount:   e.ingestedTagHeaderCount,
-			createdAt:        e.CreatedAt,
-			evidence:         e.Evidence,
-			expiresAt:        e.ExpiresAt,
-			staleUntil:       e.StaleUntil,
-			varyFields:       append([]string(nil), e.Vary...),
-			blob:             blob,
+			hash:              hash,
+			key:               key,
+			gen:               gen,
+			fileSize:          totalSize,
+			bodyLen:           s.bodyLen,
+			metaLen:           int64(len(tail)),
+			isVaryStub:        e.IsVaryStub,
+			variants:          append([]string(nil), e.Variants...),
+			tags:              append([]string(nil), e.Tags...),
+			tagPolicyTracked:  e.tagPolicyTracked,
+			tagHeaders:        e.ingestedTagHeaders,
+			tagHeaderCount:    e.ingestedTagHeaderCount,
+			createdAt:         e.CreatedAt,
+			evidence:          e.Evidence,
+			expiresAt:         e.ExpiresAt,
+			staleUntil:        e.StaleUntil,
+			varyFields:        append([]string(nil), e.Vary...),
+			routeScope:        e.RouteScope,
+			routeEpoch:        e.RouteEpoch,
+			routeConfigDigest: e.RouteConfigDigest,
+			blob:              blob,
 		}
 		it.size = it.effectiveSize(d.maxBytes)
 		el := d.ll.PushFront(it)
@@ -1779,6 +1881,7 @@ func (d *diskStore) delIfOlderGen(key string, maxGen uint64) {
 		return
 	}
 	if err := d.removePath(d.path(hash)); err != nil && !os.IsNotExist(err) {
+		d.recordWriteFailure(err)
 		if st, stErr := os.Stat(d.path(hash)); stErr == nil {
 			d.rememberHashKeyLocked(hash, key)
 			d.recordTombstoneLocked(hash, st.Size())
@@ -1966,7 +2069,7 @@ func (d *diskStore) Resize(maxBytes int64) (evictedCount int, evictedBytes int64
 			continue
 		}
 		if err := d.retireBlobLocked(it.hash, it.blob); err != nil {
-			d.log.Warn("cache: disk eviction failed to remove file", "dir", d.dir, "error", err)
+			d.log.Warn("cache: disk eviction failed to remove file", "dir", d.dir, "error", safeDiskError(err))
 			failedRemovals++
 			break
 		}

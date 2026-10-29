@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 425
-  schema_leaves: 358
-  registry_entries: 358
+  schema_paths: 432
+  schema_leaves: 364
+  registry_entries: 364
   startup_consumed: 29
   by_class:
-    hot_reload: 315
+    hot_reload: 321
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -776,11 +776,35 @@ fields:
   - path: "servers.*.locations.*.cache"
     class: hot_reload
     subsystem: cache
-    reason: "whether a location may serve from the cache is decided by the rebuilt handler tree; the backend itself is startup-owned"
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
   - path: "servers.*.locations.*.cache_control"
     class: hot_reload
     subsystem: static_files
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.cache_policy.bypass_any_cookie"
+    class: hot_reload
+    subsystem: cache
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
+  - path: "servers.*.locations.*.cache_policy.bypass_cookies"
+    class: hot_reload
+    subsystem: cache
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
+  - path: "servers.*.locations.*.cache_policy.default_ttl"
+    class: hot_reload
+    subsystem: cache
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
+  - path: "servers.*.locations.*.cache_policy.max_ttl"
+    class: hot_reload
+    subsystem: cache
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
+  - path: "servers.*.locations.*.cache_policy.stale_if_error"
+    class: hot_reload
+    subsystem: cache
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
+  - path: "servers.*.locations.*.cache_policy.stale_while_revalidate"
+    class: hot_reload
+    subsystem: cache
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
   - path: "servers.*.locations.*.client_max_body_size"
     class: hot_reload
     subsystem: server_limits

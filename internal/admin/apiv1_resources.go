@@ -83,6 +83,22 @@ func v1Routes(c *config.Config) []adminapi.Route {
 					ExternalEnforcer: loc.Sharing.ExternalEnforcer,
 				}
 			}
+			var cachePolicy *adminapi.RouteCachePolicy
+			if loc.CachePolicy != nil {
+				cachePolicy = &adminapi.RouteCachePolicy{
+					DefaultTTL:           loc.CachePolicy.DefaultTTL,
+					MaxTTL:               loc.CachePolicy.MaxTTL,
+					StaleWhileRevalidate: loc.CachePolicy.StaleWhileRevalidate,
+					StaleIfError:         loc.CachePolicy.StaleIfError,
+					BypassCookies:        loc.CachePolicy.BypassCookies,
+					BypassAnyCookie:      loc.CachePolicy.BypassAnyCookie,
+				}
+				if loc.CacheEffective != nil {
+					cachePolicy.EffectiveDefaultTTL = loc.CacheEffective.DefaultTTL
+					cachePolicy.EffectiveSWR = loc.CacheEffective.StaleWhileRevalidate
+					cachePolicy.EffectiveSIE = loc.CacheEffective.StaleIfError
+				}
+			}
 			out = append(out, adminapi.Route{
 				RouteID: loc.RouteID,
 				Selector: adminapi.RouteSelector{
@@ -102,6 +118,7 @@ func v1Routes(c *config.Config) []adminapi.Route {
 				RequireClientCert: loc.RequireClientCert,
 				Withdrawn:         loc.Withdrawn,
 				Cache:             loc.Cache,
+				CachePolicy:       cachePolicy,
 				RateLimit:         loc.RateLimit,
 				WAF:               loc.WAF != nil,
 				Sharing:           sharing,

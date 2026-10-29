@@ -84,6 +84,7 @@ type NormalizedSelector struct {
 	globSegments          []string
 	inspectionRouteExact  string
 	inspectionRoutePrefix string
+	inspectionRouteScope  string
 	cutoverExactPath      string
 	cutoverRawPrefix      string
 	cutoverMatchAnyPort   bool
@@ -1209,6 +1210,7 @@ func ParseInspectionSelector(in Selector, cfg *config.Config) (NormalizedSelecto
 			default:
 				return NormalizedSelector{}, selErr("route_id", "inspection of regex route paths is unavailable; use configured-host scope")
 			}
+			s.inspectionRouteScope = RouteScope(srv, loc)
 			s.digest = computeSelectorDigest(s)
 			return s, nil
 		}

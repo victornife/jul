@@ -33,7 +33,8 @@ func TestRemoteCacheInspectionCLIAndClient(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":{"code":"storage_unavailable","message":"inspection unavailable"}}`))
 			return
 		}
-		_ = json.NewEncoder(w).Encode(adminapi.CacheInspectResponse{APIVersion: "v1", NextCursor: "opaque.next", ExpiresAt: "2026-10-27T13:00:00Z", Inspection: cachemeta.Inspection{State: "partial", CountAccuracy: "exact", EvidenceState: "disabled", MatchedResources: 1, Resources: []cachemeta.SafeResourceSummary{{Host: "example.com", Path: "/a", FreshnessState: "fresh", BodyBytes: 1, Details: []cachemeta.RepresentationMetadata{}}}, Decisions: []cachemeta.CacheDecision{{Reason: "fresh_hit", Host: "example.com", Path: "/a"}}}})
+		maxTTL := 60.0
+		_ = json.NewEncoder(w).Encode(adminapi.CacheInspectResponse{APIVersion: "v1", PolicySource: "route_override_with_global_inheritance", RouteCacheState: "enabled", NextCursor: "opaque.next", ExpiresAt: "2026-10-27T13:00:00Z", Inspection: cachemeta.Inspection{State: "partial", CountAccuracy: "exact", EvidenceState: "disabled", MatchedResources: 1, Policy: cachemeta.EffectivePolicy{DefaultTTLSeconds: 0, MaxTTLSeconds: &maxTTL, SWRSeconds: 30, SIESeconds: 300, BypassCookies: []string{"sid"}}, Resources: []cachemeta.SafeResourceSummary{{Host: "example.com", Path: "/a", FreshnessState: "fresh", BodyBytes: 1, Details: []cachemeta.RepresentationMetadata{}}}, Decisions: []cachemeta.CacheDecision{{Reason: "fresh_hit", Host: "example.com", Path: "/a"}}}})
 	}))
 	defer ts.Close()
 	file := filepath.Join(t.TempDir(), "admin.token")

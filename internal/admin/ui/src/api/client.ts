@@ -723,6 +723,36 @@ export const LocationSharingStateSchema = z.object({
 });
 export type LocationSharingState = z.infer<typeof LocationSharingStateSchema>;
 
+export const LocationCachePolicyStateSchema = z.object({
+  default_ttl: z.string().optional(),
+  max_ttl: z.string().optional(),
+  stale_while_revalidate: z.string().optional(),
+  stale_if_error: z.string().optional(),
+  bypass_cookies: z.array(z.string()).optional(),
+  bypass_any_cookie: z.boolean().default(false),
+});
+export type LocationCachePolicyState = z.infer<typeof LocationCachePolicyStateSchema>;
+
+export const LocationCacheEffectiveStateSchema = z.object({
+  global_enabled: z.boolean(),
+  default_ttl: z.string(),
+  default_ttl_source: z.string(),
+  max_ttl: z.string().optional(),
+  max_ttl_source: z.string(),
+  stale_while_revalidate: z.string(),
+  swr_source: z.string(),
+  stale_if_error: z.string(),
+  sie_source: z.string(),
+  bypass_mode: z.string(),
+  bypass_cookies: z.array(z.string()).optional(),
+  lock_enabled: z.boolean(),
+  range_enabled: z.boolean(),
+  memory_max_size: z.string().optional(),
+  disk_enabled: z.boolean(),
+  max_entry_size: z.string().optional(),
+});
+export type LocationCacheEffectiveState = z.infer<typeof LocationCacheEffectiveStateSchema>;
+
 export const LocationProjectionSchema = z.object({
   index: z.number().default(0),
   match: z.string(),
@@ -756,6 +786,8 @@ export const LocationProjectionSchema = z.object({
   auth: z.boolean(),
   auth_detail: LocationAuthStateSchema.optional(),
   cache: z.boolean(),
+  cache_policy: LocationCachePolicyStateSchema.optional(),
+  cache_effective: LocationCacheEffectiveStateSchema.optional(),
   compression: z.boolean().default(false),
   rate_limit: z.boolean().default(false),
   rate_limit_detail: z
@@ -2225,9 +2257,20 @@ export type GlobalRateLimitPatch = {
   max_conns?: number;
 };
 
+export type LocationCachePolicyPatch = {
+  default_ttl?: string;
+  max_ttl?: string;
+  stale_while_revalidate?: string;
+  stale_if_error?: string;
+  bypass_cookies?: string[];
+  bypass_any_cookie?: boolean;
+};
+
 export type ConfigPatch =
   | ({ op: "route_set_target"; target: string } & RouteTarget)
   | ({ op: "route_toggle_cache"; enabled: boolean } & RouteTarget)
+  | ({ op: "location_cache_policy_set"; cache_policy: LocationCachePolicyPatch } & RouteTarget)
+  | ({ op: "location_cache_policy_clear" } & RouteTarget)
   | ({ op: "route_toggle_rate_limit"; enabled: boolean } & RouteTarget)
   | ({ op: "route_set_rate_limit"; rate_limit: RateLimitPatch } & RouteTarget)
   | ({ op: "location_waf_set"; waf: LocationWAFPatch } & RouteTarget)
@@ -3841,12 +3884,17 @@ export interface CacheInspectionPage {
     disk_occupancy: { bytes: number; max_bytes: number; entries: number; evictions: number } | null;
     policy: {
       default_ttl_seconds: number;
+      max_ttl_seconds?: number;
       swr_seconds: number;
       sie_seconds: number;
       max_entry_bytes: number;
       range_enabled: boolean;
       fill_lock_enabled: boolean;
       tag_ingestion_enabled: boolean;
+      route_overrides_supported?: boolean;
+      gateway_freshness_cap_supported?: boolean;
+      bypass_cookies?: string[];
+      bypass_any_cookie?: boolean;
     };
     evidence_state: string;
     warnings: string[];

@@ -12,7 +12,7 @@ import (
 	"jul/internal/background"
 )
 
-// validateAndServe is mandatory synchronous validation: the stored entry may
+// validateAndServeWithPolicy is mandatory synchronous validation: the stored entry may
 // only answer this request after the origin has confirmed or replaced it.
 //
 // It is entered when the request said no-cache or max-age=0, when the stored
@@ -24,14 +24,19 @@ import (
 //
 // Deduplication reuses #131's call state, so a burst of concurrent validators
 // for one (effective key, generation) produces exactly one origin request.
-func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, effKey string, now time.Time) {
+func (c *Cache) validateAndServeWithPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, effKey string, pol CachePolicy, now time.Time) {
 	gen, _ := background.Generation(r.Context())
-	k := revalidateKey{key: effKey, gen: gen}
+	k := revalidateKey{
+		key:         effKey,
+		gen:         gen,
+		route:       pol.RouteScope,
+		routeConfig: routeConfigDigest(pol),
+	}
 
 	if call, leader := c.beginRevalidate(k); leader {
-		c.leadValidation(w, r, next, stored, k, call)
+		c.leadValidation(w, r, next, stored, k, call, pol)
 	} else {
-		c.awaitValidation(w, r, next, call)
+		c.awaitValidation(w, r, next, call, pol)
 	}
 }
 
@@ -43,7 +48,7 @@ func (c *Cache) validateAndServe(w http.ResponseWriter, r *http.Request, next ht
 // generation's bounded operation deadline for the waiters that remain. Without a
 // lease there is no owner for detached work, so the request context is used and
 // this client simply is the leader.
-func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, k revalidateKey, call *revalidateCall) {
+func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http.Handler, stored *Entry, k revalidateKey, call *revalidateCall, pol CachePolicy) {
 	vctx := r.Context()
 	if ctx, release, ok := background.Acquire(r.Context(), background.OpCacheRevalidate); ok {
 		defer release()
@@ -68,14 +73,35 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 		call.finish(nil, outcomeCanceled, context.Canceled)
 	}()
 
-	pol := c.Policy()
 	opID, startGen := c.beginInflightOriginOp()
 	defer c.endInflightOriginOp(opID)
 
+	vreq := conditionalRequest(r.Clone(vctx), stored)
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, r)
+	rec.headerCheck = func(code int, h http.Header) bool {
+		if code == http.StatusNotModified {
+			return true
+		}
+		if reason := varyRejectionHeader(r, pol.varyGuard, h); reason != "" {
+			c.recordDecision(r, reason)
+			return false
+		}
+		if pol.TagHeaderCount > 0 {
+			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
+				rec.disk = nil
+				return true
+			}
+		}
+		if c.storageReason(vreq, code, h, c.clock(), pol) != "" {
+			// Never create a temporary disk capture file for an uncacheable
+			// replacement response; keep only bounded in-memory buffering for the
+			// validation leader when it fits within effMemLimit().
+			rec.disk = nil
+		}
+		return true
+	}
 	defer rec.releaseCapture()
-	vreq := conditionalRequest(r.Clone(vctx), stored)
 	next.ServeHTTP(rec, vreq)
 	now := c.clock()
 
@@ -87,17 +113,18 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 			c.serveDownstreamWithStrip(w, r, next)
 			return
 		}
-		c.fetchAndStore(w, r, next, c.clock())
+		c.fetchAndStoreWithPolicy(w, r, next, c.clock(), pol, nil)
 	}
 
 	switch {
 	case rec.status == http.StatusNotModified:
-		refreshed, action, reason := c.merge304Decision(stored, rec.header, now)
+		refreshed, action, reason := c.merge304DecisionWithPolicy(r, stored, rec.header, now, pol)
 		if reason != "" {
 			c.recordDecision(r, reason)
 		}
 		if action == mergeDiscard {
-			c.deleteAtMostGen(k.key, startGen)
+			c.deleteAtMostGen(baseKeyOf(k.key), startGen)
+			c.delOneIfGenAtMost(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
 			fallbackAfterValidation()
 			return
@@ -116,46 +143,57 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 	case rec.status >= 500:
 		// Validation failed. Serving the stored copy anyway is only permitted by
 		// an explicit stale-if-error window, and never when the origin said
-		// must-revalidate or proxy-revalidate.
-		if sie := c.staleOnErrorWindow(stored); sie > 0 {
-			c.recordDecision(r, "stale_if_error")
-			refreshed := stored.Clone()
-			refreshed.StaleUntil = now.Add(sie)
-			markStaleIfError(refreshed)
-			if !c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
-				c.recordDecision(r, "stale_if_error_extended")
-				c.finishValidation(call, refreshed, outcomeOriginError)
-				if c.serve(w, r, refreshed, stateStale, now) {
+		// must-revalidate or proxy-revalidate or when Vary/policy forbids reuse.
+		errVaryReason := varyRejectionEntry(r, pol.varyGuard, stored)
+		if errVaryReason == "" {
+			errVaryReason = varyRejectionHeader(r, pol.varyGuard, rec.header)
+		}
+		p5xx := parseResponsePolicy(rec.header)
+		if errVaryReason != "" {
+			c.recordDecision(r, errVaryReason)
+			c.deleteAtMostGen(baseKeyOf(k.key), startGen)
+			c.delOneIfGenAtMost(k.key, startGen)
+		} else if !p5xx.NoStore && !p5xx.Private && !hasHeaderField(rec.header, "Set-Cookie") {
+			if sie := c.staleOnErrorWindowWithPolicy(stored, pol); sie > 0 {
+				c.recordDecision(r, "stale_if_error")
+				refreshed := stored.Clone()
+				refreshed.StaleUntil = now.Add(sie)
+				markStaleIfError(refreshed)
+				if !c.setIfNotFenced(k.key, refreshed, startGen, stored.Tags) {
+					c.recordDecision(r, "stale_if_error_extended")
+					c.finishValidation(call, refreshed, outcomeOriginError)
+					if c.serve(w, r, refreshed, stateStale, now) {
+						return
+					}
+					fallbackAfterValidation()
 					return
 				}
-				fallbackAfterValidation()
-				return
 			}
 		}
 		c.finishValidation(call, nil, outcomeOriginError)
-		if isRange || !writeRecorded(w, r, rec, nil, stateMiss) {
+		if isRange || !rec.storable() || errVaryReason != "" || !varyCompatibleWithModifiedRequest(rec.header, vreq, r) || !writeRecorded(w, r, rec, nil, stateMiss) {
 			fallbackAfterValidation()
 		}
 
 	case !rec.storable():
 		// The origin's answer could not be buffered whole — it exceeded
-		// max_entry_size, or it is a stream. The captured bytes are incomplete,
-		// so they must not be sent. Re-fetch and stream instead: one extra
-		// origin request, bounded to this path, in exchange for never
-		// truncating a response.
+		// max_entry_size, or it is a stream, or its Vary was rejected. The
+		// captured bytes are incomplete or unsafe to share, so they must not be
+		// sent. Re-fetch and stream instead.
+		c.deleteAtMostGen(baseKeyOf(k.key), startGen)
 		c.delOneIfGenAtMost(k.key, startGen)
 		c.finishValidation(call, nil, outcomeUncacheable)
 		fallbackAfterValidation()
 
 	default:
 		e := c.buildEntryFromCapture(vreq, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithStartGen(key(vreq), vreq, e, rec.diskStream, startGen, true) {
+		if !c.captureMatchesRequest(e, r) || !c.storeCapturedWithPolicy(key(vreq), vreq, e, rec.diskStream, pol, startGen, true) {
 			// The origin replaced the representation with one that must not be
 			// stored or that varies on a header modified for conditional/range
 			// validation. The old copy described something that no longer exists.
 			c.delOneIfGenAtMost(k.key, startGen)
 			c.finishValidation(call, nil, outcomeUncacheable)
-			if isRange || (e != nil && !e.matchesVary(r)) || !writeRecorded(w, r, rec, nil, stateMiss) {
+			if isRange || (e != nil && !e.matchesVary(r)) || !varyCompatibleWithModifiedRequest(rec.header, vreq, r) || !writeRecorded(w, r, rec, nil, stateMiss) {
 				fallbackAfterValidation()
 			}
 		} else {
@@ -165,7 +203,7 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 					fallbackAfterValidation()
 				}
 			} else if !writeRecorded(w, r, rec, e, stateMiss) {
-				c.fetchAndStore(w, r, next, c.clock())
+				c.fetchAndStoreWithPolicy(w, r, next, c.clock(), pol, nil)
 			}
 		}
 	}
@@ -174,14 +212,14 @@ func (c *Cache) leadValidation(w http.ResponseWriter, r *http.Request, next http
 // awaitValidation waits for the leader's result instead of issuing a second
 // origin request. The wait honors this client's own cancellation and nothing
 // else, so giving up here never affects the leader or the other waiters.
-func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next http.Handler, call *revalidateCall) {
+func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next http.Handler, call *revalidateCall, pol CachePolicy) {
 	entry, outcome, _ := call.wait(r.Context())
 	if r.Context().Err() != nil {
 		// This client is gone. Nothing to serve, and nothing to clean up: the
 		// call state belongs to the leader.
 		return
 	}
-	if entry != nil && validatedReusable(entry, r) {
+	if entry != nil && c.validatedReusableWithPolicy(entry, r, pol) {
 		switch outcome {
 		case outcomeNotModified, outcomeStored:
 			if c.serve(w, r, entry, stateRevalidated, c.clock()) {
@@ -203,7 +241,7 @@ func (c *Cache) awaitValidation(w http.ResponseWriter, r *http.Request, next htt
 		c.serveDownstreamWithStrip(w, r, next)
 		return
 	}
-	c.fetchAndStore(w, r, next, c.clock())
+	c.fetchAndStoreWithPolicy(w, r, next, c.clock(), pol, nil)
 }
 
 // validatedReusable reports whether a just-validated entry may answer r. The
@@ -214,6 +252,29 @@ func validatedReusable(e *Entry, r *http.Request) bool {
 		return false
 	}
 	return !hasHeaderField(r.Header, "Authorization") || e.SharedAuthReuse
+}
+
+func (c *Cache) validatedReusableWithPolicy(e *Entry, r *http.Request, pol CachePolicy) bool {
+	if !validatedReusable(e, r) {
+		return false
+	}
+	if reason := varyRejectionEntry(r, pol.varyGuard, e); reason != "" {
+		c.recordDecision(r, reason)
+		return false
+	}
+	if pol.RouteScope != "" || e.RouteScope != "" {
+		if e.RouteScope != pol.RouteScope || e.RouteEpoch != pol.RouteEpoch {
+			c.recordDecision(r, "route_ownership_mismatch")
+			return false
+		}
+	}
+	if pol.BypassAnyCookie || pol.BypassCookieCount > 0 {
+		if (e.Evidence == nil || e.Evidence.Flags&evidenceNoRequestCookies == 0) && e.BypassDigest != bypassPolicyDigest(pol) {
+			c.recordDecision(r, "route_policy_mismatch")
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Cache) finishValidation(call *revalidateCall, e *Entry, outcome revalidateOutcome) {

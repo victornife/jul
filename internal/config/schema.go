@@ -574,6 +574,13 @@ type LocationConfig struct {
 	// Caching toggle for this location (requires [cache].enabled).
 	Cache bool `toml:"cache"`
 
+	// CachePolicy configures optional route-scoped cache freshness overrides,
+	// conservative freshness caps, and literal request-cookie bypass rules
+	// ([servers.locations.cache_policy], #623). Omitted fields inherit from
+	// [cache]; explicit zero durations disable the corresponding fallback or
+	// stale window on this route.
+	CachePolicy *LocationCachePolicy `toml:"cache_policy,omitempty"`
+
 	// ClientMaxBodySize overrides the server default for this location.
 	ClientMaxBodySize Size      `toml:"client_max_body_size"`
 	SendTimeout       *Duration `toml:"send_timeout,omitempty"`
@@ -1299,6 +1306,49 @@ func String(s string) *string { return &s }
 // Int returns a pointer to i, for the config fields where an absent key and an
 // explicit zero are different answers.
 func Int(i int) *int { return &i }
+
+// DurationPtr returns a pointer to d, for config fields where an absent key
+// (inherit/none) and an explicit zero ("0s") are different answers.
+func DurationPtr(d Duration) *Duration { return &d }
+
+// Bounds for [servers.locations.cache_policy] request-cookie bypass controls.
+const (
+	MaxBypassCookies         = 32
+	MaxBypassCookieNameBytes = 128
+)
+
+// LocationCachePolicy configures route-scoped response-cache freshness
+// overrides, conservative freshness caps, and literal request-cookie bypass
+// controls ([servers.locations.cache_policy], #623 / CACHE-OPS-03).
+type LocationCachePolicy struct {
+	// DefaultTTL overrides [cache].default_ttl for this route when origin
+	// freshness (CDN-Cache-Control / Cache-Control s-maxage or max-age, or
+	// Expires) is absent; omitted inherits [cache].default_ttl and explicit
+	// "0s" disables gateway fallback freshness on this route.
+	DefaultTTL *Duration `toml:"default_ttl,omitempty"`
+	// MaxTTL caps the computed freshness lifetime (from origin directives or
+	// gateway default_ttl) on this route; omitted applies no route cap and
+	// explicit "0s" caps fresh lifetime to zero.
+	MaxTTL *Duration `toml:"max_ttl,omitempty"`
+	// StaleWhileRevalidate overrides [cache].stale_while_revalidate for this
+	// route when the origin response omits stale-while-revalidate; omitted
+	// inherits [cache].stale_while_revalidate and explicit "0s" disables
+	// gateway fallback stale-while-revalidate on this route.
+	StaleWhileRevalidate *Duration `toml:"stale_while_revalidate,omitempty"`
+	// StaleIfError overrides [cache].stale_if_error for this route when the
+	// origin response omits stale-if-error; omitted inherits
+	// [cache].stale_if_error and explicit "0s" disables gateway fallback
+	// stale-if-error on this route.
+	StaleIfError *Duration `toml:"stale_if_error,omitempty"`
+	// BypassCookies lists literal request cookie names (1..32 names, each a
+	// 1..128-byte HTTP token matched case-insensitively) that cause a request
+	// to bypass both cache lookup and cache storage.
+	BypassCookies []string `toml:"bypass_cookies,omitempty"`
+	// BypassAnyCookie causes any request carrying a Cookie header to bypass
+	// both cache lookup and cache storage; cannot be combined with
+	// bypass_cookies.
+	BypassAnyCookie bool `toml:"bypass_any_cookie,omitempty"`
+}
 
 // RateLimitConfig configures request rate limiting (token bucket) plus a
 // per-listener concurrent-connection cap. It applies globally and can be

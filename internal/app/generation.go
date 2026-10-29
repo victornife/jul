@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"jul/internal/admin"
+	"jul/internal/cache"
 	"jul/internal/plugins"
 )
 
@@ -81,7 +82,8 @@ type Generation struct {
 	wafDigestByLoc  map[[2]int]string
 	// basicByLoc holds the exact htpasswd file bytes loaded by auth.New for
 	// each Basic-authenticated location (srvIdx, locIdx) in this generation (#642, #563).
-	basicByLoc map[[2]int][]byte
+	basicByLoc         map[[2]int][]byte
+	cacheRoutePolicies []cache.RouteCacheConfig
 }
 
 // Begin opens a new staging generation, starting the pool registry's staging
