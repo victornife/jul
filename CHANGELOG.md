@@ -19,7 +19,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   Recover corrupt populated route-epoch metadata without startup deadlock and
   retire/disable disk caching on epoch-persistence failure (#623, #672, #673).
   Prune route-Vary ownership with bounded variant membership and replace
-  per-hit policy formatting with a versioned binary digest.
+  per-hit policy formatting with a versioned binary digest. Preserve a recovery
+  floor and block fresh proof while corrupt-epoch cleanup is unrecoverable, so
+  surviving retired files cannot become reusable after restart.
 
 - Reject shared-cache storage and reuse for `Vary: Cookie`, `Vary: Authorization`,
   and responses varying on request headers rewritten, synthesized, or stripped

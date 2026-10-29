@@ -496,6 +496,9 @@ entries/manifests without compatible route ownership or matcher proof incur a
 one-time cold miss. A resource's route-Vary records share its 64-variant cap.
 
 Corrupt/unreadable route-epoch metadata is cleaned up before disk rehydration.
+Recovery retains a floor above observed entry epochs, and fresh compatibility
+proof cannot replace the restart marker while durable cleanup is unrecoverable.
+Surviving old files therefore cannot become reusable after partial cleanup.
 If persisting epochs fails, Jul retires the disk dataset and disables disk reuse
 and publication until a later successful route commit; memory remains protected
 by current epochs. Check disk-write warnings and restore filesystem health.

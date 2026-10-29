@@ -151,7 +151,13 @@ take precedence over route overrides.
 - Unreadable, malformed, null, overflowing, oversized or unknown-version epoch
   metadata, including malformed matcher proofs/unknown envelope fields, invokes
   existing fail-closed disk cleanup before rehydration. Reads are bounded to
-  1 MiB. A persistence/sync failure retires the disk dataset through existing
+  1 MiB. Corruption recovery retains an epoch floor above observed decoded
+  entries before dropping catalog visibility. Fresh compatibility state cannot
+  replace the restart marker while durable cleanup remains unrecoverable; this
+  prevents surviving old files from being reauthorized if later epoch writes
+  succeed. Disk-entry epoch decoding uses the manifest's numeric bound so floor
+  derivation cannot wrap on corrupt metadata. A persistence/sync failure retires
+  the disk dataset through existing
   tombstone recovery, attempts to leave a corrupt restart marker, and disables
   disk reads/publication until a later route commit persists successfully.
   Memory remains protected by the live epochs. This is best-effort durable

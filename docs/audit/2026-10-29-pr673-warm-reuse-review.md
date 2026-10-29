@@ -107,6 +107,26 @@ Principal regressions: `TestMatcherCompatibilityWarmReloadAndRestart`,
 The existing corrupt startup, epoch pruning, RouteVary bounds and security
 HTTP/FastCGI/uWSGI regressions remain in the exercised suites.
 
+### Recovery fault found during final verification
+
+A further injected-fault pass against the initial warm implementation
+`3912dca205817d568e1aa7f6aea3f22f80aa2b15` reproduced `HIT retired-body`:
+epoch metadata was corrupt, unlink/truncate and tombstone persistence failed,
+but epoch-manifest writes still worked. Cleanup removed catalog visibility;
+new compatibility proof then reset unknown ownership to zero, allowing an old
+physical file to return on a later healthy restart.
+
+Recovery now retains a floor above observed decoded entries before cleanup.
+Persisting fresh compatibility evidence waits for unrecoverable durable cleanup
+to resolve, so a later successful epoch-file write cannot replace the corrupt
+restart marker prematurely. Entry epochs exceeding the manifest's numeric bound
+are rejected before recovery arithmetic. Retained regressions
+`TestMatcherCorruptManifestIncompleteCleanupCannotResurrect` and
+`TestDiskRouteEpochRejectsOverflowBeforeRecovery` pass in three repetitions, the
+whole cache suite and the focused full-tag race run. The original reproduction
+failed before correction. These changes concern metadata recovery; the warm
+reuse and privacy architecture above is unchanged.
+
 ## Executed checks and limits
 
 Go 1.27.3 linux/amd64, golangci-lint 2.14.0. Full tags:
@@ -116,8 +136,8 @@ Go 1.27.3 linux/amd64, golangci-lint 2.14.0. Full tags:
   Full package coverage: cache 93.1%, app 83.3%, admin 87.8%, versionid 90.4%.
 - Focused full-tag race matrix passes, including all matching/epoch regressions
   and retained HTTP/FastCGI/uWSGI identity tests.
-- Move-aware changed-Go coverage for this follow-up: **112/114 = 98.25%**.
-  Entire PR: **1,488/1,576 = 94.42%**, combining current affected profiles with
+- Move-aware changed-Go coverage for this follow-up: **122/124 = 98.39%**.
+  Entire PR: **1,499/1,586 = 94.51%**, combining current affected profiles with
   previous-head profile data only for files whose source has not changed. Old
   coordinate data is excluded for every modified file. These local numbers do
   not replace final hosted Codecov PATCH >90%.
@@ -136,7 +156,9 @@ Go 1.27.3 linux/amd64, golangci-lint 2.14.0. Full tags:
 ## Performance evidence
 
 Same host, `GOMAXPROCS=2`, lean profile, six samples each, `-benchtime=200ms`.
-Baseline then follow-up were run sequentially. Shared-host medians are advisory,
+Baseline then initial warm implementation (`3912dca205817d568e1aa7f6aea3f22f80aa2b15`)
+were run sequentially. The subsequent correction changes metadata recovery and
+epoch validation; the measured memory-hit paths are unchanged. Shared-host medians are advisory,
 not production tail-latency or a statistically certified regression budget.
 The HTTP benchmarks have identical fixtures on both revisions. The construction
 benchmark now includes creation of the required private matcher proofs.

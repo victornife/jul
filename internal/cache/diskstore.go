@@ -44,6 +44,7 @@ const (
 
 var errCorruptDiskEntry = errors.New("cache: corrupt or incompatible disk cache file")
 var errDiskMetaTooLarge = fmt.Errorf("%w: metadata exceeds format limit", errCorruptDiskEntry)
+var errRouteEpochRecoveryPending = errors.New("cache: route epoch persistence waits for durable cleanup")
 
 type diskEntryMeta struct {
 	Evidence           *publicationEvidence
@@ -189,6 +190,9 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 	}
 	var meta diskEntryMeta
 	if err := gob.NewDecoder(bytes.NewReader(metaBuf)).Decode(&meta); err != nil {
+		return nil, "", 0, 0, 0, errCorruptDiskEntry
+	}
+	if meta.RouteEpoch > math.MaxInt64 {
 		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	if meta.BaseKey != "" && meta.BaseKey != baseKeyOf(meta.Key) {
@@ -1155,9 +1159,16 @@ func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
 	}
 	if !valid {
 		d.mu.Lock()
+		// Cleanup can fail while a later manifest write succeeds. Preserve a
+		// floor above every observed entry before dropping catalog visibility;
+		// establishing fresh matcher proof must not authorize surviving old files.
+		floor := uint64(1)
+		for _, el := range d.items {
+			floor = max(floor, el.Value.(*diskItem).routeEpoch+1)
+		}
 		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
 		d.mu.Unlock()
-		return nil, nil
+		return map[string]uint64{routeEpochFloorKey: floor}, nil
 	}
 	return epochs, matchers
 }
@@ -1168,6 +1179,14 @@ func (d *diskStore) persistRouteEpochs(epochs map[string]uint64, matchers map[st
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.sweepTombstonesLocked()
+	if d.unrecoverableInvalidation.Load() || d.corruptTombstoneCleanupPending {
+		// Do not replace a corrupt restart marker with fresh compatibility
+		// evidence while unbounded/unverifiable old files may still survive.
+		d.routeEpochFailed.Store(true)
+		d.recordWriteFailure(errRouteEpochRecoveryPending)
+		return
+	}
 	raw, _ := json.Marshal(routeEpochManifest{Version: 1, Epochs: epochs, Matchers: matchers})
 	err := d.testPersistRouteEpochErr
 	if len(raw) > maxDiskMetaBytes {

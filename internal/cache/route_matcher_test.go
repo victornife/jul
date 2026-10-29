@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -304,6 +305,69 @@ func TestMatcherUnchangedReloadDoesNotRequireDiskWrite(t *testing.T) {
 	c.CommitRoutePolicies([]RouteCacheConfig{next})
 	if c.disk.routeEpochFailed.Load() {
 		t.Fatal("unchanged retry failed to repair earlier persistence failure")
+	}
+}
+
+func TestMatcherCorruptManifestIncompleteCleanupCannotResurrect(t *testing.T) {
+	cfg := config.CacheConfig{Enabled: true, MemoryMaxSize: 4 << 20, DiskPath: t.TempDir(), DiskMaxSize: 16 << 20}
+	srv, loc := matcherFixture("retired", true)
+	rc := compileMatcher(srv, loc, nil)
+	c, err := New(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.CommitRoutePolicies([]RouteCacheConfig{rc})
+	matcherRequest(c, rc, "/cleanup-fault", "retired-body")
+	c.CommitRoutePolicies(nil)
+	// Model startup after the epoch manifest becomes corrupt. Cache files are
+	// readable but unlink/truncate and tombstone persistence fail; epoch-manifest
+	// writes remain possible. Recovery must not turn an unknown epoch into 0.
+	d, err := newDiskStore(cfg.DiskPath, cfg.DiskMaxSize.Bytes(), c.log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg.DiskPath, diskRouteEpochsFile), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	failure := errors.New("cache cleanup unavailable")
+	d.testRemoveFile = func(string) error { return failure }
+	d.testTruncateFile = func(string, int64) error { return failure }
+	d.testPersistTombstoneErr = failure
+	memoryCfg := cfg
+	memoryCfg.DiskPath = ""
+	recovered, err := New(memoryCfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered.routeEpoch, recovered.routeMatchers = d.loadRouteEpochs()
+	recovered.disk = d
+	recovered.CommitRoutePolicies([]RouteCacheConfig{rc})
+	if !d.routeEpochFailed.Load() || recovered.CurrentRouteEpoch(rc.Scope) == 0 {
+		t.Fatal("incomplete recovery authorized a fresh zero-epoch proof")
+	}
+	// Actual restart after filesystem health returns. Files that survived the
+	// failed cleanup must remain behind a durable recovery floor.
+	restarted, err := New(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted.CommitRoutePolicies([]RouteCacheConfig{rc})
+	if r := matcherRequest(restarted, rc, "/cleanup-fault", "fresh-body"); r.Body.String() != "fresh-body" || r.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("cleanup failure resurrected retired content: %s %q", r.Header().Get("X-Cache"), r.Body.String())
+	}
+}
+
+func TestDiskRouteEpochRejectsOverflowBeforeRecovery(t *testing.T) {
+	tail, err := encodeDiskTrailerAndMetaWithKeyGen(keyFor("GET", "example.com", "/overflow"), 1, &Entry{RouteEpoch: math.MaxUint64}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "entry")
+	if err := os.WriteFile(path, tail, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := readDiskEntryMeta(path); !errors.Is(err, errCorruptDiskEntry) {
+		t.Fatalf("overflowing route epoch accepted: %v", err)
 	}
 }
 
