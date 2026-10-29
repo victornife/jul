@@ -192,3 +192,29 @@ GOMAXPROCS=2 go test ./internal/cache -run '^$' \
 This is author-side verification. Five adversarial passes are not represented
 as two independent final-head security/correctness reviews. The published head
 and remaining gates are recorded in the PR description.
+
+## CI follow-up — 2026-10-30
+
+The [full-test job](https://github.com/victornife/jul/actions/runs/40973614512/job/123796573348)
+at `02354a573a029ddd0db3bb38a299d9f2a8344ccf` failed in
+`TestNGINXCorpusCacheRealE2E`: the first response lacked `X-Cache`, and cleanup
+cancelled Jul before handler construction completed. Both corpus startup helpers
+released a public-port reservation before allocating their synthetic backends.
+A backend could reclaim that port and satisfy readiness without Jul serving.
+Temporarily forcing the first backend to take the released public address
+reproduced the same response and cancellation failure. Allocating all backends
+before choosing Jul's address removes that collision; the controlled reuse case
+then passes. The temporary fault injection is excluded from the final source.
+
+The existing cache E2E passes 20 consecutive normal runs. A full-tag race run
+passes three repetitions of the cache, compression, weighted-upstream and
+generic corpus tests, excluding the two generic Unix-socket fixtures blocked by
+this environment. The broader full-tag command suite passes with the two
+Unix-dependent top-level tests excluded; its unrestricted attempt fails only on
+the established Unix-socket restriction. Formatting and lint pass. This change
+affects test setup only; production cache behavior is unchanged.
+
+The same head's hosted Codecov PATCH settled at **93.26%** after the Go upload;
+the earlier 79.08% report contained frontend coverage only. Native Windows/macOS,
+browser checks and the coverage gate passed at that head. The new test-fix head
+still requires its own final CI results.
