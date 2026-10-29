@@ -1,0 +1,175 @@
+internal/cache/merge.go
+  s_c0ab7d95a482b5::t_31688e6bc58a2f 46-55,84-87,115-119,122-124,127
+internal/cache/inspection.go
+  s_c0ab7d95a482b5::t_71afe9f76be31a 19-20,55,116-134,153-154,159-162,165-170,197-199,219,235-236,256-258,283-290,293,298,332,338,586-592
+internal/admin/ui/src/app/App.tsx
+  s_c0ab7d95a482b5::t_69247ee1efe07f 6,23-28,42-49
+internal/cachemeta/metadata.go
+  s_c0ab7d95a482b5::t_57295f819419c7 99,102-113
+docs/configuration.md
+  s_c0ab7d95a482b5::t_b5f3567ee5475a 939
+internal/config/schema.go
+  s_c0ab7d95a482b5::t_cd2c54d475b7ed 577-583,1310-1352
+internal/lifecycle/fixture_test.go
+  s_c0ab7d95a482b5::t_ef9ff469550c37 209-217
+docs/generated/config.schema.json
+  s_c0ab7d95a482b5::t_de71744d2b0578 1241-1283
+internal/admin/route_cache_policy_test.go
+  s_c0ab7d95a482b5::t_a124bcdfd04e45 317-380
+  s_c0ab7d95a482b5::t_c29fcc38aae8db 1-316,381
+docs/adr/README.md
+  s_c0ab7d95a482b5::t_c31aac2fa96d20 52
+internal/cache/range.go
+  s_c0ab7d95a482b5::t_ff9b4a48d98373 375,395,398,465,473,557
+internal/admin/assets/dist/assets/index-D0ygxhEc.js
+  s_c0ab7d95a482b5::t_2bcb45071f07bc 1-2,4,15,54,56,58,60,62-77,82-85,88-102
+internal/cache/fill.go
+  s_c0ab7d95a482b5::t_abafe5063f761f 99-107,138,143,208,216
+internal/lifecycle/extract.go
+  s_c0ab7d95a482b5::t_453935b1eb5db1 569-588
+internal/admin/assets/dist/assets/CacheInspectorPanel-DOIA8NrM.js
+  s_c0ab7d95a482b5::t_634aff4c76de22 1-2
+internal/cache/selector.go
+  s_c0ab7d95a482b5::t_bfe98328188218 87,1213
+internal/handler/vary_headers_test.go
+  s_c0ab7d95a482b5::t_2e3e4cd5a35cbc 1-66
+internal/adminapi/dto.go
+  s_c0ab7d95a482b5::t_328843b7fdd1d2 65
+internal/cache/store.go
+  s_c0ab7d95a482b5::t_663cfed5f822d5 92-100,141-146,201-207
+internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js
+  s_c0ab7d95a482b5::t_e660d45b50f16b 1-3
+internal/cache/sensitive_vary_test.go
+  s_c0ab7d95a482b5::t_a7f3bdcca12e6c 1-491
+docs/adr/0029-route-scoped-cache-policy-and-vary-guards.md
+  s_c0ab7d95a482b5::t_fb942b7141d8f8 1-108
+internal/admin/ui/src/api/client.ts
+  s_c0ab7d95a482b5::t_5eba747791738c 726-755,789-790,2260-2268,2272-2273,3887,3894-3897
+internal/cache/scoped_purge.go
+  s_c0ab7d95a482b5::t_72bdd007918072 581,795-823,831-833,883-895,925-932,944,972-978,1329-1349,1351,1355-1358,1363-1365,1449
+internal/cache/validate.go
+  s_c0ab7d95a482b5::t_34412a228f47af 27,29-34,37,39,51,79,82-103,116,121,126-127,146-168,174,180-183,190,196,206,215,222,244,257-279
+docs/generated/config-lifecycle.md
+  s_c0ab7d95a482b5::t_4f38ee0f23e9ab 20-22,24,279,281-286
+internal/admin/projection_types.go
+  s_c0ab7d95a482b5::t_294f2eae4f5d84 113-151
+docs/generated/config-reference.md
+  s_c0ab7d95a482b5::t_ab5bd9f1fde382 24,2134,2147-2236
+internal/app/cache_route_isolation_test.go
+  s_c0ab7d95a482b5::t_7177dd96820a24 1-78
+internal/config/location_cache_policy_test.go
+  s_c0ab7d95a482b5::t_81cc6a5d919ad2 1-173
+internal/cache/route_policy.go
+  s_c0ab7d95a482b5::t_783887d6955ad9 1-402
+internal/app/wiring.go
+  s_c0ab7d95a482b5::t_5f62a8a9851054 25,110-116
+internal/cache/vary_security.go
+  s_c0ab7d95a482b5::t_c5ccbcb2d32335 1-298
+internal/admin/ui/src/features/routes/LocationCachePolicyEditor.tsx
+  s_c0ab7d95a482b5::t_ba7176bc327efb 1-331
+cmd/jul/remote_usage.go
+  s_c0ab7d95a482b5::t_e107d24d4203d5 23-24
+docs/cache.md
+  s_c0ab7d95a482b5::t_9b5f8f4bc50929 83-85,89-99,432-495
+docs/audit/2026-10-13-d11-certification.json
+  s_c0ab7d95a482b5::t_a05ecd9fc6cfbb 4369-4372,4374-4375,4615-4626
+CHANGELOG.md
+  s_c0ab7d95a482b5::t_8b8bbf6aec6f27 14-19,37-44
+docs/config-value-contract.json
+  s_c0ab7d95a482b5::t_17d637f6969214 657-704
+internal/cache/revalidate.go
+  s_c0ab7d95a482b5::t_3e61af95838a1a 51-54
+internal/app/generation.go
+  s_c0ab7d95a482b5::t_fbf68990b364e6 11,85-86
+internal/config/value_contract_test.go
+  s_c0ab7d95a482b5::t_055c7da814fb4b 122-123
+internal/admin/assets/dist/assets/LocationCachePolicyEditor-CuD4SFCm.js.map
+  s_c0ab7d95a482b5::t_e10b6323414538 1
+internal/admin/projections.go
+  s_c0ab7d95a482b5::t_b4a973a7c48ea0 166,175-277,306-308
+docs/generated/config-metadata.json
+  s_c0ab7d95a482b5::t_738d898a5b056e 7-8,2470,2486-2581
+internal/admin/apiv1_cache_inspect.go
+  s_c0ab7d95a482b5::t_7786558edc79b1 20,76-261,357-359,417-418
+internal/app/proxy_vary_isolation_test.go
+  s_c0ab7d95a482b5::t_f44f91001d88d8 1-159
+internal/config/validate_location.go
+  s_c0ab7d95a482b5::t_5fdd681551b230 119,129-198
+internal/admin/assets/dist/index.html
+  s_c0ab7d95a482b5::t_18a7e34cbe5b56 14
+cmd/jul/remote_cli_inspect.go
+  s_c0ab7d95a482b5::t_0cfa4511dac100 73-80
+internal/admin/ui/src/lib/cachePolicyDraft.ts
+  s_c0ab7d95a482b5::t_c9b97047cd9b64 1-290
+internal/admin/assets/dist/assets/TranscodeDesignerPanel-BNDZXjWs.js.map
+  s_c0ab7d95a482b5::t_601199e5293bb5 1
+internal/admin/ui/src/test/location-cache-policy.test.tsx
+  s_c0ab7d95a482b5::t_6d14b8b7ba38ce 1-358
+internal/admin/ui/src/features/routes/RouteDetail.tsx
+  s_c0ab7d95a482b5::t_2e241d700ec46e 6,121-126,669-677
+  s_c0ab7d95a482b5::t_ab25979e8dc3e8 305-329,352,465-474,667-668,678,1194-1233
+docs/config-lifecycle.yaml
+  s_c0ab7d95a482b5::t_80e34ed61d518a 79-81,84,779,784-807
+docs/generated/config-lifecycle.json
+  s_c0ab7d95a482b5::t_4646d616b3bb09 259-261,264,2344,2366-2443
+internal/admin/assets/dist/assets/CacheInspectorPanel-DOIA8NrM.js.map
+  s_c0ab7d95a482b5::t_0c653ab6d38908 1
+internal/admin/assets/dist/assets/TranscodeDesignerPanel-BNDZXjWs.js
+  s_c0ab7d95a482b5::t_82615d5c295e97 1-3
+internal/cache/authorization_test.go
+  s_c0ab7d95a482b5::t_8e9e72d2ea1d45 255-257,272-274,277-280
+internal/admin/ui/src/features/traffic-controls/CacheInspectorPanel.tsx
+  s_c0ab7d95a482b5::t_81aa19b6c4815d 209-228
+internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js.map
+  s_c0ab7d95a482b5::t_453570df8d9cea 1
+internal/app/factory.go
+  s_c0ab7d95a482b5::t_60eee42c03a5af 219-221,286-288,419-444,446-447,499,511,525,530
+internal/admin/apiv1_resources.go
+  s_c0ab7d95a482b5::t_e0910b343a84e9 86-101,121
+internal/cache/scalar_policy.go
+  s_c0ab7d95a482b5::t_585c387ab46d8e 49-62
+cmd/jul/remote_cli_inspect_test.go
+  s_c0ab7d95a482b5::t_b60128600f6581 36-37
+docs/generated/openapi.json
+  s_c0ab7d95a482b5::t_ac6efaea4ac6bc 5251-5259,5273-5275,8168-8197,10241-10243,10294-10329
+internal/app/cgi_vary_isolation_test.go
+  s_c0ab7d95a482b5::t_f777a3e42a5a22 1-167
+internal/lifecycle/registry.go
+  s_c0ab7d95a482b5::t_13ca65a50ac4be 643-651
+internal/cache/cache.go
+  s_c0ab7d95a482b5::t_1015929f2b161c 90-95,309,431,539,585,605,699-700,752-756,759-768,771-789,791-823,826,870,914-917,931-934,942-953,956,968,1001,1005-1013,1015-1045,1048-1091,1176-1185,1207-1215,1248,1261,1263-1271,1274-1275,1291,1297,1300-1302,1384-1453,1483,1507-1510,1562,1568,1582,1591-1596,1612,1636,1645,1664,1667-1682,1698-1707,1712,1729-1730,1739-1759,1767-1770,1776-1780,1825-1827,1866-1869,1918-1921,1938,2081-2083,2115-2118,2124-2126,2133-2141,2176-2179,2189
+docs/nginx-importer.md
+  s_c0ab7d95a482b5::t_b221a9f842f48e 433,435
+internal/admin/assets/dist/assets/index-D0ygxhEc.js.map
+  s_c0ab7d95a482b5::t_98ff9f281e5e11 1
+internal/cache/diskstore.go
+  s_c0ab7d95a482b5::t_5650155b7d126b 71-75,107-111,233-237,254,320-341,345-362,627,888-890,938-957,966,970-972,982-983,994-996,1003-1022,1034-1054,1081-1098,1104-1140,1148-1159,1165,1486-1491,1673-1675,1683-1703,1884,2072
+internal/adminapi/v1_resources.go
+  s_c0ab7d95a482b5::t_05d64f94d7b895 52-74
+internal/admin/assets/dist/assets/LocationCachePolicyEditor-CuD4SFCm.js
+  s_c0ab7d95a482b5::t_928d74ca8a1fbf 1-2
+internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js
+  s_c0ab7d95a482b5::t_8774d2245be2d8 1,13
+internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js.map
+  s_c0ab7d95a482b5::t_57f559dd5f5fa8 1
+examples/cache-invalidation/jul.toml
+  s_c0ab7d95a482b5::t_c4cb54a3e26681 67-72
+internal/admin/ui/src/test/cache-inspector.test.tsx
+  s_c0ab7d95a482b5::t_801829c2ce36fd 39,46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.6",
+  "base_commit_sha": "6c10002aa2cc7e61b315dbb29c1cd01b5e859b0f",
+  "prompts": {},
+  "sessions": {
+    "s_c0ab7d95a482b5": {
+      "agent_id": {
+        "tool": "github-copilot",
+        "id": "9f444d69-9f64-48e2-bfd8-12620c8f8299",
+        "model": "gemini-4-argon"
+      },
+      "human_author": "juliaggas <87771596+juliaggas@users.noreply.github.com>"
+    }
+  }
+}
