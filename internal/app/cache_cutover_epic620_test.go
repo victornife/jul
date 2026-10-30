@@ -566,6 +566,48 @@ func TestRouteBackendCutoverInvalidateAndRetainMatrix(t *testing.T) {
 	if rec, body := doReq(resWCB[":8080"], "/app-two/wc-keep", nil); rec.Header().Get("X-Cache") != "HIT" || body != wcRetBody {
 		t.Fatalf("retained sibling route on unnamed/wildcard server must remain HIT, got %q %q", rec.Header().Get("X-Cache"), body)
 	}
+
+	// Verify that completing a route-scoped SelectorAll cutover does NOT erase an older
+	// incomplete/canceled purge intent for a retained route across restart!
+	_, _ = doReq(resWCB[":8080"], "/app-two/wc-canceled-1", nil)
+	_, _ = doReq(resWCB[":8080"], "/app-two/wc-canceled-2", nil)
+	cancelCtx, cancelPurge := context.WithCancel(context.Background())
+	pSel, err := cache.ParseSelector(cache.Selector{Kind: cache.SelectorPrefix, Host: "portal.example.com", Prefix: "/app-two/"}, nil)
+	if err != nil {
+		t.Fatalf("ParseSelector: %v", err)
+	}
+	_, _ = c.InvalidateScope(cancelCtx, pSel, cache.InvalidateOptions{
+		BatchSize: 1,
+		CommitFence: func(_ uint64, _ []string) error {
+			cancelPurge()
+			return nil
+		},
+	})
+
+	// Now execute a route-scoped SelectorAll cutover for /app-one/ on the unnamed server.
+	cfgWildcardC := *cfgWildcardA
+	cfgWildcardC.Servers = append([]config.ServerConfig(nil), cfgWildcardA.Servers...)
+	cfgWildcardC.Servers[0].Locations = append([]config.LocationConfig(nil), cfgWildcardA.Servers[0].Locations...)
+	cfgWildcardC.Servers[0].Locations[0].ProxyPass = originApp1V1.URL
+	if _, _, err := factory.Build(ctx, &cfgWildcardC, true); err != nil {
+		t.Fatalf("Build cfgWildcardC: %v", err)
+	}
+
+	// Simulate restart on the same disk directory: the canceled /app-two/ purge intent must still be recovered!
+	cRecovered, err := cache.New(cfgWildcardC.Cache, factory.Log)
+	if err != nil {
+		t.Fatalf("cache.New recovered: %v", err)
+	}
+	factory.Cache = cRecovered
+	resRecovered, _, err := factory.Build(ctx, &cfgWildcardC, true)
+	if err != nil {
+		t.Fatalf("Build recovered: %v", err)
+	}
+	for _, p := range []string{"/app-two/wc-canceled-1", "/app-two/wc-canceled-2"} {
+		if rec, _ := doReq(resRecovered[":8080"], p, nil); rec.Header().Get("X-Cache") != "MISS" {
+			t.Fatalf("expected %s to be MISS after restart recovery of canceled purge intent, got %q", p, rec.Header().Get("X-Cache"))
+		}
+	}
 }
 
 // TestEpic620PortalAndTwoApplicationsEndToEnd verifies the integrated #620

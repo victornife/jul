@@ -2230,7 +2230,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		failedEntries = max(failedEntries, pending)
 		uncertain = uncertain || repairUncertain
 		if intentCommitted && remainingGroups == 0 && failedEntries == 0 && !uncertain && !canceledMidway {
-			if err := c.disk.completePurgeIntent(fenceGen, sel.Kind == SelectorAll); err != nil {
+			if err := c.disk.completePurgeIntent(fenceGen, sel.Kind == SelectorAll && len(sel.cutoverRouteScopes) == 0); err != nil {
 				uncertain = true
 			}
 		}
