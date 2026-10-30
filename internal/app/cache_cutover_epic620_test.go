@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -408,21 +409,23 @@ func TestRouteBackendCutoverInvalidateAndRetainMatrix(t *testing.T) {
 
 	// 10. Verify partial post-Publish invalidation failure keeps new config committed,
 	// reports degraded cutover via LastCacheCutover(), and still fences old entries via RouteEpoch!
-	if err := os.Chmod(tmpDir, 0o500); err != nil {
-		t.Fatalf("chmod read-only: %v", err)
+	// Replace .jul-cache-gen with a directory so atomic rename fails cross-platform (Unix and Windows).
+	markerPath := filepath.Join(tmpDir, ".jul-cache-gen")
+	_ = os.Remove(markerPath)
+	if err := os.Mkdir(markerPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(.jul-cache-gen): %v", err)
 	}
-	defer func() { _ = os.Chmod(tmpDir, 0o700) }()
+	defer func() { _ = os.Remove(markerPath) }()
 
 	resFailB, _, err := factory.Build(ctx, cfgInvB, true)
 	if err != nil {
-		t.Fatalf("Build cfgInvB under read-only cache dir must still commit config: %v", err)
+		t.Fatalf("Build cfgInvB under degraded cache marker must still commit config: %v", err)
 	}
 	failResults, failErr := factory.LastCacheCutover()
 	if failErr == nil || len(failResults) == 0 || failResults[0].InvalidationEffective == "effective" {
 		t.Fatalf("expected LastCacheCutover to report degraded post-Publish invalidation, got results=%+v err=%v", failResults, failErr)
 	}
-	// Restore permissions before closing cache.
-	_ = os.Chmod(tmpDir, 0o700)
+	_ = os.Remove(markerPath)
 
 	// Even though disk persistence failed during cutover, RouteEpoch advanced in memory so
 	// hFailB serves app1-v2 and does not reuse pre-cutover A entries!

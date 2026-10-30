@@ -254,20 +254,22 @@ func TestWithBackendCutoverAndExecuteRouteCutover(t *testing.T) {
 		t.Fatalf("expected 1 effective cutover invalidation result, got %+v", results)
 	}
 
-	// Verify partial failure reporting when disk directory is read-only during cutover.
-	if err := os.Chmod(tmpDir, 0o500); err != nil {
-		t.Fatalf("chmod read-only: %v", err)
+	// Verify partial failure reporting when disk high-water marker persistence fails during cutover
+	// (cross-platform: replacing .jul-cache-gen with a directory causes atomic rename to fail on Unix and Windows).
+	markerPath := filepath.Join(tmpDir, ".jul-cache-gen")
+	_ = os.Remove(markerPath)
+	if err := os.Mkdir(markerPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(.jul-cache-gen): %v", err)
 	}
-	defer func() { _ = os.Chmod(tmpDir, 0o700) }()
-	_ = filepath.Join(tmpDir, "dummy")
+	defer func() { _ = os.Remove(markerPath) }()
 	resultsFail, errFail := c.ExecuteRouteCutover(context.Background(), cfgB, cfgA, "")
 	if errFail == nil {
-		t.Fatalf("expected error when disk intent persistence fails during cutover")
+		t.Fatalf("expected error when disk persistence fails during cutover")
 	}
 	if len(resultsFail) != 1 || resultsFail[0].InvalidationEffective == "effective" {
 		t.Fatalf("expected non-effective result when disk persistence fails, got %+v", resultsFail)
 	}
-	_ = os.Chmod(tmpDir, 0o700)
+	_ = os.Remove(markerPath)
 
 	// Cover additional action types (fastcgi, uwsgi, grpc_transcode, static, return, redirect, deny, plugin)
 	// and upstream pool TLS/healthcheck/circuitbreaker identity in WithBackendCutover and DeriveRouteCutoverSelectorsForPolicy.
