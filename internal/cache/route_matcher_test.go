@@ -730,4 +730,10 @@ func TestIndependent673GenerationCompactionPreservesActiveHandler(t *testing.T) 
 				step, rec.Header().Get("X-Cache"), rec.Body.String(), wantState)
 		}
 	}
+	keepRec := httptest.NewRecorder()
+	keepHandler.ServeHTTP(keepRec, httptest.NewRequest(http.MethodGet, "http://example.com/keep/item", nil))
+	if keepRec.Header().Get("X-Cache") != stateHit || keepRec.Body.String() != "keep-body" {
+		t.Fatalf("keep route after re-adding tmp/0: state=%s body=%q, want HIT keep-body",
+			keepRec.Header().Get("X-Cache"), keepRec.Body.String())
+	}
 }
