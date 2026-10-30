@@ -3,8 +3,8 @@
 - **Date**: 2026-10-30
 - **Branch**: `feat/624-620-route-backend-cutover` (stacked on `feat/666-667-668-cache-recovery-and-outcomes` at `86432bd9b34ee88f1f50d983b88d411fa63a2e61`)
 - **Initial Candidate Commit SHA**: `d4f1ca919c19e7cee44594d6f464131406b0abf5`
-- **Intermediate Fix Commit SHAs**: `a77ca8d28d261658ad476ab18d8ce2fe0a72fe51`, `c9b5fd3337115547fead8edf087cf739d5a3832e`, `46eb94d23c5a00127a76398e98dc4872d566e557`
-- **Final Reviewed Production/Test Commit SHA**: `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`
+- **Intermediate Fix Commit SHAs**: `a77ca8d28d261658ad476ab18d8ce2fe0a72fe51`, `c9b5fd3337115547fead8edf087cf739d5a3832e`, `46eb94d23c5a00127a76398e98dc4872d566e557`, `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`
+- **Final Reviewed Production/Test Commit SHA**: `51b8839a0957bc8a9e7853cdf10a5448df83983c`
 - **Reviewers**:
   - **Reviewer 1 (`Explore-Slice2-Cutover-Race-Reviewer`)**: Independent read-only subagent reviewing `#624` route/backend cutover semantics, `WithBackendCutover`, `DeriveRouteCutoverSelectorsForPolicy`, `ExecuteRouteCutover`, `internal/app/factory.go` (`Build` vs `Prepare` vs `commitFn` vs `abortFn`), in-flight cold fills / `304` / SWR / delayed old-handler fencing, config rollback `A -> B -> A` non-resurrection, and partial post-`Publish` failure handling.
   - **Reviewer 2 (`Explore-Slice2-Contract-UI-Epic620-Reviewer`)**: Independent read-only subagent reviewing config schema/validation/lifecycle (`[cache].reload_policy`, `[servers.locations.cache_policy].reload_policy`), admin projections/patches/diff (`CacheCutoverPlan`), Console UI (`LocationCachePolicyEditor.tsx`, `RouteDetail.tsx`, `cachePolicyDraft.ts`), documentation accuracy, and the `#620` integrated portal + two-application verification fixture (`internal/app/cache_cutover_epic620_test.go`).
@@ -46,7 +46,7 @@
 
 ---
 
-## 3. Final Re-Review Verdict (`46eb94d23c5a00127a76398e98dc4872d566e557` & `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`)
+## 3. Final Re-Review Verdict (`46eb94d23c5a00127a76398e98dc4872d566e557`, `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`, & `51b8839a0957bc8a9e7853cdf10a5448df83983c`)
 
-- **Reviewer 1 (`Explore-Slice2-Cutover-Race-Reviewer`)**: **APPROVE (`0` P0, `0` P1, `0` P2)** at `46eb94d23c5a00127a76398e98dc4872d566e557` and rebased lint-clean `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`.
-- **Reviewer 2 (`Explore-Slice2-Contract-UI-Epic620-Reviewer`)**: **APPROVE (`0` P0, `0` P1, `0` P2)** at `46eb94d23c5a00127a76398e98dc4872d566e557` and rebased lint-clean `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`.
+- **Reviewer 1 (`Explore-Slice2-Cutover-Race-Reviewer`)**: **APPROVE (`0` P0, `0` P1, `0` P2)** at `46eb94d23c5a00127a76398e98dc4872d566e557`, `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`, and `51b8839a0957bc8a9e7853cdf10a5448df83983c`.
+- **Reviewer 2 (`Explore-Slice2-Contract-UI-Epic620-Reviewer`)**: **APPROVE (`0` P0, `0` P1, `0` P2)** at `46eb94d23c5a00127a76398e98dc4872d566e557`, `4e09802597b174f0c9399f0d4d3c401a6a1a5b9f`, and `51b8839a0957bc8a9e7853cdf10a5448df83983c`.
