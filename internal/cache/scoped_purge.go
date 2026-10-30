@@ -2009,7 +2009,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			diskFailed = max(diskFailed, pending)
 			uncertain = uncertain || repairUncertain
 			if intentCommitted && diskFailed == 0 && !uncertain {
-				if err := c.disk.completePurgeIntent(fenceGen); err != nil {
+				if err := c.disk.completePurgeIntent(fenceGen, true); err != nil {
 					uncertain = true
 				}
 			}
@@ -2152,7 +2152,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		failedEntries = max(failedEntries, pending)
 		uncertain = uncertain || repairUncertain
 		if intentCommitted && remainingGroups == 0 && failedEntries == 0 && !uncertain && !canceledMidway {
-			if err := c.disk.completePurgeIntent(fenceGen); err != nil {
+			if err := c.disk.completePurgeIntent(fenceGen, sel.Kind == SelectorAll); err != nil {
 				uncertain = true
 			}
 		}
@@ -2317,9 +2317,13 @@ func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, re
 	if sel.Kind == SelectorTag {
 		if len(resourceIDs) > 4096 {
 			// When a tag purge spans >4,096 resources, coalesce the on-disk crash
-			// recovery intent to the tag's host scope so the serialized intent
-			// stays well within the 1 MiB manifest bound (#666).
-			intent.Kind = SelectorHost
+			// recovery intent to the tag's host scope (or all if host is empty)
+			// so the serialized intent stays well within the 1 MiB manifest bound (#666).
+			if sel.Host != "" {
+				intent.Kind = SelectorHost
+			} else {
+				intent.Kind = SelectorAll
+			}
 			intent.Tags = nil
 			intent.TagMatch = ""
 		} else {

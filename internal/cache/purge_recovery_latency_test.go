@@ -717,7 +717,7 @@ func TestLegacyPurgeDurabilityOutcomesAndMarkerIsolation(t *testing.T) {
 		t.Fatalf("unexpected nilCache.DeleteResult: %+v %v", r, err)
 	}
 	var nilDisk *diskStore
-	if nilDisk.loadPurgeIntents() != nil || nilDisk.recordPurgeIntent(diskPurgeIntent{}) != nil || nilDisk.completePurgeIntent(1) != nil || nilDisk.replacePurgeIntents(nil) != nil || nilDisk.hasSurvivingCacheState() {
+	if nilDisk.loadPurgeIntents() != nil || nilDisk.recordPurgeIntent(diskPurgeIntent{}) != nil || nilDisk.completePurgeIntent(1, false) != nil || nilDisk.replacePurgeIntents(nil) != nil || nilDisk.hasSurvivingCacheState() {
 		t.Fatal("unexpected non-nil result on nil diskStore")
 	}
 	if validateDiskPurgeIntent(diskPurgeIntent{FenceGen: 1, Kind: "bogus"}) ||
@@ -750,8 +750,13 @@ func TestLegacyPurgeDurabilityOutcomesAndMarkerIsolation(t *testing.T) {
 			Prefix:   fmt.Sprintf("/cap/%d", i),
 		})
 	}
+	// Completing one of the coalesced generations (e.g. FenceGen=2) must NOT remove the coalesced intent!
+	_ = c.disk.completePurgeIntent(2, false)
+	if len(c.disk.loadPurgeIntents()) == 0 || !c.disk.loadPurgeIntents()[0].Coalesced {
+		t.Fatal("expected coalesced intent to survive individual completePurgeIntent(2, false)")
+	}
 	_ = c.disk.recordPurgeIntent(diskPurgeIntent{FenceGen: uint64(MaxActiveFences), Kind: SelectorAll})
-	_ = c.disk.completePurgeIntent(999999)
+	_ = c.disk.completePurgeIntent(999999, false)
 	bigIDs := make([]string, 4097)
 	for i := range bigIDs {
 		bigIDs[i] = hashKey(fmt.Sprintf("res-%d", i))
@@ -759,6 +764,10 @@ func TestLegacyPurgeDurabilityOutcomesAndMarkerIsolation(t *testing.T) {
 	bigIntent := c.buildDiskPurgeIntent(500, NormalizedSelector{Kind: SelectorTag, Host: "portal.example.com", Tags: []string{"t"}}, bigIDs, nil)
 	if bigIntent.Kind != SelectorHost || len(bigIntent.MatchedResourceIDs) != 0 {
 		t.Fatalf("expected >4096 tag resourceIDs to coalesce to SelectorHost, got %+v", bigIntent)
+	}
+	bigIntentNoHost := c.buildDiskPurgeIntent(501, NormalizedSelector{Kind: SelectorTag, Tags: []string{"t"}}, bigIDs, nil)
+	if bigIntentNoHost.Kind != SelectorAll {
+		t.Fatalf("expected >4096 tag resourceIDs with empty host to coalesce to SelectorAll, got %+v", bigIntentNoHost)
 	}
 
 	// Exercise .jul-cache-purge-ledger synthesis fallback in loadPurgeIntents.

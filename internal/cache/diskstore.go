@@ -1236,6 +1236,7 @@ func (d *diskStore) persistRouteEpochs(epochs map[string]uint64, matchers map[st
 type diskPurgeIntent struct {
 	FenceGen            uint64       `json:"fence_gen"`
 	Kind                SelectorKind `json:"kind"`
+	Coalesced           bool         `json:"coalesced,omitempty"`
 	Host                string       `json:"host,omitempty"`
 	ExplicitDefaultPort bool         `json:"explicit_default_port,omitempty"`
 	CutoverMatchAnyPort bool         `json:"cutover_match_any_port,omitempty"`
@@ -1469,6 +1470,13 @@ func (d *diskStore) persistPurgeIntentsLocked() error {
 	return nil
 }
 
+func (d *diskStore) failClosedOnIntentWriteErrorLocked() {
+	_ = d.truncatePath(filepath.Join(d.dir, diskPurgeIntentsFile), 0)
+	_ = d.truncatePath(filepath.Join(d.dir, diskTombstoneFile), 0)
+	d.purgeAllCacheFilesOnCorruptTombstoneLocked()
+	d.unrecoverableInvalidation.Store(true)
+}
+
 func (d *diskStore) recordPurgeIntent(intent diskPurgeIntent) error {
 	if d == nil || d.dir == "" || intent.FenceGen == 0 {
 		return nil
@@ -1479,11 +1487,10 @@ func (d *diskStore) recordPurgeIntent(intent diskPurgeIntent) error {
 		d.highWaterGen = intent.FenceGen
 	}
 	for i := range d.purgeIntents {
-		if d.purgeIntents[i].FenceGen == intent.FenceGen {
+		if d.purgeIntents[i].FenceGen == intent.FenceGen && !d.purgeIntents[i].Coalesced {
 			d.purgeIntents[i] = intent
 			if err := d.persistPurgeIntentsLocked(); err != nil {
-				_ = d.truncatePath(filepath.Join(d.dir, diskTombstoneFile), 0)
-				d.unrecoverableInvalidation.Store(true)
+				d.failClosedOnIntentWriteErrorLocked()
 				return err
 			}
 			return nil
@@ -1492,6 +1499,7 @@ func (d *diskStore) recordPurgeIntent(intent diskPurgeIntent) error {
 	if len(d.purgeIntents) >= MaxActiveFences {
 		// Coalesce the oldest intents into a broader host or all intent at their
 		// max FenceGen so capacity pressure never drops pre-cutoff protection (#666).
+		// Coalesced intents are never removed by an individual non-all completion.
 		oldest := d.purgeIntents[0]
 		second := d.purgeIntents[1]
 		coalescedGen := max(oldest.FenceGen, second.FenceGen)
@@ -1500,27 +1508,28 @@ func (d *diskStore) recordPurgeIntent(intent diskPurgeIntent) error {
 			coalesced = diskPurgeIntent{
 				FenceGen:            coalescedGen,
 				Kind:                SelectorHost,
+				Coalesced:           true,
 				Host:                oldest.Host,
 				CutoverMatchAnyPort: oldest.CutoverMatchAnyPort || second.CutoverMatchAnyPort,
 			}
 		} else {
 			coalesced = diskPurgeIntent{
-				FenceGen: coalescedGen,
-				Kind:     SelectorAll,
+				FenceGen:  coalescedGen,
+				Kind:      SelectorAll,
+				Coalesced: true,
 			}
 		}
 		d.purgeIntents = append([]diskPurgeIntent{coalesced}, d.purgeIntents[2:]...)
 	}
 	d.purgeIntents = append(d.purgeIntents, intent)
 	if err := d.persistPurgeIntentsLocked(); err != nil {
-		_ = d.truncatePath(filepath.Join(d.dir, diskTombstoneFile), 0)
-		d.unrecoverableInvalidation.Store(true)
+		d.failClosedOnIntentWriteErrorLocked()
 		return err
 	}
 	return nil
 }
 
-func (d *diskStore) completePurgeIntent(fenceGen uint64) error {
+func (d *diskStore) completePurgeIntent(fenceGen uint64, isAll bool) error {
 	if d == nil || d.dir == "" || fenceGen == 0 {
 		return nil
 	}
@@ -1529,7 +1538,11 @@ func (d *diskStore) completePurgeIntent(fenceGen uint64) error {
 	kept := d.purgeIntents[:0]
 	changed := false
 	for _, it := range d.purgeIntents {
-		if it.FenceGen == fenceGen {
+		if isAll && it.FenceGen <= fenceGen {
+			changed = true
+			continue
+		}
+		if !it.Coalesced && it.FenceGen == fenceGen {
 			changed = true
 			continue
 		}
