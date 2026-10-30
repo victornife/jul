@@ -111,7 +111,7 @@ func TestRouteBackendCutoverInvalidateAndRetainMatrix(t *testing.T) {
 			}
 			w.Header().Set("Cache-Control", "public, max-age=1, stale-while-revalidate=60")
 			w.Header().Set("X-Backend", "app1-v1")
-			_, _ = w.Write([]byte(fmt.Sprintf("app1-v1-swr-%d", app1V1Hits.Load())))
+			_, _ = fmt.Fprintf(w, "app1-v1-swr-%d", app1V1Hits.Load())
 		case "/app-one/large":
 			w.Header().Set("Cache-Control", "public, max-age=300")
 			w.Header().Set("Accept-Ranges", "bytes")
@@ -147,7 +147,7 @@ func TestRouteBackendCutoverInvalidateAndRetainMatrix(t *testing.T) {
 		n := app2Hits.Add(1)
 		w.Header().Set("Cache-Control", "public, max-age=300")
 		w.Header().Set("X-Backend", "app2")
-		_, _ = w.Write([]byte(fmt.Sprintf("app2-hit-%d:%s", n, r.URL.Path)))
+		_, _ = fmt.Fprintf(w, "app2-hit-%d:%s", n, r.URL.Path)
 	}))
 	defer originApp2.Close()
 
@@ -639,7 +639,7 @@ func TestEpic620PortalAndTwoApplicationsEndToEnd(t *testing.T) {
 		n := portalHits.Add(1)
 		// Origin omits Cache-Control max-age so route default_ttl = 1h applies (#623).
 		w.Header().Set("Cache-Tag", "portal, release-v1")
-		_, _ = w.Write([]byte(fmt.Sprintf("portal-home-v1-hit-%d", n)))
+		_, _ = fmt.Fprintf(w, "portal-home-v1-hit-%d", n)
 	}))
 	defer portalOrigin.Close()
 
@@ -647,19 +647,19 @@ func TestEpic620PortalAndTwoApplicationsEndToEnd(t *testing.T) {
 		n := app1V1Hits.Add(1)
 		if r.URL.Path == "/app-one/no-explicit-cc" {
 			// Origin omits freshness headers; route default_ttl = 0s prevents heuristic storage (#623).
-			_, _ = w.Write([]byte(fmt.Sprintf("app1-no-cc-%d", n)))
+			_, _ = fmt.Fprintf(w, "app1-no-cc-%d", n)
 			return
 		}
 		if r.URL.Path == "/app-one/set-cookie-leak" {
 			// Even with max-age=300, Set-Cookie must never be stored in shared cache (#623).
 			w.Header().Set("Cache-Control", "public, max-age=300")
 			w.Header().Set("Set-Cookie", "app1_session=secret123; Path=/")
-			_, _ = w.Write([]byte(fmt.Sprintf("app1-set-cookie-%d", n)))
+			_, _ = fmt.Fprintf(w, "app1-set-cookie-%d", n)
 			return
 		}
 		w.Header().Set("Cache-Control", "public, max-age=600")
 		w.Header().Set("Cache-Tag", "app-one, tenant-alpha")
-		_, _ = w.Write([]byte(fmt.Sprintf("app1-v1-hit-%d:%s", n, r.URL.Path)))
+		_, _ = fmt.Fprintf(w, "app1-v1-hit-%d:%s", n, r.URL.Path)
 	}))
 	defer app1OriginV1.Close()
 
@@ -667,7 +667,7 @@ func TestEpic620PortalAndTwoApplicationsEndToEnd(t *testing.T) {
 		n := app1V2Hits.Add(1)
 		w.Header().Set("Cache-Control", "public, max-age=600")
 		w.Header().Set("Cache-Tag", "app-one, tenant-alpha")
-		_, _ = w.Write([]byte(fmt.Sprintf("app1-v2-hit-%d:%s", n, r.URL.Path)))
+		_, _ = fmt.Fprintf(w, "app1-v2-hit-%d:%s", n, r.URL.Path)
 	}))
 	defer app1OriginV2.Close()
 
@@ -675,14 +675,14 @@ func TestEpic620PortalAndTwoApplicationsEndToEnd(t *testing.T) {
 		n := app2Hits.Add(1)
 		w.Header().Set("Cache-Control", "public, max-age=600")
 		w.Header().Set("Cache-Tag", "app-two, tenant-beta")
-		_, _ = w.Write([]byte(fmt.Sprintf("app2-hit-%d:%s", n, r.URL.Path)))
+		_, _ = fmt.Fprintf(w, "app2-hit-%d:%s", n, r.URL.Path)
 	}))
 	defer app2Origin.Close()
 
 	privateOrigin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := privateHits.Add(1)
 		w.Header().Set("Cache-Control", "public, max-age=600")
-		_, _ = w.Write([]byte(fmt.Sprintf("private-hit-%d", n)))
+		_, _ = fmt.Fprintf(w, "private-hit-%d", n)
 	}))
 	defer privateOrigin.Close()
 

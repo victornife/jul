@@ -1307,10 +1307,6 @@ func routeChangedOrUpstreamChangedWithScope(primary *config.Config, srv *config.
 	return true, ""
 }
 
-func sameLocationCacheIdentity(a, b *config.LocationConfig) bool {
-	return sameLocationCutoverTarget(nil, a, nil, b)
-}
-
 func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, routeScopes []string, addSel func(Selector, []string), addNorm func(NormalizedSelector)) {
 	canonScopes := mergeRouteScopeSlices(nil, routeScopes)
 	if len(srv.ServerNames) == 0 {

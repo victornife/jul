@@ -2283,10 +2283,6 @@ func (c *Cache) hasResidentBaseLocked(baseKey, _ string, ownFenceGen uint64) boo
 	return c.baseVariants != nil && len(c.baseVariants[baseKey]) > 0
 }
 
-func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFenceGen uint64, dst *[]string) (repCount int, hasDisk, liveOrInflight bool) {
-	return c.collectOwnedKeysIntoForCutoverLocked(baseKey, exactKeyFilter, nil, ownFenceGen, dst)
-}
-
 func (c *Cache) collectOwnedKeysIntoForCutoverLocked(baseKey, exactKeyFilter string, cutoverScopes []string, ownFenceGen uint64, dst *[]string) (repCount int, hasDisk, liveOrInflight bool) {
 	matchesScope := func(routeScope string) bool {
 		if len(cutoverScopes) == 0 || routeScope == "" {
