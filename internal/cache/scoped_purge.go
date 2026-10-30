@@ -1193,10 +1193,6 @@ func (c *Cache) candidateBaseKeysSortedLocked(sel NormalizedSelector, maxScan in
 	}
 }
 
-func collectBoundedHostKeys(maps []map[string]struct{}, maxScan int) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
-	return collectBoundedHostKeysSorted(maps, maxScan, true)
-}
-
 func collectBoundedHostKeysSorted(maps []map[string]struct{}, maxScan int, sortKeys bool) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
 	for _, hm := range maps {
 		totalCandidates += len(hm)
@@ -2004,7 +2000,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			if c.onAfterFenceInstall != nil {
 				c.onAfterFenceInstall(sel, fenceGen)
 			}
-			diskRemoved, retiredReaders, diskFailed, uncertain = c.disk.deleteBatchAtMostGen(diskKeys, fenceGen)
+			var batchUncertain bool
+			diskRemoved, retiredReaders, diskFailed, batchUncertain = c.disk.deleteBatchAtMostGen(diskKeys, fenceGen)
+			uncertain = uncertain || batchUncertain
 			pending, repairUncertain := c.disk.reconcileInvalidation()
 			diskFailed = max(diskFailed, pending)
 			uncertain = uncertain || repairUncertain
@@ -2353,10 +2351,11 @@ func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, re
 		for _, k := range flatKeys {
 			addHash(k)
 		}
-		if sel.Kind == SelectorExactURL {
+		switch sel.Kind {
+		case SelectorExactURL:
 			addHash(keyFor(http.MethodGet, sel.Host, sel.URI))
 			addHash(keyFor(http.MethodHead, sel.Host, sel.URI))
-		} else if sel.Kind == SelectorKey {
+		case SelectorKey:
 			addHash(sel.Key)
 			addHash(baseKeyOf(sel.Key))
 		}
