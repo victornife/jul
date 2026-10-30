@@ -214,8 +214,8 @@ func TestWithBackendCutoverAndExecuteRouteCutover(t *testing.T) {
 	rcB := CompileRouteCacheConfig("scope-api", true, locInvalidate.CachePolicy).
 		WithMatcher(locInvalidate, versions).
 		WithBackendCutover(cfgB, cfgB.Servers[0], locInvalidate, versions)
-	if rcA.matcherProof == rcB.matcherProof {
-		t.Fatalf("expected matcherProof to change when upstream backend changes under reload_policy=invalidate")
+	if rcA.backendProof == rcB.backendProof || sameRouteCutoverBackend(rcA, rcB) {
+		t.Fatalf("expected backendProof to change when upstream backend changes under reload_policy=invalidate")
 	}
 
 	rcRetainA := CompileRouteCacheConfig("scope-static", true, locRetain.CachePolicy).
@@ -224,8 +224,25 @@ func TestWithBackendCutoverAndExecuteRouteCutover(t *testing.T) {
 	rcRetainB := CompileRouteCacheConfig("scope-static", true, locRetain.CachePolicy).
 		WithMatcher(locRetain, versions).
 		WithBackendCutover(cfgB, cfgB.Servers[0], locRetain, versions)
-	if rcRetainA.matcherProof != rcRetainB.matcherProof {
-		t.Fatalf("expected matcherProof to remain identical when reload_policy=retain")
+	if !sameRouteCutoverBackend(rcRetainA, rcRetainB) {
+		t.Fatalf("expected sameRouteCutoverBackend to remain true when reload_policy=retain")
+	}
+
+	// Verify reordering ServerNames and metadata-only Sharing edits produce zero cutover selectors.
+	reordered := *cfgA
+	reordered.Servers = append([]config.ServerConfig(nil), cfgA.Servers...)
+	reordered.Servers[0].ServerNames = []string{"APP.EXAMPLE.COM."}
+	reordered.Servers[0].Locations = append([]config.LocationConfig(nil), cfgA.Servers[0].Locations...)
+	aud := "internal"
+	reordered.Servers[0].Locations[0].Sharing = &config.SharingConfig{Mode: "private_network", AudienceLabel: &aud}
+	if sels := DeriveRouteCutoverSelectorsForPolicy(cfgA, &reordered, ""); len(sels) != 0 {
+		t.Fatalf("expected 0 cutover selectors for ServerNames normalization or Sharing metadata edit, got %+v", sels)
+	}
+	rcSharing := CompileRouteCacheConfig("scope-api", true, reordered.Servers[0].Locations[0].CachePolicy).
+		WithMatcher(reordered.Servers[0].Locations[0], versions).
+		WithBackendCutover(&reordered, reordered.Servers[0], reordered.Servers[0].Locations[0], versions)
+	if rcSharing.backendProof != rcA.backendProof {
+		t.Fatalf("Sharing metadata edit must not alter backendProof")
 	}
 
 	// ExecuteRouteCutover on cfgA -> cfgB should invalidate /api on app.example.com.

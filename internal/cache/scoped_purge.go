@@ -442,6 +442,28 @@ func (c *Cache) reclaimFencesLocked() {
 	c.enforceFenceCapLocked()
 }
 
+func routeScopeFromVariantKey(key string) string {
+	idx := strings.Index(key, "\x00route\x1f")
+	if idx < 0 {
+		return ""
+	}
+	rest := key[idx+len("\x00route\x1f"):]
+	if end := strings.IndexByte(rest, '\x00'); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+func (c *Cache) keyRouteScopeLocked(key string) string {
+	if s := routeScopeFromVariantKey(key); s != "" {
+		return s
+	}
+	if st := c.keyGen[key]; st != nil && st.routeScope != "" {
+		return st.routeScope
+	}
+	return ""
+}
+
 func (c *Cache) matchesAnyFenceLocked(entryGen uint64, key, host, reqURI string, ok bool, tags, extraTags []string, onlyIncomplete bool) bool {
 	if len(c.fences) == 0 {
 		return false
@@ -451,10 +473,21 @@ func (c *Cache) matchesAnyFenceLocked(entryGen uint64, key, host, reqURI string,
 	if ok {
 		resKey = resourceKeyOf(host, reqURI)
 	}
+	var keyRouteScope string
+	var keyRouteScopeResolved bool
 	for i := range c.fences {
 		f := &c.fences[i]
 		if entryGen > f.gen || (onlyIncomplete && !f.active && f.remaining == 0) {
 			continue
+		}
+		if len(f.sel.cutoverRouteScopes) > 0 {
+			if !keyRouteScopeResolved {
+				keyRouteScope = c.keyRouteScopeLocked(key)
+				keyRouteScopeResolved = true
+			}
+			if keyRouteScope != "" && !f.sel.matchesCutoverRoute(keyRouteScope) {
+				continue
+			}
 		}
 		if f.sel.Kind == SelectorKey {
 			if key == f.sel.Key || baseKey == f.sel.Key {
@@ -679,6 +712,15 @@ func (c *Cache) unindexKeyEntryLocked(st *keyGenState) {
 			if len(vm) == 0 {
 				delete(c.baseVariants, baseKey)
 			}
+		}
+		if bst := c.keyGen[baseKey]; bst != nil && len(bst.variants) > 0 {
+			kept := bst.variants[:0]
+			for _, vk := range bst.variants {
+				if vk != st.key {
+					kept = append(kept, vk)
+				}
+			}
+			bst.variants = kept
 		}
 	}
 	if len(st.tags) > 0 || len(c.baseIndexedTags) > 0 {
@@ -1045,6 +1087,7 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 			committed: false,
 			epochs:    maps.Clone(c.routeEpoch),
 			matchers:  maps.Clone(c.routeMatchers),
+			backends:  maps.Clone(c.routeBackends),
 		}
 		c.routeStateSnap.Store(snap)
 	}
@@ -1242,6 +1285,11 @@ func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector) int {
 func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool) (matched int, tagUnknown bool) {
 	c.fillMu.Lock()
 	for fk := range c.fills {
+		if len(sel.cutoverRouteScopes) > 0 {
+			if rScope := routeScopeFromVariantKey(fk); rScope != "" && !sel.matchesCutoverRoute(rScope) {
+				continue
+			}
+		}
 		base := baseKeyOf(fk)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
@@ -1270,6 +1318,9 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 
 	c.reMu.Lock()
 	for rk := range c.calls {
+		if len(sel.cutoverRouteScopes) > 0 && rk.route != "" && !sel.matchesCutoverRoute(rk.route) {
+			continue
+		}
 		base := baseKeyOf(rk.key)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
@@ -1813,7 +1864,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				continue
 			}
 			keyStart := len(flatKeys)
-			reps, hasDisk, liveOrInflight := c.collectOwnedKeysIntoLocked(bk, exactFilter, evalFenceGen, &flatKeys)
+			reps, hasDisk, liveOrInflight := c.collectOwnedKeysIntoForCutoverLocked(bk, exactFilter, sel.cutoverRouteScopes, evalFenceGen, &flatKeys)
 			if !liveOrInflight {
 				skipped++
 				continue
@@ -2230,6 +2281,21 @@ func (c *Cache) hasResidentBaseLocked(baseKey, _ string, ownFenceGen uint64) boo
 }
 
 func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFenceGen uint64, dst *[]string) (repCount int, hasDisk, liveOrInflight bool) {
+	return c.collectOwnedKeysIntoForCutoverLocked(baseKey, exactKeyFilter, nil, ownFenceGen, dst)
+}
+
+func (c *Cache) collectOwnedKeysIntoForCutoverLocked(baseKey, exactKeyFilter string, cutoverScopes []string, ownFenceGen uint64, dst *[]string) (repCount int, hasDisk, liveOrInflight bool) {
+	matchesScope := func(routeScope string) bool {
+		if len(cutoverScopes) == 0 || routeScope == "" {
+			return true
+		}
+		for _, rs := range cutoverScopes {
+			if rs == routeScope {
+				return true
+			}
+		}
+		return false
+	}
 	st := c.keyGen[baseKey]
 	var vm map[string]struct{}
 	if c.baseVariants != nil {
@@ -2238,6 +2304,9 @@ func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFe
 	hasVariants := (st != nil && len(st.variants) > 0) || len(vm) > 0
 	if !hasVariants {
 		if st == nil || (exactKeyFilter != "" && baseKey != exactKeyFilter) {
+			return 0, false, false
+		}
+		if !matchesScope(st.routeScope) {
 			return 0, false, false
 		}
 		if (ownFenceGen > 0 && st.gen > ownFenceGen) || (ownFenceGen == 0 && c.isResidentEntryFencedLocked(st.gen, baseKey, st.tags)) {
@@ -2256,12 +2325,22 @@ func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFe
 
 	startLen := len(*dst)
 	live := false
-	addKey := func(k string, isStub bool) {
+	keptOtherRouteVariant := false
+	addVariantKey := func(k string) {
 		if exactKeyFilter != "" && k != exactKeyFilter && baseKeyOf(k) != exactKeyFilter {
 			return
 		}
 		for i := startLen; i < len(*dst); i++ {
 			if (*dst)[i] == k {
+				return
+			}
+		}
+		if len(cutoverScopes) > 0 {
+			vScope := c.keyRouteScopeLocked(k)
+			if !matchesScope(vScope) {
+				if kst := c.keyGen[k]; kst != nil && (kst.inMem || kst.inDisk || kst.inflight > 0) {
+					keptOtherRouteVariant = true
+				}
 				return
 			}
 		}
@@ -2290,30 +2369,45 @@ func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFe
 			hasDisk = true
 		}
 		*dst = append(*dst, k)
-		if !isStub {
-			repCount++
-		}
+		repCount++
 	}
 
 	if st != nil {
-		addKey(baseKey, true)
 		for _, vk := range st.variants {
-			addKey(vk, false)
+			addVariantKey(vk)
 		}
 	}
 	for vk := range vm {
-		addKey(vk, false)
+		addVariantKey(vk)
 	}
-	if live && exactKeyFilter == "" {
-		foundBase := false
-		for i := startLen; i < len(*dst); i++ {
-			if (*dst)[i] == baseKey {
-				foundBase = true
-				break
+	// Only delete the base Vary stub when no other route owns live variants under baseKey
+	// and baseKey itself matches the cutover route scope.
+	if !keptOtherRouteVariant && (st == nil || matchesScope(st.routeScope)) {
+		if st != nil && (exactKeyFilter == "" || baseKey == exactKeyFilter) {
+			if (ownFenceGen == 0 || st.gen <= ownFenceGen) && (ownFenceGen > 0 || !c.isResidentEntryFencedLocked(st.gen, baseKey, st.tags)) {
+				if st.inMem || st.inDisk || (ownFenceGen > 0 && st.inflight > 0) {
+					liveOrInflight = true
+					if st.inDisk || st.inflight > 0 {
+						hasDisk = true
+					}
+					if st.inMem || st.inDisk {
+						live = true
+					}
+					*dst = append(*dst, baseKey)
+				}
 			}
 		}
-		if !foundBase {
-			*dst = append(*dst, baseKey)
+		if live && exactKeyFilter == "" {
+			foundBase := false
+			for i := startLen; i < len(*dst); i++ {
+				if (*dst)[i] == baseKey {
+					foundBase = true
+					break
+				}
+			}
+			if !foundBase {
+				*dst = append(*dst, baseKey)
+			}
 		}
 	}
 	if repCount == 0 && live {

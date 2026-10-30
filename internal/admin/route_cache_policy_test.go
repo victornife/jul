@@ -421,4 +421,60 @@ func TestRouteCachePolicyProjectionPatchDiffAndInspect(t *testing.T) {
 	if broadDiff.CacheCutover == nil || !broadDiff.CacheCutover.BroadenedToHostOrAll || broadDiff.CacheCutover.Disposition != "stage_for_restart" {
 		t.Fatalf("expected broadened stage_for_restart CacheCutoverPlan, got %+v", broadDiff.CacheCutover)
 	}
+
+	// Verify exact-route cutover labels and multi-route inspection ambiguity when ReloadPolicy differs.
+	cfgExactBefore := &config.Config{
+		Cache: config.CacheConfig{Enabled: true, ReloadPolicy: "retain"},
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"exact.example.com"},
+				Locations: []config.LocationConfig{
+					{
+						Match:       config.MatchConfig{Type: "exact", Path: "/a"},
+						ProxyPass:   "http://127.0.0.1:9001",
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "invalidate"},
+					},
+					{
+						Match:       config.MatchConfig{Type: "exact", Path: "/b"},
+						ProxyPass:   "http://127.0.0.1:9002",
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "retain"},
+					},
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/inherit"},
+						ProxyPass: "http://127.0.0.1:9003",
+						Cache:     true,
+					},
+				},
+			},
+		},
+	}
+	v1Exact := v1Routes(cfgExactBefore)
+	if len(v1Exact) != 3 || v1Exact[2].CachePolicy == nil || v1Exact[2].CachePolicy.EffectiveReloadPolicy != "retain" {
+		t.Fatalf("expected inherited route without [cache_policy] to report EffectiveReloadPolicy=retain, got %+v", v1Exact[2].CachePolicy)
+	}
+	sExact := newTestServer(t, config.AdminConfig{Token: token}, Deps{
+		Cache:      c,
+		LoadConfig: func() (*config.Config, error) { return cfgExactBefore, nil },
+	})
+	rrAmb := postV1JSON(t, sExact, "/api/v1/cache/inspect", token, "", adminapi.CacheInspectRequest{
+		Selector: adminapi.CacheSelector{Kind: "host", Host: "exact.example.com"},
+	})
+	if rrAmb.Code != http.StatusOK || decodeInto[adminapi.CacheInspectResponse](t, rrAmb).PolicySource != "ambiguous_multiple_routes_use_route_id" {
+		t.Fatalf("expected ambiguous_multiple_routes_use_route_id when routes differ in reload_policy, got %d %s", rrAmb.Code, rrAmb.Body.String())
+	}
+
+	cfgExactAfter := *cfgExactBefore
+	cfgExactAfter.Servers = append([]config.ServerConfig(nil), cfgExactBefore.Servers...)
+	cfgExactAfter.Servers[0].Locations = append([]config.LocationConfig(nil), cfgExactBefore.Servers[0].Locations...)
+	cfgExactAfter.Servers[0].Locations[0].ProxyPass = "http://127.0.0.1:9011"
+	cfgExactAfter.Servers[0].Locations[1].ProxyPass = "http://127.0.0.1:9012"
+	exactDiff := diffConfigs(cfgExactBefore, &cfgExactAfter)
+	if exactDiff.CacheCutover == nil ||
+		len(exactDiff.CacheCutover.InvalidatedScopes) != 1 || exactDiff.CacheCutover.InvalidatedScopes[0] != "exact exact.example.com/a" ||
+		len(exactDiff.CacheCutover.RetainedScopes) != 1 || exactDiff.CacheCutover.RetainedScopes[0] != "exact exact.example.com/b" {
+		t.Fatalf("unexpected exact route cutover diff: %+v", exactDiff.CacheCutover)
+	}
 }

@@ -361,6 +361,49 @@ describe("LocationCachePolicyEditor and RouteDetail integration", () => {
     expect(editBtn).toBeInTheDocument();
     expect(screen.getByText(/\[servers\.locations\.cache_policy\]/)).toBeInTheDocument();
     expect(screen.getByText(/bypass_any_cookie = true/)).toBeInTheDocument();
+    expect(screen.getByText(/reload_policy = "invalidate"/)).toBeInTheDocument();
+
+    // Verify reload_policy-only override and clearing back to global inheritance in cachePolicyDraft helpers
+    const reloadOnlyLoc: LocationProjection = {
+      ...SAMPLE_LOC,
+      cache_policy: {
+        bypass_any_cookie: false,
+        reload_policy: "invalidate",
+      },
+    };
+    const seededReloadOnly = seedCachePolicyForm(reloadOnlyLoc);
+    expect(seededReloadOnly.reloadPolicy).toBe("invalidate");
+    const validatedReloadOnly = validateCachePolicyForm({
+      ...seededReloadOnly,
+      reloadPolicy: "retain",
+    });
+    expect(validatedReloadOnly.patch).toEqual({ reload_policy: "retain" });
+    const clearedReloadOnly = validateCachePolicyForm({
+      ...seededReloadOnly,
+      reloadPolicy: "",
+    });
+    expect(clearedReloadOnly.patch).toBeNull();
+    expect(
+      buildCachePolicyPatchOps(
+        {
+          listen: ":8080",
+          server_names: ["example.com"],
+          match_type: "prefix",
+          path: "/api",
+        },
+        reloadOnlyLoc,
+        { ...seededReloadOnly, reloadPolicy: "" },
+        clearedReloadOnly.patch,
+      ),
+    ).toEqual([
+      {
+        op: "location_cache_policy_clear",
+        listen: ":8080",
+        server_names: ["example.com"],
+        match_type: "prefix",
+        path: "/api",
+      },
+    ]);
 
     fireEvent.click(editBtn);
     await waitFor(() => {

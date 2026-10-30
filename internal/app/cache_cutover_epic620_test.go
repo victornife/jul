@@ -430,6 +430,94 @@ func TestRouteBackendCutoverInvalidateAndRetainMatrix(t *testing.T) {
 	if bodyAfterPartialFail != "app1-v2:/app-one/item" {
 		t.Fatalf("expected post-cutover handler to serve app1-v2 even after partial disk cutover failure, got %q", bodyAfterPartialFail)
 	}
+
+	// 11. Verify policy-only flip ("invalidate" -> "retain" -> "invalidate") WITHOUT backend change
+	// preserves warm cache entries, and verify same-host cross-listener (:9090) and retained child
+	// route (/app-one/static/) isolation during /app-one/ backend cutover!
+	if _, body := doReq(resFailB[":8080"], "/app-one/policy-flip", nil); body != "app1-v2:/app-one/policy-flip" {
+		t.Fatalf("seed /app-one/policy-flip: %q", body)
+	}
+	cfgFlipRetain := makeConfig(originApp1V2.URL, originApp2.URL, "retain")
+	resFlipRetain, _, err := factory.Build(ctx, cfgFlipRetain, true)
+	if err != nil {
+		t.Fatalf("Build cfgFlipRetain: %v", err)
+	}
+	if rec, _ := doReq(resFlipRetain[":8080"], "/app-one/policy-flip", nil); rec.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("policy-only flip invalidate->retain without backend change must keep entry warm, got %q", rec.Header().Get("X-Cache"))
+	}
+	cfgFlipInv := makeConfig(originApp1V2.URL, originApp2.URL, "invalidate")
+	resFlipInv, _, err := factory.Build(ctx, cfgFlipInv, true)
+	if err != nil {
+		t.Fatalf("Build cfgFlipInv: %v", err)
+	}
+	if rec, _ := doReq(resFlipInv[":8080"], "/app-one/policy-flip", nil); rec.Header().Get("X-Cache") != "HIT" {
+		t.Fatalf("policy-only flip retain->invalidate without backend change must keep entry warm, got %q", rec.Header().Get("X-Cache"))
+	}
+
+	// Same-host cross-listener (:8080 vs :9090) and retained child route (/app-one/static/) isolation.
+	cfgMultiListenerA := &config.Config{
+		Cache: cfgFlipInv.Cache,
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"portal.example.com"},
+				Locations: []config.LocationConfig{
+					{
+						RouteID:     strPtrTest("route-app-one-child"),
+						Match:       config.MatchConfig{Type: "prefix", Path: "/app-one/static/"},
+						ProxyPass:   originApp2.URL,
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "retain"},
+					},
+					{
+						RouteID:     strPtrTest("route-app-one"),
+						Match:       config.MatchConfig{Type: "prefix", Path: "/app-one/"},
+						ProxyPass:   originApp1V1.URL,
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "invalidate"},
+					},
+				},
+			},
+			{
+				Listen:      ":9090",
+				ServerNames: []string{"portal.example.com"},
+				Locations: []config.LocationConfig{
+					{
+						RouteID:     strPtrTest("route-9090"),
+						Match:       config.MatchConfig{Type: "prefix", Path: "/app-one/"},
+						ProxyPass:   originApp2.URL,
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "retain"},
+					},
+				},
+			},
+		},
+	}
+	resMLA, _, err := factory.Build(ctx, cfgMultiListenerA, true)
+	if err != nil {
+		t.Fatalf("Build cfgMultiListenerA: %v", err)
+	}
+	_, _ = doReq(resMLA[":8080"], "/app-one/parent-item", nil)
+	_, childBody := doReq(resMLA[":8080"], "/app-one/static/logo.svg", nil)
+	_, port9090Body := doReq(resMLA[":9090"], "/app-one/parent-item", nil)
+
+	cfgMultiListenerB := *cfgMultiListenerA
+	cfgMultiListenerB.Servers = append([]config.ServerConfig(nil), cfgMultiListenerA.Servers...)
+	cfgMultiListenerB.Servers[0].Locations = append([]config.LocationConfig(nil), cfgMultiListenerA.Servers[0].Locations...)
+	cfgMultiListenerB.Servers[0].Locations[1].ProxyPass = originApp1V2.URL // only :8080 /app-one/ changes backend!
+	resMLB, _, err := factory.Build(ctx, &cfgMultiListenerB, true)
+	if err != nil {
+		t.Fatalf("Build cfgMultiListenerB: %v", err)
+	}
+	if rec, body := doReq(resMLB[":8080"], "/app-one/parent-item", nil); rec.Header().Get("X-Cache") != "MISS" || body != "app1-v2:/app-one/parent-item" {
+		t.Fatalf("expected :8080 /app-one/parent-item to be invalidated, got %q %q", rec.Header().Get("X-Cache"), body)
+	}
+	if rec, body := doReq(resMLB[":8080"], "/app-one/static/logo.svg", nil); rec.Header().Get("X-Cache") != "HIT" || body != childBody {
+		t.Fatalf("retained child route /app-one/static/logo.svg must remain HIT, got %q %q", rec.Header().Get("X-Cache"), body)
+	}
+	if rec, body := doReq(resMLB[":9090"], "/app-one/parent-item", nil); rec.Header().Get("X-Cache") != "HIT" || body != port9090Body {
+		t.Fatalf("retained route on listener :9090 must remain HIT, got %q %q", rec.Header().Get("X-Cache"), body)
+	}
 }
 
 // TestEpic620PortalAndTwoApplicationsEndToEnd verifies the integrated #620

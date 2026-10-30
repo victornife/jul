@@ -395,7 +395,8 @@ func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Conf
 			nextPol.DefaultTTLSeconds != firstPol.DefaultTTLSeconds || nextPol.SWRSeconds != firstPol.SWRSeconds || nextPol.SIESeconds != firstPol.SIESeconds ||
 			(nextPol.MaxTTLSeconds == nil) != (firstPol.MaxTTLSeconds == nil) ||
 			(nextPol.MaxTTLSeconds != nil && firstPol.MaxTTLSeconds != nil && *nextPol.MaxTTLSeconds != *firstPol.MaxTTLSeconds) ||
-			nextPol.BypassAnyCookie != firstPol.BypassAnyCookie || strings.Join(nextPol.BypassCookies, ",") != strings.Join(firstPol.BypassCookies, ",") {
+			nextPol.BypassAnyCookie != firstPol.BypassAnyCookie || strings.Join(nextPol.BypassCookies, ",") != strings.Join(firstPol.BypassCookies, ",") ||
+			nextPol.ReloadPolicy != firstPol.ReloadPolicy {
 			ambiguous = true
 			break
 		}

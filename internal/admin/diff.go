@@ -179,6 +179,9 @@ func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff) {
 	if !before.Cache.Enabled && !after.Cache.Enabled {
 		return
 	}
+	if !after.Cache.Enabled {
+		return
+	}
 	allSels := cache.DeriveRouteCutoverSelectors(before, after)
 	if len(allSels) == 0 {
 		return
@@ -188,21 +191,28 @@ func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff) {
 	if strings.EqualFold(strings.TrimSpace(after.Cache.ReloadPolicy), "invalidate") {
 		defaultPolicy = "invalidate"
 	}
-	invSet := make(map[string]struct{}, len(invSels))
+	seenInvLabel := make(map[string]struct{}, len(invSels))
 	var invLabels []string
 	broadened := false
 	for _, sel := range invSels {
 		lbl := formatCutoverSelector(sel)
-		invSet[lbl] = struct{}{}
-		invLabels = append(invLabels, lbl)
+		if _, exists := seenInvLabel[lbl]; !exists {
+			seenInvLabel[lbl] = struct{}{}
+			invLabels = append(invLabels, lbl)
+		}
 		if sel.Kind == cache.SelectorHost || sel.Kind == cache.SelectorAll {
 			broadened = true
 		}
 	}
+	seenRetLabel := make(map[string]struct{}, len(allSels))
 	var retLabels []string
 	for _, sel := range allSels {
+		if cutoverSelectorCoveredByInvalidated(sel, invSels) {
+			continue
+		}
 		lbl := formatCutoverSelector(sel)
-		if _, ok := invSet[lbl]; !ok {
+		if _, exists := seenRetLabel[lbl]; !exists {
+			seenRetLabel[lbl] = struct{}{}
 			retLabels = append(retLabels, lbl)
 		}
 	}
@@ -226,6 +236,12 @@ func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff) {
 		BroadenedToHostOrAll: broadened,
 		Disposition:          disposition,
 	}
+	if restartReq {
+		if len(invLabels) > 0 {
+			d.warn("Cache cutover (stage_for_restart): candidate includes restart-required changes; route/backend cutover for %s is staged for restart rather than live publish.", strings.Join(invLabels, ", "))
+		}
+		return
+	}
 	if len(invLabels) > 0 {
 		scopeList := strings.Join(invLabels, ", ")
 		if broadened {
@@ -239,6 +255,40 @@ func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff) {
 	}
 }
 
+func cutoverSelectorCoveredByInvalidated(sel cache.NormalizedSelector, invSels []cache.NormalizedSelector) bool {
+	for _, inv := range invSels {
+		if inv.Digest() == sel.Digest() {
+			return true
+		}
+		if inv.Kind == cache.SelectorAll && (len(inv.CutoverRouteScopes()) == 0 || cutoverRouteScopesContainsAll(inv.CutoverRouteScopes(), sel.CutoverRouteScopes())) {
+			return true
+		}
+		if inv.Kind == cache.SelectorHost && inv.Host == sel.Host && (len(inv.CutoverRouteScopes()) == 0 || cutoverRouteScopesContainsAll(inv.CutoverRouteScopes(), sel.CutoverRouteScopes())) {
+			return true
+		}
+	}
+	return false
+}
+
+func cutoverRouteScopesContainsAll(superset, subset []string) bool {
+	if len(subset) == 0 {
+		return len(superset) == 0
+	}
+	for _, sub := range subset {
+		found := false
+		for _, sup := range superset {
+			if sup == sub {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
 func formatCutoverSelector(sel cache.NormalizedSelector) string {
 	switch sel.Kind {
 	case cache.SelectorAll:
@@ -250,6 +300,11 @@ func formatCutoverSelector(sel cache.NormalizedSelector) string {
 			return fmt.Sprintf("prefix %s%s", sel.Host, sel.Prefix)
 		}
 		return fmt.Sprintf("prefix *%s", sel.Prefix)
+	case cache.SelectorGlob:
+		if sel.Host != "" && sel.Host != "*" {
+			return fmt.Sprintf("exact %s%s", sel.Host, sel.Pattern)
+		}
+		return fmt.Sprintf("exact *%s", sel.Pattern)
 	default:
 		return string(sel.Kind)
 	}
