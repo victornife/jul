@@ -184,17 +184,14 @@ func sameRouteCutoverBackend(a, b RouteCacheConfig) bool {
 	if !a.reloadInvalidate && !b.reloadInvalidate {
 		return true
 	}
-	if a.backendProof == "" || b.backendProof == "" {
-		return true
-	}
-	return a.backendProof == b.backendProof
+	return a.backendProof != "" && a.backendProof == b.backendProof
 }
 
 func sameDurableBackend(prevBackend, nextBackend string, invalidate bool) bool {
-	if !invalidate || prevBackend == "" || nextBackend == "" {
+	if !invalidate {
 		return true
 	}
-	return prevBackend == nextBackend
+	return prevBackend != "" && prevBackend == nextBackend
 }
 
 func sameRoutePolicyOverrides(a, b RouteCacheConfig) bool {

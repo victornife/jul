@@ -477,4 +477,41 @@ func TestRouteCachePolicyProjectionPatchDiffAndInspect(t *testing.T) {
 		len(exactDiff.CacheCutover.RetainedScopes) != 1 || exactDiff.CacheCutover.RetainedScopes[0] != "exact exact.example.com/b" {
 		t.Fatalf("unexpected exact route cutover diff: %+v", exactDiff.CacheCutover)
 	}
+
+	// Verify two regex routes on the same host (one invalidate, one retain) both changing backends
+	// report host scope in both InvalidatedScopes and RetainedScopes (since each selector carries its own routeScope).
+	cfgRegexBefore := &config.Config{
+		Cache: config.CacheConfig{Enabled: true, ReloadPolicy: "retain"},
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"regex.example.com"},
+				Locations: []config.LocationConfig{
+					{
+						Match:       config.MatchConfig{Type: "regex", Path: "^/v1/.*"},
+						ProxyPass:   "http://127.0.0.1:9001",
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "invalidate"},
+					},
+					{
+						Match:       config.MatchConfig{Type: "regex", Path: "^/v2/.*"},
+						ProxyPass:   "http://127.0.0.1:9002",
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "retain"},
+					},
+				},
+			},
+		},
+	}
+	cfgRegexAfter := *cfgRegexBefore
+	cfgRegexAfter.Servers = append([]config.ServerConfig(nil), cfgRegexBefore.Servers...)
+	cfgRegexAfter.Servers[0].Locations = append([]config.LocationConfig(nil), cfgRegexBefore.Servers[0].Locations...)
+	cfgRegexAfter.Servers[0].Locations[0].ProxyPass = "http://127.0.0.1:9011"
+	cfgRegexAfter.Servers[0].Locations[1].ProxyPass = "http://127.0.0.1:9012"
+	regexDiff := diffConfigs(cfgRegexBefore, &cfgRegexAfter)
+	if regexDiff.CacheCutover == nil ||
+		len(regexDiff.CacheCutover.InvalidatedScopes) != 1 || regexDiff.CacheCutover.InvalidatedScopes[0] != "host regex.example.com" ||
+		len(regexDiff.CacheCutover.RetainedScopes) != 1 || regexDiff.CacheCutover.RetainedScopes[0] != "host regex.example.com" {
+		t.Fatalf("expected host regex.example.com in both InvalidatedScopes and RetainedScopes, got %+v", regexDiff.CacheCutover)
+	}
 }

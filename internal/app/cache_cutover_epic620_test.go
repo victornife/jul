@@ -518,6 +518,54 @@ func TestRouteBackendCutoverInvalidateAndRetainMatrix(t *testing.T) {
 	if rec, body := doReq(resMLB[":9090"], "/app-one/parent-item", nil); rec.Header().Get("X-Cache") != "HIT" || body != port9090Body {
 		t.Fatalf("retained route on listener :9090 must remain HIT, got %q %q", rec.Header().Get("X-Cache"), body)
 	}
+
+	// Wildcard/unnamed-host cutover (SelectorAll with cutoverRouteScopes) must NOT purge unrelated retained routes!
+	cfgWildcardA := &config.Config{
+		Cache: cfgFlipInv.Cache,
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: nil, // unnamed catch-all server -> SelectorAll with cutoverRouteScopes
+				Locations: []config.LocationConfig{
+					{
+						RouteID:     strPtrTest("wc-inv"),
+						Match:       config.MatchConfig{Type: "prefix", Path: "/app-one/"},
+						ProxyPass:   originApp1V1.URL,
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "invalidate"},
+					},
+					{
+						RouteID:     strPtrTest("wc-ret"),
+						Match:       config.MatchConfig{Type: "prefix", Path: "/app-two/"},
+						ProxyPass:   originApp2.URL,
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{ReloadPolicy: "retain"},
+					},
+				},
+			},
+		},
+	}
+	resWCA, _, err := factory.Build(ctx, cfgWildcardA, true)
+	if err != nil {
+		t.Fatalf("Build cfgWildcardA: %v", err)
+	}
+	_, _ = doReq(resWCA[":8080"], "/app-one/wc-item", nil)
+	_, wcRetBody := doReq(resWCA[":8080"], "/app-two/wc-keep", nil)
+
+	cfgWildcardB := *cfgWildcardA
+	cfgWildcardB.Servers = append([]config.ServerConfig(nil), cfgWildcardA.Servers...)
+	cfgWildcardB.Servers[0].Locations = append([]config.LocationConfig(nil), cfgWildcardA.Servers[0].Locations...)
+	cfgWildcardB.Servers[0].Locations[0].ProxyPass = originApp1V2.URL
+	resWCB, _, err := factory.Build(ctx, &cfgWildcardB, true)
+	if err != nil {
+		t.Fatalf("Build cfgWildcardB: %v", err)
+	}
+	if rec, body := doReq(resWCB[":8080"], "/app-one/wc-item", nil); rec.Header().Get("X-Cache") != "MISS" || body != "app1-v2:/app-one/wc-item" {
+		t.Fatalf("expected wildcard /app-one/wc-item to be invalidated, got %q %q", rec.Header().Get("X-Cache"), body)
+	}
+	if rec, body := doReq(resWCB[":8080"], "/app-two/wc-keep", nil); rec.Header().Get("X-Cache") != "HIT" || body != wcRetBody {
+		t.Fatalf("retained sibling route on unnamed/wildcard server must remain HIT, got %q %q", rec.Header().Get("X-Cache"), body)
+	}
 }
 
 // TestEpic620PortalAndTwoApplicationsEndToEnd verifies the integrated #620

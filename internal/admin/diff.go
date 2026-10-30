@@ -260,10 +260,16 @@ func cutoverSelectorCoveredByInvalidated(sel cache.NormalizedSelector, invSels [
 		if inv.Digest() == sel.Digest() {
 			return true
 		}
-		if inv.Kind == cache.SelectorAll && (len(inv.CutoverRouteScopes()) == 0 || cutoverRouteScopesContainsAll(inv.CutoverRouteScopes(), sel.CutoverRouteScopes())) {
+		if !cutoverRouteScopesContainsAll(inv.CutoverRouteScopes(), sel.CutoverRouteScopes()) {
+			continue
+		}
+		if inv.Kind == cache.SelectorAll {
 			return true
 		}
-		if inv.Kind == cache.SelectorHost && inv.Host == sel.Host && (len(inv.CutoverRouteScopes()) == 0 || cutoverRouteScopesContainsAll(inv.CutoverRouteScopes(), sel.CutoverRouteScopes())) {
+		if inv.Kind == cache.SelectorHost && inv.Host == sel.Host {
+			return true
+		}
+		if inv.Kind == sel.Kind && inv.Host == sel.Host && inv.Prefix == sel.Prefix && inv.Pattern == sel.Pattern {
 			return true
 		}
 	}

@@ -274,6 +274,9 @@ func (c *Cache) enforceFenceCapLocked() {
 		}
 		evicted := c.fences[evictIdx]
 		c.fences = append(c.fences[:evictIdx], c.fences[evictIdx+1:]...)
+		if !evicted.active && evicted.remaining == 0 && len(evicted.sel.cutoverRouteScopes) > 0 {
+			continue
+		}
 		evictHost := evicted.sel.Host
 		if evictHost != "" && evicted.sel.Kind != SelectorAll {
 			if c.hostFenceFloorGen == nil {
@@ -1760,7 +1763,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	// documented escape paths and are never rejected by maxScan (F13).
 	isUnboundedHost := sel.Kind == SelectorHost && sel.RouteID == ""
 	isRetryFence := opts.ReuseFenceGen > 0
-	isFastAll := sel.Kind == SelectorAll && !isRetryFence
+	isFastAll := sel.Kind == SelectorAll && !isRetryFence && len(sel.cutoverRouteScopes) == 0
 	isTagRetry := isRetryFence && sel.Kind == SelectorTag
 	resourceIDs := opts.ReuseResourceIDs
 	if isRetryFence {
@@ -1949,7 +1952,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		}
 	}
 	if opts.ReuseFenceGen > 0 {
-		if sel.Kind == SelectorAll {
+		if sel.Kind == SelectorAll && len(sel.cutoverRouteScopes) == 0 {
 			if fenceGen > c.purgeGen {
 				c.purgeGen = fenceGen
 			}
@@ -2431,6 +2434,7 @@ func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, re
 		TagMatch:            sel.TagMatch,
 		RoutePath:           sel.inspectionRoutePrefix,
 		RouteType:           sel.inspectionRouteExact,
+		CutoverRouteScopes:  append([]string(nil), sel.cutoverRouteScopes...),
 	}
 	if sel.Kind == SelectorTag {
 		if len(resourceIDs) > 4096 {
@@ -2507,6 +2511,7 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []diskPurgeIntent) {
 			cutoverMatchAnyPort:   intent.CutoverMatchAnyPort,
 			cutoverRawPrefix:      intent.CutoverRawPrefix,
 			cutoverExactPath:      intent.CutoverExactPath,
+			cutoverRouteScopes:    append([]string(nil), intent.CutoverRouteScopes...),
 			inspectionRoutePrefix: intent.RoutePath,
 			inspectionRouteExact:  intent.RouteType,
 			BroadScope:            intent.Kind == SelectorAll || intent.Kind == SelectorHost,
@@ -2533,7 +2538,7 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []diskPurgeIntent) {
 
 		c.genMu.Lock()
 		addGroup := func(bk string) {
-			_, _, _ = c.collectOwnedKeysIntoLocked(bk, "", intent.FenceGen, &targetKeys)
+			_, _, _ = c.collectOwnedKeysIntoForCutoverLocked(bk, "", sel.cutoverRouteScopes, intent.FenceGen, &targetKeys)
 			if nl := strings.IndexByte(bk, '\n'); nl > 0 {
 				matchedResSet[bk[nl+1:]] = struct{}{}
 			}
@@ -2549,11 +2554,15 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []diskPurgeIntent) {
 			resKey := resourceKeyOf(host, reqURI)
 			switch intent.Kind {
 			case SelectorAll:
-				if _, seen := seenKey[k]; !seen {
-					seenKey[k] = struct{}{}
-					targetKeys = append(targetKeys, k)
+				if len(sel.cutoverRouteScopes) > 0 {
+					addGroup(baseKeyOf(k))
+				} else {
+					if _, seen := seenKey[k]; !seen {
+						seenKey[k] = struct{}{}
+						targetKeys = append(targetKeys, k)
+					}
+					matchedResSet[resKey] = struct{}{}
 				}
-				matchedResSet[resKey] = struct{}{}
 			case SelectorTag:
 				var tags []string
 				if c.baseIndexedTags != nil {

@@ -743,6 +743,10 @@ func computeSelectorDigest(s NormalizedSelector) [32]byte {
 	if s.inspectionRouteExact != "" || s.inspectionRoutePrefix != "" {
 		writePart(s.inspectionRouteExact, s.inspectionRoutePrefix)
 	}
+	if len(s.cutoverRouteScopes) > 0 {
+		writePart("cutover_scopes", strconv.Itoa(len(s.cutoverRouteScopes)))
+		writePart(s.cutoverRouteScopes...)
+	}
 	writePart(strconv.Itoa(len(s.Tags)))
 	writePart(s.Tags...)
 	var out [32]byte
@@ -1141,7 +1145,7 @@ func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, override
 			scopes := RouteScopes(*srv)
 			for j := range srv.Locations {
 				loc := &srv.Locations[j]
-				oloc, oScope := findMatchingLocationForCutover(srv, loc, secondary)
+				oloc, osrv, oScope := findMatchingLocationForCutover(srv, loc, secondary)
 				if !loc.Cache && (oloc == nil || !oloc.Cache) {
 					continue
 				}
@@ -1168,7 +1172,7 @@ func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, override
 						continue
 					}
 				}
-				if oloc == nil || !sameLocationCutoverTarget(loc, oloc) {
+				if oloc == nil || !sameLocationCutoverTarget(srv, loc, osrv, oloc) {
 					emitSelectorsForRoute(srv, loc, rScopes, addSel, addNorm)
 				}
 			}
@@ -1214,9 +1218,9 @@ func sameCutoverServerBoundary(a, b *config.ServerConfig) bool {
 	return bytes.Equal(routeScopeBoundary(*a), routeScopeBoundary(*b))
 }
 
-func findMatchingLocationForCutover(srv *config.ServerConfig, loc *config.LocationConfig, other *config.Config) (*config.LocationConfig, string) {
+func findMatchingLocationForCutover(srv *config.ServerConfig, loc *config.LocationConfig, other *config.Config) (*config.LocationConfig, *config.ServerConfig, string) {
 	if other == nil {
-		return nil, ""
+		return nil, nil, ""
 	}
 	for i := range other.Servers {
 		osrv := &other.Servers[i]
@@ -1227,20 +1231,23 @@ func findMatchingLocationForCutover(srv *config.ServerConfig, loc *config.Locati
 		for j := range osrv.Locations {
 			oloc := &osrv.Locations[j]
 			if loc.RouteID != nil && oloc.RouteID != nil && *loc.RouteID != "" && *loc.RouteID == *oloc.RouteID {
-				return oloc, oScopes[j]
+				return oloc, osrv, oScopes[j]
 			}
 			if loc.Match.Type == oloc.Match.Type && loc.Match.Path == oloc.Match.Path &&
 				loc.Match.CanonicalPredicates() == oloc.Match.CanonicalPredicates() {
-				return oloc, oScopes[j]
+				return oloc, osrv, oScopes[j]
 			}
 		}
 	}
-	return nil, ""
+	return nil, nil, ""
 }
 
-func sameLocationCutoverTarget(a, b *config.LocationConfig) bool {
+func sameLocationCutoverTarget(aSrv *config.ServerConfig, a *config.LocationConfig, bSrv *config.ServerConfig, b *config.LocationConfig) bool {
 	if a == nil || b == nil {
 		return a == b
+	}
+	if aSrv != nil && bSrv != nil && !reflect.DeepEqual(aSrv.Plugins, bSrv.Plugins) {
+		return false
 	}
 	ca := *a
 	cb := *b
@@ -1284,7 +1291,7 @@ func routeChangedOrUpstreamChangedWithScope(primary *config.Config, srv *config.
 	if other == nil {
 		return true, ""
 	}
-	oloc, oScope := findMatchingLocationForCutover(srv, loc, other)
+	oloc, osrv, oScope := findMatchingLocationForCutover(srv, loc, other)
 	if !loc.Cache && (oloc == nil || !oloc.Cache) {
 		return false, ""
 	}
@@ -1295,19 +1302,26 @@ func routeChangedOrUpstreamChangedWithScope(primary *config.Config, srv *config.
 		if up := config.ResolveLocationUpstreamName(other, *oloc); up != "" && changedUpstreams[up] {
 			return true, oScope
 		}
-		return !sameLocationCacheIdentity(loc, oloc), oScope
+		return !sameLocationCutoverTarget(srv, loc, osrv, oloc), oScope
 	}
 	return true, ""
 }
 
 func sameLocationCacheIdentity(a, b *config.LocationConfig) bool {
-	return sameLocationCutoverTarget(a, b)
+	return sameLocationCutoverTarget(nil, a, nil, b)
 }
 
 func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, routeScopes []string, addSel func(Selector, []string), addNorm func(NormalizedSelector)) {
 	canonScopes := mergeRouteScopeSlices(nil, routeScopes)
 	if len(srv.ServerNames) == 0 {
-		addSel(Selector{Kind: SelectorAll, All: true}, canonScopes)
+		ns := NormalizedSelector{
+			Kind:                SelectorAll,
+			BroadScope:          true,
+			cutoverMatchAnyPort: true,
+			cutoverRouteScopes:  canonScopes,
+		}
+		ns.digest = computeSelectorDigest(ns)
+		addNorm(ns)
 		return
 	}
 	addHostCutover := func(h string) {
@@ -1324,7 +1338,14 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 	for _, sn := range srv.ServerNames {
 		nh, err := normalizeSelectorHost(sn)
 		if err != nil || strings.Contains(nh, "*") {
-			addSel(Selector{Kind: SelectorAll, All: true}, canonScopes)
+			ns := NormalizedSelector{
+				Kind:                SelectorAll,
+				BroadScope:          true,
+				cutoverMatchAnyPort: true,
+				cutoverRouteScopes:  canonScopes,
+			}
+			ns.digest = computeSelectorDigest(ns)
+			addNorm(ns)
 			return
 		}
 		nh = stripSelectorHostPort(nh)

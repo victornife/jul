@@ -307,4 +307,12 @@ func TestWithBackendCutoverAndExecuteRouteCutover(t *testing.T) {
 	if len(remSels) == 0 {
 		t.Fatal("expected cutover selectors when server block with cached routes is removed")
 	}
+
+	// Changing server-level plugins derives cutover selectors for cached routes under reload_policy=invalidate.
+	cfgSrvPluginChanged := *cfgActions
+	cfgSrvPluginChanged.Servers = append([]config.ServerConfig(nil), cfgActions.Servers...)
+	cfgSrvPluginChanged.Servers[0].Plugins = []string{"srv-plugin-v2"}
+	if sels := DeriveRouteCutoverSelectorsForPolicy(cfgActions, &cfgSrvPluginChanged, ""); len(sels) == 0 {
+		t.Fatal("expected cutover selectors when server-level plugins change")
+	}
 }

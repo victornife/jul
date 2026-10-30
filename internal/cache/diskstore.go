@@ -1267,6 +1267,7 @@ type diskPurgeIntent struct {
 	TagMatch            TagMatchMode `json:"tag_match,omitempty"`
 	RoutePath           string       `json:"route_path,omitempty"`
 	RouteType           string       `json:"route_type,omitempty"`
+	CutoverRouteScopes  []string     `json:"cutover_route_scopes,omitempty"`
 	MatchedResourceIDs  []string     `json:"matched_resource_ids,omitempty"`
 	TargetHashes        []string     `json:"target_hashes,omitempty"`
 	TargetResourceMAC   string       `json:"target_resource_mac,omitempty"`
@@ -1304,6 +1305,14 @@ func validateDiskPurgeIntent(it diskPurgeIntent) bool {
 	}
 	if !isValidLowerHexHashSlice(it.TargetHashes, MaxPurgeScanKeys) {
 		return false
+	}
+	if len(it.CutoverRouteScopes) > 1024 {
+		return false
+	}
+	for _, rs := range it.CutoverRouteScopes {
+		if len(rs) == 0 || len(rs) > 128 {
+			return false
+		}
 	}
 	if it.TargetResourceMAC != "" {
 		if _, ok := versionid.Parse(it.TargetResourceMAC); !ok {
