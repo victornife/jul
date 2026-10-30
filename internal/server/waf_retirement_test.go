@@ -95,8 +95,8 @@ func TestReaudit653WAFLoadedDataFilePathWithSpacesMustRetire(t *testing.T) {
 	// 2. Even if the file on disk is reverted between Prepare (waf.New) and Publish,
 	//    carrying the prepared engine's SourceDigest via WithCompiledWAF / applyWAFDigests still retires!
 	_ = os.WriteFile(child, []byte("198.51.100.0/24\n"), 0o600)
-	afterPrepared := captureLoadedAccessFiles(cfg).WithCompiledWAF(after, map[[2]int]*waf.Firewall{[2]int{0, 0}: after})
-	afterPrepared.applyWAFDigests(after.SourceDigest(), map[[2]int]string{[2]int{0, 0}: after.SourceDigest()})
+	afterPrepared := captureLoadedAccessFiles(cfg).WithCompiledWAF(after, map[[2]int]*waf.Firewall{{0, 0}: after})
+	afterPrepared.applyWAFDigests(after.SourceDigest(), map[[2]int]string{{0, 0}: after.SourceDigest()})
 	transitionsPrepared := ComputePublishEntryTransitions(cfg, cfg, beforeFiles, cfg, cfg, afterPrepared, nil, nil)
 	if len(transitionsPrepared) != 1 || !transitionsPrepared[0].Retire {
 		t.Fatalf("prepared WAF SourceDigest must govern retirement even if disk file changed after Prepare: %+v", transitionsPrepared)

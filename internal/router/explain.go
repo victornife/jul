@@ -6,6 +6,9 @@ package router
 import (
 	"fmt"
 	"net/http"
+	"regexp"
+
+	"jul/internal/config"
 )
 
 // This file exposes the router's own selection to the diagnostic surfaces.
@@ -152,4 +155,29 @@ func normalizedMatchType(t string) string {
 		return "prefix"
 	}
 	return t
+}
+
+// PathCandidateIndices returns the declaration indices of locations in srv whose
+// path matches rawPath under the router's four-tier precedence order (ADR 0018
+// §6), stopping at the first matching location that has no request predicates.
+// It returns ok = false when any regex location in srv fails to compile.
+func PathCandidateIndices(srv config.ServerConfig, rawPath string) (indices []int, ok bool) {
+	sr := &serverRoute{}
+	for i, loc := range srv.Locations {
+		lr := &locationRoute{matchType: loc.Match.Type, path: loc.Match.Path, index: i}
+		if loc.Match.Type == "regex" {
+			re, err := regexp.Compile(loc.Match.Path)
+			if err != nil {
+				return nil, false
+			}
+			lr.re = re
+		}
+		sr.locations = append(sr.locations, lr)
+	}
+	sr.indexLocations()
+	sr.eachCandidate(canonicalPath(rawPath), func(_ int, loc *locationRoute) bool {
+		indices = append(indices, loc.index)
+		return !srv.Locations[loc.index].Match.HasPredicates()
+	})
+	return indices, true
 }

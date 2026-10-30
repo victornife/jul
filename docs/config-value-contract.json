@@ -655,6 +655,54 @@
       "active_when": "jwt configured"
     },
     {
+      "go_field": "LocationCachePolicy.BypassAnyCookie",
+      "path": "servers[].locations[].cache_policy.bypass_any_cookie",
+      "kind": "boolean",
+      "constraint": "must not be true when bypass_cookies is non-empty",
+      "zero_semantics": "omitted or false disables any-cookie bypass",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true"
+    },
+    {
+      "go_field": "LocationCachePolicy.BypassCookies",
+      "path": "servers[].locations[].cache_policy.bypass_cookies",
+      "kind": "grammar_list",
+      "constraint": "at most 32 unique (case-insensitive) 1..128-byte RFC 6265 / RFC 9110 cookie-name tokens; must not be combined with bypass_any_cookie = true",
+      "zero_semantics": "omitted or empty disables selected-cookie bypass",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true"
+    },
+    {
+      "go_field": "LocationCachePolicy.DefaultTTL",
+      "path": "servers[].locations[].cache_policy.default_ttl",
+      "kind": "duration",
+      "constraint": "non-negative when present; must not exceed max_ttl when both are set on the same route",
+      "zero_semantics": "omitted inherits cache.default_ttl; explicit \"0s\" disables gateway fallback freshness on this route",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true"
+    },
+    {
+      "go_field": "LocationCachePolicy.MaxTTL",
+      "path": "servers[].locations[].cache_policy.max_ttl",
+      "kind": "duration",
+      "constraint": "non-negative when present; must not be less than default_ttl when both are set on the same route",
+      "zero_semantics": "omitted applies no route freshness cap; explicit \"0s\" caps fresh lifetime to zero",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true"
+    },
+    {
+      "go_field": "LocationCachePolicy.StaleIfError",
+      "path": "servers[].locations[].cache_policy.stale_if_error",
+      "kind": "duration",
+      "constraint": "non-negative when present",
+      "zero_semantics": "omitted inherits cache.stale_if_error; explicit \"0s\" disables gateway fallback stale-if-error on this route",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true"
+    },
+    {
+      "go_field": "LocationCachePolicy.StaleWhileRevalidate",
+      "path": "servers[].locations[].cache_policy.stale_while_revalidate",
+      "kind": "duration",
+      "constraint": "non-negative when present",
+      "zero_semantics": "omitted inherits cache.stale_while_revalidate; explicit \"0s\" disables gateway fallback stale-while-revalidate on this route",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true"
+    },
+    {
       "go_field": "LocationConfig.ClientMaxBodySize",
       "path": "servers[].locations[].client_max_body_size",
       "kind": "size",

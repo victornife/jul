@@ -1175,7 +1175,7 @@
       "claims": [
         "Full frozen CLI/help wildcard substantiates local commands and AUTO04 stable /api/v1 remote automation; no private Console fallback",
         "Credential/profile precedence, normal TLS/mTLS, loopback-only plaintext/no redirects and no raw --token preserve transport/secret boundaries",
-        "Actual process tests enforce exit0–9, terminal polling/Ctrl-C distinction and idempotency/base fences"
+        "Actual process tests enforce exit0\u20139, terminal polling/Ctrl-C distinction and idempotency/base fences"
       ],
       "implementation_and_authority": [
         "cmd/jul/main.go",
@@ -4366,13 +4366,13 @@
       "original_disposition": "not reviewed",
       "original_reason_and_limit": "generated OpenAPI, route classification, targeted admin mutation permission comparison and TLS self-lockout predicate sampled; full authorization matrix and Console UI not exercised",
       "current_paths": [
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DeTrKHkX.js",
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DeTrKHkX.js.map",
-        "internal/admin/assets/dist/assets/CodeEditor-m5YUkbOy.js",
-        "internal/admin/assets/dist/assets/CodeEditor-m5YUkbOy.js.map",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js",
+        "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js.map",
         "internal/admin/assets/dist/assets/index-C7sRNCYr.css",
-        "internal/admin/assets/dist/assets/index-CJOCN40V.js",
-        "internal/admin/assets/dist/assets/index-CJOCN40V.js.map",
+        "internal/admin/assets/dist/assets/index-DaEnkoV1.js",
+        "internal/admin/assets/dist/assets/index-DaEnkoV1.js.map",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-WkwZ5CU-.js",
@@ -4611,6 +4611,30 @@
             "internal/admin/assets/dist/assets/CodeEditor-C7L8kw11.js.map": "internal/admin/assets/dist/assets/CodeEditor-m5YUkbOy.js.map",
             "internal/admin/assets/dist/assets/index-BukvF6bW.js": "internal/admin/assets/dist/assets/index-CJOCN40V.js",
             "internal/admin/assets/dist/assets/index-BukvF6bW.js.map": "internal/admin/assets/dist/assets/index-CJOCN40V.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/673",
+          "context": "#623 / #672 rebuilds the Console for route-scoped cache policy and lazy-loads LocationCachePolicyEditor and TranscodeDesignerPanel. Path reconciliation only; prior mappings and historical review verdicts remain unchanged.",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DeTrKHkX.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DeTrKHkX.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-m5YUkbOy.js": "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js",
+            "internal/admin/assets/dist/assets/CodeEditor-m5YUkbOy.js.map": "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js.map",
+            "internal/admin/assets/dist/assets/index-CJOCN40V.js": "internal/admin/assets/dist/assets/index-D0ygxhEc.js",
+            "internal/admin/assets/dist/assets/index-CJOCN40V.js.map": "internal/admin/assets/dist/assets/index-D0ygxhEc.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/673",
+          "context": "Review fix rebuild: correct max_ttl=0s Console explanation, accessible live regions and aria-invalid for route cache policy warnings/errors, and optional route_id inspection filter. Path reconciliation only; historical verdicts and review evidence are unchanged.",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js": "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js",
+            "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js.map": "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js.map",
+            "internal/admin/assets/dist/assets/index-D0ygxhEc.js": "internal/admin/assets/dist/assets/index-DaEnkoV1.js",
+            "internal/admin/assets/dist/assets/index-D0ygxhEc.js.map": "internal/admin/assets/dist/assets/index-DaEnkoV1.js.map"
           }
         }
       ]

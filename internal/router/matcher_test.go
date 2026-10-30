@@ -260,6 +260,29 @@ func TestApplyRewritesDefaultRewrite(t *testing.T) {
 	}
 }
 
+func TestPathCandidateIndices(t *testing.T) {
+	srv := config.ServerConfig{
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "regex", Path: `^/assets/.*`}},
+			{Match: config.MatchConfig{Type: "prefix", Path: "/"}},
+		},
+	}
+	if got, ok := PathCandidateIndices(srv, "/account"); !ok || len(got) != 1 || got[0] != 1 {
+		t.Fatalf("PathCandidateIndices(/account) = %v, %v; want [1], true", got, ok)
+	}
+	if got, ok := PathCandidateIndices(srv, "/assets/app.js"); !ok || len(got) != 1 || got[0] != 0 {
+		t.Fatalf("PathCandidateIndices(/assets/app.js) = %v, %v; want [0], true", got, ok)
+	}
+	badSrv := config.ServerConfig{
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "regex", Path: `(`}},
+		},
+	}
+	if _, ok := PathCandidateIndices(badSrv, "/account"); ok {
+		t.Fatal("expected ok=false for invalid regex")
+	}
+}
+
 func TestApplyRewritesNoMatch(t *testing.T) {
 	rules := []compiledRewrite{
 		{re: regexp.MustCompile(`^/other$`), replacement: "/x", flag: "redirect"},

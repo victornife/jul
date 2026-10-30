@@ -852,6 +852,38 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 	case "location_set_withdrawn":
 		return applyLocationWithdrawnSet(c, req)
 
+	case "location_cache_policy_set":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if req.CachePolicy == nil {
+			return "", fmt.Errorf("location_cache_policy_set: cache_policy payload is required")
+		}
+		cp, summary, err := buildLocationCachePolicy(*req.CachePolicy)
+		if err != nil {
+			return "", err
+		}
+		if req.CachePolicy.Cache != nil {
+			loc.Cache = *req.CachePolicy.Cache
+		}
+		loc.CachePolicy = cp
+		return fmt.Sprintf("route %s%s cache policy set (cache=%s, %s)", req.Listen, req.Path, onOff(loc.Cache), summary), nil
+
+	case "location_cache_policy_clear":
+		loc, err := findLocation(c, req.locationTarget())
+		if err != nil {
+			return "", err
+		}
+		if loc.CachePolicy == nil {
+			return "", fmt.Errorf("route %s%s has no cache_policy override to clear", req.Listen, req.Path)
+		}
+		loc.CachePolicy = nil
+		if req.Enabled != nil {
+			loc.Cache = *req.Enabled
+		}
+		return fmt.Sprintf("route %s%s cache policy cleared (inherits global [cache])", req.Listen, req.Path), nil
+
 	default:
 		return "", fmt.Errorf("unknown patch op %q", req.Op)
 	}

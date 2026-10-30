@@ -360,10 +360,16 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   with `public` or `s-maxage`.** RFC 9111 §3.5 also lists `must-revalidate` as a
   *reuse* permission, which Jul honors — but not as permission to publish an
   authenticated response into a cache anonymous clients read.
-- **Cookie-based sessions are not protected by the authenticated-reuse rule.**
-  RFC 9111 §3.5 is defined in terms of `Authorization`; a `Cookie` header is not
-  a shared-cache authentication signal. An origin serving user-specific content
-  behind a cookie must set `private` or `no-store`.
+- **Cookie-based sessions are not protected by the authenticated-reuse rule
+  unless route cookie bypass is configured.** RFC 9111 §3.5 is defined in terms
+  of `Authorization`; a `Cookie` header is not an automatic shared-cache
+  authentication signal. Although Jul rejects `Vary: Cookie`,
+  `Vary: Authorization`, and proxy/CGI transformed-header `Vary` responses from
+  shared caching (#672) and supports opt-in per-route cookie bypass
+  (`[servers.locations.cache_policy]` `bypass_cookies` and
+  `bypass_any_cookie = true`, #623), cookies alone do not establish application
+  safety: an origin serving user-specific content must still set `private` or
+  `no-store`.
 - **A `304` that changes `Vary` discards the representation** and the request
   re-fetches, rather than rekeying it in place. Discarding is the outcome that
   cannot leave a wrongly-keyed entry reachable.
@@ -396,12 +402,19 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   the entry serves from memory or the upstream.
 - **No distributed / shared cache.** Cache state is local to the single Jul.IA
   process. Multi-node setups each maintain independent cache pools.
-- **A reload does not invalidate cached entries.** The cache is process-scoped
-  and deliberately survives configuration reloads, so a routing or backend change
-  does not retroactively drop entries stored under the previous configuration. A
-  background refresh that was already in flight when the reload ran also
-  completes against the *old* generation's route and publishes its result. Purge
-  or restart when a configuration change must invalidate content.
+- **Reload is not a backend-cutover purge.** Path-only routes retain compatible
+  cached entries across reload/restart; route-policy tightening is enforced on
+  reuse and publication, and removal/cache disable advances route ownership.
+  Unchanged predicate routes also remain warm: a separate keyed matcher proof
+  under the existing durable version context establishes compatibility. Changed
+  matching, incomparable key contexts or unverifiable old state cause affected
+  scopes to become cold. Anonymous same-path slot edits can lose reuse; explicit
+  route IDs preserve identity through reordering. Epoch-history compaction can
+  make other scoped routes cold. Backend-target changes do not themselves invalidate compatible
+  entries (#624); use an explicit purge for content cutover. Route-epoch write
+  failure disables and retires disk caching until a later successful route
+  commit. If all durable invalidation/cleanup operations fail, restore disk
+  health and clear affected files before restart. See [cache.md](cache.md).
 - **A background refresh or a synchronous validation delays retirement of its
   generation.** While either runs, the handler generation that started it keeps
   its gRPC connections, plugin runtimes and static roots open. The delay is

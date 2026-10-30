@@ -724,7 +724,20 @@ func parseList(v string) []string {
 // Vary is a list field and may arrive on several response header lines. Each
 // line contributes a field name to the cache key, including after a 304 merge.
 func varyFields(h http.Header) []string {
-	return parseList(strings.Join(h.Values("Vary"), ","))
+	var out []string
+	for k, lines := range h {
+		if !strings.EqualFold(k, "Vary") {
+			continue
+		}
+		for _, line := range lines {
+			for part := range strings.SplitSeq(line, ",") {
+				if p := strings.TrimSpace(part); p != "" {
+					out = append(out, p)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // Header presence, not the first line's value, controls conservative shared

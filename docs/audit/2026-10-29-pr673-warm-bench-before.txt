@@ -1,0 +1,42 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: AMD EPYC 9V74 80-Core Processor
+BenchmarkCacheHit-2                	  101012	      2082 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	  108920	      2341 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	   98902	      2232 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	   85149	      2520 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	  101238	      2335 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	   96063	      2203 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheVaryHit-2            	   62846	      3739 ns/op	    1664 B/op	      35 allocs/op
+BenchmarkCacheVaryHit-2            	   61245	      3805 ns/op	    1664 B/op	      35 allocs/op
+BenchmarkCacheVaryHit-2            	   52563	      4199 ns/op	    1664 B/op	      35 allocs/op
+BenchmarkCacheVaryHit-2            	   60324	      4006 ns/op	    1664 B/op	      35 allocs/op
+BenchmarkCacheVaryHit-2            	   64831	      3544 ns/op	    1664 B/op	      35 allocs/op
+BenchmarkCacheVaryHit-2            	   65392	      3654 ns/op	    1664 B/op	      35 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  107642	      2390 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	   93990	      2303 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  115052	      2292 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  108940	      2233 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  109549	      2300 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	   99190	      2537 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	   95782	      2602 ns/op	    1288 B/op	      17 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	   93397	      2863 ns/op	    1288 B/op	      17 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	   95302	      2697 ns/op	    1288 B/op	      17 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	   86238	      2839 ns/op	    1288 B/op	      17 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	   90013	      2658 ns/op	    1288 B/op	      17 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	   94528	      2548 ns/op	    1288 B/op	      17 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	    9831	     22142 ns/op	   18953 B/op	     138 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   10000	     22619 ns/op	   18954 B/op	     138 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   10000	     21452 ns/op	   18953 B/op	     138 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   10000	     21869 ns/op	   18954 B/op	     138 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	    9022	     22475 ns/op	   18954 B/op	     138 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   10000	     21830 ns/op	   18954 B/op	     138 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	      97	   2735182 ns/op	 1905361 B/op	   12928 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	      84	   2861893 ns/op	 1905566 B/op	   12928 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	      92	   2622553 ns/op	 1905433 B/op	   12928 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	      91	   2667964 ns/op	 1905445 B/op	   12928 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	      91	   2715804 ns/op	 1905444 B/op	   12928 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	      86	   2904521 ns/op	 1905535 B/op	   12928 allocs/op
+PASS
+ok  	jul/internal/cache	8.962s

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Sparkline } from "@/components/Sparkline";
@@ -118,6 +118,12 @@ import {
 } from "@/features/routes/RouteEditors.tsx";
 import { LocationRateLimitEditor } from "@/features/routes/LocationRateLimitEditor.tsx";
 import { TranscodeQuickEdit } from "@/features/routes/TranscodeQuickEdit.tsx";
+
+const LocationCachePolicyEditor = lazy(() =>
+  import("@/features/routes/LocationCachePolicyEditor.tsx").then((m) => ({
+    default: m.LocationCachePolicyEditor,
+  })),
+);
 import { usePermission } from "@/auth/usePermission.ts";
 import type { PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
 import { isEditableAction } from "@/lib/routeEdit.ts";
@@ -296,6 +302,31 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
       lines.push(`    external_enforcer = ${quoted(loc.sharing.external_enforcer)}`);
     }
   }
+  if (loc.cache_policy) {
+    lines.push("");
+    lines.push("    [servers.locations.cache_policy]");
+    if (loc.cache_policy.default_ttl !== undefined) {
+      lines.push(`    default_ttl = ${quoted(loc.cache_policy.default_ttl)}`);
+    }
+    if (loc.cache_policy.max_ttl !== undefined) {
+      lines.push(`    max_ttl = ${quoted(loc.cache_policy.max_ttl)}`);
+    }
+    if (loc.cache_policy.stale_while_revalidate !== undefined) {
+      lines.push(
+        `    stale_while_revalidate = ${quoted(loc.cache_policy.stale_while_revalidate)}`,
+      );
+    }
+    if (loc.cache_policy.stale_if_error !== undefined) {
+      lines.push(`    stale_if_error = ${quoted(loc.cache_policy.stale_if_error)}`);
+    }
+    if (loc.cache_policy.bypass_any_cookie) {
+      lines.push("    bypass_any_cookie = true");
+    } else if (loc.cache_policy.bypass_cookies && loc.cache_policy.bypass_cookies.length > 0) {
+      lines.push(
+        `    bypass_cookies = [${loc.cache_policy.bypass_cookies.map(quoted).join(", ")}]`,
+      );
+    }
+  }
   return lines.join("\n");
 }
 
@@ -318,6 +349,7 @@ function QuickEdits({
   const [authEditing, setAuthEditing] = useState(false);
   const [matchEditing, setMatchEditing] = useState(false);
   const [actionEditing, setActionEditing] = useState(false);
+  const [cachePolicyEditing, setCachePolicyEditing] = useState(false);
   const [rateLimitEditing, setRateLimitEditing] = useState(false);
   const [predicatesEditing, setPredicatesEditing] = useState(false);
   const [responseHeadersEditing, setResponseHeadersEditing] = useState(false);
@@ -429,6 +461,16 @@ function QuickEdits({
           className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
         >
           {loc.cache ? "Disable cache" : "Enable cache"} →
+        </button>
+        <button
+          type="button"
+          disabled={busy || !canWrite}
+          onClick={() => {
+            setCachePolicyEditing(true);
+          }}
+          className="rounded-md border border-jul-border px-3 py-1.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+        >
+          {loc.cache_policy ? "Edit cache policy" : "Configure cache policy"} →
         </button>
         <button
           type="button"
@@ -621,6 +663,18 @@ function QuickEdits({
             setRateLimitEditing(false);
           }}
         />
+      )}
+
+      {cachePolicyEditing && (
+        <Suspense fallback={null}>
+          <LocationCachePolicyEditor
+            route={route}
+            loc={loc}
+            onClose={() => {
+              setCachePolicyEditing(false);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );
@@ -1137,6 +1191,46 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
               )
             }
           />
+          {(loc.cache || loc.cache_policy !== undefined || loc.cache_effective !== undefined) && (
+            <Row
+              label="Cache policy"
+              value={
+                loc.cache_effective ? (
+                  <div className="space-y-0.5 text-xs">
+                    <div>
+                      <span className="font-mono text-jul-text">
+                        TTL {loc.cache_effective.default_ttl}
+                      </span>{" "}
+                      <span className="text-jul-muted">
+                        ({loc.cache_effective.default_ttl_source})
+                      </span>
+                      {loc.cache_effective.max_ttl ? (
+                        <>
+                          {" · "}
+                          <span className="font-mono text-jul-text">
+                            cap {loc.cache_effective.max_ttl}
+                          </span>
+                        </>
+                      ) : null}
+                    </div>
+                    <div className="text-jul-muted">
+                      SWR {loc.cache_effective.stale_while_revalidate} · SIE{" "}
+                      {loc.cache_effective.stale_if_error} · Cookie bypass:{" "}
+                      {loc.cache_effective.bypass_mode}
+                      {loc.cache_effective.bypass_cookies &&
+                      loc.cache_effective.bypass_cookies.length > 0
+                        ? ` (${loc.cache_effective.bypass_cookies.join(", ")})`
+                        : ""}
+                    </div>
+                  </div>
+                ) : (
+                  <span className="text-xs text-jul-muted">
+                    {loc.cache ? "Enabled (global defaults)" : "Disabled"}
+                  </span>
+                )
+              }
+            />
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2">

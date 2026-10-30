@@ -11,6 +11,24 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Keep predicate values and their hashes out of persistent route-cache
+  partitions. Separate private, route-specific matcher proofs preserve unchanged
+  route reuse across reload/restart and advance ownership only on incompatible
+  or unverifiable matching. IDs stay optional; explicit IDs survive reordering. Bound epoch history with a durable global floor so
+  retired routes cannot resurrect old memory or disk responses after churn.
+  Recover corrupt populated route-epoch metadata without startup deadlock and
+  retire/disable disk caching on epoch-persistence failure (#623, #672, #673).
+  Prune route-Vary ownership with bounded variant membership and replace
+  per-hit policy formatting with a versioned binary digest. Preserve a recovery
+  floor and block fresh proof while corrupt-epoch cleanup is unrecoverable, so
+  surviving retired files cannot become reusable after restart.
+
+- Reject shared-cache storage and reuse for `Vary: Cookie`, `Vary: Authorization`,
+  and responses varying on request headers rewritten, synthesized, or stripped
+  by the HTTP reverse proxy or FastCGI/uWSGI handlers, and isolate cached
+  representations across overlapping predicate-scoped routes (#672, #623,
+  [ADR 0029](docs/adr/0029-route-scoped-cache-policy-and-vary-guards.md)).
+
 - Protect exported WAF `external_digest` in `GET /api/security` (`waf_effective`)
   from offline dictionary guessing (#649 / EX01): compiled external rule,
   include, and operator-data file digests now use domain-separated
@@ -27,6 +45,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 
 ### Added
+
+- Route-scoped cache policy overrides, freshness caps (`max_ttl`), and
+  conservative request-cookie bypass (`bypass_cookies`, `bypass_any_cookie`) in
+  `[servers.locations.cache_policy]` with hot-reload enforcement, `/api/routes`
+  and `/api/v1/routes` effective policy projections, `/api/v1/cache/inspect`
+  and `jul cache inspect` route policy reporting, and the Console route cache
+  policy editor with curated starters (#623 / `CACHE-OPS-03`,
+  [ADR 0029](docs/adr/0029-route-scoped-cache-policy-and-vary-guards.md)).
 
 - Bounded read-only cache metadata inspection and opt-in recent cache-decision
   evidence across the admin API, remote CLI and Full Console (#622). Separate
@@ -349,6 +375,11 @@ See [release preparation](docs/release-candidates/v2.2.0.md) for upgrade,
 rollback and coordinated advisory-disclosure requirements.
 
 ### Changed
+
+- Reduce route-cache hit overhead with bounded immutable policy-digest reuse
+  and allocation-free Vary guard scans. Normalize server identity once per
+  route batch and remove formatted framing during matcher compilation, keeping
+  persistent scopes/proofs and all eligibility checks unchanged (#673).
 
 - Independently promote the existing bounded routing/CORS, resilience and
   auxiliary-egress contracts under #527 to GA with post-GA soak explicitly

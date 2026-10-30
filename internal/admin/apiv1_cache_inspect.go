@@ -11,15 +11,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"jul/internal/adminapi"
 	"jul/internal/cache"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/rbac"
+	"jul/internal/router"
 )
 
 const maxInspectionSnapshots = 16
@@ -70,6 +74,334 @@ func configuredInspectionScope(sel cache.NormalizedSelector, cfg *config.Config)
 	// Unnamed/wildcard hosts need an explicit named configuration before generic
 	// enumeration; this does not widen purge or router wildcard semantics.
 	return false
+}
+
+func applyRoutePolicyToEffective(cfg *config.Config, loc config.LocationConfig, pol cachemeta.EffectivePolicy) (cachemeta.EffectivePolicy, bool) {
+	pol.RouteOverridesSupported = true
+	pol.GatewayFreshnessCapSupported = true
+	if cfg != nil {
+		pol.DefaultTTLSeconds = cfg.Cache.DefaultTTL.Std().Seconds()
+		pol.SWRSeconds = cfg.Cache.StaleWhileRevalidate.Std().Seconds()
+		pol.SIESeconds = cfg.Cache.StaleIfError.Std().Seconds()
+	}
+	pol.MaxTTLSeconds = nil
+	pol.BypassCookies = nil
+	pol.BypassAnyCookie = false
+	hasOverride := false
+	if cp := loc.CachePolicy; cp != nil {
+		if cp.DefaultTTL != nil {
+			pol.DefaultTTLSeconds = cp.DefaultTTL.Std().Seconds()
+			hasOverride = true
+		}
+		if cp.MaxTTL != nil {
+			v := cp.MaxTTL.Std().Seconds()
+			pol.MaxTTLSeconds = &v
+			if cp.DefaultTTL == nil && pol.DefaultTTLSeconds > v {
+				pol.DefaultTTLSeconds = v
+			}
+			hasOverride = true
+		}
+		if cp.StaleWhileRevalidate != nil {
+			pol.SWRSeconds = cp.StaleWhileRevalidate.Std().Seconds()
+			hasOverride = true
+		}
+		if cp.StaleIfError != nil {
+			pol.SIESeconds = cp.StaleIfError.Std().Seconds()
+			hasOverride = true
+		}
+		if len(cp.BypassCookies) > 0 && !cp.BypassAnyCookie {
+			norm := make([]string, 0, len(cp.BypassCookies))
+			seen := make(map[string]struct{}, len(cp.BypassCookies))
+			for _, raw := range cp.BypassCookies {
+				trimmed := strings.ToLower(strings.TrimSpace(raw))
+				if trimmed == "" {
+					continue
+				}
+				if _, dup := seen[trimmed]; !dup {
+					seen[trimmed] = struct{}{}
+					norm = append(norm, trimmed)
+				}
+			}
+			sort.Strings(norm)
+			pol.BypassCookies = norm
+			hasOverride = true
+		}
+		if cp.BypassAnyCookie {
+			pol.BypassAnyCookie = true
+			hasOverride = true
+		}
+	}
+	return pol, hasOverride
+}
+
+func locationHasPredicates(loc config.LocationConfig) bool {
+	return loc.Match.HasPredicates()
+}
+
+func hasSegmentPrefix(path, prefix string) bool {
+	if prefix == "" || prefix == "/" {
+		return strings.HasPrefix(path, "/")
+	}
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	if strings.HasSuffix(prefix, "/") {
+		return true
+	}
+	return len(path) == len(prefix) || path[len(prefix)] == '/'
+}
+
+func inspectionSelectorTargetPath(sel cache.NormalizedSelector) string {
+	var targetPath string
+	switch sel.Kind {
+	case cache.SelectorExactURL:
+		targetPath = sel.URI
+		if q := strings.IndexByte(targetPath, '?'); q >= 0 {
+			targetPath = targetPath[:q]
+		}
+	case cache.SelectorKey:
+		parts := strings.Split(sel.Key, "\n")
+		if len(parts) == 3 {
+			targetPath = parts[2]
+			if nl := strings.IndexByte(targetPath, 0x00); nl >= 0 {
+				targetPath = targetPath[:nl]
+			}
+			if q := strings.IndexByte(targetPath, '?'); q >= 0 {
+				targetPath = targetPath[:q]
+			}
+		}
+	}
+	if targetPath != "" && strings.IndexByte(targetPath, '%') >= 0 {
+		if unescaped, err := url.PathUnescape(targetPath); err == nil && unescaped != "" {
+			targetPath = unescaped
+		}
+	}
+	return targetPath
+}
+
+func locationMatchesInspectionSelector(loc config.LocationConfig, sel cache.NormalizedSelector) bool {
+	if sel.Kind == cache.SelectorPrefix {
+		switch loc.Match.Type {
+		case "exact":
+			return hasSegmentPrefix(loc.Match.Path, sel.Prefix)
+		case "prefix", "":
+			return hasSegmentPrefix(loc.Match.Path, sel.Prefix) || strings.HasPrefix(sel.Prefix, loc.Match.Path)
+		default:
+			return true
+		}
+	}
+	return true
+}
+
+func serverCandidatesForInspectionSelector(srv config.ServerConfig, sel cache.NormalizedSelector) ([]config.LocationConfig, bool) {
+	switch sel.Kind {
+	case cache.SelectorExactURL, cache.SelectorKey:
+		targetPath := inspectionSelectorTargetPath(sel)
+		if targetPath == "" {
+			return append([]config.LocationConfig(nil), srv.Locations...), true
+		}
+		indices, ok := router.PathCandidateIndices(srv, targetPath)
+		if !ok {
+			return append([]config.LocationConfig(nil), srv.Locations...), true
+		}
+		out := make([]config.LocationConfig, 0, len(indices))
+		for _, idx := range indices {
+			out = append(out, srv.Locations[idx])
+		}
+		return out, false
+
+	case cache.SelectorPrefix:
+		shadowPrefixLen := -1
+		shadowDeclIdx := -1
+		for i, loc := range srv.Locations {
+			if (loc.Match.Type == "prefix" || loc.Match.Type == "") &&
+				loc.Match.Path != "/" &&
+				!locationHasPredicates(loc) &&
+				strings.HasPrefix(sel.Prefix, loc.Match.Path) {
+				if len(loc.Match.Path) > shadowPrefixLen {
+					shadowPrefixLen = len(loc.Match.Path)
+					shadowDeclIdx = i
+				}
+			}
+		}
+		var out []config.LocationConfig
+		uncertain := false
+		rootShadowed := shadowPrefixLen > 0
+		for i, loc := range srv.Locations {
+			if !locationMatchesInspectionSelector(loc, sel) {
+				continue
+			}
+			switch loc.Match.Type {
+			case "prefix", "":
+				if loc.Match.Path == "/" {
+					if rootShadowed {
+						continue
+					}
+					out = append(out, loc)
+					if !locationHasPredicates(loc) {
+						rootShadowed = true
+					}
+					continue
+				}
+				if shadowPrefixLen > 0 &&
+					(len(loc.Match.Path) < shadowPrefixLen || (len(loc.Match.Path) == shadowPrefixLen && i > shadowDeclIdx)) {
+					continue
+				}
+				out = append(out, loc)
+			case "exact":
+				uncertain = true
+				out = append(out, loc)
+			default:
+				if shadowPrefixLen > 0 {
+					continue
+				}
+				uncertain = true
+				out = append(out, loc)
+			}
+		}
+		return out, uncertain
+
+	default:
+		var out []config.LocationConfig
+		uncertain := false
+		for _, loc := range srv.Locations {
+			if locationMatchesInspectionSelector(loc, sel) {
+				if loc.Match.Type == "regex" || loc.Match.Type == "exact" {
+					uncertain = true
+				}
+				out = append(out, loc)
+			}
+		}
+		return out, uncertain
+	}
+}
+
+func inspectionServerHostScore(srv config.ServerConfig, host, bare string) int {
+	if host == "" {
+		return 3
+	}
+	if len(srv.ServerNames) == 0 {
+		return 1
+	}
+	best := 0
+	for _, name := range srv.ServerNames {
+		norm := config.NormalizeHostPattern(name)
+		switch {
+		case norm == host || norm == bare:
+			return 3
+		case strings.HasPrefix(norm, "*."):
+			suffix := norm[1:]
+			if len(bare) > len(suffix) && strings.HasSuffix(bare, suffix) && best < 2 {
+				best = 2
+			}
+		}
+	}
+	return best
+}
+
+func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Config, base cachemeta.EffectivePolicy) (cachemeta.EffectivePolicy, string, string, []string) {
+	base.RouteOverridesSupported = true
+	base.GatewayFreshnessCapSupported = true
+	defaultSource := "global_inherited_origin_precedence"
+	defaultRouteState := "host_scope_may_include_disabled_routes"
+	if cfg == nil {
+		return base, defaultSource, defaultRouteState, nil
+	}
+	host := sel.Host
+	if sel.Kind == cache.SelectorKey {
+		parts := strings.Split(sel.Key, "\n")
+		if len(parts) == 3 {
+			host = parts[1]
+		}
+	}
+	bare := middleware.CanonicalHTTPHost(host)
+	maxScoreByListen := make(map[string]int, len(cfg.Servers))
+	for _, srv := range cfg.Servers {
+		if sc := inspectionServerHostScore(srv, host, bare); sc > maxScoreByListen[srv.Listen] {
+			maxScoreByListen[srv.Listen] = sc
+		}
+	}
+	serverMatchesHost := func(srv config.ServerConfig) bool {
+		if host == "" {
+			return true
+		}
+		sc := inspectionServerHostScore(srv, host, bare)
+		return sc > 0 && sc == maxScoreByListen[srv.Listen]
+	}
+	if sel.RouteID != "" {
+		for _, srv := range cfg.Servers {
+			if !serverMatchesHost(srv) {
+				continue
+			}
+			for _, loc := range srv.Locations {
+				if loc.RouteID != nil && *loc.RouteID == sel.RouteID {
+					routeState := "disabled_retained_entries_may_exist"
+					if loc.Cache {
+						routeState = "enabled"
+					}
+					pol, hasOverride := applyRoutePolicyToEffective(cfg, loc, base)
+					if hasOverride {
+						return pol, "route_override_with_global_inheritance", routeState, nil
+					}
+					return pol, defaultSource, routeState, nil
+				}
+			}
+		}
+		return base, defaultSource, defaultRouteState, nil
+	}
+	var candidates []config.LocationConfig
+	uncertain := false
+	for _, srv := range cfg.Servers {
+		if !serverMatchesHost(srv) {
+			continue
+		}
+		srvCandidates, srvUncertain := serverCandidatesForInspectionSelector(srv, sel)
+		candidates = append(candidates, srvCandidates...)
+		if srvUncertain {
+			uncertain = true
+		}
+	}
+	if len(candidates) == 0 {
+		return base, defaultSource, defaultRouteState, nil
+	}
+	if !uncertain && len(candidates) == 1 && !locationHasPredicates(candidates[0]) {
+		pol, hasOverride := applyRoutePolicyToEffective(cfg, candidates[0], base)
+		source := defaultSource
+		if hasOverride {
+			source = "route_override_with_global_inheritance"
+		}
+		routeState := defaultRouteState
+		if sel.Kind == cache.SelectorExactURL || sel.Kind == cache.SelectorKey {
+			if candidates[0].Cache {
+				routeState = "enabled"
+			} else {
+				routeState = "disabled_retained_entries_may_exist"
+			}
+		}
+		return pol, source, routeState, nil
+	}
+	// Multiple candidate routes (or a predicate/untested-regex route) match this selector without route_id.
+	// Check whether any candidate uses route cache overrides, predicates, or differing cache toggles.
+	firstPol, firstHasOverride := applyRoutePolicyToEffective(cfg, candidates[0], base)
+	ambiguous := (locationHasPredicates(candidates[0]) || uncertain) && firstHasOverride
+	for i := 1; i < len(candidates); i++ {
+		nextPol, nextHasOverride := applyRoutePolicyToEffective(cfg, candidates[i], base)
+		if locationHasPredicates(candidates[i]) || candidates[i].Cache != candidates[0].Cache || nextHasOverride != firstHasOverride ||
+			nextPol.DefaultTTLSeconds != firstPol.DefaultTTLSeconds || nextPol.SWRSeconds != firstPol.SWRSeconds || nextPol.SIESeconds != firstPol.SIESeconds ||
+			(nextPol.MaxTTLSeconds == nil) != (firstPol.MaxTTLSeconds == nil) ||
+			(nextPol.MaxTTLSeconds != nil && firstPol.MaxTTLSeconds != nil && *nextPol.MaxTTLSeconds != *firstPol.MaxTTLSeconds) ||
+			nextPol.BypassAnyCookie != firstPol.BypassAnyCookie || strings.Join(nextPol.BypassCookies, ",") != strings.Join(firstPol.BypassCookies, ",") {
+			ambiguous = true
+			break
+		}
+	}
+	if ambiguous {
+		return base, "ambiguous_multiple_routes_use_route_id", defaultRouteState, []string{"ambiguous_route_policy_use_route_id"}
+	}
+	if firstHasOverride {
+		return firstPol, "route_override_with_global_inheritance", defaultRouteState, nil
+	}
+	return firstPol, defaultSource, defaultRouteState, nil
 }
 
 func (s *Server) handleV1CacheInspect(w http.ResponseWriter, r *http.Request) {
@@ -167,6 +499,9 @@ func (s *Server) handleV1CacheInspect(w http.ResponseWriter, r *http.Request) {
 		if r.Context().Err() != nil {
 			return
 		}
+		effPol, _, _, extraWarnings := resolveInspectionRoutePolicy(sel, cfg, data.Policy)
+		data.Policy = effPol
+		data.Warnings = append(data.Warnings, extraWarnings...)
 		b, e := json.Marshal(data)
 		if e != nil {
 			fail(adminapi.CodeStorageUnavailable, "inspection metadata could not be encoded")
@@ -224,20 +559,8 @@ func (s *Server) handleV1CacheInspect(w http.ResponseWriter, r *http.Request) {
 			change = "observed_change_since_capture"
 		}
 	}
-	resp := adminapi.CacheInspectResponse{ConcurrentChange: change, APIVersion: adminapi.APIVersion, Selector: fromCacheSelector(sel.RedactedSummary()), Inspection: data, ExpiresAt: adminapi.Timestamp(snap.expires), Consistency: "bounded_metadata_capture_not_global_snapshot", PolicySource: "global_inherited_origin_precedence_route_overrides_unsupported", RouteCacheState: "host_scope_may_include_disabled_routes", AuthorityState: s.v1AuthorityState()}
-	if sel.RouteID != "" {
-		for _, srv := range cfg.Servers {
-			for _, loc := range srv.Locations {
-				if loc.RouteID != nil && *loc.RouteID == sel.RouteID {
-					if loc.Cache {
-						resp.RouteCacheState = "enabled"
-					} else {
-						resp.RouteCacheState = "disabled_retained_entries_may_exist"
-					}
-				}
-			}
-		}
-	}
+	_, policySource, routeCacheState, _ := resolveInspectionRoutePolicy(sel, cfg, data.Policy)
+	resp := adminapi.CacheInspectResponse{ConcurrentChange: change, APIVersion: adminapi.APIVersion, Selector: fromCacheSelector(sel.RedactedSummary()), Inspection: data, ExpiresAt: adminapi.Timestamp(snap.expires), Consistency: "bounded_metadata_capture_not_global_snapshot", PolicySource: policySource, RouteCacheState: routeCacheState, AuthorityState: s.v1AuthorityState()}
 	// page_size is an upper bound. Wide representations must remain usable by
 	// the shared client without raising its response safety limit. Include the
 	// cursor and complete envelope when measuring the actual encoded response.

@@ -96,16 +96,19 @@ type CacheDecision struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
-// EffectivePolicy reports current global fallback values, never an unconditional
+// EffectivePolicy reports current global or route-effective fallback values, never an unconditional
 // cacheability or wall-clock guarantee. Entries can retain older computed policy.
 type EffectivePolicy struct {
-	DefaultTTLSeconds            float64 `json:"default_ttl_seconds"`
-	SWRSeconds                   float64 `json:"swr_seconds"`
-	SIESeconds                   float64 `json:"sie_seconds"`
-	MaxEntryBytes                int64   `json:"max_entry_bytes"`
-	RangeEnabled                 bool    `json:"range_enabled"`
-	FillLockEnabled              bool    `json:"fill_lock_enabled"`
-	TagIngestionEnabled          bool    `json:"tag_ingestion_enabled"`
-	RouteOverridesSupported      bool    `json:"route_overrides_supported"`
-	GatewayFreshnessCapSupported bool    `json:"gateway_freshness_cap_supported"`
+	DefaultTTLSeconds            float64  `json:"default_ttl_seconds"`
+	MaxTTLSeconds                *float64 `json:"max_ttl_seconds,omitempty"`
+	SWRSeconds                   float64  `json:"swr_seconds"`
+	SIESeconds                   float64  `json:"sie_seconds"`
+	MaxEntryBytes                int64    `json:"max_entry_bytes"`
+	RangeEnabled                 bool     `json:"range_enabled"`
+	FillLockEnabled              bool     `json:"fill_lock_enabled"`
+	TagIngestionEnabled          bool     `json:"tag_ingestion_enabled"`
+	RouteOverridesSupported      bool     `json:"route_overrides_supported"`
+	GatewayFreshnessCapSupported bool     `json:"gateway_freshness_cap_supported"`
+	BypassCookies                []string `json:"bypass_cookies,omitempty"`
+	BypassAnyCookie              bool     `json:"bypass_any_cookie,omitempty"`
 }

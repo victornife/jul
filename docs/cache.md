@@ -80,12 +80,23 @@ tag_headers            = ["Cache-Tag", "Surrogate-Key"] # opt-in trusted origin 
 strip_tag_headers      = true     # strip configured tag_headers from client responses (default true when tag_headers is set)
 ```
 
-Per-location opt-in is still required:
+Per-location opt-in is still required, and each location may optionally override
+freshness, caps, stale windows, and request-cookie bypass via
+`[servers.locations.cache_policy]` ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
 
 ```toml
 [[servers.locations]]
-path  = "/static/"
-cache = true
+route_id = "api-public"
+match    = { type = "prefix", path = "/api/catalog" }
+proxy_pass = "http://catalog"
+cache    = true
+
+  [servers.locations.cache_policy]
+  default_ttl            = "0s"     # require explicit origin freshness on this route
+  max_ttl                = "2m"     # cap origin s-maxage / max-age / Expires to 2m
+  stale_while_revalidate = "30s"
+  stale_if_error         = "5m"
+  bypass_cookies         = ["session_id", "__Host-auth"] # or bypass_any_cookie = true
 ```
 
 ## Cache key and Vary
@@ -419,6 +430,102 @@ made obsolete (RFC 9111 §4.4).
 - **Cross-origin targets are never invalidated.** A `Location` naming another
   host is skipped, as is a value that does not parse, is opaque (`mailto:`), uses
   a non-HTTP scheme, or spells the authority differently.
+
+### Route-scoped cache policy, cookie bypass, and Vary guards (#623 / #672)
+
+Each cache-enabled location (`cache = true`) inherits global `[cache]` settings
+by default and may declare `[servers.locations.cache_policy]` to tune route
+freshness, cap upstream TTLs, or bypass caching when request cookies are
+present ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
+
+| Field | Type | Default (omitted) | Explicit `"0s"` / `false` |
+| --- | --- | --- | --- |
+| `default_ttl` | duration (`0s..876000h`) | Inherits `[cache].default_ttl` | `"0s"` disables fallback caching when the origin omits explicit freshness (`s-maxage`, `max-age`, `Expires`) |
+| `max_ttl` | duration (`0s..876000h`) | None (no route cap) | `"0s"` caps fresh lifetime to zero (disabling fresh storage on the route without retaining responses for conditional `304` revalidation) |
+| `stale_while_revalidate` | duration (`0s..876000h`) | Inherits `[cache].stale_while_revalidate` | `"0s"` disables fallback SWR when the origin omits `stale-while-revalidate` |
+| `stale_if_error` | duration (`0s..876000h`) | Inherits `[cache].stale_if_error` | `"0s"` disables fallback `stale-if-error` when the origin omits `stale-if-error` |
+| `bypass_cookies` | list of 1..32 cookie names | `[]` | Case-insensitive RFC 6265 cookie-name tokens (`<= 128` bytes each); mutually exclusive with `bypass_any_cookie = true` |
+| `bypass_any_cookie` | bool | `false` | When `true`, any request carrying a `Cookie` header bypasses lookup and storage |
+
+#### Precedence model
+
+1. **Explicit origin exclusion always wins**: `Cache-Control: no-store`,
+   `private`, `Set-Cookie`, `Vary: *`, `Vary: Cookie`, `Vary: Authorization`,
+   and uncacheable `Authorization` responses are never stored regardless of
+   route `default_ttl` or `max_ttl`.
+2. **Request cookie bypass**: when `bypass_any_cookie = true` or a request
+   `Cookie` header contains a cookie name in `bypass_cookies`, Jul skips both
+   cache lookup and storage (`X-Cache: BYPASS`, decision `cookie_bypass`).
+   Cookie values are never inspected, logged, or included in cache keys. If a
+   request's `Cookie` headers are malformed or exceed `16` lines, `8192` bytes,
+   or `128` pairs while cookie bypass is configured, Jul fails closed and
+   bypasses the cache (`cookie_bypass_malformed`).
+3. **Base freshness**: origin `CDN-Cache-Control` (when valid) or
+   `Cache-Control: s-maxage` -> `max-age` -> `Expires` -> route `default_ttl`
+   (if set) -> global `[cache].default_ttl`.
+4. **Route freshness cap (`max_ttl`)**: when `max_ttl` is set on the route,
+   `effective_ttl = min(base_ttl, max_ttl)`. A route `max_ttl` caps longer
+   origin or fallback lifetimes from above and never extends a shorter origin
+   lifetime.
+5. **Overlapping route isolation and hot reload**: routes sharing a hostname and
+   URL (for example via method, header, query, or cookie route predicates)
+   isolate their cached representations by route scope without evicting sibling
+   routes' variants. All `[servers.locations.cache_policy]` fields are
+   `hot_reload`: tightening `max_ttl`, `default_ttl`, `stale_while_revalidate`,
+   `stale_if_error`, or cookie bypass takes effect immediately on stored memory
+   and disk entries and fences in-flight fills started under the prior policy.
+
+Unchanged routes, including predicate-bearing routes, retain warm memory/disk
+entries across reloads and restarts. Ownership excludes predicate values and
+hashes. Jul records a separate route-specific HMAC compatibility proof in its
+bounded epoch manifest, using the existing private effective-version key; the
+proof never enters cache keys or response-entry metadata. Changed matching rules,
+key context changes, or unverifiable prior matching state advance only affected
+route epochs before reuse. Route policy tightening remains independently enforced.
+
+`route_id` is optional. Setting it preserves identity through route reordering.
+Anonymous predicates use a slot among anonymous predicates sharing the same
+path/type; unrelated paths do not shift it. Edits to those ambiguous same-path
+slots can cause safe cold misses. Embeddings using a process-only version context
+can retain reload hits but become cold on restart; production already supplies
+its durable effective-version context. Backend cutover remains owned by #624.
+
+Retired-epoch history is bounded: compaction advances a durable global epoch floor
+before forgetting scopes, potentially making other scoped routes cold. A retired
+scope cannot regain old entries by cycling through many other routes. Legacy
+entries/manifests without compatible route ownership or matcher proof incur a
+one-time cold miss. A resource's route-Vary records share its 64-variant cap.
+
+Corrupt/unreadable route-epoch metadata is cleaned up before disk rehydration.
+Recovery retains a floor above observed entry epochs, and fresh compatibility
+proof cannot replace the restart marker while durable cleanup is unrecoverable.
+Surviving old files therefore cannot become reusable after partial cleanup.
+If persisting epochs fails, Jul retires the disk dataset and disables disk reuse
+and publication until a later successful route commit; memory remains protected
+by current epochs. Check disk-write warnings and restore filesystem health.
+If the filesystem also refuses restart-marker writes and cache cleanup, clear
+affected cache files before restarting: crash recovery cannot promise durable
+invalidation when all durable operations fail. See [ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md).
+
+#### Sensitive and proxy/CGI-transformed `Vary` guards (#672)
+
+- **Sensitive `Vary` rejection (`vary_sensitive_rejected`)**: responses carrying
+  `Vary: Cookie` or `Vary: Authorization` (case-insensitively, including on
+  `304 Not Modified` merges, `5xx` `stale-if-error` checks, Range fills, and
+  legacy on-disk entries across restarts) are never stored or reused in the
+  shared cache.
+- **Proxy and CGI transformed-header `Vary` rejection
+  (`vary_proxy_rewrite_rejected`, `vary_cgi_rewrite_rejected`)**: when an HTTP
+  reverse-proxy or FastCGI/uWSGI route rewrites, synthesizes, or strips a
+  request header before forwarding to the upstream (including `Forwarded`,
+  `X-Forwarded-*`, `X-Real-IP`, hop-by-hop headers, per-request `Connection`
+  nominations, `proxy_headers` `set_*`/`remove`, `fastcgi_params` `HTTP_*`
+  overrides, or CGI hyphen/underscore aliases such as `X-Custom` vs
+  `X_Custom`), a response that varies on that header cannot be matched safely
+  against the downstream client's original request header and is excluded from
+  shared cache storage and reuse. Standard content-negotiation headers
+  (`Accept-Encoding`, `Accept-Language`, `Accept`, `User-Agent`) remain
+  cacheable as normal.
 
 A user-controlled header cannot reach the filesystem through this path: an
 invalidation target is only ever used to build a cache key, and a disk file is
@@ -1354,16 +1461,24 @@ integrity, and availability:
    served to legitimate requests. Counter-measures: validate `Host` in the outer
    proxy; do not forward untrusted `X-Forwarded-Host` to Jul.IA.
 
-2. **Cross-user leakage through `Vary` misconfiguration.** An upstream that sets
-   `Vary: Cookie` without `Cache-Control: private` may cause one user's
-   authenticated page to be served to another user with the same `Cookie` header.
-   The cache does not treat cookies as a cache-bypass signal (only `private`,
-   `no-store` or a `Set-Cookie` in the response do). Requests carrying
-   `Authorization` are separately protected by the shared-reuse rule above, but
-   **cookie-based sessions are not**, because a `Cookie` header is not a
-   shared-cache authentication signal in RFC 9111. Counter-measures: upstreams
-   must set `private` for user-specific responses; operators should audit `Vary`
-   headers before enabling cache on cookie-authenticated routes.
+2. **Cross-user leakage on cookie-authenticated routes.** Jul rejects shared
+   cache storage and reuse for responses carrying `Vary: Cookie` or
+   `Vary: Authorization` (`vary_sensitive_rejected`), as well as responses
+   varying on proxy- or CGI-transformed request headers
+   (`vary_proxy_rewrite_rejected`, `vary_cgi_rewrite_rejected`). In addition,
+   operators can configure `[servers.locations.cache_policy]` with
+   `bypass_cookies` or `bypass_any_cookie = true` so requests carrying matching
+   (or malformed) `Cookie` headers bypass cache lookup and storage. However, a
+   `Cookie` request header is not an automatic shared-cache authentication
+   signal in RFC 9111, and cookies or route bypass rules alone do not establish
+   application safety: when cookie bypass is not configured (or does not list an
+   application's session cookie), an upstream that returns a personalized
+   response without `Vary: Cookie` and without `Cache-Control: private` or
+   `no-store` will still allow that response to be cached and served to other
+   clients. Counter-measures: upstreams must always set `private` or `no-store`
+   for user-specific responses; operators should configure `bypass_cookies` /
+   `bypass_any_cookie = true` or keep caching disabled on cookie-authenticated
+   routes.
 
 3. **Vary-header evasion (Web Cache Deception).** An attacker requests
    `/profile.jpg` with a `Accept: image/webp` header when the real page is
@@ -1500,12 +1615,16 @@ reconstructed as historical facts.
 
 The server records origin s-maxage/max-age/Expires or gateway fallback provenance,
 targeted directive use, numeric freshness/SWR/SIE lifetimes and validation/auth
-restrictions at the owning policy decision. Current global fallback values and
-supported range/fill/tag controls appear separately. Route overrides and gateway
-freshness caps remain unsupported (#623). A route's cache boolean controls
+restrictions at the owning policy decision. Current global or route-effective
+fallback values, route `max_ttl` caps, cookie-bypass rules, and supported
+range/fill/tag controls appear in `inspection.policy` (`route_overrides_supported`
+and `gateway_freshness_cap_supported` are both `true`, #623). When a host or path
+selector matches multiple routes with distinct cache policies or predicates,
+inspection reports `ambiguous_multiple_routes_use_route_id` so the operator can
+narrow by `route_id`. A route's cache boolean controls
 activation; cached entries can remain after disabling a route or ordinary
-reload. `retained_policy` compares recorded entry policy with current global
-policy. A displayed freshness lifetime is not an absolute wall-clock guarantee:
+reload. `retained_policy` compares recorded entry policy with the active route or
+global policy. A displayed freshness lifetime is not an absolute wall-clock guarantee:
 origin age, validation, request restrictions, invalidation and eviction still
 matter. A MISS is not proof of storage.
 

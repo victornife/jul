@@ -43,7 +43,16 @@ func (c *Cache) merge304(stored *Entry, h304 http.Header, now time.Time) (*Entry
 }
 
 func (c *Cache) merge304Decision(stored *Entry, h304 http.Header, now time.Time) (*Entry, mergeAction, string) {
-	pol := c.Policy()
+	return c.merge304DecisionWithPolicy(nil, stored, h304, now, c.Policy())
+}
+
+func (c *Cache) merge304DecisionWithPolicy(req *http.Request, stored *Entry, h304 http.Header, now time.Time, pol CachePolicy) (*Entry, mergeAction, string) {
+	if reason := varyRejectionEntry(req, pol.varyGuard, stored); reason != "" {
+		return nil, mergeDiscard, reason
+	}
+	if reason := varyRejectionHeader(req, pol.varyGuard, h304); reason != "" {
+		return nil, mergeDiscard, reason
+	}
 	var tags304 []string
 	var present304 bool
 	if pol.TagHeaderCount > 0 {
@@ -70,6 +79,10 @@ func (c *Cache) merge304Decision(stored *Entry, h304 http.Header, now time.Time)
 	}
 	if pol.StripTagHeaders && pol.TagHeaderCount > 0 {
 		stripConfiguredTagHeaders(merged, pol.TagHeaderSlice())
+	}
+
+	if reason := varyRejectionHeader(req, pol.varyGuard, merged); reason != "" {
+		return nil, mergeDiscard, reason
 	}
 
 	// A 304 that changes Vary changes which key this representation belongs
@@ -99,11 +112,19 @@ func (c *Cache) merge304Decision(stored *Entry, h304 http.Header, now time.Time)
 	refreshed := stored.Clone()
 	refreshed.Header = merged
 	refreshed.CreatedAt = created
-	refreshed.Evidence = c.entryEvidence(stored.Status, merged, p, pol, now, ttl, swr)
+	refreshed.RouteScope = pol.RouteScope
+	refreshed.RouteEpoch = pol.RouteEpoch
+	refreshed.BypassDigest = bypassPolicyDigest(pol)
+	refreshed.RouteConfigDigest = routeConfigDigest(pol)
+	refreshed.Evidence = c.entryEvidenceForRequest(req, stored.Status, merged, p, pol, now, ttl, swr)
 	if stored.Evidence != nil {
 		refreshed.Evidence.InsertedAt = stored.Evidence.InsertedAt
+		if stored.Evidence.Flags&evidenceNoRequestCookies == 0 {
+			refreshed.Evidence.Flags &^= evidenceNoRequestCookies
+		}
 	} else {
 		refreshed.Evidence.InsertedAt = 0
+		refreshed.Evidence.Flags &^= evidenceNoRequestCookies
 	}
 	refreshed.Evidence.ValidatedAt = now.UnixNano()
 	refreshed.ExpiresAt = created.Add(ttl)

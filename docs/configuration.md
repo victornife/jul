@@ -936,6 +936,7 @@ return = 200
 | `withdrawn` | bool | Outermost stage-0 withdrawal gate (`403 Forbidden` with `Cache-Control: no-store` before rewrites, plugins, preflight, client-cert, auth, WAF, cache, and action; preserves the route's action and credentials for single-edit recovery; triggers `2s` stream/WebSocket retirement on narrowing) |
 | `rewrites` | array | Regex rewrite rules (`pattern`, `replacement`, `flag`) |
 | `cache` | bool | Enable response caching for this location (requires `[cache].enabled`) |
+| `cache_policy` | table | Optional route-scoped cache policy overrides (`default_ttl`, `max_ttl`, `stale_while_revalidate`, `stale_if_error`, `bypass_cookies`, `bypass_any_cookie`; all `hot_reload`; see [cache.md](cache.md#route-scoped-cache-policy-cookie-bypass-and-vary-guards-623--672)) |
 | `client_max_body_size` | size | Override the server default for this location |
 | `rate_limit` | table | Override the global `[rate_limit]` for this location (`enabled`, `key`, `rate`, `burst`; per-location `max_conns` is rejected by validation) |
 

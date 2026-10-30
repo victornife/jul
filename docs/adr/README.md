@@ -49,6 +49,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0027](0027-scoped-cache-invalidation.md) | Scoped cache invalidation, trusted origin tags, and selector fences | Accepted — Beta/unreleased | 2026-10-25 |
 
 | [0028](0028-bounded-cache-inspection.md) | Bounded cache inspection and observed decision evidence | Accepted for implementation; verification pending (#622) | 2026-10-27 |
+| [0029](0029-route-scoped-cache-policy-and-vary-guards.md) | Route-scoped cache policy, request-cookie bypass, and Vary transformation guards | Accepted — #623 / #672 | 2026-10-29 |
 
 ## Reading order
 

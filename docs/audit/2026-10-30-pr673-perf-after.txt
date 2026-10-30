@@ -1,0 +1,55 @@
+# Sequential ABBA comparison; baseline 6888e58; GOMAXPROCS=2; 300ms; six samples
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: AMD EPYC 9V74 80-Core Processor                
+BenchmarkCacheHit-2                	  185572	      1859 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	  179664	      1785 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	  189338	      1749 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheMiss-2               	   22038	     17696 ns/op	   13148 B/op	      79 allocs/op
+BenchmarkCacheMiss-2               	   21596	     18847 ns/op	   13156 B/op	      79 allocs/op
+BenchmarkCacheMiss-2               	   23161	     18673 ns/op	   13129 B/op	      79 allocs/op
+BenchmarkCacheVaryHit-2            	  108163	      3009 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2            	  107307	      3258 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2            	  110136	      3199 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  179360	      2014 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  179341	      2074 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  194192	      2082 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  155480	      2191 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  177502	      2147 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  182983	      2046 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   12355	     28872 ns/op	   28880 B/op	     194 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   12168	     29628 ns/op	   28880 B/op	     194 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   12049	     30823 ns/op	   28880 B/op	     194 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	     100	   3288864 ns/op	 3015285 B/op	   17053 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	     100	   3033790 ns/op	 3015285 B/op	   17053 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	     100	   3096357 ns/op	 3015286 B/op	   17053 allocs/op
+PASS
+ok  	jul/internal/cache	8.228s
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: AMD EPYC 9V74 80-Core Processor                
+BenchmarkCacheHit-2                	  178497	      1909 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	  179130	      1846 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2                	  186573	      1788 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheMiss-2               	   21538	     17445 ns/op	   13157 B/op	      79 allocs/op
+BenchmarkCacheMiss-2               	   22495	     17739 ns/op	   13140 B/op	      79 allocs/op
+BenchmarkCacheMiss-2               	   23626	     17331 ns/op	   13122 B/op	      79 allocs/op
+BenchmarkCacheVaryHit-2            	  116839	      3076 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2            	  114730	      2947 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2            	  108618	      3195 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  191754	      1905 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  199539	      1900 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=false-2         	  186843	      1996 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  161497	      2125 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  166290	      2174 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyHTTPHit/cookies=true-2          	  178718	      2017 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   12826	     27921 ns/op	   28880 B/op	     194 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   10000	     30297 ns/op	   28880 B/op	     194 allocs/op
+BenchmarkRoutePolicyManyRoutes/10-2                 	   12244	     29316 ns/op	   28880 B/op	     194 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	     100	   3105091 ns/op	 3015285 B/op	   17053 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	     100	   3373206 ns/op	 3015286 B/op	   17053 allocs/op
+BenchmarkRoutePolicyManyRoutes/1000-2               	     100	   3007688 ns/op	 3015285 B/op	   17053 allocs/op
+PASS
+ok  	jul/internal/cache	8.110s

@@ -116,14 +116,16 @@ func startRealJulForCorpus(t *testing.T, name string, cfg *config.Config) (baseU
 	if len(cfg.Servers) != 1 {
 		t.Fatalf("%s: runtime tranche requires exactly one server, got %d", name, len(cfg.Servers))
 	}
-	address := reserveLoopbackAddress(t)
-	cfg.Servers[0].Listen = address
 	stopUnixBackends := startCorpusUnixHTTPBackends(t, cfg)
 	stopTCPBackends := startCorpusTCPBackends(t, cfg)
 	stopBackends := func() {
 		stopTCPBackends()
 		stopUnixBackends()
 	}
+	// The backends must already own their ports before Jul's reservation
+	// is released, or a backend can masquerade as Jul during readiness.
+	address := reserveLoopbackAddress(t)
+	cfg.Servers[0].Listen = address
 	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
 		stopBackends()
 		t.Fatalf("%s: runtime preflight: %v", name, err)

@@ -179,12 +179,14 @@ func runRealJulCorpusScenarios(t *testing.T, manifest corpus.Manifest, cfg *conf
 	if len(cfg.Servers) != 1 {
 		t.Fatalf("core runtime tranche requires exactly one server, got %d", len(cfg.Servers))
 	}
-	address := reserveLoopbackAddress(t)
-	cfg.Servers[0].Listen = address
 	stopUnixBackends := startCorpusUnixHTTPBackends(t, cfg)
 	defer stopUnixBackends()
 	stopTCPBackends := startCorpusTCPBackends(t, cfg)
 	defer stopTCPBackends()
+	// Allocate every backend first so it cannot claim Jul's released port
+	// and satisfy the HTTP readiness probe before Jul has started.
+	address := reserveLoopbackAddress(t)
+	cfg.Servers[0].Listen = address
 	if err := app.ValidateRuntimeConfig(context.Background(), cfg); err != nil {
 		t.Fatalf("runtime preflight: %v", err)
 	}

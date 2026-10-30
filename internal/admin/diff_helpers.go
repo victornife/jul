@@ -518,7 +518,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 	// Auth changes (CIDR lists, Basic, JWT, forward-auth).
 	diffAuth(server, key, b.Auth, a.Auth, d)
 
-	// Cache toggle.
+	// Cache toggle and route-scoped cache policy (#623).
 	if b.Cache != a.Cache {
 		action := "Enable"
 		if !a.Cache {
@@ -530,6 +530,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 		}
 	}
 	d.cover("servers.*.locations.*.cache")
+	diffLocationCachePolicy(server, key, b, a, d)
 
 	// Per-route rate-limit override.
 	diffRateLimit(server, key, b.RateLimit, a.RateLimit, d)
@@ -751,6 +752,100 @@ func durPtrStr(d *config.Duration) string {
 		return "(unset)"
 	}
 	return durStr(*d)
+}
+
+func cacheDurPtrStr(d *config.Duration, unsetLabel string) string {
+	if d == nil {
+		return unsetLabel
+	}
+	return time.Duration(*d).String()
+}
+
+func normalizeCookieListForDiff(cookies []string) []string {
+	if len(cookies) == 0 {
+		return nil
+	}
+	out := make([]string, len(cookies))
+	for i, c := range cookies {
+		out[i] = strings.ToLower(strings.TrimSpace(c))
+	}
+	sort.Strings(out)
+	return out
+}
+
+func diffLocationCachePolicy(server, key string, bLoc, aLoc *config.LocationConfig, d *ConfigDiff) {
+	defer d.cover("servers.*.locations.*.cache_policy")
+	name := server + " " + key
+	b, a := bLoc.CachePolicy, aLoc.CachePolicy
+	switch {
+	case b == nil && a == nil:
+		return
+	case b == nil && a != nil:
+		d.mod(DiffEntry{Kind: "cache", Name: name, Detail: "Add route cache_policy override on route " + key}, "route "+name+" cache_policy")
+		b = &config.LocationCachePolicy{}
+	case b != nil && a == nil:
+		d.mod(DiffEntry{Kind: "cache", Name: name, Detail: "Remove route cache_policy override from route " + key + " (inherits global [cache])"}, "route "+name+" cache_policy")
+		if aLoc.Cache && (b.BypassAnyCookie || len(b.BypassCookies) > 0) {
+			d.warn("Removing cookie-bypass controls on cached route %s on %s allows requests carrying cookies to use the shared cache unless origin headers prohibit it.", key, server)
+		}
+		return
+	}
+	for _, field := range []struct {
+		name       string
+		unsetLabel string
+		before     *config.Duration
+		after      *config.Duration
+	}{
+		{"default_ttl", "(inherit)", b.DefaultTTL, a.DefaultTTL},
+		{"max_ttl", "(none)", b.MaxTTL, a.MaxTTL},
+		{"stale_while_revalidate", "(inherit)", b.StaleWhileRevalidate, a.StaleWhileRevalidate},
+		{"stale_if_error", "(inherit)", b.StaleIfError, a.StaleIfError},
+	} {
+		bs := cacheDurPtrStr(field.before, field.unsetLabel)
+		as := cacheDurPtrStr(field.after, field.unsetLabel)
+		if bs != as {
+			d.mod(DiffEntry{
+				Kind:   "cache",
+				Name:   name,
+				Before: bs,
+				After:  as,
+				Detail: fmt.Sprintf("Change cache_policy.%s on route %s", field.name, key),
+			}, "route "+name+" cache_policy "+field.name)
+		}
+	}
+	if b.BypassAnyCookie != a.BypassAnyCookie {
+		action := "Enable"
+		if !a.BypassAnyCookie {
+			action = "Disable"
+		}
+		d.mod(DiffEntry{
+			Kind:   "cache",
+			Name:   name,
+			Before: fmt.Sprintf("%t", b.BypassAnyCookie),
+			After:  fmt.Sprintf("%t", a.BypassAnyCookie),
+			Detail: fmt.Sprintf("%s cache_policy.bypass_any_cookie on route %s", action, key),
+		}, "route "+name+" cache_policy bypass_any_cookie")
+		if b.BypassAnyCookie && !a.BypassAnyCookie && len(a.BypassCookies) == 0 && aLoc.Cache {
+			d.warn("Disabling bypass_any_cookie on cached route %s on %s allows cookie-bearing requests to use the shared cache unless origin headers prohibit it.", key, server)
+		}
+	}
+	bCookies := normalizeCookieListForDiff(b.BypassCookies)
+	aCookies := normalizeCookieListForDiff(a.BypassCookies)
+	if !stringSlicesEqual(bCookies, aCookies) {
+		d.mod(DiffEntry{
+			Kind:   "cache",
+			Name:   name,
+			Before: orNone(strings.Join(bCookies, ", ")),
+			After:  orNone(strings.Join(aCookies, ", ")),
+			Detail: "Change cache_policy.bypass_cookies on route " + key,
+		}, "route "+name+" cache_policy bypass_cookies")
+		if len(bCookies) > 0 && len(aCookies) == 0 && !a.BypassAnyCookie && aLoc.Cache {
+			d.warn("Clearing bypass_cookies on cached route %s on %s allows cookie-bearing requests to use the shared cache unless origin headers prohibit it.", key, server)
+		}
+	}
+	if aLoc.CachePolicy != nil && !aLoc.Cache {
+		d.warn("Route %s on %s configures cache_policy while cache = false; the policy remains dormant until cache is enabled.", key, server)
+	}
 }
 
 func diffProxyTimeouts(server, key string, b, a *config.LocationConfig, d *ConfigDiff) {

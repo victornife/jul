@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 425 |
-| Schema leaves (configurable values) | 358 |
-| Registry entries | 358 |
+| Schema paths (containers included) | 432 |
+| Schema leaves (configurable values) | 364 |
+| Registry entries | 364 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 315 |
+| Class `hot_reload` | 321 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -276,8 +276,14 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.backend_tls.min_version` | `hot_reload` | `backend_tls` | — | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
 | `servers.*.locations.*.backend_tls.peer_identities` | `hot_reload` | `backend_tls` | — | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
 | `servers.*.locations.*.backend_tls.server_name` | `hot_reload` | `backend_tls` | — | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
-| `servers.*.locations.*.cache` | `hot_reload` | `cache` | — | whether a location may serve from the cache is decided by the rebuilt handler tree; the backend itself is startup-owned |
+| `servers.*.locations.*.cache` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.cache_control` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.cache_policy.bypass_any_cookie` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| `servers.*.locations.*.cache_policy.bypass_cookies` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| `servers.*.locations.*.cache_policy.default_ttl` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| `servers.*.locations.*.cache_policy.max_ttl` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| `servers.*.locations.*.cache_policy.stale_if_error` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| `servers.*.locations.*.cache_policy.stale_while_revalidate` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.client_max_body_size` | `hot_reload` | `server_limits` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.cors.allow_credentials` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.cors.allowed_headers` | `hot_reload` | `cors` | — | the handler tree is rebuilt from the effective config on each successful reload |

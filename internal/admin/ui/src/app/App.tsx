@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/app/Layout.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
@@ -19,7 +20,12 @@ import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
 import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
-import { TranscodeDesignerPanel } from "@/features/transcode/TranscodeDesignerPanel.tsx";
+
+const TranscodeDesignerPanel = lazy(() =>
+  import("@/features/transcode/TranscodeDesignerPanel.tsx").then((m) => ({
+    default: m.TranscodeDesignerPanel,
+  })),
+);
 
 export function App() {
   return (
@@ -33,7 +39,14 @@ export function App() {
         <Route path="/traffic" element={<TrafficControlsPanel />} />
         <Route path="/plugins" element={<PluginsPanel />} />
         <Route path="/streams" element={<StreamsPanel />} />
-        <Route path="/transcode" element={<TranscodeDesignerPanel />} />
+        <Route
+          path="/transcode"
+          element={
+            <Suspense fallback={null}>
+              <TranscodeDesignerPanel />
+            </Suspense>
+          }
+        />
         <Route path="/search" element={<SearchPanel />} />
         <Route path="/operations" element={<OperationsPanel tab="diagnostics" />} />
         <Route path="/operations/events" element={<OperationsPanel tab="events" />} />

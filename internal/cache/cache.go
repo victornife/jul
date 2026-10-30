@@ -87,6 +87,18 @@ type Cache struct {
 	startupHighWaterGen       atomic.Uint64
 	originOpSeq               uint64
 	inflightOps               map[uint64]uint64
+	routePolicyDigest         map[string][16]byte
+	routeMatchers             map[string]string
+	routeMatcherGen           map[string]uint64
+	routePolicyCommitted      bool
+	inCandidateBuild          bool
+	pendingRouteHandlers      []pendingRouteHandler
+	routeCommitMu             sync.Mutex
+	routePolicyFloor          map[string]uint64
+	routeEpoch                map[string]uint64
+	routeConfigs              map[string]RouteCacheConfig
+	routeStateSnap            atomic.Pointer[routeStateSnapshot]
+	globalPolicyFloorGen      uint64
 	onBeforeReclaim           func(key string)
 	onAfterFenceInstall       func(sel NormalizedSelector, fenceGen uint64)
 	onAfterDiskPublication    func(key string, gen uint64)
@@ -192,6 +204,9 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Recover before attaching callbacks: corrupt metadata cleanup can call
+		// back into genMu, and must finish before taking the item snapshot.
+		c.routeEpoch, c.routeMatchers = d.loadRouteEpochs()
 		d.onEviction = func(k string) { c.recordKeyDecision(k, "disk_eviction") }
 		d.onSkip = c.captureSkipped
 		d.checkGen = c.isGenCurrent
@@ -300,6 +315,7 @@ type keyGenState struct {
 	expiresAt              time.Time
 	staleUntil             time.Time
 	varyFields             []string
+	routeScope             string
 	gen                    uint64
 	inflight               int32
 	inMem                  bool
@@ -421,7 +437,7 @@ func (c *Cache) canCommitToDisk(key string, gen, startGen uint64, hasStartGen bo
 			return false
 		}
 	}
-	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) {
+	if hasStartGen && e != nil && (c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) || c.isPolicyPublicationFencedLocked(startGen, e)) {
 		return false
 	}
 	return true
@@ -529,7 +545,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 			e.tagPolicyTracked = true
 		}
 	}
-	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) {
+	if hasStartGen && e != nil && (c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) || c.isPolicyPublicationFencedLocked(startGen, e)) {
 		c.genMu.Unlock()
 		return false, true, 0
 	}
@@ -575,7 +591,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 						st.gen = 0
 					}
 				}
-				fencedAfterDisk := hasStartGen && c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags)
+				fencedAfterDisk := hasStartGen && (c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) || c.isPolicyPublicationFencedLocked(startGen, e))
 				c.genMu.Unlock()
 				if fencedAfterDisk {
 					c.delOneIfGenAtMost(key, gen)
@@ -595,7 +611,7 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 	}
 	if hasStartGen && e != nil {
 		c.genMu.Lock()
-		fencedAfter := c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags)
+		fencedAfter := c.isPublicationFencedLocked(startGen, key, e.Tags, extraTags) || c.isPolicyPublicationFencedLocked(startGen, e)
 		c.genMu.Unlock()
 		if fencedAfter {
 			c.delOneIfGenAtMost(key, gen)
@@ -689,6 +705,8 @@ func (c *Cache) Purge() {
 	c.incompleteFloorGen = 0
 	c.incompleteHostFloorGen = nil
 	c.evictedIncompleteHostGens = nil
+	c.routePolicyFloor = nil
+	c.globalPolicyFloorGen = pGen
 	c.fences = nil
 	c.latestFenceGen.Store(pGen)
 	c.incompleteFenceGen.Store(0)
@@ -740,19 +758,81 @@ func keyFor(method, host, requestURI string) string {
 // what stops an invalidated variant from becoming reachable again, and what
 // makes a pre-#132 stub (which records no membership) fail closed.
 func (c *Cache) lookup(base string, r *http.Request) (*Entry, string, bool) {
+	e, effKey, _, ok := c.lookupForPolicy(base, r, c.Policy())
+	return e, effKey, ok
+}
+
+func (c *Cache) lookupForPolicy(base string, r *http.Request, pol CachePolicy) (*Entry, string, string, bool) {
 	e, ok := c.get(base)
 	if !ok {
-		return nil, base, false
+		effKey := base
+		if pol.MultiRouteOverlap && pol.RouteScope != "" {
+			effKey = routeVariantKey(base, pol.RouteScope, nil, r)
+		}
+		return nil, effKey, "", false
+	}
+	maxGen := c.genSeq.Load()
+	if sensitiveVaryEntry(e) {
+		c.cleanupSensitiveVary(base, e, maxGen)
+		return nil, base, "vary_sensitive_rejected", false
 	}
 	if e.IsVaryStub {
-		vk := variantKey(base, e.Vary, r)
-		if !e.ownsVariant(vk) {
-			return nil, vk, false
+		vary := e.Vary
+		if e.RouteVary != nil {
+			rv, exists := e.RouteVary[pol.RouteScope]
+			if !exists {
+				effKey := routeVariantKey(base, pol.RouteScope, nil, r)
+				return nil, effKey, "route_ownership_mismatch", false
+			}
+			vary = rv
+		} else if pol.RouteScope != "" && e.RouteScope != pol.RouteScope {
+			effKey := routeVariantKey(base, pol.RouteScope, nil, r)
+			return nil, effKey, "route_ownership_mismatch", false
 		}
-		e, ok = c.get(vk)
-		return e, vk, ok
+		if reason := varyRejectionFields(r, pol.varyGuard, vary); reason != "" {
+			if varyRejectionFields(nil, pol.varyGuard, vary) != "" {
+				c.cleanupSensitiveVary(base, e, maxGen)
+			}
+			return nil, base, reason, false
+		}
+		vk := routeVariantKey(base, pol.RouteScope, vary, r)
+		if !e.ownsVariant(vk) {
+			return nil, vk, "", false
+		}
+		ve, ok := c.get(vk)
+		if !ok {
+			return nil, vk, "", false
+		}
+		vMaxGen := c.genSeq.Load()
+		if reason := varyRejectionEntry(r, pol.varyGuard, ve); reason != "" {
+			if sensitiveVaryEntry(ve) || varyRejectionEntry(nil, pol.varyGuard, ve) != "" {
+				c.cleanupSensitiveVary(base, e, vMaxGen)
+			}
+			return nil, vk, reason, false
+		}
+		if pol.RouteScope != "" || ve.RouteScope != "" {
+			if ve.RouteScope != pol.RouteScope || ve.RouteEpoch != pol.RouteEpoch {
+				return nil, vk, "route_ownership_mismatch", false
+			}
+		}
+		return ve, vk, "", true
 	}
-	return e, base, true
+	if reason := varyRejectionEntry(r, pol.varyGuard, e); reason != "" {
+		if sensitiveVaryEntry(e) || varyRejectionEntry(nil, pol.varyGuard, e) != "" {
+			c.cleanupSensitiveVary(base, e, maxGen)
+		}
+		return nil, base, reason, false
+	}
+	if pol.RouteScope != "" || e.RouteScope != "" {
+		if e.RouteScope != pol.RouteScope || e.RouteEpoch != pol.RouteEpoch {
+			effKey := base
+			if pol.MultiRouteOverlap && pol.RouteScope != "" {
+				effKey = routeVariantKey(base, pol.RouteScope, nil, r)
+			}
+			return nil, effKey, "route_ownership_mismatch", false
+		}
+	}
+	return e, base, "", true
 }
 
 // store writes an entry to the cache. A response without Vary is stored directly
@@ -796,7 +876,7 @@ func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStre
 			e.tagPolicyTracked = true
 		}
 	}
-	if hasStartGen && e != nil && c.isPublicationFencedLocked(startGen, k, e.Tags, nil) {
+	if hasStartGen && e != nil && (c.isPublicationFencedLocked(startGen, k, e.Tags, nil) || c.isPolicyPublicationFencedLocked(startGen, e)) {
 		c.genMu.Unlock()
 		return false, 0
 	}
@@ -840,7 +920,10 @@ func (c *Cache) publishCapturedWithStartGen(k string, e *Entry, stream *diskStre
 	if c.onAfterDiskPublication != nil {
 		c.onAfterDiskPublication(k, gen)
 	}
-	if hasStartGen && c.isPublicationFenced(startGen, k, e, nil) {
+	c.genMu.Lock()
+	fencedAfterDisk := hasStartGen && (c.isPublicationFencedLocked(startGen, k, e.Tags, nil) || c.isPolicyPublicationFencedLocked(startGen, e))
+	c.genMu.Unlock()
+	if fencedAfterDisk {
 		c.delOneIfGenAtMost(k, gen)
 		c.finishKeyOp(st)
 		return false, 0
@@ -854,6 +937,10 @@ func (c *Cache) storeCaptured(base string, r *http.Request, e *Entry, stream *di
 }
 
 func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry, stream *diskStreamCapture, startGen uint64, hasStartGen bool) (stored bool) {
+	return c.storeCapturedWithPolicy(base, r, e, stream, c.Policy(), startGen, hasStartGen)
+}
+
+func (c *Cache) storeCapturedWithPolicy(base string, r *http.Request, e *Entry, stream *diskStreamCapture, pol CachePolicy, startGen uint64, hasStartGen bool) (stored bool) {
 	defer func() {
 		if stored {
 			c.recordKeyDecision(base, "response_stored")
@@ -861,22 +948,33 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 			c.recordKeyDecision(base, "publication_failed_or_fenced")
 		}
 	}()
-	if len(e.Vary) == 0 {
+	if e == nil || pol.RouteEpoch == incompatibleRouteEpoch {
+		return false
+	}
+	if reason := varyRejectionEntry(r, pol.varyGuard, e); reason != "" {
+		c.recordDecision(r, reason)
+		return false
+	}
+	e.RouteScope = pol.RouteScope
+	e.RouteEpoch = pol.RouteEpoch
+	e.BypassDigest = bypassPolicyDigest(pol)
+	e.RouteConfigDigest = routeConfigDigest(pol)
+	if len(e.Vary) == 0 && !pol.MultiRouteOverlap {
 		return c.setCapturedWithStartGen(base, e, stream, startGen, hasStartGen)
 	}
-	vk := variantKey(base, e.Vary, r)
+	vk := routeVariantKey(base, pol.RouteScope, e.Vary, r)
 
 	c.varyMu.Lock()
 	defer c.varyMu.Unlock()
 
-	if hasStartGen && c.isPublicationFenced(startGen, base, e, nil) {
+	if hasStartGen && (c.isPublicationFenced(startGen, base, e, nil) || c.isPolicyPublicationFenced(startGen, e)) {
 		return false
 	}
 	deleteGen := uint64(math.MaxUint64)
 	if hasStartGen {
 		deleteGen = startGen
 	}
-	stub := c.stubFor(base, e.Vary, deleteGen)
+	stub := c.stubForRoute(base, pol.RouteScope, e.Vary, deleteGen)
 	// The variant is published before the stub that points at it, so a lookup
 	// following a freshly listed key always finds an entry there.
 	stored, variantGen := c.publishCapturedWithStartGen(vk, e, stream, startGen, hasStartGen)
@@ -885,6 +983,25 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 	}
 	if evicted := stub.addVariant(vk); evicted != "" {
 		c.delOneIfGenAtMost(evicted, deleteGen)
+	}
+	// Route-level Vary ownership must have the same bound as representation
+	// membership. Otherwise route churn retains an ever-growing map even as
+	// addVariant evicts the old representations.
+	if stub.RouteVary != nil {
+		liveScopes := make(map[string]bool, len(stub.Variants))
+		prefix := base + "\x00route\x1f"
+		for _, member := range stub.Variants {
+			if suffix, ok := strings.CutPrefix(member, prefix); ok {
+				scope, _, _ := strings.Cut(suffix, "\x00")
+				liveScopes[scope] = true
+			}
+		}
+		for scope := range stub.RouteVary {
+			if !liveScopes[scope] {
+				delete(stub.RouteVary, scope)
+			}
+		}
+		stub.Vary = mergeRouteVaryFields(stub.RouteVary)
 	}
 	var varTagSets [][]string
 	c.genMu.Lock()
@@ -909,20 +1026,97 @@ func (c *Cache) storeCapturedWithStartGen(base string, r *http.Request, e *Entry
 	return true
 }
 
-// stubFor returns the membership stub to publish for base. An existing stub with
+// stubForRoute returns the membership stub to publish for base. An existing stub with
 // the same Vary field set is extended; a stub for a different Vary — the origin
 // changed what it varies on — is replaced, and the variants it owned are deleted
 // up to maxGen rather than deleting representations newer than the origin work.
-func (c *Cache) stubFor(base string, vary []string, maxGen uint64) *Entry {
-	if old, ok := c.get(base); ok && old.IsVaryStub {
-		if sameFields(old.Vary, vary) {
-			return old.Clone()
+func (c *Cache) stubForRoute(base, routeScope string, vary []string, maxGen uint64) *Entry {
+	if routeScope == "" {
+		if old, ok := c.get(base); ok && old.IsVaryStub {
+			if old.RouteVary == nil && old.RouteScope == "" && sameFields(old.Vary, vary) {
+				return old.Clone()
+			}
+			for _, vk := range old.Variants {
+				c.delOneIfGenAtMost(vk, maxGen)
+			}
 		}
-		for _, vk := range old.Variants {
-			c.delOneIfGenAtMost(vk, maxGen)
+		return &Entry{IsVaryStub: true, Vary: append([]string(nil), vary...)}
+	}
+	routePrefix := base + "\x00route\x1f" + routeScope
+	if old, ok := c.get(base); ok {
+		if old.IsVaryStub {
+			if old.RouteVary != nil {
+				stub := old.Clone()
+				if prevVary, hadRoute := stub.RouteVary[routeScope]; hadRoute && !sameFields(prevVary, vary) {
+					kept := stub.Variants[:0]
+					for _, vk := range stub.Variants {
+						if vk == routePrefix || strings.HasPrefix(vk, routePrefix+"\x00") {
+							c.delOneIfGenAtMost(vk, maxGen)
+						} else {
+							kept = append(kept, vk)
+						}
+					}
+					stub.Variants = kept
+				}
+				stub.RouteVary[routeScope] = append([]string(nil), vary...)
+				stub.RouteScope = routeScope
+				stub.Vary = mergeRouteVaryFields(stub.RouteVary)
+				return stub
+			}
+			if old.RouteScope == routeScope && sameFields(old.Vary, vary) {
+				stub := old.Clone()
+				stub.RouteVary = map[string][]string{routeScope: append([]string(nil), vary...)}
+				return stub
+			}
+			for _, vk := range old.Variants {
+				c.delOneIfGenAtMost(vk, maxGen)
+			}
 		}
 	}
-	return &Entry{IsVaryStub: true, Vary: append([]string(nil), vary...)}
+	return &Entry{
+		IsVaryStub: true,
+		RouteScope: routeScope,
+		Vary:       append([]string(nil), vary...),
+		RouteVary:  map[string][]string{routeScope: append([]string(nil), vary...)},
+	}
+}
+
+func mergeRouteVaryFields(routeVary map[string][]string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, fields := range routeVary {
+		for _, f := range fields {
+			lower := strings.ToLower(strings.TrimSpace(f))
+			if lower == "" {
+				continue
+			}
+			if _, ok := seen[lower]; !ok {
+				seen[lower] = struct{}{}
+				out = append(out, f)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func routeVariantKey(base, routeScope string, vary []string, r *http.Request) string {
+	if routeScope == "" {
+		return variantKey(base, vary, r)
+	}
+	fields := normalizeFields(vary)
+	var b strings.Builder
+	b.WriteString(base)
+	b.WriteByte(0x00)
+	b.WriteString("route\x1f")
+	b.WriteString(routeScope)
+	for _, f := range fields {
+		b.WriteByte(0x00)
+		b.WriteString(f)
+		b.WriteByte(0x1f)
+		b.WriteString(varyRequestValue(r.Header, f))
+	}
+	return b.String()
 }
 
 // addVariant records vk in the stub, returning a variant key that must be
@@ -1007,6 +1201,27 @@ func varyRequestValue(header http.Header, name string) string {
 // that are cacheable per HTTP semantics are stored; an unsafe method is
 // forwarded and, when it succeeds, invalidates what it changed.
 func (c *Cache) Handler(next http.Handler) http.Handler {
+	return c.handlerWithRoute(next, nil)
+}
+
+// HandlerForRoute wraps next with route-scoped cache policy, request-cookie
+// bypass, route isolation, and proxy/CGI Vary guards (#623 / #672).
+func (c *Cache) HandlerForRoute(next http.Handler, routeCfg RouteCacheConfig) http.Handler {
+	return c.handlerWithRoute(next, &routeCfg)
+}
+
+func (c *Cache) handlerWithRoute(next http.Handler, routeCfg *RouteCacheConfig) http.Handler {
+	var localCfg RouteCacheConfig
+	if routeCfg != nil {
+		localCfg = *routeCfg
+		if c != nil && localCfg.Scope != "" {
+			boundGen := &atomic.Uint64{}
+			localCfg.boundGen = boundGen
+			c.registerPendingRouteHandler(localCfg, boundGen)
+		}
+		routeCfg = &localCfg
+	}
+	var identity policyIdentityMemo
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			c.serveUnsafe(w, r, next)
@@ -1028,7 +1243,15 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		pol := c.Policy()
+		pol := c.effectivePolicy(routeCfg)
+
+		// Route-scoped conservative request-cookie bypass (#623): skips both
+		// lookup and storage before Range or normal cache handling.
+		if bypassReason := evaluateCookieBypass(r, pol); bypassReason != "" {
+			c.recordDecision(r, bypassReason)
+			c.bypass(w, r, next, span)
+			return
+		}
 
 		// Decision D05 (#107/#132) & #442 Option A (ADR 0024): when range_enabled
 		// is false (default), a request carrying Range or If-Range bypasses the
@@ -1054,18 +1277,24 @@ func (c *Cache) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		c.serveOrFillFull(w, r, next, reqPolicy, pol, span)
+		c.serveOrFillFullWithIdentity(w, r, next, reqPolicy, identity.snapshot(pol), span)
 	})
 }
 
 func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next http.Handler, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span) {
+	identity := newPolicyIdentity(pol)
+	c.serveOrFillFullWithIdentity(w, r, next, reqPolicy, &identity, span)
+}
+
+func (c *Cache) serveOrFillFullWithIdentity(w http.ResponseWriter, r *http.Request, next http.Handler, reqPolicy requestPolicy, identity *policyIdentity, span tracing.Span) {
+	pol := identity.policy
 	k := key(r)
 	now := c.clock()
-	effKey, served := c.serveCachedIfReusable(w, r, next, k, reqPolicy, now, span)
+	effKey, served := c.serveCachedWithIdentity(w, r, next, k, reqPolicy, identity, now, span)
 	if served {
 		return
 	}
-	if pol.Lock {
+	if pol.Lock && pol.RouteEpoch != incompatibleRouteEpoch {
 		c.fillOrWait(w, r, next, k, effKey, reqPolicy, pol, span, effKey == k)
 		return
 	}
@@ -1074,15 +1303,27 @@ func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next htt
 	c.fetchAndStoreWithPolicy(w, r, next, now, pol, nil)
 }
 
-func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, now time.Time, span tracing.Span) (effKey string, served bool) {
+func (c *Cache) serveCachedIfReusableWithPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, pol CachePolicy, now time.Time, span tracing.Span) (effKey string, served bool) {
+	identity := newPolicyIdentity(pol)
+	return c.serveCachedWithIdentity(w, r, next, base, reqPolicy, &identity, now, span)
+}
+
+func (c *Cache) serveCachedWithIdentity(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, identity *policyIdentity, now time.Time, span tracing.Span) (effKey string, served bool) {
+	pol := identity.policy
 	for attempt := 0; attempt < 2; attempt++ {
-		var e *Entry
-		var ok bool
-		e, effKey, ok = c.lookup(base, r)
-		if !ok || !e.matchesVary(r) {
+		e, k, rejectReason, ok := c.lookupForPolicy(base, r, pol)
+		effKey = k
+		if !ok {
+			if rejectReason != "" {
+				c.recordDecision(r, rejectReason)
+			}
 			return effKey, false
 		}
-		switch reuseDecision(e, r, reqPolicy, now) {
+		if !e.matchesVary(r) {
+			return effKey, false
+		}
+		decision, reason := c.reuseDecisionWithIdentity(e, r, reqPolicy, identity, now)
+		switch decision {
 		case reuseHit:
 			if !c.serve(w, r, e, stateHit, now) {
 				continue
@@ -1098,16 +1339,18 @@ func (c *Cache) serveCachedIfReusable(w http.ResponseWriter, r *http.Request, ne
 			span.End()
 			// Start the background refresh before returning, so the lease
 			// is taken while this request still holds its generation.
-			c.startRevalidate(effKey, r, next, e)
+			c.startRevalidateWithPolicy(effKey, r, next, e, pol)
 			return effKey, true
 		case reuseValidate:
 			c.recordDecision(r, "revalidation_required")
 			span.SetString("cache.status", "VALIDATE")
 			span.End()
-			c.validateAndServe(w, r, next, e, effKey, now)
+			c.validateAndServeWithPolicy(w, r, next, e, effKey, pol, now)
 			return effKey, true
 		default:
-			if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
+			if reason != "" {
+				c.recordDecision(r, reason)
+			} else if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
 				c.recordDecision(r, "auth_reuse_restricted")
 			}
 			return effKey, false
@@ -1189,6 +1432,82 @@ func reuseDecision(e *Entry, r *http.Request, p requestPolicy, now time.Time) re
 	return reuseValidate
 }
 
+func (c *Cache) reuseDecisionWithPolicy(e *Entry, r *http.Request, p requestPolicy, pol CachePolicy, now time.Time) (reuseKind, string) {
+	identity := newPolicyIdentity(pol)
+	return c.reuseDecisionWithIdentity(e, r, p, &identity, now)
+}
+
+func (c *Cache) reuseDecisionWithIdentity(e *Entry, r *http.Request, p requestPolicy, identity *policyIdentity, now time.Time) (reuseKind, string) {
+	pol := identity.policy
+	if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
+		return reuseNone, "auth_reuse_restricted"
+	}
+	if pol.BypassAnyCookie || pol.BypassCookieCount > 0 {
+		if (e.Evidence == nil || e.Evidence.Flags&evidenceNoRequestCookies == 0) && e.BypassDigest != identity.bypassDigest {
+			return reuseNone, "route_policy_mismatch"
+		}
+	}
+	if e.Evidence != nil && e.Evidence.PolicyID == identity.digest {
+		return reuseDecision(e, r, p, now), ""
+	}
+	if e.Evidence == nil && !pol.HasRouteDefaultTTL && !pol.HasMaxTTL && !pol.HasRouteSWR && !pol.HasRouteSIE {
+		return reuseDecision(e, r, p, now), ""
+	}
+
+	respPol := parseResponsePolicy(e.Header)
+	refNow := e.CreatedAt
+	if e.Evidence != nil {
+		if e.Evidence.ValidatedAt != 0 {
+			refNow = evidenceTime(e.Evidence.ValidatedAt)
+		} else if e.Evidence.InsertedAt != 0 {
+			refNow = evidenceTime(e.Evidence.InsertedAt)
+		}
+	}
+	ttl, swr, _, ok := c.freshnessDecision(e.Status, e.Header, respPol, refNow, pol)
+	if !ok {
+		return reuseNone, "route_policy_mismatch"
+	}
+	effExpiresAt := e.CreatedAt.Add(ttl)
+	if !e.ExpiresAt.IsZero() && effExpiresAt.After(e.ExpiresAt) {
+		effExpiresAt = e.ExpiresAt
+	}
+	var effStaleUntil time.Time
+	if e.Evidence != nil && e.Evidence.Flags&evidenceStaleIfError != 0 {
+		sie := c.staleOnErrorWindowWithPolicy(e, pol)
+		if sie <= 0 {
+			effStaleUntil = effExpiresAt
+		} else {
+			effStaleUntil = refNow.Add(sie)
+			if !e.StaleUntil.IsZero() && effStaleUntil.After(e.StaleUntil) {
+				effStaleUntil = e.StaleUntil
+			}
+		}
+	} else {
+		effStaleUntil = effExpiresAt.Add(swr)
+		if !e.StaleUntil.IsZero() && effStaleUntil.After(e.StaleUntil) {
+			effStaleUntil = e.StaleUntil
+		}
+	}
+
+	mustValidate := p.MustValidate || e.RequiresValidation
+	if !mustValidate {
+		if now.Before(effExpiresAt) {
+			return reuseHit, ""
+		}
+		if !e.MustRevalidate && now.Before(effStaleUntil) {
+			return reuseStale, ""
+		}
+	}
+	if e.ETag == "" && e.LastModified == "" {
+		if (!e.ExpiresAt.IsZero() && effExpiresAt.Before(e.ExpiresAt) && now.Before(e.ExpiresAt)) ||
+			(!e.StaleUntil.IsZero() && effStaleUntil.Before(e.StaleUntil) && now.Before(e.StaleUntil)) {
+			return reuseNone, "route_policy_mismatch"
+		}
+		return reuseNone, ""
+	}
+	return reuseValidate, ""
+}
+
 // serveUnsafe forwards a request whose method the cache never stores, and
 // invalidates the representations a successful state-changing request made
 // obsolete (RFC 9111 §4.4).
@@ -1218,14 +1537,10 @@ func (c *Cache) serveUnsafe(w http.ResponseWriter, r *http.Request, next http.Ha
 	c.invalidateFor(r, w.Header())
 }
 
-// fetchAndStore runs the upstream handler, streams the response to the client,
+// fetchAndStoreWithPolicy runs the upstream handler, streams the response to the client,
 // and stores it if cacheable. The handler receives a capability-transparent
 // wrapper, so enabling the cache neither removes nor invents an optional
 // ResponseWriter interface.
-func (c *Cache) fetchAndStore(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time) {
-	c.fetchAndStoreWithPolicy(w, r, next, now, c.Policy(), nil)
-}
-
 func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, now time.Time, pol CachePolicy, onAbandon func()) bool {
 	opID, startGen := c.beginInflightOriginOp()
 	defer c.endInflightOriginOp(opID)
@@ -1246,6 +1561,10 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 	cw.onDecision = func(reason string) { c.recordDecision(r, reason) }
 	cw.acct.onSkip = func(reason string) { c.captureSkipped(reason); c.recordDecision(r, "capture_"+reason) }
 	cw.headerCheck = func(code int, h http.Header) bool {
+		if reason := varyRejectionHeader(r, pol.varyGuard, w.Header()); reason != "" {
+			c.recordDecision(r, reason)
+			return false
+		}
 		if pol.TagHeaderCount > 0 {
 			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
 				tagSkipReason = skip
@@ -1297,13 +1616,13 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 		h = w.Header()
 	}
 	if e := c.buildEntryFromCapture(r, cw.status, h, cw.buf.Bytes(), cw.bodyLen, cw.diskStream != nil, now, pol); e != nil {
-		stored := c.storeCapturedWithStartGen(key(r), r, e, cw.diskStream, startGen, true)
+		stored := c.storeCapturedWithPolicy(key(r), r, e, cw.diskStream, pol, startGen, true)
 		return stored
 	}
 	return false
 }
 
-// startRevalidate launches the background refresh of a stale entry. It must be
+// startRevalidateWithPolicy launches the background refresh of a stale entry. It must be
 // called from the originating request's ServeHTTP, before it returns:
 //
 //  1. it acquires the handler generation's background lease first, so the
@@ -1317,7 +1636,7 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 //  3. it clones the request onto the leased context here, not in the goroutine,
 //     because the originating *http.Request must not be touched after
 //     ServeHTTP returns.
-func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handler, stale *Entry) {
+func (c *Cache) startRevalidateWithPolicy(effKey string, r *http.Request, next http.Handler, stale *Entry, pol CachePolicy) {
 	ctx, release, ok := background.Acquire(r.Context(), background.OpCacheRevalidate)
 	if !ok {
 		c.observeRevalidation(outcomeNoLease)
@@ -1326,7 +1645,12 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 		return
 	}
 	gen, _ := background.Generation(r.Context())
-	k := revalidateKey{key: effKey, gen: gen}
+	k := revalidateKey{
+		key:         effKey,
+		gen:         gen,
+		route:       pol.RouteScope,
+		routeConfig: routeConfigDigest(pol),
+	}
 
 	call, leader := c.beginRevalidate(k)
 	if !leader {
@@ -1342,7 +1666,7 @@ func (c *Cache) startRevalidate(effKey string, r *http.Request, next http.Handle
 	go func() {
 		defer release()
 		defer c.endInflightOriginOp(opID)
-		c.revalidate(ctx, k, req, origReq, next, stale, call, startGen)
+		c.revalidateWithPolicy(ctx, k, req, origReq, next, stale, call, startGen, pol)
 	}()
 }
 
@@ -1366,7 +1690,7 @@ func conditionalRequest(req *http.Request, stale *Entry) *http.Request {
 	return req
 }
 
-// revalidate refreshes a stale entry using a conditional request. It runs on the
+// revalidateWithPolicy refreshes a stale entry using a conditional request. It runs on the
 // leased background context: independent of the client that triggered it, but
 // canceled by process shutdown, generation retirement, and the lease's bounded
 // operation deadline.
@@ -1375,7 +1699,7 @@ func conditionalRequest(req *http.Request, stale *Entry) *http.Request {
 // replaces the stored pointer under the tier's own lock. The deferred cleanup
 // removes the call state and releases every waiter on all paths, including a
 // panic in the downstream handler.
-func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *http.Request, next http.Handler, stale *Entry, call *revalidateCall, startGen uint64) {
+func (c *Cache) revalidateWithPolicy(ctx context.Context, k revalidateKey, req, origReq *http.Request, next http.Handler, stale *Entry, call *revalidateCall, startGen uint64, pol CachePolicy) {
 	defer func() {
 		// Ordering matters: drop the call state first so a later stale hit can
 		// start a fresh refresh the instant a waiter is released.
@@ -1394,9 +1718,25 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		call.finish(nil, outcomeCanceled, context.Canceled)
 	}()
 
-	pol := c.Policy()
+	var tagSkipReason string
 	rec := c.newRecorder(pol)
 	c.observeRecorder(rec, req)
+	rec.headerCheck = func(code int, h http.Header) bool {
+		if code == http.StatusNotModified || code >= 500 {
+			return true
+		}
+		if pol.TagHeaderCount > 0 {
+			if _, _, skip := extractOriginTags(h, pol.TagHeaderSlice()); skip != "" {
+				tagSkipReason = skip
+				return false
+			}
+		}
+		reason := c.storageReason(req, code, h, c.clock(), pol)
+		if reason != "" {
+			c.recordDecision(req, reason)
+		}
+		return reason == ""
+	}
 	defer rec.releaseCapture()
 	next.ServeHTTP(rec, req)
 	now := c.clock()
@@ -1412,11 +1752,21 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		return
 	}
 
+	if tagSkipReason != "" {
+		c.recordDecision(req, "tag_capture_rejected")
+		c.tagSkipped(tagSkipReason)
+		c.deleteAtMostGen(baseKeyOf(k.key), startGen)
+		c.delOneIfGenAtMost(k.key, startGen)
+		call.finish(nil, outcomeUncacheable, nil)
+		c.observeRevalidation(outcomeUncacheable)
+		return
+	}
+
 	switch {
 	case rec.status == http.StatusNotModified:
 		// Upstream confirms freshness: republish a merged clone under the same
 		// (variant) key it already lives at.
-		refreshed, action, reason := c.merge304Decision(stale, rec.header, now)
+		refreshed, action, reason := c.merge304DecisionWithPolicy(origReq, stale, rec.header, now, pol)
 		if reason != "" {
 			c.recordDecision(req, reason)
 		}
@@ -1433,7 +1783,8 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		case mergeDiscard:
 			// The 304 changed the representation's keying or made it
 			// unstorable; dropping the pre-validation generation is the only safe outcome.
-			c.deleteAtMostGen(k.key, startGen)
+			c.deleteAtMostGen(baseKeyOf(k.key), startGen)
+			c.delOneIfGenAtMost(k.key, startGen)
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 		}
@@ -1442,16 +1793,27 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 		// Upstream error during revalidation: extend the stale-if-error window
 		// so the entry stays servable while the backend recovers. The published
 		// entry is replaced by a clone, never edited in place.
-		if sie := c.staleOnErrorWindow(stale); sie > 0 {
-			c.recordDecision(req, "stale_if_error")
-			refreshed := stale.Clone()
-			refreshed.StaleUntil = now.Add(sie)
-			markStaleIfError(refreshed)
-			if !c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
-				c.recordDecision(req, "stale_if_error_extended")
-				call.finish(refreshed, outcomeOriginError, nil)
-				c.observeRevalidation(outcomeOriginError)
-				return
+		errVaryReason := varyRejectionEntry(origReq, pol.varyGuard, stale)
+		if errVaryReason == "" {
+			errVaryReason = varyRejectionHeader(origReq, pol.varyGuard, rec.header)
+		}
+		p5xx := parseResponsePolicy(rec.header)
+		if errVaryReason != "" {
+			c.recordDecision(req, errVaryReason)
+			c.deleteAtMostGen(baseKeyOf(k.key), startGen)
+			c.delOneIfGenAtMost(k.key, startGen)
+		} else if !p5xx.NoStore && !p5xx.Private && !hasHeaderField(rec.header, "Set-Cookie") {
+			if sie := c.staleOnErrorWindowWithPolicy(stale, pol); sie > 0 {
+				c.recordDecision(req, "stale_if_error")
+				refreshed := stale.Clone()
+				refreshed.StaleUntil = now.Add(sie)
+				markStaleIfError(refreshed)
+				if !c.setIfNotFenced(k.key, refreshed, startGen, stale.Tags) {
+					c.recordDecision(req, "stale_if_error_extended")
+					call.finish(refreshed, outcomeOriginError, nil)
+					c.observeRevalidation(outcomeOriginError)
+					return
+				}
 			}
 		}
 		call.finish(nil, outcomeOriginError, nil)
@@ -1459,12 +1821,20 @@ func (c *Cache) revalidate(ctx context.Context, k revalidateKey, req, origReq *h
 
 	case !rec.storable():
 		c.recordDecision(req, "capture_not_stored")
+		if varyRejectionHeader(origReq, pol.varyGuard, rec.header) != "" {
+			c.deleteAtMostGen(baseKeyOf(k.key), startGen)
+			c.delOneIfGenAtMost(k.key, startGen)
+		}
 		call.finish(nil, outcomeUncacheable, nil)
 		c.observeRevalidation(outcomeUncacheable)
 
 	default:
 		e := c.buildEntryFromCapture(req, rec.status, rec.header, rec.body.Bytes(), rec.bodyLen, rec.diskStream != nil, now, pol)
-		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithStartGen(key(req), req, e, rec.diskStream, startGen, true) {
+		if !c.captureMatchesRequest(e, origReq) || !c.storeCapturedWithPolicy(key(req), req, e, rec.diskStream, pol, startGen, true) {
+			if varyRejectionHeader(origReq, pol.varyGuard, rec.header) != "" {
+				c.deleteAtMostGen(baseKeyOf(k.key), startGen)
+				c.delOneIfGenAtMost(k.key, startGen)
+			}
 			call.finish(nil, outcomeUncacheable, nil)
 			c.observeRevalidation(outcomeUncacheable)
 			return
@@ -1509,6 +1879,9 @@ func (c *Cache) storageReason(r *http.Request, status int, h http.Header, now ti
 			return "response_policy_rejected"
 		}
 	}
+	if reason := varyRejectionHeader(r, pol.varyGuard, h); reason != "" {
+		return reason
+	}
 	if hasHeaderField(r.Header, "Authorization") && !p.sharedAuthStorable() {
 		return "auth_storage_restricted"
 	}
@@ -1545,6 +1918,10 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 	ttl, swr, ok := c.freshnessWithPolicy(status, h, p, now, pol)
 	if !ok {
 		c.recordDecision(r, c.storageReason(r, status, h, now, pol))
+		return nil
+	}
+	if reason := varyRejectionHeader(r, pol.varyGuard, h); reason != "" {
+		c.recordDecision(r, reason)
 		return nil
 	}
 	// A response produced FOR an authenticated request enters the shared cache
@@ -1595,6 +1972,10 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 		ingestedTagHeaderCount: pol.TagHeaderCount,
 		ingestedTagHeaders:     pol.TagHeaders,
 		tagPolicyTracked:       true,
+		RouteScope:             pol.RouteScope,
+		RouteEpoch:             pol.RouteEpoch,
+		BypassDigest:           bypassPolicyDigest(pol),
+		RouteConfigDigest:      routeConfigDigest(pol),
 	}
 	if vary := varyFields(h); len(vary) > 0 {
 		for _, name := range vary {
@@ -1611,7 +1992,7 @@ func (c *Cache) buildEntryFromCapture(r *http.Request, status int, h http.Header
 			e.VaryValues[name] = varyRequestValue(r.Header, name)
 		}
 	}
-	e.Evidence = c.entryEvidence(status, h, p, pol, now, ttl, swr)
+	e.Evidence = c.entryEvidenceForRequest(r, status, h, p, pol, now, ttl, swr)
 	return e
 }
 
@@ -1754,6 +2135,9 @@ func (c *Cache) freshnessDecision(status int, h http.Header, p responsePolicy, n
 	}
 
 	source = "gateway_fallback"
+	if pol.HasRouteDefaultTTL {
+		source = "route_default_ttl"
+	}
 	ttl = pol.DefaultTTL
 	switch {
 	case p.HasSMaxAge:
@@ -1785,18 +2169,33 @@ func (c *Cache) freshnessDecision(status int, h http.Header, p responsePolicy, n
 			source = "origin_expires"
 		}
 	}
+	if pol.HasMaxTTL && ttl > pol.MaxTTL {
+		ttl = pol.MaxTTL
+		source = "route_max_ttl_cap"
+	}
 	if ttl <= 0 && !p.NoCache {
 		return 0, 0, "", false
 	}
 
 	if p.NoCache {
+		if pol.HasMaxTTL && pol.MaxTTL <= 0 {
+			return 0, 0, "", false
+		}
 		// A no-cache response is storable, and its stored copy is still worth
 		// keeping even with no usable lifetime: every reuse revalidates, and a
 		// 304 then saves the body. Give it the configured default so it is
 		// retained and aged like anything else.
 		if ttl <= 0 {
 			ttl = pol.DefaultTTL
-			source = "gateway_fallback_no_cache"
+			if pol.HasRouteDefaultTTL {
+				source = "route_default_ttl_no_cache"
+			} else {
+				source = "gateway_fallback_no_cache"
+			}
+			if pol.HasMaxTTL && ttl > pol.MaxTTL {
+				ttl = pol.MaxTTL
+				source = "route_max_ttl_cap"
+			}
 		}
 		if ttl <= 0 {
 			return 0, 0, "", false
@@ -1831,6 +2230,10 @@ func (c *Cache) freshnessDecision(status int, h http.Header, p responsePolicy, n
 //     nothing. It is not permission to serve a no-cache response unvalidated,
 //     so a no-cache entry gets a window only when the origin asked for one.
 func (c *Cache) staleOnErrorWindow(e *Entry) time.Duration {
+	return c.staleOnErrorWindowWithPolicy(e, c.Policy())
+}
+
+func (c *Cache) staleOnErrorWindowWithPolicy(e *Entry, pol CachePolicy) time.Duration {
 	if e.MustRevalidate {
 		return 0
 	}
@@ -1840,5 +2243,5 @@ func (c *Cache) staleOnErrorWindow(e *Entry) time.Duration {
 	if e.RequiresValidation {
 		return 0
 	}
-	return c.Policy().StaleIfError
+	return pol.StaleIfError
 }

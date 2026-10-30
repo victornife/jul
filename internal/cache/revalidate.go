@@ -48,8 +48,10 @@ var errRevalidatePanic = errors.New("cache: background revalidation panicked")
 // installs a fresh key space: a new generation is never made to wait on — or be
 // suppressed by — a call still running against the retired handler tree.
 type revalidateKey struct {
-	key string
-	gen uint64
+	key         string
+	gen         uint64
+	route       string
+	routeConfig [16]byte
 }
 
 // revalidateCall is the shared state of one in-flight revalidation. Exactly one

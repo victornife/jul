@@ -201,11 +201,19 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	}
 	gen := f.GenRes.Begin()
 	f.stageEgress(candidateEgress)
+	if f.Cache != nil {
+		f.Cache.BeginRouteCandidate()
+	}
 	committed := false
 	defer func() {
 		gen.Abort()
-		if !committed && egressChanged && candidateEgress != nil {
-			candidateEgress.CloseIdleConnections()
+		if !committed {
+			if f.Cache != nil {
+				f.Cache.DiscardPendingRouteHandlers()
+			}
+			if egressChanged && candidateEgress != nil {
+				candidateEgress.CloseIdleConnections()
+			}
 		}
 	}()
 
@@ -216,6 +224,9 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	var retirePrev func()
 	if commit {
 		retireHandlers := gen.Commit()
+		if f.Cache != nil {
+			f.Cache.CommitRoutePolicies(gen.cacheRoutePolicies)
+		}
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)
@@ -255,10 +266,16 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 	}
 	gen := f.GenRes.Begin()
 	f.stageEgress(candidateEgress)
+	if f.Cache != nil {
+		f.Cache.BeginRouteCandidate()
+	}
 
 	handlers, err = f.buildHandlers(ctx, c, gen, upstreams, candidateEgress)
 	if err != nil {
 		gen.Abort()
+		if f.Cache != nil {
+			f.Cache.DiscardPendingRouteHandlers()
+		}
 		if egressChanged && candidateEgress != nil {
 			candidateEgress.CloseIdleConnections()
 		}
@@ -280,6 +297,9 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		}
 		committed = true
 		retireHandlers := gen.Commit()
+		if f.Cache != nil {
+			f.Cache.CommitRoutePolicies(gen.cacheRoutePolicies)
+		}
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)
@@ -308,6 +328,9 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		}
 		committed = true
 		gen.Abort()
+		if f.Cache != nil {
+			f.Cache.DiscardPendingRouteHandlers()
+		}
 		if egressChanged && candidateEgress != nil {
 			candidateEgress.CloseIdleConnections()
 		}
@@ -410,11 +433,39 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return nil, fmt.Errorf("build aborted after plugin compilation: %w", err)
 	}
 
-	withCache := func(loc config.LocationConfig, h http.Handler) http.Handler {
-		if loc.Cache && f.Cache != nil {
-			return f.Cache.Handler(h)
+	totalCachedLocs := 0
+	cacheScopes := make(map[string]string)
+	for i := range c.Servers {
+		scopes := cache.RouteScopes(c.Servers[i])
+		for j := range c.Servers[i].Locations {
+			if c.Servers[i].Locations[j].Cache && !c.Servers[i].Locations[j].Withdrawn {
+				totalCachedLocs++
+				srv, loc := c.Servers[i], c.Servers[i].Locations[j]
+				cacheScopes[LocationScope(srv, loc)] = scopes[j]
+			}
 		}
-		return h
+	}
+
+	withCache := func(srv config.ServerConfig, loc config.LocationConfig, h http.Handler, action string) http.Handler {
+		if !loc.Cache || loc.Withdrawn || f.Cache == nil {
+			return h
+		}
+		scope := cacheScopes[LocationScope(srv, loc)]
+		multiOverlap := totalCachedLocs > 1 || loc.Match.HasPredicates()
+		rc := cache.CompileRouteCacheConfig(scope, multiOverlap, loc.CachePolicy).WithMatcher(loc, f.Versions)
+		rc.Epoch = f.Cache.CurrentRouteEpoch(scope)
+		switch action {
+		case router.ActionProxy:
+			names, complete := handler.ProxyTransformedRequestHeaders(loc, cache.MaxProxyVaryNames)
+			rc = rc.WithProxyVaryGuard(names, complete)
+		case router.ActionFastCGI:
+			names, prefixes, complete := handler.CGITransformedRequestHeaders(loc, cache.MaxProxyVaryNames)
+			rc = rc.WithCGIVaryGuard(names, prefixes, complete)
+		default:
+			rc = rc.WithProxyVaryGuard(nil, true)
+		}
+		gen.cacheRoutePolicies = append(gen.cacheRoutePolicies, rc)
+		return f.Cache.HandlerForRoute(h, rc)
 	}
 
 	// Static locations may serve precompressed .br/.gz sidecars when the
@@ -466,7 +517,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if c, ok := h.(io.Closer); ok {
 				gen.Stage(c)
 			}
-			return withCache(loc, h), nil
+			return withCache(srv, loc, h, router.ActionProxy), nil
 		},
 		router.ActionFastCGI: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h, err := handler.NewFastCGI(ctx, srv, loc, upstreams, f.PoolReg, f.Log)
@@ -478,7 +529,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if c, ok := h.(io.Closer); ok {
 				gen.Stage(c)
 			}
-			return withCache(loc, h), nil
+			return withCache(srv, loc, h, router.ActionFastCGI), nil
 		},
 		router.ActionGRPCTranscode: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h, err := handler.NewGRPCTranscode(ctx, srv, loc, upstreams, f.PoolReg, f.Log, f.Metrics.ObserveGRPCTranscode, f.Metrics.ObserveGRPCTranscodeStreamMsg)
@@ -492,12 +543,12 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			}
 			return h, nil
 		},
-		router.ActionPlugin: func(_ config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
+		router.ActionPlugin: func(srv config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
 			h := pluginSet.Handler(loc.Plugin)
 			if h == nil {
 				return nil, fmt.Errorf("handler plugin %q is not loaded", loc.Plugin)
 			}
-			return withCache(loc, h), nil
+			return withCache(srv, loc, h, router.ActionPlugin), nil
 		},
 	}
 

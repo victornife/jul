@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 358 configurable leaves.
+Coverage: 364 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -2131,7 +2131,7 @@ Caching toggle for this location (requires [cache].enabled).
 | Type | `bool` |
 | Lifecycle | `hot_reload` |
 | Subsystem | `cache` |
-| Why | whether a location may serve from the cache is decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 
 ## `servers.*.locations.*.cache_control` {#servers-x-locations-x-cache_control}
 
@@ -2143,6 +2143,96 @@ CacheControl sets a fixed Cache-Control response header value for this location.
 | Lifecycle | `hot_reload` |
 | Subsystem | `static_files` |
 | Why | the handler tree is rebuilt from the effective config on each successful reload |
+
+## `servers.*.locations.*.cache_policy.bypass_any_cookie` {#servers-x-locations-x-cache_policy-bypass_any_cookie}
+
+BypassAnyCookie causes any request carrying a Cookie header to bypass both cache lookup and cache storage; cannot be combined with bypass_cookies.
+
+| | |
+| --- | --- |
+| Type | `bool` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Constraint | must not be true when bypass_cookies is non-empty |
+| Zero/empty semantics | omitted or false disables any-cookie bypass |
+| Active when | cache.enabled = true and servers[].locations[].cache = true |
+
+## `servers.*.locations.*.cache_policy.bypass_cookies` {#servers-x-locations-x-cache_policy-bypass_cookies}
+
+BypassCookies lists literal request cookie names (1..32 names, each a 1..128-byte HTTP token matched case-insensitively) that cause a request to bypass both cache lookup and cache storage.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Constraint | at most 32 unique (case-insensitive) 1..128-byte RFC 6265 / RFC 9110 cookie-name tokens; must not be combined with bypass_any_cookie = true |
+| Zero/empty semantics | omitted or empty disables selected-cookie bypass |
+| Active when | cache.enabled = true and servers[].locations[].cache = true |
+
+## `servers.*.locations.*.cache_policy.default_ttl` {#servers-x-locations-x-cache_policy-default_ttl}
+
+DefaultTTL overrides [cache].default_ttl for this route when origin freshness (CDN-Cache-Control / Cache-Control s-maxage or max-age, or Expires) is absent; omitted inherits [cache].default_ttl and explicit "0s" disables gateway fallback freshness on this route.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Constraint | non-negative when present; must not exceed max_ttl when both are set on the same route |
+| Zero/empty semantics | omitted inherits cache.default_ttl; explicit "0s" disables gateway fallback freshness on this route |
+| Active when | cache.enabled = true and servers[].locations[].cache = true |
+
+## `servers.*.locations.*.cache_policy.max_ttl` {#servers-x-locations-x-cache_policy-max_ttl}
+
+MaxTTL caps the computed freshness lifetime (from origin directives or gateway default_ttl) on this route; omitted applies no route cap and explicit "0s" caps fresh lifetime to zero.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Constraint | non-negative when present; must not be less than default_ttl when both are set on the same route |
+| Zero/empty semantics | omitted applies no route freshness cap; explicit "0s" caps fresh lifetime to zero |
+| Active when | cache.enabled = true and servers[].locations[].cache = true |
+
+## `servers.*.locations.*.cache_policy.stale_if_error` {#servers-x-locations-x-cache_policy-stale_if_error}
+
+StaleIfError overrides [cache].stale_if_error for this route when the origin response omits stale-if-error; omitted inherits [cache].stale_if_error and explicit "0s" disables gateway fallback stale-if-error on this route.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Constraint | non-negative when present |
+| Zero/empty semantics | omitted inherits cache.stale_if_error; explicit "0s" disables gateway fallback stale-if-error on this route |
+| Active when | cache.enabled = true and servers[].locations[].cache = true |
+
+## `servers.*.locations.*.cache_policy.stale_while_revalidate` {#servers-x-locations-x-cache_policy-stale_while_revalidate}
+
+StaleWhileRevalidate overrides [cache].stale_while_revalidate for this route when the origin response omits stale-while-revalidate; omitted inherits [cache].stale_while_revalidate and explicit "0s" disables gateway fallback stale-while-revalidate on this route.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Constraint | non-negative when present |
+| Zero/empty semantics | omitted inherits cache.stale_while_revalidate; explicit "0s" disables gateway fallback stale-while-revalidate on this route |
+| Active when | cache.enabled = true and servers[].locations[].cache = true |
 
 ## `servers.*.locations.*.client_max_body_size` {#servers-x-locations-x-client_max_body_size}
 

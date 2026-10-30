@@ -163,12 +163,116 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				}
 				lp.Sharing = sh
 			}
+			lp.CachePolicy, lp.CacheEffective = projectLocationCachePolicy(c, loc, lp.Action)
 			lp.Warnings = locationWarnings(c, srv, loc, &lp)
 			rp.Locations = append(rp.Locations, lp)
 		}
 		out = append(out, rp)
 	}
 	return out
+}
+
+func projectLocationCachePolicy(c *config.Config, loc *config.LocationConfig, action string) (*LocationCachePolicyState, *LocationCacheEffectiveState) {
+	var state *LocationCachePolicyState
+	cp := loc.CachePolicy
+	if cp != nil {
+		state = &LocationCachePolicyState{
+			BypassAnyCookie: cp.BypassAnyCookie,
+		}
+		if len(cp.BypassCookies) > 0 {
+			state.BypassCookies = append([]string(nil), cp.BypassCookies...)
+		}
+		if cp.DefaultTTL != nil {
+			s := cp.DefaultTTL.Std().String()
+			state.DefaultTTL = &s
+		}
+		if cp.MaxTTL != nil {
+			s := cp.MaxTTL.Std().String()
+			state.MaxTTL = &s
+		}
+		if cp.StaleWhileRevalidate != nil {
+			s := cp.StaleWhileRevalidate.Std().String()
+			state.StaleWhileRevalidate = &s
+		}
+		if cp.StaleIfError != nil {
+			s := cp.StaleIfError.Std().String()
+			state.StaleIfError = &s
+		}
+	}
+	cacheableAction := action == "proxy" || action == "fastcgi" || action == "uwsgi" || action == "plugin"
+	if !cacheableAction && !loc.Cache && cp == nil {
+		return state, nil
+	}
+	eff := &LocationCacheEffectiveState{
+		GlobalEnabled:        c.Cache.Enabled,
+		DefaultTTL:           c.Cache.DefaultTTL.Std().String(),
+		DefaultTTLSource:     "inherited_global",
+		MaxTTLSource:         "none",
+		StaleWhileRevalidate: c.Cache.StaleWhileRevalidate.Std().String(),
+		SWRSource:            "inherited_global",
+		StaleIfError:         c.Cache.StaleIfError.Std().String(),
+		SIESource:            "inherited_global",
+		BypassMode:           "none",
+		LockEnabled:          c.Cache.Lock,
+		RangeEnabled:         c.Cache.RangeEnabled,
+		DiskEnabled:          strings.TrimSpace(c.Cache.DiskPath) != "",
+	}
+	if c.Cache.MemoryMaxSize > 0 {
+		eff.MemoryMaxSize = c.Cache.MemoryMaxSize.String()
+	}
+	if c.Cache.MaxEntrySize > 0 {
+		eff.MaxEntrySize = c.Cache.MaxEntrySize.String()
+	} else if c.Cache.MemoryMaxSize > 0 {
+		eff.MaxEntrySize = c.Cache.MemoryMaxSize.String()
+	}
+	if cp != nil {
+		if cp.DefaultTTL != nil {
+			eff.DefaultTTL = cp.DefaultTTL.Std().String()
+			if cp.DefaultTTL.Std() == 0 {
+				eff.DefaultTTLSource = "explicit_zero"
+			} else {
+				eff.DefaultTTLSource = "route_override"
+			}
+		}
+		if cp.MaxTTL != nil {
+			eff.MaxTTL = cp.MaxTTL.Std().String()
+			if cp.MaxTTL.Std() == 0 {
+				eff.MaxTTLSource = "explicit_zero"
+			} else {
+				eff.MaxTTLSource = "route_cap"
+			}
+			// If default_ttl was inherited from global and exceeds the route max_ttl cap,
+			// reflect the capped effective default_ttl.
+			if cp.DefaultTTL == nil && c.Cache.DefaultTTL > *cp.MaxTTL {
+				eff.DefaultTTL = cp.MaxTTL.Std().String()
+				eff.DefaultTTLSource = "capped_by_route_max_ttl"
+			}
+		}
+		if cp.StaleWhileRevalidate != nil {
+			eff.StaleWhileRevalidate = cp.StaleWhileRevalidate.Std().String()
+			if cp.StaleWhileRevalidate.Std() == 0 {
+				eff.SWRSource = "explicit_zero"
+			} else {
+				eff.SWRSource = "route_override"
+			}
+		}
+		if cp.StaleIfError != nil {
+			eff.StaleIfError = cp.StaleIfError.Std().String()
+			if cp.StaleIfError.Std() == 0 {
+				eff.SIESource = "explicit_zero"
+			} else {
+				eff.SIESource = "route_override"
+			}
+		}
+		switch {
+		case cp.BypassAnyCookie:
+			eff.BypassMode = "any_cookie"
+		case len(cp.BypassCookies) > 0:
+			eff.BypassMode = "selected_cookies"
+			eff.BypassCookies = append([]string(nil), cp.BypassCookies...)
+		}
+	}
+	return state, eff
 }
 
 // upstreamRef extracts the upstream pool name a proxied target references. A
@@ -198,6 +302,9 @@ func locationWarnings(c *config.Config, srv *config.ServerConfig, loc *config.Lo
 	var w []string
 	if loc.Cache && !c.Cache.Enabled {
 		w = append(w, "Cache is toggled on for this route, but the global [cache] block is disabled.")
+	}
+	if loc.CachePolicy != nil && !loc.Cache {
+		w = append(w, "A route cache_policy is configured, but cache = false on this route so the policy is currently dormant.")
 	}
 	if lp.RateLimit && !c.RateLimit.Enabled && (loc.RateLimit == nil || loc.RateLimit.Rate <= 0) {
 		w = append(w, "Rate limiting is referenced but no rate is configured.")

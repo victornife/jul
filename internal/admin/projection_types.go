@@ -110,6 +110,45 @@ type LocationProjection struct {
 	// Sharing is the location's optional declared sharing intent
 	// ([servers.locations.sharing], ADR 0026 Decision 2, spec §4.5).
 	Sharing *LocationSharingState `json:"sharing,omitempty"`
+	// CachePolicy is the location's optional [servers.locations.cache_policy]
+	// override (#623 / CACHE-OPS-03), present only when configured.
+	CachePolicy *LocationCachePolicyState `json:"cache_policy,omitempty"`
+	// CacheEffective is the server-computed effective cache policy and
+	// inheritance summary for cacheable routes (#623 / CACHE-OPS-03).
+	CacheEffective *LocationCacheEffectiveState `json:"cache_effective,omitempty"`
+}
+
+// LocationCachePolicyState summarises a location's configured [cache_policy]
+// block. Pointer fields distinguish omitted (inherit / no cap) from explicit
+// "0s" (disabled / zero cap).
+type LocationCachePolicyState struct {
+	DefaultTTL           *string  `json:"default_ttl,omitempty"`
+	MaxTTL               *string  `json:"max_ttl,omitempty"`
+	StaleWhileRevalidate *string  `json:"stale_while_revalidate,omitempty"`
+	StaleIfError         *string  `json:"stale_if_error,omitempty"`
+	BypassCookies        []string `json:"bypass_cookies,omitempty"`
+	BypassAnyCookie      bool     `json:"bypass_any_cookie,omitempty"`
+}
+
+// LocationCacheEffectiveState reports the server-owned effective cache policy
+// and global node-wide boundaries for a route (#623 / CACHE-OPS-03).
+type LocationCacheEffectiveState struct {
+	GlobalEnabled        bool     `json:"global_enabled"`
+	DefaultTTL           string   `json:"default_ttl"`
+	DefaultTTLSource     string   `json:"default_ttl_source"`
+	MaxTTL               string   `json:"max_ttl,omitempty"`
+	MaxTTLSource         string   `json:"max_ttl_source"`
+	StaleWhileRevalidate string   `json:"stale_while_revalidate"`
+	SWRSource            string   `json:"swr_source"`
+	StaleIfError         string   `json:"stale_if_error"`
+	SIESource            string   `json:"sie_source"`
+	BypassMode           string   `json:"bypass_mode"`
+	BypassCookies        []string `json:"bypass_cookies,omitempty"`
+	LockEnabled          bool     `json:"lock_enabled"`
+	RangeEnabled         bool     `json:"range_enabled"`
+	MemoryMaxSize        string   `json:"memory_max_size,omitempty"`
+	DiskEnabled          bool     `json:"disk_enabled"`
+	MaxEntrySize         string   `json:"max_entry_size,omitempty"`
 }
 
 // LocationSharingState summarises a location's declared [sharing] block.

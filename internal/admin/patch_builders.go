@@ -6,6 +6,7 @@ package admin
 import (
 	"fmt"
 	"maps"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -185,6 +186,82 @@ func buildCORS(p corsPatch) (*config.CORSConfig, error) {
 		}
 	}
 	return cors, nil
+}
+
+func parseOptionalDurPtr(raw *string, field string) (*config.Duration, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	trimmed := strings.TrimSpace(*raw)
+	if trimmed == "" {
+		return nil, nil
+	}
+	var d config.Duration
+	if err := d.UnmarshalText([]byte(trimmed)); err != nil {
+		return nil, fmt.Errorf("%s: %w", field, err)
+	}
+	return &d, nil
+}
+
+func buildLocationCachePolicy(in locationCachePolicyPatch) (*config.LocationCachePolicy, string, error) {
+	defaultTTL, err := parseOptionalDurPtr(in.DefaultTTL, "default_ttl")
+	if err != nil {
+		return nil, "", fmt.Errorf("location_cache_policy_set: %w", err)
+	}
+	maxTTL, err := parseOptionalDurPtr(in.MaxTTL, "max_ttl")
+	if err != nil {
+		return nil, "", fmt.Errorf("location_cache_policy_set: %w", err)
+	}
+	swr, err := parseOptionalDurPtr(in.StaleWhileRevalidate, "stale_while_revalidate")
+	if err != nil {
+		return nil, "", fmt.Errorf("location_cache_policy_set: %w", err)
+	}
+	sie, err := parseOptionalDurPtr(in.StaleIfError, "stale_if_error")
+	if err != nil {
+		return nil, "", fmt.Errorf("location_cache_policy_set: %w", err)
+	}
+	var cookies []string
+	seenCookies := make(map[string]struct{}, len(in.BypassCookies))
+	for _, raw := range in.BypassCookies {
+		trimmed := strings.ToLower(strings.TrimSpace(raw))
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seenCookies[trimmed]; !dup {
+			seenCookies[trimmed] = struct{}{}
+			cookies = append(cookies, trimmed)
+		}
+	}
+	sort.Strings(cookies)
+	if defaultTTL == nil && maxTTL == nil && swr == nil && sie == nil && len(cookies) == 0 && !in.BypassAnyCookie {
+		return nil, "inherit global [cache]", nil
+	}
+	var parts []string
+	if defaultTTL != nil {
+		parts = append(parts, "default_ttl="+defaultTTL.Std().String())
+	}
+	if maxTTL != nil {
+		parts = append(parts, "max_ttl="+maxTTL.Std().String())
+	}
+	if swr != nil {
+		parts = append(parts, "swr="+swr.Std().String())
+	}
+	if sie != nil {
+		parts = append(parts, "sie="+sie.Std().String())
+	}
+	if in.BypassAnyCookie {
+		parts = append(parts, "bypass_any_cookie=true")
+	} else if len(cookies) > 0 {
+		parts = append(parts, fmt.Sprintf("bypass_cookies=%d", len(cookies)))
+	}
+	return &config.LocationCachePolicy{
+		DefaultTTL:           defaultTTL,
+		MaxTTL:               maxTTL,
+		StaleWhileRevalidate: swr,
+		StaleIfError:         sie,
+		BypassCookies:        cookies,
+		BypassAnyCookie:      in.BypassAnyCookie,
+	}, strings.Join(parts, ", "), nil
 }
 
 // orDefault returns s, or def when s is empty — used to echo the effective value

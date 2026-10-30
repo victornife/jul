@@ -981,6 +981,32 @@ func setCanonicalXForwardedWithVars(pr *httputil.ProxyRequest, vars *proxyVarCon
 // widely deployed pre-standard spelling and is stripped on the same terms.
 var certAssertionHeaders = []string{"Client-Cert", "Client-Cert-Chain", "X-Forwarded-Client-Cert"}
 
+// ProxyTransformedRequestHeaders reports request header names that the HTTP
+// reverse proxy rewrites, generates, or strips before forwarding to the origin,
+// so the cache can reject Vary headers naming those fields (#672).
+func ProxyTransformedRequestHeaders(loc config.LocationConfig, limit int) ([]string, bool) {
+	names := []string{
+		"Host",
+		"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+		"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto",
+		"Traceparent", "Tracestate", "Baggage",
+	}
+	names = append(names, certAssertionHeaders...)
+	if limit <= 0 || len(names) > limit || len(loc.Headers) > limit-len(names) {
+		return names, false
+	}
+	if len(loc.Headers) > 0 {
+		extra := make([]string, 0, len(loc.Headers))
+		for name := range loc.Headers {
+			extra = append(extra, http.CanonicalHeaderKey(name))
+		}
+		sort.Strings(extra)
+		names = append(names, extra...)
+	}
+	return names, true
+}
+
 // setClientCertHeadersWithVars sanitizes the certificate-assertion channel and,
 // when the listener asks for it, emits Jul's own assertion.
 //

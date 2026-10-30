@@ -640,8 +640,16 @@ func locationEntries() []Entry {
 		loc+"rewrites.*.pattern",
 		loc+"rewrites.*.replacement",
 	)...)
+	out = append(out, hotGroup(SubCache, "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned",
+		loc+"cache",
+		loc+"cache_policy.bypass_any_cookie",
+		loc+"cache_policy.bypass_cookies",
+		loc+"cache_policy.default_ttl",
+		loc+"cache_policy.max_ttl",
+		loc+"cache_policy.stale_if_error",
+		loc+"cache_policy.stale_while_revalidate",
+	)...)
 	out = append(out,
-		hot(loc+"cache", SubCache, "whether a location may serve from the cache is decided by the rebuilt handler tree; the backend itself is startup-owned"),
 		hot(loc+"client_max_body_size", SubServerLimits, reasonHandlerRebuild),
 		hot(loc+"send_timeout", SubListenerTimes, reasonHandlerRebuild),
 		hot(loc+"deny", SubAccessControl, reasonHandlerRebuild),

@@ -84,6 +84,7 @@ type NormalizedSelector struct {
 	globSegments          []string
 	inspectionRouteExact  string
 	inspectionRoutePrefix string
+	inspectionRouteScope  string
 	cutoverExactPath      string
 	cutoverRawPrefix      string
 	cutoverMatchAnyPort   bool
@@ -255,11 +256,14 @@ func ParseSelector(in Selector, cfg *config.Config) (NormalizedSelector, error) 
 		out.ExplicitDefaultPort = defaultPort
 
 	case SelectorKey:
-		if in.All || rawHost != "" || in.URL != "" || in.URI != "" || in.Prefix != "" || in.Pattern != "" || len(in.Tags) > 0 {
+		if in.All || strings.TrimSpace(in.Host) != "" || in.URL != "" || in.URI != "" || in.Prefix != "" || in.Pattern != "" || len(in.Tags) > 0 {
 			return NormalizedSelector{}, selErr("kind", "key selector cannot be combined with host, url, uri, prefix, pattern, tags, or all")
 		}
 		method, host, reqURI, defaultPort, err := validateSelectorRawKey(in.Key)
 		if err != nil {
+			return NormalizedSelector{}, err
+		}
+		if err := checkRouteHostAllowed(host, routeID, routeHosts); err != nil {
 			return NormalizedSelector{}, err
 		}
 		out.Key = keyFor(method, host, reqURI)
@@ -1209,6 +1213,7 @@ func ParseInspectionSelector(in Selector, cfg *config.Config) (NormalizedSelecto
 			default:
 				return NormalizedSelector{}, selErr("route_id", "inspection of regex route paths is unavailable; use configured-host scope")
 			}
+			s.inspectionRouteScope = RouteScope(srv, loc)
 			s.digest = computeSelectorDigest(s)
 			return s, nil
 		}

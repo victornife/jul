@@ -96,6 +96,15 @@ func fillLockKey(base, effKey string) string {
 	return base + "\x00" + hashKey(effKey)
 }
 
+func fillLockKeyForPolicy(base, effKey string, pol CachePolicy) string {
+	fk := fillLockKey(base, effKey)
+	if pol.RouteScope == "" && !pol.HasRouteDefaultTTL && !pol.HasMaxTTL && !pol.HasRouteSWR && !pol.HasRouteSIE && !pol.BypassAnyCookie && pol.BypassCookieCount == 0 {
+		return fk
+	}
+	rcd := routeConfigDigest(pol)
+	return fk + "\x00p:" + string(rcd[:])
+}
+
 func (c *Cache) beginFill(fk string) (call *fillCall, leader bool) {
 	c.fillMu.Lock()
 	defer c.fillMu.Unlock()
@@ -126,12 +135,12 @@ func (c *Cache) inflightFills() int {
 // pol.LockTimeout and then re-evaluate lookup, Vary, freshness, and shared-cache
 // authorization rules against the store.
 func (c *Cache) fillOrWait(w http.ResponseWriter, r *http.Request, next http.Handler, base, effKey string, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span, allowVariantRetry bool) {
-	fk := fillLockKey(base, effKey)
+	fk := fillLockKeyForPolicy(base, effKey, pol)
 	call, leader := c.beginFill(fk)
 	if leader {
 		// Re-check lookup after acquiring leadership in case a previous leader
 		// published its entry immediately before removing its fillCall.
-		if _, served := c.serveCachedIfReusable(w, r, next, base, reqPolicy, c.clock(), span); served {
+		if _, served := c.serveCachedIfReusableWithPolicy(w, r, next, base, reqPolicy, pol, c.clock(), span); served {
 			c.endFill(fk, call)
 			call.finish(true)
 			return
@@ -196,7 +205,7 @@ func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Hand
 		return
 	}
 
-	latestEffKey, served := c.serveCachedIfReusable(w, r, next, base, reqPolicy, c.clock(), span)
+	latestEffKey, served := c.serveCachedIfReusableWithPolicy(w, r, next, base, reqPolicy, pol, c.clock(), span)
 	if served {
 		c.observeFillLock(fillOutcomeReused)
 		return
@@ -204,7 +213,7 @@ func (c *Cache) awaitFill(w http.ResponseWriter, r *http.Request, next http.Hand
 
 	c.recordDecision(r, "fill_lock_not_reusable")
 	c.observeFillLock(fillOutcomeNotReusable)
-	if allowVariantRetry && latestEffKey != base && fillLockKey(base, latestEffKey) != fk {
+	if allowVariantRetry && latestEffKey != base && fillLockKeyForPolicy(base, latestEffKey, pol) != fk {
 		c.fillOrWait(w, r, next, base, latestEffKey, reqPolicy, pol, span, false)
 		return
 	}

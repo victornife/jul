@@ -116,11 +116,86 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 	if loc.Cache && loc.Root != "" {
 		errs = append(errs, fmt.Errorf("%s: cache applies to proxy/fastcgi responses, not static 'root' locations", where))
 	}
+	errs = append(errs, validateLocationCachePolicy(loc, where)...)
 	if loc.RateLimit != nil {
 		errs = append(errs, validateRateLimit(*loc.RateLimit, where+".rate_limit", true)...)
 	}
 	if loc.Auth != nil {
 		errs = append(errs, validateAuth(loc.Auth, where+".auth")...)
+	}
+	return errs
+}
+
+func isValidCookieTokenName(s string) bool {
+	if len(s) == 0 || len(s) > MaxBypassCookieNameBytes {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+			continue
+		}
+		switch ch {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func validateLocationCachePolicy(loc LocationConfig, where string) []error {
+	cp := loc.CachePolicy
+	if cp == nil {
+		return nil
+	}
+	var errs []error
+	pWhere := where + ".cache_policy"
+	hasCacheableAction := (loc.ProxyPass != "" && !loc.GRPC) || loc.FastCGIPass != "" || loc.UWSGIPass != "" || loc.Plugin != ""
+	if !hasCacheableAction || loc.Root != "" || loc.GRPC || loc.GRPCTranscode != nil || loc.Redirect != "" || loc.Return != 0 || loc.Deny {
+		errs = append(errs, fmt.Errorf("%s: cache_policy applies only to cacheable location actions (proxy_pass without grpc, fastcgi_pass, uwsgi_pass, or handler plugin)", pWhere))
+	}
+	const maxCachePolicyDuration = Duration(100 * 365 * 24 * time.Hour)
+	for _, check := range []struct {
+		path  string
+		value *Duration
+	}{
+		{pWhere + ".default_ttl", cp.DefaultTTL},
+		{pWhere + ".max_ttl", cp.MaxTTL},
+		{pWhere + ".stale_while_revalidate", cp.StaleWhileRevalidate},
+		{pWhere + ".stale_if_error", cp.StaleIfError},
+	} {
+		if check.value != nil {
+			if err := validateNonNegativeDuration(check.path, *check.value); err != nil {
+				errs = append(errs, err)
+			} else if *check.value > maxCachePolicyDuration {
+				errs = append(errs, fmt.Errorf("%s: duration %s exceeds maximum of %s (100 years)", check.path, check.value.Std(), maxCachePolicyDuration.Std()))
+			}
+		}
+	}
+	if cp.DefaultTTL != nil && cp.MaxTTL != nil && *cp.DefaultTTL >= 0 && *cp.MaxTTL >= 0 && *cp.DefaultTTL > *cp.MaxTTL {
+		errs = append(errs, fmt.Errorf("%s: default_ttl (%s) must not exceed max_ttl (%s)", pWhere, cp.DefaultTTL.Std(), cp.MaxTTL.Std()))
+	}
+	if cp.BypassAnyCookie && len(cp.BypassCookies) > 0 {
+		errs = append(errs, fmt.Errorf("%s: bypass_any_cookie = true cannot be combined with bypass_cookies", pWhere))
+	}
+	if len(cp.BypassCookies) > MaxBypassCookies {
+		errs = append(errs, fmt.Errorf("%s.bypass_cookies: %d cookie names exceeds maximum of %d", pWhere, len(cp.BypassCookies), MaxBypassCookies))
+	}
+	seen := make(map[string]int, len(cp.BypassCookies))
+	for i, raw := range cp.BypassCookies {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || trimmed != raw || !isValidCookieTokenName(trimmed) {
+			errs = append(errs, fmt.Errorf("%s.bypass_cookies[%d]: %q must be a non-empty HTTP cookie-name token (1..%d bytes, no surrounding whitespace)", pWhere, i, raw, MaxBypassCookieNameBytes))
+			continue
+		}
+		lower := strings.ToLower(trimmed)
+		if prevIdx, dup := seen[lower]; dup {
+			errs = append(errs, fmt.Errorf("%s.bypass_cookies[%d]: %q duplicates %s.bypass_cookies[%d]", pWhere, i, raw, pWhere, prevIdx))
+			continue
+		}
+		seen[lower] = i
 	}
 	return errs
 }
