@@ -92,6 +92,13 @@ take precedence over route overrides.
   shift them. Reordering/inserting ambiguous anonymous same-path predicates can
   make affected slots cold; use IDs to preserve ownership through those edits.
   There is no new persistent identity registry or key provisioning requirement.
+- Compilation may reuse normalized server-boundary bytes within a batch, while
+  preserving the exact versioned framing for scopes and matcher proofs. The
+  HTTP handler retains at most one immutable policy/digest memo. Reuse requires
+  equality of the complete effective `CachePolicy` value, including ownership
+  epoch and cookie rules; concurrent requests receive their own matching
+  snapshot. This memo changes no persistent evidence or request eligibility:
+  cookie parsing, ownership, authorization and Vary guards still run per request.
 - Every compiled production route carries a separate matcher compatibility
   proof: HMAC-SHA-256 through the existing private `versionid.Context`, domain
   `cache-route-matcher-v1`. Its length-framed input binds scope, normalized match

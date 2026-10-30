@@ -155,6 +155,7 @@ func TestPolicyIDIncludesEveryReuseField(t *testing.T) {
 	// tightening. Only these three documented non-freshness fields are ignored.
 	ignored := map[string]bool{"DecisionSamples": true, "MultiRouteOverlap": true, "varyGuard": true}
 	base := policyID(CachePolicy{})
+	var memo policyIdentityMemo
 	typeOf := reflect.TypeFor[CachePolicy]()
 	for i := range typeOf.NumField() {
 		name := typeOf.Field(i).Name
@@ -179,6 +180,12 @@ func TestPolicyIDIncludesEveryReuseField(t *testing.T) {
 		}
 		if same := policyID(p) == base; same != ignored[name] {
 			t.Errorf("policy field %s ignored=%t, want %t", name, same, ignored[name])
+		}
+		if memo.snapshot(p).digest != policyID(p) || memo.snapshot(CachePolicy{}).digest != base {
+			t.Errorf("policy memo failed to track field %s", name)
+		}
+		if memo.snapshot(p).bypassDigest != bypassPolicyDigest(p) {
+			t.Errorf("cookie policy memo failed to track field %s", name)
 		}
 	}
 	if policyID(CachePolicy{varyGuard: newProxyVaryTransformPolicy([]string{"X-Test"}, true)}) != base {

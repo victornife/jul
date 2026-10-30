@@ -1207,6 +1207,7 @@ func (c *Cache) HandlerForRoute(next http.Handler, routeCfg RouteCacheConfig) ht
 }
 
 func (c *Cache) handlerWithRoute(next http.Handler, routeCfg *RouteCacheConfig) http.Handler {
+	var identity policyIdentityMemo
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			c.serveUnsafe(w, r, next)
@@ -1262,14 +1263,20 @@ func (c *Cache) handlerWithRoute(next http.Handler, routeCfg *RouteCacheConfig) 
 			return
 		}
 
-		c.serveOrFillFull(w, r, next, reqPolicy, pol, span)
+		c.serveOrFillFullWithIdentity(w, r, next, reqPolicy, identity.snapshot(pol), span)
 	})
 }
 
 func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next http.Handler, reqPolicy requestPolicy, pol CachePolicy, span tracing.Span) {
+	identity := newPolicyIdentity(pol)
+	c.serveOrFillFullWithIdentity(w, r, next, reqPolicy, &identity, span)
+}
+
+func (c *Cache) serveOrFillFullWithIdentity(w http.ResponseWriter, r *http.Request, next http.Handler, reqPolicy requestPolicy, identity *policyIdentity, span tracing.Span) {
+	pol := identity.policy
 	k := key(r)
 	now := c.clock()
-	effKey, served := c.serveCachedIfReusableWithPolicy(w, r, next, k, reqPolicy, pol, now, span)
+	effKey, served := c.serveCachedWithIdentity(w, r, next, k, reqPolicy, identity, now, span)
 	if served {
 		return
 	}
@@ -1283,6 +1290,12 @@ func (c *Cache) serveOrFillFull(w http.ResponseWriter, r *http.Request, next htt
 }
 
 func (c *Cache) serveCachedIfReusableWithPolicy(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, pol CachePolicy, now time.Time, span tracing.Span) (effKey string, served bool) {
+	identity := newPolicyIdentity(pol)
+	return c.serveCachedWithIdentity(w, r, next, base, reqPolicy, &identity, now, span)
+}
+
+func (c *Cache) serveCachedWithIdentity(w http.ResponseWriter, r *http.Request, next http.Handler, base string, reqPolicy requestPolicy, identity *policyIdentity, now time.Time, span tracing.Span) (effKey string, served bool) {
+	pol := identity.policy
 	for attempt := 0; attempt < 2; attempt++ {
 		e, k, rejectReason, ok := c.lookupForPolicy(base, r, pol)
 		effKey = k
@@ -1295,7 +1308,7 @@ func (c *Cache) serveCachedIfReusableWithPolicy(w http.ResponseWriter, r *http.R
 		if !e.matchesVary(r) {
 			return effKey, false
 		}
-		decision, reason := c.reuseDecisionWithPolicy(e, r, reqPolicy, pol, now)
+		decision, reason := c.reuseDecisionWithIdentity(e, r, reqPolicy, identity, now)
 		switch decision {
 		case reuseHit:
 			if !c.serve(w, r, e, stateHit, now) {
@@ -1406,15 +1419,21 @@ func reuseDecision(e *Entry, r *http.Request, p requestPolicy, now time.Time) re
 }
 
 func (c *Cache) reuseDecisionWithPolicy(e *Entry, r *http.Request, p requestPolicy, pol CachePolicy, now time.Time) (reuseKind, string) {
+	identity := newPolicyIdentity(pol)
+	return c.reuseDecisionWithIdentity(e, r, p, &identity, now)
+}
+
+func (c *Cache) reuseDecisionWithIdentity(e *Entry, r *http.Request, p requestPolicy, identity *policyIdentity, now time.Time) (reuseKind, string) {
+	pol := identity.policy
 	if hasHeaderField(r.Header, "Authorization") && !e.SharedAuthReuse {
 		return reuseNone, "auth_reuse_restricted"
 	}
 	if pol.BypassAnyCookie || pol.BypassCookieCount > 0 {
-		if (e.Evidence == nil || e.Evidence.Flags&evidenceNoRequestCookies == 0) && e.BypassDigest != bypassPolicyDigest(pol) {
+		if (e.Evidence == nil || e.Evidence.Flags&evidenceNoRequestCookies == 0) && e.BypassDigest != identity.bypassDigest {
 			return reuseNone, "route_policy_mismatch"
 		}
 	}
-	if e.Evidence != nil && e.Evidence.PolicyID == policyID(pol) {
+	if e.Evidence != nil && e.Evidence.PolicyID == identity.digest {
 		return reuseDecision(e, r, p, now), ""
 	}
 	if e.Evidence == nil && !pol.HasRouteDefaultTTL && !pol.HasMaxTTL && !pol.HasRouteSWR && !pol.HasRouteSIE {

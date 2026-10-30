@@ -1,0 +1,24 @@
+goos: linux
+goarch: amd64
+pkg: jul/internal/cache
+cpu: AMD EPYC 9V74 80-Core Processor                
+BenchmarkCacheHit-2       	  167514	      1500 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  158065	      1479 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  161017	      1447 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  170688	      1419 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  176796	      1385 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheHit-2       	  160584	      1354 ns/op	    1256 B/op	      16 allocs/op
+BenchmarkCacheMiss-2      	   14506	     17718 ns/op	   12712 B/op	      82 allocs/op
+BenchmarkCacheMiss-2      	   14014	     17542 ns/op	   12594 B/op	      82 allocs/op
+BenchmarkCacheMiss-2      	   12693	     19845 ns/op	   12562 B/op	      82 allocs/op
+BenchmarkCacheMiss-2      	   13710	     18550 ns/op	   12578 B/op	      82 allocs/op
+BenchmarkCacheMiss-2      	   13600	     17586 ns/op	   12547 B/op	      82 allocs/op
+BenchmarkCacheMiss-2      	   12266	     18595 ns/op	   12574 B/op	      82 allocs/op
+BenchmarkCacheVaryHit-2   	   92788	      2195 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  115234	      1941 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  120218	      2104 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  115915	      2119 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  112082	      2245 ns/op	    1504 B/op	      25 allocs/op
+BenchmarkCacheVaryHit-2   	  101967	      2185 ns/op	    1504 B/op	      25 allocs/op
+PASS
+ok  	jul/internal/cache	5.721s

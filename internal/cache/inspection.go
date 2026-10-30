@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/http/httpguts"
@@ -146,6 +147,33 @@ func evidenceTime(n int64) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(0, n).UTC()
+}
+
+type policyIdentity struct {
+	policy       CachePolicy
+	digest       [32]byte
+	bypassDigest [16]byte
+}
+
+// One immutable memo per handler bounds retention independently of reloads and
+// request count. Compare the entire policy value so no field/epoch can be
+// omitted from refresh, including fields added in the future. Concurrent old
+// and new requests may replace the memo; each receives its own correct digest.
+type policyIdentityMemo struct {
+	latest atomic.Pointer[policyIdentity]
+}
+
+func (m *policyIdentityMemo) snapshot(p CachePolicy) *policyIdentity {
+	if prior := m.latest.Load(); prior != nil && prior.policy == p {
+		return prior
+	}
+	identity := newPolicyIdentity(p)
+	m.latest.Store(&identity)
+	return &identity
+}
+
+func newPolicyIdentity(p CachePolicy) policyIdentity {
+	return policyIdentity{policy: p, digest: policyID(p), bypassDigest: bypassPolicyDigest(p)}
 }
 
 func policyID(p CachePolicy) [32]byte {

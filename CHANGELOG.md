@@ -376,6 +376,11 @@ rollback and coordinated advisory-disclosure requirements.
 
 ### Changed
 
+- Reduce route-cache hit overhead with bounded immutable policy-digest reuse
+  and allocation-free Vary guard scans. Normalize server identity once per
+  route batch and remove formatted framing during matcher compilation, keeping
+  persistent scopes/proofs and all eligibility checks unchanged (#673).
+
 - Independently promote the existing bounded routing/CORS, resilience and
   auxiliary-egress contracts under #527 to GA with post-GA soak explicitly
   pending. No new long-running soak or overall-coverage target. Apps now exposes

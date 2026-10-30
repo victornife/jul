@@ -86,7 +86,7 @@ func isSensitiveVaryField(field string) bool {
 
 func sensitiveVaryFields(fields []string) bool {
 	for _, field := range fields {
-		for _, tok := range parseList(field) {
+		for tok := range strings.SplitSeq(field, ",") {
 			if isSensitiveVaryField(tok) {
 				return true
 			}
@@ -220,7 +220,11 @@ func varyRejectionFields(r *http.Request, policy *varyTransformPolicy, fields []
 		return varyRewriteReason(policy)
 	}
 	for _, field := range fields {
-		for _, tok := range parseList(field) {
+		for tok := range strings.SplitSeq(field, ",") {
+			tok = strings.TrimSpace(tok)
+			if tok == "" {
+				continue
+			}
 			if tok == "*" {
 				continue
 			}

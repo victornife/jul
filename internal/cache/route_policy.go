@@ -6,7 +6,6 @@ package cache
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"maps"
 	"net/http"
 	"net/textproto"
@@ -28,47 +27,74 @@ const routeEpochFloorKey = "\x00floor"
 // anonymousSlot, when supplied by RouteScopes, avoids scanning the server.
 // Backend targets remain outside ownership and compatibility (#624).
 func RouteScope(srv config.ServerConfig, loc config.LocationConfig, anonymousSlot ...int) string {
+	slot := 0
+	if (loc.RouteID == nil || *loc.RouteID == "") && loc.Match.HasPredicates() {
+		if len(anonymousSlot) > 0 {
+			slot = anonymousSlot[0]
+		} else {
+			matchType := loc.Match.Type
+			if matchType == "" {
+				matchType = "prefix"
+			}
+			predicates := loc.Match.CanonicalPredicates()
+			for _, candidate := range srv.Locations {
+				if !anonymousPredicateCoordinate(candidate, matchType, loc.Match.Path) {
+					continue
+				}
+				if candidate.Match.CanonicalPredicates() == predicates {
+					break
+				}
+				slot++
+			}
+		}
+	}
+	return routeScopeFromBoundary(routeScopeBoundary(srv), loc, slot)
+}
+
+// appendRouteField preserves the decimal byte-length framing used by v3
+// ownership and v1 matcher proofs, without allocating formatting arguments.
+func appendRouteField(dst []byte, field string) []byte {
+	dst = strconv.AppendInt(dst, int64(len(field)), 10)
+	dst = append(dst, ':')
+	dst = append(dst, field...)
+	return append(dst, '\n')
+}
+
+func routeScopeBoundary(srv config.ServerConfig) []byte {
 	names := make([]string, len(srv.ServerNames))
 	for i, n := range srv.ServerNames {
 		names[i] = config.NormalizeHostPattern(n)
 	}
 	sort.Strings(names)
+	buf := make([]byte, 0, 256)
+	for _, field := range []string{"route-scope-v3", config.CanonicalListenAddr(srv.Listen), strconv.Itoa(len(names))} {
+		buf = appendRouteField(buf, field)
+	}
+	for _, name := range names {
+		buf = appendRouteField(buf, name)
+	}
+	return buf
+}
+
+func routeScopeFromBoundary(buf []byte, loc config.LocationConfig, slot int) string {
 	matchType := loc.Match.Type
 	if matchType == "" {
 		matchType = "prefix"
 	}
-	h := sha256.New()
-	write := func(parts ...string) {
-		for _, p := range parts {
-			fmt.Fprintf(h, "%d:%s\n", len(p), p)
-		}
-	}
-	write("route-scope-v3", config.CanonicalListenAddr(srv.Listen), strconv.Itoa(len(names)))
-	write(names...)
 	if loc.RouteID != nil && *loc.RouteID != "" {
-		write("route_id", *loc.RouteID)
+		buf = appendRouteField(buf, "route_id")
+		buf = appendRouteField(buf, *loc.RouteID)
 	} else {
-		write("anonymous", matchType, loc.Match.Path)
+		for _, field := range []string{"anonymous", matchType, loc.Match.Path} {
+			buf = appendRouteField(buf, field)
+		}
 		if loc.Match.HasPredicates() {
-			slot := 0
-			if len(anonymousSlot) > 0 {
-				slot = anonymousSlot[0]
-			} else {
-				predicates := loc.Match.CanonicalPredicates()
-				for _, candidate := range srv.Locations {
-					if !anonymousPredicateCoordinate(candidate, matchType, loc.Match.Path) {
-						continue
-					}
-					if candidate.Match.CanonicalPredicates() == predicates {
-						break
-					}
-					slot++
-				}
-			}
-			write("predicate-slot", strconv.Itoa(slot))
+			buf = appendRouteField(buf, "predicate-slot")
+			buf = appendRouteField(buf, strconv.Itoa(slot))
 		}
 	}
-	return hex.EncodeToString(h.Sum(nil)[:16])
+	sum := sha256.Sum256(buf)
+	return hex.EncodeToString(sum[:16])
 }
 
 func anonymousPredicateCoordinate(loc config.LocationConfig, matchType, path string) bool {
@@ -80,21 +106,25 @@ func anonymousPredicateCoordinate(loc config.LocationConfig, matchType, path str
 }
 
 // RouteScopes compiles all location identities in linear time. Scope derivation
-// and inspection share RouteScope; no persistent route-identity registry exists.
+// and inspection share the same encoding; server normalization runs once per
+// batch. No persistent route-identity registry exists.
 func RouteScopes(srv config.ServerConfig) []string {
 	type coordinate struct{ typ, path string }
 	counts := make(map[coordinate]int)
 	out := make([]string, len(srv.Locations))
+	boundary := routeScopeBoundary(srv)
 	for i, loc := range srv.Locations {
 		typ := loc.Match.Type
 		if typ == "" {
 			typ = "prefix"
 		}
-		coord := coordinate{typ, loc.Match.Path}
-		out[i] = RouteScope(srv, loc, counts[coord])
+		slot := 0
 		if anonymousPredicateCoordinate(loc, typ, loc.Match.Path) {
-			counts[coord]++
+			coord := coordinate{typ, loc.Match.Path}
+			slot = counts[coord]
+			counts[coord] = slot + 1
 		}
+		out[i] = routeScopeFromBoundary(boundary, loc, slot)
 	}
 	return out
 }
@@ -135,11 +165,12 @@ func (rc RouteCacheConfig) WithMatcher(loc config.LocationConfig, versions *vers
 	if typ == "" {
 		typ = "prefix"
 	}
-	var data strings.Builder
+	var storage [256]byte
+	data := storage[:0]
 	for _, field := range []string{rc.Scope, typ, loc.Match.Path, loc.Match.CanonicalPredicates(), strconv.FormatBool(config.LocationPreflightWidening(loc))} {
-		fmt.Fprintf(&data, "%d:%s\n", len(field), field)
+		data = appendRouteField(data, field)
 	}
-	rc.matcherProof = versions.Digest("cache-route-matcher-v1", []byte(data.String()))
+	rc.matcherProof = versions.Digest("cache-route-matcher-v1", data)
 	return rc
 }
 
