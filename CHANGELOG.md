@@ -11,6 +11,22 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Preserve incomplete scoped-purge and sensitive-`Vary` retirement protection
+  across process restarts (#666, #667, #668,
+  [ADR 0030](docs/adr/0030-cache-purge-recovery-latency-and-cutover.md)):
+  persist bounded `.jul-cache-purge-intents` (using normalized post-`route_id`
+  selectors, original tag resource snapshots, and pre-commit disk hashes +
+  keyed `versionid` HMAC target verifiers so raw query strings are never
+  written to disk) and pre-unlink `.jul-cache-tombstones` batches on `304`/Vary
+  retirement, reconciling unfinished purges at startup before serving cache
+  traffic while keeping in-memory selector fences active if any disk removal
+  fails. Reduce 200,000-entry host-purge heap allocations by >90% and isolate
+  unrelated-host warm memory hits from single-host incomplete-fence lock
+  acquisitions (#667). Surface durability failures on legacy `POST /cache/purge`
+  with `503 Service Unavailable` and audit `"failure"` without reflexively
+  disabling a healthy empty disk tier on marker-only `.jul-cache-gen` errors
+  (#668).
+
 - Keep predicate values and their hashes out of persistent route-cache
   partitions. Separate private, route-specific matcher proofs preserve unchanged
   route reuse across reload/restart and advance ownership only on incompatible
