@@ -17,7 +17,6 @@ import {
   fetchRoutes,
   fetchStats,
   previewRawConfig,
-  purgeCache,
   type ConfigPatch,
   type RouteProjection,
   type ServerLimitsProjection,
@@ -165,10 +164,8 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
   const { has } = usePermission();
   const canWrite = has("config:write");
   const canRaw = has("config:raw");
-  const canPurge = has("cache:purge");
   const batch = useRunPatchBatch();
   const [localError, setLocalError] = useState<string | null>(null);
-  const [purgeMessage, setPurgeMessage] = useState<string | null>(null);
   const [cacheReviewing, setCacheReviewing] = useState(false);
 
   const routes = useQuery({ queryKey: ["routes"], queryFn: fetchRoutes });
@@ -726,27 +723,7 @@ export function TrafficControlEditor({ kind, current, onClose }: TrafficControlE
                 authorityMode={overview.data?.authority?.config_authority}
               />
             </Suspense>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                disabled={!canPurge}
-                className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text disabled:opacity-40"
-                onClick={() => {
-                  setPurgeMessage(null);
-                  void purgeCache()
-                    .then(() => {
-                      setPurgeMessage("Cache purged.");
-                    })
-                    .catch(() => {
-                      setPurgeMessage("Could not purge the cache.");
-                    });
-                }}
-              >
-                Purge cache
-              </button>
-              <ForbiddenAction permission="cache:purge" />
-              {purgeMessage && <span className="text-xs text-jul-muted">{purgeMessage}</span>}
-            </div>
+
           </div>
         )}
 

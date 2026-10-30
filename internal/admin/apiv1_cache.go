@@ -66,6 +66,7 @@ type cachePurgeRecord struct {
 	IdempotencyOperation   string                      `json:"idempotency_operation,omitempty"`
 	CreatedAt              time.Time                   `json:"created_at"`
 	Response               adminapi.CachePurgeResponse `json:"response"`
+	RecoveryIntent         *cache.PurgeRecoveryIntent  `json:"recovery_intent,omitempty"`
 	MatchedResourceIDs     []string                    `json:"matched_resource_ids"`
 	execSelector           *cache.NormalizedSelector   `json:"-"`
 }
@@ -874,16 +875,19 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 			ReuseResourceIDs:    reuseResourceIDs,
 			CrossBootRetry:      crossBootRetry,
 			RequireBroadConfirm: requireBroadConfirm,
-			CommitFence: func(fenceGen uint64, resourceIDs []string) error {
+			CommitFence: func(fenceGen uint64, resourceIDs []string, intent cache.PurgeRecoveryIntent) error {
 				s.purgeLedger.mu.Lock()
 				defer s.purgeLedger.mu.Unlock()
 				prevFence := rec.Response.FenceSequence
 				prevResources := rec.MatchedResourceIDs
+				prevIntent := rec.RecoveryIntent
 				rec.Response.FenceSequence = fenceGen
 				rec.MatchedResourceIDs = resourceIDs
+				rec.RecoveryIntent = &intent
 				if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
 					rec.Response.FenceSequence = prevFence
 					rec.MatchedResourceIDs = prevResources
+					rec.RecoveryIntent = prevIntent
 					return err
 				}
 				fenceCommitted = true
@@ -946,6 +950,10 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 		}
 		s.purgeLedger.mu.Unlock()
 		s.recordAudit(r, "cache.purge", "cache", "failure", "rejected: "+invErr.Error())
+		if errors.Is(invErr, cache.ErrPurgeIntentCapacity) {
+			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeStorageUnavailable, "%s", cache.ErrPurgeIntentCapacity.Error()))
+			return
+		}
 		if errors.Is(invErr, cache.ErrFenceCommit) {
 			writeAPIError(w, r, adminapi.New(adminapi.CodeStorageUnavailable).WithDetails(adminapi.Details{}))
 			return
@@ -995,11 +1003,14 @@ func (s *Server) handleV1CachePurge(w http.ResponseWriter, r *http.Request) {
 	s.purgeLedger.mu.Lock()
 	rec.Response = finalResp
 	prevResources := rec.MatchedResourceIDs
+	prevIntent := rec.RecoveryIntent
 	if finalResp.State == "succeeded" {
 		rec.MatchedResourceIDs = nil
+		rec.RecoveryIntent = nil
 	}
 	if err := s.persistPurgeLedgerLocked(diskDir); err != nil {
 		rec.MatchedResourceIDs = prevResources
+		rec.RecoveryIntent = prevIntent
 		finalResp.State = "partial"
 		finalResp.Outcome = "partial_failure"
 		finalResp.InvalidationEffective = "uncertain"

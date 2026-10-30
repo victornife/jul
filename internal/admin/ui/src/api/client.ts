@@ -1551,25 +1551,6 @@ export function fetchStats(): Promise<StatsSnapshot> {
   return api<unknown>("/stats").then((d) => StatsSnapshotSchema.parse(d));
 }
 
-/**
- * Purges the response cache (Milestone 3.2). With no key the whole cache is
- * cleared; a key removes a single entry. The admin endpoint lives at the server
- * root (/cache/purge), not under /api, so this bypasses the /api-prefixed
- * client helper.
- */
-export async function purgeCache(key?: string): Promise<void> {
-  const headers = new Headers();
-  headers.set("X-Jul-Console", "1");
-  headers.set("Accept", "application/json");
-  const token = authToken.get();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const url = key ? `/cache/purge?key=${encodeURIComponent(key)}` : "/cache/purge";
-  const resp = await fetch(url, { method: "POST", headers });
-  if (!resp.ok) {
-    throw new ApiError("/cache/purge", resp.status, `${String(resp.status)} ${resp.statusText}`);
-  }
-}
-
 // ── Scoped cache invalidation (/api/v1/cache/purge*, #621) ───────────────────
 
 export type CacheSelectorKind = "exact_url" | "prefix" | "glob" | "tag" | "host" | "key" | "all";

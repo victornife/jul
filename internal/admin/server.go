@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"jul/internal/buildcaps"
+	"jul/internal/cache"
 	"jul/internal/config"
 	"jul/internal/logthrottle"
 	"jul/internal/observability"
@@ -1032,6 +1033,9 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 	}
 	if rp, ok := s.deps.Cache.(ResultPurger); ok {
 		res, err := rp.PurgeResult()
+		if errors.Is(err, cache.ErrPurgeIntentCapacity) {
+			res.RecoveryGuidance = cache.ErrPurgeIntentCapacity.Error()
+		}
 		if err != nil || res.InvalidationEffective != "effective" {
 			status := res.InvalidationEffective
 			if status == "" {

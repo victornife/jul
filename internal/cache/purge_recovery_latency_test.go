@@ -450,7 +450,7 @@ func TestIncompletePurgeCanceledAndRepeatedFaultyRecovery(t *testing.T) {
 	cFaultSeed2.disk.testTruncateFile = func(string, int64) error { return errors.New("truncate EIO") }
 	cFaultSeed2.disk.testPersistTombstoneErr = errors.New("tombstone EIO")
 	cFaultSeed2.disk.mu.Unlock()
-	cFaultSeed2.reconcileRecoveredPurgeIntents([]diskPurgeIntent{{
+	cFaultSeed2.reconcileRecoveredPurgeIntents([]PurgeRecoveryIntent{{
 		FenceGen: 9999,
 		Kind:     SelectorPrefix,
 		Host:     "portal.example.com",
@@ -717,14 +717,14 @@ func TestLegacyPurgeDurabilityOutcomesAndMarkerIsolation(t *testing.T) {
 		t.Fatalf("unexpected nilCache.DeleteResult: %+v %v", r, err)
 	}
 	var nilDisk *diskStore
-	if nilDisk.loadPurgeIntents() != nil || nilDisk.recordPurgeIntent(diskPurgeIntent{}) != nil || nilDisk.completePurgeIntent(1, false) != nil || nilDisk.replacePurgeIntents(nil) != nil || nilDisk.hasSurvivingCacheState() {
+	if nilDisk.loadPurgeIntents() != nil || nilDisk.recordPurgeIntent(PurgeRecoveryIntent{}) != nil || nilDisk.completePurgeIntent(1, false) != nil || nilDisk.replacePurgeIntents(nil) != nil || nilDisk.hasSurvivingCacheState() {
 		t.Fatal("unexpected non-nil result on nil diskStore")
 	}
-	if validateDiskPurgeIntent(diskPurgeIntent{FenceGen: 1, Kind: "bogus"}) ||
-		validateDiskPurgeIntent(diskPurgeIntent{FenceGen: 1, Kind: SelectorAll, MatchedResourceIDs: []string{"bad"}}) ||
-		validateDiskPurgeIntent(diskPurgeIntent{FenceGen: 1, Kind: SelectorAll, TargetHashes: []string{"bad"}}) ||
-		validateDiskPurgeIntent(diskPurgeIntent{FenceGen: 1, Kind: SelectorAll, TargetResourceMAC: "bad"}) ||
-		validateDiskPurgeIntent(diskPurgeIntent{FenceGen: 1, Kind: SelectorAll, TargetKeyMAC: "bad"}) ||
+	if validateDiskPurgeIntent(PurgeRecoveryIntent{FenceGen: 1, Kind: "bogus"}) ||
+		validateDiskPurgeIntent(PurgeRecoveryIntent{FenceGen: 1, Kind: SelectorAll, MatchedResourceIDs: []string{"bad"}}) ||
+		validateDiskPurgeIntent(PurgeRecoveryIntent{FenceGen: 1, Kind: SelectorAll, TargetHashes: []string{"bad"}}) ||
+		validateDiskPurgeIntent(PurgeRecoveryIntent{FenceGen: 1, Kind: SelectorAll, TargetResourceMAC: "bad"}) ||
+		validateDiskPurgeIntent(PurgeRecoveryIntent{FenceGen: 1, Kind: SelectorAll, TargetKeyMAC: "bad"}) ||
 		isValidLowerHexHashSlice(make([]string, MaxPurgeScanKeys+1), MaxPurgeScanKeys) {
 		t.Fatal("expected validateDiskPurgeIntent to reject invalid fields")
 	}
@@ -736,38 +736,47 @@ func TestLegacyPurgeDurabilityOutcomesAndMarkerIsolation(t *testing.T) {
 	c.disk.testTruncateFile = nil
 	c.disk.testPersistPurgeIntentErr = errors.New("intent write EIO")
 	c.disk.mu.Unlock()
-	if err := c.disk.recordPurgeIntent(diskPurgeIntent{FenceGen: 10, Kind: SelectorAll}); err == nil {
+	if err := c.disk.recordPurgeIntent(PurgeRecoveryIntent{FenceGen: 10, Kind: SelectorAll}); err == nil {
 		t.Fatal("expected testPersistPurgeIntentErr")
 	}
 	c.disk.mu.Lock()
 	c.disk.testPersistPurgeIntentErr = nil
 	c.disk.mu.Unlock()
-	for i := 1; i <= MaxActiveFences+2; i++ {
-		_ = c.disk.recordPurgeIntent(diskPurgeIntent{
-			FenceGen: uint64(i),
-			Kind:     SelectorPrefix,
-			Host:     "portal.example.com",
-			Prefix:   fmt.Sprintf("/cap/%d", i),
-		})
+	if err := c.disk.replacePurgeIntents(nil); err != nil {
+		t.Fatal(err)
 	}
-	// Completing one of the coalesced generations (e.g. FenceGen=2) must NOT remove the coalesced intent!
-	_ = c.disk.completePurgeIntent(2, false)
-	if len(c.disk.loadPurgeIntents()) == 0 || !c.disk.loadPurgeIntents()[0].Coalesced {
-		t.Fatal("expected coalesced intent to survive individual completePurgeIntent(2, false)")
+	for i := 1; i <= MaxActiveFences; i++ {
+		if err := c.disk.recordPurgeIntent(PurgeRecoveryIntent{FenceGen: uint64(i), Kind: SelectorPrefix, Host: "portal.example.com", Prefix: fmt.Sprintf("/cap/%d", i)}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	_ = c.disk.recordPurgeIntent(diskPurgeIntent{FenceGen: uint64(MaxActiveFences), Kind: SelectorAll})
+	if err := c.disk.recordPurgeIntent(PurgeRecoveryIntent{FenceGen: MaxActiveFences + 1, Kind: SelectorHost, Host: "portal.example.com"}); !errors.Is(err, ErrPurgeIntentCapacity) {
+		t.Fatalf("expected operation capacity rejection, got %v", err)
+	}
+	if err := c.disk.completePurgeIntent(2, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.disk.recordPurgeIntent(PurgeRecoveryIntent{FenceGen: MaxActiveFences + 1, Kind: SelectorAll}); err != nil {
+		t.Fatal(err)
+	}
 	_ = c.disk.completePurgeIntent(999999, false)
+	// Older coalesced journals remain readable, but new admissions never broaden.
+	if err := c.disk.replacePurgeIntents([]PurgeRecoveryIntent{{FenceGen: 2, Kind: SelectorHost, Host: "portal.example.com", Coalesced: true}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = c.disk.completePurgeIntent(2, false)
+	if got := c.disk.loadPurgeIntents(); len(got) != 1 || !got[0].Coalesced {
+		t.Fatal("legacy coalesced intent lost")
+	}
 	bigIDs := make([]string, 4097)
 	for i := range bigIDs {
 		bigIDs[i] = hashKey(fmt.Sprintf("res-%d", i))
 	}
-	bigIntent := c.buildDiskPurgeIntent(500, NormalizedSelector{Kind: SelectorTag, Host: "portal.example.com", Tags: []string{"t"}}, bigIDs, nil)
-	if bigIntent.Kind != SelectorHost || len(bigIntent.MatchedResourceIDs) != 0 {
-		t.Fatalf("expected >4096 tag resourceIDs to coalesce to SelectorHost, got %+v", bigIntent)
-	}
-	bigIntentNoHost := c.buildDiskPurgeIntent(501, NormalizedSelector{Kind: SelectorTag, Tags: []string{"t"}}, bigIDs, nil)
-	if bigIntentNoHost.Kind != SelectorAll {
-		t.Fatalf("expected >4096 tag resourceIDs with empty host to coalesce to SelectorAll, got %+v", bigIntentNoHost)
+	for _, host := range []string{"portal.example.com", ""} {
+		bigIntent := c.buildDiskPurgeIntent(500, NormalizedSelector{Kind: SelectorTag, Host: host, Tags: []string{"t"}}, bigIDs, nil)
+		if bigIntent.Kind != SelectorTag || len(bigIntent.MatchedResourceIDs) != len(bigIDs) {
+			t.Fatal("large tag snapshot broadened")
+		}
 	}
 
 	// Exercise .jul-cache-purge-ledger synthesis fallback in loadPurgeIntents.
@@ -893,7 +902,7 @@ func TestMeasure667LargePurgeComparison(t *testing.T) {
 		{name: "mem_10k_all", entries: 10000, withTags: true, sel: Selector{Kind: SelectorAll, All: true}},
 		{name: "mem_200k_host", entries: 200000, sel: Selector{Kind: SelectorHost, Host: "portal.example.com"}},
 		{name: "mem_200k_all", entries: 200000, sel: Selector{Kind: SelectorAll, All: true}},
-		{name: "disk_1k_host_ledger", entries: 1000, withDisk: true, withTags: true, sel: Selector{Kind: SelectorHost, Host: "portal.example.com"}},
+		{name: "disk_1k_host_cache_only", entries: 1000, withDisk: true, withTags: true, sel: Selector{Kind: SelectorHost, Host: "portal.example.com"}},
 	}
 
 	for _, sc := range scenarios {
@@ -952,7 +961,6 @@ func TestMeasure667LargePurgeComparison(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			var commitDur time.Duration
 			var fenceInstalledAt time.Time
 			c.onAfterFenceInstall = func(_ NormalizedSelector, _ uint64) {
 				fenceInstalledAt = time.Now()
@@ -1003,17 +1011,7 @@ func TestMeasure667LargePurgeComparison(t *testing.T) {
 			var m0, m1 runtime.MemStats
 			runtime.ReadMemStats(&m0)
 			start := time.Now()
-			res, err := c.InvalidateScope(context.Background(), normSel, InvalidateOptions{
-				CommitFence: func(fenceGen uint64, resIDs []string) error {
-					t0 := time.Now()
-					if sc.withDisk {
-						payload := fmt.Sprintf(`[{"op":"bench","fence":%d,"ids":%d}]`, fenceGen, len(resIDs))
-						_ = os.WriteFile(filepath.Join(diskDir, ".jul-cache-purge-ledger.bench"), []byte(payload), 0o600)
-					}
-					commitDur = time.Since(t0)
-					return nil
-				},
-			})
+			res, err := c.InvalidateScope(context.Background(), normSel, InvalidateOptions{})
 			totalDur := time.Since(start)
 			runtime.ReadMemStats(&m1)
 			if sc.entries == 200000 {
@@ -1038,10 +1036,9 @@ func TestMeasure667LargePurgeComparison(t *testing.T) {
 				return cp[idx]
 			}
 
-			t.Logf("OPTIMIZED_667 scenario=%s sample=%d entries=%d crit_ms=%.2f commit_ms=%.2f del_ms=%.2f total_ms=%.2f alloc_bytes=%d alloc_objs=%d inv_res=%d inv_reps=%d hit_p50_us=%.1f hit_p95_us=%.1f hit_p99_us=%.1f miss_p50_ms=%.2f miss_p95_ms=%.2f miss_p99_ms=%.2f",
+			t.Logf("OPTIMIZED_667 scenario=%s sample=%d entries=%d crit_ms=%.2f del_ms=%.2f total_ms=%.2f alloc_bytes=%d alloc_objs=%d inv_res=%d inv_reps=%d hit_p50_us=%.1f hit_p95_us=%.1f hit_p99_us=%.1f miss_p50_ms=%.2f miss_p95_ms=%.2f miss_p99_ms=%.2f",
 				sc.name, sample, sc.entries,
 				float64(critDur.Microseconds())/1000.0,
-				float64(commitDur.Microseconds())/1000.0,
 				float64(delDur.Microseconds())/1000.0,
 				float64(totalDur.Microseconds())/1000.0,
 				allocBytes, allocObjs,

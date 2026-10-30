@@ -120,7 +120,6 @@ describe("reviewed Console write inventory", () => {
     expect(writes).toEqual({
       logoutOIDC: ["POST"],
       testRoute: ["POST"],
-      purgeCache: ["POST"],
       previewCachePurge: ["POST"],
       inspectCache: ["POST"], // read-only JSON operation; preserves normal POST/CSRF policy
       executeCachePurge: ["POST"],

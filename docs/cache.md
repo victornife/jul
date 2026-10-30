@@ -1255,6 +1255,37 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    already-admitted readers may finish once their retirement is durable.
    Old fenced fills cannot mutate Vary membership or delete newer variants.
 
+### Restart recovery and journal capacity
+
+With a disk tier, `.jul-cache-purge-intents` stores executable normalized purge
+identity before the cutoff is committed to the administrative ledger. That
+ledger atomically stores the same recovery identity with its cutoff. Startup
+reconciles unfinished purges before serving cache reads, preserving newer
+fills. Exact-URL purges select GET/HEAD resource groups; key purges retain their
+method and representation semantics. Retries preserve original target hashes
+and tag snapshots even after live catalog generations advance.
+
+The journal supports at most **256 retained intents subject to a shared 1 MiB
+encoded-byte limit**. It may fill much earlier for large tag snapshots. New
+operations are rejected with HTTP 503 and capacity guidance before committing
+a cutoff; capacity pressure neither flushes unrelated hosts nor broadens the
+requested scope. Retry unfinished operations to complete cleanup, or reconcile
+on restart before submitting new operations. Completed operations release
+capacity. Actual filesystem/corrupt-metadata failures retain the fail-closed
+policy. Older ledger records whose identity cannot be reconstructed explicitly
+sweep pre-cutoff disk entries (including unrelated scopes), log that migration
+fallback, and preserve post-cutoff data.
+
+All Console purge actions use the versioned preview → confirm → execute →
+observe/recover panel. The duplicate legacy shortcut is removed; structured
+incomplete/uncertain results show recovery guidance. The unversioned HTTP
+endpoint and internal `Delete()` wrapper remain available. Their removal is a
+separate compatibility decision; unsafe-method invalidation still uses
+`Delete()` in production.
+
+The [PR #674 validation record](reviews/2026-10-31-pr674-confirmed-findings-and-validation.md)
+defines measured local latency budgets and their workload/hardware limits.
+
 ### Console retry confirmation
 
 The Console retries a terminal incomplete operation using its canonical

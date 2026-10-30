@@ -277,7 +277,8 @@ type diskStore struct {
 	pinned                         map[string]*diskBlob
 	tombstones                     map[string]int64
 	hashKeys                       map[string]string
-	purgeIntents                   []diskPurgeIntent
+	purgeIntentMu                  sync.Mutex // independent of disk items; may be held under cache.genMu
+	purgeIntents                   []PurgeRecoveryIntent
 	highWaterGen                   uint64
 	tombstoneDirty                 bool
 	corruptTombstoneCleanupPending bool
@@ -1233,7 +1234,10 @@ func (d *diskStore) persistRouteEpochs(epochs map[string]uint64, matchers map[st
 	d.routeEpochFailed.Store(false)
 }
 
-type diskPurgeIntent struct {
+// PurgeRecoveryIntent is the executable, secret-safe identity persisted both by
+// the cache journal and atomically with an administrative cutoff. It is internal
+// durable state, never an API response (the public selector is redacted).
+type PurgeRecoveryIntent struct {
 	FenceGen            uint64       `json:"fence_gen"`
 	Kind                SelectorKind `json:"kind"`
 	Coalesced           bool         `json:"coalesced,omitempty"`
@@ -1248,15 +1252,15 @@ type diskPurgeIntent struct {
 	TagMatch            TagMatchMode `json:"tag_match,omitempty"`
 	RoutePath           string       `json:"route_path,omitempty"`
 	RouteType           string       `json:"route_type,omitempty"`
-	MatchedResourceIDs  []string     `json:"matched_resource_ids,omitempty"`
+	MatchedResourceIDs  []string     `json:"matched_resource_ids"`
 	TargetHashes        []string     `json:"target_hashes,omitempty"`
 	TargetResourceMAC   string       `json:"target_resource_mac,omitempty"`
 	TargetKeyMAC        string       `json:"target_key_mac,omitempty"`
 }
 
 type diskPurgeIntentsManifest struct {
-	Version int               `json:"version"`
-	Intents []diskPurgeIntent `json:"intents"`
+	Version int                   `json:"version"`
+	Intents []PurgeRecoveryIntent `json:"intents"`
 }
 
 func isValidLowerHexHashSlice(hashes []string, maxCount int) bool {
@@ -1271,7 +1275,7 @@ func isValidLowerHexHashSlice(hashes []string, maxCount int) bool {
 	return true
 }
 
-func validateDiskPurgeIntent(it diskPurgeIntent) bool {
+func validateDiskPurgeIntent(it PurgeRecoveryIntent) bool {
 	if it.FenceGen == 0 || it.FenceGen >= math.MaxInt64 {
 		return false
 	}
@@ -1280,6 +1284,33 @@ func validateDiskPurgeIntent(it diskPurgeIntent) bool {
 	default:
 		return false
 	}
+	// Compact selectors must be executable as well as syntactically recognized.
+	switch it.Kind {
+	case SelectorHost:
+		if it.Host == "" {
+			return false
+		}
+	case SelectorPrefix:
+		if it.Prefix == "" && it.CutoverRawPrefix == "" {
+			return false
+		}
+	case SelectorGlob:
+		if it.CutoverExactPath == "" {
+			if _, _, err := validateSelectorGlob(it.Pattern); err != nil {
+				return false
+			}
+		}
+	}
+	if it.Kind == SelectorTag && it.MatchedResourceIDs == nil {
+		return false
+	}
+	if it.Kind == SelectorExactURL && len(it.TargetHashes) == 0 && it.TargetResourceMAC == "" {
+		return false
+	}
+	if it.Kind == SelectorKey && len(it.TargetHashes) == 0 && it.TargetKeyMAC == "" {
+		return false
+	}
+
 	if !isValidLowerHexHashSlice(it.MatchedResourceIDs, MaxPurgeScanKeys) {
 		return false
 	}
@@ -1299,11 +1330,11 @@ func validateDiskPurgeIntent(it diskPurgeIntent) bool {
 	return true
 }
 
-func (d *diskStore) loadPurgeIntents() []diskPurgeIntent {
+func (d *diskStore) loadPurgeIntents() []PurgeRecoveryIntent {
 	if d == nil || d.dir == "" {
 		return nil
 	}
-	var out []diskPurgeIntent
+	var out []PurgeRecoveryIntent
 	seenGen := make(map[uint64]bool)
 
 	f, err := os.Open(filepath.Join(d.dir, diskPurgeIntentsFile))
@@ -1360,7 +1391,8 @@ func (d *diskStore) loadPurgeIntents() []diskPurgeIntent {
 	// incomplete records in .jul-cache-purge-ledger when their fence_sequence > 0.
 	if rawLedger, lErr := os.ReadFile(filepath.Join(d.dir, diskPurgeLedgerFile)); lErr == nil && len(rawLedger) <= 4*maxDiskMetaBytes {
 		var ledgerRecs []struct {
-			MatchedResourceIDs []string `json:"matched_resource_ids"`
+			MatchedResourceIDs []string             `json:"matched_resource_ids"`
+			RecoveryIntent     *PurgeRecoveryIntent `json:"recovery_intent"`
 			Response           struct {
 				FenceSequence         uint64 `json:"fence_sequence"`
 				Terminal              bool   `json:"terminal"`
@@ -1388,6 +1420,11 @@ func (d *diskStore) loadPurgeIntents() []diskPurgeIntent {
 				if rec.Response.Terminal && rec.Response.InvalidationEffective == "effective" {
 					continue
 				}
+				if rec.RecoveryIntent != nil && rec.RecoveryIntent.FenceGen == fg && validateDiskPurgeIntent(*rec.RecoveryIntent) {
+					seenGen[fg] = true
+					out = append(out, *rec.RecoveryIntent)
+					continue
+				}
 				kind := SelectorKind(strings.ToLower(strings.TrimSpace(rec.Response.Selector.Kind)))
 				if kind == "" && rec.Response.Selector.All {
 					kind = SelectorAll
@@ -1396,9 +1433,9 @@ func (d *diskStore) loadPurgeIntents() []diskPurgeIntent {
 					kind = SelectorPrefix
 				}
 				if kind == "" {
-					continue
+					kind = SelectorKind("unreconstructible")
 				}
-				it := diskPurgeIntent{
+				it := PurgeRecoveryIntent{
 					FenceGen:           fg,
 					Kind:               kind,
 					Host:               strings.ToLower(strings.TrimSpace(rec.Response.Selector.Host)),
@@ -1407,6 +1444,13 @@ func (d *diskStore) loadPurgeIntents() []diskPurgeIntent {
 					Tags:               rec.Response.Selector.Tags,
 					TagMatch:           TagMatchMode(rec.Response.Selector.TagMatch),
 					MatchedResourceIDs: rec.MatchedResourceIDs,
+				}
+				if !validateDiskPurgeIntent(it) || kind == SelectorTag || rec.RecoveryIntent != nil {
+					// Older redacted records lack executable identity or an immutable
+					// tag snapshot. Explicit migration fallback: sweep all entries at
+					// this cutoff, preserving newer generations; never reconcile a no-op.
+					d.log.Warn("cache: legacy purge recovery identity unavailable; sweeping pre-cutoff disk entries", "fence_gen", fg)
+					it = PurgeRecoveryIntent{FenceGen: fg, Kind: SelectorAll}
 				}
 				if validateDiskPurgeIntent(it) {
 					seenGen[fg] = true
@@ -1417,7 +1461,9 @@ func (d *diskStore) loadPurgeIntents() []diskPurgeIntent {
 	}
 
 	d.mu.Lock()
-	d.purgeIntents = append([]diskPurgeIntent(nil), out...)
+	d.purgeIntentMu.Lock()
+	d.purgeIntents = append([]PurgeRecoveryIntent(nil), out...)
+	d.purgeIntentMu.Unlock()
 	for _, it := range out {
 		if it.FenceGen > d.highWaterGen {
 			d.highWaterGen = it.FenceGen
@@ -1470,6 +1516,13 @@ func (d *diskStore) persistPurgeIntentsLocked() error {
 	return nil
 }
 
+// Must run after releasing cache.genMu: corrupt-file cleanup calls back into it.
+func (d *diskStore) failClosedOnIntentWriteError() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.failClosedOnIntentWriteErrorLocked()
+}
+
 func (d *diskStore) failClosedOnIntentWriteErrorLocked() {
 	_ = d.truncatePath(filepath.Join(d.dir, diskPurgeIntentsFile), 0)
 	_ = d.truncatePath(filepath.Join(d.dir, diskTombstoneFile), 0)
@@ -1477,64 +1530,55 @@ func (d *diskStore) failClosedOnIntentWriteErrorLocked() {
 	d.unrecoverableInvalidation.Store(true)
 }
 
-func (d *diskStore) recordPurgeIntent(intent diskPurgeIntent) error {
+func (d *diskStore) recordPurgeIntent(intent PurgeRecoveryIntent) error {
+	_, err := d.commitPurgeIntent(intent)
+	if err != nil && !errors.Is(err, ErrPurgeIntentCapacity) {
+		d.failClosedOnIntentWriteError()
+	}
+	return err
+}
+
+// commitPurgeIntent admits and persists one immutable cutoff snapshot. A retry
+// must retain its original hashes even after memory/key generations advanced.
+func (d *diskStore) commitPurgeIntent(intent PurgeRecoveryIntent) (PurgeRecoveryIntent, error) {
 	if d == nil || d.dir == "" || intent.FenceGen == 0 {
-		return nil
+		return intent, nil
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if intent.FenceGen > d.highWaterGen {
-		d.highWaterGen = intent.FenceGen
-	}
-	for i := range d.purgeIntents {
-		if d.purgeIntents[i].FenceGen == intent.FenceGen && !d.purgeIntents[i].Coalesced {
-			d.purgeIntents[i] = intent
-			if err := d.persistPurgeIntentsLocked(); err != nil {
-				d.failClosedOnIntentWriteErrorLocked()
-				return err
-			}
-			return nil
+	d.purgeIntentMu.Lock()
+	defer d.purgeIntentMu.Unlock()
+	next := append([]PurgeRecoveryIntent(nil), d.purgeIntents...)
+	replaced := false
+	for i := range next {
+		if next[i].FenceGen == intent.FenceGen && !next[i].Coalesced {
+			intent = next[i]
+			replaced = true
+			break
 		}
 	}
-	if len(d.purgeIntents) >= MaxActiveFences {
-		// Coalesce the oldest intents into a broader host or all intent at their
-		// max FenceGen so capacity pressure never drops pre-cutoff protection (#666).
-		// Coalesced intents are never removed by an individual non-all completion.
-		oldest := d.purgeIntents[0]
-		second := d.purgeIntents[1]
-		coalescedGen := max(oldest.FenceGen, second.FenceGen)
-		var coalesced diskPurgeIntent
-		if oldest.Host != "" && oldest.Host == second.Host && oldest.Kind != SelectorAll && second.Kind != SelectorAll {
-			coalesced = diskPurgeIntent{
-				FenceGen:            coalescedGen,
-				Kind:                SelectorHost,
-				Coalesced:           true,
-				Host:                oldest.Host,
-				CutoverMatchAnyPort: oldest.CutoverMatchAnyPort || second.CutoverMatchAnyPort,
-			}
-		} else {
-			coalesced = diskPurgeIntent{
-				FenceGen:  coalescedGen,
-				Kind:      SelectorAll,
-				Coalesced: true,
-			}
-		}
-		d.purgeIntents = append([]diskPurgeIntent{coalesced}, d.purgeIntents[2:]...)
+	if !replaced {
+		next = append(next, intent)
 	}
-	d.purgeIntents = append(d.purgeIntents, intent)
+	raw, err := json.Marshal(diskPurgeIntentsManifest{Version: 1, Intents: next})
+	if err != nil {
+		return intent, err
+	}
+	if len(next) > MaxActiveFences || len(raw) > maxDiskMetaBytes || !validateDiskPurgeIntent(intent) {
+		return intent, ErrPurgeIntentCapacity
+	}
+	d.purgeIntents = next
 	if err := d.persistPurgeIntentsLocked(); err != nil {
-		d.failClosedOnIntentWriteErrorLocked()
-		return err
+		d.unrecoverableInvalidation.Store(true)
+		return intent, err
 	}
-	return nil
+	return intent, nil
 }
 
 func (d *diskStore) completePurgeIntent(fenceGen uint64, isAll bool) error {
 	if d == nil || d.dir == "" || fenceGen == 0 {
 		return nil
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.purgeIntentMu.Lock()
+	defer d.purgeIntentMu.Unlock()
 	kept := d.purgeIntents[:0]
 	changed := false
 	for _, it := range d.purgeIntents {
@@ -1555,13 +1599,13 @@ func (d *diskStore) completePurgeIntent(fenceGen uint64, isAll bool) error {
 	return d.persistPurgeIntentsLocked()
 }
 
-func (d *diskStore) replacePurgeIntents(intents []diskPurgeIntent) error {
+func (d *diskStore) replacePurgeIntents(intents []PurgeRecoveryIntent) error {
 	if d == nil || d.dir == "" {
 		return nil
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.purgeIntents = append([]diskPurgeIntent(nil), intents...)
+	d.purgeIntentMu.Lock()
+	defer d.purgeIntentMu.Unlock()
+	d.purgeIntents = append([]PurgeRecoveryIntent(nil), intents...)
 	return d.persistPurgeIntentsLocked()
 }
 

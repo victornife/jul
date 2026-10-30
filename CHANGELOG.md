@@ -27,6 +27,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   disabling a healthy empty disk tier on marker-only `.jul-cache-gen` errors
   (#668).
 
+- Close purge recovery commit gaps in #674: persist complete private identity
+  with the cutoff and retain it across retries; preserve key-method/Vary
+  semantics on restart. Reject recovery journal byte/count capacity before
+  committing a cutoff, without evicting unrelated entries. Move all Console
+  purges to the versioned preview/confirmation flow and retain legacy HTTP
+  compatibility and unsafe-method `Delete()` callers. Add real disk/admin
+  ledger latency and journal-limit startup acceptance profiles (#666–#668).
+
 - Keep predicate values and their hashes out of persistent route-cache
   partitions. Separate private, route-specific matcher proofs preserve unchanged
   route reuse across reload/restart and advance ownership only on incompatible
