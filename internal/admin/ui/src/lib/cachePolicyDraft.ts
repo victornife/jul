@@ -27,6 +27,7 @@ export interface CachePolicyStarter {
   readonly staleIfError: string;
   readonly bypassMode: "none" | "named" | "any";
   readonly bypassCookiesInput: string;
+  readonly reloadPolicy: "" | "retain" | "invalidate";
 }
 
 export const CACHE_POLICY_STARTERS: readonly CachePolicyStarter[] = [
@@ -42,12 +43,13 @@ export const CACHE_POLICY_STARTERS: readonly CachePolicyStarter[] = [
     staleIfError: "",
     bypassMode: "none",
     bypassCookiesInput: "",
+    reloadPolicy: "",
   },
   {
     id: "conservative_dynamic",
     label: "Conservative dynamic / API",
     summary:
-      "Requires explicit origin freshness (default_ttl = 0s), caps fresh lifetime to 1m, enables 30s SWR / 5m stale-if-error, and bypasses any request with a Cookie header.",
+      "Requires explicit origin freshness (default_ttl = 0s), caps fresh lifetime to 1m, enables 30s SWR / 5m stale-if-error, bypasses any request with a Cookie header, and invalidates cached entries on backend cutover.",
     cacheEnabled: true,
     defaultTTL: "0s",
     maxTTL: "1m",
@@ -55,6 +57,7 @@ export const CACHE_POLICY_STARTERS: readonly CachePolicyStarter[] = [
     staleIfError: "5m",
     bypassMode: "any",
     bypassCookiesInput: "",
+    reloadPolicy: "invalidate",
   },
   {
     id: "static_assets",
@@ -68,6 +71,7 @@ export const CACHE_POLICY_STARTERS: readonly CachePolicyStarter[] = [
     staleIfError: "1h",
     bypassMode: "none",
     bypassCookiesInput: "",
+    reloadPolicy: "retain",
   },
 ] as const;
 
@@ -79,6 +83,7 @@ export interface CachePolicyFormState {
   readonly staleIfError: string;
   readonly bypassMode: "none" | "named" | "any";
   readonly bypassCookiesInput: string;
+  readonly reloadPolicy?: "" | "retain" | "invalidate";
 }
 
 const GO_DURATION_RE = /^(?:0|(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+)$/;
@@ -92,6 +97,10 @@ export function seedCachePolicyForm(loc: LocationProjection): CachePolicyFormSta
   } else if (cp?.bypass_cookies && cp.bypass_cookies.length > 0) {
     bypassMode = "named";
   }
+  const rp =
+    cp?.reload_policy === "retain" || cp?.reload_policy === "invalidate"
+      ? cp.reload_policy
+      : "";
   return {
     cacheEnabled: loc.cache,
     defaultTTL: cp?.default_ttl ?? "",
@@ -100,6 +109,7 @@ export function seedCachePolicyForm(loc: LocationProjection): CachePolicyFormSta
     staleIfError: cp?.stale_if_error ?? "",
     bypassMode,
     bypassCookiesInput: cp?.bypass_cookies ? cp.bypass_cookies.join(", ") : "",
+    reloadPolicy: rp,
   };
 }
 
@@ -234,13 +244,18 @@ export function validateCachePolicyForm(form: CachePolicyFormState): CachePolicy
   }
 
   const bypassAny = form.bypassMode === "any";
+  const reloadPolicy =
+    form.reloadPolicy === "retain" || form.reloadPolicy === "invalidate"
+      ? form.reloadPolicy
+      : undefined;
   const hasAnyOverride =
     defaultTTL !== undefined ||
     maxTTL !== undefined ||
     swr !== undefined ||
     sie !== undefined ||
     bypassAny ||
-    bypassCookies.length > 0;
+    bypassCookies.length > 0 ||
+    reloadPolicy !== undefined;
 
   if (!form.cacheEnabled && hasAnyOverride) {
     warnings.push(
@@ -256,6 +271,7 @@ export function validateCachePolicyForm(form: CachePolicyFormState): CachePolicy
         ...(sie !== undefined ? { stale_if_error: sie } : {}),
         ...(bypassCookies.length > 0 ? { bypass_cookies: bypassCookies } : {}),
         ...(bypassAny ? { bypass_any_cookie: true } : {}),
+        ...(reloadPolicy !== undefined ? { reload_policy: reloadPolicy } : {}),
       }
     : null;
 

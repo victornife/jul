@@ -81,8 +81,26 @@ type HandlerFactory struct {
 	moduleChanges moduleChangeRecord
 	// liveWAF is the serving generation's compiled WAF policy (#440), also
 	// guarded by moduleMu.
-	liveWAF    *admin.WAFEffectivePolicy
-	wafDigests wafDigestRecord
+	liveWAF        *admin.WAFEffectivePolicy
+	wafDigests     wafDigestRecord
+	liveConfig     *config.Config
+	lastCutover    []cache.InvalidateResult
+	lastCutoverErr error
+}
+
+// LastCacheCutover returns the results and any error from the most recent
+// route/backend cutover invalidation executed at Publish (#624 / CACHE-OPS-04).
+func (f *HandlerFactory) LastCacheCutover() ([]cache.InvalidateResult, error) {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	return append([]cache.InvalidateResult(nil), f.lastCutover...), f.lastCutoverErr
+}
+
+func (f *HandlerFactory) recordCacheCutover(results []cache.InvalidateResult, err error) {
+	f.moduleMu.Lock()
+	f.lastCutover = append([]cache.InvalidateResult(nil), results...)
+	f.lastCutoverErr = err
+	f.moduleMu.Unlock()
 }
 
 type wafDigestRecord struct {
@@ -226,7 +244,15 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		retireHandlers := gen.Commit()
 		if f.Cache != nil {
 			f.Cache.CommitRoutePolicies(gen.cacheRoutePolicies)
+			if f.liveConfig != nil {
+				results, cutoverErr := f.Cache.ExecuteRouteCutover(ctx, f.liveConfig, c, "")
+				f.recordCacheCutover(results, cutoverErr)
+				if cutoverErr != nil && f.Log != nil {
+					f.Log.Warn("cache cutover invalidation degraded after publish", "error", cutoverErr)
+				}
+			}
 		}
+		f.liveConfig = c
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)
@@ -299,7 +325,15 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		retireHandlers := gen.Commit()
 		if f.Cache != nil {
 			f.Cache.CommitRoutePolicies(gen.cacheRoutePolicies)
+			if f.liveConfig != nil {
+				results, cutoverErr := f.Cache.ExecuteRouteCutover(context.Background(), f.liveConfig, c, "")
+				f.recordCacheCutover(results, cutoverErr)
+				if cutoverErr != nil && f.Log != nil {
+					f.Log.Warn("cache cutover invalidation degraded after publish", "error", cutoverErr)
+				}
+			}
 		}
+		f.liveConfig = c
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)
@@ -452,7 +486,9 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		}
 		scope := cacheScopes[LocationScope(srv, loc)]
 		multiOverlap := totalCachedLocs > 1 || loc.Match.HasPredicates()
-		rc := cache.CompileRouteCacheConfig(scope, multiOverlap, loc.CachePolicy).WithMatcher(loc, f.Versions)
+		rc := cache.CompileRouteCacheConfig(scope, multiOverlap, loc.CachePolicy).
+			WithMatcher(loc, f.Versions).
+			WithBackendCutover(c, srv, loc, f.Versions)
 		rc.Epoch = f.Cache.CurrentRouteEpoch(scope)
 		switch action {
 		case router.ActionProxy:

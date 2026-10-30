@@ -62,6 +62,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Explicit route and backend cutover cache behavior (`reload_policy = "retain" |
+  "invalidate"` in `[cache]` and `[servers.locations.cache_policy]`, #624 /
+  `CACHE-OPS-04`, #620,
+  [ADR 0030](docs/adr/0030-cache-purge-recovery-latency-and-cutover.md)):
+  preserves warm cache continuity by default (`"retain"`) while allowing global
+  or per-route opt-in (`"invalidate"`) to atomically advance `RouteEpoch`,
+  fence pre-cutover cold fills, `304` revalidations, background SWR refreshes,
+  and delayed old-generation handlers at `Publish`, and execute scoped cache
+  invalidation for changed or removed routes/upstreams without evicting
+  unrelated applications. Surfaces structured `cache_cutover` plans and scope
+  broadening warnings in configuration diffs/previews and the Console route
+  cache policy editor.
+
 - Route-scoped cache policy overrides, freshness caps (`max_ttl`), and
   conservative request-cookie bypass (`bypass_cookies`, `bypass_any_cookie`) in
   `[servers.locations.cache_policy]` with hot-reload enforcement, `/api/routes`

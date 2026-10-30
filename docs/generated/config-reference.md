@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 364 configurable leaves.
+Coverage: 366 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -841,6 +841,22 @@ RangeEnabled opts the cache into Option A range-aware caching (#442, ADR 0024): 
 | Lifecycle | `hot_reload` |
 | Subsystem | `cache` |
 | Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+
+## `cache.reload_policy` {#cache-reload_policy}
+
+ReloadPolicy selects whether route/backend changes retain existing cached entries ("retain", the default when omitted) or invalidate affected route/upstream cache scopes at the configuration Publish boundary ("invalidate", #624 / CACHE-OPS-04).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| Allowed values | `retain`, `invalidate` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted defaults to "retain" |
+| Active when | cache.enabled = true |
 
 ## `cache.stale_if_error` {#cache-stale_if_error}
 
@@ -2202,6 +2218,22 @@ MaxTTL caps the computed freshness lifetime (from origin directives or gateway d
 | Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | Constraint | non-negative when present; must not be less than default_ttl when both are set on the same route |
 | Zero/empty semantics | omitted applies no route freshness cap; explicit "0s" caps fresh lifetime to zero |
+| Active when | cache.enabled = true and servers[].locations[].cache = true |
+
+## `servers.*.locations.*.cache_policy.reload_policy` {#servers-x-locations-x-cache_policy-reload_policy}
+
+ReloadPolicy overrides [cache].reload_policy ("retain" or "invalidate") for this route when its target, action, upstream, or route definition changes across a reload or restart (#624 / CACHE-OPS-04).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `cache` |
+| Why | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| Allowed values | `retain`, `invalidate` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted inherits cache.reload_policy |
 | Active when | cache.enabled = true and servers[].locations[].cache = true |
 
 ## `servers.*.locations.*.cache_policy.stale_if_error` {#servers-x-locations-x-cache_policy-stale_if_error}

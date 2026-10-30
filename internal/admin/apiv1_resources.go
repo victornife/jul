@@ -92,11 +92,13 @@ func v1Routes(c *config.Config) []adminapi.Route {
 					StaleIfError:         loc.CachePolicy.StaleIfError,
 					BypassCookies:        loc.CachePolicy.BypassCookies,
 					BypassAnyCookie:      loc.CachePolicy.BypassAnyCookie,
+					ReloadPolicy:         loc.CachePolicy.ReloadPolicy,
 				}
 				if loc.CacheEffective != nil {
 					cachePolicy.EffectiveDefaultTTL = loc.CacheEffective.DefaultTTL
 					cachePolicy.EffectiveSWR = loc.CacheEffective.StaleWhileRevalidate
 					cachePolicy.EffectiveSIE = loc.CacheEffective.StaleIfError
+					cachePolicy.EffectiveReloadPolicy = loc.CacheEffective.ReloadPolicy
 				}
 			}
 			out = append(out, adminapi.Route{

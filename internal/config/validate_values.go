@@ -273,6 +273,9 @@ func validateCacheValues(c CacheConfig) []error {
 			errs = append(errs, fmt.Errorf("[cache].max_ranges: %d must be at most 16", c.MaxRanges))
 		}
 	}
+	if c.ReloadPolicy != "" && c.ReloadPolicy != "retain" && c.ReloadPolicy != "invalidate" {
+		errs = append(errs, fmt.Errorf("[cache].reload_policy: %q must be \"retain\" or \"invalidate\"", c.ReloadPolicy))
+	}
 	errs = append(errs, validateCacheTagHeaders(c)...)
 	return errs
 }

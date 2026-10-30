@@ -1058,6 +1058,119 @@ func DeriveRouteCutoverSelectors(before, after *config.Config) []NormalizedSelec
 	return selectors
 }
 
+// DeriveRouteCutoverSelectorsForPolicy computes the deduplicated minimal set of
+// cache invalidation selectors for route or backend changes between before and
+// after configurations that opt into cutover invalidation (#624 / CACHE-OPS-04).
+// When overrideMode is "retain", nil is returned. When overrideMode is
+// "invalidate", all changed/deleted routes are included. When overrideMode is
+// empty (""), each changed/deleted route is included when its effective
+// reload_policy (in before or after) is "invalidate".
+func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, overrideMode string) []NormalizedSelector {
+	switch strings.ToLower(strings.TrimSpace(overrideMode)) {
+	case "retain":
+		return nil
+	case "invalidate":
+		return DeriveRouteCutoverSelectors(before, after)
+	}
+	if before == nil || after == nil {
+		return nil
+	}
+	changedUpstreams := changedUpstreamNames(before, after)
+	var selectors []NormalizedSelector
+	seen := make(map[[32]byte]struct{})
+	addNorm := func(ns NormalizedSelector) {
+		if _, ok := seen[ns.Digest()]; ok {
+			return
+		}
+		seen[ns.Digest()] = struct{}{}
+		selectors = append(selectors, ns)
+	}
+	addSel := func(s Selector) {
+		ns, err := ParseSelector(s, nil)
+		if err != nil {
+			if s.Host != "" {
+				ns, err = ParseSelector(Selector{Kind: SelectorHost, Host: s.Host}, nil)
+			}
+			if err != nil {
+				ns, err = ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
+			}
+			if err != nil {
+				return
+			}
+		}
+		addNorm(ns)
+	}
+
+	collectPolicyRoutes := func(primary, secondary *config.Config) {
+		for i := range primary.Servers {
+			srv := &primary.Servers[i]
+			for j := range srv.Locations {
+				loc := &srv.Locations[j]
+				oloc := findMatchingLocationForCutover(srv, loc, secondary)
+				if !loc.Cache && (oloc == nil || !oloc.Cache) {
+					continue
+				}
+				useInvalidate := primary.EffectiveReloadPolicy(*loc) == "invalidate" ||
+					(oloc != nil && secondary.EffectiveReloadPolicy(*oloc) == "invalidate") ||
+					(oloc == nil && strings.EqualFold(strings.TrimSpace(secondary.Cache.ReloadPolicy), "invalidate"))
+				if !useInvalidate {
+					continue
+				}
+				if up := config.ResolveLocationUpstreamName(primary, *loc); up != "" && changedUpstreams[up] {
+					emitSelectorsForRoute(srv, loc, addSel, addNorm)
+					continue
+				}
+				if oloc != nil {
+					if up := config.ResolveLocationUpstreamName(secondary, *oloc); up != "" && changedUpstreams[up] {
+						emitSelectorsForRoute(srv, loc, addSel, addNorm)
+						continue
+					}
+				}
+				if oloc == nil || !sameLocationCutoverTarget(loc, oloc) {
+					emitSelectorsForRoute(srv, loc, addSel, addNorm)
+				}
+			}
+		}
+	}
+	collectPolicyRoutes(before, after)
+	collectPolicyRoutes(after, before)
+	return selectors
+}
+
+func findMatchingLocationForCutover(srv *config.ServerConfig, loc *config.LocationConfig, other *config.Config) *config.LocationConfig {
+	if other == nil {
+		return nil
+	}
+	for i := range other.Servers {
+		osrv := &other.Servers[i]
+		if osrv.Listen != srv.Listen || strings.Join(osrv.ServerNames, ",") != strings.Join(srv.ServerNames, ",") {
+			continue
+		}
+		for j := range osrv.Locations {
+			oloc := &osrv.Locations[j]
+			if loc.RouteID != nil && oloc.RouteID != nil && *loc.RouteID != "" && *loc.RouteID == *oloc.RouteID {
+				return oloc
+			}
+			if loc.Match.Type == oloc.Match.Type && loc.Match.Path == oloc.Match.Path &&
+				loc.Match.CanonicalPredicates() == oloc.Match.CanonicalPredicates() {
+				return oloc
+			}
+		}
+	}
+	return nil
+}
+
+func sameLocationCutoverTarget(a, b *config.LocationConfig) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	ca := *a
+	cb := *b
+	ca.CachePolicy = nil
+	cb.CachePolicy = nil
+	return reflect.DeepEqual(ca, cb)
+}
+
 func changedUpstreamNames(before, after *config.Config) map[string]bool {
 	out := make(map[string]bool)
 	if before == nil || after == nil {

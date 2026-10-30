@@ -78,11 +78,14 @@ range_enabled          = true     # opt-in Option A range-aware caching (#442)
 max_ranges             = 1        # bound accepted range specs (default 1 when range_enabled = true)
 tag_headers            = ["Cache-Tag", "Surrogate-Key"] # opt-in trusted origin grouping-tag headers (#621)
 strip_tag_headers      = true     # strip configured tag_headers from client responses (default true when tag_headers is set)
+reload_policy          = "retain" # "retain" (default) or "invalidate" on route/backend cutover (#624)
 ```
 
 Per-location opt-in is still required, and each location may optionally override
-freshness, caps, stale windows, and request-cookie bypass via
-`[servers.locations.cache_policy]` ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
+freshness, caps, stale windows, request-cookie bypass, and route/backend cutover
+invalidation via `[servers.locations.cache_policy]`
+([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md),
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md)):
 
 ```toml
 [[servers.locations]]
@@ -97,6 +100,7 @@ cache    = true
   stale_while_revalidate = "30s"
   stale_if_error         = "5m"
   bypass_cookies         = ["session_id", "__Host-auth"] # or bypass_any_cookie = true
+  reload_policy          = "invalidate" # invalidate & fence pre-cutover entries when route/backend changes
 ```
 
 ## Cache key and Vary

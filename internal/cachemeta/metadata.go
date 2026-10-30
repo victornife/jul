@@ -111,4 +111,5 @@ type EffectivePolicy struct {
 	GatewayFreshnessCapSupported bool     `json:"gateway_freshness_cap_supported"`
 	BypassCookies                []string `json:"bypass_cookies,omitempty"`
 	BypassAnyCookie              bool     `json:"bypass_any_cookie,omitempty"`
+	ReloadPolicy                 string   `json:"reload_policy,omitempty"`
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"jul/internal/cachemeta"
+	"jul/internal/config"
 	"maps"
 	"math"
 	"net/http"
@@ -1572,6 +1573,31 @@ func (c *Cache) snapshotMatchedResourcesLocked(sel NormalizedSelector) map[strin
 func (c *Cache) BeginSelectorFence(sel NormalizedSelector) (fenceGen uint64, complete func()) {
 	fenceGen, complete, _ = c.BeginSelectorFenceWithError(sel)
 	return fenceGen, complete
+}
+
+// ExecuteRouteCutover derives and executes scoped invalidations for route or
+// backend changes between before and after configurations that opt into
+// cutover invalidation (#624 / CACHE-OPS-04, ADR 0030 §4).
+func (c *Cache) ExecuteRouteCutover(ctx context.Context, before, after *config.Config, overrideMode string) ([]InvalidateResult, error) {
+	if c == nil || before == nil || after == nil {
+		return nil, nil
+	}
+	sels := DeriveRouteCutoverSelectorsForPolicy(before, after, overrideMode)
+	if len(sels) == 0 {
+		return nil, nil
+	}
+	results := make([]InvalidateResult, 0, len(sels))
+	var firstErr error
+	for _, sel := range sels {
+		res, err := c.InvalidateScope(ctx, sel, InvalidateOptions{})
+		results = append(results, res)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		} else if res.InvalidationEffective != "effective" && firstErr == nil {
+			firstErr = fmt.Errorf("cache cutover invalidation %s (%s): %s", sel.Kind, sel.Host, res.InvalidationEffective)
+		}
+	}
+	return results, firstErr
 }
 
 // BeginSelectorFenceWithError installs an active selector fence at a new

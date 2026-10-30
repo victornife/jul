@@ -1348,6 +1348,11 @@ type LocationCachePolicy struct {
 	// both cache lookup and cache storage; cannot be combined with
 	// bypass_cookies.
 	BypassAnyCookie bool `toml:"bypass_any_cookie,omitempty"`
+	// ReloadPolicy overrides [cache].reload_policy ("retain" or "invalidate")
+	// for this route when its target, action, upstream, or route definition
+	// changes across a reload or restart (#624 / CACHE-OPS-04). Omitted
+	// inherits [cache].reload_policy.
+	ReloadPolicy string `toml:"reload_policy,omitempty"`
 }
 
 // RateLimitConfig configures request rate limiting (token bucket) plus a
@@ -1490,6 +1495,28 @@ type CacheConfig struct {
 	// responses and stored response headers so internal grouping metadata is not
 	// exposed to clients. Omitted defaults to true when tag_headers is non-empty.
 	StripTagHeaders *bool `toml:"strip_tag_headers,omitempty"`
+	// ReloadPolicy selects whether route/backend changes retain existing cached
+	// entries ("retain", the default when omitted) or invalidate affected
+	// route/upstream cache scopes at the configuration Publish boundary
+	// ("invalidate", #624 / CACHE-OPS-04).
+	ReloadPolicy string `toml:"reload_policy,omitempty"`
+}
+
+// EffectiveReloadPolicy returns the effective route/backend cutover policy
+// ("retain" or "invalidate") for loc under c (#624 / CACHE-OPS-04).
+func (c *Config) EffectiveReloadPolicy(loc LocationConfig) string {
+	if loc.CachePolicy != nil {
+		switch strings.ToLower(strings.TrimSpace(loc.CachePolicy.ReloadPolicy)) {
+		case "invalidate":
+			return "invalidate"
+		case "retain":
+			return "retain"
+		}
+	}
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Cache.ReloadPolicy), "invalidate") {
+		return "invalidate"
+	}
+	return "retain"
 }
 
 // StripTagHeadersEnabled reports whether configured TagHeaders should be

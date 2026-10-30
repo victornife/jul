@@ -4388,6 +4388,37 @@
                   "type": "string"
                 }
               },
+              "cache_cutover": {
+                "type": "object",
+                "properties": {
+                  "broadened_to_host_or_all": {
+                    "type": "boolean"
+                  },
+                  "default_policy": {
+                    "type": "string"
+                  },
+                  "disposition": {
+                    "type": "string"
+                  },
+                  "invalidated_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "retained_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "default_policy",
+                  "disposition"
+                ],
+                "additionalProperties": false
+              },
               "modifications": {
                 "type": "array",
                 "items": {
@@ -5275,6 +5306,9 @@
                   },
                   "range_enabled": {
                     "type": "boolean"
+                  },
+                  "reload_policy": {
+                    "type": "string"
                   },
                   "route_overrides_supported": {
                     "type": "boolean"
@@ -6355,6 +6389,37 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "cache_cutover": {
+                "type": "object",
+                "properties": {
+                  "broadened_to_host_or_all": {
+                    "type": "boolean"
+                  },
+                  "default_policy": {
+                    "type": "string"
+                  },
+                  "disposition": {
+                    "type": "string"
+                  },
+                  "invalidated_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "retained_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "default_policy",
+                  "disposition"
+                ],
+                "additionalProperties": false
               },
               "modifications": {
                 "type": "array",
@@ -8186,6 +8251,9 @@
                     "max_ttl": {
                       "type": "string"
                     },
+                    "reload_policy": {
+                      "type": "string"
+                    },
                     "stale_if_error": {
                       "type": "string"
                     },
@@ -9076,6 +9144,37 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "cache_cutover": {
+                "type": "object",
+                "properties": {
+                  "broadened_to_host_or_all": {
+                    "type": "boolean"
+                  },
+                  "default_policy": {
+                    "type": "string"
+                  },
+                  "disposition": {
+                    "type": "string"
+                  },
+                  "invalidated_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "retained_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "default_policy",
+                  "disposition"
+                ],
+                "additionalProperties": false
               },
               "modifications": {
                 "type": "array",
@@ -10309,6 +10408,9 @@
           "effective_default_ttl": {
             "type": "string"
           },
+          "effective_reload_policy": {
+            "type": "string"
+          },
           "effective_stale_if_error": {
             "type": "string"
           },
@@ -10316,6 +10418,9 @@
             "type": "string"
           },
           "max_ttl": {
+            "type": "string"
+          },
+          "reload_policy": {
             "type": "string"
           },
           "stale_if_error": {

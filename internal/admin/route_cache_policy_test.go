@@ -378,4 +378,47 @@ func TestRouteCachePolicyProjectionPatchDiffAndInspect(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+
+	// Verify reload_policy validation, projection, diff, and CacheCutoverPlan (#624).
+	if _, err := applyPatch(&cloned, patchRequest{
+		Op:           "location_cache_policy_set",
+		Listen:       ":8080",
+		ServerNames:  []string{"example.com"},
+		MatchType:    "prefix",
+		Path:         "/api",
+		MatchOrdinal: intPtr(0),
+		CachePolicy:  &locationCachePolicyPatch{ReloadPolicy: "invalid_mode"},
+	}); err == nil {
+		t.Fatal("expected error for invalid reload_policy")
+	}
+	if _, err := applyPatch(&cloned, patchRequest{
+		Op:           "location_cache_policy_set",
+		Listen:       ":8080",
+		ServerNames:  []string{"example.com"},
+		MatchType:    "prefix",
+		Path:         "/api",
+		MatchOrdinal: intPtr(0),
+		CachePolicy:  &locationCachePolicyPatch{ReloadPolicy: "invalidate"},
+	}); err != nil {
+		t.Fatalf("location_cache_policy_set(reload_policy=invalidate): %v", err)
+	}
+	clonedCutover := cloned
+	clonedCutover.Cache.ReloadPolicy = "invalidate"
+	clonedCutover.Servers = append([]config.ServerConfig(nil), cloned.Servers...)
+	clonedCutover.Servers[0].Locations = append([]config.LocationConfig(nil), cloned.Servers[0].Locations...)
+	clonedCutover.Servers[0].Locations[0].ProxyPass = "http://127.0.0.1:9099"
+	cutoverDiff := diffConfigs(&cloned, &clonedCutover)
+	if cutoverDiff.CacheCutover == nil || cutoverDiff.CacheCutover.Disposition != "invalidate_on_publish" {
+		t.Fatalf("expected invalidate_on_publish CacheCutoverPlan, got %+v", cutoverDiff.CacheCutover)
+	}
+
+	// Verify broadened host/all and stage_for_restart dispositions in diffCacheCutoverPlan.
+	clonedBroad := clonedCutover
+	clonedBroad.Cache.MemoryMaxSize = config.Size(32 << 20) // restart_required change
+	clonedBroad.Servers = append([]config.ServerConfig(nil), clonedCutover.Servers...)
+	clonedBroad.Servers[0].ServerNames = nil // unnamed server block -> SelectorAll
+	broadDiff := diffConfigs(&cloned, &clonedBroad)
+	if broadDiff.CacheCutover == nil || !broadDiff.CacheCutover.BroadenedToHostOrAll || broadDiff.CacheCutover.Disposition != "stage_for_restart" {
+		t.Fatalf("expected broadened stage_for_restart CacheCutoverPlan, got %+v", broadDiff.CacheCutover)
+	}
 }

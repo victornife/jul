@@ -6,6 +6,7 @@ package cache
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"maps"
 	"math"
 	"net/http"
@@ -314,6 +315,66 @@ func (rc RouteCacheConfig) WithMatcher(loc config.LocationConfig, versions *vers
 	}
 	rc.matcherProof = versions.Digest("cache-route-matcher-v1", data)
 	return rc
+}
+
+// WithBackendCutover extends rc's compatibility proof with the route's
+// canonical backend, action, upstream, and content-transforming identity when
+// cfg.EffectiveReloadPolicy(loc) == "invalidate" (#624 / CACHE-OPS-04).
+// When the effective reload policy is "retain" (default), rc is returned
+// unchanged so backend target edits retain warm cache entries across reload
+// and restart.
+func (rc RouteCacheConfig) WithBackendCutover(cfg *config.Config, srv config.ServerConfig, loc config.LocationConfig, versions *versionid.Context) RouteCacheConfig {
+	if cfg == nil || cfg.EffectiveReloadPolicy(loc) != "invalidate" {
+		return rc
+	}
+	typ := loc.Match.Type
+	if typ == "" {
+		typ = "prefix"
+	}
+	backendID := canonicalLocationBackendIdentity(cfg, srv, loc)
+	var storage [512]byte
+	data := storage[:0]
+	for _, field := range []string{
+		rc.Scope,
+		typ,
+		loc.Match.Path,
+		loc.Match.CanonicalPredicates(),
+		strconv.FormatBool(config.LocationPreflightWidening(loc)),
+		backendID,
+	} {
+		data = appendRouteField(data, field)
+	}
+	rc.matcherProof = versions.Digest("cache-route-matcher-v1", data)
+	return rc
+}
+
+func canonicalLocationBackendIdentity(cfg *config.Config, srv config.ServerConfig, loc config.LocationConfig) string {
+	type backendSnapshot struct {
+		ServerPlugins []string               `json:"server_plugins,omitempty"`
+		Loc           config.LocationConfig  `json:"loc"`
+		Upstream      *config.UpstreamConfig `json:"upstream,omitempty"`
+	}
+	locCopy := loc
+	locCopy.Match = config.MatchConfig{}
+	locCopy.CachePolicy = nil
+	var upPtr *config.UpstreamConfig
+	if cfg != nil {
+		if upName := config.ResolveLocationUpstreamName(cfg, loc); upName != "" {
+			for i := range cfg.Upstreams {
+				if cfg.Upstreams[i].Name == upName {
+					uCopy := cfg.Upstreams[i]
+					upPtr = &uCopy
+					break
+				}
+			}
+		}
+	}
+	raw, _ := json.Marshal(backendSnapshot{
+		ServerPlugins: srv.Plugins,
+		Loc:           locCopy,
+		Upstream:      upPtr,
+	})
+	return string(raw)
 }
 
 // CompileRouteCacheConfig compiles a LocationCachePolicy and route scope into

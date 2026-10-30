@@ -63,15 +63,17 @@ type Route struct {
 // RouteCachePolicy is the optional route-scoped response-cache policy on a
 // location ([servers.locations.cache_policy], #623 / CACHE-OPS-03).
 type RouteCachePolicy struct {
-	DefaultTTL           *string  `json:"default_ttl,omitempty"`
-	MaxTTL               *string  `json:"max_ttl,omitempty"`
-	StaleWhileRevalidate *string  `json:"stale_while_revalidate,omitempty"`
-	StaleIfError         *string  `json:"stale_if_error,omitempty"`
-	BypassCookies        []string `json:"bypass_cookies,omitempty"`
-	BypassAnyCookie      bool     `json:"bypass_any_cookie,omitempty"`
-	EffectiveDefaultTTL  string   `json:"effective_default_ttl,omitempty"`
-	EffectiveSWR         string   `json:"effective_stale_while_revalidate,omitempty"`
-	EffectiveSIE         string   `json:"effective_stale_if_error,omitempty"`
+	DefaultTTL            *string  `json:"default_ttl,omitempty"`
+	MaxTTL                *string  `json:"max_ttl,omitempty"`
+	StaleWhileRevalidate  *string  `json:"stale_while_revalidate,omitempty"`
+	StaleIfError          *string  `json:"stale_if_error,omitempty"`
+	BypassCookies         []string `json:"bypass_cookies,omitempty"`
+	BypassAnyCookie       bool     `json:"bypass_any_cookie,omitempty"`
+	ReloadPolicy          string   `json:"reload_policy,omitempty"`
+	EffectiveDefaultTTL   string   `json:"effective_default_ttl,omitempty"`
+	EffectiveSWR          string   `json:"effective_stale_while_revalidate,omitempty"`
+	EffectiveSIE          string   `json:"effective_stale_if_error,omitempty"`
+	EffectiveReloadPolicy string   `json:"effective_reload_policy,omitempty"`
 }
 
 // RouteSharing is the optional operator-declared sharing posture on a route
