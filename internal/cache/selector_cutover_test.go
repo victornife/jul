@@ -315,4 +315,55 @@ func TestWithBackendCutoverAndExecuteRouteCutover(t *testing.T) {
 	if sels := DeriveRouteCutoverSelectorsForPolicy(cfgActions, &cfgSrvPluginChanged, ""); len(sels) == 0 {
 		t.Fatal("expected cutover selectors when server-level plugins change")
 	}
+
+	// Exercise routeScopeFromVariantKey, keyRouteScopeLocked, matchesAnyFenceLocked with cutoverRouteScopes,
+	// and startup compatibility with Backends.
+	if got := routeScopeFromVariantKey("GET\napp.example.com\n/a\x00route\x1fscope-123\x00vary"); got != "scope-123" {
+		t.Fatalf("unexpected routeScopeFromVariantKey: %q", got)
+	}
+	if got := routeScopeFromVariantKey("GET\napp.example.com\n/a\x00route\x1fscope-456"); got != "scope-456" {
+		t.Fatalf("unexpected routeScopeFromVariantKey without trailing NUL: %q", got)
+	}
+	c.genMu.Lock()
+	c.keyGen["GET\napp.example.com\n/scoped"] = &keyGenState{
+		key:        "GET\napp.example.com\n/scoped",
+		routeScope: "scope-api",
+		gen:        1,
+		inMem:      true,
+	}
+	if got := c.keyRouteScopeLocked("GET\napp.example.com\n/scoped"); got != "scope-api" {
+		c.genMu.Unlock()
+		t.Fatalf("unexpected keyRouteScopeLocked for base key: %q", got)
+	}
+	if got := c.keyRouteScopeLocked("GET\napp.example.com\n/scoped\x00route\x1fscope-var\x00v"); got != "scope-var" {
+		c.genMu.Unlock()
+		t.Fatalf("unexpected keyRouteScopeLocked for variant key: %q", got)
+	}
+	c.fences = append(c.fences, selectorFence{
+		gen:    100,
+		active: true,
+		sel: NormalizedSelector{
+			Kind:                SelectorPrefix,
+			Host:                "app.example.com",
+			Prefix:              "/scoped",
+			cutoverRawPrefix:    "/scoped",
+			cutoverMatchAnyPort: true,
+			cutoverRouteScopes:  []string{"scope-other"},
+		},
+	})
+	if c.matchesAnyFenceLocked(1, "GET\napp.example.com\n/scoped", "app.example.com", "/scoped", true, nil, nil, false) {
+		c.genMu.Unlock()
+		t.Fatal("expected fence for scope-other not to match entry owned by scope-api")
+	}
+	c.genMu.Unlock()
+
+	snap := &routeStateSnapshot{
+		committed: false,
+		epochs:    map[string]uint64{"scope-api": 1},
+		matchers:  map[string]string{"scope-api": rcA.matcherProof},
+		backends:  map[string]string{"scope-api": rcA.backendProof},
+	}
+	if !snap.isStartupCompatible(rcA) || snap.isStartupCompatible(rcB) {
+		t.Fatal("unexpected isStartupCompatible result with durable backendProof")
+	}
 }

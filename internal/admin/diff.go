@@ -182,7 +182,7 @@ func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff) {
 	if !after.Cache.Enabled {
 		return
 	}
-	allSels := cache.DeriveRouteCutoverSelectors(before, after)
+	allSels := cache.DeriveRouteCutoverSelectorsForPolicy(before, after, "all_cached")
 	if len(allSels) == 0 {
 		return
 	}
@@ -260,39 +260,8 @@ func cutoverSelectorCoveredByInvalidated(sel cache.NormalizedSelector, invSels [
 		if inv.Digest() == sel.Digest() {
 			return true
 		}
-		if !cutoverRouteScopesContainsAll(inv.CutoverRouteScopes(), sel.CutoverRouteScopes()) {
-			continue
-		}
-		if inv.Kind == cache.SelectorAll {
-			return true
-		}
-		if inv.Kind == cache.SelectorHost && inv.Host == sel.Host {
-			return true
-		}
-		if inv.Kind == sel.Kind && inv.Host == sel.Host && inv.Prefix == sel.Prefix && inv.Pattern == sel.Pattern {
-			return true
-		}
 	}
 	return false
-}
-
-func cutoverRouteScopesContainsAll(superset, subset []string) bool {
-	if len(subset) == 0 {
-		return len(superset) == 0
-	}
-	for _, sub := range subset {
-		found := false
-		for _, sup := range superset {
-			if sup == sub {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
 }
 
 func formatCutoverSelector(sel cache.NormalizedSelector) string {
@@ -302,17 +271,9 @@ func formatCutoverSelector(sel cache.NormalizedSelector) string {
 	case cache.SelectorHost:
 		return "host " + sel.Host
 	case cache.SelectorPrefix:
-		if sel.Host != "" && sel.Host != "*" {
-			return fmt.Sprintf("prefix %s%s", sel.Host, sel.Prefix)
-		}
-		return fmt.Sprintf("prefix *%s", sel.Prefix)
-	case cache.SelectorGlob:
-		if sel.Host != "" && sel.Host != "*" {
-			return fmt.Sprintf("exact %s%s", sel.Host, sel.Pattern)
-		}
-		return fmt.Sprintf("exact *%s", sel.Pattern)
+		return fmt.Sprintf("prefix %s%s", sel.Host, sel.Prefix)
 	default:
-		return string(sel.Kind)
+		return fmt.Sprintf("exact %s%s", sel.Host, sel.Pattern)
 	}
 }
 

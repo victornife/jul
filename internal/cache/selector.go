@@ -1034,64 +1034,7 @@ func parseBaseKeyParts(k string) (method, host, requestURI string, isVariant boo
 // invalidation selectors covering route or backend changes between before and
 // after configurations (reusable contract for #624 / CACHE-OPS-04, ADR 0027 §6.2).
 func DeriveRouteCutoverSelectors(before, after *config.Config) []NormalizedSelector {
-	if before == nil && after == nil {
-		return nil
-	}
-	changedUpstreams := changedUpstreamNames(before, after)
-	var selectors []NormalizedSelector
-	seenIdx := make(map[[32]byte]int)
-	addNorm := func(ns NormalizedSelector) {
-		if idx, ok := seenIdx[ns.Digest()]; ok {
-			selectors[idx].cutoverRouteScopes = mergeRouteScopeSlices(selectors[idx].cutoverRouteScopes, ns.cutoverRouteScopes)
-			return
-		}
-		seenIdx[ns.Digest()] = len(selectors)
-		selectors = append(selectors, ns)
-	}
-	addSel := func(s Selector, routeScopes []string) {
-		ns, err := ParseSelector(s, nil)
-		if err != nil {
-			if s.Host != "" {
-				ns, err = ParseSelector(Selector{Kind: SelectorHost, Host: s.Host}, nil)
-			}
-			if err != nil {
-				ns, err = ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
-			}
-			if err != nil {
-				return
-			}
-		}
-		ns.cutoverRouteScopes = mergeRouteScopeSlices(nil, routeScopes)
-		addNorm(ns)
-	}
-
-	collectAffectedRoutes := func(primary, secondary *config.Config) {
-		if primary == nil {
-			return
-		}
-		for i := range primary.Servers {
-			srv := &primary.Servers[i]
-			scopes := RouteScopes(*srv)
-			for j := range srv.Locations {
-				loc := &srv.Locations[j]
-				changed, oScope := routeChangedOrUpstreamChangedWithScope(primary, srv, loc, secondary, changedUpstreams)
-				if !changed {
-					continue
-				}
-				var rScopes []string
-				if j < len(scopes) && scopes[j] != "" {
-					rScopes = append(rScopes, scopes[j])
-				}
-				if oScope != "" {
-					rScopes = append(rScopes, oScope)
-				}
-				emitSelectorsForRoute(srv, loc, rScopes, addSel, addNorm)
-			}
-		}
-	}
-	collectAffectedRoutes(before, after)
-	collectAffectedRoutes(after, before)
-	return selectors
+	return deriveRouteCutoverSelectorsInternal(before, after, "all")
 }
 
 // DeriveRouteCutoverSelectorsForPolicy computes the deduplicated minimal set of
@@ -1102,15 +1045,22 @@ func DeriveRouteCutoverSelectors(before, after *config.Config) []NormalizedSelec
 // empty (""), each changed/deleted route is included when its effective
 // reload_policy (in before or after) is "invalidate".
 func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, overrideMode string) []NormalizedSelector {
-	switch strings.ToLower(strings.TrimSpace(overrideMode)) {
-	case "retain":
-		return nil
-	case "invalidate":
-		return DeriveRouteCutoverSelectors(before, after)
-	}
-	if before == nil || after == nil {
+	mode := strings.ToLower(strings.TrimSpace(overrideMode))
+	if mode == "retain" || (before == nil && after == nil) {
 		return nil
 	}
+	if mode != "invalidate" && (before == nil || after == nil) {
+		return nil
+	}
+	return deriveRouteCutoverSelectorsInternal(before, after, mode)
+}
+
+func deriveRouteCutoverSelectorsInternal(before, after *config.Config, mode string) []NormalizedSelector {
+	if before == nil && after == nil {
+		return nil
+	}
+	includeUncached := mode == "all" || mode == "invalidate"
+	allCached := mode == "all_cached" || includeUncached
 	changedUpstreams := changedUpstreamNames(before, after)
 	var selectors []NormalizedSelector
 	seenIdx := make(map[[32]byte]int)
@@ -1122,37 +1072,38 @@ func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, override
 		seenIdx[ns.Digest()] = len(selectors)
 		selectors = append(selectors, ns)
 	}
-	addSel := func(s Selector, routeScopes []string) {
-		ns, err := ParseSelector(s, nil)
-		if err != nil {
-			if s.Host != "" {
-				ns, err = ParseSelector(Selector{Kind: SelectorHost, Host: s.Host}, nil)
-			}
-			if err != nil {
-				ns, err = ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
-			}
-			if err != nil {
-				return
-			}
-		}
-		ns.cutoverRouteScopes = mergeRouteScopeSlices(nil, routeScopes)
-		addNorm(ns)
-	}
 
-	collectPolicyRoutes := func(primary, secondary *config.Config) {
+	collectRoutes := func(primary, secondary *config.Config) {
+		if primary == nil {
+			return
+		}
 		for i := range primary.Servers {
 			srv := &primary.Servers[i]
 			scopes := RouteScopes(*srv)
 			for j := range srv.Locations {
 				loc := &srv.Locations[j]
 				oloc, osrv, oScope := findMatchingLocationForCutover(srv, loc, secondary)
-				if !loc.Cache && (oloc == nil || !oloc.Cache) {
+				if !includeUncached && !loc.Cache && (oloc == nil || !oloc.Cache) {
 					continue
 				}
-				useInvalidate := primary.EffectiveReloadPolicy(*loc) == "invalidate" ||
-					(oloc != nil && secondary.EffectiveReloadPolicy(*oloc) == "invalidate") ||
-					(oloc == nil && strings.EqualFold(strings.TrimSpace(secondary.Cache.ReloadPolicy), "invalidate"))
+				useInvalidate := allCached ||
+					primary.EffectiveReloadPolicy(*loc) == "invalidate" ||
+					(oloc != nil && secondary != nil && secondary.EffectiveReloadPolicy(*oloc) == "invalidate") ||
+					(oloc == nil && secondary != nil && strings.EqualFold(strings.TrimSpace(secondary.Cache.ReloadPolicy), "invalidate"))
 				if !useInvalidate {
+					continue
+				}
+				changed := oloc == nil || !sameLocationCutoverTarget(srv, loc, osrv, oloc)
+				if !changed {
+					if up := config.ResolveLocationUpstreamName(primary, *loc); up != "" && changedUpstreams[up] {
+						changed = true
+					} else if secondary != nil {
+						if up := config.ResolveLocationUpstreamName(secondary, *oloc); up != "" && changedUpstreams[up] {
+							changed = true
+						}
+					}
+				}
+				if !changed {
 					continue
 				}
 				var rScopes []string
@@ -1162,24 +1113,12 @@ func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, override
 				if oScope != "" {
 					rScopes = append(rScopes, oScope)
 				}
-				if up := config.ResolveLocationUpstreamName(primary, *loc); up != "" && changedUpstreams[up] {
-					emitSelectorsForRoute(srv, loc, rScopes, addSel, addNorm)
-					continue
-				}
-				if oloc != nil {
-					if up := config.ResolveLocationUpstreamName(secondary, *oloc); up != "" && changedUpstreams[up] {
-						emitSelectorsForRoute(srv, loc, rScopes, addSel, addNorm)
-						continue
-					}
-				}
-				if oloc == nil || !sameLocationCutoverTarget(srv, loc, osrv, oloc) {
-					emitSelectorsForRoute(srv, loc, rScopes, addSel, addNorm)
-				}
+				emitSelectorsForRoute(srv, loc, rScopes, addNorm)
 			}
 		}
 	}
-	collectPolicyRoutes(before, after)
-	collectPolicyRoutes(after, before)
+	collectRoutes(before, after)
+	collectRoutes(after, before)
 	return selectors
 }
 
@@ -1287,27 +1226,7 @@ func sameUpstreamIdentity(a, b config.UpstreamConfig) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func routeChangedOrUpstreamChangedWithScope(primary *config.Config, srv *config.ServerConfig, loc *config.LocationConfig, other *config.Config, changedUpstreams map[string]bool) (bool, string) {
-	if other == nil {
-		return true, ""
-	}
-	oloc, osrv, oScope := findMatchingLocationForCutover(srv, loc, other)
-	if !loc.Cache && (oloc == nil || !oloc.Cache) {
-		return false, ""
-	}
-	if up := config.ResolveLocationUpstreamName(primary, *loc); up != "" && changedUpstreams[up] {
-		return true, oScope
-	}
-	if oloc != nil {
-		if up := config.ResolveLocationUpstreamName(other, *oloc); up != "" && changedUpstreams[up] {
-			return true, oScope
-		}
-		return !sameLocationCutoverTarget(srv, loc, osrv, oloc), oScope
-	}
-	return true, ""
-}
-
-func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, routeScopes []string, addSel func(Selector, []string), addNorm func(NormalizedSelector)) {
+func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, routeScopes []string, addNorm func(NormalizedSelector)) {
 	canonScopes := mergeRouteScopeSlices(nil, routeScopes)
 	if len(srv.ServerNames) == 0 {
 		ns := NormalizedSelector{
