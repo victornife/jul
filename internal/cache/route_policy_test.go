@@ -248,11 +248,26 @@ func TestRouteCachePolicyCookieBypassAndMalformedFailClosed(t *testing.T) {
 		t.Fatalf("anonymous request after bypass: expected HIT resp-1, got %s %q", rec.Header().Get("X-Cache"), rec.Body.String())
 	}
 
-	// 3. Malformed Cookie header (missing '=', control char, or oversized > 8192 bytes) fails closed.
+	// 2b. Quoted RFC 6265 cookie values are accepted when contents are valid cookie-octets.
+	reqQuoted := httptest.NewRequest(http.MethodGet, "http://example.com/page", nil)
+	reqQuoted.Header.Set("Cookie", `theme="dark-mode"`)
+	rec = httptest.NewRecorder()
+	hNamed.ServeHTTP(rec, reqQuoted)
+	if rec.Header().Get("X-Cache") != stateHit || rec.Body.String() != "resp-1" {
+		t.Fatalf("valid quoted cookie value: expected HIT resp-1, got %s %q", rec.Header().Get("X-Cache"), rec.Body.String())
+	}
+
+	// 3. Malformed Cookie header (missing '=', control char, forbidden RFC 6265 value bytes, or oversized > 8192 bytes) fails closed.
 	for _, badCookie := range []string{
 		"malformed_cookie_without_equals",
 		"=emptyname",
 		"bad name=1",
+		"theme=two words",
+		"theme=a,b",
+		`theme=a\b`,
+		`theme="unclosed`,
+		`theme="inner"quote"`,
+		"theme=nonascii\x80",
 		"oversized=" + strings.Repeat("x", 9000),
 	} {
 		reqBad := httptest.NewRequest(http.MethodGet, "http://example.com/page", nil)
@@ -634,6 +649,37 @@ func TestVaryTransformGuardsProxyAndCGIInCachePackage(t *testing.T) {
 		t.Fatal("expected vary_proxy_rewrite_rejected for multi-token Vary header")
 	}
 	(*Cache)(nil).cleanupSensitiveVary("k", nil, 0)
+	(*Cache)(nil).registerPendingRouteHandler(RouteCacheConfig{}, nil)
+
+	// Exercise routeStateSnapshot helper methods directly.
+	var nilSnap *routeStateSnapshot
+	if nilSnap.epochOf("s") != 0 || nilSnap.matcherGenOf("s") != 0 || nilSnap.isCompatibleConfig(RouteCacheConfig{}) || !nilSnap.isStartupCompatible(RouteCacheConfig{}) || nilSnap.hasPriorEvidence("s") || nilSnap.isRouteEligible(RouteCacheConfig{}) {
+		t.Fatal("unexpected nil routeStateSnapshot results")
+	}
+	snapNoMatchers := &routeStateSnapshot{
+		committed:  true,
+		epochs:     map[string]uint64{"s": 2},
+		matcherGen: map[string]uint64{"s": 3},
+		configs:    map[string]RouteCacheConfig{"s": {Scope: "s", matcherProof: "p1"}},
+	}
+	if !snapNoMatchers.isStartupCompatible(RouteCacheConfig{Scope: "new"}) || snapNoMatchers.isStartupCompatible(RouteCacheConfig{Scope: "s"}) {
+		t.Fatal("unexpected isStartupCompatible when matchers==nil")
+	}
+	if !snapNoMatchers.hasPriorEvidence("s") || snapNoMatchers.hasPriorEvidence("") {
+		t.Fatal("unexpected hasPriorEvidence on epochs")
+	}
+	snapWithMatchers := &routeStateSnapshot{
+		committed: true,
+		epochs:    map[string]uint64{},
+		matchers:  map[string]string{"s": "p1"},
+		configs:   map[string]RouteCacheConfig{"s": {Scope: "s", matcherProof: "p1"}},
+	}
+	if !snapWithMatchers.isStartupCompatible(RouteCacheConfig{Scope: "s", matcherProof: "p1"}) ||
+		!snapWithMatchers.isStartupCompatible(RouteCacheConfig{Scope: "new"}) ||
+		!snapWithMatchers.hasPriorEvidence("s") ||
+		snapWithMatchers.hasPriorEvidence("missing") {
+		t.Fatal("unexpected snapWithMatchers results")
+	}
 }
 
 func TestMultiRouteOverlapVaryStubAndRouteScopeInspection(t *testing.T) {

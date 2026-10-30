@@ -115,3 +115,24 @@ These are author-side passes, not independent final-head reviews. Parent
 `6888e58` completed 63 successful hosted checks and two skips. The optimized
 head still requires new hosted CI/Codecov results and independent reviews before
 merge; no merge is performed.
+
+## Maintainer review follow-up (`5b1e4c83`) and independent final-head reviews
+
+Following the maintainer review of `5b1e4c8328b8cc57c5e74f63e4a051d179291e3a`:
+
+1. **Generation-bound matcher eligibility (P1 fix):**
+   - `RouteCacheConfig` binds an atomic generation (`boundGen`) when constructed via `HandlerForRoute` (or upon the next `CommitRoutePolicies` if constructed before initial commit).
+   - `routeStateSnapshot.isRouteEligible` requires an active scope, matching `matcherProof`, identical route policy overrides (`sameRoutePolicyOverrides`), and `boundGen != 0 && boundGen == curGen` when a matcher proof is present.
+   - Any handler from a retired or superseded matcher generation receives `pol.RouteEpoch = incompatibleRouteEpoch` (`math.MaxUint64`), preventing both cache hits and cache publication across normal fills, coalesced fills, Range fills, and 304 validations (`isPolicyPublicationFencedLocked`).
+   - Verified with `TestIndependent673OldSelectedHandlerCannotPublishIntoReplacementEpoch` (`identified=false/true`, `disk=false/true`, restart, Range requests, and `A -> B -> A` predicate transitions) and `TestCacheMatcherFactoryWarmReloadPreflightAndRestart`.
+
+2. **Documentation alignment:**
+   - Updated the cache threat note (`docs/cache.md`), inspection capabilities section (`docs/cache.md`), cookie-session limitation (`docs/known-limitations.md`), and `docs/adr/0029-route-scoped-cache-policy-and-vary-guards.md` to state that `Vary: Cookie` and `Vary: Authorization` are rejected and never reused (`#672`), and that route-scoped `bypass_cookies` / `bypass_any_cookie` bypass shared cache lookup and storage (`#623`), while retaining the explicit warning that cookies alone do not establish application safety when an origin emits cacheable responses without privacy directives or configured bypass.
+
+3. **Five adversarial review passes and two independent final-head reviews:**
+   - **Pass 1 (Security & Privacy):** Verified generation-bound admission, sensitive-`Vary` rejection (`Cookie`/`Authorization`) including startup disk rehydration scrub (`rehydrate` in `diskstore.go`) and runtime lookup quarantine, proxy/CGI transformed-header `Vary` isolation, and RFC 6265 §4.1.1 `cookie-octet` validation in `hasInvalidCookieValueByte` so malformed cookie values (including unquoted spaces, commas, backslashes, stray quotes, control bytes, and non-ASCII bytes) fail closed with `cookie_bypass_malformed`.
+   - **Pass 2 (Correctness & Concurrency):** Verified `isRouteEligible` rejects unbound (`bg == 0`) or stale generations, `pendingRouteHandlers` is bounded (`max(4096, len(c.routeConfigs)*2)`) and cleared on every `CommitRoutePolicies`, and `routePolicyFloor` compacts to `routeEpochFloorKey` when exceeding 1,024 entries even while an origin fill is in flight.
+   - **Pass 3 (Disk Persistence & Resource Bounds):** Verified `decodeDiskEntryMeta` rejects `meta.RouteEpoch >= math.MaxInt64` and `len(meta.RouteVary) > maxVariantsPerResource`.
+   - **Pass 4 (Admin API, Config Validation & CLI):** Verified `validateLocationCachePolicy` requires a cacheable location action (`proxy_pass` without `grpc`, `fastcgi_pass`, `uwsgi_pass`, or `plugins`), and `resolveInspectionRoutePolicy` caps inherited `DefaultTTLSeconds` by route `MaxTTL`, normalizes/sorts `BypassCookies`, enforces segment-bounded prefix matching, and respects per-server router tier/specificity shadowing.
+   - **Pass 5 (Console UI, Accessibility & Playwright E2E):** Verified duration overflow guard in `cachePolicyDraft.ts`, `aria-invalid` on duration and cookie-name inputs, `role="alert"` and `role="status"` live regions in `LocationCachePolicyEditor.tsx`, optional `Route ID` filter in `CacheInspectorPanel.tsx`, and end-to-end Playwright + keyboard accessibility tests in `internal/admin/ui/e2e/smoke.spec.ts`.
+   - **Independent Final-Head Reviews #1 (Security & Privacy) and #2 (Correctness, Concurrency, Resource Bounds, Admin API & Console):** Executed via isolated review subagents against the final working tree; all findings (startup sensitive-`Vary` disk scrub, strict RFC 6265 cookie-value byte validation, router-shadowing in admin inspection policy resolution, and `aria-invalid` on cookie-name input) were resolved and verified by unit and E2E tests.

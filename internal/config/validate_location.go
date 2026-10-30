@@ -152,7 +152,8 @@ func validateLocationCachePolicy(loc LocationConfig, where string) []error {
 	}
 	var errs []error
 	pWhere := where + ".cache_policy"
-	if loc.Root != "" || loc.GRPC || loc.GRPCTranscode != nil || loc.Redirect != "" || loc.Return != 0 || loc.Deny {
+	hasCacheableAction := (loc.ProxyPass != "" && !loc.GRPC) || loc.FastCGIPass != "" || loc.UWSGIPass != "" || len(loc.Plugins) > 0
+	if !hasCacheableAction || loc.Root != "" || loc.GRPC || loc.GRPCTranscode != nil || loc.Redirect != "" || loc.Return != 0 || loc.Deny {
 		errs = append(errs, fmt.Errorf("%s: cache_policy applies only to cacheable location actions (proxy_pass without grpc, fastcgi_pass, uwsgi_pass, or handler plugin)", pWhere))
 	}
 	for _, check := range []struct {

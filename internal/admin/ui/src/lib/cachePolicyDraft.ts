@@ -141,7 +141,10 @@ export function parseDurationSecondsApprox(raw: string): number | null {
         return null;
     }
   }
-  return matched ? total : null;
+  if (!matched || !Number.isFinite(total) || total > 100 * 365 * 86400) {
+    return null;
+  }
+  return total;
 }
 
 export function parseBypassCookiesInput(raw: string): {

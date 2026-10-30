@@ -192,7 +192,7 @@ func readDiskEntryMetaFileWithKeyGen(f *os.File) (entry *Entry, key string, gen 
 	if err := gob.NewDecoder(bytes.NewReader(metaBuf)).Decode(&meta); err != nil {
 		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
-	if meta.RouteEpoch > math.MaxInt64 {
+	if meta.RouteEpoch >= math.MaxInt64 || len(meta.RouteVary) > maxVariantsPerResource {
 		return nil, "", 0, 0, 0, errCorruptDiskEntry
 	}
 	if meta.BaseKey != "" && meta.BaseKey != baseKeyOf(meta.Key) {
@@ -997,7 +997,7 @@ func (d *diskStore) rehydrate() {
 		}
 		fullPath := d.path(name)
 		entryMeta, entryKey, entryGen, bodyLen, fileSize, err := readDiskEntryMetaWithKeyGen(fullPath)
-		if err != nil || entryKey == "" || hashKey(entryKey) != name {
+		if err != nil || entryKey == "" || hashKey(entryKey) != name || sensitiveVaryEntry(entryMeta) {
 			if removeErr := d.removePath(fullPath); removeErr != nil && !os.IsNotExist(removeErr) {
 				d.recordWriteFailure(removeErr)
 			}
@@ -1148,7 +1148,7 @@ func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
 		}
 	}
 	for scope, ep := range epochs {
-		if scope == "" || ep > math.MaxInt64 {
+		if scope == "" || ep >= math.MaxInt64 {
 			valid = false
 		}
 	}

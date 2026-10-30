@@ -376,6 +376,10 @@ func (c *Cache) handleRangeRequest(w http.ResponseWriter, r *http.Request, next 
 	if served {
 		return
 	}
+	if pol.RouteEpoch == incompatibleRouteEpoch {
+		c.fallbackRange(w, r, next, span)
+		return
+	}
 
 	if pol.Lock {
 		c.rangeFillOrWait(w, r, rWithSpec, next, k, effKey, reqPolicy, pol, span, effKey == k)

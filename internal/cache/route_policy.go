@@ -7,18 +7,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"maps"
+	"math"
 	"net/http"
 	"net/textproto"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"jul/internal/config"
 	"jul/internal/versionid"
 )
 
-const routeEpochFloorKey = "\x00floor"
+const (
+	routeEpochFloorKey     = "\x00floor"
+	incompatibleRouteEpoch = math.MaxUint64
+)
 
 // RouteScope builds restart-stable ownership without predicate values or their
 // digests. Explicit route IDs survive reordering. Anonymous predicates use an
@@ -155,6 +160,116 @@ type RouteCacheConfig struct {
 	varyGuard            *varyTransformPolicy
 	// matcherProof belongs only in the compatibility manifest, never keys or entries.
 	matcherProof string
+	boundGen     *atomic.Uint64
+}
+
+type pendingRouteHandler struct {
+	cfg      RouteCacheConfig
+	boundGen *atomic.Uint64
+}
+
+type routeStateSnapshot struct {
+	committed  bool
+	epochs     map[string]uint64
+	matchers   map[string]string
+	configs    map[string]RouteCacheConfig
+	matcherGen map[string]uint64
+}
+
+func sameRoutePolicyOverrides(a, b RouteCacheConfig) bool {
+	return a.Scope == b.Scope &&
+		a.HasDefaultTTL == b.HasDefaultTTL && a.DefaultTTL == b.DefaultTTL &&
+		a.HasMaxTTL == b.HasMaxTTL && a.MaxTTL == b.MaxTTL &&
+		a.HasSWR == b.HasSWR && a.StaleWhileRevalidate == b.StaleWhileRevalidate &&
+		a.HasSIE == b.HasSIE && a.StaleIfError == b.StaleIfError &&
+		a.BypassAnyCookie == b.BypassAnyCookie &&
+		a.BypassCookieCount == b.BypassCookieCount &&
+		a.BypassCookies == b.BypassCookies
+}
+
+func (s *routeStateSnapshot) epochOf(scope string) uint64 {
+	if s == nil || scope == "" {
+		return 0
+	}
+	return max(s.epochs[scope], s.epochs[routeEpochFloorKey])
+}
+
+func (s *routeStateSnapshot) matcherGenOf(scope string) uint64 {
+	if s == nil || scope == "" {
+		return 0
+	}
+	return max(s.matcherGen[scope], s.matcherGen[routeEpochFloorKey])
+}
+
+func (s *routeStateSnapshot) isCompatibleConfig(rc RouteCacheConfig) bool {
+	if s == nil || !s.committed {
+		return false
+	}
+	activeCfg, ok := s.configs[rc.Scope]
+	if !ok {
+		return false
+	}
+	return activeCfg.matcherProof == rc.matcherProof && sameRoutePolicyOverrides(activeCfg, rc)
+}
+
+func (s *routeStateSnapshot) isStartupCompatible(rc RouteCacheConfig) bool {
+	if s == nil {
+		return true
+	}
+	if s.matchers == nil {
+		return s.epochs[rc.Scope] == 0 && s.epochs[routeEpochFloorKey] == 0 && rc.matcherProof == ""
+	}
+	if m, exists := s.matchers[rc.Scope]; exists {
+		return m == rc.matcherProof
+	}
+	return s.epochs[rc.Scope] == 0 && s.epochs[routeEpochFloorKey] == 0 && rc.matcherProof == ""
+}
+
+func (s *routeStateSnapshot) hasPriorEvidence(scope string) bool {
+	if s == nil || scope == "" {
+		return false
+	}
+	if s.epochs[scope] > 0 || s.epochs[routeEpochFloorKey] > 0 {
+		return true
+	}
+	if s.matchers != nil {
+		_, exists := s.matchers[scope]
+		return exists
+	}
+	return false
+}
+
+func (s *routeStateSnapshot) isRouteEligible(rc RouteCacheConfig) bool {
+	if !s.isCompatibleConfig(rc) {
+		return false
+	}
+	if rc.boundGen != nil {
+		curGen := s.matcherGenOf(rc.Scope)
+		bg := rc.boundGen.Load()
+		if bg == 0 || bg != curGen {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Cache) registerPendingRouteHandler(rc RouteCacheConfig, boundGen *atomic.Uint64) {
+	if c == nil || boundGen == nil || rc.Scope == "" {
+		return
+	}
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
+	if c.routePolicyCommitted {
+		if activeCfg, ok := c.routeConfigs[rc.Scope]; ok && activeCfg.matcherProof == rc.matcherProof && sameRoutePolicyOverrides(activeCfg, rc) {
+			boundGen.Store(max(c.routeMatcherGen[rc.Scope], c.routeMatcherGen[routeEpochFloorKey]))
+			return
+		}
+	}
+	c.pendingRouteHandlers = append(c.pendingRouteHandlers, pendingRouteHandler{cfg: rc, boundGen: boundGen})
+	limit := max(4096, len(c.routeConfigs)*2)
+	if len(c.pendingRouteHandlers) > limit {
+		c.pendingRouteHandlers = c.pendingRouteHandlers[len(c.pendingRouteHandlers)-limit:]
+	}
 }
 
 // WithMatcher binds the resolved matcher to compatibility using the existing
@@ -240,21 +355,45 @@ func (rc RouteCacheConfig) WithCGIVaryGuard(names, prefixes []string, complete b
 }
 
 // effectivePolicy merges the live global scalar CachePolicy with an optional
-// route-scoped override in O(1) stack operations.
+// route-scoped override in O(1) stack operations, verifying that route is
+// compatible with the active committed matcher/generation before granting the
+// active route epoch.
 func (c *Cache) effectivePolicy(route *RouteCacheConfig) CachePolicy {
+	pol := c.baseEffectivePolicy(route)
+	if route == nil || route.Scope == "" || c == nil {
+		return pol
+	}
+	snap := c.routeStateSnap.Load()
+	if snap == nil {
+		return pol
+	}
+	if !snap.committed {
+		if snap.isStartupCompatible(*route) {
+			if ep := snap.epochOf(route.Scope); ep > pol.RouteEpoch {
+				pol.RouteEpoch = ep
+			}
+		} else if snap.hasPriorEvidence(route.Scope) {
+			pol.RouteEpoch = incompatibleRouteEpoch
+		}
+		return pol
+	}
+	if !snap.isRouteEligible(*route) {
+		pol.RouteEpoch = incompatibleRouteEpoch
+		return pol
+	}
+	if ep := snap.epochOf(route.Scope); ep > pol.RouteEpoch {
+		pol.RouteEpoch = ep
+	}
+	return pol
+}
+
+func (c *Cache) baseEffectivePolicy(route *RouteCacheConfig) CachePolicy {
 	pol := c.Policy()
 	if route == nil {
 		return pol
 	}
 	pol.RouteScope = route.Scope
 	pol.RouteEpoch = route.Epoch
-	if route.Scope != "" {
-		if snap := c.routeEpochsSnap.Load(); snap != nil {
-			if ep := max((*snap)[route.Scope], (*snap)[routeEpochFloorKey]); ep > pol.RouteEpoch {
-				pol.RouteEpoch = ep
-			}
-		}
-	}
 	pol.MultiRouteOverlap = route.MultiRouteOverlap
 	pol.varyGuard = route.varyGuard
 	if route.HasDefaultTTL {
@@ -328,10 +467,27 @@ func routeConfigDigest(pol CachePolicy) [16]byte {
 	return out
 }
 
+func isCookieOctet(b byte) bool {
+	// RFC 6265 §4.1.1:
+	// cookie-octet = %x21 / %x23-2B / %x2D-3A / %x3C-5B / %x5D-7E
+	// US-ASCII characters excluding CTLs, whitespace, DQUOTE, comma, semicolon, and backslash.
+	if b <= 0x20 || b >= 0x7f {
+		return false
+	}
+	switch b {
+	case '"', ',', ';', '\\':
+		return false
+	default:
+		return true
+	}
+}
+
 func hasInvalidCookieValueByte(val string) bool {
+	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+		val = val[1 : len(val)-1]
+	}
 	for i := 0; i < len(val); i++ {
-		b := val[i]
-		if b < 0x20 || b == 0x7f || b == ';' {
+		if !isCookieOctet(val[i]) {
 			return true
 		}
 	}
@@ -494,10 +650,50 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 			continue
 		}
 		rc.Epoch = max(epochSnap[rc.Scope], epochSnap[routeEpochFloorKey])
-		eff := c.effectivePolicy(&rc)
+		eff := c.baseEffectivePolicy(&rc)
 		digest := routeConfigDigest(eff)
 		active[rc.Scope] = digest
 		configs[rc.Scope] = rc
+	}
+	if c.routeMatcherGen == nil {
+		c.routeMatcherGen = make(map[string]uint64, len(routes))
+	}
+	nextMatcherGen := maps.Clone(c.routeMatcherGen)
+	genFloor := nextMatcherGen[routeEpochFloorKey]
+	if !c.routePolicyCommitted {
+		for scope := range configs {
+			nextMatcherGen[scope] = max(nextMatcherGen[scope], genFloor) + 1
+		}
+	} else {
+		for scope, rc := range configs {
+			prevCfg, wasActive := c.routeConfigs[scope]
+			if wasActive && prevCfg.matcherProof == rc.matcherProof && sameRoutePolicyOverrides(prevCfg, rc) {
+				nextMatcherGen[scope] = max(c.routeMatcherGen[scope], genFloor)
+			} else {
+				nextMatcherGen[scope] = max(c.routeMatcherGen[scope], genFloor) + 1
+			}
+		}
+		for prevScope := range c.routeConfigs {
+			if _, stillActive := configs[prevScope]; !stillActive {
+				nextMatcherGen[prevScope] = max(c.routeMatcherGen[prevScope], genFloor) + 1
+			}
+		}
+	}
+	if len(nextMatcherGen) > 1024+len(configs) {
+		prunedFloor := nextMatcherGen[routeEpochFloorKey]
+		trimmed := make(map[string]uint64, len(configs)+1)
+		for scope, mg := range nextMatcherGen {
+			if scope == routeEpochFloorKey {
+				continue
+			}
+			if _, isActive := configs[scope]; isActive {
+				trimmed[scope] = mg
+			} else if mg > prunedFloor {
+				prunedFloor = mg
+			}
+		}
+		trimmed[routeEpochFloorKey] = prunedFloor
+		nextMatcherGen = trimmed
 	}
 	// An unchanged durable proof needs no rewrite/fsync. Besides avoiding I/O
 	// on no-op reloads, this keeps healthy warm entries usable when writes are
@@ -518,13 +714,45 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 			c.routePolicyFloor[scope] = c.genSeq.Add(1)
 		}
 	}
+	for scope, rc := range configs {
+		if c.routeMatchers[scope] != rc.matcherProof {
+			c.routePolicyFloor[scope] = c.genSeq.Add(1)
+		}
+	}
+	c.routePolicyCommitted = true
 	c.routeEpoch = maps.Clone(epochSnap)
-	c.routeEpochsSnap.Store(&epochSnap)
 	c.routePolicyDigest = active
 	c.routeConfigs = configs
 	c.routeMatchers = matchers
-	if len(c.routePolicyFloor) > 1024 && c.minInflightStartGenLocked() == ^uint64(0) {
-		c.routePolicyFloor = make(map[string]uint64)
+	c.routeMatcherGen = nextMatcherGen
+	if len(c.pendingRouteHandlers) > 0 {
+		for _, ph := range c.pendingRouteHandlers {
+			if ph.boundGen.Load() != 0 {
+				continue
+			}
+			if rc, ok := configs[ph.cfg.Scope]; ok && rc.matcherProof == ph.cfg.matcherProof && sameRoutePolicyOverrides(rc, ph.cfg) {
+				ph.boundGen.CompareAndSwap(0, max(nextMatcherGen[ph.cfg.Scope], nextMatcherGen[routeEpochFloorKey]))
+			}
+		}
+		c.pendingRouteHandlers = nil
+	}
+	c.routeStateSnap.Store(&routeStateSnapshot{
+		committed:  true,
+		epochs:     maps.Clone(epochSnap),
+		matchers:   maps.Clone(matchers),
+		configs:    maps.Clone(configs),
+		matcherGen: maps.Clone(nextMatcherGen),
+	})
+	if len(c.routePolicyFloor) > 1024 {
+		if c.minInflightStartGenLocked() == ^uint64(0) {
+			c.routePolicyFloor = make(map[string]uint64)
+		} else {
+			maxFloor := c.routePolicyFloor[routeEpochFloorKey]
+			for _, fl := range c.routePolicyFloor {
+				maxFloor = max(maxFloor, fl)
+			}
+			c.routePolicyFloor = map[string]uint64{routeEpochFloorKey: maxFloor}
+		}
 	}
 	c.genMu.Unlock()
 }

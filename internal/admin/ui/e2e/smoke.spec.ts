@@ -849,3 +849,197 @@ for (const inspectionOnly of [false, true]) {
     }
   });
 }
+
+test.describe("Route cache policy starters, failed/staged/denied flows, and accessibility (#623)", () => {
+  test("keyboard-activates starters, surfaces validation/server alerts, hands off staged preview, and enforces RBAC", async ({
+    page,
+  }) => {
+    await setupApiMocks(page);
+    await page.route("/api/routes", (route) =>
+      json(route, [
+        {
+          base_version: "v1",
+          listen: ":8080",
+          server_names: ["portal.example.com"],
+          http3: false,
+          h2c: false,
+          locations: [
+            {
+              index: 0,
+              route_id: "portal-api",
+              match: "/api",
+              type: "prefix",
+              action: "proxy",
+              target: "http://app:3000",
+              auth: false,
+              cache: true,
+              compression: false,
+              rate_limit: false,
+              secure: false,
+              require_client_cert: false,
+              cache_policy: {
+                default_ttl: "5m0s",
+                stale_while_revalidate: "30s",
+                stale_if_error: "5m0s",
+                bypass_cookies: ["session_id"],
+                bypass_any_cookie: false,
+              },
+              cache_effective: {
+                global_enabled: true,
+                default_ttl: "5m0s",
+                default_ttl_source: "route_override",
+                max_ttl_source: "none",
+                stale_while_revalidate: "30s",
+                swr_source: "route_override",
+                stale_if_error: "5m0s",
+                sie_source: "route_override",
+                bypass_mode: "selected_cookies",
+                bypass_cookies: ["session_id"],
+                lock_enabled: true,
+                range_enabled: true,
+                memory_max_size: "64m",
+                disk_enabled: true,
+                max_entry_size: "16m",
+              },
+            },
+          ],
+        },
+      ]),
+    );
+
+    await page.goto("/routes");
+    await page.getByText("http://app:3000").click();
+    await expect(page.getByText("Cache policy", { exact: true })).toBeVisible();
+
+    // Open the Route cache policy editor via keyboard
+    const editPolicyBtn = page.getByRole("button", { name: "Edit cache policy →" });
+    await editPolicyBtn.focus();
+    await expect(editPolicyBtn).toBeFocused();
+    await page.keyboard.press("Enter");
+
+    const editorDialog = page.getByRole("dialog", { name: "Route cache policy" });
+    await expect(editorDialog).toBeVisible();
+    await expect(editorDialog.getByLabel("Effective route cache posture")).toContainText(
+      "selected_cookies (session_id)",
+    );
+
+    // 1. Validation error & dormant warning accessibility regions + aria-invalid state
+    const defaultTTLInput = editorDialog.getByLabel("Default TTL override");
+    const maxTTLInput = editorDialog.getByLabel("Max TTL cap");
+    const cookieInput = editorDialog.getByLabel(/Cookie names/);
+    await defaultTTLInput.fill("10m");
+    await maxTTLInput.fill("1m");
+    await cookieInput.fill("bad name=1");
+    await expect(defaultTTLInput).toHaveAttribute("aria-invalid", "true");
+    await expect(maxTTLInput).toHaveAttribute("aria-invalid", "true");
+    await expect(cookieInput).toHaveAttribute("aria-invalid", "true");
+    await expect(editorDialog.getByRole("alert", { name: "Cache policy errors" })).toContainText(
+      "default_ttl (10m) must not exceed max_ttl (1m).",
+    );
+    await expect(editorDialog.getByRole("button", { name: "Preview change →" })).toBeDisabled();
+
+    await editorDialog.getByLabel("Enable caching on this route (cache = true)").uncheck();
+    await expect(editorDialog.getByRole("status", { name: "Cache policy warnings" })).toContainText(
+      "Route cache is disabled",
+    );
+
+    // 2. Keyboard activation of the Conservative dynamic / API starter + failed preview flow
+    let failPreview = true;
+    await page.route("/api/config/patch/preview", (route) => {
+      const body = route.request().postDataJSON() as {
+        ops?: Array<{ readonly op: string }>;
+      };
+      if (failPreview) {
+        return json(
+          route,
+          {
+            ok: false,
+            message: "Preview rejected by policy guard",
+            errors: [
+              {
+                code: "cache_policy_conflict",
+                path: "servers[0].locations[0].cache_policy",
+                summary: "Simulated server-side preview failure",
+                severity: "error",
+              },
+            ],
+            op_index: 0,
+            op: body.ops?.[0]?.op ?? "location_cache_policy_set",
+          },
+          400,
+        );
+      }
+      return json(route, {
+        ...PATCH_RESULT,
+        summary: "route :8080/api cache policy set",
+        operation_summaries: (body.ops ?? []).map((op, idx) => ({
+          op_index: idx,
+          op: op.op,
+          summary: `${op.op} previewed`,
+        })),
+        lifecycle: {
+          changes: [
+            {
+              path: "servers.0.locations.0.cache_policy.max_ttl",
+              declared: "hot_reload",
+              effective: "restart_required",
+              subsystem: "cache",
+              reason: "staged for restart in test fixture",
+              ignored: false,
+              reserved: false,
+            },
+          ],
+          can_apply_hot: false,
+          can_stage_restart: true,
+          hot_paths: [],
+          restart_required_paths: ["servers.0.locations.0.cache_policy.max_ttl"],
+          new_listener_only_paths: [],
+          ignored_deprecated_paths: [],
+          validation_rejected_paths: [],
+          pending_subsystems: ["cache"],
+        },
+        diff: {
+          summary: "1 modification",
+          modifications: [
+            {
+              kind: "cache",
+              name: "portal.example.com :8080 /api",
+              before: "max_ttl = none",
+              after: "max_ttl = 1m0s",
+              detail: "Change cache_policy.max_ttl on route /api",
+            },
+          ],
+        },
+      });
+    });
+
+    const conservativeStarter = editorDialog.getByRole("button", {
+      name: /Conservative dynamic \/ API/i,
+    });
+    await conservativeStarter.focus();
+    await page.keyboard.press("Enter");
+    await expect(editorDialog.getByLabel("Default TTL override")).toHaveValue("0s");
+    await expect(editorDialog.getByLabel("Max TTL cap")).toHaveValue("1m");
+
+    const previewBtn = editorDialog.getByRole("button", { name: "Preview change →" });
+    await expect(previewBtn).toBeEnabled();
+    await previewBtn.click();
+    await expect(editorDialog.getByRole("alert")).toContainText(
+      /Simulated server-side preview failure|Preview rejected/i,
+    );
+
+    // 3. Staged restart handoff flow
+    failPreview = false;
+    await previewBtn.click();
+    await expect(page.getByText("atomic patch", { exact: true })).toBeVisible();
+    await expect(page.getByText("Change cache_policy.max_ttl on route /api")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save for next restart" })).toBeVisible();
+
+    // 4. Denied / viewer RBAC flow
+    await mockIdentity(page, VIEWER_IDENTITY);
+    await page.goto("/routes");
+    await page.getByText("http://app:3000").click();
+    await expect(page.getByRole("button", { name: "Edit cache policy →" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Disable cache →" })).toBeDisabled();
+  });
+});

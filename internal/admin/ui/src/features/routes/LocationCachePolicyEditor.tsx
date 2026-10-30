@@ -86,7 +86,11 @@ export function LocationCachePolicyEditor({
                 Reset to global defaults →
               </button>
             )}
-            {batchError && <span className="text-xs text-jul-danger">{batchError}</span>}
+            {batchError && (
+              <span role="alert" className="text-xs text-jul-danger">
+                {batchError}
+              </span>
+            )}
             <button
               type="button"
               disabled={batch.busy || validation.errors.length > 0 || ops.length === 0 || !canWrite}
@@ -195,6 +199,7 @@ export function LocationCachePolicyEditor({
             <input
               type="text"
               value={form.defaultTTL}
+              aria-invalid={validation.errors.some((e) => e.includes("default_ttl"))}
               placeholder="inherit global (or 0s, 5m, 1h)"
               onChange={(e) => {
                 setForm((prev) => ({ ...prev, defaultTTL: e.target.value }));
@@ -211,6 +216,7 @@ export function LocationCachePolicyEditor({
             <input
               type="text"
               value={form.maxTTL}
+              aria-invalid={validation.errors.some((e) => e.includes("max_ttl"))}
               placeholder="no route cap (or 0s, 1m, 24h)"
               onChange={(e) => {
                 setForm((prev) => ({ ...prev, maxTTL: e.target.value }));
@@ -227,6 +233,7 @@ export function LocationCachePolicyEditor({
             <input
               type="text"
               value={form.staleWhileRevalidate}
+              aria-invalid={validation.errors.some((e) => e.includes("stale_while_revalidate"))}
               placeholder="inherit global (or 0s, 30s)"
               onChange={(e) => {
                 setForm((prev) => ({ ...prev, staleWhileRevalidate: e.target.value }));
@@ -243,6 +250,7 @@ export function LocationCachePolicyEditor({
             <input
               type="text"
               value={form.staleIfError}
+              aria-invalid={validation.errors.some((e) => e.includes("stale_if_error"))}
               placeholder="inherit global (or 0s, 5m)"
               onChange={(e) => {
                 setForm((prev) => ({ ...prev, staleIfError: e.target.value }));
@@ -301,6 +309,12 @@ export function LocationCachePolicyEditor({
               <input
                 type="text"
                 value={form.bypassCookiesInput}
+                aria-invalid={validation.errors.some(
+                  (e) =>
+                    e.includes("Cookie name") ||
+                    e.includes("cookie name") ||
+                    e.includes("bypass_cookies"),
+                )}
                 placeholder="session_id, __Host-auth, logged_in"
                 onChange={(e) => {
                   setForm((prev) => ({ ...prev, bypassCookiesInput: e.target.value }));
@@ -314,17 +328,33 @@ export function LocationCachePolicyEditor({
           )}
         </fieldset>
 
-        {validation.warnings.map((wn, i) => (
-          <p key={`cp-warn-${String(i)}`} className="text-xs text-jul-warning">
-            {wn}
-          </p>
-        ))}
+        {validation.warnings.length > 0 && (
+          <div
+            role="status"
+            aria-label="Cache policy warnings"
+            className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3"
+          >
+            {validation.warnings.map((wn, i) => (
+              <p key={`cp-warn-${String(i)}`} className="text-xs text-jul-warning">
+                {wn}
+              </p>
+            ))}
+          </div>
+        )}
 
-        {validation.errors.map((errMsg, i) => (
-          <p key={`cp-err-${String(i)}`} className="text-xs text-jul-danger">
-            {errMsg}
-          </p>
-        ))}
+        {validation.errors.length > 0 && (
+          <div
+            role="alert"
+            aria-label="Cache policy errors"
+            className="space-y-1 rounded-md border border-jul-danger/40 bg-jul-danger/10 p-3"
+          >
+            {validation.errors.map((errMsg, i) => (
+              <p key={`cp-err-${String(i)}`} className="text-xs text-jul-danger">
+                {errMsg}
+              </p>
+            ))}
+          </div>
+        )}
       </div>
     </Drawer>
   );

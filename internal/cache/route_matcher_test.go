@@ -455,3 +455,107 @@ func TestMatcherManifestLegacyMissingAndCorruption(t *testing.T) {
 		})
 	}
 }
+
+func TestIndependent673OldSelectedHandlerCannotPublishIntoReplacementEpoch(t *testing.T) {
+	for _, identified := range []bool{false, true} {
+		for _, withDisk := range []bool{false, true} {
+			name := fmt.Sprintf("identified=%t/disk=%t", identified, withDisk)
+			t.Run(name, func(t *testing.T) {
+				cfg := config.CacheConfig{
+					Enabled:       true,
+					MemoryMaxSize: 4 << 20,
+					DefaultTTL:    config.Duration(time.Hour),
+					Lock:          true,
+					RangeEnabled:  true,
+				}
+				if withDisk {
+					cfg.DiskPath = t.TempDir()
+					cfg.DiskMaxSize = 16 << 20
+				}
+				c, err := New(cfg, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				key, _ := versionid.New(bytes.Repeat([]byte{0x73}, 32))
+				srvA, locA := matcherFixture("tenant-a", identified)
+				rcA := compileMatcher(srvA, locA, key)
+				c.CommitRoutePolicies([]RouteCacheConfig{rcA})
+				hA := c.HandlerForRoute(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Cache-Control", "public, max-age=3600")
+					_, _ = w.Write([]byte("tenant-a"))
+				}), rcA)
+
+				// 1. A request selects the route matching X-Tenant: tenant-a, then
+				// pauses before entering the cache.
+				selected, resume, done := make(chan struct{}), make(chan struct{}), make(chan struct{})
+				oldRec := httptest.NewRecorder()
+				go func() {
+					defer close(done)
+					req := httptest.NewRequest(http.MethodGet, "http://example.com/shared", nil)
+					req.Header.Set("X-Tenant", "tenant-a")
+					close(selected)
+					<-resume
+					hA.ServeHTTP(oldRec, req)
+				}()
+				<-selected
+
+				// 2. Reload changes that route's matcher to tenant-b.
+				srvB, locB := matcherFixture("tenant-b", identified)
+				rcB := compileMatcher(srvB, locB, key)
+				c.CommitRoutePolicies([]RouteCacheConfig{rcB})
+				hB := c.HandlerForRoute(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Cache-Control", "public, max-age=3600")
+					_, _ = w.Write([]byte("tenant-b"))
+				}), rcB)
+
+				// 3. The old request resumes and finishes its request, but must not
+				// acquire the replacement matcher's cache privileges.
+				close(resume)
+				<-done
+				if oldRec.Code != http.StatusOK || oldRec.Body.String() != "tenant-a" {
+					t.Fatalf("old handler response = %d %q, want 200 tenant-a", oldRec.Code, oldRec.Body.String())
+				}
+				// Even if a caller constructs a handler from the stale rcA struct
+				// after reload or issues a Range request on hA, it cannot publish.
+				matcherRequest(c, rcA, "/shared", "tenant-a")
+				rangeReq := httptest.NewRequest(http.MethodGet, "http://example.com/shared", nil)
+				rangeReq.Header.Set("Range", "bytes=0-3")
+				hA.ServeHTTP(httptest.NewRecorder(), rangeReq)
+
+				// 4. A new tenant-B request must miss (fetching "tenant-b") and then hit "tenant-b".
+				for i, wantState := range []string{"MISS", "HIT"} {
+					reqB := httptest.NewRequest(http.MethodGet, "http://example.com/shared", nil)
+					reqB.Header.Set("X-Tenant", "tenant-b")
+					recB := httptest.NewRecorder()
+					hB.ServeHTTP(recB, reqB)
+					if recB.Header().Get("X-Cache") != wantState || recB.Body.String() != "tenant-b" {
+						t.Fatalf("step %d: state=%s body=%q, want %s tenant-b", i, recB.Header().Get("X-Cache"), recB.Body.String(), wantState)
+					}
+				}
+
+				if withDisk {
+					restarted, err := New(cfg, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					restarted.CommitRoutePolicies([]RouteCacheConfig{rcB})
+					if r := matcherRequest(restarted, rcB, "/shared", "unwanted-origin"); r.Header().Get("X-Cache") != "HIT" || r.Body.String() != "tenant-b" {
+						t.Fatalf("after restart: state=%s body=%q, want HIT tenant-b", r.Header().Get("X-Cache"), r.Body.String())
+					}
+				}
+
+				// 5. ABA transition (tenant-b -> tenant-a -> tenant-b): an old
+				// handler from the first tenant-b generation must not publish into
+				// the third generation's epoch even though the matcher proof returns
+				// to tenant-b.
+				c.CommitRoutePolicies([]RouteCacheConfig{rcA})
+				c.CommitRoutePolicies([]RouteCacheConfig{rcB})
+				recABA := httptest.NewRecorder()
+				hB.ServeHTTP(recABA, httptest.NewRequest(http.MethodGet, "http://example.com/aba", nil))
+				if r := matcherRequest(c, rcB, "/aba", "fresh-b-epoch"); r.Header().Get("X-Cache") != "MISS" || r.Body.String() != "fresh-b-epoch" {
+					t.Fatalf("ABA old handler published into later epoch: state=%s body=%q", r.Header().Get("X-Cache"), r.Body.String())
+				}
+			})
+		}
+	}
+}

@@ -1461,16 +1461,24 @@ integrity, and availability:
    served to legitimate requests. Counter-measures: validate `Host` in the outer
    proxy; do not forward untrusted `X-Forwarded-Host` to Jul.IA.
 
-2. **Cross-user leakage through `Vary` misconfiguration.** An upstream that sets
-   `Vary: Cookie` without `Cache-Control: private` may cause one user's
-   authenticated page to be served to another user with the same `Cookie` header.
-   The cache does not treat cookies as a cache-bypass signal (only `private`,
-   `no-store` or a `Set-Cookie` in the response do). Requests carrying
-   `Authorization` are separately protected by the shared-reuse rule above, but
-   **cookie-based sessions are not**, because a `Cookie` header is not a
-   shared-cache authentication signal in RFC 9111. Counter-measures: upstreams
-   must set `private` for user-specific responses; operators should audit `Vary`
-   headers before enabling cache on cookie-authenticated routes.
+2. **Cross-user leakage on cookie-authenticated routes.** Jul rejects shared
+   cache storage and reuse for responses carrying `Vary: Cookie` or
+   `Vary: Authorization` (`vary_sensitive_rejected`), as well as responses
+   varying on proxy- or CGI-transformed request headers
+   (`vary_proxy_rewrite_rejected`, `vary_cgi_rewrite_rejected`). In addition,
+   operators can configure `[servers.locations.cache_policy]` with
+   `bypass_cookies` or `bypass_any_cookie = true` so requests carrying matching
+   (or malformed) `Cookie` headers bypass cache lookup and storage. However, a
+   `Cookie` request header is not an automatic shared-cache authentication
+   signal in RFC 9111, and cookies or route bypass rules alone do not establish
+   application safety: when cookie bypass is not configured (or does not list an
+   application's session cookie), an upstream that returns a personalized
+   response without `Vary: Cookie` and without `Cache-Control: private` or
+   `no-store` will still allow that response to be cached and served to other
+   clients. Counter-measures: upstreams must always set `private` or `no-store`
+   for user-specific responses; operators should configure `bypass_cookies` /
+   `bypass_any_cookie = true` or keep caching disabled on cookie-authenticated
+   routes.
 
 3. **Vary-header evasion (Web Cache Deception).** An attacker requests
    `/profile.jpg` with a `Accept: image/webp` header when the real page is
@@ -1607,12 +1615,16 @@ reconstructed as historical facts.
 
 The server records origin s-maxage/max-age/Expires or gateway fallback provenance,
 targeted directive use, numeric freshness/SWR/SIE lifetimes and validation/auth
-restrictions at the owning policy decision. Current global fallback values and
-supported range/fill/tag controls appear separately. Route overrides and gateway
-freshness caps remain unsupported (#623). A route's cache boolean controls
+restrictions at the owning policy decision. Current global or route-effective
+fallback values, route `max_ttl` caps, cookie-bypass rules, and supported
+range/fill/tag controls appear in `inspection.policy` (`route_overrides_supported`
+and `gateway_freshness_cap_supported` are both `true`, #623). When a host or path
+selector matches multiple routes with distinct cache policies or predicates,
+inspection reports `ambiguous_multiple_routes_use_route_id` so the operator can
+narrow by `route_id`. A route's cache boolean controls
 activation; cached entries can remain after disabling a route or ordinary
-reload. `retained_policy` compares recorded entry policy with current global
-policy. A displayed freshness lifetime is not an absolute wall-clock guarantee:
+reload. `retained_policy` compares recorded entry policy with the active route or
+global policy. A displayed freshness lifetime is not an absolute wall-clock guarantee:
 origin age, validation, request restrictions, invalidation and eviction still
 matter. A MISS is not proof of storage.
 

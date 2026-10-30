@@ -358,4 +358,73 @@ describe("LocationCachePolicyEditor and RouteDetail integration", () => {
       expect(screen.getByText("Route cache policy")).toBeInTheDocument();
     });
   });
+
+  it("handles failed preview responses and denied config:write permissions with accessible alerts", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      headers: new Headers(),
+      json: () =>
+        Promise.resolve({
+          ok: false,
+          message: "location_cache_policy_set rejected by server",
+          errors: [
+            {
+              code: "invalid_cache_policy",
+              path: "servers[0].locations[0].cache_policy",
+              summary: "default_ttl exceeds max_ttl",
+              severity: "error",
+            },
+          ],
+          op_index: 0,
+          op: "location_cache_policy_set",
+        }),
+    }) as typeof fetch;
+
+    render(
+      <Wrapper>
+        <LocationCachePolicyEditor route={SAMPLE_ROUTE} loc={SAMPLE_LOC} onClose={() => {}} />
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByText(CACHE_POLICY_STARTERS[1]?.label ?? ""));
+    fireEvent.click(screen.getByRole("button", { name: /Preview change/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent(/default_ttl exceeds max_ttl|rejected/i);
+    });
+
+    // Verify viewer (no config:write) has all starters and actions disabled
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <PermissionContext.Provider
+          value={{
+            identity: {
+              principal: "viewer",
+              role: "viewer",
+              token_id: "t-view",
+              permissions: ["status:read", "config:read"],
+              legacy: false,
+            },
+            isLoading: false,
+            ready: true,
+            has: (p) => p === "status:read" || p === "config:read",
+          }}
+        >
+          <MemoryRouter>
+            <LocationCachePolicyEditor
+              route={SAMPLE_ROUTE}
+              loc={SAMPLE_LOC}
+              onClose={() => {}}
+            />
+          </MemoryRouter>
+        </PermissionContext.Provider>
+      </QueryClientProvider>,
+    );
+
+    const previewButtons = screen.getAllByRole("button", { name: /Preview change/i });
+    expect(previewButtons[previewButtons.length - 1]).toBeDisabled();
+  });
 });

@@ -89,11 +89,14 @@ type Cache struct {
 	inflightOps               map[uint64]uint64
 	routePolicyDigest         map[string][16]byte
 	routeMatchers             map[string]string
+	routeMatcherGen           map[string]uint64
+	routePolicyCommitted      bool
+	pendingRouteHandlers      []pendingRouteHandler
 	routeCommitMu             sync.Mutex
 	routePolicyFloor          map[string]uint64
 	routeEpoch                map[string]uint64
 	routeConfigs              map[string]RouteCacheConfig
-	routeEpochsSnap           atomic.Pointer[map[string]uint64]
+	routeStateSnap            atomic.Pointer[routeStateSnapshot]
 	globalPolicyFloorGen      uint64
 	onBeforeReclaim           func(key string)
 	onAfterFenceInstall       func(sel NormalizedSelector, fenceGen uint64)
@@ -944,7 +947,7 @@ func (c *Cache) storeCapturedWithPolicy(base string, r *http.Request, e *Entry, 
 			c.recordKeyDecision(base, "publication_failed_or_fenced")
 		}
 	}()
-	if e == nil {
+	if e == nil || pol.RouteEpoch == incompatibleRouteEpoch {
 		return false
 	}
 	if reason := varyRejectionEntry(r, pol.varyGuard, e); reason != "" {
@@ -963,7 +966,7 @@ func (c *Cache) storeCapturedWithPolicy(base string, r *http.Request, e *Entry, 
 	c.varyMu.Lock()
 	defer c.varyMu.Unlock()
 
-	if hasStartGen && c.isPublicationFenced(startGen, base, e, nil) {
+	if hasStartGen && (c.isPublicationFenced(startGen, base, e, nil) || c.isPolicyPublicationFenced(startGen, e)) {
 		return false
 	}
 	deleteGen := uint64(math.MaxUint64)
@@ -1207,6 +1210,20 @@ func (c *Cache) HandlerForRoute(next http.Handler, routeCfg RouteCacheConfig) ht
 }
 
 func (c *Cache) handlerWithRoute(next http.Handler, routeCfg *RouteCacheConfig) http.Handler {
+	var localCfg RouteCacheConfig
+	if routeCfg != nil {
+		localCfg = *routeCfg
+		if c != nil && localCfg.Scope != "" {
+			boundGen := &atomic.Uint64{}
+			localCfg.boundGen = boundGen
+			if snap := c.routeStateSnap.Load(); snap != nil && snap.committed && snap.isCompatibleConfig(localCfg) {
+				boundGen.Store(snap.matcherGenOf(localCfg.Scope))
+			} else {
+				c.registerPendingRouteHandler(localCfg, boundGen)
+			}
+		}
+		routeCfg = &localCfg
+	}
 	var identity policyIdentityMemo
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -1280,7 +1297,7 @@ func (c *Cache) serveOrFillFullWithIdentity(w http.ResponseWriter, r *http.Reque
 	if served {
 		return
 	}
-	if pol.Lock {
+	if pol.Lock && pol.RouteEpoch != incompatibleRouteEpoch {
 		c.fillOrWait(w, r, next, k, effKey, reqPolicy, pol, span, effKey == k)
 		return
 	}

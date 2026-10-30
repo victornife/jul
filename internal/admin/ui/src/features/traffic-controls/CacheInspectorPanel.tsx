@@ -21,6 +21,7 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
   const { has } = usePermission();
   const id = useId();
   const [host, setHost] = useState(serverNames[0] ?? "");
+  const [routeId, setRouteId] = useState("");
   const [kind, setKind] = useState<"host" | "exact_url" | "prefix" | "glob" | "tag">("host");
   const [filter, setFilter] = useState("");
   const [data, setData] = useState<CacheInspectionPage>();
@@ -77,7 +78,11 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
     setError("");
     setData(undefined);
     setExpired(false);
-    const selector: CacheSelector = { kind, host };
+    const selector: CacheSelector = {
+      kind,
+      host,
+      ...(routeId.trim() !== "" ? { route_id: routeId.trim() } : {}),
+    };
     switch (kind) {
       case "exact_url":
         selector.uri = filter;
@@ -133,6 +138,15 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
               <option key={h} value={h} />
             ))}
           </datalist>
+          <label htmlFor={`${id}-route-id`}>Route ID (optional)</label>
+          <input
+            id={`${id}-route-id`}
+            value={routeId}
+            onChange={(e) => {
+              clear();
+              setRouteId(e.target.value);
+            }}
+          />
           <label htmlFor={`${id}-kind`}>Filter</label>
           <select
             id={`${id}-kind`}
@@ -164,7 +178,7 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
           )}
           <button
             type="button"
-            disabled={loading || host.trim() === ""}
+            disabled={loading || (host.trim() === "" && routeId.trim() === "")}
             onClick={() => void load()}
           >
             Inspect / refresh
@@ -269,8 +283,9 @@ export function CacheInspectorPanel({ serverNames }: { readonly serverNames: str
                 ))}
               </ul>
               <p>
-                Current global fallback: freshness {data.inspection.policy.default_ttl_seconds}s;
-                stale-while-revalidate {data.inspection.policy.swr_seconds}s; stale-if-error{" "}
+                Current global fallback / effective policy: freshness{" "}
+                {data.inspection.policy.default_ttl_seconds}s; stale-while-revalidate{" "}
+                {data.inspection.policy.swr_seconds}s; stale-if-error{" "}
                 {data.inspection.policy.sie_seconds}s. Maximum entry{" "}
                 {data.inspection.policy.max_entry_bytes} bytes. Origin and validation restrictions
                 take precedence.

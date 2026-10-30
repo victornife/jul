@@ -360,10 +360,15 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   with `public` or `s-maxage`.** RFC 9111 §3.5 also lists `must-revalidate` as a
   *reuse* permission, which Jul honors — but not as permission to publish an
   authenticated response into a cache anonymous clients read.
-- **Cookie-based sessions are not protected by the authenticated-reuse rule.**
-  RFC 9111 §3.5 is defined in terms of `Authorization`; a `Cookie` header is not
-  a shared-cache authentication signal. An origin serving user-specific content
-  behind a cookie must set `private` or `no-store`.
+- **Cookie-based sessions are not protected by the authenticated-reuse rule
+  unless route cookie bypass is configured.** RFC 9111 §3.5 is defined in terms
+  of `Authorization`; a `Cookie` header is not an automatic shared-cache
+  authentication signal. Although Jul rejects `Vary: Cookie` responses from
+  shared caching and supports opt-in per-route cookie bypass
+  (`[servers.locations.cache_policy]` `bypass_cookies` and
+  `bypass_any_cookie = true`), cookies alone do not establish application
+  safety: an origin serving user-specific content must still set `private` or
+  `no-store`.
 - **A `304` that changes `Vary` discards the representation** and the request
   re-fetches, rather than rekeying it in place. Discarding is the outcome that
   cannot leave a wrongly-keyed entry reachable.

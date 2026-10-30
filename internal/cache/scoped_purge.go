@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"jul/internal/cachemeta"
+	"maps"
 	"math"
 	"net/http"
 	"sort"
@@ -792,12 +793,33 @@ func (c *Cache) refreshBaseTagsLocked(host, baseKey string) {
 	}
 }
 
+func (c *Cache) isPolicyPublicationFenced(startGen uint64, e *Entry) bool {
+	if c == nil || e == nil {
+		return false
+	}
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
+	return c.isPolicyPublicationFencedLocked(startGen, e)
+}
+
 func (c *Cache) isPolicyPublicationFencedLocked(startGen uint64, e *Entry) bool {
-	if e == nil || e.IsVaryStub || e.Evidence == nil {
+	if e == nil {
+		return false
+	}
+	if e.RouteEpoch == incompatibleRouteEpoch {
+		return true
+	}
+	if e.IsVaryStub || e.Evidence == nil {
 		return false
 	}
 	if e.RouteScope != "" {
-		floor := c.routePolicyFloor[e.RouteScope]
+		if c.routePolicyCommitted {
+			curDigest, active := c.routePolicyDigest[e.RouteScope]
+			if !active || e.RouteConfigDigest != curDigest {
+				return true
+			}
+		}
+		floor := max(c.routePolicyFloor[e.RouteScope], c.routePolicyFloor[routeEpochFloorKey])
 		if c.globalPolicyFloorGen > floor {
 			floor = c.globalPolicyFloorGen
 		}
@@ -962,12 +984,13 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 			}
 		}
 	}
-	if len(c.routeEpoch) > 0 {
-		epochSnap := make(map[string]uint64, len(c.routeEpoch))
-		for k, v := range c.routeEpoch {
-			epochSnap[k] = v
+	if len(c.routeEpoch) > 0 || c.routeMatchers != nil {
+		snap := &routeStateSnapshot{
+			committed: false,
+			epochs:    maps.Clone(c.routeEpoch),
+			matchers:  maps.Clone(c.routeMatchers),
 		}
-		c.routeEpochsSnap.Store(&epochSnap)
+		c.routeStateSnap.Store(snap)
 	}
 	c.genMu.Unlock()
 	for _, rk := range retireKeys {

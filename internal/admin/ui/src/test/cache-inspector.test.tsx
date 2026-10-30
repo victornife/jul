@@ -118,7 +118,7 @@ function json(value: unknown, status = 200) {
 describe("cache inspector", () => {
   it("shows server-owned metadata, policy, occupancy and repeats selector for paging", async () => {
     const requests: Array<{
-      selector: { kind: string; host: string; uri?: string };
+      selector: { kind: string; host: string; uri?: string; route_id?: string };
       cursor?: string;
     }> = [];
     globalThis.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
@@ -127,12 +127,16 @@ describe("cache inspector", () => {
       return Promise.resolve(json(page()));
     });
     render(<CacheInspectorPanel serverNames={["example.com"]} />);
+    fireEvent.change(screen.getByLabelText("Route ID (optional)"), {
+      target: { value: "portal-api" },
+    });
     fireEvent.change(screen.getByLabelText("Filter"), { target: { value: "exact_url" } });
     fireEvent.change(screen.getByLabelText("Filter value"), {
       target: { value: "/article?token=SECRET" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Inspect / refresh" }));
     await screen.findByText(/origin_max_age/);
+    expect(requests[0]?.selector.route_id).toBe("portal-api");
     expect(screen.getByText(/Memory occupancy 100/)).toBeInTheDocument();
     expect(screen.getByText(/Current global fallback/)).toBeInTheDocument();
     expect(screen.getByText(/Concurrent-change evidence/)).toBeInTheDocument();

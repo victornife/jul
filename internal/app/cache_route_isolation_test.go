@@ -149,4 +149,15 @@ func TestCacheMatcherFactoryWarmReloadPreflightAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	request(build(f2, true), "after", "HIT", "origin-2")
+
+	// A request that selected the old generation's route handler before reload
+	// and paused before entering the cache must not publish into the new
+	// generation's epoch after reload changes the matcher.
+	oldHandler := build(f2, true)
+	changedAgain := "tenant-c"
+	cfg.Servers[0].Locations[0].Match.Headers[0].Value = &changedAgain
+	newHandler := build(f2, true)
+	request(oldHandler, "after", "MISS", "origin-3")
+	request(newHandler, "tenant-c", "MISS", "origin-4")
+	request(newHandler, "tenant-c", "HIT", "origin-4")
 }

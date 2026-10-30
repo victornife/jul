@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -93,6 +94,9 @@ func applyRoutePolicyToEffective(cfg *config.Config, loc config.LocationConfig, 
 		if cp.MaxTTL != nil {
 			v := cp.MaxTTL.Std().Seconds()
 			pol.MaxTTLSeconds = &v
+			if cp.DefaultTTL == nil && pol.DefaultTTLSeconds > v {
+				pol.DefaultTTLSeconds = v
+			}
 			hasOverride = true
 		}
 		if cp.StaleWhileRevalidate != nil {
@@ -103,8 +107,21 @@ func applyRoutePolicyToEffective(cfg *config.Config, loc config.LocationConfig, 
 			pol.SIESeconds = cp.StaleIfError.Std().Seconds()
 			hasOverride = true
 		}
-		if len(cp.BypassCookies) > 0 {
-			pol.BypassCookies = append([]string(nil), cp.BypassCookies...)
+		if len(cp.BypassCookies) > 0 && !cp.BypassAnyCookie {
+			norm := make([]string, 0, len(cp.BypassCookies))
+			seen := make(map[string]struct{}, len(cp.BypassCookies))
+			for _, raw := range cp.BypassCookies {
+				trimmed := strings.ToLower(strings.TrimSpace(raw))
+				if trimmed == "" {
+					continue
+				}
+				if _, dup := seen[trimmed]; !dup {
+					seen[trimmed] = struct{}{}
+					norm = append(norm, trimmed)
+				}
+			}
+			sort.Strings(norm)
+			pol.BypassCookies = norm
 			hasOverride = true
 		}
 		if cp.BypassAnyCookie {
@@ -119,47 +136,171 @@ func locationHasPredicates(loc config.LocationConfig) bool {
 	return loc.Match.HasPredicates()
 }
 
-func locationMatchesInspectionSelector(loc config.LocationConfig, sel cache.NormalizedSelector) bool {
-	targetPath := ""
+func hasSegmentPrefix(path, prefix string) bool {
+	if prefix == "" || prefix == "/" {
+		return strings.HasPrefix(path, "/")
+	}
+	if !strings.HasPrefix(path, prefix) {
+		return false
+	}
+	if strings.HasSuffix(prefix, "/") {
+		return true
+	}
+	return len(path) == len(prefix) || path[len(prefix)] == '/'
+}
+
+func inspectionSelectorTargetPath(sel cache.NormalizedSelector) string {
 	switch sel.Kind {
 	case cache.SelectorExactURL:
-		targetPath = sel.URI
+		targetPath := sel.URI
 		if q := strings.IndexByte(targetPath, '?'); q >= 0 {
 			targetPath = targetPath[:q]
 		}
+		return targetPath
 	case cache.SelectorKey:
 		parts := strings.Split(sel.Key, "\n")
 		if len(parts) == 3 {
-			targetPath = parts[2]
+			targetPath := parts[2]
 			if nl := strings.IndexByte(targetPath, 0x00); nl >= 0 {
 				targetPath = targetPath[:nl]
 			}
 			if q := strings.IndexByte(targetPath, '?'); q >= 0 {
 				targetPath = targetPath[:q]
 			}
+			return targetPath
+		}
+	}
+	return ""
+}
+
+func locationMatchesInspectionSelector(loc config.LocationConfig, sel cache.NormalizedSelector) bool {
+	switch sel.Kind {
+	case cache.SelectorExactURL, cache.SelectorKey:
+		targetPath := inspectionSelectorTargetPath(sel)
+		if targetPath == "" {
+			return true
+		}
+		switch loc.Match.Type {
+		case "exact":
+			return targetPath == loc.Match.Path
+		case "prefix", "":
+			return strings.HasPrefix(targetPath, loc.Match.Path)
+		default:
+			return true
 		}
 	case cache.SelectorPrefix:
 		switch loc.Match.Type {
 		case "exact":
-			return strings.HasPrefix(loc.Match.Path, sel.Prefix)
+			return hasSegmentPrefix(loc.Match.Path, sel.Prefix)
 		case "prefix", "":
-			return strings.HasPrefix(loc.Match.Path, sel.Prefix) || strings.HasPrefix(sel.Prefix, loc.Match.Path)
+			return hasSegmentPrefix(loc.Match.Path, sel.Prefix) || strings.HasPrefix(sel.Prefix, loc.Match.Path)
 		default:
 			return true
 		}
 	default:
 		return true
 	}
-	if targetPath == "" {
-		return true
-	}
-	switch loc.Match.Type {
-	case "exact":
-		return targetPath == loc.Match.Path
-	case "prefix", "":
-		return strings.HasPrefix(targetPath, loc.Match.Path)
+}
+
+func serverCandidatesForInspectionSelector(srv config.ServerConfig, sel cache.NormalizedSelector) []config.LocationConfig {
+	switch sel.Kind {
+	case cache.SelectorExactURL, cache.SelectorKey:
+		targetPath := inspectionSelectorTargetPath(sel)
+		if targetPath == "" {
+			return append([]config.LocationConfig(nil), srv.Locations...)
+		}
+		type indexedLoc struct {
+			loc config.LocationConfig
+			idx int
+		}
+		var tier1, tier2, tier3, tier4 []indexedLoc
+		for i, loc := range srv.Locations {
+			if !locationMatchesInspectionSelector(loc, sel) {
+				continue
+			}
+			switch loc.Match.Type {
+			case "exact":
+				tier1 = append(tier1, indexedLoc{loc: loc, idx: i})
+			case "prefix", "":
+				if loc.Match.Path == "/" {
+					tier4 = append(tier4, indexedLoc{loc: loc, idx: i})
+				} else {
+					tier2 = append(tier2, indexedLoc{loc: loc, idx: i})
+				}
+			default:
+				tier3 = append(tier3, indexedLoc{loc: loc, idx: i})
+			}
+		}
+		sort.SliceStable(tier2, func(i, j int) bool {
+			return len(tier2[i].loc.Match.Path) > len(tier2[j].loc.Match.Path)
+		})
+		var out []config.LocationConfig
+		for _, tier := range [][]indexedLoc{tier1, tier2, tier3, tier4} {
+			for _, item := range tier {
+				out = append(out, item.loc)
+				if !locationHasPredicates(item.loc) {
+					return out
+				}
+			}
+		}
+		return out
+
+	case cache.SelectorPrefix:
+		shadowPrefixLen := -1
+		shadowDeclIdx := -1
+		for i, loc := range srv.Locations {
+			if (loc.Match.Type == "prefix" || loc.Match.Type == "") &&
+				loc.Match.Path != "/" &&
+				!locationHasPredicates(loc) &&
+				strings.HasPrefix(sel.Prefix, loc.Match.Path) {
+				if len(loc.Match.Path) > shadowPrefixLen {
+					shadowPrefixLen = len(loc.Match.Path)
+					shadowDeclIdx = i
+				}
+			}
+		}
+		var out []config.LocationConfig
+		rootShadowed := shadowPrefixLen > 0
+		for i, loc := range srv.Locations {
+			if !locationMatchesInspectionSelector(loc, sel) {
+				continue
+			}
+			switch loc.Match.Type {
+			case "prefix", "":
+				if loc.Match.Path == "/" {
+					if rootShadowed {
+						continue
+					}
+					out = append(out, loc)
+					if !locationHasPredicates(loc) {
+						rootShadowed = true
+					}
+					continue
+				}
+				if shadowPrefixLen > 0 &&
+					(len(loc.Match.Path) < shadowPrefixLen || (len(loc.Match.Path) == shadowPrefixLen && i > shadowDeclIdx)) {
+					continue
+				}
+				out = append(out, loc)
+			case "exact":
+				out = append(out, loc)
+			default:
+				if shadowPrefixLen > 0 {
+					continue
+				}
+				out = append(out, loc)
+			}
+		}
+		return out
+
 	default:
-		return true
+		var out []config.LocationConfig
+		for _, loc := range srv.Locations {
+			if locationMatchesInspectionSelector(loc, sel) {
+				out = append(out, loc)
+			}
+		}
+		return out
 	}
 }
 
@@ -171,8 +312,31 @@ func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Conf
 	if cfg == nil {
 		return base, defaultSource, defaultRouteState, nil
 	}
+	host := sel.Host
+	if sel.Kind == cache.SelectorKey {
+		parts := strings.Split(sel.Key, "\n")
+		if len(parts) == 3 {
+			host = parts[1]
+		}
+	}
+	bare := middleware.CanonicalHTTPHost(host)
+	serverMatchesHost := func(srv config.ServerConfig) bool {
+		if host == "" {
+			return true
+		}
+		for _, name := range srv.ServerNames {
+			norm := config.NormalizeHostPattern(name)
+			if norm == host || norm == bare {
+				return true
+			}
+		}
+		return false
+	}
 	if sel.RouteID != "" {
 		for _, srv := range cfg.Servers {
+			if !serverMatchesHost(srv) {
+				continue
+			}
 			for _, loc := range srv.Locations {
 				if loc.RouteID != nil && *loc.RouteID == sel.RouteID {
 					routeState := "disabled_retained_entries_may_exist"
@@ -189,32 +353,12 @@ func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Conf
 		}
 		return base, defaultSource, defaultRouteState, nil
 	}
-	host := sel.Host
-	if sel.Kind == cache.SelectorKey {
-		parts := strings.Split(sel.Key, "\n")
-		if len(parts) == 3 {
-			host = parts[1]
-		}
-	}
-	bare := middleware.CanonicalHTTPHost(host)
 	var candidates []config.LocationConfig
 	for _, srv := range cfg.Servers {
-		matchedServer := false
-		for _, name := range srv.ServerNames {
-			norm := config.NormalizeHostPattern(name)
-			if norm == host || norm == bare {
-				matchedServer = true
-				break
-			}
-		}
-		if !matchedServer {
+		if !serverMatchesHost(srv) {
 			continue
 		}
-		for _, loc := range srv.Locations {
-			if locationMatchesInspectionSelector(loc, sel) {
-				candidates = append(candidates, loc)
-			}
-		}
+		candidates = append(candidates, serverCandidatesForInspectionSelector(srv, sel)...)
 	}
 	if len(candidates) == 0 {
 		return base, defaultSource, defaultRouteState, nil

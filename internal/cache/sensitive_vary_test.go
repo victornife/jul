@@ -100,6 +100,15 @@ func TestSensitiveVaryAdmissionAndInspection(t *testing.T) {
 
 func seedSensitiveVaryDisk(t *testing.T, dir, method, header string) (*http.Request, string) {
 	t.Helper()
+	d, err := newDiskStore(dir, 8<<20, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return seedSensitiveVaryOnStore(t, d, method, header)
+}
+
+func seedSensitiveVaryOnStore(t *testing.T, d *diskStore, method, header string) (*http.Request, string) {
+	t.Helper()
 	req := httptest.NewRequest(method, "http://example.com/legacy", nil)
 	req.Header.Set(header, "fixture-legacy-marker")
 	base := key(req)
@@ -116,10 +125,6 @@ func seedSensitiveVaryDisk(t *testing.T, dir, method, header string) (*http.Requ
 		VaryValues: map[string]string{header: varyRequestValue(req.Header, header)},
 	}
 	stub := &Entry{IsVaryStub: true, Vary: []string{header}, Variants: []string{variant}}
-	d, err := newDiskStore(dir, 8<<20, testLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
 	d.set(variant, entry)
 	d.set(base, stub)
 	if !d.hasKey(base) || !d.hasKey(variant) {
@@ -135,6 +140,9 @@ func TestSensitiveVaryLegacyDiskRejectedAfterRestart(t *testing.T) {
 				dir := t.TempDir()
 				req, variant := seedSensitiveVaryDisk(t, dir, method, header)
 				c := newTestCache(t, largeCacheCfg(dir, 1<<20, 1<<20, 8<<20))
+				if _, err := os.Stat(filepath.Join(dir, hashKey(variant))); !os.IsNotExist(err) {
+					t.Fatalf("expected startup rehydrate to scrub legacy variant: %v", err)
+				}
 				origin := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					w.Header().Set("Cache-Control", "public, max-age=60")
 					w.Header().Set("Vary", header)
@@ -162,13 +170,13 @@ func TestSensitiveVaryLegacyDiskRejectedAfterRestart(t *testing.T) {
 
 func TestSensitiveVaryCleanupFailureIsReported(t *testing.T) {
 	dir := t.TempDir()
-	req, variant := seedSensitiveVaryDisk(t, dir, http.MethodGet, "Cookie")
 	var logs bytes.Buffer
 	cfg := largeCacheCfg(dir, 1<<20, 1<<20, 8<<20)
 	c, err := New(cfg, slog.New(slog.NewTextHandler(&logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
+	req, variant := seedSensitiveVaryOnStore(t, c.disk, http.MethodGet, "Cookie")
 	c.disk.testRemoveFile = func(path string) error {
 		return &os.PathError{Op: "remove", Path: path, Err: os.ErrPermission}
 	}

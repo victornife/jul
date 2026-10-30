@@ -18,6 +18,7 @@ import (
 	"jul/internal/adminapi"
 	"jul/internal/adminclient"
 	"jul/internal/cache"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/rbac"
 )
@@ -409,5 +410,184 @@ func TestInspectionWideVaryClientPagination(t *testing.T) {
 	}
 	if len(seen) != 50 {
 		t.Fatalf("got %d resources in %d pages", len(seen), pages)
+	}
+}
+
+func TestResolveInspectionRoutePolicyRouterShadowingAndPrefixOverlap(t *testing.T) {
+	maxTTL := config.Duration(45 * time.Second)
+	cfg := &config.Config{
+		Cache: config.CacheConfig{
+			Enabled:    true,
+			DefaultTTL: config.Duration(5 * time.Minute),
+		},
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"example.com"},
+				Locations: []config.LocationConfig{
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+						ProxyPass: "http://root:8080",
+						Cache:     true,
+					},
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/api"},
+						ProxyPass: "http://api:8080",
+						Cache:     true,
+						CachePolicy: &config.LocationCachePolicy{
+							MaxTTL:        &maxTTL,
+							BypassCookies: []string{"SID", "auth"},
+						},
+					},
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/api-v2"},
+						ProxyPass: "http://apiv2:8080",
+						Cache:     false,
+					},
+				},
+			},
+		},
+	}
+	base := cachemeta.EffectivePolicy{DefaultTTLSeconds: 300}
+
+	// 1. Exact URL under /api/items shadows catch-all "/" and resolves /api policy unambiguously.
+	selExact, err := cache.ParseInspectionSelector(cache.Selector{
+		Kind: cache.SelectorExactURL,
+		URL:  "http://example.com/api/items",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pol, src, state, warns := resolveInspectionRoutePolicy(selExact, cfg, base)
+	if src != "route_override_with_global_inheritance" || state != "enabled" || len(warns) != 0 {
+		t.Fatalf("exact URL under /api: src=%q state=%q warns=%v", src, state, warns)
+	}
+	if pol.MaxTTLSeconds == nil || *pol.MaxTTLSeconds != 45 || pol.DefaultTTLSeconds != 45 {
+		t.Fatalf("expected MaxTTL=45 and capped DefaultTTL=45, got %+v", pol)
+	}
+	if len(pol.BypassCookies) != 2 || pol.BypassCookies[0] != "auth" || pol.BypassCookies[1] != "sid" {
+		t.Fatalf("expected normalized sorted BypassCookies [auth sid], got %v", pol.BypassCookies)
+	}
+
+	// 2. Prefix selector "/api" does NOT overlap "/api-v2" (segment boundary) and shadows "/".
+	selPrefixAPI, err := cache.ParseInspectionSelector(cache.Selector{
+		Kind:   cache.SelectorPrefix,
+		Host:   "example.com",
+		Prefix: "/api",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	polAPI, srcAPI, _, warnsAPI := resolveInspectionRoutePolicy(selPrefixAPI, cfg, base)
+	if srcAPI != "route_override_with_global_inheritance" || len(warnsAPI) != 0 || polAPI.MaxTTLSeconds == nil || *polAPI.MaxTTLSeconds != 45 {
+		t.Fatalf("prefix /api: src=%q warns=%v pol=%+v", srcAPI, warnsAPI, polAPI)
+	}
+
+	// 3. Prefix selector "/apix" IS routed to prefix location "/api" by the router and shadows "/".
+	selPrefixAPIX, err := cache.ParseInspectionSelector(cache.Selector{
+		Kind:   cache.SelectorPrefix,
+		Host:   "example.com",
+		Prefix: "/apix",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	polAPIX, srcAPIX, _, warnsAPIX := resolveInspectionRoutePolicy(selPrefixAPIX, cfg, base)
+	if srcAPIX != "route_override_with_global_inheritance" || len(warnsAPIX) != 0 || polAPIX.MaxTTLSeconds == nil || *polAPIX.MaxTTLSeconds != 45 {
+		t.Fatalf("prefix /apix: src=%q warns=%v pol=%+v", srcAPIX, warnsAPIX, polAPIX)
+	}
+
+	// 4. Exercise hasSegmentPrefix, exact/regex tiers, SelectorKey targetPath extraction, and route_id resolution.
+	if !hasSegmentPrefix("/a/b", "/") || !hasSegmentPrefix("/a/b", "/a/") || hasSegmentPrefix("/b", "/a") {
+		t.Fatal("unexpected hasSegmentPrefix result")
+	}
+	routeExactID := "exact-id"
+	routeNoOverrideID := "no-override-id"
+	cfg2 := &config.Config{
+		Cache: cfg.Cache,
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"other.example.com"},
+				Locations: []config.LocationConfig{
+					{Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "http://other:8080"},
+				},
+			},
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"example.com"},
+				Locations: []config.LocationConfig{
+					{
+						RouteID:     &routeExactID,
+						Match:       config.MatchConfig{Type: "exact", Path: "/api/exact"},
+						ProxyPass:   "http://exact:8080",
+						Cache:       true,
+						CachePolicy: &config.LocationCachePolicy{MaxTTL: &maxTTL},
+					},
+					{
+						RouteID:   &routeNoOverrideID,
+						Match:     config.MatchConfig{Type: "prefix", Path: "/api"},
+						ProxyPass: "http://api:8080",
+						Cache:     false,
+					},
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/api"},
+						ProxyPass: "http://api2:8080",
+						Cache:     false,
+					},
+					{
+						Match:     config.MatchConfig{Type: "regex", Path: `^/api/.*`},
+						ProxyPass: "http://regex:8080",
+						Cache:     false,
+					},
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+						ProxyPass: "http://root1:8080",
+						Cache:     true,
+					},
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+						ProxyPass: "http://root2:8080",
+						Cache:     false,
+					},
+				},
+			},
+		},
+	}
+	selKey, err := cache.ParseInspectionSelector(cache.Selector{
+		Kind: cache.SelectorKey,
+		Key:  "GET\nexample.com\n/api/exact?x=1",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, srcKey, stateKey, _ := resolveInspectionRoutePolicy(selKey, cfg2, base)
+	if srcKey != "route_override_with_global_inheritance" || stateKey != "enabled" {
+		t.Fatalf("SelectorKey exact route: src=%q state=%q", srcKey, stateKey)
+	}
+	selByID, err := cache.ParseInspectionSelector(cache.Selector{
+		Kind:    cache.SelectorHost,
+		Host:    "example.com",
+		RouteID: routeNoOverrideID,
+	}, cfg2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, srcByID, stateByID, _ := resolveInspectionRoutePolicy(selByID, cfg2, base)
+	if srcByID != "global_inherited_origin_precedence" || stateByID != "disabled_retained_entries_may_exist" {
+		t.Fatalf("RouteID no override: src=%q state=%q", srcByID, stateByID)
+	}
+	// Prefix selector on root-only server exercises rootShadowed without Tier-2 shadow.
+	selRootPrefix, err := cache.ParseInspectionSelector(cache.Selector{
+		Kind:   cache.SelectorPrefix,
+		Host:   "other.example.com",
+		Prefix: "/anything",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, srcRoot, _, _ := resolveInspectionRoutePolicy(selRootPrefix, cfg2, base)
+	if srcRoot != "global_inherited_origin_precedence" {
+		t.Fatalf("root-only server prefix: src=%q", srcRoot)
 	}
 }

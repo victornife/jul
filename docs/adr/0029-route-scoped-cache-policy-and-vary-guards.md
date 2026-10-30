@@ -111,8 +111,15 @@ take precedence over route overrides.
   Changed predicates (including changes while stopped), preflight changes,
   incomparable key contexts, or unverifiable previous matcher state advance the
   affected route's epoch before reuse/publication. Returning to an earlier
-  predicate never resets its epoch. Existing route policy tightening is still
-  evaluated separately; matching proof equality cannot weaken it.
+  predicate never resets its epoch. Each route handler binds to its compatible
+  committed matcher generation (`boundGen`) and verifies both matcher-proof and
+  policy compatibility before acquiring the active `RouteEpoch` in
+  `effectivePolicy`; a request that selected an older handler before a reload
+  and resumed after a matcher or policy change receives the sentinel
+  `incompatibleRouteEpoch` (`math.MaxUint64`) and is barred from both cache
+  reuse and publication, even if its origin operation started after the reload's
+  publication floor. Existing route policy tightening is still evaluated
+  separately; matching proof equality cannot weaken it.
 - Production uses the already-provisioned effective-version key (ADR 0025).
   Missing/unprotected keys still fail startup through that owner's contract.
   Embeddings with no supplied context use `versionid.Process()`: unchanged

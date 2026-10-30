@@ -4366,13 +4366,13 @@
       "original_disposition": "not reviewed",
       "original_reason_and_limit": "generated OpenAPI, route classification, targeted admin mutation permission comparison and TLS self-lockout predicate sampled; full authorization matrix and Console UI not exercised",
       "current_paths": [
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-D-cVvgTM.js",
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-D-cVvgTM.js.map",
-        "internal/admin/assets/dist/assets/CodeEditor-B18RerBS.js",
-        "internal/admin/assets/dist/assets/CodeEditor-B18RerBS.js.map",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DXcEzj1F.js",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DXcEzj1F.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-Drqsu9jh.js",
+        "internal/admin/assets/dist/assets/CodeEditor-Drqsu9jh.js.map",
         "internal/admin/assets/dist/assets/index-C7sRNCYr.css",
-        "internal/admin/assets/dist/assets/index-DXkJTR_w.js",
-        "internal/admin/assets/dist/assets/index-DXkJTR_w.js.map",
+        "internal/admin/assets/dist/assets/index-krZB9iFa.js",
+        "internal/admin/assets/dist/assets/index-krZB9iFa.js.map",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-WkwZ5CU-.js",
@@ -4627,14 +4627,14 @@
         },
         {
           "pr": "https://github.com/victornife/jul/pull/673",
-          "context": "Review fix rebuild: correct max_ttl=0s Console explanation. Path reconciliation only; historical verdicts and review evidence are unchanged.",
+          "context": "Review fix rebuild: correct max_ttl=0s Console explanation, accessible live regions and aria-invalid for route cache policy warnings/errors, and optional route_id inspection filter. Path reconciliation only; historical verdicts and review evidence are unchanged.",
           "path_changes": {
-            "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-D-cVvgTM.js",
-            "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-D-cVvgTM.js.map",
-            "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js": "internal/admin/assets/dist/assets/CodeEditor-B18RerBS.js",
-            "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js.map": "internal/admin/assets/dist/assets/CodeEditor-B18RerBS.js.map",
-            "internal/admin/assets/dist/assets/index-D0ygxhEc.js": "internal/admin/assets/dist/assets/index-DXkJTR_w.js",
-            "internal/admin/assets/dist/assets/index-D0ygxhEc.js.map": "internal/admin/assets/dist/assets/index-DXkJTR_w.js.map"
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-DXcEzj1F.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-waBdiaJu.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-DXcEzj1F.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js": "internal/admin/assets/dist/assets/CodeEditor-Drqsu9jh.js",
+            "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js.map": "internal/admin/assets/dist/assets/CodeEditor-Drqsu9jh.js.map",
+            "internal/admin/assets/dist/assets/index-D0ygxhEc.js": "internal/admin/assets/dist/assets/index-krZB9iFa.js",
+            "internal/admin/assets/dist/assets/index-D0ygxhEc.js.map": "internal/admin/assets/dist/assets/index-krZB9iFa.js.map"
           }
         }
       ]
