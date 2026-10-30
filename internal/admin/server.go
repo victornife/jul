@@ -1006,12 +1006,50 @@ func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if key := r.URL.Query().Get("key"); key != "" {
-		s.deps.Cache.Delete(key)
+		if rp, ok := s.deps.Cache.(ResultPurger); ok {
+			res, err := rp.DeleteResult(key)
+			if err != nil || res.InvalidationEffective != "effective" {
+				status := res.InvalidationEffective
+				if status == "" {
+					status = "failed"
+				}
+				s.recordAudit(r, "cache.purge", "cache", "failure", "single-entry purge "+status)
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+					"status":                 status,
+					"outcome":                res.Outcome,
+					"invalidation_effective": res.InvalidationEffective,
+					"failed_entries":         res.FailedEntries,
+					"recovery_guidance":      res.RecoveryGuidance,
+				})
+				return
+			}
+		} else {
+			s.deps.Cache.Delete(key)
+		}
 		s.recordAudit(r, "cache.purge", "cache", "success", "single-entry purge requested")
 		writeJSON(w, http.StatusOK, map[string]string{"status": "purged", "key": key})
 		return
 	}
-	s.deps.Cache.Purge()
+	if rp, ok := s.deps.Cache.(ResultPurger); ok {
+		res, err := rp.PurgeResult()
+		if err != nil || res.InvalidationEffective != "effective" {
+			status := res.InvalidationEffective
+			if status == "" {
+				status = "failed"
+			}
+			s.recordAudit(r, "cache.purge", "cache", "failure", "whole-cache purge "+status)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"status":                 status,
+				"outcome":                res.Outcome,
+				"invalidation_effective": res.InvalidationEffective,
+				"failed_entries":         res.FailedEntries,
+				"recovery_guidance":      res.RecoveryGuidance,
+			})
+			return
+		}
+	} else {
+		s.deps.Cache.Purge()
+	}
 	s.recordAudit(r, "cache.purge", "cache", "success", "whole-cache purge completed")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "purged"})
 }

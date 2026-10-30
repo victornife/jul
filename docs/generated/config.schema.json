@@ -421,6 +421,15 @@
           "description": "RangeEnabled opts the cache into Option A range-aware caching (#442, ADR 0024): single byte-range GET requests are satisfied from complete stored representations, and eligible cold range misses coordinate a complete-object origin fill",
           "type": "boolean"
         },
+        "reload_policy": {
+          "description": "ReloadPolicy selects whether route/backend changes retain existing cached entries (\"retain\", the default when omitted) or invalidate affected route/upstream cache scopes at the configuration Publish boundary (\"invalidate\", #624 / CACHE-OPS-04)",
+          "enum": [
+            "retain",
+            "invalidate"
+          ],
+          "type": "string",
+          "x-jul-constraint": "exact lowercase enum"
+        },
         "stale_if_error": {
           "description": "StaleIfError extends the stale-serving window when a background revalidation encounters an upstream error (5xx or timeout)",
           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
@@ -1265,6 +1274,15 @@
                       "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                       "type": "string",
                       "x-jul-constraint": "non-negative when present; must not be less than default_ttl when both are set on the same route"
+                    },
+                    "reload_policy": {
+                      "description": "ReloadPolicy overrides [cache].reload_policy (\"retain\" or \"invalidate\") for this route when its target, action, upstream, or route definition changes across a reload or restart (#624 / CACHE-OPS-04)",
+                      "enum": [
+                        "retain",
+                        "invalidate"
+                      ],
+                      "type": "string",
+                      "x-jul-constraint": "exact lowercase enum"
                     },
                     "stale_if_error": {
                       "description": "StaleIfError overrides [cache].stale_if_error for this route when the origin response omits stale-if-error; omitted inherits [cache].stale_if_error and explicit \"0s\" disables gateway fallback stale-if-error on this route",

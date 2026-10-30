@@ -730,6 +730,7 @@ export const LocationCachePolicyStateSchema = z.object({
   stale_if_error: z.string().optional(),
   bypass_cookies: z.array(z.string()).optional(),
   bypass_any_cookie: z.boolean().default(false),
+  reload_policy: z.string().optional(),
 });
 export type LocationCachePolicyState = z.infer<typeof LocationCachePolicyStateSchema>;
 
@@ -745,6 +746,8 @@ export const LocationCacheEffectiveStateSchema = z.object({
   sie_source: z.string(),
   bypass_mode: z.string(),
   bypass_cookies: z.array(z.string()).optional(),
+  reload_policy: z.string().optional(),
+  reload_policy_source: z.string().optional(),
   lock_enabled: z.boolean(),
   range_enabled: z.boolean(),
   memory_max_size: z.string().optional(),
@@ -2264,6 +2267,7 @@ export type LocationCachePolicyPatch = {
   stale_if_error?: string;
   bypass_cookies?: string[];
   bypass_any_cookie?: boolean;
+  reload_policy?: string;
 };
 
 export type ConfigPatch =

@@ -84,19 +84,22 @@ func v1Routes(c *config.Config) []adminapi.Route {
 				}
 			}
 			var cachePolicy *adminapi.RouteCachePolicy
-			if loc.CachePolicy != nil {
-				cachePolicy = &adminapi.RouteCachePolicy{
-					DefaultTTL:           loc.CachePolicy.DefaultTTL,
-					MaxTTL:               loc.CachePolicy.MaxTTL,
-					StaleWhileRevalidate: loc.CachePolicy.StaleWhileRevalidate,
-					StaleIfError:         loc.CachePolicy.StaleIfError,
-					BypassCookies:        loc.CachePolicy.BypassCookies,
-					BypassAnyCookie:      loc.CachePolicy.BypassAnyCookie,
+			if loc.CachePolicy != nil || (loc.Cache && loc.CacheEffective != nil) {
+				cachePolicy = &adminapi.RouteCachePolicy{}
+				if loc.CachePolicy != nil {
+					cachePolicy.DefaultTTL = loc.CachePolicy.DefaultTTL
+					cachePolicy.MaxTTL = loc.CachePolicy.MaxTTL
+					cachePolicy.StaleWhileRevalidate = loc.CachePolicy.StaleWhileRevalidate
+					cachePolicy.StaleIfError = loc.CachePolicy.StaleIfError
+					cachePolicy.BypassCookies = loc.CachePolicy.BypassCookies
+					cachePolicy.BypassAnyCookie = loc.CachePolicy.BypassAnyCookie
+					cachePolicy.ReloadPolicy = loc.CachePolicy.ReloadPolicy
 				}
 				if loc.CacheEffective != nil {
 					cachePolicy.EffectiveDefaultTTL = loc.CacheEffective.DefaultTTL
 					cachePolicy.EffectiveSWR = loc.CacheEffective.StaleWhileRevalidate
 					cachePolicy.EffectiveSIE = loc.CacheEffective.StaleIfError
+					cachePolicy.EffectiveReloadPolicy = loc.CacheEffective.ReloadPolicy
 				}
 			}
 			out = append(out, adminapi.Route{

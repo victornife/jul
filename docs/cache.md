@@ -78,11 +78,14 @@ range_enabled          = true     # opt-in Option A range-aware caching (#442)
 max_ranges             = 1        # bound accepted range specs (default 1 when range_enabled = true)
 tag_headers            = ["Cache-Tag", "Surrogate-Key"] # opt-in trusted origin grouping-tag headers (#621)
 strip_tag_headers      = true     # strip configured tag_headers from client responses (default true when tag_headers is set)
+reload_policy          = "retain" # "retain" (default) or "invalidate" on route/backend cutover (#624)
 ```
 
 Per-location opt-in is still required, and each location may optionally override
-freshness, caps, stale windows, and request-cookie bypass via
-`[servers.locations.cache_policy]` ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
+freshness, caps, stale windows, request-cookie bypass, and route/backend cutover
+invalidation via `[servers.locations.cache_policy]`
+([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md),
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md)):
 
 ```toml
 [[servers.locations]]
@@ -97,6 +100,7 @@ cache    = true
   stale_while_revalidate = "30s"
   stale_if_error         = "5m"
   bypass_cookies         = ["session_id", "__Host-auth"] # or bypass_any_cookie = true
+  reload_policy          = "invalidate" # invalidate & fence pre-cutover entries when route/backend changes
 ```
 
 ## Cache key and Vary
@@ -1594,7 +1598,8 @@ origin or retry a purge.
 - Cancellation discards the builder result before retention/publication.
   The two-second build deadline is checked around bounded work; a wait on an
   existing cache mutex is not instantaneously cancelable and can exceed that
-  deadline before returning. Large-purge contention remains tracked in #667.
+  deadline before returning. Large-purge lock hold and allocation bounds are
+  documented in [ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md) (#667).
 
 ### Reading metadata and policy
 
@@ -1681,9 +1686,10 @@ zero even for explicit partial/truncated states; automation must inspect those
 fields. There is no automatic cursor restart or page accumulation.
 
 Purge uses the existing preview → confirm → execute → observe/recover flow and
-its own permission. #666 (unfinished-purge restart protection), #667
-(large-purge latency) and #668 (legacy purge outcome visibility) remain inherited
-limitations; inspection does not implement them. No release, GA or soak claim is
+its own permission. Durable incomplete-operation recovery across restart (#666),
+measured large-purge lock/allocation bounds (#667), and legacy `POST /cache/purge`
+durability outcomes (#668) are documented in
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md). No release, GA or soak claim is
 made. NGINX migration impact is **not applicable**: this is a Jul-specific
 operator interface and does not change imported request/cache semantics.
 

@@ -4,6 +4,7 @@
 package cache
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"path"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -88,7 +90,26 @@ type NormalizedSelector struct {
 	cutoverExactPath      string
 	cutoverRawPrefix      string
 	cutoverMatchAnyPort   bool
+	cutoverRouteScopes    []string
 	digest                [32]byte
+}
+
+// CutoverRouteScopes returns the route ownership scopes targeted by a cutover
+// selector, or nil for non-cutover selectors.
+func (s NormalizedSelector) CutoverRouteScopes() []string {
+	return append([]string(nil), s.cutoverRouteScopes...)
+}
+
+func (s NormalizedSelector) matchesCutoverRoute(routeScope string) bool {
+	if len(s.cutoverRouteScopes) == 0 || routeScope == "" {
+		return true
+	}
+	for _, rs := range s.cutoverRouteScopes {
+		if rs == routeScope {
+			return true
+		}
+	}
+	return false
 }
 
 // SelectorError reports a deterministic validation error on a selector field.
@@ -722,6 +743,10 @@ func computeSelectorDigest(s NormalizedSelector) [32]byte {
 	if s.inspectionRouteExact != "" || s.inspectionRoutePrefix != "" {
 		writePart(s.inspectionRouteExact, s.inspectionRoutePrefix)
 	}
+	if len(s.cutoverRouteScopes) > 0 {
+		writePart("cutover_scopes", strconv.Itoa(len(s.cutoverRouteScopes)))
+		writePart(s.cutoverRouteScopes...)
+	}
 	writePart(strconv.Itoa(len(s.Tags)))
 	writePart(s.Tags...)
 	var out [32]byte
@@ -1009,53 +1034,167 @@ func parseBaseKeyParts(k string) (method, host, requestURI string, isVariant boo
 // invalidation selectors covering route or backend changes between before and
 // after configurations (reusable contract for #624 / CACHE-OPS-04, ADR 0027 §6.2).
 func DeriveRouteCutoverSelectors(before, after *config.Config) []NormalizedSelector {
+	return deriveRouteCutoverSelectorsInternal(before, after, "all")
+}
+
+// DeriveRouteCutoverSelectorsForPolicy computes the deduplicated minimal set of
+// cache invalidation selectors for route or backend changes between before and
+// after configurations that opt into cutover invalidation (#624 / CACHE-OPS-04).
+// When overrideMode is "retain", nil is returned. When overrideMode is
+// "invalidate", all changed/deleted routes are included. When overrideMode is
+// empty (""), each changed/deleted route is included when its effective
+// reload_policy (in before or after) is "invalidate".
+func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, overrideMode string) []NormalizedSelector {
+	mode := strings.ToLower(strings.TrimSpace(overrideMode))
+	if mode == "retain" || (before == nil && after == nil) {
+		return nil
+	}
+	if mode != "invalidate" && (before == nil || after == nil) {
+		return nil
+	}
+	return deriveRouteCutoverSelectorsInternal(before, after, mode)
+}
+
+func deriveRouteCutoverSelectorsInternal(before, after *config.Config, mode string) []NormalizedSelector {
 	if before == nil && after == nil {
 		return nil
 	}
+	includeUncached := mode == "all" || mode == "invalidate"
+	allCached := mode == "all_cached" || includeUncached
 	changedUpstreams := changedUpstreamNames(before, after)
 	var selectors []NormalizedSelector
-	seen := make(map[[32]byte]struct{})
+	seenIdx := make(map[[32]byte]int)
 	addNorm := func(ns NormalizedSelector) {
-		if _, ok := seen[ns.Digest()]; ok {
+		if idx, ok := seenIdx[ns.Digest()]; ok {
+			selectors[idx].cutoverRouteScopes = mergeRouteScopeSlices(selectors[idx].cutoverRouteScopes, ns.cutoverRouteScopes)
 			return
 		}
-		seen[ns.Digest()] = struct{}{}
+		seenIdx[ns.Digest()] = len(selectors)
 		selectors = append(selectors, ns)
 	}
-	addSel := func(s Selector) {
-		ns, err := ParseSelector(s, nil)
-		if err != nil {
-			if s.Host != "" {
-				ns, err = ParseSelector(Selector{Kind: SelectorHost, Host: s.Host}, nil)
-			}
-			if err != nil {
-				ns, err = ParseSelector(Selector{Kind: SelectorAll, All: true}, nil)
-			}
-			if err != nil {
-				return
-			}
-		}
-		addNorm(ns)
-	}
 
-	collectAffectedRoutes := func(primary, secondary *config.Config) {
+	collectRoutes := func(primary, secondary *config.Config) {
 		if primary == nil {
 			return
 		}
 		for i := range primary.Servers {
 			srv := &primary.Servers[i]
+			scopes := RouteScopes(*srv)
 			for j := range srv.Locations {
 				loc := &srv.Locations[j]
-				if !routeChangedOrUpstreamChanged(primary, srv, loc, secondary, changedUpstreams) {
+				oloc, osrv, oScope := findMatchingLocationForCutover(srv, loc, secondary)
+				if !includeUncached && !loc.Cache && (oloc == nil || !oloc.Cache) {
 					continue
 				}
-				emitSelectorsForRoute(srv, loc, addSel, addNorm)
+				useInvalidate := allCached ||
+					primary.EffectiveReloadPolicy(*loc) == "invalidate" ||
+					(oloc != nil && secondary != nil && secondary.EffectiveReloadPolicy(*oloc) == "invalidate") ||
+					(oloc == nil && secondary != nil && strings.EqualFold(strings.TrimSpace(secondary.Cache.ReloadPolicy), "invalidate"))
+				if !useInvalidate {
+					continue
+				}
+				changed := oloc == nil || !sameLocationCutoverTarget(srv, loc, osrv, oloc)
+				if !changed {
+					if up := config.ResolveLocationUpstreamName(primary, *loc); up != "" && changedUpstreams[up] {
+						changed = true
+					} else if secondary != nil {
+						if up := config.ResolveLocationUpstreamName(secondary, *oloc); up != "" && changedUpstreams[up] {
+							changed = true
+						}
+					}
+				}
+				if !changed {
+					continue
+				}
+				var rScopes []string
+				if j < len(scopes) && scopes[j] != "" {
+					rScopes = append(rScopes, scopes[j])
+				}
+				if oScope != "" {
+					rScopes = append(rScopes, oScope)
+				}
+				emitSelectorsForRoute(srv, loc, rScopes, addNorm)
 			}
 		}
 	}
-	collectAffectedRoutes(before, after)
-	collectAffectedRoutes(after, before)
+	collectRoutes(before, after)
+	collectRoutes(after, before)
 	return selectors
+}
+
+func mergeRouteScopeSlices(a, b []string) []string {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(a)+len(b))
+	var out []string
+	for _, s := range a {
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	for _, s := range b {
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sameCutoverServerBoundary(a, b *config.ServerConfig) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return bytes.Equal(routeScopeBoundary(*a), routeScopeBoundary(*b))
+}
+
+func findMatchingLocationForCutover(srv *config.ServerConfig, loc *config.LocationConfig, other *config.Config) (*config.LocationConfig, *config.ServerConfig, string) {
+	if other == nil {
+		return nil, nil, ""
+	}
+	for i := range other.Servers {
+		osrv := &other.Servers[i]
+		if !sameCutoverServerBoundary(osrv, srv) {
+			continue
+		}
+		oScopes := RouteScopes(*osrv)
+		for j := range osrv.Locations {
+			oloc := &osrv.Locations[j]
+			if loc.RouteID != nil && oloc.RouteID != nil && *loc.RouteID != "" && *loc.RouteID == *oloc.RouteID {
+				return oloc, osrv, oScopes[j]
+			}
+			if loc.Match.Type == oloc.Match.Type && loc.Match.Path == oloc.Match.Path &&
+				loc.Match.CanonicalPredicates() == oloc.Match.CanonicalPredicates() {
+				return oloc, osrv, oScopes[j]
+			}
+		}
+	}
+	return nil, nil, ""
+}
+
+func sameLocationCutoverTarget(aSrv *config.ServerConfig, a *config.LocationConfig, bSrv *config.ServerConfig, b *config.LocationConfig) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if aSrv != nil && bSrv != nil && !reflect.DeepEqual(aSrv.Plugins, bSrv.Plugins) {
+		return false
+	}
+	ca := *a
+	cb := *b
+	ca.CachePolicy = nil
+	cb.CachePolicy = nil
+	ca.Sharing = nil
+	cb.Sharing = nil
+	return reflect.DeepEqual(ca, cb)
 }
 
 func changedUpstreamNames(before, after *config.Config) map[string]bool {
@@ -1087,42 +1226,17 @@ func sameUpstreamIdentity(a, b config.UpstreamConfig) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func routeChangedOrUpstreamChanged(primary *config.Config, srv *config.ServerConfig, loc *config.LocationConfig, other *config.Config, changedUpstreams map[string]bool) bool {
-	if other == nil {
-		return true
-	}
-	if up := config.ResolveLocationUpstreamName(primary, *loc); up != "" && changedUpstreams[up] {
-		return true
-	}
-	if up := config.ResolveLocationUpstreamName(other, *loc); up != "" && changedUpstreams[up] {
-		return true
-	}
-	for i := range other.Servers {
-		osrv := &other.Servers[i]
-		if osrv.Listen != srv.Listen || strings.Join(osrv.ServerNames, ",") != strings.Join(srv.ServerNames, ",") {
-			continue
-		}
-		for j := range osrv.Locations {
-			oloc := &osrv.Locations[j]
-			if loc.RouteID != nil && oloc.RouteID != nil && *loc.RouteID != "" && *loc.RouteID == *oloc.RouteID {
-				return !sameLocationCacheIdentity(loc, oloc)
-			}
-			if loc.Match.Type == oloc.Match.Type && loc.Match.Path == oloc.Match.Path &&
-				loc.Match.CanonicalPredicates() == oloc.Match.CanonicalPredicates() {
-				return !sameLocationCacheIdentity(loc, oloc)
-			}
-		}
-	}
-	return true
-}
-
-func sameLocationCacheIdentity(a, b *config.LocationConfig) bool {
-	return reflect.DeepEqual(a, b)
-}
-
-func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, addSel func(Selector), addNorm func(NormalizedSelector)) {
+func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig, routeScopes []string, addNorm func(NormalizedSelector)) {
+	canonScopes := mergeRouteScopeSlices(nil, routeScopes)
 	if len(srv.ServerNames) == 0 {
-		addSel(Selector{Kind: SelectorAll, All: true})
+		ns := NormalizedSelector{
+			Kind:                SelectorAll,
+			BroadScope:          true,
+			cutoverMatchAnyPort: true,
+			cutoverRouteScopes:  canonScopes,
+		}
+		ns.digest = computeSelectorDigest(ns)
+		addNorm(ns)
 		return
 	}
 	addHostCutover := func(h string) {
@@ -1131,6 +1245,7 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 			Host:                h,
 			BroadScope:          true,
 			cutoverMatchAnyPort: true,
+			cutoverRouteScopes:  canonScopes,
 		}
 		ns.digest = computeSelectorDigest(ns)
 		addNorm(ns)
@@ -1138,7 +1253,14 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 	for _, sn := range srv.ServerNames {
 		nh, err := normalizeSelectorHost(sn)
 		if err != nil || strings.Contains(nh, "*") {
-			addSel(Selector{Kind: SelectorAll, All: true})
+			ns := NormalizedSelector{
+				Kind:                SelectorAll,
+				BroadScope:          true,
+				cutoverMatchAnyPort: true,
+				cutoverRouteScopes:  canonScopes,
+			}
+			ns.digest = computeSelectorDigest(ns)
+			addNorm(ns)
 			return
 		}
 		nh = stripSelectorHostPort(nh)
@@ -1158,6 +1280,7 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 					globSegments:        strings.Split(loc.Match.Path[1:], "/"),
 					cutoverExactPath:    loc.Match.Path,
 					cutoverMatchAnyPort: true,
+					cutoverRouteScopes:  canonScopes,
 				}
 				ns.digest = computeSelectorDigest(ns)
 				addNorm(ns)
@@ -1172,6 +1295,7 @@ func emitSelectorsForRoute(srv *config.ServerConfig, loc *config.LocationConfig,
 					Prefix:              loc.Match.Path,
 					cutoverRawPrefix:    loc.Match.Path,
 					cutoverMatchAnyPort: true,
+					cutoverRouteScopes:  canonScopes,
 				}
 				ns.digest = computeSelectorDigest(ns)
 				addNorm(ns)

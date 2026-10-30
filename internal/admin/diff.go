@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/cache"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 )
@@ -15,6 +16,16 @@ import (
 // (helpers: serverIndex, sortedKeys, durStr, sizeStr, orNone and the
 // diffLocations / diffUpstreams / diffGlobal* comparators live in
 // diff_helpers.go.)
+
+// CacheCutoverPlan summarizes the cache cutover posture and invalidation
+// impact of a configuration change (#624 / CACHE-OPS-04).
+type CacheCutoverPlan struct {
+	DefaultPolicy        string   `json:"default_policy"`
+	InvalidatedScopes    []string `json:"invalidated_scopes,omitempty"`
+	RetainedScopes       []string `json:"retained_scopes,omitempty"`
+	BroadenedToHostOrAll bool     `json:"broadened_to_host_or_all,omitempty"`
+	Disposition          string   `json:"disposition"`
+}
 
 // ConfigDiff is a structured before/after report for the Console v2 diff view.
 type ConfigDiff struct {
@@ -25,6 +36,7 @@ type ConfigDiff struct {
 	Removals      []DiffEntry        `json:"removals,omitempty"`
 	Modifications []DiffEntry        `json:"modifications,omitempty"`
 	Sharing       *SharingPlanReport `json:"sharing,omitempty"`
+	CacheCutover  *CacheCutoverPlan  `json:"cache_cutover,omitempty"`
 
 	// coveredPaths tracks which lifecycle registry paths have already been
 	// represented by the high-level comparators. The registry-driven
@@ -123,6 +135,7 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 	// was not covered by the high-level comparators is reported here, so the
 	// diff cannot silently miss a field that the lifecycle registry classifies.
 	diffLifecycleCompleteness(before, after, &d)
+	diffCacheCutoverPlan(before, after, &d)
 
 	if len(d.Affected) == 0 {
 		d.Summary = "No structural changes detected between the current configuration and the draft."
@@ -159,6 +172,108 @@ func diffLifecycleCompleteness(before, after *config.Config, d *ConfigDiff) {
 			Detail:         detail,
 			LifecycleClass: ch.Class.String(),
 		}, affected)
+	}
+}
+
+func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff) {
+	if !before.Cache.Enabled && !after.Cache.Enabled {
+		return
+	}
+	if !after.Cache.Enabled {
+		return
+	}
+	allSels := cache.DeriveRouteCutoverSelectorsForPolicy(before, after, "all_cached")
+	if len(allSels) == 0 {
+		return
+	}
+	invSels := cache.DeriveRouteCutoverSelectorsForPolicy(before, after, "")
+	defaultPolicy := "retain"
+	if strings.EqualFold(strings.TrimSpace(after.Cache.ReloadPolicy), "invalidate") {
+		defaultPolicy = "invalidate"
+	}
+	seenInvLabel := make(map[string]struct{}, len(invSels))
+	var invLabels []string
+	broadened := false
+	for _, sel := range invSels {
+		lbl := formatCutoverSelector(sel)
+		if _, exists := seenInvLabel[lbl]; !exists {
+			seenInvLabel[lbl] = struct{}{}
+			invLabels = append(invLabels, lbl)
+		}
+		if sel.Kind == cache.SelectorHost || sel.Kind == cache.SelectorAll {
+			broadened = true
+		}
+	}
+	seenRetLabel := make(map[string]struct{}, len(allSels))
+	var retLabels []string
+	for _, sel := range allSels {
+		if cutoverSelectorCoveredByInvalidated(sel, invSels) {
+			continue
+		}
+		lbl := formatCutoverSelector(sel)
+		if _, exists := seenRetLabel[lbl]; !exists {
+			seenRetLabel[lbl] = struct{}{}
+			retLabels = append(retLabels, lbl)
+		}
+	}
+	restartReq := false
+	for _, ch := range lifecycle.DiffConfig(before, after) {
+		if ch.Class == lifecycle.RestartRequiredClass {
+			restartReq = true
+			break
+		}
+	}
+	disposition := "retain"
+	if restartReq {
+		disposition = "stage_for_restart"
+	} else if len(invLabels) > 0 {
+		disposition = "invalidate_on_publish"
+	}
+	d.CacheCutover = &CacheCutoverPlan{
+		DefaultPolicy:        defaultPolicy,
+		InvalidatedScopes:    invLabels,
+		RetainedScopes:       retLabels,
+		BroadenedToHostOrAll: broadened,
+		Disposition:          disposition,
+	}
+	if restartReq {
+		if len(invLabels) > 0 {
+			d.warn("Cache cutover (stage_for_restart): candidate includes restart-required changes; route/backend cutover for %s is staged for restart rather than live publish.", strings.Join(invLabels, ", "))
+		}
+		return
+	}
+	if len(invLabels) > 0 {
+		scopeList := strings.Join(invLabels, ", ")
+		if broadened {
+			d.warn("Cache cutover (reload_policy = invalidate): publishing this change will invalidate cached entries for %s (broadened to host/node scope) and fence pre-cutover fills.", scopeList)
+		} else {
+			d.warn("Cache cutover (reload_policy = invalidate): publishing this change will invalidate cached entries for %s and fence pre-cutover fills while unrelated routes remain warm.", scopeList)
+		}
+	}
+	if len(retLabels) > 0 {
+		d.warn("Cache cutover (reload_policy = retain): existing cached entries for %s remain eligible until expiry or explicit purge (set reload_policy = \"invalidate\" to evict on cutover).", strings.Join(retLabels, ", "))
+	}
+}
+
+func cutoverSelectorCoveredByInvalidated(sel cache.NormalizedSelector, invSels []cache.NormalizedSelector) bool {
+	for _, inv := range invSels {
+		if inv.Digest() == sel.Digest() {
+			return true
+		}
+	}
+	return false
+}
+
+func formatCutoverSelector(sel cache.NormalizedSelector) string {
+	switch sel.Kind {
+	case cache.SelectorAll:
+		return "all (entire node cache)"
+	case cache.SelectorHost:
+		return "host " + sel.Host
+	case cache.SelectorPrefix:
+		return fmt.Sprintf("prefix %s%s", sel.Host, sel.Prefix)
+	default:
+		return fmt.Sprintf("exact %s%s", sel.Host, sel.Pattern)
 	}
 }
 

@@ -4366,13 +4366,13 @@
       "original_disposition": "not reviewed",
       "original_reason_and_limit": "generated OpenAPI, route classification, targeted admin mutation permission comparison and TLS self-lockout predicate sampled; full authorization matrix and Console UI not exercised",
       "current_paths": [
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js",
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js.map",
-        "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js",
-        "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js.map",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js",
+        "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js.map",
         "internal/admin/assets/dist/assets/index-C7sRNCYr.css",
-        "internal/admin/assets/dist/assets/index-DaEnkoV1.js",
-        "internal/admin/assets/dist/assets/index-DaEnkoV1.js.map",
+        "internal/admin/assets/dist/assets/index-DU7Bn--c.js",
+        "internal/admin/assets/dist/assets/index-DU7Bn--c.js.map",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-WkwZ5CU-.js",
@@ -4635,6 +4635,18 @@
             "internal/admin/assets/dist/assets/CodeEditor-DisTzWW2.js.map": "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js.map",
             "internal/admin/assets/dist/assets/index-D0ygxhEc.js": "internal/admin/assets/dist/assets/index-DaEnkoV1.js",
             "internal/admin/assets/dist/assets/index-D0ygxhEc.js.map": "internal/admin/assets/dist/assets/index-DaEnkoV1.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/674",
+          "context": "#624 rebuilds the Console to add reload_policy to the route cache policy editor and RouteDetail TOML view. Path reconciliation only; historical verdicts and review evidence are unchanged.",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js": "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js",
+            "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js.map": "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js.map",
+            "internal/admin/assets/dist/assets/index-DaEnkoV1.js": "internal/admin/assets/dist/assets/index-DU7Bn--c.js",
+            "internal/admin/assets/dist/assets/index-DaEnkoV1.js.map": "internal/admin/assets/dist/assets/index-DU7Bn--c.js.map"
           }
         }
       ]

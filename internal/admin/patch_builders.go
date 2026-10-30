@@ -233,7 +233,11 @@ func buildLocationCachePolicy(in locationCachePolicyPatch) (*config.LocationCach
 		}
 	}
 	sort.Strings(cookies)
-	if defaultTTL == nil && maxTTL == nil && swr == nil && sie == nil && len(cookies) == 0 && !in.BypassAnyCookie {
+	reloadPolicy := strings.ToLower(strings.TrimSpace(in.ReloadPolicy))
+	if reloadPolicy != "" && reloadPolicy != "retain" && reloadPolicy != "invalidate" {
+		return nil, "", fmt.Errorf("location_cache_policy_set: reload_policy must be \"retain\" or \"invalidate\"")
+	}
+	if defaultTTL == nil && maxTTL == nil && swr == nil && sie == nil && len(cookies) == 0 && !in.BypassAnyCookie && reloadPolicy == "" {
 		return nil, "inherit global [cache]", nil
 	}
 	var parts []string
@@ -254,6 +258,9 @@ func buildLocationCachePolicy(in locationCachePolicyPatch) (*config.LocationCach
 	} else if len(cookies) > 0 {
 		parts = append(parts, fmt.Sprintf("bypass_cookies=%d", len(cookies)))
 	}
+	if reloadPolicy != "" {
+		parts = append(parts, "reload_policy="+reloadPolicy)
+	}
 	return &config.LocationCachePolicy{
 		DefaultTTL:           defaultTTL,
 		MaxTTL:               maxTTL,
@@ -261,6 +268,7 @@ func buildLocationCachePolicy(in locationCachePolicyPatch) (*config.LocationCach
 		StaleIfError:         sie,
 		BypassCookies:        cookies,
 		BypassAnyCookie:      in.BypassAnyCookie,
+		ReloadPolicy:         reloadPolicy,
 	}, strings.Join(parts, ", "), nil
 }
 

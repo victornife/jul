@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 432 |
-| Schema leaves (configurable values) | 364 |
-| Registry entries | 364 |
+| Schema paths (containers included) | 434 |
+| Schema leaves (configurable values) | 366 |
+| Registry entries | 366 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 321 |
+| Class `hot_reload` | 323 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -182,6 +182,7 @@ value is compared as a digest so no secret material leaves the process.
 | `cache.max_ranges` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.memory_max_size` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.range_enabled` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
+| `cache.reload_policy` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.stale_if_error` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.stale_while_revalidate` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
 | `cache.strip_tag_headers` | `hot_reload` | `cache` | — | the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92) |
@@ -282,6 +283,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.cache_policy.bypass_cookies` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.cache_policy.default_ttl` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.cache_policy.max_ttl` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
+| `servers.*.locations.*.cache_policy.reload_policy` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.cache_policy.stale_if_error` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.cache_policy.stale_while_revalidate` | `hot_reload` | `cache` | — | whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned |
 | `servers.*.locations.*.client_max_body_size` | `hot_reload` | `server_limits` | — | the handler tree is rebuilt from the effective config on each successful reload |

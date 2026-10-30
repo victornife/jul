@@ -49,6 +49,14 @@ type ScopedPurger interface {
 	InvalidateScope(ctx context.Context, sel cache.NormalizedSelector, opts cache.InvalidateOptions) (cache.InvalidateResult, error)
 }
 
+// ResultPurger is the durability-aware legacy purge interface implemented by
+// *cache.Cache (#668, ADR 0030).
+type ResultPurger interface {
+	Purger
+	PurgeResult() (cache.InvalidateResult, error)
+	DeleteResult(key string) (cache.InvalidateResult, error)
+}
+
 type cachePurgeRecord struct {
 	OperationID            string                      `json:"operation_id"`
 	Principal              string                      `json:"principal"`

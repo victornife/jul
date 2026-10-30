@@ -128,6 +128,7 @@ type LocationCachePolicyState struct {
 	StaleIfError         *string  `json:"stale_if_error,omitempty"`
 	BypassCookies        []string `json:"bypass_cookies,omitempty"`
 	BypassAnyCookie      bool     `json:"bypass_any_cookie,omitempty"`
+	ReloadPolicy         string   `json:"reload_policy,omitempty"`
 }
 
 // LocationCacheEffectiveState reports the server-owned effective cache policy
@@ -144,6 +145,8 @@ type LocationCacheEffectiveState struct {
 	SIESource            string   `json:"sie_source"`
 	BypassMode           string   `json:"bypass_mode"`
 	BypassCookies        []string `json:"bypass_cookies,omitempty"`
+	ReloadPolicy         string   `json:"reload_policy,omitempty"`
+	ReloadPolicySource   string   `json:"reload_policy_source,omitempty"`
 	LockEnabled          bool     `json:"lock_enabled"`
 	RangeEnabled         bool     `json:"range_enabled"`
 	MemoryMaxSize        string   `json:"memory_max_size,omitempty"`

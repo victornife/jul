@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -111,6 +112,7 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"ACMEConfig.CA", "ACMEConfig.Challenge", "AccessLogConfig.Format",
 		"BackendTLSConfig.CAMode", "BackendTLSConfig.MinVersion",
 		"BackendTLSConfig.PeerIdentities",
+		"CacheConfig.ReloadPolicy",
 		"AccessLogConfig.Sinks", "CORSConfig.AllowedOrigins",
 		"ClientAddressConfig.ForwardedHeaders",
 		"ClientAddressConfig.TrustedProxies", "ClientAuthConfig.Mode",
@@ -120,6 +122,7 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"GlobalConfig.WorkerThreads", "GRPCTranscodeConfig.StreamMode",
 		"HeaderMatch.Name", "HeaderMatch.Op", "HeaderMatch.Value",
 		"HealthCheckConfig.Type", "LocationCachePolicy.BypassCookies",
+		"LocationCachePolicy.ReloadPolicy",
 		"MatchConfig.Methods", "MatchConfig.Type",
 		"PluginConfig.ABI", "PluginConfig.Type", "QueryMatch.Name", "QueryMatch.Op", "QueryMatch.Value",
 		"RateLimitConfig.Key", "ResponseHeaderOp.Op", "RewriteConfig.Flag", "StreamServer.Protocol",
@@ -130,5 +133,60 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		if _, ok := inventory[field]; !ok {
 			t.Errorf("enum/grammar public field %q has no audited validation disposition", field)
 		}
+	}
+}
+
+func TestCacheReloadPolicyValidationAndEffectivePrecedence(t *testing.T) {
+	var nilCfg *Config
+	if got := nilCfg.EffectiveReloadPolicy(LocationConfig{}); got != "retain" {
+		t.Fatalf("nil Config.EffectiveReloadPolicy = %q, want retain", got)
+	}
+	cfg := &Config{
+		Cache: CacheConfig{Enabled: true, ReloadPolicy: "invalidate"},
+	}
+	if got := cfg.EffectiveReloadPolicy(LocationConfig{}); got != "invalidate" {
+		t.Fatalf("inherited EffectiveReloadPolicy = %q, want invalidate", got)
+	}
+	if got := cfg.EffectiveReloadPolicy(LocationConfig{
+		CachePolicy: &LocationCachePolicy{ReloadPolicy: "retain"},
+	}); got != "retain" {
+		t.Fatalf("route retain override EffectiveReloadPolicy = %q, want retain", got)
+	}
+	cfgRetain := &Config{
+		Cache: CacheConfig{Enabled: true, ReloadPolicy: "retain"},
+	}
+	if got := cfgRetain.EffectiveReloadPolicy(LocationConfig{
+		CachePolicy: &LocationCachePolicy{ReloadPolicy: "invalidate"},
+	}); got != "invalidate" {
+		t.Fatalf("route invalidate override EffectiveReloadPolicy = %q, want invalidate", got)
+	}
+
+	// Invalid global [cache].reload_policy
+	badGlobal := &Config{
+		Cache: CacheConfig{Enabled: true, MemoryMaxSize: 4 << 20, ReloadPolicy: "bogus"},
+		Servers: []ServerConfig{{
+			Listen:    ":8080",
+			Locations: []LocationConfig{{Match: MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: "http://127.0.0.1:9000"}},
+		}},
+	}
+	if err := Validate(badGlobal); err == nil || !strings.Contains(err.Error(), "[cache].reload_policy") {
+		t.Fatalf("expected [cache].reload_policy validation error, got %v", err)
+	}
+
+	// Invalid route [servers.locations.cache_policy].reload_policy
+	badLoc := &Config{
+		Cache: CacheConfig{Enabled: true, MemoryMaxSize: 4 << 20, ReloadPolicy: "retain"},
+		Servers: []ServerConfig{{
+			Listen: ":8080",
+			Locations: []LocationConfig{{
+				Match:       MatchConfig{Type: "prefix", Path: "/"},
+				ProxyPass:   "http://127.0.0.1:9000",
+				Cache:       true,
+				CachePolicy: &LocationCachePolicy{ReloadPolicy: "bogus"},
+			}},
+		}},
+	}
+	if err := Validate(badLoc); err == nil || !strings.Contains(err.Error(), "cache_policy.reload_policy") {
+		t.Fatalf("expected cache_policy.reload_policy validation error, got %v", err)
 	}
 }

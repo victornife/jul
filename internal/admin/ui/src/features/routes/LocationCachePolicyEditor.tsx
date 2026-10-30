@@ -50,6 +50,7 @@ export function LocationCachePolicyEditor({
       staleIfError: starter.staleIfError,
       bypassMode: starter.bypassMode,
       bypassCookiesInput: starter.bypassCookiesInput,
+      reloadPolicy: starter.reloadPolicy,
     });
   }
 
@@ -147,6 +148,9 @@ export function LocationCachePolicyEditor({
               Cookie bypass: <span className="font-mono text-jul-text">{eff.bypass_mode}</span>
               {eff.bypass_cookies && eff.bypass_cookies.length > 0
                 ? ` (${eff.bypass_cookies.join(", ")})`
+                : ""}
+              {eff.reload_policy
+                ? ` · Cutover reload policy: ${eff.reload_policy} (${eff.reload_policy_source ?? "inherited_global"})`
                 : ""}
             </p>
             <p className="text-jul-muted">
@@ -326,6 +330,47 @@ export function LocationCachePolicyEditor({
               </span>
             </label>
           )}
+        </fieldset>
+
+        <fieldset className="space-y-2 rounded-md border border-jul-border p-3">
+          <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-jul-muted">
+            Backend / route cutover behavior (reload_policy)
+          </legend>
+          <label className="flex items-center gap-2 text-sm text-jul-text">
+            <input
+              type="radio"
+              name="reload-policy"
+              checked={!form.reloadPolicy}
+              onChange={() => {
+                setForm((prev) => ({ ...prev, reloadPolicy: "" }));
+              }}
+            />
+            <span>Inherit global [cache].reload_policy</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-jul-text">
+            <input
+              type="radio"
+              name="reload-policy"
+              checked={form.reloadPolicy === "retain"}
+              onChange={() => {
+                setForm((prev) => ({ ...prev, reloadPolicy: "retain" }));
+              }}
+            />
+            <span>Retain cached entries across route/backend cutover (reload_policy = &quot;retain&quot;)</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm text-jul-text">
+            <input
+              type="radio"
+              name="reload-policy"
+              checked={form.reloadPolicy === "invalidate"}
+              onChange={() => {
+                setForm((prev) => ({ ...prev, reloadPolicy: "invalidate" }));
+              }}
+            />
+            <span>
+              Invalidate affected route cache &amp; fence in-flight fills on cutover (reload_policy = &quot;invalidate&quot;)
+            </span>
+          </label>
         </fieldset>
 
         {validation.warnings.length > 0 && (

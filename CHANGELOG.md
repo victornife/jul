@@ -11,6 +11,22 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Preserve incomplete scoped-purge and sensitive-`Vary` retirement protection
+  across process restarts (#666, #667, #668,
+  [ADR 0030](docs/adr/0030-cache-purge-recovery-latency-and-cutover.md)):
+  persist bounded `.jul-cache-purge-intents` (using normalized post-`route_id`
+  selectors, original tag resource snapshots, and pre-commit disk hashes +
+  keyed `versionid` HMAC target verifiers so raw query strings are never
+  written to disk) and pre-unlink `.jul-cache-tombstones` batches on `304`/Vary
+  retirement, reconciling unfinished purges at startup before serving cache
+  traffic while keeping in-memory selector fences active if any disk removal
+  fails. Reduce 200,000-entry host-purge heap allocations by >90% and isolate
+  unrelated-host warm memory hits from single-host incomplete-fence lock
+  acquisitions (#667). Surface durability failures on legacy `POST /cache/purge`
+  with `503 Service Unavailable` and audit `"failure"` without reflexively
+  disabling a healthy empty disk tier on marker-only `.jul-cache-gen` errors
+  (#668).
+
 - Keep predicate values and their hashes out of persistent route-cache
   partitions. Separate private, route-specific matcher proofs preserve unchanged
   route reuse across reload/restart and advance ownership only on incompatible
@@ -45,6 +61,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 
 ### Added
+
+- Explicit route and backend cutover cache behavior (`reload_policy = "retain" |
+  "invalidate"` in `[cache]` and `[servers.locations.cache_policy]`, #624 /
+  `CACHE-OPS-04`, #620,
+  [ADR 0030](docs/adr/0030-cache-purge-recovery-latency-and-cutover.md)):
+  preserves warm cache continuity by default (`"retain"`) while allowing global
+  or per-route opt-in (`"invalidate"`) to atomically advance `RouteEpoch`,
+  fence pre-cutover cold fills, `304` revalidations, background SWR refreshes,
+  and delayed old-generation handlers at `Publish`, and execute scoped cache
+  invalidation for changed or removed routes/upstreams without evicting
+  unrelated applications. Surfaces structured `cache_cutover` plans and scope
+  broadening warnings in configuration diffs/previews and the Console route
+  cache policy editor.
 
 - Route-scoped cache policy overrides, freshness caps (`max_ttl`), and
   conservative request-cookie bypass (`bypass_cookies`, `bypass_any_cookie`) in

@@ -50,6 +50,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 
 | [0028](0028-bounded-cache-inspection.md) | Bounded cache inspection and observed decision evidence | Accepted for implementation; verification pending (#622) | 2026-10-27 |
 | [0029](0029-route-scoped-cache-policy-and-vary-guards.md) | Route-scoped cache policy, request-cookie bypass, and Vary transformation guards | Accepted — #623 / #672 | 2026-10-29 |
+| [0030](0030-cache-purge-recovery-latency-and-cutover.md) | Durable incomplete-purge recovery, large-purge latency bounds, legacy purge outcomes, and route/backend cutover | Accepted — Beta/unreleased (#667, #666, #668, #624) | 2026-10-30 |
 
 ## Reading order
 

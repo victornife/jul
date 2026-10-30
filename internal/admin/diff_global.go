@@ -75,6 +75,7 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.max_ranges")
 		d.cover("cache.tag_headers")
 		d.cover("cache.strip_tag_headers")
+		d.cover("cache.reload_policy")
 		return
 	}
 	if !a.Enabled {
@@ -92,6 +93,7 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		d.cover("cache.max_ranges")
 		d.cover("cache.tag_headers")
 		d.cover("cache.strip_tag_headers")
+		d.cover("cache.reload_policy")
 		return
 	}
 	if b.MemoryMaxSize != a.MemoryMaxSize {
@@ -145,6 +147,11 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 		}
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " stripping of cache tag headers"}, "cache strip_tag_headers")
 	}
+	bReload := orDefault(strings.ToLower(strings.TrimSpace(b.ReloadPolicy)), "retain")
+	aReload := orDefault(strings.ToLower(strings.TrimSpace(a.ReloadPolicy)), "retain")
+	if bReload != aReload {
+		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: bReload, After: aReload, Detail: "Change cache reload_policy on route/backend cutover"}, "cache reload_policy")
+	}
 	d.cover("cache.enabled")
 	d.cover("cache.memory_max_size")
 	d.cover("cache.disk_path")
@@ -159,6 +166,7 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	d.cover("cache.max_ranges")
 	d.cover("cache.tag_headers")
 	d.cover("cache.strip_tag_headers")
+	d.cover("cache.reload_policy")
 }
 
 // diffGlobalCompression compares the [compression] block.
