@@ -122,6 +122,8 @@ describe("cachePolicyDraft helpers", () => {
     expect(parseDurationSecondsApprox("2h")).toBe(7200);
     expect(parseDurationSecondsApprox("500ms")).toBe(0.5);
     expect(parseDurationSecondsApprox("100us")).toBeCloseTo(0.0001);
+    expect(parseDurationSecondsApprox("100µs")).toBeCloseTo(0.0001);
+    expect(parseDurationSecondsApprox("100μs")).toBeNull();
     expect(parseDurationSecondsApprox("100ns")).toBeCloseTo(0.0000001);
     expect(parseDurationSecondsApprox("-5s")).toBeNull();
     expect(parseDurationSecondsApprox("bogus")).toBeNull();

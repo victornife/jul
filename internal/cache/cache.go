@@ -91,6 +91,7 @@ type Cache struct {
 	routeMatchers             map[string]string
 	routeMatcherGen           map[string]uint64
 	routePolicyCommitted      bool
+	inCandidateBuild          bool
 	pendingRouteHandlers      []pendingRouteHandler
 	routeCommitMu             sync.Mutex
 	routePolicyFloor          map[string]uint64
@@ -1216,11 +1217,7 @@ func (c *Cache) handlerWithRoute(next http.Handler, routeCfg *RouteCacheConfig) 
 		if c != nil && localCfg.Scope != "" {
 			boundGen := &atomic.Uint64{}
 			localCfg.boundGen = boundGen
-			if snap := c.routeStateSnap.Load(); snap != nil && snap.committed && snap.isCompatibleConfig(localCfg) {
-				boundGen.Store(snap.matcherGenOf(localCfg.Scope))
-			} else {
-				c.registerPendingRouteHandler(localCfg, boundGen)
-			}
+			c.registerPendingRouteHandler(localCfg, boundGen)
 		}
 		routeCfg = &localCfg
 	}

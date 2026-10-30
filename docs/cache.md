@@ -429,6 +429,7 @@ made obsolete (RFC 9111 §4.4).
   removed, together with **every `Vary` variant** they own.
 - **Cross-origin targets are never invalidated.** A `Location` naming another
   host is skipped, as is a value that does not parse, is opaque (`mailto:`), uses
+  a non-HTTP scheme, or spells the authority differently.
 
 ### Route-scoped cache policy, cookie bypass, and Vary guards (#623 / #672)
 
@@ -439,10 +440,10 @@ present ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
 
 | Field | Type | Default (omitted) | Explicit `"0s"` / `false` |
 | --- | --- | --- | --- |
-| `default_ttl` | duration | Inherits `[cache].default_ttl` | `"0s"` disables fallback caching when the origin omits explicit freshness (`s-maxage`, `max-age`, `Expires`) |
-| `max_ttl` | duration | None (no route cap) | `"0s"` caps fresh lifetime to zero (disabling fresh storage on the route) |
-| `stale_while_revalidate` | duration | Inherits `[cache].stale_while_revalidate` | `"0s"` disables fallback SWR when the origin omits `stale-while-revalidate` |
-| `stale_if_error` | duration | Inherits `[cache].stale_if_error` | `"0s"` disables fallback `stale-if-error` when the origin omits `stale-if-error` |
+| `default_ttl` | duration (`0s..876000h`) | Inherits `[cache].default_ttl` | `"0s"` disables fallback caching when the origin omits explicit freshness (`s-maxage`, `max-age`, `Expires`) |
+| `max_ttl` | duration (`0s..876000h`) | None (no route cap) | `"0s"` caps fresh lifetime to zero (disabling fresh storage on the route without retaining responses for conditional `304` revalidation) |
+| `stale_while_revalidate` | duration (`0s..876000h`) | Inherits `[cache].stale_while_revalidate` | `"0s"` disables fallback SWR when the origin omits `stale-while-revalidate` |
+| `stale_if_error` | duration (`0s..876000h`) | Inherits `[cache].stale_if_error` | `"0s"` disables fallback `stale-if-error` when the origin omits `stale-if-error` |
 | `bypass_cookies` | list of 1..32 cookie names | `[]` | Case-insensitive RFC 6265 cookie-name tokens (`<= 128` bytes each); mutually exclusive with `bypass_any_cookie = true` |
 | `bypass_any_cookie` | bool | `false` | When `true`, any request carrying a `Cookie` header bypasses lookup and storage |
 
@@ -525,7 +526,6 @@ invalidation when all durable operations fail. See [ADR 0029](adr/0029-route-sco
   shared cache storage and reuse. Standard content-negotiation headers
   (`Accept-Encoding`, `Accept-Language`, `Accept`, `User-Agent`) remain
   cacheable as normal.
-  a non-HTTP scheme, or spells the authority differently.
 
 A user-controlled header cannot reach the filesystem through this path: an
 invalidation target is only ever used to build a cache key, and a disk file is

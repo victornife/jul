@@ -81,7 +81,7 @@ export interface CachePolicyFormState {
   readonly bypassCookiesInput: string;
 }
 
-const GO_DURATION_RE = /^(?:0|(?:\d+(?:\.\d+)?(?:ns|us|µs|μs|ms|s|m|h))+)$/;
+const GO_DURATION_RE = /^(?:0|(?:\d+(?:\.\d+)?(?:ns|us|µs|ms|s|m|h))+)$/;
 const COOKIE_TOKEN_RE = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
 export function seedCachePolicyForm(loc: LocationProjection): CachePolicyFormState {
@@ -108,7 +108,7 @@ export function parseDurationSecondsApprox(raw: string): number | null {
   if (trimmed === "") return null;
   if (trimmed === "0") return 0;
   if (!GO_DURATION_RE.test(trimmed)) return null;
-  const partRe = /(\d+(?:\.\d+)?)(ns|us|µs|μs|ms|s|m|h)/g;
+  const partRe = /(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)/g;
   let total = 0;
   let matched = false;
   let m: RegExpExecArray | null;
@@ -122,7 +122,6 @@ export function parseDurationSecondsApprox(raw: string): number | null {
         break;
       case "us":
       case "µs":
-      case "μs":
         total += val / 1e6;
         break;
       case "ms":

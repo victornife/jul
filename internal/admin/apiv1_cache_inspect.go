@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/rbac"
+	"jul/internal/router"
 )
 
 const maxInspectionSnapshots = 16
@@ -150,45 +152,35 @@ func hasSegmentPrefix(path, prefix string) bool {
 }
 
 func inspectionSelectorTargetPath(sel cache.NormalizedSelector) string {
+	var targetPath string
 	switch sel.Kind {
 	case cache.SelectorExactURL:
-		targetPath := sel.URI
+		targetPath = sel.URI
 		if q := strings.IndexByte(targetPath, '?'); q >= 0 {
 			targetPath = targetPath[:q]
 		}
-		return targetPath
 	case cache.SelectorKey:
 		parts := strings.Split(sel.Key, "\n")
 		if len(parts) == 3 {
-			targetPath := parts[2]
+			targetPath = parts[2]
 			if nl := strings.IndexByte(targetPath, 0x00); nl >= 0 {
 				targetPath = targetPath[:nl]
 			}
 			if q := strings.IndexByte(targetPath, '?'); q >= 0 {
 				targetPath = targetPath[:q]
 			}
-			return targetPath
 		}
 	}
-	return ""
+	if targetPath != "" && strings.IndexByte(targetPath, '%') >= 0 {
+		if unescaped, err := url.PathUnescape(targetPath); err == nil && unescaped != "" {
+			targetPath = unescaped
+		}
+	}
+	return targetPath
 }
 
 func locationMatchesInspectionSelector(loc config.LocationConfig, sel cache.NormalizedSelector) bool {
-	switch sel.Kind {
-	case cache.SelectorExactURL, cache.SelectorKey:
-		targetPath := inspectionSelectorTargetPath(sel)
-		if targetPath == "" {
-			return true
-		}
-		switch loc.Match.Type {
-		case "exact":
-			return targetPath == loc.Match.Path
-		case "prefix", "":
-			return strings.HasPrefix(targetPath, loc.Match.Path)
-		default:
-			return true
-		}
-	case cache.SelectorPrefix:
+	if sel.Kind == cache.SelectorPrefix {
 		switch loc.Match.Type {
 		case "exact":
 			return hasSegmentPrefix(loc.Match.Path, sel.Prefix)
@@ -197,53 +189,26 @@ func locationMatchesInspectionSelector(loc config.LocationConfig, sel cache.Norm
 		default:
 			return true
 		}
-	default:
-		return true
 	}
+	return true
 }
 
-func serverCandidatesForInspectionSelector(srv config.ServerConfig, sel cache.NormalizedSelector) []config.LocationConfig {
+func serverCandidatesForInspectionSelector(srv config.ServerConfig, sel cache.NormalizedSelector) ([]config.LocationConfig, bool) {
 	switch sel.Kind {
 	case cache.SelectorExactURL, cache.SelectorKey:
 		targetPath := inspectionSelectorTargetPath(sel)
 		if targetPath == "" {
-			return append([]config.LocationConfig(nil), srv.Locations...)
+			return append([]config.LocationConfig(nil), srv.Locations...), true
 		}
-		type indexedLoc struct {
-			loc config.LocationConfig
-			idx int
+		indices, ok := router.PathCandidateIndices(srv, targetPath)
+		if !ok {
+			return append([]config.LocationConfig(nil), srv.Locations...), true
 		}
-		var tier1, tier2, tier3, tier4 []indexedLoc
-		for i, loc := range srv.Locations {
-			if !locationMatchesInspectionSelector(loc, sel) {
-				continue
-			}
-			switch loc.Match.Type {
-			case "exact":
-				tier1 = append(tier1, indexedLoc{loc: loc, idx: i})
-			case "prefix", "":
-				if loc.Match.Path == "/" {
-					tier4 = append(tier4, indexedLoc{loc: loc, idx: i})
-				} else {
-					tier2 = append(tier2, indexedLoc{loc: loc, idx: i})
-				}
-			default:
-				tier3 = append(tier3, indexedLoc{loc: loc, idx: i})
-			}
+		out := make([]config.LocationConfig, 0, len(indices))
+		for _, idx := range indices {
+			out = append(out, srv.Locations[idx])
 		}
-		sort.SliceStable(tier2, func(i, j int) bool {
-			return len(tier2[i].loc.Match.Path) > len(tier2[j].loc.Match.Path)
-		})
-		var out []config.LocationConfig
-		for _, tier := range [][]indexedLoc{tier1, tier2, tier3, tier4} {
-			for _, item := range tier {
-				out = append(out, item.loc)
-				if !locationHasPredicates(item.loc) {
-					return out
-				}
-			}
-		}
-		return out
+		return out, false
 
 	case cache.SelectorPrefix:
 		shadowPrefixLen := -1
@@ -260,6 +225,7 @@ func serverCandidatesForInspectionSelector(srv config.ServerConfig, sel cache.No
 			}
 		}
 		var out []config.LocationConfig
+		uncertain := false
 		rootShadowed := shadowPrefixLen > 0
 		for i, loc := range srv.Locations {
 			if !locationMatchesInspectionSelector(loc, sel) {
@@ -283,25 +249,54 @@ func serverCandidatesForInspectionSelector(srv config.ServerConfig, sel cache.No
 				}
 				out = append(out, loc)
 			case "exact":
+				uncertain = true
 				out = append(out, loc)
 			default:
 				if shadowPrefixLen > 0 {
 					continue
 				}
+				uncertain = true
 				out = append(out, loc)
 			}
 		}
-		return out
+		return out, uncertain
 
 	default:
 		var out []config.LocationConfig
+		uncertain := false
 		for _, loc := range srv.Locations {
 			if locationMatchesInspectionSelector(loc, sel) {
+				if loc.Match.Type == "regex" || loc.Match.Type == "exact" {
+					uncertain = true
+				}
 				out = append(out, loc)
 			}
 		}
-		return out
+		return out, uncertain
 	}
+}
+
+func inspectionServerHostScore(srv config.ServerConfig, host, bare string) int {
+	if host == "" {
+		return 3
+	}
+	if len(srv.ServerNames) == 0 {
+		return 1
+	}
+	best := 0
+	for _, name := range srv.ServerNames {
+		norm := config.NormalizeHostPattern(name)
+		switch {
+		case norm == host || norm == bare:
+			return 3
+		case strings.HasPrefix(norm, "*."):
+			suffix := norm[1:]
+			if len(bare) > len(suffix) && strings.HasSuffix(bare, suffix) && best < 2 {
+				best = 2
+			}
+		}
+	}
+	return best
 }
 
 func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Config, base cachemeta.EffectivePolicy) (cachemeta.EffectivePolicy, string, string, []string) {
@@ -320,17 +315,18 @@ func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Conf
 		}
 	}
 	bare := middleware.CanonicalHTTPHost(host)
+	maxScoreByListen := make(map[string]int, len(cfg.Servers))
+	for _, srv := range cfg.Servers {
+		if sc := inspectionServerHostScore(srv, host, bare); sc > maxScoreByListen[srv.Listen] {
+			maxScoreByListen[srv.Listen] = sc
+		}
+	}
 	serverMatchesHost := func(srv config.ServerConfig) bool {
 		if host == "" {
 			return true
 		}
-		for _, name := range srv.ServerNames {
-			norm := config.NormalizeHostPattern(name)
-			if norm == host || norm == bare {
-				return true
-			}
-		}
-		return false
+		sc := inspectionServerHostScore(srv, host, bare)
+		return sc > 0 && sc == maxScoreByListen[srv.Listen]
 	}
 	if sel.RouteID != "" {
 		for _, srv := range cfg.Servers {
@@ -354,16 +350,21 @@ func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Conf
 		return base, defaultSource, defaultRouteState, nil
 	}
 	var candidates []config.LocationConfig
+	uncertain := false
 	for _, srv := range cfg.Servers {
 		if !serverMatchesHost(srv) {
 			continue
 		}
-		candidates = append(candidates, serverCandidatesForInspectionSelector(srv, sel)...)
+		srvCandidates, srvUncertain := serverCandidatesForInspectionSelector(srv, sel)
+		candidates = append(candidates, srvCandidates...)
+		if srvUncertain {
+			uncertain = true
+		}
 	}
 	if len(candidates) == 0 {
 		return base, defaultSource, defaultRouteState, nil
 	}
-	if len(candidates) == 1 && !locationHasPredicates(candidates[0]) {
+	if !uncertain && len(candidates) == 1 && !locationHasPredicates(candidates[0]) {
 		pol, hasOverride := applyRoutePolicyToEffective(cfg, candidates[0], base)
 		source := defaultSource
 		if hasOverride {
@@ -379,10 +380,10 @@ func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Conf
 		}
 		return pol, source, routeState, nil
 	}
-	// Multiple candidate routes (or a predicate-scoped route) match this selector without route_id.
+	// Multiple candidate routes (or a predicate/untested-regex route) match this selector without route_id.
 	// Check whether any candidate uses route cache overrides, predicates, or differing cache toggles.
 	firstPol, firstHasOverride := applyRoutePolicyToEffective(cfg, candidates[0], base)
-	ambiguous := locationHasPredicates(candidates[0]) && firstHasOverride
+	ambiguous := (locationHasPredicates(candidates[0]) || uncertain) && firstHasOverride
 	for i := 1; i < len(candidates); i++ {
 		nextPol, nextHasOverride := applyRoutePolicyToEffective(cfg, candidates[i], base)
 		if locationHasPredicates(candidates[i]) || candidates[i].Cache != candidates[0].Cache || nextHasOverride != firstHasOverride ||

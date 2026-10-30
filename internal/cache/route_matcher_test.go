@@ -559,3 +559,175 @@ func TestIndependent673OldSelectedHandlerCannotPublishIntoReplacementEpoch(t *te
 		}
 	}
 }
+
+func TestIndependent673InitialBindingBeyond4096Routes(t *testing.T) {
+	c, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: 16 << 20,
+		DefaultTTL:    config.Duration(time.Hour),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := versionid.New(bytes.Repeat([]byte{0x42}, 32))
+
+	// Abandoned candidate before initial commit is discarded cleanly.
+	abandonedLoc := config.LocationConfig{
+		Match:     config.MatchConfig{Type: "prefix", Path: "/abandoned"},
+		ProxyPass: "http://127.0.0.1:8080",
+		Cache:     true,
+	}
+	abandonedRC := CompileRouteCacheConfig("route:abandoned", true, nil).WithMatcher(abandonedLoc, key)
+	abandonedHandler := c.HandlerForRoute(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write([]byte("abandoned"))
+	}), abandonedRC)
+	c.DiscardPendingRouteHandlers()
+
+	const totalRoutes = 4097
+	routes := make([]RouteCacheConfig, totalRoutes)
+	handlers := make([]http.Handler, totalRoutes)
+	for i := range totalRoutes {
+		p := fmt.Sprintf("/r/%d", i)
+		loc := config.LocationConfig{
+			Match:     config.MatchConfig{Type: "prefix", Path: p},
+			ProxyPass: "http://127.0.0.1:8080",
+			Cache:     true,
+		}
+		rc := CompileRouteCacheConfig(fmt.Sprintf("route:%d", i), true, nil).WithMatcher(loc, key)
+		routes[i] = rc
+		body := fmt.Sprintf("body-%d", i)
+		handlers[i] = c.HandlerForRoute(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+			_, _ = w.Write([]byte(body))
+		}), rc)
+	}
+	c.CommitRoutePolicies(routes)
+
+	for _, idx := range []int{0, 1, 2048, totalRoutes - 2, totalRoutes - 1} {
+		target := fmt.Sprintf("http://example.com/r/%d", idx)
+		wantBody := fmt.Sprintf("body-%d", idx)
+		for step, wantState := range []string{stateMiss, stateHit} {
+			rec := httptest.NewRecorder()
+			handlers[idx].ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+			if rec.Header().Get("X-Cache") != wantState || rec.Body.String() != wantBody {
+				t.Fatalf("route %d step %d: state=%s body=%q, want %s %q",
+					idx, step, rec.Header().Get("X-Cache"), rec.Body.String(), wantState, wantBody)
+			}
+		}
+	}
+
+	// Verify the discarded abandoned candidate handler never acquired cache privileges.
+	for range 2 {
+		rec := httptest.NewRecorder()
+		abandonedHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.com/abandoned", nil))
+		if rec.Header().Get("X-Cache") != stateMiss {
+			t.Fatalf("abandoned handler state=%s, want MISS", rec.Header().Get("X-Cache"))
+		}
+	}
+
+	// Verify an aborted staged candidate (BeginRouteCandidate -> HandlerForRoute -> DiscardPendingRouteHandlers)
+	// for an ALREADY-ACTIVE compatible route (route:0) cannot acquire cache privileges either.
+	c.BeginRouteCandidate()
+	abortedCompatible := c.HandlerForRoute(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write([]byte("aborted-candidate-body"))
+	}), routes[0])
+	c.DiscardPendingRouteHandlers()
+	for range 2 {
+		rec := httptest.NewRecorder()
+		abortedCompatible.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.com/r/0-aborted", nil))
+		if rec.Header().Get("X-Cache") != stateMiss {
+			t.Fatalf("aborted compatible candidate handler state=%s, want MISS", rec.Header().Get("X-Cache"))
+		}
+	}
+}
+
+func TestIndependent673GenerationCompactionPreservesActiveHandler(t *testing.T) {
+	c, err := New(config.CacheConfig{
+		Enabled:       true,
+		MemoryMaxSize: 8 << 20,
+		DefaultTTL:    config.Duration(time.Hour),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key, _ := versionid.New(bytes.Repeat([]byte{0x55}, 32))
+
+	keepLoc := config.LocationConfig{
+		Match:     config.MatchConfig{Type: "prefix", Path: "/keep"},
+		ProxyPass: "http://127.0.0.1:8080",
+		Cache:     true,
+	}
+	compileKeep := func() RouteCacheConfig {
+		rc := CompileRouteCacheConfig("route:keep", true, nil).WithMatcher(keepLoc, key)
+		rc.Epoch = c.CurrentRouteEpoch(rc.Scope)
+		return rc
+	}
+	originKeep := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write([]byte("keep-body"))
+	})
+
+	// Follow the factory's construction-before-commit order across 1,030 reloads
+	// with distinct temporary routes, crossing both epoch and matcher-generation compaction.
+	var keepHandler http.Handler
+	var retiredFirstHandler http.Handler
+	var retiredFirstRC RouteCacheConfig
+	for i := range 1030 {
+		rcKeep := compileKeep()
+		keepHandler = c.HandlerForRoute(originKeep, rcKeep)
+
+		tmpLoc := config.LocationConfig{
+			Match:     config.MatchConfig{Type: "prefix", Path: fmt.Sprintf("/tmp/%d", i)},
+			ProxyPass: "http://127.0.0.1:8080",
+			Cache:     true,
+		}
+		rcTmp := CompileRouteCacheConfig(fmt.Sprintf("route:tmp:%d", i), true, nil).WithMatcher(tmpLoc, key)
+		rcTmp.Epoch = c.CurrentRouteEpoch(rcTmp.Scope)
+		tmpHandler := c.HandlerForRoute(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+			_, _ = fmt.Fprintf(w, "tmp-%d", i)
+		}), rcTmp)
+		if i == 0 {
+			retiredFirstHandler = tmpHandler
+			retiredFirstRC = rcTmp
+		}
+
+		c.CommitRoutePolicies([]RouteCacheConfig{rcKeep, rcTmp})
+	}
+
+	// After 1,030 reloads (past 1,026 compaction threshold), the unchanged route's
+	// handler must still cache and hit subsequent responses.
+	for step, wantState := range []string{stateMiss, stateHit, stateHit} {
+		rec := httptest.NewRecorder()
+		keepHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.com/keep/item", nil))
+		if rec.Header().Get("X-Cache") != wantState || rec.Body.String() != "keep-body" {
+			t.Fatalf("keep route step %d after compaction: state=%s body=%q, want %s keep-body",
+				step, rec.Header().Get("X-Cache"), rec.Body.String(), wantState)
+		}
+	}
+
+	// Re-adding the pruned route:tmp:0 after compaction must assign a fresh generation
+	// above the compacted floor so retiredFirstHandler from reload 0 remains fenced.
+	rcKeep := compileKeep()
+	keepHandler = c.HandlerForRoute(originKeep, rcKeep)
+	readdedRC := retiredFirstRC
+	readdedRC.Epoch = c.CurrentRouteEpoch(readdedRC.Scope)
+	readdedHandler := c.HandlerForRoute(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write([]byte("tmp-0-readded"))
+	}), readdedRC)
+	c.CommitRoutePolicies([]RouteCacheConfig{rcKeep, readdedRC})
+
+	// Old handler from reload 0 must not publish into the re-added route's epoch.
+	retiredFirstHandler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.com/tmp/0", nil))
+	for step, wantState := range []string{stateMiss, stateHit} {
+		rec := httptest.NewRecorder()
+		readdedHandler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.com/tmp/0", nil))
+		if rec.Header().Get("X-Cache") != wantState || rec.Body.String() != "tmp-0-readded" {
+			t.Fatalf("readded route step %d: state=%s body=%q, want %s tmp-0-readded",
+				step, rec.Header().Get("X-Cache"), rec.Body.String(), wantState)
+		}
+	}
+}

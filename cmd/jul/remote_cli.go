@@ -662,7 +662,7 @@ func cmdRemoteCache(args []string) int {
 	defer cancel()
 
 	if strings.TrimSpace(*operationID) != "" {
-		if *preview || *urlFlag != "" || *hostFlag != "" || *uriFlag != "" || *prefixFlag != "" || *globFlag != "" || len(tags) > 0 || *keyFlag != "" || *allFlag {
+		if *preview || *urlFlag != "" || *hostFlag != "" || *uriFlag != "" || *prefixFlag != "" || *globFlag != "" || len(tags) > 0 || *keyFlag != "" || *routeID != "" || *allFlag {
 			return renderUsageError(common.json, "cache", "--operation-id cannot be combined with selector or --preview flags")
 		}
 		v, r, err := client.CachePurgeOperation(ctx, strings.TrimSpace(*operationID))

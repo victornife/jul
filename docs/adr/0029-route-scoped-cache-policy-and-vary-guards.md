@@ -45,13 +45,17 @@ cookie-authenticated web routes) needed:
 ### 1. `[servers.locations.cache_policy]` Schema and Precedence
 
 We add an optional `*LocationCachePolicy` (`[servers.locations.cache_policy]`)
-table on `LocationConfig` with hot-reload lifecycle (`SubCache`):
+table on `LocationConfig` with hot-reload lifecycle (`SubCache`) and non-negative
+durations bounded at `876000h` (100 years):
 
 - `default_ttl` (`*config.Duration`): nil inherits `[cache].default_ttl`;
   explicit `"0s"` disables fallback caching when the origin omits explicit
   freshness (`s-maxage`, `max-age`, `Expires`).
 - `max_ttl` (`*config.Duration`): nil applies no route cap; when set, caps
-  fresh lifetime from above (`effective_ttl = min(base_ttl, max_ttl)`).
+  fresh lifetime from above (`effective_ttl = min(base_ttl, max_ttl)`). Setting
+  `max_ttl = "0s"` caps fresh lifetime to zero and disables fresh storage on
+  the route without retaining responses for subsequent conditional `304`
+  revalidation.
 - `stale_while_revalidate` (`*config.Duration`): nil inherits
   `[cache].stale_while_revalidate`; explicit `"0s"` disables fallback SWR.
 - `stale_if_error` (`*config.Duration`): nil inherits `[cache].stale_if_error`;

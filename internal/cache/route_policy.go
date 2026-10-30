@@ -184,7 +184,8 @@ func sameRoutePolicyOverrides(a, b RouteCacheConfig) bool {
 		a.HasSIE == b.HasSIE && a.StaleIfError == b.StaleIfError &&
 		a.BypassAnyCookie == b.BypassAnyCookie &&
 		a.BypassCookieCount == b.BypassCookieCount &&
-		a.BypassCookies == b.BypassCookies
+		a.BypassCookies == b.BypassCookies &&
+		sameVaryGuard(a.varyGuard, b.varyGuard)
 }
 
 func (s *routeStateSnapshot) epochOf(scope string) uint64 {
@@ -198,7 +199,7 @@ func (s *routeStateSnapshot) matcherGenOf(scope string) uint64 {
 	if s == nil || scope == "" {
 		return 0
 	}
-	return max(s.matcherGen[scope], s.matcherGen[routeEpochFloorKey])
+	return s.matcherGen[scope]
 }
 
 func (s *routeStateSnapshot) isCompatibleConfig(rc RouteCacheConfig) bool {
@@ -259,17 +260,43 @@ func (c *Cache) registerPendingRouteHandler(rc RouteCacheConfig, boundGen *atomi
 	}
 	c.genMu.Lock()
 	defer c.genMu.Unlock()
-	if c.routePolicyCommitted {
+	if !c.inCandidateBuild && c.routePolicyCommitted {
 		if activeCfg, ok := c.routeConfigs[rc.Scope]; ok && activeCfg.matcherProof == rc.matcherProof && sameRoutePolicyOverrides(activeCfg, rc) {
-			boundGen.Store(max(c.routeMatcherGen[rc.Scope], c.routeMatcherGen[routeEpochFloorKey]))
+			boundGen.Store(c.routeMatcherGen[rc.Scope])
 			return
 		}
 	}
 	c.pendingRouteHandlers = append(c.pendingRouteHandlers, pendingRouteHandler{cfg: rc, boundGen: boundGen})
-	limit := max(4096, len(c.routeConfigs)*2)
-	if len(c.pendingRouteHandlers) > limit {
-		c.pendingRouteHandlers = c.pendingRouteHandlers[len(c.pendingRouteHandlers)-limit:]
+}
+
+// BeginRouteCandidate marks the start of a staged handler-generation build so
+// newly constructed route handlers remain unbound until CommitRoutePolicies
+// promotes the candidate (or DiscardPendingRouteHandlers aborts it).
+func (c *Cache) BeginRouteCandidate() {
+	if c == nil {
+		return
 	}
+	c.genMu.Lock()
+	c.inCandidateBuild = true
+	c.pendingRouteHandlers = nil
+	c.genMu.Unlock()
+}
+
+// DiscardPendingRouteHandlers clears uncommitted route-handler registrations
+// when a candidate generation is aborted before CommitRoutePolicies.
+func (c *Cache) DiscardPendingRouteHandlers() {
+	if c == nil {
+		return
+	}
+	c.genMu.Lock()
+	c.inCandidateBuild = false
+	for _, ph := range c.pendingRouteHandlers {
+		if ph.boundGen != nil {
+			ph.boundGen.Store(0)
+		}
+	}
+	c.pendingRouteHandlers = nil
+	c.genMu.Unlock()
 }
 
 // WithMatcher binds the resolved matcher to compatibility using the existing
@@ -504,6 +531,11 @@ func evaluateCookieBypass(r *http.Request, pol CachePolicy) string {
 		return ""
 	}
 	lines := r.Header.Values("Cookie")
+	for k, vs := range r.Header {
+		if k != "Cookie" && strings.EqualFold(k, "Cookie") {
+			lines = append(append([]string(nil), lines...), vs...)
+		}
+	}
 	if len(lines) == 0 {
 		return ""
 	}
@@ -550,7 +582,7 @@ func evaluateCookieBypass(r *http.Request, pol CachePolicy) string {
 				return "cookie_bypass_malformed"
 			}
 			name := part[:eq]
-			val := textproto.TrimString(part[eq+1:])
+			val := part[eq+1:]
 			if len(name) > config.MaxBypassCookieNameBytes || !isHTTPToken(name) || hasInvalidCookieValueByte(val) {
 				return "cookie_bypass_malformed"
 			}
@@ -668,7 +700,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 		for scope, rc := range configs {
 			prevCfg, wasActive := c.routeConfigs[scope]
 			if wasActive && prevCfg.matcherProof == rc.matcherProof && sameRoutePolicyOverrides(prevCfg, rc) {
-				nextMatcherGen[scope] = max(c.routeMatcherGen[scope], genFloor)
+				nextMatcherGen[scope] = c.routeMatcherGen[scope]
 			} else {
 				nextMatcherGen[scope] = max(c.routeMatcherGen[scope], genFloor) + 1
 			}
@@ -717,8 +749,11 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	for scope, rc := range configs {
 		if c.routeMatchers[scope] != rc.matcherProof {
 			c.routePolicyFloor[scope] = c.genSeq.Add(1)
+		} else if prevCfg, ok := c.routeConfigs[scope]; ok && !sameVaryGuard(prevCfg.varyGuard, rc.varyGuard) {
+			c.routePolicyFloor[scope] = c.genSeq.Add(1)
 		}
 	}
+	c.inCandidateBuild = false
 	c.routePolicyCommitted = true
 	c.routeEpoch = maps.Clone(epochSnap)
 	c.routePolicyDigest = active
@@ -731,7 +766,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 				continue
 			}
 			if rc, ok := configs[ph.cfg.Scope]; ok && rc.matcherProof == ph.cfg.matcherProof && sameRoutePolicyOverrides(rc, ph.cfg) {
-				ph.boundGen.CompareAndSwap(0, max(nextMatcherGen[ph.cfg.Scope], nextMatcherGen[routeEpochFloorKey]))
+				ph.boundGen.CompareAndSwap(0, nextMatcherGen[ph.cfg.Scope])
 			}
 		}
 		c.pendingRouteHandlers = nil

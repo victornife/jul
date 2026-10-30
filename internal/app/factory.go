@@ -201,11 +201,19 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	}
 	gen := f.GenRes.Begin()
 	f.stageEgress(candidateEgress)
+	if f.Cache != nil {
+		f.Cache.BeginRouteCandidate()
+	}
 	committed := false
 	defer func() {
 		gen.Abort()
-		if !committed && egressChanged && candidateEgress != nil {
-			candidateEgress.CloseIdleConnections()
+		if !committed {
+			if f.Cache != nil {
+				f.Cache.DiscardPendingRouteHandlers()
+			}
+			if egressChanged && candidateEgress != nil {
+				candidateEgress.CloseIdleConnections()
+			}
 		}
 	}()
 
@@ -258,10 +266,16 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 	}
 	gen := f.GenRes.Begin()
 	f.stageEgress(candidateEgress)
+	if f.Cache != nil {
+		f.Cache.BeginRouteCandidate()
+	}
 
 	handlers, err = f.buildHandlers(ctx, c, gen, upstreams, candidateEgress)
 	if err != nil {
 		gen.Abort()
+		if f.Cache != nil {
+			f.Cache.DiscardPendingRouteHandlers()
+		}
 		if egressChanged && candidateEgress != nil {
 			candidateEgress.CloseIdleConnections()
 		}
@@ -314,6 +328,9 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		}
 		committed = true
 		gen.Abort()
+		if f.Cache != nil {
+			f.Cache.DiscardPendingRouteHandlers()
+		}
 		if egressChanged && candidateEgress != nil {
 			candidateEgress.CloseIdleConnections()
 		}

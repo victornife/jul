@@ -926,12 +926,18 @@ test.describe("Route cache policy starters, failed/staged/denied flows, and acce
     // 1. Validation error & dormant warning accessibility regions + aria-invalid state
     const defaultTTLInput = editorDialog.getByLabel("Default TTL override");
     const maxTTLInput = editorDialog.getByLabel("Max TTL cap");
+    const swrInput = editorDialog.getByLabel("Stale-while-revalidate");
+    const sieInput = editorDialog.getByLabel("Stale-if-error");
     const cookieInput = editorDialog.getByLabel(/Cookie names/);
     await defaultTTLInput.fill("10m");
     await maxTTLInput.fill("1m");
+    await swrInput.fill("-1s");
+    await sieInput.fill("bad");
     await cookieInput.fill("bad name=1");
     await expect(defaultTTLInput).toHaveAttribute("aria-invalid", "true");
     await expect(maxTTLInput).toHaveAttribute("aria-invalid", "true");
+    await expect(swrInput).toHaveAttribute("aria-invalid", "true");
+    await expect(sieInput).toHaveAttribute("aria-invalid", "true");
     await expect(cookieInput).toHaveAttribute("aria-invalid", "true");
     await expect(editorDialog.getByRole("alert", { name: "Cache policy errors" })).toContainText(
       "default_ttl (10m) must not exceed max_ttl (1m).",

@@ -152,10 +152,11 @@ func validateLocationCachePolicy(loc LocationConfig, where string) []error {
 	}
 	var errs []error
 	pWhere := where + ".cache_policy"
-	hasCacheableAction := (loc.ProxyPass != "" && !loc.GRPC) || loc.FastCGIPass != "" || loc.UWSGIPass != "" || len(loc.Plugins) > 0
+	hasCacheableAction := (loc.ProxyPass != "" && !loc.GRPC) || loc.FastCGIPass != "" || loc.UWSGIPass != "" || loc.Plugin != ""
 	if !hasCacheableAction || loc.Root != "" || loc.GRPC || loc.GRPCTranscode != nil || loc.Redirect != "" || loc.Return != 0 || loc.Deny {
 		errs = append(errs, fmt.Errorf("%s: cache_policy applies only to cacheable location actions (proxy_pass without grpc, fastcgi_pass, uwsgi_pass, or handler plugin)", pWhere))
 	}
+	const maxCachePolicyDuration = Duration(100 * 365 * 24 * time.Hour)
 	for _, check := range []struct {
 		path  string
 		value *Duration
@@ -168,6 +169,8 @@ func validateLocationCachePolicy(loc LocationConfig, where string) []error {
 		if check.value != nil {
 			if err := validateNonNegativeDuration(check.path, *check.value); err != nil {
 				errs = append(errs, err)
+			} else if *check.value > maxCachePolicyDuration {
+				errs = append(errs, fmt.Errorf("%s: duration %s exceeds maximum of %s (100 years)", check.path, check.value.Std(), maxCachePolicyDuration.Std()))
 			}
 		}
 	}

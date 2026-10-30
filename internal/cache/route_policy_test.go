@@ -262,6 +262,7 @@ func TestRouteCachePolicyCookieBypassAndMalformedFailClosed(t *testing.T) {
 		"malformed_cookie_without_equals",
 		"=emptyname",
 		"bad name=1",
+		"theme= 1",
 		"theme=two words",
 		"theme=a,b",
 		`theme=a\b`,
@@ -648,8 +649,34 @@ func TestVaryTransformGuardsProxyAndCGIInCachePackage(t *testing.T) {
 	if varyRejectionHeader(nil, polProxy.varyGuard, http.Header{"Vary": []string{"Accept, X-Custom-Rewrite"}}) != "vary_proxy_rewrite_rejected" {
 		t.Fatal("expected vary_proxy_rewrite_rejected for multi-token Vary header")
 	}
+	if varyRejectionHeader(nil, nil, http.Header{"vary": []string{"Cookie"}}) != "vary_sensitive_rejected" {
+		t.Fatal("expected non-canonical vary header map key to be rejected")
+	}
+	if len(varyFields(http.Header{"vary": []string{"Accept-Encoding, Cookie"}})) != 2 {
+		t.Fatal("expected varyFields to read non-canonical vary header map key")
+	}
+	reqLowerCookie := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	reqLowerCookie.Header["cookie"] = []string{"session_id=secret"}
+	if evaluateCookieBypass(reqLowerCookie, CachePolicy{BypassCookieCount: 1, BypassCookies: [32]string{"session_id"}}) != "cookie_bypass" {
+		t.Fatal("expected non-canonical cookie header map key to trigger cookie_bypass")
+	}
+	// Vary-guard tightening on reload fences old handler and advances floor.
+	rcGuard1 := CompileRouteCacheConfig("route:guard-tighten", false, nil).WithProxyVaryGuard([]string{"X-Rewrite-1"}, true)
+	rcGuard2 := CompileRouteCacheConfig("route:guard-tighten", false, nil).WithProxyVaryGuard([]string{"X-Rewrite-1", "X-Rewrite-2"}, true)
+	c.CommitRoutePolicies([]RouteCacheConfig{rcGuard1})
+	hGuardOld := c.HandlerForRoute(origin, rcGuard1)
+	c.CommitRoutePolicies([]RouteCacheConfig{rcGuard2})
+	for range 2 {
+		rec := httptest.NewRecorder()
+		hGuardOld.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "http://example.com/guard-tighten", nil))
+		if rec.Header().Get("X-Cache") != stateMiss {
+			t.Fatalf("expected old handler after varyGuard tightening to miss, got %s", rec.Header().Get("X-Cache"))
+		}
+	}
 	(*Cache)(nil).cleanupSensitiveVary("k", nil, 0)
 	(*Cache)(nil).registerPendingRouteHandler(RouteCacheConfig{}, nil)
+	(*Cache)(nil).BeginRouteCandidate()
+	(*Cache)(nil).DiscardPendingRouteHandlers()
 
 	// Exercise routeStateSnapshot helper methods directly.
 	var nilSnap *routeStateSnapshot
@@ -679,6 +706,34 @@ func TestVaryTransformGuardsProxyAndCGIInCachePackage(t *testing.T) {
 		!snapWithMatchers.hasPriorEvidence("s") ||
 		snapWithMatchers.hasPriorEvidence("missing") {
 		t.Fatal("unexpected snapWithMatchers results")
+	}
+
+	// Verify SelectorKey + RouteID on a single-host route succeeds and enforces host membership.
+	singleRouteID := "single-host-route"
+	singleHostCfg := &config.Config{
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"example.com"},
+				Locations: []config.LocationConfig{
+					{RouteID: &singleRouteID, Match: config.MatchConfig{Type: "prefix", Path: "/api"}},
+				},
+			},
+		},
+	}
+	if _, err := ParseSelector(Selector{
+		Kind:    SelectorKey,
+		RouteID: singleRouteID,
+		Key:     "GET\nexample.com\n/api/items",
+	}, singleHostCfg); err != nil {
+		t.Fatalf("expected SelectorKey + RouteID on single-host route to succeed: %v", err)
+	}
+	if _, err := ParseSelector(Selector{
+		Kind:    SelectorKey,
+		RouteID: singleRouteID,
+		Key:     "GET\nother.example.com\n/api/items",
+	}, singleHostCfg); err == nil {
+		t.Fatal("expected SelectorKey + RouteID with mismatched key host to fail")
 	}
 }
 

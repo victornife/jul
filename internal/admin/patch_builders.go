@@ -6,6 +6,7 @@ package admin
 import (
 	"fmt"
 	"maps"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -219,7 +220,19 @@ func buildLocationCachePolicy(in locationCachePolicyPatch) (*config.LocationCach
 	if err != nil {
 		return nil, "", fmt.Errorf("location_cache_policy_set: %w", err)
 	}
-	cookies := normalizeStringSlice(in.BypassCookies)
+	var cookies []string
+	seenCookies := make(map[string]struct{}, len(in.BypassCookies))
+	for _, raw := range in.BypassCookies {
+		trimmed := strings.ToLower(strings.TrimSpace(raw))
+		if trimmed == "" {
+			continue
+		}
+		if _, dup := seenCookies[trimmed]; !dup {
+			seenCookies[trimmed] = struct{}{}
+			cookies = append(cookies, trimmed)
+		}
+	}
+	sort.Strings(cookies)
 	if defaultTTL == nil && maxTTL == nil && swr == nil && sie == nil && len(cookies) == 0 && !in.BypassAnyCookie {
 		return nil, "inherit global [cache]", nil
 	}

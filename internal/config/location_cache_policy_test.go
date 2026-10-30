@@ -136,6 +136,16 @@ bypass_cookies = ["sid"]
 			policy:  `bypass_cookies = ["Session_ID", "session_id"]`,
 			wantSub: "duplicates",
 		},
+		{
+			name:    "duration_exceeds_100_years",
+			policy:  `max_ttl = "880000h"`,
+			wantSub: "100 years",
+		},
+		{
+			name:    "default_ttl_exceeds_max_ttl",
+			policy:  "default_ttl = \"10m\"\nmax_ttl = \"1m\"",
+			wantSub: "must not exceed max_ttl",
+		},
 	}
 
 	for _, tc := range cases {
@@ -169,5 +179,20 @@ server_names = ["example.com"]
 				t.Fatalf("expected error containing %q, got %v", tc.wantSub, err)
 			}
 		})
+	}
+
+	// Non-cacheable action with cache_policy is rejected; handler plugin with cache_policy is accepted.
+	oneMin := Duration(time.Minute)
+	if errs := validateLocationCachePolicy(LocationConfig{
+		Return:      200,
+		CachePolicy: &LocationCachePolicy{MaxTTL: &oneMin},
+	}, "servers[0].locations[0]"); len(errs) == 0 || !strings.Contains(errs[0].Error(), "cacheable location actions") {
+		t.Fatalf("expected non-cacheable action error, got %v", errs)
+	}
+	if errs := validateLocationCachePolicy(LocationConfig{
+		Plugin:      "act",
+		CachePolicy: &LocationCachePolicy{MaxTTL: &oneMin},
+	}, "servers[0].locations[0]"); len(errs) != 0 {
+		t.Fatalf("expected handler plugin with cache_policy to pass, got %v", errs)
 	}
 }

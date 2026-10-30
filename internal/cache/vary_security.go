@@ -4,7 +4,9 @@
 package cache
 
 import (
+	"crypto/sha256"
 	"net/http"
+	"sort"
 	"strings"
 
 	"golang.org/x/net/http/httpguts"
@@ -25,6 +27,52 @@ type varyTransformPolicy struct {
 	prefixes []string
 	reject   bool
 	cgi      bool
+	digest   [16]byte
+}
+
+func computeVaryTransformDigest(p *varyTransformPolicy) [16]byte {
+	if p == nil {
+		return [16]byte{}
+	}
+	h := sha256.New()
+	var flags [2]byte
+	if p.reject {
+		flags[0] = 1
+	}
+	if p.cgi {
+		flags[1] = 1
+	}
+	_, _ = h.Write(flags[:])
+	keys := make([]string, 0, len(p.names))
+	for k := range p.names {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte{0})
+	}
+	_, _ = h.Write([]byte{0xff})
+	prefixes := append([]string(nil), p.prefixes...)
+	sort.Strings(prefixes)
+	for _, pref := range prefixes {
+		_, _ = h.Write([]byte(pref))
+		_, _ = h.Write([]byte{0})
+	}
+	sum := h.Sum(nil)
+	var out [16]byte
+	copy(out[:], sum[:16])
+	return out
+}
+
+func sameVaryGuard(a, b *varyTransformPolicy) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.digest == b.digest
 }
 
 func newProxyVaryTransformPolicy(names []string, complete bool) *varyTransformPolicy {
@@ -44,6 +92,7 @@ func newProxyVaryTransformPolicy(names []string, complete bool) *varyTransformPo
 		}
 		p.names[lower] = struct{}{}
 	}
+	p.digest = computeVaryTransformDigest(p)
 	return p
 }
 
@@ -65,6 +114,7 @@ func newCGIVaryTransformPolicy(names, prefixes []string, complete bool) *varyTra
 		}
 		p.prefixes = append(p.prefixes, strings.ReplaceAll(strings.ToLower(prefix), "-", "_"))
 	}
+	p.digest = computeVaryTransformDigest(p)
 	return p
 }
 
@@ -96,16 +146,21 @@ func sensitiveVaryFields(fields []string) bool {
 }
 
 func sensitiveVaryHeader(h http.Header) bool {
-	for _, line := range h.Values("Vary") {
-		for {
-			field, rest, more := strings.Cut(line, ",")
-			if isSensitiveVaryField(field) {
-				return true
+	for k, lines := range h {
+		if !strings.EqualFold(k, "Vary") {
+			continue
+		}
+		for _, line := range lines {
+			for {
+				field, rest, more := strings.Cut(line, ",")
+				if isSensitiveVaryField(field) {
+					return true
+				}
+				if !more {
+					break
+				}
+				line = rest
 			}
-			if !more {
-				break
-			}
-			line = rest
 		}
 	}
 	return false
@@ -244,22 +299,27 @@ func varyRejectionHeader(r *http.Request, policy *varyTransformPolicy, h http.He
 		return ""
 	}
 	var bytes, count int
-	for _, line := range h.Values("Vary") {
-		bytes += len(line)
-		if bytes > maxProxyVaryBytes {
-			return varyRewriteReason(policy)
+	for k, lines := range h {
+		if !strings.EqualFold(k, "Vary") {
+			continue
 		}
-		for {
-			field, rest, more := strings.Cut(line, ",")
-			trimmed := strings.TrimSpace(field)
-			count++
-			if count > maxProxyVaryFields || (trimmed != "*" && proxyVaryField(r, policy, trimmed)) {
+		for _, line := range lines {
+			bytes += len(line)
+			if bytes > maxProxyVaryBytes {
 				return varyRewriteReason(policy)
 			}
-			if !more {
-				break
+			for {
+				field, rest, more := strings.Cut(line, ",")
+				trimmed := strings.TrimSpace(field)
+				count++
+				if count > maxProxyVaryFields || (trimmed != "*" && proxyVaryField(r, policy, trimmed)) {
+					return varyRewriteReason(policy)
+				}
+				if !more {
+					break
+				}
+				line = rest
 			}
-			line = rest
 		}
 	}
 	return ""

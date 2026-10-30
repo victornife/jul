@@ -116,23 +116,57 @@ These are author-side passes, not independent final-head reviews. Parent
 head still requires new hosted CI/Codecov results and independent reviews before
 merge; no merge is performed.
 
-## Maintainer review follow-up (`5b1e4c83`) and independent final-head reviews
+## Maintainer review follow-up (`5b1e4c83` -> `4914ac91` -> final head) and independent final-head reviews
 
-Following the maintainer review of `5b1e4c8328b8cc57c5e74f63e4a051d179291e3a`:
+Reviewed baseline revisions:
+- Performance optimization head: `5b1e4c8328b8cc57c5e74f63e4a051d179291e3a`
+- First maintainer-review follow-up head: `4914ac918696ae0f983b9dfdede61d1843490eb5`
+- Final corrected head: the commit containing this report (exact full SHA pinned in the PR #673 description)
+- Fix author: `GitHub Copilot (Gemini 4 Argon)`
+
+### 1. Maintainer review of `5b1e4c8328b8cc57c5e74f63e4a051d179291e3a`
 
 1. **Generation-bound matcher eligibility (P1 fix):**
-   - `RouteCacheConfig` binds an atomic generation (`boundGen`) when constructed via `HandlerForRoute` (or upon the next `CommitRoutePolicies` if constructed before initial commit).
-   - `routeStateSnapshot.isRouteEligible` requires an active scope, matching `matcherProof`, identical route policy overrides (`sameRoutePolicyOverrides`), and `boundGen != 0 && boundGen == curGen` when a matcher proof is present.
+   - `RouteCacheConfig` binds an atomic generation (`boundGen`) when constructed via `HandlerForRoute` (or upon the next `CommitRoutePolicies` if constructed before commit).
+   - `routeStateSnapshot.isRouteEligible` requires an active scope, matching `matcherProof`, identical route policy overrides (`sameRoutePolicyOverrides`), and `boundGen != 0 && boundGen == curGen`.
    - Any handler from a retired or superseded matcher generation receives `pol.RouteEpoch = incompatibleRouteEpoch` (`math.MaxUint64`), preventing both cache hits and cache publication across normal fills, coalesced fills, Range fills, and 304 validations (`isPolicyPublicationFencedLocked`).
    - Verified with `TestIndependent673OldSelectedHandlerCannotPublishIntoReplacementEpoch` (`identified=false/true`, `disk=false/true`, restart, Range requests, and `A -> B -> A` predicate transitions) and `TestCacheMatcherFactoryWarmReloadPreflightAndRestart`.
 
 2. **Documentation alignment:**
    - Updated the cache threat note (`docs/cache.md`), inspection capabilities section (`docs/cache.md`), cookie-session limitation (`docs/known-limitations.md`), and `docs/adr/0029-route-scoped-cache-policy-and-vary-guards.md` to state that `Vary: Cookie` and `Vary: Authorization` are rejected and never reused (`#672`), and that route-scoped `bypass_cookies` / `bypass_any_cookie` bypass shared cache lookup and storage (`#623`), while retaining the explicit warning that cookies alone do not establish application safety when an origin emits cacheable responses without privacy directives or configured bypass.
 
-3. **Five adversarial review passes and two independent final-head reviews:**
-   - **Pass 1 (Security & Privacy):** Verified generation-bound admission, sensitive-`Vary` rejection (`Cookie`/`Authorization`) including startup disk rehydration scrub (`rehydrate` in `diskstore.go`) and runtime lookup quarantine, proxy/CGI transformed-header `Vary` isolation, and RFC 6265 §4.1.1 `cookie-octet` validation in `hasInvalidCookieValueByte` so malformed cookie values (including unquoted spaces, commas, backslashes, stray quotes, control bytes, and non-ASCII bytes) fail closed with `cookie_bypass_malformed`.
-   - **Pass 2 (Correctness & Concurrency):** Verified `isRouteEligible` rejects unbound (`bg == 0`) or stale generations, `pendingRouteHandlers` is bounded (`max(4096, len(c.routeConfigs)*2)`) and cleared on every `CommitRoutePolicies`, and `routePolicyFloor` compacts to `routeEpochFloorKey` when exceeding 1,024 entries even while an origin fill is in flight.
-   - **Pass 3 (Disk Persistence & Resource Bounds):** Verified `decodeDiskEntryMeta` rejects `meta.RouteEpoch >= math.MaxInt64` and `len(meta.RouteVary) > maxVariantsPerResource`.
-   - **Pass 4 (Admin API, Config Validation & CLI):** Verified `validateLocationCachePolicy` requires a cacheable location action (`proxy_pass` without `grpc`, `fastcgi_pass`, `uwsgi_pass`, or `plugins`), and `resolveInspectionRoutePolicy` caps inherited `DefaultTTLSeconds` by route `MaxTTL`, normalizes/sorts `BypassCookies`, enforces segment-bounded prefix matching, and respects per-server router tier/specificity shadowing.
-   - **Pass 5 (Console UI, Accessibility & Playwright E2E):** Verified duration overflow guard in `cachePolicyDraft.ts`, `aria-invalid` on duration and cookie-name inputs, `role="alert"` and `role="status"` live regions in `LocationCachePolicyEditor.tsx`, optional `Route ID` filter in `CacheInspectorPanel.tsx`, and end-to-end Playwright + keyboard accessibility tests in `internal/admin/ui/e2e/smoke.spec.ts`.
-   - **Independent Final-Head Reviews #1 (Security & Privacy) and #2 (Correctness, Concurrency, Resource Bounds, Admin API & Console):** Executed via isolated review subagents against the final working tree; all findings (startup sensitive-`Vary` disk scrub, strict RFC 6265 cookie-value byte validation, router-shadowing in admin inspection policy resolution, and `aria-invalid` on cookie-name input) were resolved and verified by unit and E2E tests.
+### 2. Maintainer review of `4914ac918696ae0f983b9dfdede61d1843490eb5` (three P2 functional defects)
+
+1. **P2 #1 — Inspection route-policy resolution for regex routes and fallbacks (`internal/admin/apiv1_cache_inspect.go`, `internal/router/explain.go`):**
+   - Defect at `4914ac918696ae0f983b9dfdede61d1843490eb5`: `locationMatchesInspectionSelector` treated an untested regex (`^/assets/.*`) as a match on `/account` and discarded the subsequent `/` fallback.
+   - Fix (`GitHub Copilot (Gemini 4 Argon)`): Added `router.PathCandidateIndices(srv, rawPath)` in `internal/router/explain.go` so `SelectorExactURL` and `SelectorKey` use the routing owner's exact four-tier enumeration (`exact` -> longest `prefix` -> compiled `regex` -> `/` fallback), and marked unshadowed `regex` / `exact` routes on non-exact selectors (`SelectorPrefix`, `SelectorGlob`, `SelectorTag`, `SelectorHost`, `SelectorAll`) as `uncertain = true` so untested regex or single-path exact policies are never asserted for broader scopes.
+   - Regression test: `TestResolveInspectionRoutePolicyRegexAndFallbackSemantics` (`3` repetitions normal and `-race`).
+
+2. **P2 #2 — Initial and candidate handler binding beyond 4,096 routes (`internal/cache/route_policy.go`, `internal/app/factory.go`):**
+   - Defect at `4914ac918696ae0f983b9dfdede61d1843490eb5`: `registerPendingRouteHandler` truncated `pendingRouteHandlers` at `max(4096, len(c.routeConfigs)*2)`, dropping the first handler when 4,097 routes were constructed before initial `CommitRoutePolicies`.
+   - Fix (`GitHub Copilot (Gemini 4 Argon)`): Removed the fixed truncation cap so every handler belonging to an accepted candidate is bound on `CommitRoutePolicies`, and bounded abandoned candidates through their lifecycle via `BeginRouteCandidate()` and `DiscardPendingRouteHandlers()` in `HandlerFactory.Build` and `HandlerFactory.Prepare`.
+   - Regression test: `TestIndependent673InitialBindingBeyond4096Routes` (`3` repetitions normal and `-race`).
+
+3. **P2 #3 — Matcher-generation compaction preserving active unchanged handlers (`internal/cache/route_policy.go`):**
+   - Defect at `4914ac918696ae0f983b9dfdede61d1843490eb5`: `matcherGenOf` and `CommitRoutePolicies` raised an active unchanged route's generation to `routeEpochFloorKey` after >1,024 retired routes compacted (`1,026` reloads in construction-before-commit order), invalidating the unchanged route's handler binding.
+   - Fix (`GitHub Copilot (Gemini 4 Argon)`): Preserved `c.routeMatcherGen[scope]` for active compatible routes (`s.matcherGenOf(scope)` returns `s.matcherGen[scope]`) while applying `routeEpochFloorKey` when assigning new generations to newly added, modified, or re-added retired scopes (`max(c.routeMatcherGen[scope], genFloor) + 1`).
+   - Regression test: `TestIndependent673GenerationCompactionPreservesActiveHandler` (`3` repetitions normal and `-race`).
+
+### 3. Twelve adversarial review passes and two independent final-head re-reviews
+
+| Review ID / Agent Identifier | Reviewed Revision | Scope | Findings & Resolution Attribution (`GitHub Copilot (Gemini 4 Argon)`) |
+| --- | --- | --- | --- |
+| `Explore-Adversarial-01` | Post-`4914ac91` working tree | Matcher generation binding & candidate lifecycle | Found that an aborted candidate for an already-active compatible route could retain a prebound generation if invoked after abort. Fixed via `BeginRouteCandidate()` + `DiscardPendingRouteHandlers()` zeroing `boundGen`. |
+| `Explore-Adversarial-02` | Post-`4914ac91` working tree | Epoch/generation compaction & resurrection | No defect found; verified multi-compaction active handler preservation, ABA resurrection fencing, and `routePolicyFloor` compaction during in-flight fills. |
+| `Explore-Adversarial-03` | Post-`4914ac91` working tree | Admin cache inspection & router semantics | Found `exact` location over-assertion on `SelectorPrefix` and cross-listener wildcard/default host scoring in `resolveInspectionRoutePolicy`. Fixed via `uncertain = true` for `exact` on non-exact selectors and per-listener `inspectionServerHostScore`. |
+| `Explore-Adversarial-04` | Post-`4914ac91` working tree | Sensitive `Vary` (`Cookie` / `Authorization`) & non-retention | Found non-canonical `http.Header["vary"]` map keys could bypass `h.Values("Vary")`. Fixed case-insensitive `"Vary"` map scan in `sensitiveVaryHeader`, `varyRejectionHeader`, and `varyFields`. |
+| `Explore-Adversarial-05` | Post-`4914ac91` working tree | Proxy, FastCGI, and uWSGI transformed-header `Vary` isolation | Verified `ProxyTransformedRequestHeaders` and `CGITransformedRequestHeaders` bounds and `Connection`-nominated header handling; no defect found. |
+| `Explore-Adversarial-06` | Post-`4914ac91` working tree | Request-cookie bypass & RFC 6265 parsing | Found `textproto.TrimString(part[eq+1:])` normalized leading whitespace after `=` (`Cookie: theme= 1`) and `r.Header.Values("Cookie")` missed non-canonical `"cookie"` map keys. Fixed in `evaluateCookieBypass`. |
+| `Explore-Adversarial-07` | Post-`4914ac91` working tree | Freshness precedence, `max_ttl`, SWR, SIE & policy memo | Found `sameRoutePolicyOverrides` and `CommitRoutePolicies` floor check omitted `varyGuard` changes. Fixed via precomputed 16-byte `varyTransformPolicy.digest` and `sameVaryGuard`. |
+| `Explore-Adversarial-08` | Post-`4914ac91` working tree | Concurrency, coalesced fills, Range requests & 304 validation | No defect found; verified lock ordering (`genMu`, `disk.mu`, `mem.mu`, `fillMu`), follower re-evaluation, Range epoch checks, and 304 fencing. |
+| `Explore-Adversarial-09` | Post-`4914ac91` working tree | Disk store persistence, corrupt manifests & fault recovery | No defect found; verified 1 MiB manifest limit, `RouteEpoch >= math.MaxInt64` and `len(RouteVary) > 64` bounds, startup sensitive-`Vary` scrub, and `routeEpochFailed` recovery. |
+| `Explore-Adversarial-10` | Post-`4914ac91` working tree | Config validation, patch engine, selector & CLI | Found `loc.Plugin` (handler plugin) vs `loc.Plugins` (middleware) check and 100-year duration cap in `validateLocationCachePolicy`, `BypassCookies` canonicalization in `buildLocationCachePolicy`, `SelectorKey` + `RouteID` single-host check in `selector.go`, and `--operation-id` + `--route-id` check in `remote_cli.go`. All fixed. |
+| `Explore-Adversarial-11` | Post-`4914ac91` working tree | Console UI, draft validation, RBAC & accessibility | Found Greek small letter mu (`μs`) in `cachePolicyDraft.ts` `GO_DURATION_RE` and expanded `smoke.spec.ts` `aria-invalid` assertions to cover `stale_while_revalidate` and `stale_if_error`. Fixed and rebuilt Console assets. |
+| `Explore-Adversarial-12` | Post-`4914ac91` working tree | Documentation, ADR 0029, known limitations & D11 inventory | Found split sentence in `docs/cache.md`, clarified `max_ttl = "0s"` non-retention for conditional `304` and `0s..876000h` duration ceiling in `docs/cache.md` and `ADR 0029`, and added review provenance table here. |
+| `Explore-Security-Lifecycle-Reviewer-A` (Independent Final-Head Review #1) | Post-fix final tree (parent `4914ac918696ae0f983b9dfdede61d1843490eb5`) | Independent security, privacy, and matcher/compaction lifecycle re-review | **Verdict: PASS (0 blocking defects).** Verified P2 #1, P2 #2, P2 #3 fixes and all security/privacy adversarial fixes; added explicit regression assertions for non-canonical `vary`/`cookie` map keys and `varyGuard` tightening on reload. |
+| `Explore-Correctness-Surface-Reviewer-B` (Independent Final-Head Review #2) | Post-fix final tree (parent `4914ac918696ae0f983b9dfdede61d1843490eb5`) | Independent correctness, router/inspection, API/CLI, UI, and documentation re-review | **Verdict: PASS (0 blocking defects).** Verified `PathCandidateIndices`, `inspectionServerHostScore`, `SelectorKey` + `RouteID`, config validation, Console UI, and `0s..876000h` duration documentation. |

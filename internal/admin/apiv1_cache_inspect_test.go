@@ -591,3 +591,103 @@ func TestResolveInspectionRoutePolicyRouterShadowingAndPrefixOverlap(t *testing.
 		t.Fatalf("root-only server prefix: src=%q", srcRoot)
 	}
 }
+
+func TestResolveInspectionRoutePolicyRegexAndFallbackSemantics(t *testing.T) {
+	cap60 := config.Duration(60 * time.Second)
+	cfg := &config.Config{
+		Cache: config.CacheConfig{
+			Enabled:    true,
+			DefaultTTL: config.Duration(5 * time.Minute),
+		},
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"example.com"},
+				Locations: []config.LocationConfig{
+					{
+						Match:     config.MatchConfig{Type: "regex", Path: `^/assets/.*`},
+						ProxyPass: "http://assets:8080",
+						Cache:     true,
+						CachePolicy: &config.LocationCachePolicy{
+							MaxTTL: &cap60,
+						},
+					},
+					{
+						Match:     config.MatchConfig{Type: "prefix", Path: "/"},
+						ProxyPass: "http://app:8080",
+						Cache:     false,
+					},
+				},
+			},
+		},
+	}
+	base := cachemeta.EffectivePolicy{DefaultTTLSeconds: 300}
+
+	// Verify against the actual router via testRoute.
+	rtAccount := testRoute(cfg, routeTestRequest{Host: "example.com", Path: "/account"})
+	if !rtAccount.Matched || rtAccount.Match != "/" || rtAccount.Cache {
+		t.Fatalf("expected router to select cache-disabled '/' for /account, got matched=%v match=%q cache=%v",
+			rtAccount.Matched, rtAccount.Match, rtAccount.Cache)
+	}
+
+	// 1. Inspecting /account via ExactURL or Key must report the '/' fallback (cache disabled, no regex TTL cap).
+	for _, tc := range []cache.Selector{
+		{Kind: cache.SelectorExactURL, URL: "http://example.com/account"},
+		{Kind: cache.SelectorExactURL, Host: "example.com", URI: "/%61ccount?tab=1"},
+		{Kind: cache.SelectorKey, Key: "GET\nexample.com\n/account"},
+	} {
+		sel, err := cache.ParseInspectionSelector(tc, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pol, src, state, warns := resolveInspectionRoutePolicy(sel, cfg, base)
+		if state != "disabled_retained_entries_may_exist" || src != "global_inherited_origin_precedence" || len(warns) != 0 {
+			t.Fatalf("selector %+v: state=%q src=%q warns=%v", tc, state, src, warns)
+		}
+		if pol.MaxTTLSeconds != nil || pol.DefaultTTLSeconds != 300 {
+			t.Fatalf("selector %+v reported regex TTL cap on /account: %+v", tc, pol)
+		}
+	}
+
+	// 2. Inspecting /assets/bundle.js via ExactURL selects the regex route with its 60s TTL cap.
+	selAsset, err := cache.ParseInspectionSelector(cache.Selector{
+		Kind: cache.SelectorExactURL,
+		URL:  "http://example.com/assets/bundle.js",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	polAsset, srcAsset, stateAsset, warnsAsset := resolveInspectionRoutePolicy(selAsset, cfg, base)
+	if stateAsset != "enabled" || srcAsset != "route_override_with_global_inheritance" || len(warnsAsset) != 0 {
+		t.Fatalf("asset URL: state=%q src=%q warns=%v", stateAsset, srcAsset, warnsAsset)
+	}
+	if polAsset.MaxTTLSeconds == nil || *polAsset.MaxTTLSeconds != 60 || polAsset.DefaultTTLSeconds != 60 {
+		t.Fatalf("asset URL policy: %+v", polAsset)
+	}
+
+	// 3. Prefix/host selectors with an unshadowed regex route report uncertainty rather than asserting the regex policy.
+	cfgRegexOnly := &config.Config{
+		Cache: cfg.Cache,
+		Servers: []config.ServerConfig{
+			{
+				Listen:      ":8080",
+				ServerNames: []string{"example.com"},
+				Locations:   cfg.Servers[0].Locations[:1],
+			},
+		},
+	}
+	for _, selIn := range []cache.Selector{
+		{Kind: cache.SelectorPrefix, Host: "example.com", Prefix: "/account"},
+		{Kind: cache.SelectorHost, Host: "example.com"},
+	} {
+		sel, err := cache.ParseInspectionSelector(selIn, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		polUncertain, srcUncertain, _, warnsUncertain := resolveInspectionRoutePolicy(sel, cfgRegexOnly, base)
+		if srcUncertain != "ambiguous_multiple_routes_use_route_id" || len(warnsUncertain) == 0 || polUncertain.MaxTTLSeconds != nil {
+			t.Fatalf("expected uncertainty for %+v on regex-only server, got src=%q warns=%v pol=%+v",
+				selIn, srcUncertain, warnsUncertain, polUncertain)
+		}
+	}
+}

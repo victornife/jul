@@ -363,10 +363,11 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
 - **Cookie-based sessions are not protected by the authenticated-reuse rule
   unless route cookie bypass is configured.** RFC 9111 §3.5 is defined in terms
   of `Authorization`; a `Cookie` header is not an automatic shared-cache
-  authentication signal. Although Jul rejects `Vary: Cookie` responses from
-  shared caching and supports opt-in per-route cookie bypass
+  authentication signal. Although Jul rejects `Vary: Cookie`,
+  `Vary: Authorization`, and proxy/CGI transformed-header `Vary` responses from
+  shared caching (#672) and supports opt-in per-route cookie bypass
   (`[servers.locations.cache_policy]` `bypass_cookies` and
-  `bypass_any_cookie = true`), cookies alone do not establish application
+  `bypass_any_cookie = true`, #623), cookies alone do not establish application
   safety: an origin serving user-specific content must still set `private` or
   `no-store`.
 - **A `304` that changes `Vary` discards the representation** and the request
