@@ -1270,7 +1270,10 @@ encoded-byte limit**. It may fill much earlier for large tag snapshots. New
 operations are rejected with HTTP 503 and capacity guidance before committing
 a cutoff; capacity pressure neither flushes unrelated hosts nor broadens the
 requested scope. Retry unfinished operations to complete cleanup, or reconcile
-on restart before submitting new operations. Completed operations release
+on restart before submitting new operations. Valid historical tag resource snapshots
+(including explicit `matched_resource_ids: []` for zero original targets)
+retain their exact scope on restart, without consulting current tag membership.
+Absent/null or invalid snapshots require the documented broader fallback. Completed operations release
 capacity. Actual filesystem/corrupt-metadata failures retain the fail-closed
 policy. Older ledger records whose identity cannot be reconstructed explicitly
 sweep pre-cutoff disk entries (including unrelated scopes), log that migration

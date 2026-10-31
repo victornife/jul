@@ -1445,10 +1445,11 @@ func (d *diskStore) loadPurgeIntents() []PurgeRecoveryIntent {
 					TagMatch:           TagMatchMode(rec.Response.Selector.TagMatch),
 					MatchedResourceIDs: rec.MatchedResourceIDs,
 				}
-				if !validateDiskPurgeIntent(it) || kind == SelectorTag || rec.RecoveryIntent != nil {
-					// Older redacted records lack executable identity or an immutable
-					// tag snapshot. Explicit migration fallback: sweep all entries at
-					// this cutoff, preserving newer generations; never reconcile a no-op.
+				if !validateDiskPurgeIntent(it) || rec.RecoveryIntent != nil {
+					// Historical tag snapshots are executable identity, including []
+					// (zero original targets). Missing/null or invalid snapshots fail
+					// validation. Only unavailable/unverifiable identity needs the
+					// broader cutoff sweep; never reconcile an unknown scope as a no-op.
 					d.log.Warn("cache: legacy purge recovery identity unavailable; sweeping pre-cutoff disk entries", "fence_gen", fg)
 					it = PurgeRecoveryIntent{FenceGen: fg, Kind: SelectorAll}
 				}

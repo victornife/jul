@@ -32,7 +32,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   committing a cutoff, without evicting unrelated entries. Move all Console
   purges to the versioned preview/confirmation flow, remove the internal
   `POST /cache/purge` route / keyed form / unused HTTP adapter, and migrate
-  OIDC/security/audit/durability tests and docs. Keep unsafe-method `Delete()`
+  OIDC/security/audit/durability tests and docs. Recover valid historical tag
+  snapshots at their exact original scope, including explicit empty snapshots;
+  reserve broader recovery for missing/invalid/unverifiable identity. Keep unsafe-method `Delete()`
   callers; retired mutations return 404 rather than a successful SPA shell. Add real disk/admin
   ledger latency and journal-limit startup acceptance profiles (#666–#668).
 

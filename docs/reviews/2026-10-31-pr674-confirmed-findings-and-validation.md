@@ -104,11 +104,11 @@ more complex invalidation engine.
 ## Validation and limits
 
 - Full cache/admin suites pass; package statement coverage: cache 92.8%, admin
-  87.8%; app coverage 81.8%.
+  87.8%; app coverage 81.9%.
 - `go test -race ./internal/cache ./internal/admin -run 'Purge|Retire|SensitiveVary'
   -count=3` passes after corrections.
 - Repository changed-Go block gate (including app, cache and admin; no package
-  allowlist or lowered floor): **699/764 = 91.49%**, floor 90%. Hosted Codecov
+  allowlist or lowered floor): **700/764 = 91.62%**, floor 90%. Hosted Codecov
   patch is a distinct measurement and must be checked on the pushed head.
 - Console: typecheck, lint, reporter tests, full coverage contract and build
   pass; **86 files / 1,002 tests**. Statements 81.88%, branches 76.57%, functions
@@ -172,9 +172,38 @@ Console fallback. No unresolved cleanup findings remain after validation.
   caller of the retired endpoint; remaining literal paths explain retirement,
   describe historical behavior, or assert its absence.
 
+## Historical tag-snapshot recovery correction
+
+The later review of `53910ced` identified a confirmed P2 missed by the earlier
+passes: the ledger fallback unconditionally broadened every historical tag
+operation to all pre-cutoff disk entries, even when the original snapshot was
+valid. Populated snapshots removed unrelated same-host and other-host warm
+entries; explicit empty snapshots incorrectly removed their zero-target scope
+and unrelated entries. Both reproduced in three normal and three race runs.
+
+The correction removes that unconditional tag-kind fallback. Existing intent
+validation already distinguishes non-nil valid snapshots (including `[]`) from
+absent/null or invalid IDs. Valid snapshots now reconcile only their original
+resource set; broader fallback remains for genuinely unavailable/invalid or
+unverifiable identity.
+
+`TestLegacyTagLedgerRecoveryUsesOriginalSnapshot` covers populated, explicit
+empty, absent, null and malformed snapshots; host-scoped selectors; running and terminal-uncertain historical records; GET/HEAD targets; unrelated
+same-host and other-host entries; post-cutoff fills; and two successive boots.
+Tag ingestion is disabled to prove ownership comes from original IDs rather
+than current tag membership. The populated/empty cases preserve unrelated warm
+entries, while missing/invalid controls retain the conservative cutoff fallback.
+
+All 10 focused regression cases pass three normal and three race repetitions
+after the correction. Cache/admin/app suites pass in lean/full builds, affected
+Console-enabled race tests pass three repetitions, vet passes, and every step
+of the docs-check workflow passes locally. Changed-Go coverage is 700/764
+(91.62%); final-head hosted checks remain required before merge.
+
 ## Recommendation
 
-The reported runtime defects and acceptance/documentation gaps are corrected.
-No unresolved findings remain from the two local adversarial passes. Recommend
+The reproduced runtime defects, including the later historical tag-snapshot
+finding, have targeted corrections and passing regression coverage. The earlier
+audit passes did not exhaustively establish the absence of further defects. Recommend
 merge only after the final pushed head passes the hosted checks and maintains
 the requested >90% patch coverage; do not reuse the old head's green CI result.
