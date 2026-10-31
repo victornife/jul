@@ -74,7 +74,7 @@ func TestLegacyTagLedgerRecoveryUsesOriginalSnapshot(t *testing.T) {
 					}
 					for _, key := range targets {
 						_, hit := restarted.get(key)
-						if want := !(tc.targeted || tc.broad); hit != want {
+						if want := !tc.targeted && !tc.broad; hit != want {
 							t.Errorf("boot %d target %q hit=%t want=%t", boot, key, hit, want)
 						}
 					}

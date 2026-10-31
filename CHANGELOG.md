@@ -11,6 +11,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Update the Console's build-time `minimatch` dependency to 11.0.1 to address
+  globparts amplification (GHSA-g3hv-75wg-m249).
+
 - Preserve incomplete scoped-purge and sensitive-`Vary` retirement protection
   across process restarts (#666, #667, #668,
   [ADR 0030](docs/adr/0030-cache-purge-recovery-latency-and-cutover.md)):

@@ -5,6 +5,9 @@ allowBuilds:
   esbuild: true
 
 overrides:
+  # minimatch is a build-time dependency of eslint and TypeScript tooling.
+  # Require the globparts-amplification fix (GHSA-g3hv-75wg-m249).
+  minimatch@<11.0.1: 11.0.1
   # nanoid is a build-time transitive dependency of the postcss/vite toolchain.
   # Force the patched floor for GHSA-2v37-7h3g-55p8 across every affected 3.x range.
   nanoid@<3.3.18: 3.3.18

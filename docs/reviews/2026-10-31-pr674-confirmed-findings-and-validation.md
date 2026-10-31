@@ -202,6 +202,20 @@ of the docs-check workflow passes locally. Changed-Go coverage is 700/764
 
 ## Recommendation
 
+The hosted checks on `0ed12cfc` found a staticcheck QF1001 simplification in the
+new regression test and a dependency-audit failure for build-time `minimatch`
+(GHSA-g3hv-75wg-m249). Apply De Morgan's law in the assertion and require patched
+`minimatch` 11.0.1 throughout the Console lockfile. Retain the existing audit,
+lint and coverage gates.
+
+Local revalidation uses CI's pnpm 11.8.0 and golangci-lint 2.14.0: frozen install,
+moderate-level audit (no known vulnerabilities), Console build/typecheck/lint,
+full Console coverage suite and report contract all pass. Console statement
+coverage is 81.88%; no floors or exclusions changed. Go lint reports zero issues,
+the historical-tag race regression passes three repetitions, documentation
+checks pass 2,574 checks, and D11 validation reports zero errors. Rebuilding
+the Console leaves the embedded assets unchanged.
+
 The reproduced runtime defects, including the later historical tag-snapshot
 finding, have targeted corrections and passing regression coverage. The earlier
 audit passes did not exhaustively establish the absence of further defects. Recommend
