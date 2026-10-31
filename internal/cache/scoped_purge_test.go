@@ -2360,7 +2360,7 @@ func TestReauditR01_LedgerHighWaterFallbackWhenMarkerWriteFails(t *testing.T) {
 	var rsvFence uint64
 	if _, err := c2.InvalidateScope(context.Background(), sel, InvalidateOptions{
 		PreviewSequence: c2.genSeq.Load(),
-		CommitFence: func(fenceGen uint64, _ []string) error {
+		CommitFence: func(fenceGen uint64, _ []string, _ PurgeRecoveryIntent) error {
 			rsvFence = fenceGen
 			return nil
 		},
@@ -2648,7 +2648,7 @@ func TestPurgeCommitFenceAtomicallyBlocksEarlierPublications(t *testing.T) {
 					go func() {
 						defer wg.Done()
 						res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
-							CommitFence: func(fenceGen uint64, _ []string) error {
+							CommitFence: func(fenceGen uint64, _ []string, _ PurgeRecoveryIntent) error {
 								committing <- fenceGen
 								<-commitRelease
 								return nil
@@ -2705,7 +2705,7 @@ func TestPurgeCommitFenceFailurePreservesResidentsAndFencesEarlierWork(t *testin
 	}
 	commitErr := errors.New("intent storage unavailable")
 	res, err := c.InvalidateScope(context.Background(), all, InvalidateOptions{
-		CommitFence: func(uint64, []string) error { return commitErr },
+		CommitFence: func(_ uint64, _ []string, _ PurgeRecoveryIntent) error { return commitErr },
 	})
 	if !errors.Is(err, ErrFenceCommit) || !errors.Is(err, commitErr) || res.State != "" {
 		t.Fatalf("commit failure: res=%+v err=%v", res, err)
@@ -2733,7 +2733,7 @@ func TestPurgeRejectedBeforeFenceCommit(t *testing.T) {
 			raw := Selector{Kind: SelectorAll, All: true}
 			ctx := context.Background()
 			committed := false
-			opts := InvalidateOptions{CommitFence: func(uint64, []string) error {
+			opts := InvalidateOptions{CommitFence: func(_ uint64, _ []string, _ PurgeRecoveryIntent) error {
 				committed = true
 				return nil
 			}}
@@ -2796,7 +2796,7 @@ func TestPurgeCanceledWhileWaitingForGenerationLockDoesNotCommit(t *testing.T) {
 	go func() {
 		defer close(done)
 		res, invErr = c.InvalidateScope(ctx, all, InvalidateOptions{
-			CommitFence: func(uint64, []string) error {
+			CommitFence: func(_ uint64, _ []string, _ PurgeRecoveryIntent) error {
 				committed = true
 				return nil
 			},
@@ -2859,7 +2859,7 @@ func TestPurgeUncertainIntentFencesDiskPublicationsAcrossRestart(t *testing.T) {
 	}
 	var cutoff uint64
 	_, err = c.InvalidateScope(context.Background(), sel, InvalidateOptions{
-		CommitFence: func(gen uint64, _ []string) error {
+		CommitFence: func(gen uint64, _ []string, _ PurgeRecoveryIntent) error {
 			cutoff = gen
 			ledger := fmt.Sprintf(`[{"response":{"fence_sequence":%d}}]`, gen)
 			if err := os.WriteFile(filepath.Join(cfg.DiskPath, ".jul-cache-purge-ledger"), []byte(ledger), 0o600); err != nil {
@@ -2923,7 +2923,7 @@ func TestTagRetryRequiresOriginalOwnershipAndBoundsUniqueTargets(t *testing.T) {
 		var ids []string
 		res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
 			ReuseFenceGen: cutoff,
-			CommitFence: func(_ uint64, resources []string) error {
+			CommitFence: func(_ uint64, resources []string, _ PurgeRecoveryIntent) error {
 				ids = resources
 				return nil
 			},

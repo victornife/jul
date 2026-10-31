@@ -1255,6 +1255,46 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    already-admitted readers may finish once their retirement is durable.
    Old fenced fills cannot mutate Vary membership or delete newer variants.
 
+### Restart recovery and journal capacity
+
+With a disk tier, `.jul-cache-purge-intents` stores executable normalized purge
+identity before the cutoff is committed to the administrative ledger. That
+ledger atomically stores the same recovery identity with its cutoff. Startup
+reconciles unfinished purges before serving cache reads, preserving newer
+fills. Exact-URL purges select GET/HEAD resource groups; key purges retain their
+method and representation semantics. Retries preserve original target hashes
+and tag snapshots even after live catalog generations advance.
+
+The journal supports at most **256 retained intents subject to a shared 1 MiB
+encoded-byte limit**. It may fill much earlier for large tag snapshots. New
+operations are rejected with HTTP 503 and capacity guidance before committing
+a cutoff; capacity pressure neither flushes unrelated hosts nor broadens the
+requested scope. Retry unfinished operations to complete cleanup, or reconcile
+on restart before submitting new operations. Valid historical tag resource snapshots
+(including explicit `matched_resource_ids: []` for zero original targets)
+retain their exact scope on restart, without consulting current tag membership.
+Absent/null or invalid snapshots require the documented broader fallback. Completed operations release
+capacity. Actual filesystem/corrupt-metadata failures retain the fail-closed
+policy. Older ledger records whose identity cannot be reconstructed explicitly
+sweep pre-cutoff disk entries (including unrelated scopes), log that migration
+fallback, and preserve post-cutoff data.
+
+All Console purge actions use the versioned preview → confirm → execute →
+observe/recover panel. The duplicate legacy shortcut is removed; structured
+incomplete/uncertain results show recovery guidance. The internal unversioned `POST /cache/purge` endpoint, including `?key=`, is
+removed in #674. Migrate scripts to `/api/v1/cache/purge*` or `jul cache purge`;
+no legacy HTTP alias remains. This was an unsupported internal route under
+ADR 0019, so retirement does not remove a supported external contract. Retired
+mutation requests return 404 even with the full Console enabled.
+
+Internal `Delete()` / `DeleteResult()` and `Purge()` / `PurgeResult()` remain Go
+cache operations, not exposed endpoints. Unsafe-method invalidation still uses
+`Delete()` to retire GET/HEAD and their owned Vary representations through the
+current durability machinery.
+
+The [PR #674 validation record](reviews/2026-10-31-pr674-confirmed-findings-and-validation.md)
+defines measured local latency budgets and their workload/hardware limits.
+
 ### Console retry confirmation
 
 The Console retries a terminal incomplete operation using its canonical
@@ -1594,7 +1634,8 @@ origin or retry a purge.
 - Cancellation discards the builder result before retention/publication.
   The two-second build deadline is checked around bounded work; a wait on an
   existing cache mutex is not instantaneously cancelable and can exceed that
-  deadline before returning. Large-purge contention remains tracked in #667.
+  deadline before returning. Large-purge lock hold and allocation bounds are
+  documented in [ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md) (#667).
 
 ### Reading metadata and policy
 
@@ -1681,9 +1722,10 @@ zero even for explicit partial/truncated states; automation must inspect those
 fields. There is no automatic cursor restart or page accumulation.
 
 Purge uses the existing preview → confirm → execute → observe/recover flow and
-its own permission. #666 (unfinished-purge restart protection), #667
-(large-purge latency) and #668 (legacy purge outcome visibility) remain inherited
-limitations; inspection does not implement them. No release, GA or soak claim is
+its own permission. Durable incomplete-operation recovery across restart (#666),
+measured large-purge lock/allocation bounds (#667), and internal HTTP purge retirement / structured
+durability outcomes (#668) are documented in
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md). No release, GA or soak claim is
 made. NGINX migration impact is **not applicable**: this is a Jul-specific
 operator interface and does not change imported request/cache semantics.
 

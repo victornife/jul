@@ -20,6 +20,7 @@ import (
 	"jul/internal/logthrottle"
 	"jul/internal/respwriter"
 	"jul/internal/tracing"
+	"jul/internal/versionid"
 )
 
 // Cache is a two-tier HTTP response cache. The memory tier overflows evicted
@@ -84,7 +85,10 @@ type Cache struct {
 	evictedIncompleteHostGens map[string]map[uint64]struct{}
 	latestFenceGen            atomic.Uint64
 	incompleteFenceGen        atomic.Uint64
+	incompleteFenceHost       atomic.Pointer[string]
 	startupHighWaterGen       atomic.Uint64
+	reconciledFenceGens       map[uint64]bool
+	versions                  atomic.Pointer[versionid.Context]
 	originOpSeq               uint64
 	inflightOps               map[uint64]uint64
 	routePolicyDigest         map[string][16]byte
@@ -166,6 +170,12 @@ var cacheableStatus = map[int]bool{
 // nil) receives operational warnings from the disk tier, such as foreign files
 // found in the cache directory or a failed disk write.
 func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
+	return NewWithVersionContext(cfg, logger, nil)
+}
+
+// NewWithVersionContext builds a Cache and binds the node's confidential
+// effective-version context before running startup incomplete-purge recovery (#666).
+func NewWithVersionContext(cfg config.CacheConfig, logger *slog.Logger, versions *versionid.Context) (*Cache, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -177,6 +187,9 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		calls:  make(map[revalidateKey]*revalidateCall),
 		fills:  make(map[string]*fillCall),
 		keyGen: make(map[string]*keyGenState),
+	}
+	if versions != nil {
+		c.versions.Store(versions)
 	}
 	pol := policyFromConfig(cfg)
 	if err := c.initInspection(); err != nil {
@@ -207,6 +220,7 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 		// Recover before attaching callbacks: corrupt metadata cleanup can call
 		// back into genMu, and must finish before taking the item snapshot.
 		c.routeEpoch, c.routeMatchers = d.loadRouteEpochs()
+		intents := d.loadPurgeIntents()
 		d.onEviction = func(k string) { c.recordKeyDecision(k, "disk_eviction") }
 		d.onSkip = c.captureSkipped
 		d.checkGen = c.isGenCurrent
@@ -222,8 +236,40 @@ func New(cfg config.CacheConfig, logger *slog.Logger) (*Cache, error) {
 			c.genSeq.Store(hw)
 		}
 		c.startupHighWaterGen.Store(c.genSeq.Load())
+		if len(intents) > 0 {
+			c.reconcileRecoveredPurgeIntents(intents)
+		}
 	}
 	return c, nil
+}
+
+// SetVersionContext binds the node's confidential effective-version context
+// for keyed recovery target verifiers (#666).
+func (c *Cache) SetVersionContext(v *versionid.Context) {
+	if c == nil {
+		return
+	}
+	c.versions.Store(v)
+}
+
+func (c *Cache) versionContext() *versionid.Context {
+	if c != nil {
+		if v := c.versions.Load(); v != nil {
+			return v
+		}
+	}
+	return versionid.Process()
+}
+
+// WasPurgeFenceReconciledOnStartup reports whether fenceGen was reconciled by
+// startup incomplete-purge recovery (#666).
+func (c *Cache) WasPurgeFenceReconciledOnStartup(fenceGen uint64) bool {
+	if c == nil || fenceGen == 0 {
+		return false
+	}
+	c.genMu.Lock()
+	defer c.genMu.Unlock()
+	return c.reconciledFenceGens[fenceGen]
 }
 
 // SetRevalidationObserver installs a bounded counter for background
@@ -297,6 +343,7 @@ func (c *Cache) captureSkipped(reason string) {
 type keyGenState struct {
 	key                    string
 	baseKey                string
+	resourceID             string
 	host                   string
 	requestURI             string
 	method                 string
@@ -453,9 +500,26 @@ func (c *Cache) hasStoredKey(key string) bool {
 	return false
 }
 
+func (c *Cache) mayMatchIncompleteFenceHost(key string) bool {
+	hp := c.incompleteFenceHost.Load()
+	if hp == nil || *hp == "" {
+		return true
+	}
+	nl1 := strings.IndexByte(key, '\n')
+	if nl1 < 0 {
+		return true
+	}
+	rest := key[nl1+1:]
+	nl2 := strings.IndexByte(rest, '\n')
+	if nl2 < 0 {
+		return true
+	}
+	return rest[:nl2] == *hp
+}
+
 func (c *Cache) get(key string) (*Entry, bool) {
 	if e, mgen, ok := c.mem.getWithGen(key); ok {
-		if lf := c.incompleteFenceGen.Load(); lf > 0 && mgen <= lf && c.isResidentEntryFenced(mgen, key, e) {
+		if lf := c.incompleteFenceGen.Load(); lf > 0 && mgen <= lf && c.mayMatchIncompleteFenceHost(key) && c.isResidentEntryFenced(mgen, key, e) {
 			c.delOneIfGenAtMost(key, mgen)
 		} else {
 			return e, true
@@ -628,10 +692,52 @@ func (c *Cache) setCoreWithStartGen(key string, e *Entry, startGen uint64, hasSt
 // strand the hashed variant entries in the store, where a later stub with the
 // same Vary could make them reachable again.
 func (c *Cache) Delete(key string) {
-	c.deleteAtMostGen(key, math.MaxUint64)
+	_, _ = c.DeleteResult(key)
+}
+
+// DeleteResult removes a single key (and any owned Vary variants) from both
+// tiers and returns the structured durability outcome (#668).
+func (c *Cache) DeleteResult(key string) (InvalidateResult, error) {
+	started := time.Now().UTC()
+	if c != nil {
+		started = c.clock().UTC()
+	}
+	sel := NormalizedSelector{Kind: SelectorKey, Key: key}
+	if c == nil {
+		return InvalidateResult{
+			Selector:              sel,
+			State:                 "succeeded",
+			Outcome:               "cache_disabled",
+			InvalidationEffective: "effective",
+			StartedAt:             started,
+			CompletedAt:           started,
+		}, nil
+	}
+	memRem, diskRem, retired, failed, uncertain := c.deleteAtMostGenWithResult(key, math.MaxUint64)
+	reps := 0
+	if memRem > 0 || diskRem > 0 {
+		reps = 1
+	}
+	res := InvalidateResult{
+		Selector:                   sel,
+		InvalidatedResources:       reps,
+		InvalidatedRepresentations: reps,
+		MemoryEntriesRemoved:       memRem,
+		DiskEntriesRemoved:         diskRem,
+		ActiveReadersRetired:       retired,
+		FailedEntries:              failed,
+		StartedAt:                  started,
+		CompletedAt:                c.clock().UTC(),
+	}
+	finalizeInvalidateOutcome(&res, uncertain, false)
+	return res, nil
 }
 
 func (c *Cache) deleteAtMostGen(key string, maxGen uint64) {
+	_, _, _, _, _ = c.deleteAtMostGenWithResult(key, maxGen)
+}
+
+func (c *Cache) deleteAtMostGenWithResult(key string, maxGen uint64) (memRem, diskRem, retired, failed int, uncertain bool) {
 	c.varyMu.Lock()
 	defer c.varyMu.Unlock()
 	var extraVars []string
@@ -650,15 +756,36 @@ func (c *Cache) deleteAtMostGen(key string, maxGen uint64) {
 			extraVars = append(extraVars, e.Variants...)
 		}
 	}
-	seen := make(map[string]struct{}, len(extraVars))
+	allKeys := make([]string, 0, len(extraVars)+1)
+	seen := make(map[string]struct{}, len(extraVars)+1)
 	for _, vk := range extraVars {
 		if _, ok := seen[vk]; ok {
 			continue
 		}
 		seen[vk] = struct{}{}
-		c.delOneIfGenAtMost(vk, maxGen)
+		allKeys = append(allKeys, vk)
 	}
-	c.delOneIfGenAtMost(key, maxGen)
+	if _, ok := seen[key]; !ok {
+		allKeys = append(allKeys, key)
+	}
+	// When a disk tier is configured, execute a crash-consistent tombstone batch
+	// across all owned variants and the base key BEFORE dropping in-memory state
+	// so an interrupted sensitive-Vary or 304 retirement cannot resurrect an
+	// older disk entry across restart (#666).
+	if c.disk != nil && len(allKeys) > 0 {
+		diskRem, retired, failed, uncertain = c.disk.deleteBatchAtMostGen(allKeys, maxGen)
+	}
+	for _, k := range allKeys {
+		m, d, r, f, u := c.delOneIfGenAtMostWithResult(k, maxGen, c.disk != nil && len(allKeys) > 0)
+		memRem += m
+		diskRem += d
+		retired += r
+		failed += f
+		if u {
+			uncertain = true
+		}
+	}
+	return memRem, diskRem, retired, failed, uncertain
 }
 
 func (c *Cache) delOne(key string) {
@@ -666,63 +793,75 @@ func (c *Cache) delOne(key string) {
 }
 
 func (c *Cache) delOneIfGenAtMost(key string, maxGen uint64) {
+	_, _, _, _, _ = c.delOneIfGenAtMostWithResult(key, maxGen, false)
+}
+
+func (c *Cache) delOneIfGenAtMostWithResult(key string, maxGen uint64, diskAlreadyBatched bool) (memRem, diskRem, retired, failed int, uncertain bool) {
 	c.genMu.Lock()
 	if maxGen != math.MaxUint64 {
 		if existing, ok := c.keyGen[key]; ok && existing.gen > maxGen {
 			c.genMu.Unlock()
 			// An older disk publication may outlive the catalog generation
 			// that invalidated it. Preserve newer entries, not that old file.
-			if c.disk != nil {
+			if c.disk != nil && !diskAlreadyBatched {
+				d, r, f, u := c.disk.deleteBatchAtMostGen([]string{key}, maxGen)
+				diskRem += d
+				retired += r
+				failed += f
+				uncertain = uncertain || u
 				c.disk.delIfOlderGen(key, maxGen+1)
 			}
-			return
+			return 0, diskRem, retired, failed, uncertain
 		}
 	}
 	st, _, _, _ := c.beginNextGenLocked(key)
-	c.mem.delIfGenAtMost(key, maxGen)
+	if c.mem.delIfGenAtMost(key, maxGen) {
+		memRem = 1
+	}
 	st.inMem = c.mem.hasKey(key)
 	if !st.inMem {
 		st.memBytes = 0
 	}
 	c.genMu.Unlock()
 	if c.disk != nil {
+		if !diskAlreadyBatched {
+			d, r, f, u := c.disk.deleteBatchAtMostGen([]string{key}, maxGen)
+			diskRem += d
+			retired += r
+			failed += f
+			uncertain = uncertain || u
+		}
 		if maxGen == math.MaxUint64 {
 			c.disk.del(key)
 		} else {
 			c.disk.delIfOlderGen(key, maxGen+1)
 		}
+		if c.disk.unrecoverableInvalidation.Load() {
+			uncertain = true
+		}
 	}
 	c.finishKeyOp(st)
+	return memRem, diskRem, retired, failed, uncertain
 }
 
 // Purge clears both tiers.
 func (c *Cache) Purge() {
-	c.genMu.Lock()
-	pGen := c.genSeq.Add(1)
-	c.purgeGen = pGen
-	c.fenceFloorGen = pGen
-	c.hostFenceFloorGen = nil
-	c.incompleteFloorGen = 0
-	c.incompleteHostFloorGen = nil
-	c.evictedIncompleteHostGens = nil
-	c.routePolicyFloor = nil
-	c.globalPolicyFloorGen = pGen
-	c.fences = nil
-	c.latestFenceGen.Store(pGen)
-	c.incompleteFenceGen.Store(0)
-	c.byHost = nil
-	c.byResourceID = nil
-	c.baseVariants = nil
-	c.tagIndex = nil
-	c.baseIndexedTags = nil
-	c.totalTagLinks = 0
-	c.keyGen = make(map[string]*keyGenState)
-	c.mem.purge()
-	c.genMu.Unlock()
-	if c.disk != nil {
-		_ = c.disk.recordHighWaterGen(pGen)
-		c.disk.purge()
+	_, _ = c.PurgeResult()
+}
+
+// PurgeResult clears both tiers using the shared invalidation and tombstone
+// engine and returns the structured durability outcome (#668).
+func (c *Cache) PurgeResult() (InvalidateResult, error) {
+	if c != nil {
+		c.genMu.Lock()
+		c.routePolicyFloor = nil
+		c.globalPolicyFloorGen = c.genSeq.Load() + 1
+		c.genMu.Unlock()
 	}
+	return c.InvalidateScope(context.Background(), NormalizedSelector{
+		Kind:       SelectorAll,
+		BroadScope: true,
+	}, InvalidateOptions{})
 }
 
 // DiskWriteHealth reports the disk tier's cumulative write failures and

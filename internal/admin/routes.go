@@ -91,6 +91,12 @@ func (s *Server) handleConsoleOrRoot() http.Handler {
 		}
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only browser navigation may fall through to the UI. A retired or
+		// unknown mutation route must not receive a successful SPA response.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
 		snap := s.requestAdminSnapshot(r)
 		if console != nil && snap.cfg.ConsoleEnabled() {
 			console.ServeHTTP(w, r)

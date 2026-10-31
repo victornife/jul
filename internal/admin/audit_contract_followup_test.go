@@ -124,7 +124,7 @@ func TestSuccessfulAuthenticationAndAuthorizationDenialAreNotAuthFailures(t *tes
 	for _, tc := range []struct {
 		method, path, token string
 		code                int
-	}{{http.MethodGet, "/api/admin/me", adminToken, 200}, {http.MethodPost, "/cache/purge", viewerToken, 403}} {
+	}{{http.MethodGet, "/api/admin/me", adminToken, 200}, {http.MethodPost, "/api/v1/cache/purge", viewerToken, 403}} {
 		req := httptest.NewRequest(tc.method, tc.path, nil)
 		req.RemoteAddr = "127.0.0.1:12345"
 		req.Header.Set("Authorization", "Bearer "+tc.token)
@@ -142,7 +142,14 @@ func TestSuccessfulAuthenticationAndAuthorizationDenialAreNotAuthFailures(t *tes
 func TestOpenAdminAuditDoesNotInventACredential(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{})
 	request := func(method, path string) *http.Request {
-		r := httptest.NewRequest(method, path, nil)
+		body := ""
+		if path == "/api/v1/cache/purge" {
+			body = `{"selector":{"kind":"all","all":true},"confirm_broad":true}`
+		}
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			r.Header.Set("Content-Type", "application/json")
+		}
 		r.RemoteAddr = "127.0.0.1:12345"
 		return r
 	}
@@ -153,7 +160,7 @@ func TestOpenAdminAuditDoesNotInventACredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	rr = httptest.NewRecorder()
-	s.routes().ServeHTTP(rr, request(http.MethodPost, "/cache/purge"))
+	s.routes().ServeHTTP(rr, request(http.MethodPost, "/api/v1/cache/purge"))
 	// A configured cache is unnecessary for the actual auth middleware; attach
 	// the existing recorder after it to exercise both control entry paths.
 	for _, h := range []http.Handler{

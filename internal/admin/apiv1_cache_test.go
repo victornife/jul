@@ -615,7 +615,7 @@ func (p *countingScopedPurger) InvalidateScope(ctx context.Context, sel cache.No
 		fenceGen = 1
 	}
 	if opts.CommitFence != nil {
-		if err := opts.CommitFence(fenceGen, nil); err != nil {
+		if err := opts.CommitFence(fenceGen, nil, cache.PurgeRecoveryIntent{FenceGen: fenceGen, Kind: sel.Kind}); err != nil {
 			return cache.InvalidateResult{}, fmt.Errorf("%w: %w", cache.ErrFenceCommit, err)
 		}
 	}

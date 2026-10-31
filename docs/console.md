@@ -1165,7 +1165,7 @@ consumes the endpoints below.
 | Audit | `GET /api/audit`, `GET /api/audit/export` |
 | Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/preview`, `/patch/candidate`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
 | Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
-| Operational actions | `POST /cache/purge`, `POST /reload` |
+| Operational actions | `POST /api/v1/cache/purge/preview`, `POST /api/v1/cache/purge`, `GET /api/v1/cache/purges/{operation_id}`, `POST /reload` |
 
 ## Consistency, feedback & discoverability
 

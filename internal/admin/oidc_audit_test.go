@@ -6,6 +6,7 @@ package admin
 import (
 	"encoding/csv"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -61,7 +62,14 @@ func TestOIDCAuditCapturesHistoricalAuthorityAcrossAllSinks(t *testing.T) {
 				if strings.HasPrefix(raw, "/") {
 					raw = srv.URL + raw
 				}
-				req, _ := http.NewRequest(method, raw, nil)
+				var body io.Reader
+				if method == "POST" && strings.HasSuffix(raw, "/api/v1/cache/purge") {
+					body = strings.NewReader(`{"selector":{"kind":"all","all":true},"confirm_broad":true}`)
+				}
+				req, _ := http.NewRequest(method, raw, body)
+				if body != nil {
+					req.Header.Set("Content-Type", "application/json")
+				}
 				req.Header.Set("Origin", srv.URL)
 				req.Header.Set("X-Jul-Console", "1")
 				resp, err := client.Do(req)
@@ -96,7 +104,7 @@ func TestOIDCAuditCapturesHistoricalAuthorityAcrossAllSinks(t *testing.T) {
 			if call("GET", "/auth/oidc/logout").StatusCode != http.StatusForbidden {
 				t.Fatal("invalid logout accepted")
 			}
-			if call("POST", "/cache/purge").StatusCode != 200 || call("POST", "/auth/oidc/logout").StatusCode != 204 {
+			if call("POST", "/api/v1/cache/purge").StatusCode != 200 || call("POST", "/auth/oidc/logout").StatusCode != 204 {
 				t.Fatal("mutation or logout failed")
 			}
 			cfg.OIDC.ProviderName = "Replacement identity"

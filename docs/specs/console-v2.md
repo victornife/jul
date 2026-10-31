@@ -121,11 +121,13 @@ All `/api/*` require a Bearer token (constant-time compare, header — not cooki
 The SPA is served at `/`.
 
 **Existing v1** (kept until cutover, then retired / thin-aliased one release):
-`/healthz`, `/readyz`, `/metrics`, `/`, `/config`, `/ui`, `POST /cache/purge`,
+`/healthz`, `/readyz`, `/metrics`, `/`, `/config`, `/ui`,
 `POST /reload`, `GET /api/stats`, `GET /api/status`, `GET /api/config`,
 `POST|PUT /api/config/raw`, `GET|POST /api/config/settings`, `GET /api/upstreams`,
 `GET /api/certs`, `POST /api/wizard`, `GET /api/history`, `GET /api/history/get`,
 `POST /api/history/rollback`.
+
+`POST /cache/purge` has since been retired by #674 / ADR 0030; cache operations use the versioned preview/confirm/execute/status workflow.
 
 **New v2** (additive; no `/api/v2/` prefix — Console is Beta, contract not frozen):
 

@@ -95,9 +95,7 @@ var internalRouteReasons = map[string]string{
 	"/api/config/preview":         "Renders a raw candidate under config:raw. Raw candidate echoes are never returned by a v1 operation.",
 	"/api/config/patch/candidate": "Returns the exact candidate bytes a patch would produce, under config:raw. Same data class.",
 
-	// ── Legacy unversioned operational endpoints ──────────────────────────
-	"/cache/purge": "A legacy unversioned operational endpoint. Its shape predates this contract and it is not part of " +
-		"the configuration surface v1 publishes.",
+	// ── Internal operational endpoints ────────────────────────────────────
 	"/reload": "A legacy unversioned reload trigger. It has no place in a managed-authority world, where a change is " +
 		"applied through an operation with a base_version rather than by asking the server to re-read a file.",
 	"/debug/pprof/": "A Go runtime detail behind admin:manage. Publishing it would make pprof's format part of Jul's " +

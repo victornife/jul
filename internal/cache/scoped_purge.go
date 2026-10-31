@@ -30,9 +30,13 @@ const (
 // InvalidateOptions.RequireBroadConfirm is true.
 var ErrBroadConfirmRequired = errors.New("broad cache invalidation (>= 100 matched resources, truncated scan, host, or all) requires confirm_broad = true")
 
+// ErrPurgeIntentCapacity is backpressure before a cutoff commits. Retrying an
+// existing operation or reconciling retained intents frees capacity.
+var ErrPurgeIntentCapacity = errors.New("cache purge recovery journal capacity exhausted; retry unfinished purges or reconcile on restart before submitting a new purge")
+
 // ErrFenceCommit reports that durable invalidation intent could not be
-// committed. Resident entries are unchanged, but earlier origin publications
-// remain fenced because the write may have reached durable storage.
+// committed. Earlier origin publications remain fenced on uncertain writes.
+// Capacity rejection happens before either cutoff commit or fence installation.
 var ErrFenceCommit = errors.New("cache invalidation intent commit failed")
 
 // ErrRetrySnapshotUnavailable prevents a tag retry from forgetting its
@@ -92,13 +96,14 @@ type InvalidateOptions struct {
 	CrossBootRetry      bool
 	BatchSize           int
 	RequireBroadConfirm bool
-	// CommitFence persists the operation's cutoff before its fence is installed.
+	// CommitFence atomically persists the cutoff and executable recovery identity
+	// before its fence is installed. The intent contains no raw query/Vary values.
 	// It runs under genMu so publications cannot cross that boundary, and must
 	// not call back into the cache. An error leaves resident entries unchanged
 	// and conservatively fences earlier origin work against an uncertain write.
 	// Resource IDs are opaque hashes, never raw request URIs. A nil slice means
 	// no snapshot is required; an empty non-nil slice records zero tag targets.
-	CommitFence func(fenceGen uint64, resourceIDs []string) error
+	CommitFence func(fenceGen uint64, resourceIDs []string, intent PurgeRecoveryIntent) error
 }
 
 // StartupHighWaterGen returns the durable generation high-water mark recovered
@@ -325,8 +330,47 @@ func (c *Cache) enforceFenceCapLocked() {
 			incompleteMax = f.gen
 		}
 	}
+	c.updateFenceAtomicsLocked(maxGen, incompleteMax)
+}
+
+func (c *Cache) updateFenceAtomicsLocked(maxGen, incompleteMax uint64) {
 	c.latestFenceGen.Store(maxGen)
 	c.incompleteFenceGen.Store(incompleteMax)
+	if incompleteMax == 0 || c.incompleteFloorGen > 0 || len(c.incompleteHostFloorGen) > 1 {
+		c.incompleteFenceHost.Store(nil)
+		return
+	}
+	singleHost := ""
+	for h, hg := range c.incompleteHostFloorGen {
+		if hg > 0 {
+			if h == "" || (singleHost != "" && singleHost != h) {
+				c.incompleteFenceHost.Store(nil)
+				return
+			}
+			singleHost = h
+		}
+	}
+	for i := range c.fences {
+		f := &c.fences[i]
+		if !f.active && f.remaining == 0 {
+			continue
+		}
+		if f.sel.Kind == SelectorAll || f.sel.Host == "" || f.sel.cutoverMatchAnyPort {
+			c.incompleteFenceHost.Store(nil)
+			return
+		}
+		if singleHost != "" && singleHost != f.sel.Host {
+			c.incompleteFenceHost.Store(nil)
+			return
+		}
+		singleHost = f.sel.Host
+	}
+	if singleHost != "" {
+		hCopy := singleHost
+		c.incompleteFenceHost.Store(&hCopy)
+	} else {
+		c.incompleteFenceHost.Store(nil)
+	}
 }
 
 func (c *Cache) clearEvictedIncompleteFenceLocked(host string, fenceGen uint64) {
@@ -389,8 +433,7 @@ func (c *Cache) reclaimFencesLocked() {
 				incompleteMax = hg
 			}
 		}
-		c.latestFenceGen.Store(maxGen)
-		c.incompleteFenceGen.Store(incompleteMax)
+		c.updateFenceAtomicsLocked(maxGen, incompleteMax)
 		return
 	}
 	kept := c.fences[:0]
@@ -595,14 +638,20 @@ func (c *Cache) indexKeyEntryLocked(st *keyGenState, e *Entry) {
 		if c.byResourceID == nil {
 			c.byResourceID = make(map[string][2]string)
 		}
-		id := hashKey(resourceKeyOf(host, reqURI))
-		bases := c.byResourceID[id]
+		if st.resourceID == "" {
+			if nl := strings.IndexByte(st.baseKey, '\n'); nl > 0 {
+				st.resourceID = hashKey(st.baseKey[nl+1:])
+			} else {
+				st.resourceID = hashKey(resourceKeyOf(host, reqURI))
+			}
+		}
+		bases := c.byResourceID[st.resourceID]
 		if method == http.MethodGet {
 			bases[0] = st.baseKey
 		} else {
 			bases[1] = st.baseKey
 		}
-		c.byResourceID[id] = bases
+		c.byResourceID[st.resourceID] = bases
 	}
 
 	if isVar {
@@ -616,7 +665,9 @@ func (c *Cache) indexKeyEntryLocked(st *keyGenState, e *Entry) {
 		}
 		vm[st.key] = struct{}{}
 	}
-	c.refreshBaseTagsLocked(host, st.baseKey)
+	if len(st.tags) > 0 || len(c.baseIndexedTags) > 0 {
+		c.refreshBaseTagsLocked(host, st.baseKey)
+	}
 }
 
 func (c *Cache) unindexKeyEntryLocked(st *keyGenState) {
@@ -634,7 +685,9 @@ func (c *Cache) unindexKeyEntryLocked(st *keyGenState) {
 			}
 		}
 	}
-	c.refreshBaseTagsLocked(host, baseKey)
+	if len(st.tags) > 0 || len(c.baseIndexedTags) > 0 {
+		c.refreshBaseTagsLocked(host, baseKey)
+	}
 
 	hasBase := false
 	if bst, ok := c.keyGen[baseKey]; ok && bst != st && (bst.inMem || bst.inDisk || bst.inflight > 0) {
@@ -647,7 +700,14 @@ func (c *Cache) unindexKeyEntryLocked(st *keyGenState) {
 			if len(hm) == 0 {
 				delete(c.byHost, host)
 			}
-			id := hashKey(resourceKeyOf(host, st.requestURI))
+			id := st.resourceID
+			if id == "" {
+				if nl := strings.IndexByte(baseKey, '\n'); nl > 0 {
+					id = hashKey(baseKey[nl+1:])
+				} else {
+					id = hashKey(resourceKeyOf(host, st.requestURI))
+				}
+			}
 			if bases, ok := c.byResourceID[id]; ok {
 				for i, bk := range bases {
 					if bk == baseKey {
@@ -1036,6 +1096,14 @@ func (c *Cache) expandResourceKeysToBaseKeysLocked(resKeys []string) []string {
 // candidate entries so preview/execution never copies or sorts an unbounded
 // host catalog under genMu (F13).
 func (c *Cache) candidateBaseKeysLocked(sel NormalizedSelector, maxScan int) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
+	return c.candidateBaseKeysSortedLocked(sel, maxScan, true)
+}
+
+func (c *Cache) candidateBaseKeysForExecLocked(sel NormalizedSelector, maxScan int) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
+	return c.candidateBaseKeysSortedLocked(sel, maxScan, false)
+}
+
+func (c *Cache) candidateBaseKeysSortedLocked(sel NormalizedSelector, maxScan int, sortKeys bool) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
 	switch sel.Kind {
 	case SelectorKey:
 		return []string{baseKeyOf(sel.Key)}, 1, false, 1
@@ -1113,24 +1181,24 @@ func (c *Cache) candidateBaseKeysLocked(sel NormalizedSelector, maxScan int) (ba
 					maps = append(maps, hm)
 				}
 			}
-			return collectBoundedHostKeys(maps, maxScan)
+			return collectBoundedHostKeysSorted(maps, maxScan, sortKeys)
 		}
 		if len(c.byHost[sel.Host]) == 0 {
 			return nil, 0, false, 0
 		}
-		return collectBoundedHostKeys([]map[string]struct{}{c.byHost[sel.Host]}, maxScan)
+		return collectBoundedHostKeysSorted([]map[string]struct{}{c.byHost[sel.Host]}, maxScan, sortKeys)
 	case SelectorAll:
 		var maps []map[string]struct{}
 		for _, hm := range c.byHost {
 			maps = append(maps, hm)
 		}
-		return collectBoundedHostKeys(maps, maxScan)
+		return collectBoundedHostKeysSorted(maps, maxScan, sortKeys)
 	default:
 		return nil, 0, false, 0
 	}
 }
 
-func collectBoundedHostKeys(maps []map[string]struct{}, maxScan int) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
+func collectBoundedHostKeysSorted(maps []map[string]struct{}, maxScan int, sortKeys bool) (baseKeys []string, scanned int, truncated bool, totalCandidates int) {
 	for _, hm := range maps {
 		totalCandidates += len(hm)
 	}
@@ -1146,14 +1214,18 @@ func collectBoundedHostKeys(maps []map[string]struct{}, maxScan int) (baseKeys [
 		for bk := range hm {
 			if maxScan > 0 && scanned >= maxScan {
 				truncated = true
-				sort.Strings(baseKeys)
+				if sortKeys {
+					sort.Strings(baseKeys)
+				}
 				return baseKeys, scanned, truncated, totalCandidates
 			}
 			scanned++
 			baseKeys = append(baseKeys, bk)
 		}
 	}
-	sort.Strings(baseKeys)
+	if sortKeys {
+		sort.Strings(baseKeys)
+	}
 	return baseKeys, scanned, truncated, totalCandidates
 }
 
@@ -1596,7 +1668,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 	batchSize := opts.BatchSize
 	if batchSize <= 0 {
-		batchSize = 64
+		batchSize = 512
 	}
 
 	c.genMu.Lock()
@@ -1653,7 +1725,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		if isTagRetry {
 			candidates, candTrunc, totalCand = c.resourceBaseKeysLocked(resourceIDs, scanCap)
 		} else {
-			candidates, _, candTrunc, totalCand = c.candidateBaseKeysLocked(sel, scanCap)
+			candidates, _, candTrunc, totalCand = c.candidateBaseKeysForExecLocked(sel, scanCap)
 		}
 		if !isUnboundedHost && sel.Kind != SelectorAll && (candTrunc || len(candidates) > maxScan) {
 			c.genMu.Unlock()
@@ -1662,13 +1734,17 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 
 	type matchedGroup struct {
-		resKey  string
-		baseKey string
-		allKeys []string
-		reps    int
+		resKey       string
+		keyStart     int
+		keyEnd       int
+		reps         int
+		isPrimaryRes bool
 	}
 	var groups []matchedGroup
-	matchedResSet := make(map[string]struct{})
+	var flatKeys []string
+	var matchedResSet map[string]struct{}
+	matchedResCount := 0
+	hasDiskTargets := false
 	skipped := 0
 	exactFilter := ""
 	if sel.Kind == SelectorKey {
@@ -1681,13 +1757,24 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	}
 
 	if !isFastAll {
+		useResMap := sel.Kind == SelectorTag || len(candidates) <= 2048
+		var countedResSet map[string]struct{}
+		if useResMap && len(candidates) > 0 {
+			matchedResSet = make(map[string]struct{}, min(len(candidates), 2048))
+			countedResSet = make(map[string]struct{}, min(len(candidates), 2048))
+		}
+		if len(candidates) > 0 {
+			groups = make([]matchedGroup, 0, len(candidates))
+			flatKeys = make([]string, 0, len(candidates))
+		}
 		for _, bk := range candidates {
-			_, host, reqURI, _, ok := parseBaseKeyParts(bk)
+			method, host, reqURI, _, ok := parseBaseKeyParts(bk)
 			if !ok {
 				skipped++
 				continue
 			}
-			resKey := resourceKeyOf(host, reqURI)
+			nl := strings.IndexByte(bk, '\n')
+			resKey := bk[nl+1:]
 			var tags []string
 			if c.baseIndexedTags != nil {
 				tags = c.baseIndexedTags[resKey]
@@ -1704,33 +1791,51 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				skipped++
 				continue
 			}
-			memKeys, diskKeys, inflightKeys, reps, _, _, _, _, live := c.collectOwnedKeysForBaseLockedWithFence(bk, exactFilter, evalFenceGen)
-			if !live && len(inflightKeys) == 0 {
+			keyStart := len(flatKeys)
+			reps, hasDisk, liveOrInflight := c.collectOwnedKeysIntoLocked(bk, exactFilter, evalFenceGen, &flatKeys)
+			if !liveOrInflight {
 				skipped++
 				continue
 			}
-			matchedResSet[resKey] = struct{}{}
-			keySet := make(map[string]struct{}, len(memKeys)+len(diskKeys)+len(inflightKeys)+1)
-			var allKeys []string
-			for _, slice := range [][]string{memKeys, diskKeys, inflightKeys} {
-				for _, k := range slice {
-					if _, exists := keySet[k]; !exists {
-						keySet[k] = struct{}{}
-						allKeys = append(allKeys, k)
+			if hasDisk {
+				hasDiskTargets = true
+			}
+			if useResMap {
+				matchedResSet[resKey] = struct{}{}
+			}
+			isPrimary := false
+			if reps > 0 {
+				isPrimary = true
+				if useResMap {
+					if _, seen := countedResSet[resKey]; seen {
+						isPrimary = false
+					} else {
+						countedResSet[resKey] = struct{}{}
+						matchedResCount++
+					}
+				} else {
+					if method == http.MethodHead {
+						getBK := "GET\n" + resKey
+						if hm := c.byHost[host]; hm != nil {
+							if _, hasGet := hm[getBK]; hasGet && c.hasResidentBaseLocked(getBK, exactFilter, evalFenceGen) {
+								isPrimary = false
+							}
+						}
+					}
+					if isPrimary {
+						matchedResCount++
 					}
 				}
 			}
-			if _, exists := keySet[bk]; !exists && exactFilter == "" {
-				allKeys = append(allKeys, bk)
-			}
 			groups = append(groups, matchedGroup{
-				resKey:  resKey,
-				baseKey: bk,
-				allKeys: allKeys,
-				reps:    reps,
+				resKey:       resKey,
+				keyStart:     keyStart,
+				keyEnd:       len(flatKeys),
+				reps:         reps,
+				isPrimaryRes: isPrimary,
 			})
 		}
-		if opts.RequireBroadConfirm && len(matchedResSet) >= BroadScopeResourceThr {
+		if opts.RequireBroadConfirm && max(len(matchedResSet), matchedResCount) >= BroadScopeResourceThr {
 			c.genMu.Unlock()
 			return InvalidateResult{}, ErrBroadConfirmRequired
 		}
@@ -1752,8 +1857,29 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	} else {
 		fenceGen = c.genSeq.Add(1)
 	}
+	// Persist complete recovery identity BEFORE exposing the cutoff to the
+	// admin ledger. genMu serializes admission against other purges/publications;
+	// the independent intent mutex atomically checks both operation and encoded-byte capacity.
+	intent := c.buildDiskPurgeIntent(fenceGen, sel, resourceIDs, flatKeys)
+	intentCommitted := false
+	intentUncertain := false
+	if c.disk != nil {
+		var err error
+		intent, err = c.disk.commitPurgeIntent(intent)
+		if err != nil {
+			if errors.Is(err, ErrPurgeIntentCapacity) {
+				c.genMu.Unlock()
+				return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
+			}
+			// Actual I/O failure already installed the disk fail-closed fallback.
+			// Continue fencing/deletion, reporting an uncertain durability outcome.
+			intentUncertain = true
+		} else {
+			intentCommitted = true
+		}
+	}
 	if opts.CommitFence != nil {
-		if err := opts.CommitFence(fenceGen, resourceIDs); err != nil {
+		if err := opts.CommitFence(fenceGen, resourceIDs, intent); err != nil {
 			foundFence := false
 			for _, f := range c.fences {
 				if f.gen == fenceGen {
@@ -1768,6 +1894,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			}
 			c.reclaimFencesLocked()
 			c.genMu.Unlock()
+			if intentUncertain {
+				c.disk.failClosedOnIntentWriteError()
+			}
 			return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
 		}
 	}
@@ -1825,21 +1954,35 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		c.fences = nil
 		c.latestFenceGen.Store(fenceGen)
 		c.incompleteFenceGen.Store(0)
+		c.incompleteFenceHost.Store(nil)
 
-		resources := make(map[string]struct{})
+		resourceCount := 0
+		for _, hm := range c.byHost {
+			for bk := range hm {
+				if strings.HasPrefix(bk, "GET\n") {
+					resourceCount++
+				} else if strings.HasPrefix(bk, "HEAD\n") {
+					if _, hasGet := hm["GET\n"+bk[5:]]; !hasGet {
+						resourceCount++
+					}
+				}
+			}
+		}
 		memCount := 0
-		diskKeys := make([]string, 0, len(c.keyGen))
+		var diskKeys []string
+		if c.disk != nil {
+			diskKeys = make([]string, 0, min(len(c.keyGen), 4096))
+		}
 		repCount := 0
 		for k, st := range c.keyGen {
 			if st.gen > fenceGen {
 				continue
 			}
-			diskKeys = append(diskKeys, k)
+			if c.disk != nil && (st.inDisk || st.inflight > 0) {
+				diskKeys = append(diskKeys, k)
+			}
 			if !st.inMem && !st.inDisk {
 				continue
-			}
-			if _, host, reqURI, _, ok := parseBaseKeyParts(k); ok {
-				resources[host+"\n"+reqURI] = struct{}{}
 			}
 			if st.inMem {
 				memCount++
@@ -1858,20 +2001,46 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		c.mem.purge()
 		c.genMu.Unlock()
 
+		if intentUncertain {
+			c.disk.failClosedOnIntentWriteError()
+		}
 		var diskRemoved, retiredReaders, diskFailed int
 		var uncertain bool
 		if c.disk != nil {
+			c.disk.mu.Lock()
+			for h, el := range c.disk.items {
+				it := el.Value.(*diskItem)
+				if it.gen <= fenceGen {
+					if it.key != "" {
+						diskKeys = append(diskKeys, it.key)
+					} else if hk := c.disk.hashKeys[h]; hk != "" {
+						diskKeys = append(diskKeys, hk)
+					}
+				}
+			}
+			c.disk.mu.Unlock()
+
+			uncertain = intentUncertain
 			hwErr := c.disk.recordHighWaterGen(fenceGen)
 			if c.onAfterFenceInstall != nil {
 				c.onAfterFenceInstall(sel, fenceGen)
 			}
-			diskRemoved, retiredReaders, diskFailed, uncertain = c.disk.deleteBatchAtMostGen(diskKeys, fenceGen)
+			var batchUncertain bool
+			diskRemoved, retiredReaders, diskFailed, batchUncertain = c.disk.deleteBatchAtMostGen(diskKeys, fenceGen)
+			uncertain = uncertain || batchUncertain
 			pending, repairUncertain := c.disk.reconcileInvalidation()
 			diskFailed = max(diskFailed, pending)
 			uncertain = uncertain || repairUncertain
+			if intentCommitted && diskFailed == 0 && !uncertain {
+				if err := c.disk.completePurgeIntent(fenceGen, true); err != nil {
+					uncertain = true
+				}
+			}
 			if hwErr != nil {
-				c.disk.unrecoverableInvalidation.Store(true)
 				uncertain = true
+				if diskFailed > 0 || repairUncertain || c.disk.hasSurvivingCacheState() {
+					c.disk.unrecoverableInvalidation.Store(true)
+				}
 			}
 		} else if c.onAfterFenceInstall != nil {
 			c.onAfterFenceInstall(sel, fenceGen)
@@ -1881,7 +2050,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			FenceSequence:              fenceGen,
 			CacheSequenceBefore:        seqBefore,
 			StateChangedSincePreview:   changedSincePreview,
-			InvalidatedResources:       len(resources),
+			InvalidatedResources:       resourceCount,
 			InvalidatedRepresentations: repCount,
 			MemoryEntriesRemoved:       memCount,
 			DiskEntriesRemoved:         diskRemoved,
@@ -1898,21 +2067,25 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		return res, nil
 	}
 	c.genMu.Unlock()
+	if intentUncertain {
+		c.disk.failClosedOnIntentWriteError()
+	}
 
-	invalidatedRes := make(map[string]struct{}, len(groups))
+	invalidatedResCount := 0
 	invalidatedReps := 0
 	memRemoved := 0
 	diskRemoved := 0
 	retiredReaders := 0
 	failedEntries := 0
 	remainingGroups := 0
-	uncertain := false
+	uncertain := intentUncertain
 	canceledMidway := false
-
 	if c.disk != nil {
 		if err := c.disk.recordHighWaterGen(fenceGen); err != nil {
-			c.disk.unrecoverableInvalidation.Store(true)
 			uncertain = true
+			if hasDiskTargets {
+				c.disk.unrecoverableInvalidation.Store(true)
+			}
 		}
 	}
 
@@ -1920,11 +2093,12 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		c.onAfterFenceInstall(sel, fenceGen)
 	}
 
+	var completedEndIdx int
 	for startIdx := 0; startIdx < len(groups); startIdx += batchSize {
 		if err := ctx.Err(); err != nil {
 			canceledMidway = true
 			for i := startIdx; i < len(groups); i++ {
-				remainingGroups += len(groups[i].allKeys)
+				remainingGroups += groups[i].keyEnd - groups[i].keyStart
 			}
 			break
 		}
@@ -1933,15 +2107,19 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			endIdx = len(groups)
 		}
 		batch := groups[startIdx:endIdx]
+		batchKeyStart := batch[0].keyStart
+		batchKeyEnd := batch[len(batch)-1].keyEnd
+		batchKeys := flatKeys[batchKeyStart:batchKeyEnd]
 
-		var batchDiskKeys []string
 		c.genMu.Lock()
 		for _, g := range batch {
 			if g.reps > 0 {
-				invalidatedRes[g.resKey] = struct{}{}
+				if g.isPrimaryRes {
+					invalidatedResCount++
+				}
 				invalidatedReps += g.reps
 			}
-			for _, k := range g.allKeys {
+			for _, k := range flatKeys[g.keyStart:g.keyEnd] {
 				st := c.keyGen[k]
 				if st != nil && st.gen <= fenceGen {
 					nextG := c.genSeq.Add(1)
@@ -1961,12 +2139,12 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 					c.maybeReclaimLocked(st)
 				}
 			}
-			batchDiskKeys = append(batchDiskKeys, g.allKeys...)
 		}
 		c.genMu.Unlock()
+		completedEndIdx = endIdx
 
-		if c.disk != nil && len(batchDiskKeys) > 0 {
-			dRem, dRet, dFail, dUnc := c.disk.deleteBatchAtMostGen(batchDiskKeys, fenceGen)
+		if c.disk != nil && len(batchKeys) > 0 {
+			dRem, dRet, dFail, dUnc := c.disk.deleteBatchAtMostGen(batchKeys, fenceGen)
 			diskRemoved += dRem
 			retiredReaders += dRet
 			failedEntries += dFail
@@ -1975,11 +2153,25 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			}
 		}
 	}
+	if canceledMidway && completedEndIdx > 0 {
+		seenCanceledRes := make(map[string]struct{}, completedEndIdx)
+		for i := 0; i < completedEndIdx; i++ {
+			if groups[i].reps > 0 {
+				seenCanceledRes[groups[i].resKey] = struct{}{}
+			}
+		}
+		invalidatedResCount = len(seenCanceledRes)
+	}
 
 	if c.disk != nil {
 		pending, repairUncertain := c.disk.reconcileInvalidation()
 		failedEntries = max(failedEntries, pending)
 		uncertain = uncertain || repairUncertain
+		if intentCommitted && remainingGroups == 0 && failedEntries == 0 && !uncertain && !canceledMidway {
+			if err := c.disk.completePurgeIntent(fenceGen, sel.Kind == SelectorAll); err != nil {
+				uncertain = true
+			}
+		}
 	}
 	c.genMu.Lock()
 	for i := range c.fences {
@@ -2000,7 +2192,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		FenceSequence:              fenceGen,
 		CacheSequenceBefore:        seqBefore,
 		StateChangedSincePreview:   changedSincePreview,
-		InvalidatedResources:       len(invalidatedRes),
+		InvalidatedResources:       invalidatedResCount,
 		InvalidatedRepresentations: invalidatedReps,
 		MemoryEntriesRemoved:       memRemoved,
 		DiskEntriesRemoved:         diskRemoved,
@@ -2020,6 +2212,328 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		return res, ctx.Err()
 	}
 	return res, nil
+}
+
+func (c *Cache) hasResidentBaseLocked(baseKey, _ string, ownFenceGen uint64) bool {
+	if st := c.keyGen[baseKey]; st != nil && (ownFenceGen == 0 || st.gen <= ownFenceGen) && (st.inMem || st.inDisk) {
+		return true
+	}
+	return c.baseVariants != nil && len(c.baseVariants[baseKey]) > 0
+}
+
+func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFenceGen uint64, dst *[]string) (repCount int, hasDisk, liveOrInflight bool) {
+	st := c.keyGen[baseKey]
+	var vm map[string]struct{}
+	if c.baseVariants != nil {
+		vm = c.baseVariants[baseKey]
+	}
+	hasVariants := (st != nil && len(st.variants) > 0) || len(vm) > 0
+	if !hasVariants {
+		if st == nil || (exactKeyFilter != "" && baseKey != exactKeyFilter) {
+			return 0, false, false
+		}
+		if (ownFenceGen > 0 && st.gen > ownFenceGen) || (ownFenceGen == 0 && c.isResidentEntryFencedLocked(st.gen, baseKey, st.tags)) {
+			return 0, false, false
+		}
+		if !st.inMem && !st.inDisk {
+			if ownFenceGen > 0 && st.inflight > 0 {
+				*dst = append(*dst, baseKey)
+				return 0, true, true
+			}
+			return 0, false, false
+		}
+		*dst = append(*dst, baseKey)
+		return 1, st.inDisk || st.inflight > 0, true
+	}
+
+	startLen := len(*dst)
+	live := false
+	addKey := func(k string, isStub bool) {
+		if exactKeyFilter != "" && k != exactKeyFilter && baseKeyOf(k) != exactKeyFilter {
+			return
+		}
+		for i := startLen; i < len(*dst); i++ {
+			if (*dst)[i] == k {
+				return
+			}
+		}
+		kst := c.keyGen[k]
+		if kst == nil {
+			return
+		}
+		if ownFenceGen > 0 {
+			if kst.gen > ownFenceGen {
+				return
+			}
+		} else if c.isResidentEntryFencedLocked(kst.gen, k, kst.tags) {
+			return
+		}
+		if !kst.inMem && !kst.inDisk {
+			if ownFenceGen > 0 && kst.inflight > 0 {
+				*dst = append(*dst, k)
+				hasDisk = true
+				liveOrInflight = true
+			}
+			return
+		}
+		live = true
+		liveOrInflight = true
+		if kst.inDisk || kst.inflight > 0 {
+			hasDisk = true
+		}
+		*dst = append(*dst, k)
+		if !isStub {
+			repCount++
+		}
+	}
+
+	if st != nil {
+		addKey(baseKey, true)
+		for _, vk := range st.variants {
+			addKey(vk, false)
+		}
+	}
+	for vk := range vm {
+		addKey(vk, false)
+	}
+	if live && exactKeyFilter == "" {
+		foundBase := false
+		for i := startLen; i < len(*dst); i++ {
+			if (*dst)[i] == baseKey {
+				foundBase = true
+				break
+			}
+		}
+		if !foundBase {
+			*dst = append(*dst, baseKey)
+		}
+	}
+	if repCount == 0 && live {
+		repCount = 1
+	}
+	return repCount, hasDisk, liveOrInflight
+}
+
+func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, resourceIDs []string, flatKeys []string) PurgeRecoveryIntent {
+	intent := PurgeRecoveryIntent{
+		FenceGen:            fenceGen,
+		Kind:                sel.Kind,
+		Host:                sel.Host,
+		ExplicitDefaultPort: sel.ExplicitDefaultPort,
+		CutoverMatchAnyPort: sel.cutoverMatchAnyPort,
+		Prefix:              sel.Prefix,
+		CutoverRawPrefix:    sel.cutoverRawPrefix,
+		Pattern:             sel.Pattern,
+		CutoverExactPath:    sel.cutoverExactPath,
+		Tags:                append([]string(nil), sel.Tags...),
+		TagMatch:            sel.TagMatch,
+		RoutePath:           sel.inspectionRoutePrefix,
+		RouteType:           sel.inspectionRouteExact,
+	}
+	if sel.Kind == SelectorTag {
+		intent.MatchedResourceIDs = append([]string{}, resourceIDs...)
+	}
+
+	if sel.Kind == SelectorExactURL || sel.Kind == SelectorKey {
+		vctx := c.versionContext()
+		if sel.Kind == SelectorExactURL && sel.Host != "" && sel.URI != "" {
+			intent.TargetResourceMAC = vctx.Digest("cache-purge-target-v1", []byte(resourceKeyOf(sel.Host, sel.URI)))
+		}
+		if sel.Kind == SelectorKey && sel.Key != "" {
+			intent.TargetKeyMAC = vctx.Digest("cache-purge-target-v1", []byte(sel.Key))
+		}
+		hashes := make([]string, 0, len(flatKeys)+3)
+		seenH := make(map[string]struct{}, len(flatKeys)+3)
+		addHash := func(k string) {
+			if k == "" {
+				return
+			}
+			h := hashKey(k)
+			if _, ok := seenH[h]; !ok {
+				seenH[h] = struct{}{}
+				hashes = append(hashes, h)
+			}
+		}
+		for _, k := range flatKeys {
+			addHash(k)
+		}
+		switch sel.Kind {
+		case SelectorExactURL:
+			addHash(keyFor(http.MethodGet, sel.Host, sel.URI))
+			addHash(keyFor(http.MethodHead, sel.Host, sel.URI))
+		case SelectorKey:
+			addHash(sel.Key)
+		}
+		sort.Strings(hashes)
+		intent.TargetHashes = hashes
+	}
+	return intent
+}
+
+func (c *Cache) reconcileRecoveredPurgeIntents(intents []PurgeRecoveryIntent) {
+	if c == nil || c.disk == nil || len(intents) == 0 {
+		return
+	}
+	vctx := c.versionContext()
+	var remaining []PurgeRecoveryIntent
+
+	for _, intent := range intents {
+		if intent.FenceGen == 0 {
+			continue
+		}
+		sel := NormalizedSelector{
+			Kind:                  intent.Kind,
+			Host:                  intent.Host,
+			Prefix:                intent.Prefix,
+			Pattern:               intent.Pattern,
+			Tags:                  append([]string(nil), intent.Tags...),
+			TagMatch:              intent.TagMatch,
+			ExplicitDefaultPort:   intent.ExplicitDefaultPort,
+			cutoverMatchAnyPort:   intent.CutoverMatchAnyPort,
+			cutoverRawPrefix:      intent.CutoverRawPrefix,
+			cutoverExactPath:      intent.CutoverExactPath,
+			inspectionRoutePrefix: intent.RoutePath,
+			inspectionRouteExact:  intent.RouteType,
+			BroadScope:            intent.Kind == SelectorAll || intent.Kind == SelectorHost,
+		}
+		if sel.Kind == SelectorGlob && sel.Pattern != "" && sel.cutoverExactPath == "" {
+			if _, segs, err := validateSelectorGlob(sel.Pattern); err == nil {
+				sel.globSegments = segs
+			}
+		}
+		sel.digest = computeSelectorDigest(sel)
+
+		targetHashSet := make(map[string]struct{}, len(intent.TargetHashes))
+		for _, h := range intent.TargetHashes {
+			targetHashSet[h] = struct{}{}
+		}
+		resIDSet := make(map[string]struct{}, len(intent.MatchedResourceIDs))
+		for _, id := range intent.MatchedResourceIDs {
+			resIDSet[id] = struct{}{}
+		}
+
+		var targetKeys []string
+		seenKey := make(map[string]struct{})
+		seenGroup := make(map[string]bool)
+		matchedResSet := make(map[string]struct{})
+
+		c.genMu.Lock()
+		addGroup := func(bk string) {
+			if seenGroup[bk] {
+				return
+			}
+			seenGroup[bk] = true
+			_, _, _ = c.collectOwnedKeysIntoLocked(bk, "", intent.FenceGen, &targetKeys)
+			if nl := strings.IndexByte(bk, '\n'); nl > 0 {
+				matchedResSet[bk[nl+1:]] = struct{}{}
+			}
+		}
+		for k, st := range c.keyGen {
+			if st == nil || st.gen > intent.FenceGen {
+				continue
+			}
+			_, host, reqURI, _, ok := parseBaseKeyParts(k)
+			if !ok {
+				continue
+			}
+			resKey := resourceKeyOf(host, reqURI)
+			switch intent.Kind {
+			case SelectorAll:
+				if _, seen := seenKey[k]; !seen {
+					seenKey[k] = struct{}{}
+					targetKeys = append(targetKeys, k)
+				}
+				matchedResSet[resKey] = struct{}{}
+			case SelectorTag:
+				if _, inSnap := resIDSet[hashKey(resKey)]; inSnap && sel.matchesHost(host) {
+					addGroup(baseKeyOf(k))
+				}
+			case SelectorKey:
+				// A base key selects its owned variants, but a variant key selects
+				// only that representation. Never expand a matching variant to its
+				// base group or match a method-independent resource verifier.
+				_, hMatch := targetHashSet[hashKey(k)]
+				_, bMatch := targetHashSet[hashKey(baseKeyOf(k))]
+				macMatch := intent.TargetKeyMAC != "" &&
+					(vctx.Digest("cache-purge-target-v1", []byte(k)) == intent.TargetKeyMAC ||
+						vctx.Digest("cache-purge-target-v1", []byte(baseKeyOf(k))) == intent.TargetKeyMAC)
+				if hMatch || bMatch || macMatch {
+					// Reconstruct only in-memory identity for the fallback fence.
+					// The persisted hash of the selected base exists even if its
+					// stub was evicted; a variant selector never stores that hash.
+					if bMatch || (intent.TargetKeyMAC != "" && vctx.Digest("cache-purge-target-v1", []byte(baseKeyOf(k))) == intent.TargetKeyMAC) {
+						sel.Key = baseKeyOf(k)
+					} else if sel.Key == "" {
+						sel.Key = k
+					}
+					if _, seen := seenKey[k]; !seen {
+						seenKey[k] = struct{}{}
+						targetKeys = append(targetKeys, k)
+					}
+				}
+			case SelectorExactURL:
+				_, hMatch := targetHashSet[hashKey(k)]
+				_, bMatch := targetHashSet[hashKey(baseKeyOf(k))]
+				macMatch := intent.TargetResourceMAC != "" && vctx.Digest("cache-purge-target-v1", []byte(resKey)) == intent.TargetResourceMAC
+				if hMatch || bMatch || macMatch {
+					addGroup(baseKeyOf(k))
+				}
+
+			default:
+				if sel.MatchesResource(host, reqURI, nil) {
+					addGroup(baseKeyOf(k))
+				}
+			}
+		}
+		for _, k := range targetKeys {
+			st := c.keyGen[k]
+			if st != nil && st.gen <= intent.FenceGen {
+				nextG := c.genSeq.Add(1)
+				if nextG <= intent.FenceGen {
+					nextG = intent.FenceGen + 1
+				}
+				st.gen = nextG
+			}
+			c.mem.delIfGenAtMost(k, intent.FenceGen)
+			if st != nil {
+				st.inMem = c.mem.hasKey(k)
+				if !st.inMem {
+					st.memBytes = 0
+				}
+				c.maybeReclaimLocked(st)
+			}
+		}
+		c.genMu.Unlock()
+
+		_, _, dFail, dUnc := c.disk.deleteBatchAtMostGen(targetKeys, intent.FenceGen)
+		pending, repairUncertain := c.disk.reconcileInvalidation()
+		failed := max(dFail, pending)
+		uncertain := dUnc || repairUncertain
+
+		if failed == 0 && !uncertain {
+			c.genMu.Lock()
+			if c.reconciledFenceGens == nil {
+				c.reconciledFenceGens = make(map[uint64]bool)
+			}
+			c.reconciledFenceGens[intent.FenceGen] = true
+			c.genMu.Unlock()
+		} else {
+			remaining = append(remaining, intent)
+			c.genMu.Lock()
+			c.fences = append(c.fences, selectorFence{
+				gen:              intent.FenceGen,
+				sel:              sel,
+				remaining:        max(failed, 1),
+				matchedResources: matchedResSet,
+			})
+			c.enforceFenceCapLocked()
+			c.genMu.Unlock()
+		}
+	}
+
+	if err := c.disk.replacePurgeIntents(remaining); err != nil {
+		c.disk.unrecoverableInvalidation.Store(true)
+	}
 }
 
 func (c *Cache) collectOwnedKeysForBaseLockedWithFence(baseKey, exactKeyFilter string, ownFenceGen uint64) (memKeys, diskKeys, inflightKeys []string, repCount int, bodyBytes, memBytes, diskBytes int64, stBase *keyGenState, live bool) {

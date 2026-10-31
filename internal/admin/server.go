@@ -361,7 +361,7 @@ type Deps struct {
 	// PluginModules returns the content identity of each serving plugin's
 	// compiled module, keyed by plugin name (#429). Nil omits digests.
 	PluginModules func() map[string]PluginModule
-	// Cache, when non-nil, backs the /cache/purge endpoint.
+	// Cache, when non-nil, backs the versioned cache invalidation endpoints.
 	Cache Purger
 	// Reload triggers a configuration reload. It returns an error if the
 	// reload could not be enqueued within the implementation's timeout.
@@ -991,29 +991,6 @@ func (s *Server) handleMetrics() http.Handler {
 		}
 		s.deps.Metrics.ServeHTTP(w, r)
 	})
-}
-
-// handlePurge clears the response cache. POST only. An optional ?key=<key>
-// removes a single entry; otherwise the whole cache is purged.
-func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.deps.Cache == nil {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "cache disabled"})
-		return
-	}
-	if key := r.URL.Query().Get("key"); key != "" {
-		s.deps.Cache.Delete(key)
-		s.recordAudit(r, "cache.purge", "cache", "success", "single-entry purge requested")
-		writeJSON(w, http.StatusOK, map[string]string{"status": "purged", "key": key})
-		return
-	}
-	s.deps.Cache.Purge()
-	s.recordAudit(r, "cache.purge", "cache", "success", "whole-cache purge completed")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "purged"})
 }
 
 // handleReload triggers a configuration reload. POST only. It returns 202

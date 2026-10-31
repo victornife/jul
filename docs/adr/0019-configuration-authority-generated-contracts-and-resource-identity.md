@@ -2519,11 +2519,13 @@ each will attract:
 | `/api/wizard`, `/api/wizard/generate` | authoring aids for the Console, not a machine contract |
 | `/api/plugins/upload`, `/api/transcode/descriptor-upload` | multipart upload contracts; external exposure needs its own size, path and permission review |
 | `/api/audit`, `/api/audit/export` | strong external candidate; deferred so the export format is designed once rather than frozen by accident |
-| `/cache/purge`, `/reload` | legacy unversioned operational endpoints; `/reload` in particular has no place in a managed-authority world |
+| `/reload` | legacy unversioned operational endpoint; it has no place in a managed-authority world |
 | `/debug/pprof/` | a Go runtime detail |
 | `/api/admin/me`, `/api/admin/health`, `/api/admin/client-errors` | Console plumbing |
 | `/` | the Console shell |
 | all existing `/api/config/*`, `/api/history/*`, `/api/listeners/*`, `/api/routes*`, `/api/upstreams*` | retained for the Console; **not** stable, and the `/api/v1` route is the supported one |
+
+The previously internal `/cache/purge` route is retired in #674 / ADR 0030 after Console migration. All purge clients use the supported versioned flow; the internal classification did not grant a stable external contract.
 
 **Aliases share handlers; they never duplicate logic.** An `/api/v1` route is the same
 `RouteSpec.Handler` bound at a second pattern, with the same permission and the same authority checks.
