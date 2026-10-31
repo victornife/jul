@@ -1383,9 +1383,7 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
           ),
         );
       }
-      if (url === "/cache/purge") {
-        return Promise.resolve(new Response("{}", { status: 200 }));
-      }
+
       if (url === "/api/config") {
         return Promise.resolve(
           new Response(

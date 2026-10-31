@@ -4,7 +4,6 @@
 package admin
 
 import (
-	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,11 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"jul/internal/adminapi"
 	"jul/internal/cache"
 	"jul/internal/config"
 )
 
-func TestLegacyPurgeDurabilityOutcomesAndCompatibility(t *testing.T) {
+func TestVersionedPurgeDurabilityOutcomes(t *testing.T) {
 	t.Parallel()
 
 	const token = "legacy-purge-token-32-chars-668-a"
@@ -57,30 +57,28 @@ func TestLegacyPurgeDurabilityOutcomesAndCompatibility(t *testing.T) {
 			return &config.Config{Cache: cacheCfg}, nil
 		},
 	})
-	handler := s.routes()
-
-	doPurge := func(query string) *httptest.ResponseRecorder {
+	doPurge := func(key string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/cache/purge"+query, nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
-		return rr
+		selector := adminapi.CacheSelector{Kind: "all", All: true}
+		if key != "" {
+			selector = adminapi.CacheSelector{Kind: "key", Key: key}
+		}
+		return postV1JSON(t, s, "/api/v1/cache/purge", token, "", adminapi.CachePurgeRequest{Selector: selector, ConfirmBroad: true})
 	}
 
-	// 1. Clean whole-cache and single-key purge succeed with 200 OK {"status":"purged"}.
+	// 1. Clean whole-cache and single-key purge succeed with 200 OK with structured effective success.
 	seed("/clean-1")
 	rrClean := doPurge("")
 	if rrClean.Code != http.StatusOK {
 		t.Fatalf("clean purge status=%d body=%s", rrClean.Code, rrClean.Body.String())
 	}
-	var cleanBody map[string]any
-	if err := json.Unmarshal(rrClean.Body.Bytes(), &cleanBody); err != nil || cleanBody["status"] != "purged" {
-		t.Fatalf("unexpected clean purge body: %s", rrClean.Body.String())
+	cleanBody := decodeInto[adminapi.CachePurgeResponse](t, rrClean)
+	if cleanBody.State != "succeeded" || cleanBody.InvalidationEffective != "effective" {
+		t.Fatalf("unexpected clean purge: %+v", cleanBody)
 	}
 
 	seed("/clean-key")
-	keyParam := "?key=" + "GET%0Aportal.example.com%0A/clean-key"
+	keyParam := "GET\nportal.example.com\n/clean-key"
 	rrKey := doPurge(keyParam)
 	if rrKey.Code != http.StatusOK {
 		t.Fatalf("clean key purge status=%d body=%s", rrKey.Code, rrKey.Body.String())
@@ -88,7 +86,7 @@ func TestLegacyPurgeDurabilityOutcomesAndCompatibility(t *testing.T) {
 
 	// 2. Marker-only failure (.jul-cache-gen is a directory so atomic rename fails with EISDIR,
 	// while cache file unlinks in diskDir succeed):
-	// - Returns 503 Service Unavailable with status="uncertain", failed_entries=0
+	// - Returns a terminal 200 response with effectiveness="uncertain", failed_entries=0
 	// - Records DiskWriteHealth failure
 	// - Old disk content is removed and does NOT reappear after restart
 	// - Healthy disk tier remains operational for new writes and hits!
@@ -99,16 +97,17 @@ func TestLegacyPurgeDurabilityOutcomesAndCompatibility(t *testing.T) {
 		t.Fatalf("Mkdir(.jul-cache-gen): %v", err)
 	}
 	rrMarker := doPurge("")
-	if rrMarker.Code != http.StatusServiceUnavailable {
-		t.Fatalf("marker-only failure: expected 503, got %d body=%s", rrMarker.Code, rrMarker.Body.String())
+	if rrMarker.Code != http.StatusOK {
+		t.Fatalf("marker-only completed failure: expected 200, got %d body=%s", rrMarker.Code, rrMarker.Body.String())
 	}
-	var markerBody map[string]any
-	if err := json.Unmarshal(rrMarker.Body.Bytes(), &markerBody); err != nil {
-		t.Fatal(err)
-	}
-	if markerBody["status"] != "uncertain" || markerBody["invalidation_effective"] != "uncertain" {
+	markerBody := decodeInto[adminapi.CachePurgeResponse](t, rrMarker)
+	if markerBody.InvalidationEffective != "uncertain" || markerBody.State == "succeeded" || markerBody.RecoveryGuidance == "" {
 		t.Fatalf("unexpected marker-only body: %+v", markerBody)
 	}
+	if got := s.audit.snapshot("cache.purge", "failure", 0); len(got) != 1 {
+		t.Fatalf("uncertain result did not audit failure: %+v", got)
+	}
+
 	failures, failing, ok := c.DiskWriteHealth()
 	if !ok || failures == 0 || !failing {
 		t.Fatalf("expected DiskWriteHealth failure after marker-only error, got failures=%d failing=%v ok=%v", failures, failing, ok)
@@ -145,7 +144,7 @@ func TestLegacyPurgeDurabilityOutcomesAndCompatibility(t *testing.T) {
 	}
 
 	// 3. Combined tombstone manifest failure (.jul-cache-tombstones is a directory):
-	// POST /cache/purge?key=... returns 503 Service Unavailable and does not fabricate success.
+	// Versioned key purge reports a structured incomplete/uncertain result, never success.
 	tombPath := filepath.Join(diskDir, ".jul-cache-tombstones")
 	_ = os.Remove(tombPath)
 	if err := os.Mkdir(tombPath, 0o700); err != nil {
@@ -153,8 +152,12 @@ func TestLegacyPurgeDurabilityOutcomesAndCompatibility(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(tombPath) })
 
-	rrKeyFail := doPurge("?key=" + "GET%0Aportal.example.com%0A/still-healthy")
-	if rrKeyFail.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503 on single-key tombstone failure, got %d body=%s", rrKeyFail.Code, rrKeyFail.Body.String())
+	rrKeyFail := doPurge("GET\nportal.example.com\n/still-healthy")
+	if rrKeyFail.Code != http.StatusOK {
+		t.Fatalf("expected terminal structured response, got %d body=%s", rrKeyFail.Code, rrKeyFail.Body.String())
+	}
+	keyFail := decodeInto[adminapi.CachePurgeResponse](t, rrKeyFail)
+	if keyFail.State == "succeeded" || keyFail.InvalidationEffective == "effective" || keyFail.RecoveryGuidance == "" {
+		t.Fatalf("key fault fabricated success: %+v", keyFail)
 	}
 }

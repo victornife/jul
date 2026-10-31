@@ -13,7 +13,7 @@ claim release, GA, production soak or hardware power-loss certification.
 | P2 aggregate journal capacity flush | Four retained 4,096-ID intents exceeded 1 MiB and removed an unrelated disk file on the baseline. | Atomically check count and encoded aggregate bytes before committing a cutoff. Reject with 503/backpressure guidance, preserving disk entries and the prior journal. New admissions never coalesce tag snapshots or retained operations into broader scopes. |
 | P2 key recovery broadens to HEAD | Baseline recovery removed HEAD while the live GET-key purge preserved it. | Separate key/representation matching from exact-URL resource-group matching. Preserve HEAD, Vary siblings and stubs outside the selected key, including rotated-version-key recovery. |
 | Partial performance evidence | Confirmed: synthetic os.WriteFile was not a durable ledger commit; prior 200k concurrent profile was memory-only; no enforced latency budgets. | Remove the misleading synthetic ledger callback. Add actual admin/ledger commits, real disk catalogs, explicit local acceptance budgets, and recovery at both journal limits. |
-| Console consumer and generic failure | Confirmed the duplicate shortcut called the unversioned endpoint and collapsed errors. | Remove that shortcut/client helper. All Console purges use the existing versioned preview/confirm/execute/observe panel, which shows effectiveness, operation ID and recovery guidance. Rebuild embedded assets. |
+| Console consumer and generic failure | Confirmed the duplicate shortcut called the unversioned endpoint and collapsed errors. | Remove that shortcut/client helper and retire the unsupported HTTP route/handler/adapter in this PR. All Console purges use the existing versioned preview/confirm/execute/observe panel. Migrate OIDC/RBAC/CSRF/audit/durability tests to v1; rebuild embedded assets. |
 | ADR allocation claim | Confirmed the historical report said about 17.4 MB, not <5 MB. | Correct ADR 0030 and mark the old evidence report superseded. |
 
 Retries retain their original normalized recovery identity and target hashes,
@@ -79,7 +79,7 @@ attempt. This is not a synthetic payload or no-op ledger hook.
 | 3 | 207.869 ms | 49.865 µs | 4.634 s | 35.003 µs | 34.276 ms |
 | Enforced local budget | 2 s | included in cutoff | 30 s | 10 ms | 1 s |
 
-All three 1k-resource samples also passed (6–9 ms total). Cutoff timing covers
+All three 1k-resource samples also passed (7–9 ms total). Cutoff timing covers
 initial selection, journal persistence and the ledger cutoff callback; it is
 not instrumentation of every later generation-lock acquisition. Warm samples
 numbered 3,969–4,763 and publication samples 456–503 in the large runs. The disk
@@ -103,12 +103,12 @@ more complex invalidation engine.
 
 ## Validation and limits
 
-- Full cache/admin suites pass; package statement coverage: cache 92.9%, admin
+- Full cache/admin suites pass; package statement coverage: cache 92.8%, admin
   87.8%; app coverage 81.8%.
 - `go test -race ./internal/cache ./internal/admin -run 'Purge|Retire|SensitiveVary'
   -count=3` passes after corrections.
 - Repository changed-Go block gate (including app, cache and admin; no package
-  allowlist or lowered floor): **717/783 = 91.57%**, floor 90%. Hosted Codecov
+  allowlist or lowered floor): **699/764 = 91.49%**, floor 90%. Hosted Codecov
   patch is a distinct measurement and must be checked on the pushed head.
 - Console: typecheck, lint, reporter tests, full coverage contract and build
   pass; **86 files / 1,002 tests**. Statements 81.88%, branches 76.57%, functions
@@ -122,19 +122,55 @@ more complex invalidation engine.
   corpus tests excluded. Hosted Linux/macOS/Windows, full race, browser/E2E and
   final Codecov remain merge gates, not claimed from these local results.
 
-## Legacy endpoint recommendation
+## Maintainer-selected HTTP retirement in this PR
 
-**Migrate the Console now (done), retain the HTTP endpoint in #674, and defer
-removal to an explicit compatibility follow-up.** Inventory supported scripts,
-examples and integrations, decide any Beta deprecation window, migrate remaining
-consumers, then remove route/contracts/tests/docs together. A repository search
-cannot prove that external supported callers do not exist.
+The maintainer selected direct retirement in #674 after the Console migration.
+`POST /cache/purge`, its `?key=` form, handler, unused `ResultPurger` adapter,
+route classification and transport inventory are removed. There is no alias,
+extra issue or deferred HTTP cleanup. ADR 0019 explicitly classifies the old
+route as internal/unsupported and free to change, so a public-API deprecation
+window does not apply. Update any old scripts to `jul cache purge` or the
+versioned preview/execute/status flow.
 
-Keep internal `Cache.Delete()` / `DeleteResult()`: unsafe-method invalidation
-has production callers, and HTTP endpoint removal does not remove that need.
-Legacy durability failures and capacity rejections remain observable with 503
-and recovery guidance. The endpoint retirement recommendation is recorded here;
-no follow-up GitHub issue was created.
+OIDC, CSRF, RBAC, audit-attribution and durability tests now exercise the
+supported versioned endpoint with real structured request bodies. Completed
+degraded outcomes are HTTP 200 with explicit terminal failure/uncertainty and
+recovery guidance; pre-commit capacity rejection remains a 503 envelope. A
+negative regression covers retired POST/key/trailing-slash routes, alternate
+mutation methods, token/open modes and enabled/disabled Console builds. The UI
+fallback accepts browser navigation only, preventing a removed mutation route
+from receiving an HTTP 200 SPA shell.
+
+Keep internal `Cache.Delete()` / `DeleteResult()` and `Purge()` / `PurgeResult()`.
+These are Go cache operations, not exposed endpoints or duplicate legacy
+engines. Unsafe-method invalidation needs `Delete()` to retire GET/HEAD/Vary
+representations; it already delegates to the current durability machinery.
+
+Cleanup audit pass 1 checks route removal, no-mutation controls, v1 success,
+RBAC/CSRF and audit attribution. Pass 2 checks durability faults, internal
+unsafe-method invalidation, route inventory/contracts, docs and lean/full
+Console fallback. No unresolved cleanup findings remain after validation.
+
+## Same-PR cleanup verification
+
+- Repository Go tests pass with Unix-socket tests excluded only for the local
+  environment restriction. Affected full-tag cache/admin/app/API-contract
+  suites pass without that exclusion.
+- Lean and full Console tests verify removed mutations return 404 and never
+  invoke cache deletion, while the versioned replacement still executes.
+- Versioned durability fault tests retain marker-only health/restart controls
+  and uncertain single-key outcomes with recovery guidance and failure audit.
+- Console-enabled OIDC/auth/purge/invalidation race tests pass three repetitions.
+- Frontend typecheck/lint and 35 targeted cache/retry/OIDC unit tests pass.
+  Production browser bundle sources are unchanged by this cleanup.
+- Real-provider OIDC browser tests were attempted with Playwright and system
+  Chromium. This environment blocks Chromium's process-singleton Unix socket
+  (`Operation not permitted`); no browser assertions could run locally. Hosted
+  OIDC/browser checks remain required on the published head.
+- Full-tag vet, generated contracts and 2,574 documentation checks pass.
+- Repository/embedded-asset/script/example searches find no remaining product
+  caller of the retired endpoint; remaining literal paths explain retirement,
+  describe historical behavior, or assert its absence.
 
 ## Recommendation
 

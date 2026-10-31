@@ -1,4 +1,4 @@
-# ADR 0030 — Durable incomplete-purge recovery, large-purge latency bounds, legacy purge outcomes, and route/backend cutover
+# ADR 0030 — Durable incomplete-purge recovery, large-purge latency bounds, purge outcomes, and route/backend cutover
 
 - **Status:** Accepted — Beta/unreleased (`#667`, `#666`, `#668`, `#624`, `#620`)
 - **Date:** 2026-10-30
@@ -72,17 +72,15 @@ We retain the single `c.genMu` linearization owner (preserving atomic cutoff ass
    - `Cache.PurgeResult() InvalidateResult` executes whole-cache invalidation through the shared `InvalidateScope` (`SelectorAll`) engine; `Cache.Purge()` is a 1-line wrapper (`_, _ = c.PurgeResult()`).
    - `Cache.DeleteResult(key string) InvalidateResult` executes generation-conditional resource/key deletion with durable tombstone batching and reconciliation; `Cache.Delete(key)` wraps `_, _ = c.DeleteResult(key)`.
 2. **Distinguishing marker-only failure from surviving-data / tombstone / unlink / sync failures:**
-   - If `.jul-cache-gen` (`recordHighWaterGen`) fails during a purge, `diskStore` increments `writeFails`, sets `failing = true` in `DiskWriteHealth()`, and marks the operation durability outcome `uncertain = true` (`State = "partial"` or `"failed"`, `InvalidationEffective = "uncertain"`) so neither the structured API nor the unversioned `POST /cache/purge` handler fabricates durable success.
+   - If `.jul-cache-gen` (`recordHighWaterGen`) fails during a purge, `diskStore` increments `writeFails`, sets `failing = true` in `DiskWriteHealth()`, and marks the operation durability outcome `uncertain = true` (`State = "partial"` or `"failed"`, `InvalidationEffective = "uncertain"`) so the structured API reports the terminal incomplete/uncertain outcome and recovery guidance instead of fabricating durable success.
    - However, if all targeted disk entries were removed (`diskFailed == 0 && !repairUncertain`) and no target cache files or dirty tombstones remain, no old entry can resurrect on restart. In that marker-only case, Jul does **not** set `unrecoverableInvalidation = true`, keeping the healthy disk tier operational while surfacing the durability failure in the purge result, HTTP status, audit log, and `DiskWriteHealth()`.
    - If `.jul-cache-gen` fails alongside any tombstone, unlink, truncate, or directory-sync error (`diskFailed > 0 || repairUncertain`), `unrecoverableInvalidation = true` is set, disabling disk reads until reconciliation succeeds.
-3. **Unversioned `POST /cache/purge` compatibility contract (`internal/admin/server.go`):**
-
-| Condition | HTTP Status | Response Body | Audit Outcome | Disk Tier State |
-| --- | --- | --- | --- | --- |
-| Cache disabled (`Cache == nil`) | `200 OK` | `{"status":"cache disabled"}` | (none) | N/A |
-| Durable effective purge (`State == "succeeded"`, `InvalidationEffective == "effective"`) | `200 OK` | `{"status":"purged"}` (plus `"key"` when `?key=` supplied) | `success` | Healthy (`failing = false`) |
-| Marker-only `.jul-cache-gen` failure, all target files removed (`diskFailed == 0 && !repairUncertain`) | `503 Service Unavailable` | `{"status":"uncertain","outcome":...,"invalidation_effective":"uncertain","failed_entries":0,"recovery_guidance":"..."}` | `failure` | Operational (`unrecoverableInvalidation = false`); `DiskWriteHealth` records write failure (`failing = true`) |
-| Tombstone, unlink, truncate, or dir-sync failure (`diskFailed > 0 \|\| repairUncertain`) | `503 Service Unavailable` | `{"status":"failed"\|"uncertain","outcome":...,"invalidation_effective":"incomplete"\|"uncertain","failed_entries":N,"recovery_guidance":"..."}` | `failure` | Disabled (`unrecoverableInvalidation = true`) until reconciled |
+3. **Retire the internal HTTP endpoint in #674:**
+   - Remove `POST /cache/purge` (including `?key=`), its handler, the unused `ResultPurger` HTTP adapter, and route/classification inventory entries. All administrative cache invalidation uses `/api/v1/cache/purge*`; Console and remote CLI use that supported API.
+   - ADR 0019's classification is explicit: the removed endpoint was `internal`, unsupported and not a stable external contract. The maintainer selected retirement in this PR after migrating the last product consumer. No public-API deprecation window or legacy alias is introduced. Old scripts must migrate to the versioned workflow.
+   - Migrate OIDC RBAC/CSRF/audit tests and durability fault tests to the actual versioned route. A completed degraded operation returns HTTP 200 with terminal `state`, `invalidation_effective`, failure counts and recovery guidance; rejection before commit (including journal capacity) returns the versioned error envelope and 503. Clients must inspect structured outcomes.
+   - Unknown mutations may not fall through to a successful Console SPA response. Retired POST/key/trailing-slash paths return 404 in lean/full and enabled/disabled Console configurations, without mutating the cache.
+   - Keep internal `Cache.Delete()` / `DeleteResult()` and `Purge()` / `PurgeResult()`. These are Go cache operations, not HTTP endpoints. Unsafe-method GET/HEAD/Vary invalidation actively uses `Delete()`, already backed by the current durability machinery. HTTP retirement does not remove that required behavior.
 
 ### 4. Publication-aligned route and backend cutover (`#624`, `CACHE-OPS-04`)
 
@@ -118,9 +116,9 @@ We retain the single `c.genMu` linearization owner (preserving atomic cutoff ass
 - **Positive:**
   - Large `200,000`-entry host purges used approximately `17.4 MB` instead of `194.3 MB` in the original memory-only profile (not a `< 5 MB` guarantee), avoid sorting `200,000` keys under `genMu`, and no longer stall warm memory hits on unrelated hosts.
   - Interrupted, canceled, or partially failed purges—as well as interrupted `304` sensitive-`Vary` retirements—cannot resurrect pre-cutoff disk entries after a restart.
-  - Legacy `POST /cache/purge` callers get truthful `503` failure reporting on incomplete/uncertain durability without reflexively disabling a healthy empty disk tier on marker-only write errors.
+  - All admin callers use the versioned API and receive truthful structured outcomes. The retired internal HTTP route cannot mutate cache or return a misleading SPA success; marker-only failures do not reflexively disable a healthy empty disk tier.
   - Operators have an explicit, previewable `retain` (default) vs `invalidate` cutover choice across managed and file-owned workflows.
-- **Console migration:** all Console invalidation now uses the versioned preview/confirm/execute/observe panel, including structured effectiveness and recovery guidance. The duplicate unversioned shortcut/client helper is removed. Retain the HTTP compatibility endpoint until a deliberate consumer/removal review; retain internal `Delete()` for unsafe-method invalidation.
+- **Console migration:** all Console invalidation now uses the versioned preview/confirm/execute/observe panel, including structured effectiveness and recovery guidance. The duplicate unversioned shortcut/client helper is removed. The internal HTTP endpoint is retired in this PR after consumer migration; internal `Delete()` remains for unsafe-method invalidation.
 - **Measured acceptance:** [the updated review](../reviews/2026-10-31-pr674-confirmed-findings-and-validation.md) defines local admin/request/startup thresholds and exercises real durable ledger commits, 200,000-resource disk catalogs, and both journal limits. These are declared local acceptance budgets, not hardware-independent SLOs.
 - **Limits:**
   - Startup reconciliation bounds `.jul-cache-purge-intents` to `1 MiB` / `256` operations; corrupt intent files fail closed by purging disk cache files.

@@ -874,14 +874,6 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleAuditExport) },
 	},
 
-	// ── Cache purge (cache:purge) ─────────────────────────────────────────────
-	{
-		Pattern:    "/cache/purge",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.CachePurge,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handlePurge) },
-	},
-
 	// ── Reload trigger (reload:trigger) ──────────────────────────────────────
 	{
 		Pattern:    "/reload",

@@ -112,22 +112,10 @@ type capacityPurger struct{ errScopedPurger }
 func (capacityPurger) InvalidateScope(context.Context, cache.NormalizedSelector, cache.InvalidateOptions) (cache.InvalidateResult, error) {
 	return cache.InvalidateResult{}, fmt.Errorf("%w: %w", cache.ErrFenceCommit, cache.ErrPurgeIntentCapacity)
 }
-func (capacityPurger) PurgeResult() (cache.InvalidateResult, error) {
-	return cache.InvalidateResult{}, cache.ErrPurgeIntentCapacity
-}
-func (capacityPurger) DeleteResult(string) (cache.InvalidateResult, error) {
-	return cache.InvalidateResult{}, nil
-}
-
 func TestPurgeCapacityReturnsBackpressureAndGuidance(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{Cache: capacityPurger{}})
 	rr := postV1JSON(t, s, "/api/v1/cache/purge", "", "", adminapi.CachePurgeRequest{Selector: adminapi.CacheSelector{Kind: "all", All: true}, ConfirmBroad: true})
 	if rr.Code != 503 || !strings.Contains(rr.Body.String(), "capacity exhausted") {
 		t.Fatalf("versioned capacity response: %d %s", rr.Code, rr.Body.String())
-	}
-	legacy := httptest.NewRecorder()
-	s.routes().ServeHTTP(legacy, httptest.NewRequest("POST", "/cache/purge", nil))
-	if legacy.Code != 503 || !strings.Contains(legacy.Body.String(), "capacity exhausted") {
-		t.Fatalf("legacy capacity response: %d %s", legacy.Code, legacy.Body.String())
 	}
 }

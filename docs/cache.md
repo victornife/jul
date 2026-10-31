@@ -1278,10 +1278,16 @@ fallback, and preserve post-cutoff data.
 
 All Console purge actions use the versioned preview → confirm → execute →
 observe/recover panel. The duplicate legacy shortcut is removed; structured
-incomplete/uncertain results show recovery guidance. The unversioned HTTP
-endpoint and internal `Delete()` wrapper remain available. Their removal is a
-separate compatibility decision; unsafe-method invalidation still uses
-`Delete()` in production.
+incomplete/uncertain results show recovery guidance. The internal unversioned `POST /cache/purge` endpoint, including `?key=`, is
+removed in #674. Migrate scripts to `/api/v1/cache/purge*` or `jul cache purge`;
+no legacy HTTP alias remains. This was an unsupported internal route under
+ADR 0019, so retirement does not remove a supported external contract. Retired
+mutation requests return 404 even with the full Console enabled.
+
+Internal `Delete()` / `DeleteResult()` and `Purge()` / `PurgeResult()` remain Go
+cache operations, not exposed endpoints. Unsafe-method invalidation still uses
+`Delete()` to retire GET/HEAD and their owned Vary representations through the
+current durability machinery.
 
 The [PR #674 validation record](reviews/2026-10-31-pr674-confirmed-findings-and-validation.md)
 defines measured local latency budgets and their workload/hardware limits.
@@ -1714,7 +1720,7 @@ fields. There is no automatic cursor restart or page accumulation.
 
 Purge uses the existing preview → confirm → execute → observe/recover flow and
 its own permission. Durable incomplete-operation recovery across restart (#666),
-measured large-purge lock/allocation bounds (#667), and legacy `POST /cache/purge`
+measured large-purge lock/allocation bounds (#667), and internal HTTP purge retirement / structured
 durability outcomes (#668) are documented in
 [ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md). No release, GA or soak claim is
 made. NGINX migration impact is **not applicable**: this is a Jul-specific
