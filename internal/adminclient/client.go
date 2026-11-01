@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"jul/internal/adminapi"
+	"jul/internal/config"
 )
 
 const (
@@ -400,8 +401,15 @@ func (c *Client) Plan(ctx context.Context, candidate []byte, baseVersion string)
 	return c.do(ctx, operation("planConfig"), nil, q, candidate, "application/toml", "")
 }
 
-func (c *Client) HistoryDiff(ctx context.Context, id string) (RawResponse, error) {
-	return c.do(ctx, operation("diffHistoryRevision"), map[string]string{"id": id}, nil, nil, "", "")
+func (c *Client) HistoryDiff(ctx context.Context, id string, cacheCutover ...string) (RawResponse, error) {
+	q := make(url.Values)
+	if len(cacheCutover) > 0 && cacheCutover[0] != "" {
+		if err := config.ValidateCacheCutoverMode(cacheCutover[0], "hot"); err != nil {
+			return RawResponse{}, err
+		}
+		q.Set("cache_cutover", cacheCutover[0])
+	}
+	return c.do(ctx, operation("diffHistoryRevision"), map[string]string{"id": id}, q, nil, "", "")
 }
 
 func (c *Client) History(ctx context.Context, limit int, cursor string) (adminapi.HistoryListResponse, RawResponse, error) {
@@ -503,7 +511,7 @@ type PreparedMutation struct {
 	IdempotencyKey string
 }
 
-func (c *Client) PrepareApply(candidate []byte, baseVersion, mode, idemKey string, confirmAdmin bool) (PreparedMutation, error) {
+func (c *Client) PrepareApply(candidate []byte, baseVersion, mode, idemKey string, confirmAdmin bool, cacheCutover ...string) (PreparedMutation, error) {
 	if strings.TrimSpace(baseVersion) == "" {
 		return PreparedMutation{}, errors.New("base_version is required")
 	}
@@ -520,7 +528,17 @@ func (c *Client) PrepareApply(candidate []byte, baseVersion, mode, idemKey strin
 	if !ValidIdempotencyKey(idemKey) {
 		return PreparedMutation{}, errors.New("invalid idempotency key")
 	}
+	cutover := ""
+	if len(cacheCutover) > 0 {
+		cutover = cacheCutover[0]
+	}
+	if err := config.ValidateCacheCutoverMode(cutover, mode); err != nil {
+		return PreparedMutation{}, err
+	}
 	q := url.Values{"base_version": {baseVersion}, "mode": {mode}}
+	if cutover != "" {
+		q.Set("cache_cutover", cutover)
+	}
 	if confirmAdmin {
 		q.Set("confirm_admin", "true")
 	}
@@ -528,11 +546,12 @@ func (c *Client) PrepareApply(candidate []byte, baseVersion, mode, idemKey strin
 }
 
 type rollbackRequest struct {
-	ID          string `json:"id"`
-	BaseVersion string `json:"base_version"`
+	ID           string `json:"id"`
+	BaseVersion  string `json:"base_version"`
+	CacheCutover string `json:"cache_cutover,omitempty"`
 }
 
-func (c *Client) PrepareRollback(id, baseVersion, idemKey string, confirmAdmin bool) (PreparedMutation, error) {
+func (c *Client) PrepareRollback(id, baseVersion, idemKey string, confirmAdmin bool, cacheCutover ...string) (PreparedMutation, error) {
 	if strings.TrimSpace(id) == "" || strings.TrimSpace(baseVersion) == "" {
 		return PreparedMutation{}, errors.New("history id and base_version are required")
 	}
@@ -546,7 +565,14 @@ func (c *Client) PrepareRollback(id, baseVersion, idemKey string, confirmAdmin b
 	if !ValidIdempotencyKey(idemKey) {
 		return PreparedMutation{}, errors.New("invalid idempotency key")
 	}
-	body, err := json.Marshal(rollbackRequest{ID: id, BaseVersion: baseVersion})
+	cutover := ""
+	if len(cacheCutover) > 0 {
+		cutover = cacheCutover[0]
+	}
+	if err := config.ValidateCacheCutoverMode(cutover, "hot"); err != nil {
+		return PreparedMutation{}, err
+	}
+	body, err := json.Marshal(rollbackRequest{ID: id, BaseVersion: baseVersion, CacheCutover: cutover})
 	if err != nil {
 		return PreparedMutation{}, err
 	}

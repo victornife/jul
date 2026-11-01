@@ -180,6 +180,9 @@ func validateLocationCachePolicy(loc LocationConfig, where string) []error {
 	if cp.BypassAnyCookie && len(cp.BypassCookies) > 0 {
 		errs = append(errs, fmt.Errorf("%s: bypass_any_cookie = true cannot be combined with bypass_cookies", pWhere))
 	}
+	if cp.ReloadPolicy != "" && cp.ReloadPolicy != "retain" && cp.ReloadPolicy != "invalidate" {
+		errs = append(errs, fmt.Errorf("%s.reload_policy: %q must be \"retain\" or \"invalidate\"", pWhere, cp.ReloadPolicy))
+	}
 	if len(cp.BypassCookies) > MaxBypassCookies {
 		errs = append(errs, fmt.Errorf("%s.bypass_cookies: %d cookie names exceeds maximum of %d", pWhere, len(cp.BypassCookies), MaxBypassCookies))
 	}

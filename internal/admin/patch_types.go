@@ -211,6 +211,7 @@ type locationCachePolicyPatch struct {
 	StaleIfError         *string  `json:"stale_if_error,omitempty"`
 	BypassCookies        []string `json:"bypass_cookies,omitempty"`
 	BypassAnyCookie      bool     `json:"bypass_any_cookie,omitempty"`
+	ReloadPolicy         string   `json:"reload_policy,omitempty"`
 }
 
 // locationSharingPatch carries the location's [sharing] block for

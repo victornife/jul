@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 432,
-    "schema_leaves": 364,
+    "schema_paths": 434,
+    "schema_leaves": 366,
     "resources": 9
   },
   "capability_build_tags": {
@@ -928,6 +928,26 @@
       "lifecycle_reason": "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)",
       "description": "RangeEnabled opts the cache into Option A range-aware caching (#442, ADR 0024): single byte-range GET requests are satisfied from complete stored representations, and eligible cold range misses coordinate a complete-object origin fill",
       "anchor": "cache-range_enabled"
+    },
+    "cache.reload_policy": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": false,
+      "subsystem": "cache",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)",
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to \"retain\"",
+      "active_when": "cache.enabled = true",
+      "allowed": [
+        "retain",
+        "invalidate"
+      ],
+      "description": "ReloadPolicy selects whether route/backend changes retain existing cached entries (\"retain\", the default when omitted) or invalidate affected route/upstream cache scopes at the configuration Publish boundary (\"invalidate\", #624 / CACHE-OPS-04)",
+      "anchor": "cache-reload_policy"
     },
     "cache.stale_if_error": {
       "kind": "scalar",
@@ -2546,6 +2566,26 @@
       "active_when": "cache.enabled = true and servers[].locations[].cache = true",
       "description": "MaxTTL caps the computed freshness lifetime (from origin directives or gateway default_ttl) on this route; omitted applies no route cap and explicit \"0s\" caps fresh lifetime to zero",
       "anchor": "servers-x-locations-x-cache_policy-max_ttl"
+    },
+    "servers.*.locations.*.cache_policy.reload_policy": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "cache",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned",
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted inherits cache.reload_policy",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true",
+      "allowed": [
+        "retain",
+        "invalidate"
+      ],
+      "description": "ReloadPolicy overrides [cache].reload_policy (\"retain\" or \"invalidate\") for this route when its target, action, upstream, or route definition changes across a reload or restart (#624 / CACHE-OPS-04)",
+      "anchor": "servers-x-locations-x-cache_policy-reload_policy"
     },
     "servers.*.locations.*.cache_policy.stale_if_error": {
       "kind": "scalar",

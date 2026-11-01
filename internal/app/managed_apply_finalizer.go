@@ -353,7 +353,12 @@ func projectManagedApplyOutcome(reqCtx admin.ApplyRequestContext, result admin.C
 	if applyID == "" && result.Reload != nil {
 		applyID = result.Reload.ID
 	}
+	cutover := result.CacheCutoverResult
+	if cutover == nil && result.Reload != nil {
+		cutover = result.Reload.CacheCutover
+	}
 	return admin.ManagedApplyOutcome{
+		CacheCutover:        cutover,
 		ID:                  applyID,
 		Mode:                result.Mode,
 		OK:                  result.OK,

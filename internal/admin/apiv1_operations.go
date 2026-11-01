@@ -19,8 +19,9 @@ type v1ValidationResponse struct {
 }
 
 type v1RollbackRequest struct {
-	ID          string `json:"id"`
-	BaseVersion string `json:"base_version"`
+	ID           string `json:"id"`
+	BaseVersion  string `json:"base_version"`
+	CacheCutover string `json:"cache_cutover,omitempty"`
 }
 
 func (s *Server) handleV1ConfigValidate(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +45,9 @@ func (s *Server) handleV1ConfigPlan(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodPost) {
 		return
 	}
+	if !prepareCacheCutoverRequest(w, r, "", r.URL.Query().Get("mode")) {
+		return
+	}
 	body, apiErr := readV1TOML(w, r)
 	if apiErr != nil {
 		writeAPIError(w, r, apiErr)
@@ -62,8 +66,9 @@ func (s *Server) handleV1ConfigPlan(w http.ResponseWriter, r *http.Request) {
 		}))
 		return
 	}
-	effective, live := s.patchRuntimeBaseline(nil, state.Config)
-	assessment, err := previewRawCandidate(r.Context(), state.Config, effective, live, state.Version, body)
+	var moduleDigests map[string]string
+	effective, live := s.patchRuntimeBaseline(nil, state.Config, &moduleDigests)
+	assessment, err := previewRawCandidate(r.Context(), state.Config, effective, live, state.Version, body, moduleDigests)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeOperationTimeout, "Candidate assessment did not complete in time."))
@@ -110,6 +115,9 @@ func (s *Server) handleV1ConfigPatch(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, r, apiErr)
 		return
 	}
+	if !prepareCacheCutoverRequest(w, r, req.CacheCutover, r.URL.Query().Get("mode")) {
+		return
+	}
 	if len(req.Ops) == 0 {
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest, "At least one patch operation is required.").WithDetails(adminapi.Details{Field: "ops"}))
 		return
@@ -124,6 +132,9 @@ func (s *Server) handleV1ConfigPatch(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleV1ConfigApply(w http.ResponseWriter, r *http.Request) {
 	if !requireExternalMethod(w, r, http.MethodPost) {
+		return
+	}
+	if !prepareCacheCutoverRequest(w, r, "", r.URL.Query().Get("mode")) {
 		return
 	}
 	if s.denyIfFileOwned(w, r, string(ApplyOperationConfigApply)) {
@@ -156,6 +167,9 @@ func (s *Server) handleV1ConfigPatchApply(w http.ResponseWriter, r *http.Request
 		writeAPIError(w, r, apiErr)
 		return
 	}
+	if !prepareCacheCutoverRequest(w, r, req.CacheCutover, r.URL.Query().Get("mode")) {
+		return
+	}
 	if strings.TrimSpace(req.BaseVersion) == "" {
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest, "base_version is required for this mutation.").WithDetails(adminapi.Details{Field: "base_version"}))
 		return
@@ -179,6 +193,9 @@ func (s *Server) handleV1Rollback(w http.ResponseWriter, r *http.Request) {
 	body, apiErr := readV1JSON(w, r, &req)
 	if apiErr != nil {
 		writeAPIError(w, r, apiErr)
+		return
+	}
+	if !prepareCacheCutoverRequest(w, r, req.CacheCutover, r.URL.Query().Get("mode")) {
 		return
 	}
 	if strings.TrimSpace(req.ID) == "" {

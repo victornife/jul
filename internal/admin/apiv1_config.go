@@ -132,6 +132,7 @@ func (s *Server) applyResultResponse(rec ManagedApplyRecord) adminapi.ApplyResul
 	} else {
 		out.ServingVersion = rec.Result.ServingVersion
 	}
+	out.CacheCutoverState, out.CacheCutoverResult = cacheCutoverOutcome(rec.Result)
 	out.RestoreError = rec.Result.RestoreError
 	return out
 }

@@ -3,6 +3,8 @@
 
 package adminapi
 
+import "jul/internal/cachemeta"
+
 // ConfigApplyResponse is the bounded external result of a configuration
 // mutation. It deliberately does not expose the Console's ConfigApplyResult or
 // server.ReloadResult: those internal types carry implementation-only fields
@@ -15,13 +17,15 @@ package adminapi
 // status code alone. no_change is a successful terminal outcome with no runtime
 // generation publication.
 type ConfigApplyResponse struct {
-	APIVersion string        `json:"api_version"`
-	ApplyID    string        `json:"apply_id,omitempty"`
-	State      string        `json:"state"`
-	Terminal   bool          `json:"terminal"`
-	OK         bool          `json:"ok"`
-	Mode       string        `json:"mode,omitempty"`
-	Outcome    ReloadOutcome `json:"outcome,omitempty"`
+	APIVersion         string                   `json:"api_version"`
+	ApplyID            string                   `json:"apply_id,omitempty"`
+	State              string                   `json:"state"`
+	Terminal           bool                     `json:"terminal"`
+	OK                 bool                     `json:"ok"`
+	Mode               string                   `json:"mode,omitempty"`
+	CacheCutoverState  string                   `json:"cache_cutover_state,omitempty"`
+	CacheCutoverResult *cachemeta.CutoverResult `json:"cache_cutover_result,omitempty"`
+	Outcome            ReloadOutcome            `json:"outcome,omitempty"`
 
 	// IdempotentReplay is true only when this terminal result was returned from
 	// the retained idempotency binding rather than by executing the mutation.

@@ -181,6 +181,16 @@ they always have, and the admin write paths are disabled.
   and a reload was triggered. This is what the apply API confirms.
 - **Serving** — the live runtime has finished swapping to the new configuration.
 
+When `[cache].reload_policy = "invalidate"` or a route sets
+`[servers.locations.cache_policy].reload_policy = "invalidate"` (#624,
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md)), committing a
+new serving generation (`Publish`) atomically advances the route's ownership
+epoch (`RouteEpoch`) and executes scoped cache invalidation for changed or
+removed routes/upstreams, fencing any in-flight pre-cutover origin fills, `304`
+revalidations, background `stale-while-revalidate` refreshes, or delayed
+old-handler requests while keeping unrelated routes warm. Dry-run previews and
+aborted `Prepare` generations never invalidate cached entries.
+
 The admin apply path waits for the live reload outcome up to the **currently
 serving** config's `reload_timeout` plus a small scheduling margin. A candidate
 that changes `reload_timeout` affects the *next* apply, never the one that

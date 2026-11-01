@@ -406,6 +406,9 @@ func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	if !prepareCacheCutoverRequest(w, r, "", r.URL.Query().Get("mode")) {
+		return
+	}
 	if s.deps.LoadConfig == nil {
 		http.Error(w, "501 Not Implemented", http.StatusNotImplemented)
 		return
@@ -429,16 +432,18 @@ func (s *Server) handleConfigDiff(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	diff := diffConfigs(before, after)
+	diff := diffConfigs(before, after, config.CacheCutoverMode(r.Context()))
 	callerHasRaw := true
 	if id, ok := rbac.IdentityFromContext(r.Context()); ok {
 		callerHasRaw = id.Has(rbac.ConfigRaw)
 	}
-	beforeEff, _ := s.patchRuntimeBaseline(nil, before)
+	var moduleDigests map[string]string
+	beforeEff, _ := s.patchRuntimeBaseline(nil, before, &moduleDigests)
 	var afterEff *config.Config
 	if cand, candErr := config.NewCandidateContext(r.Context(), after); candErr == nil {
 		afterEff = cand.Effective
 	}
+	diff = diffConfigsWithEffectiveCutover(before, after, beforeEff, afterEff, config.CacheCutoverMode(r.Context()), observeCutoverModules(r.Context(), afterEff, moduleDigests))
 	sharing := s.BuildSharingPlanReport(before, beforeEff, after, afterEff, true, nil, callerHasRaw)
 	diff.Sharing = &sharing
 	writeJSON(w, http.StatusOK, diff)
@@ -519,6 +524,7 @@ func applyRequestContext(r *http.Request, op ApplyOperation) ApplyRequestContext
 		SourceIP:        adminClientIP(r),
 		Idempotency:     v1IdempotencyFromRequest(r),
 		KeepOpenEntries: keepOpen,
+		CacheCutover:    config.CacheCutoverMode(r.Context()),
 		StartedAt:       time.Now().UTC(),
 		RequestContext:  r.Context(),
 	}
@@ -534,7 +540,13 @@ func (s *Server) handleConfigApply(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w, http.MethodPost)
 		return
 	}
+	if !prepareCacheCutoverRequest(w, r, "", r.URL.Query().Get("mode")) {
+		return
+	}
 	if s.denyIfFileOwned(w, r, string(ApplyOperationConfigApply)) {
+		return
+	}
+	if !requireCacheCutoverSupport(w, r, s.deps.ApplyConfigRaw != nil) {
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationConfigApply)

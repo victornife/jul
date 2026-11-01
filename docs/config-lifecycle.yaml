@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 432
-  schema_leaves: 364
-  registry_entries: 364
+  schema_paths: 434
+  schema_leaves: 366
+  registry_entries: 366
   startup_consumed: 29
   by_class:
-    hot_reload: 321
+    hot_reload: 323
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -368,6 +368,10 @@ fields:
     subsystem: cache
     reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
   - path: "cache.range_enabled"
+    class: hot_reload
+    subsystem: cache
+    reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
+  - path: "cache.reload_policy"
     class: hot_reload
     subsystem: cache
     reason: "the scalar policy/capacity snapshot is rebuilt and installed atomically on each successful reload, resizing the memory/disk stores in place without rebuilding the cache or resetting its counters/LRU state (#92)"
@@ -794,6 +798,10 @@ fields:
     subsystem: cache
     reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
   - path: "servers.*.locations.*.cache_policy.max_ttl"
+    class: hot_reload
+    subsystem: cache
+    reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"
+  - path: "servers.*.locations.*.cache_policy.reload_policy"
     class: hot_reload
     subsystem: cache
     reason: "whether a location may serve from the cache and its route-scoped cache policy are decided by the rebuilt handler tree; the backend itself is startup-owned"

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/observability"
@@ -97,6 +98,7 @@ type ReloadPlan struct {
 	keepOpenEntries       []string
 	nextAccessFiles       *LoadedAccessFiles
 	pluginChanges         []PluginModuleChange
+	cacheCutover          *cachemeta.CutoverResult
 	waitEntryRetirements  func() []respwriter.EntryRetirementResult
 	hasDeferredUnaryDrain bool
 
@@ -310,6 +312,9 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// handler generation carries the backend view of the configuration it
 	// represents, not the previous generation's live state.
 	snapshots, retirePrev := p.handlerCommit()
+	if p.s.CacheCutoverResult != nil {
+		p.cacheCutover = p.s.CacheCutoverResult(p.GenID)
+	}
 	if p.s.WAFSourceDigests != nil && p.nextAccessFiles != nil {
 		gDig, byLoc := p.s.WAFSourceDigests(p.GenID)
 		p.nextAccessFiles.applyWAFDigests(gDig, byLoc)
@@ -457,6 +462,7 @@ func (p *ReloadPlan) publishRuntimeState() {
 		p.EffectiveVersion = p.s.versions.Config(p.s.cfg)
 	}
 	rs := &runtimeState{
+		PluginModules:    p.s.loadedPluginModuleDigests(),
 		EffectiveVersion: p.EffectiveVersion,
 		EffectiveConfig:  p.s.cfg,
 		RawConfig:        p.s.rawCfg,

@@ -363,6 +363,7 @@ func TestCacheScalarPolicyIsHot(t *testing.T) {
 		"cache.max_ranges",
 		"cache.memory_max_size",
 		"cache.range_enabled",
+		"cache.reload_policy",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",
 		"cache.strip_tag_headers",

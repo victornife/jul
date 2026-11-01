@@ -326,6 +326,9 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
         `    bypass_cookies = [${loc.cache_policy.bypass_cookies.map(quoted).join(", ")}]`,
       );
     }
+    if (loc.cache_policy.reload_policy) {
+      lines.push(`    reload_policy = ${quoted(loc.cache_policy.reload_policy)}`);
+    }
   }
   return lines.join("\n");
 }

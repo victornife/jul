@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"jul/internal/cachemeta"
+	"jul/internal/config"
 	"maps"
 	"math"
 	"net/http"
@@ -278,6 +279,9 @@ func (c *Cache) enforceFenceCapLocked() {
 		}
 		evicted := c.fences[evictIdx]
 		c.fences = append(c.fences[:evictIdx], c.fences[evictIdx+1:]...)
+		if !evicted.active && evicted.remaining == 0 && len(evicted.sel.cutoverRouteScopes) > 0 {
+			continue
+		}
 		evictHost := evicted.sel.Host
 		if evictHost != "" && evicted.sel.Kind != SelectorAll {
 			if c.hostFenceFloorGen == nil {
@@ -446,6 +450,28 @@ func (c *Cache) reclaimFencesLocked() {
 	c.enforceFenceCapLocked()
 }
 
+func routeScopeFromVariantKey(key string) string {
+	idx := strings.Index(key, "\x00route\x1f")
+	if idx < 0 {
+		return ""
+	}
+	rest := key[idx+len("\x00route\x1f"):]
+	if end := strings.IndexByte(rest, '\x00'); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+func (c *Cache) keyRouteScopeLocked(key string) string {
+	if s := routeScopeFromVariantKey(key); s != "" {
+		return s
+	}
+	if st := c.keyGen[key]; st != nil && st.routeScope != "" {
+		return st.routeScope
+	}
+	return ""
+}
+
 func (c *Cache) matchesAnyFenceLocked(entryGen uint64, key, host, reqURI string, ok bool, tags, extraTags []string, onlyIncomplete bool) bool {
 	if len(c.fences) == 0 {
 		return false
@@ -455,10 +481,21 @@ func (c *Cache) matchesAnyFenceLocked(entryGen uint64, key, host, reqURI string,
 	if ok {
 		resKey = resourceKeyOf(host, reqURI)
 	}
+	var keyRouteScope string
+	var keyRouteScopeResolved bool
 	for i := range c.fences {
 		f := &c.fences[i]
 		if entryGen > f.gen || (onlyIncomplete && !f.active && f.remaining == 0) {
 			continue
+		}
+		if len(f.sel.cutoverRouteScopes) > 0 {
+			if !keyRouteScopeResolved {
+				keyRouteScope = c.keyRouteScopeLocked(key)
+				keyRouteScopeResolved = true
+			}
+			if keyRouteScope != "" && !f.sel.matchesCutoverRoute(keyRouteScope) {
+				continue
+			}
 		}
 		if f.sel.Kind == SelectorKey {
 			if key == f.sel.Key || baseKey == f.sel.Key {
@@ -683,6 +720,15 @@ func (c *Cache) unindexKeyEntryLocked(st *keyGenState) {
 			if len(vm) == 0 {
 				delete(c.baseVariants, baseKey)
 			}
+		}
+		if bst := c.keyGen[baseKey]; bst != nil && len(bst.variants) > 0 {
+			kept := bst.variants[:0]
+			for _, vk := range bst.variants {
+				if vk != st.key {
+					kept = append(kept, vk)
+				}
+			}
+			bst.variants = kept
 		}
 	}
 	if len(st.tags) > 0 || len(c.baseIndexedTags) > 0 {
@@ -1046,9 +1092,11 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 	}
 	if len(c.routeEpoch) > 0 || c.routeMatchers != nil {
 		snap := &routeStateSnapshot{
-			committed: false,
-			epochs:    maps.Clone(c.routeEpoch),
-			matchers:  maps.Clone(c.routeMatchers),
+			committed:      false,
+			epochs:         maps.Clone(c.routeEpoch),
+			matchers:       maps.Clone(c.routeMatchers),
+			backends:       maps.Clone(c.routeBackends),
+			reloadPolicies: maps.Clone(c.routeReloadPolicies),
 		}
 		c.routeStateSnap.Store(snap)
 	}
@@ -1246,6 +1294,11 @@ func (c *Cache) detachMatchingInflightLocked(sel NormalizedSelector) int {
 func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool) (matched int, tagUnknown bool) {
 	c.fillMu.Lock()
 	for fk := range c.fills {
+		if len(sel.cutoverRouteScopes) > 0 {
+			if rScope := routeScopeFromVariantKey(fk); rScope != "" && !sel.matchesCutoverRoute(rScope) {
+				continue
+			}
+		}
 		base := baseKeyOf(fk)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
@@ -1274,6 +1327,9 @@ func (c *Cache) visitMatchingInflightLocked(sel NormalizedSelector, detach bool)
 
 	c.reMu.Lock()
 	for rk := range c.calls {
+		if len(sel.cutoverRouteScopes) > 0 && rk.route != "" && !sel.matchesCutoverRoute(rk.route) {
+			continue
+		}
 		base := baseKeyOf(rk.key)
 		_, host, reqURI, _, ok := parseBaseKeyParts(base)
 		if !ok {
@@ -1579,6 +1635,31 @@ func (c *Cache) BeginSelectorFence(sel NormalizedSelector) (fenceGen uint64, com
 	return fenceGen, complete
 }
 
+// ExecuteRouteCutover derives and executes scoped invalidations for route or
+// backend changes between before and after configurations that opt into
+// cutover invalidation (#624 / CACHE-OPS-04, ADR 0030 §4).
+func (c *Cache) ExecuteRouteCutover(ctx context.Context, before, after *config.Config, overrideMode string, modules ...CutoverModuleIdentities) ([]InvalidateResult, error) {
+	if c == nil || before == nil || after == nil {
+		return nil, nil
+	}
+	sels := DeriveRouteCutoverSelectorsForPolicy(before, after, overrideMode, modules...)
+	if len(sels) == 0 {
+		return nil, nil
+	}
+	results := make([]InvalidateResult, 0, len(sels))
+	var firstErr error
+	for _, sel := range sels {
+		res, err := c.InvalidateScope(ctx, sel, InvalidateOptions{})
+		results = append(results, res)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		} else if res.InvalidationEffective != "effective" && firstErr == nil {
+			firstErr = fmt.Errorf("cache cutover invalidation %s (%s): %s", sel.Kind, sel.Host, res.InvalidationEffective)
+		}
+	}
+	return results, firstErr
+}
+
 // BeginSelectorFenceWithError installs an active selector fence at a new
 // monotonic generation, persists the generation high-water mark when a disk
 // tier is configured, and returns any durable marker persistence error alongside
@@ -1688,7 +1769,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	// documented escape paths and are never rejected by maxScan (F13).
 	isUnboundedHost := sel.Kind == SelectorHost && sel.RouteID == ""
 	isRetryFence := opts.ReuseFenceGen > 0
-	isFastAll := sel.Kind == SelectorAll && !isRetryFence
+	isFastAll := sel.Kind == SelectorAll && !isRetryFence && len(sel.cutoverRouteScopes) == 0
 	isTagRetry := isRetryFence && sel.Kind == SelectorTag
 	resourceIDs := opts.ReuseResourceIDs
 	if isRetryFence {
@@ -1767,6 +1848,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			groups = make([]matchedGroup, 0, len(candidates))
 			flatKeys = make([]string, 0, len(candidates))
 		}
+		// Retained GET owners must not suppress a deleted HEAD resource.
+		// Reuse one buffer so large cutovers do not allocate per resource.
+		var siblingKeys []string
 		for _, bk := range candidates {
 			method, host, reqURI, _, ok := parseBaseKeyParts(bk)
 			if !ok {
@@ -1792,7 +1876,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 				continue
 			}
 			keyStart := len(flatKeys)
-			reps, hasDisk, liveOrInflight := c.collectOwnedKeysIntoLocked(bk, exactFilter, evalFenceGen, &flatKeys)
+			reps, hasDisk, liveOrInflight := c.collectOwnedKeysIntoForCutoverLocked(bk, exactFilter, sel.cutoverRouteScopes, evalFenceGen, &flatKeys)
 			if !liveOrInflight {
 				skipped++
 				continue
@@ -1817,8 +1901,14 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 					if method == http.MethodHead {
 						getBK := "GET\n" + resKey
 						if hm := c.byHost[host]; hm != nil {
-							if _, hasGet := hm[getBK]; hasGet && c.hasResidentBaseLocked(getBK, exactFilter, evalFenceGen) {
-								isPrimary = false
+							if _, hasGet := hm[getBK]; hasGet {
+								if len(sel.cutoverRouteScopes) == 0 {
+									isPrimary = !c.hasResidentBaseLocked(getBK, exactFilter, evalFenceGen)
+								} else {
+									siblingKeys = siblingKeys[:0]
+									getReps, _, _ := c.collectOwnedKeysIntoForCutoverLocked(getBK, exactFilter, sel.cutoverRouteScopes, evalFenceGen, &siblingKeys)
+									isPrimary = getReps == 0
+								}
 							}
 						}
 					}
@@ -1901,7 +1991,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		}
 	}
 	if opts.ReuseFenceGen > 0 {
-		if sel.Kind == SelectorAll {
+		if sel.Kind == SelectorAll && len(sel.cutoverRouteScopes) == 0 {
 			if fenceGen > c.purgeGen {
 				c.purgeGen = fenceGen
 			}
@@ -2168,7 +2258,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		failedEntries = max(failedEntries, pending)
 		uncertain = uncertain || repairUncertain
 		if intentCommitted && remainingGroups == 0 && failedEntries == 0 && !uncertain && !canceledMidway {
-			if err := c.disk.completePurgeIntent(fenceGen, sel.Kind == SelectorAll); err != nil {
+			if err := c.disk.completePurgeIntent(fenceGen, sel.Kind == SelectorAll && len(sel.cutoverRouteScopes) == 0); err != nil {
 				uncertain = true
 			}
 		}
@@ -2221,7 +2311,18 @@ func (c *Cache) hasResidentBaseLocked(baseKey, _ string, ownFenceGen uint64) boo
 	return c.baseVariants != nil && len(c.baseVariants[baseKey]) > 0
 }
 
-func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFenceGen uint64, dst *[]string) (repCount int, hasDisk, liveOrInflight bool) {
+func (c *Cache) collectOwnedKeysIntoForCutoverLocked(baseKey, exactKeyFilter string, cutoverScopes []string, ownFenceGen uint64, dst *[]string) (repCount int, hasDisk, liveOrInflight bool) {
+	matchesScope := func(routeScope string) bool {
+		if len(cutoverScopes) == 0 || routeScope == "" {
+			return true
+		}
+		for _, rs := range cutoverScopes {
+			if rs == routeScope {
+				return true
+			}
+		}
+		return false
+	}
 	st := c.keyGen[baseKey]
 	var vm map[string]struct{}
 	if c.baseVariants != nil {
@@ -2230,6 +2331,9 @@ func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFe
 	hasVariants := (st != nil && len(st.variants) > 0) || len(vm) > 0
 	if !hasVariants {
 		if st == nil || (exactKeyFilter != "" && baseKey != exactKeyFilter) {
+			return 0, false, false
+		}
+		if !matchesScope(st.routeScope) {
 			return 0, false, false
 		}
 		if (ownFenceGen > 0 && st.gen > ownFenceGen) || (ownFenceGen == 0 && c.isResidentEntryFencedLocked(st.gen, baseKey, st.tags)) {
@@ -2248,12 +2352,22 @@ func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFe
 
 	startLen := len(*dst)
 	live := false
-	addKey := func(k string, isStub bool) {
+	keptOtherRouteVariant := false
+	addVariantKey := func(k string) {
 		if exactKeyFilter != "" && k != exactKeyFilter && baseKeyOf(k) != exactKeyFilter {
 			return
 		}
 		for i := startLen; i < len(*dst); i++ {
 			if (*dst)[i] == k {
+				return
+			}
+		}
+		if len(cutoverScopes) > 0 {
+			vScope := c.keyRouteScopeLocked(k)
+			if !matchesScope(vScope) {
+				if kst := c.keyGen[k]; kst != nil && (kst.inMem || kst.inDisk || kst.inflight > 0) {
+					keptOtherRouteVariant = true
+				}
 				return
 			}
 		}
@@ -2282,30 +2396,45 @@ func (c *Cache) collectOwnedKeysIntoLocked(baseKey, exactKeyFilter string, ownFe
 			hasDisk = true
 		}
 		*dst = append(*dst, k)
-		if !isStub {
-			repCount++
-		}
+		repCount++
 	}
 
 	if st != nil {
-		addKey(baseKey, true)
 		for _, vk := range st.variants {
-			addKey(vk, false)
+			addVariantKey(vk)
 		}
 	}
 	for vk := range vm {
-		addKey(vk, false)
+		addVariantKey(vk)
 	}
-	if live && exactKeyFilter == "" {
-		foundBase := false
-		for i := startLen; i < len(*dst); i++ {
-			if (*dst)[i] == baseKey {
-				foundBase = true
-				break
+	// Only delete the base Vary stub when no other route owns live variants under baseKey
+	// and baseKey itself matches the cutover route scope.
+	if !keptOtherRouteVariant && (st == nil || matchesScope(st.routeScope)) {
+		if st != nil && (exactKeyFilter == "" || baseKey == exactKeyFilter) {
+			if (ownFenceGen == 0 || st.gen <= ownFenceGen) && (ownFenceGen > 0 || !c.isResidentEntryFencedLocked(st.gen, baseKey, st.tags)) {
+				if st.inMem || st.inDisk || (ownFenceGen > 0 && st.inflight > 0) {
+					liveOrInflight = true
+					if st.inDisk || st.inflight > 0 {
+						hasDisk = true
+					}
+					if st.inMem || st.inDisk {
+						live = true
+					}
+					*dst = append(*dst, baseKey)
+				}
 			}
 		}
-		if !foundBase {
-			*dst = append(*dst, baseKey)
+		if live && exactKeyFilter == "" {
+			foundBase := false
+			for i := startLen; i < len(*dst); i++ {
+				if (*dst)[i] == baseKey {
+					foundBase = true
+					break
+				}
+			}
+			if !foundBase {
+				*dst = append(*dst, baseKey)
+			}
 		}
 	}
 	if repCount == 0 && live {
@@ -2329,6 +2458,7 @@ func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, re
 		TagMatch:            sel.TagMatch,
 		RoutePath:           sel.inspectionRoutePrefix,
 		RouteType:           sel.inspectionRouteExact,
+		CutoverRouteScopes:  append([]string(nil), sel.cutoverRouteScopes...),
 	}
 	if sel.Kind == SelectorTag {
 		intent.MatchedResourceIDs = append([]string{}, resourceIDs...)
@@ -2392,6 +2522,7 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []PurgeRecoveryIntent) {
 			cutoverMatchAnyPort:   intent.CutoverMatchAnyPort,
 			cutoverRawPrefix:      intent.CutoverRawPrefix,
 			cutoverExactPath:      intent.CutoverExactPath,
+			cutoverRouteScopes:    append([]string(nil), intent.CutoverRouteScopes...),
 			inspectionRoutePrefix: intent.RoutePath,
 			inspectionRouteExact:  intent.RouteType,
 			BroadScope:            intent.Kind == SelectorAll || intent.Kind == SelectorHost,
@@ -2423,7 +2554,7 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []PurgeRecoveryIntent) {
 				return
 			}
 			seenGroup[bk] = true
-			_, _, _ = c.collectOwnedKeysIntoLocked(bk, "", intent.FenceGen, &targetKeys)
+			_, _, _ = c.collectOwnedKeysIntoForCutoverLocked(bk, "", sel.cutoverRouteScopes, intent.FenceGen, &targetKeys)
 			if nl := strings.IndexByte(bk, '\n'); nl > 0 {
 				matchedResSet[bk[nl+1:]] = struct{}{}
 			}
@@ -2439,11 +2570,15 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []PurgeRecoveryIntent) {
 			resKey := resourceKeyOf(host, reqURI)
 			switch intent.Kind {
 			case SelectorAll:
-				if _, seen := seenKey[k]; !seen {
-					seenKey[k] = struct{}{}
-					targetKeys = append(targetKeys, k)
+				if len(sel.cutoverRouteScopes) > 0 {
+					addGroup(baseKeyOf(k))
+				} else {
+					if _, seen := seenKey[k]; !seen {
+						seenKey[k] = struct{}{}
+						targetKeys = append(targetKeys, k)
+					}
+					matchedResSet[resKey] = struct{}{}
 				}
-				matchedResSet[resKey] = struct{}{}
 			case SelectorTag:
 				if _, inSnap := resIDSet[hashKey(resKey)]; inSnap && sel.matchesHost(host) {
 					addGroup(baseKeyOf(k))

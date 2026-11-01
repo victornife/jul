@@ -843,6 +843,17 @@ func diffLocationCachePolicy(server, key string, bLoc, aLoc *config.LocationConf
 			d.warn("Clearing bypass_cookies on cached route %s on %s allows cookie-bearing requests to use the shared cache unless origin headers prohibit it.", key, server)
 		}
 	}
+	bReload := orDefault(strings.ToLower(strings.TrimSpace(b.ReloadPolicy)), "(inherit)")
+	aReload := orDefault(strings.ToLower(strings.TrimSpace(a.ReloadPolicy)), "(inherit)")
+	if bReload != aReload {
+		d.mod(DiffEntry{
+			Kind:   "cache",
+			Name:   name,
+			Before: bReload,
+			After:  aReload,
+			Detail: "Change cache_policy.reload_policy on route " + key,
+		}, "route "+name+" cache_policy reload_policy")
+	}
 	if aLoc.CachePolicy != nil && !aLoc.Cache {
 		d.warn("Route %s on %s configures cache_policy while cache = false; the policy remains dormant until cache is enabled.", key, server)
 	}

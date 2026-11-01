@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"jul/internal/buildcaps"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/logthrottle"
 	"jul/internal/observability"
@@ -111,6 +112,8 @@ type ApplyRequestContext struct {
 	// KeepOpenEntries lists the entry route_ids or coordinates the caller
 	// requested to keep open on an uncertain-only change (SD-09, #642).
 	KeepOpenEntries []string
+	// CacheCutover is a one-change retain/invalidate override, never persisted as configuration.
+	CacheCutover string
 
 	// StartedAt is the wall-clock time the handler admitted the operation. It
 	// is recorded on the terminal ledger record so a browser can observe when
@@ -230,17 +233,18 @@ func (e *AuthorizationError) Error() string { return e.Message }
 // including any async restoration. It is exposed in RuntimeOverview so the
 // console can show the final state of a previously timed-out apply.
 type ManagedApplyOutcome struct {
-	ID                  string    `json:"id"`
-	Mode                string    `json:"mode"`
-	OK                  bool      `json:"ok"`
-	Outcome             string    `json:"outcome"` // server.ReloadOutcome string
-	Restored            bool      `json:"restored,omitempty"`
-	RestoreError        string    `json:"restore_error,omitempty"`
-	FinalDiskVersion    string    `json:"final_disk_version,omitempty"`
-	FinalServingVersion string    `json:"final_serving_version,omitempty"`
-	CompletedAt         time.Time `json:"completed_at"`
-	Actor               string    `json:"actor,omitempty"`
-	SourceIP            string    `json:"source_ip,omitempty"`
+	CacheCutover        *cachemeta.CutoverResult `json:"cache_cutover,omitempty"`
+	ID                  string                   `json:"id"`
+	Mode                string                   `json:"mode"`
+	OK                  bool                     `json:"ok"`
+	Outcome             string                   `json:"outcome"` // server.ReloadOutcome string
+	Restored            bool                     `json:"restored,omitempty"`
+	RestoreError        string                   `json:"restore_error,omitempty"`
+	FinalDiskVersion    string                   `json:"final_disk_version,omitempty"`
+	FinalServingVersion string                   `json:"final_serving_version,omitempty"`
+	CompletedAt         time.Time                `json:"completed_at"`
+	Actor               string                   `json:"actor,omitempty"`
+	SourceIP            string                   `json:"source_ip,omitempty"`
 
 	// HistorySnapshotID, HistoryError, and FinalizationError surface the
 	// configuration-history finalization provenance (AC-14) separately from the
@@ -797,6 +801,12 @@ func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApp
 	}
 	if o.FinalServingVersion != "" {
 		detail += " final_serving_version=" + o.FinalServingVersion
+	}
+	if o.CacheCutover != nil {
+		detail += fmt.Sprintf(" cache_cutover=%s invalidation_effective=%s failed_entries=%d remaining_entries=%d", o.CacheCutover.State, o.CacheCutover.InvalidationEffective, o.CacheCutover.FailedEntries, o.CacheCutover.RemainingEntries)
+		if o.CacheCutover.InvalidationEffective != "effective" {
+			result = "failure"
+		}
 	}
 	actor := ctx.Actor
 	if actor == "" {

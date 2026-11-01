@@ -22,6 +22,7 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/cache"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/egress"
 	"jul/internal/lifecycle"
@@ -483,6 +484,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv.ConnStateHook = metrics.ConnState
 	srv.PluginModulesUnchanged = f.PluginModulesUnchanged
 	srv.PluginModuleChanges = f.PluginModuleChanges
+	srv.CacheCutoverResult = f.CacheCutoverResult
 	srv.WAFSourceDigests = f.WAFSourceDigests
 	srv.OnReloadStart = metrics.ReloadStarted
 	srv.OnReloadComplete = metrics.ObserveReload
@@ -967,6 +969,13 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	deps.ObserveOIDCLogin = func(result string) { metrics.ObserveAuthDecision("oidc", result) }
 	deps.EffectiveVersions = options.versions
 	adminSrv := admin.New(cfg.Admin, log, deps)
+	if adminSrv != nil {
+		priorReloadResult := srv.OnReloadResult
+		srv.OnReloadResult = func(r server.ReloadResult) {
+			priorReloadResult(r)
+			adminSrv.RecordCacheCutoverReload(r)
+		}
+	}
 	// Jul-owned storage headroom (#437) is read on demand by /api/stats and
 	// scrapes; nothing polls in the background. A nil adminSrv (admin
 	// disabled) contributes no admin-owned category.
@@ -1219,7 +1228,17 @@ func toAdminConfigApplyResult(r ApplyResult) admin.ConfigApplyResult {
 	for _, d := range r.Degraded {
 		degraded = append(degraded, admin.DegradedEntry{Kind: string(d.Kind), Message: d.Message})
 	}
+	cutoverState := ""
+	var cutover *cachemeta.CutoverResult
+	if r.Reload != nil && r.Reload.CacheCutover != nil {
+		cutover = r.Reload.CacheCutover
+		cutoverState = cutover.State
+	} else if r.OK && r.Mode == ApplyStageRestart {
+		cutoverState = "staged_for_restart"
+	}
 	return admin.ConfigApplyResult{
+		CacheCutoverState:     cutoverState,
+		CacheCutoverResult:    cutover,
 		ApplyID:               r.ApplyID,
 		OK:                    r.OK,
 		Mode:                  string(r.Mode),

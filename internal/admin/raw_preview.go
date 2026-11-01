@@ -79,8 +79,13 @@ func previewRawCandidate(
 	live lifecycle.Live,
 	baseVersion string,
 	candidateRaw []byte,
+	moduleBefore ...map[string]string,
 ) (rawConfigPreviewAssessment, error) {
 	var out rawConfigPreviewAssessment
+	var servingModules map[string]string
+	if len(moduleBefore) > 0 {
+		servingModules = moduleBefore[0]
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -95,6 +100,7 @@ func previewRawCandidate(
 	if err != nil {
 		return out, err
 	}
+	cutoverBefore := beforeEffective
 	if beforeEffective == nil {
 		baselineCandidate, resolveErr := config.NewCandidateContext(ctx, before)
 		if resolveErr != nil {
@@ -123,12 +129,15 @@ func previewRawCandidate(
 		Valid:              len(validationErrors) == 0 && len(classification.ValidationRejected) == 0,
 		ValidationErrors:   validationErrors,
 		Lint:               lint,
-		Diff:               diffConfigs(before, candidateConfig),
+		Diff:               diffConfigsWithEffectiveCutover(before, candidateConfig, cutoverBefore, candidate.Effective, config.CacheCutoverMode(ctx), observeCutoverModules(ctx, candidate.Effective, servingModules)),
 		Lifecycle:          classification,
 		BeforeConfig:       before,
 		BeforeEffective:    beforeEffective,
 		CandidateConfig:    candidateConfig,
 		CandidateEffective: candidate.Effective,
+	}
+	if err := ctx.Err(); err != nil {
+		return rawConfigPreviewAssessment{}, err
 	}
 	return out, nil
 }
@@ -164,6 +173,9 @@ func (s *Server) buildRawPreviewResponse(r *http.Request, assessment rawConfigPr
 }
 
 func (s *Server) handleConfigPreview(w http.ResponseWriter, r *http.Request) {
+	if !prepareCacheCutoverRequest(w, r, "", "") {
+		return
+	}
 	if r.Method != http.MethodPost {
 		methodNotAllowed(w, http.MethodPost)
 		return
@@ -195,8 +207,9 @@ func (s *Server) handleConfigPreview(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	effective, live := s.patchRuntimeBaseline(nil, state.Config)
-	assessment, err := previewRawCandidate(r.Context(), state.Config, effective, live, state.Version, body)
+	var moduleDigests map[string]string
+	effective, live := s.patchRuntimeBaseline(nil, state.Config, &moduleDigests)
+	assessment, err := previewRawCandidate(r.Context(), state.Config, effective, live, state.Version, body, moduleDigests)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			writeJSON(w, http.StatusRequestTimeout, map[string]any{"ok": false, "message": "Raw preview timed out."})

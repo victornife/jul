@@ -54,7 +54,7 @@ var v1WriteCatalog = []RouteSpec{
 			Parameters: []ExternalParameter{{
 				Name: "base_version", In: "query", Type: "string",
 				Description: "Optional canonical version to pin the assessment. The response always returns the version actually assessed.",
-			}},
+			}, v1CacheCutoverParameter()},
 			Response: "ConfigPlanResponse",
 			Errors:   []string{"validation_failed", "stale_base_version", "storage_unavailable", "operation_timeout", "payload_too_large", "unsupported_media_type"},
 		}},
@@ -107,6 +107,7 @@ var v1WriteCatalog = []RouteSpec{
 			Parameters: []ExternalParameter{
 				{Name: "base_version", In: "query", Type: "string", Required: true, Description: "Canonical version the candidate was reviewed against."},
 				{Name: "mode", In: "query", Type: "string", Default: "hot", Enum: []string{"hot", "stage_restart"}},
+				v1CacheCutoverParameter(),
 				{Name: "confirm_admin", In: "query", Type: "boolean", Default: false, Description: "Explicit confirmation for an admin-reachability-affecting transition."},
 				v1IdempotencyParameter(),
 			},
@@ -129,6 +130,7 @@ var v1WriteCatalog = []RouteSpec{
 			MaxBodyBytes:        v1BodyLimit,
 			Parameters: []ExternalParameter{
 				{Name: "mode", In: "query", Type: "string", Default: "hot", Enum: []string{"hot", "stage_restart"}},
+				v1CacheCutoverParameter(),
 				{Name: "confirm_admin", In: "query", Type: "boolean", Default: false},
 				v1IdempotencyParameter(),
 			},
@@ -283,6 +285,7 @@ func init() {
 				MaxBodyBytes:        v1BodyLimit,
 				Parameters: []ExternalParameter{
 					{Name: "mode", In: "query", Type: "string", Default: "hot", Enum: []string{"hot", "stage_restart"}},
+					v1CacheCutoverParameter(),
 					v1IdempotencyParameter(),
 				},
 				Response:                  "ConfigApplyResponse",
@@ -326,4 +329,8 @@ func init() {
 		}
 	}
 	refreshExternalEndpointList()
+}
+
+func v1CacheCutoverParameter() ExternalParameter {
+	return ExternalParameter{Name: "cache_cutover", In: "query", Type: "string", Enum: []string{"retain", "invalidate"}, Description: "Optional one-live-change cache override. Omit to use configured reload_policy. Rejected with stage_restart; set durable reload_policy for restart behavior. Mandatory policy/security compatibility still applies."}
 }

@@ -1269,6 +1269,18 @@
             }
           },
           {
+            "name": "cache_cutover",
+            "in": "query",
+            "description": "Optional one-live-change cache override. Omit to use configured reload_policy. Rejected with stage_restart; set durable reload_policy for restart behavior. Mandatory policy/security compatibility still applies.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "retain",
+                "invalidate"
+              ]
+            }
+          },
+          {
             "name": "confirm_admin",
             "in": "query",
             "description": "Explicit confirmation for an admin-reachability-affecting transition.",
@@ -1698,6 +1710,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cache_cutover",
+            "in": "query",
+            "description": "Optional one-live-change cache override. Omit to use configured reload_policy. Rejected with stage_restart; set durable reload_policy for restart behavior. Mandatory policy/security compatibility still applies.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "retain",
+                "invalidate"
+              ]
+            }
           }
         ],
         "responses": {
@@ -1984,6 +2008,18 @@
                 "stage_restart"
               ],
               "default": "hot"
+            }
+          },
+          {
+            "name": "cache_cutover",
+            "in": "query",
+            "description": "Optional one-live-change cache override. Omit to use configured reload_policy. Rejected with stage_restart; set durable reload_policy for restart behavior. Mandatory policy/security compatibility still applies.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "retain",
+                "invalidate"
+              ]
             }
           },
           {
@@ -2416,6 +2452,18 @@
             "description": "Optional canonical version to pin the assessment. The response always returns the version actually assessed.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "cache_cutover",
+            "in": "query",
+            "description": "Optional one-live-change cache override. Omit to use configured reload_policy. Rejected with stage_restart; set durable reload_policy for restart behavior. Mandatory policy/security compatibility still applies.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "retain",
+                "invalidate"
+              ]
             }
           }
         ],
@@ -3170,6 +3218,18 @@
                 "stage_restart"
               ],
               "default": "hot"
+            }
+          },
+          {
+            "name": "cache_cutover",
+            "in": "query",
+            "description": "Optional one-live-change cache override. Omit to use configured reload_policy. Rejected with stage_restart; set durable reload_policy for restart behavior. Mandatory policy/security compatibility still applies.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "retain",
+                "invalidate"
+              ]
             }
           },
           {
@@ -4388,6 +4448,37 @@
                   "type": "string"
                 }
               },
+              "cache_cutover": {
+                "type": "object",
+                "properties": {
+                  "broadened_to_host_or_all": {
+                    "type": "boolean"
+                  },
+                  "default_policy": {
+                    "type": "string"
+                  },
+                  "disposition": {
+                    "type": "string"
+                  },
+                  "invalidated_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "retained_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "default_policy",
+                  "disposition"
+                ],
+                "additionalProperties": false
+              },
               "modifications": {
                 "type": "array",
                 "items": {
@@ -4924,6 +5015,48 @@
           "boot_id": {
             "type": "string"
           },
+          "cache_cutover_result": {
+            "type": "object",
+            "properties": {
+              "failed_entries": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "invalidated_resources": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "invalidation_effective": {
+                "type": "string"
+              },
+              "operations": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "recovery_guidance": {
+                "type": "string"
+              },
+              "remaining_entries": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "failed_entries",
+              "invalidated_resources",
+              "invalidation_effective",
+              "operations",
+              "remaining_entries",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "cache_cutover_state": {
+            "type": "string"
+          },
           "completed_at": {
             "type": "string"
           },
@@ -5275,6 +5408,9 @@
                   },
                   "range_enabled": {
                     "type": "boolean"
+                  },
+                  "reload_policy": {
+                    "type": "string"
                   },
                   "route_overrides_supported": {
                     "type": "boolean"
@@ -6185,6 +6321,48 @@
           "boot_id": {
             "type": "string"
           },
+          "cache_cutover_result": {
+            "type": "object",
+            "properties": {
+              "failed_entries": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "invalidated_resources": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "invalidation_effective": {
+                "type": "string"
+              },
+              "operations": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "recovery_guidance": {
+                "type": "string"
+              },
+              "remaining_entries": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "state": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "failed_entries",
+              "invalidated_resources",
+              "invalidation_effective",
+              "operations",
+              "remaining_entries",
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "cache_cutover_state": {
+            "type": "string"
+          },
           "can_stage": {
             "type": "boolean"
           },
@@ -6355,6 +6533,37 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "cache_cutover": {
+                "type": "object",
+                "properties": {
+                  "broadened_to_host_or_all": {
+                    "type": "boolean"
+                  },
+                  "default_policy": {
+                    "type": "string"
+                  },
+                  "disposition": {
+                    "type": "string"
+                  },
+                  "invalidated_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "retained_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "default_policy",
+                  "disposition"
+                ],
+                "additionalProperties": false
               },
               "modifications": {
                 "type": "array",
@@ -7428,6 +7637,9 @@
           "base_version": {
             "type": "string"
           },
+          "cache_cutover": {
+            "type": "string"
+          },
           "id": {
             "type": "string"
           }
@@ -7823,6 +8035,37 @@
           "base_version": {
             "type": "string"
           },
+          "cache_cutover": {
+            "type": "object",
+            "properties": {
+              "broadened_to_host_or_all": {
+                "type": "boolean"
+              },
+              "default_policy": {
+                "type": "string"
+              },
+              "disposition": {
+                "type": "string"
+              },
+              "invalidated_scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "retained_scopes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "default_policy",
+              "disposition"
+            ],
+            "additionalProperties": false
+          },
           "history_id": {
             "type": "string"
           },
@@ -8051,6 +8294,9 @@
           "base_version": {
             "type": "string"
           },
+          "cache_cutover": {
+            "type": "string"
+          },
           "keep_open_entries": {
             "type": "array",
             "items": {
@@ -8184,6 +8430,9 @@
                       "type": "string"
                     },
                     "max_ttl": {
+                      "type": "string"
+                    },
+                    "reload_policy": {
                       "type": "string"
                     },
                     "stale_if_error": {
@@ -9076,6 +9325,37 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "cache_cutover": {
+                "type": "object",
+                "properties": {
+                  "broadened_to_host_or_all": {
+                    "type": "boolean"
+                  },
+                  "default_policy": {
+                    "type": "string"
+                  },
+                  "disposition": {
+                    "type": "string"
+                  },
+                  "invalidated_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "retained_scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "default_policy",
+                  "disposition"
+                ],
+                "additionalProperties": false
               },
               "modifications": {
                 "type": "array",
@@ -10309,6 +10589,9 @@
           "effective_default_ttl": {
             "type": "string"
           },
+          "effective_reload_policy": {
+            "type": "string"
+          },
           "effective_stale_if_error": {
             "type": "string"
           },
@@ -10316,6 +10599,9 @@
             "type": "string"
           },
           "max_ttl": {
+            "type": "string"
+          },
+          "reload_policy": {
             "type": "string"
           },
           "stale_if_error": {

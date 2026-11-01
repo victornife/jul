@@ -289,6 +289,18 @@
       "active_when": "always"
     },
     {
+      "go_field": "CacheConfig.ReloadPolicy",
+      "path": "cache.reload_policy",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to \"retain\"",
+      "active_when": "cache.enabled = true",
+      "allowed": [
+        "retain",
+        "invalidate"
+      ]
+    },
+    {
       "go_field": "CacheConfig.StaleIfError",
       "path": "cache.stale_if_error",
       "kind": "duration",
@@ -685,6 +697,18 @@
       "constraint": "non-negative when present; must not be less than default_ttl when both are set on the same route",
       "zero_semantics": "omitted applies no route freshness cap; explicit \"0s\" caps fresh lifetime to zero",
       "active_when": "cache.enabled = true and servers[].locations[].cache = true"
+    },
+    {
+      "go_field": "LocationCachePolicy.ReloadPolicy",
+      "path": "servers[].locations[].cache_policy.reload_policy",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted inherits cache.reload_policy",
+      "active_when": "cache.enabled = true and servers[].locations[].cache = true",
+      "allowed": [
+        "retain",
+        "invalidate"
+      ]
     },
     {
       "go_field": "LocationCachePolicy.StaleIfError",

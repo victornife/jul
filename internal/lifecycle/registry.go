@@ -396,6 +396,7 @@ func cacheEntries() []Entry {
 		"cache.max_ranges",
 		"cache.memory_max_size",
 		"cache.range_enabled",
+		"cache.reload_policy",
 		"cache.stale_if_error",
 		"cache.stale_while_revalidate",
 		"cache.strip_tag_headers",
@@ -646,6 +647,7 @@ func locationEntries() []Entry {
 		loc+"cache_policy.bypass_cookies",
 		loc+"cache_policy.default_ttl",
 		loc+"cache_policy.max_ttl",
+		loc+"cache_policy.reload_policy",
 		loc+"cache_policy.stale_if_error",
 		loc+"cache_policy.stale_while_revalidate",
 	)...)

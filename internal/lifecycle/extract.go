@@ -511,6 +511,13 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 		return func(cfg *config.Config) any { return cfg.Admin.ConsoleEnabled() }, true
 	case "cache.strip_tag_headers":
 		return func(cfg *config.Config) any { return cfg.Cache.StripTagHeadersEnabled() }, true
+	case "cache.reload_policy":
+		return func(cfg *config.Config) any {
+			if strings.EqualFold(strings.TrimSpace(cfg.Cache.ReloadPolicy), "invalidate") {
+				return "invalidate"
+			}
+			return "retain"
+		}, true
 	case "cache.tag_headers":
 		return func(cfg *config.Config) any {
 			if len(cfg.Cache.TagHeaders) == 0 {

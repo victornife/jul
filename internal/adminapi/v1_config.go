@@ -3,6 +3,8 @@
 
 package adminapi
 
+import "jul/internal/cachemeta"
+
 // ConfigResponse is GET /api/v1/config: the configuration-centric view of the
 // same state /api/v1/status reports from the server's side — versions,
 // authority, drift and any staged restart.
@@ -59,8 +61,10 @@ type ApplyResultResponse struct {
 	Mode      string `json:"mode,omitempty"`
 	// Outcome is the terminal reload outcome, empty until the record is
 	// terminal. no_change is successful even though it does not publish.
-	Outcome ReloadOutcome `json:"outcome,omitempty"`
-	OK      bool          `json:"ok"`
+	CacheCutoverState  string                   `json:"cache_cutover_state,omitempty"`
+	CacheCutoverResult *cachemeta.CutoverResult `json:"cache_cutover_result,omitempty"`
+	Outcome            ReloadOutcome            `json:"outcome,omitempty"`
+	OK                 bool                     `json:"ok"`
 
 	StartedAt   string `json:"started_at,omitempty"`
 	CompletedAt string `json:"completed_at,omitempty"`

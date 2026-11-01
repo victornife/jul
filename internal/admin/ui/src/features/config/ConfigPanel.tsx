@@ -25,6 +25,7 @@ import {
   ConfigAdminChangeError,
   ConfigApplyOutcomeError,
   type ConfigDiff,
+  type CacheCutoverMode,
   type PendingRestartStatus,
 } from "@/api/client.ts";
 import { deriveApplyOutcome, type ApplyOutcome } from "@/lib/applyOutcome.ts";
@@ -51,6 +52,7 @@ import { Loading, Spinner } from "@/components/ui.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
 import { ApplyOutcomeBanner } from "@/features/config/ApplyOutcomeBanner.tsx";
+import { CacheCutoverChoice } from "@/features/config/CacheCutoverChoice.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 import { sharingAckEntries, sharingPlanRequiresAck } from "@/lib/sharingIntent.ts";
 
@@ -270,9 +272,7 @@ function SharingAcknowledgementBox({
           }}
           className="mt-0.5 rounded border-jul-border"
         />
-        <span>
-          I acknowledge the audience change for {entries.join(", ")} and want to proceed.
-        </span>
+        <span>I acknowledge the audience change for {entries.join(", ")} and want to proceed.</span>
       </label>
     </div>
   );
@@ -403,7 +403,7 @@ function PatchAssessment({
 
           {lifecycle.pending_subsystems.length > 0 && (
             <p className="text-xs text-jul-muted">
-              Pending subsystems: {" "}
+              Pending subsystems:{" "}
               <span className="font-mono text-jul-text">
                 {lifecycle.pending_subsystems.slice(0, 12).join(", ")}
                 {lifecycle.pending_subsystems.length > 12
@@ -445,10 +445,7 @@ function RawAssessment({
         {refreshError && <p className="text-xs text-jul-danger">{refreshError.message}</p>}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <AssessmentPaths
-          label="Restart-required paths"
-          paths={lifecycle.restart_required_paths}
-        />
+        <AssessmentPaths label="Restart-required paths" paths={lifecycle.restart_required_paths} />
         <AssessmentPaths
           label="Validation-rejected paths"
           paths={lifecycle.validation_rejected_paths}
@@ -468,9 +465,7 @@ function RawAssessment({
       {lifecycle.pending_subsystems.length > 0 && (
         <p className="text-xs text-jul-muted">
           Pending subsystems:{" "}
-          <span className="font-mono text-jul-text">
-            {lifecycle.pending_subsystems.join(", ")}
-          </span>
+          <span className="font-mono text-jul-text">{lifecycle.pending_subsystems.join(", ")}</span>
         </p>
       )}
     </section>
@@ -480,7 +475,12 @@ function RawAssessment({
 export function ConfigPanel() {
   const { ready, has } = usePermission();
   if (ready && !has("config:raw")) {
-    return <p role="note">Configuration previews require config:raw because comparisons can reveal hidden values. Ask an administrator to review the change or grant that permission.</p>;
+    return (
+      <p role="note">
+        Configuration previews require config:raw because comparisons can reveal hidden values. Ask
+        an administrator to review the change or grant that permission.
+      </p>
+    );
   }
   return <AuthorizedConfigPanel />;
 }
@@ -539,6 +539,7 @@ function AuthorizedConfigPanel() {
   const [draft, setDraft] = useState<string | null>(null);
   const [baseline, setBaseline] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [cacheCutover, setCacheCutover] = useState<CacheCutoverMode>("");
   const [stageConfirming, setStageConfirming] = useState(false);
   const [rawHandoff, setRawHandoff] = useState<PendingRawDraft | null>(null);
 
@@ -741,10 +742,7 @@ function AuthorizedConfigPanel() {
         currentPendingSnapshot,
       );
     },
-    enabled:
-      patchNeedsAssessmentRefresh &&
-      currentPendingSnapshot !== undefined &&
-      canWritePerm,
+    enabled: patchNeedsAssessmentRefresh && currentPendingSnapshot !== undefined && canWritePerm,
     retry: false,
     staleTime: Infinity,
   });
@@ -870,23 +868,46 @@ function AuthorizedConfigPanel() {
     retry: false,
   });
 
+  // A one-change override is previewed on the server against the same pinned
+  // candidate/base. Never reuse the handoff's configured-policy assessment.
+  const cutoverAssessment = useQuery({
+    queryKey: ["config-cutover-preview", cacheCutover, current, patchDraft?.ops, baseVersion],
+    queryFn: async () => {
+      if (patchDraft !== null) {
+        const result = await patchConfigBatch(patchDraft.ops, patchDraft.baseVersion, cacheCutover);
+        if (!result.valid || result.validation_errors.length > 0) {
+          throw new Error("The candidate is not valid for this change.");
+        }
+        return result.diff;
+      }
+      return diffConfig(current, cacheCutover);
+    },
+    enabled: dirty && cacheCutover !== "" && canWritePerm,
+    retry: false,
+    staleTime: Infinity,
+  });
+
   // In patch mode the diff is pre-computed; in raw mode it is fetched.
   const previewDiff: ConfigDiff | undefined = useMemo(
-    () => patchDraft?.previewDiff ?? rawHandoff?.previewDiff ?? rawDiff.data,
-    [patchDraft, rawHandoff, rawDiff.data],
+    () =>
+      cacheCutover !== ""
+        ? cutoverAssessment.data
+        : (patchDraft?.previewDiff ?? rawHandoff?.previewDiff ?? rawDiff.data),
+    [cacheCutover, cutoverAssessment.data, patchDraft, rawHandoff, rawDiff.data],
   );
 
   // Require a completed assessment for the current draft before confirmation so
   // sharing widening acknowledgement cannot be bypassed while /api/config/diff
   // (or a handoff refresh) is still pending or failed.
-  const assessmentReady = isPatchMode
+  const baseAssessmentReady = isPatchMode
     ? !patchNeedsAssessmentRefresh && !patchAssessmentRefresh.isFetching
     : rawHandoff !== null
       ? !rawAssessmentRefresh.isFetching
-      : draft !== null &&
-        draft === debounced &&
-        rawDiff.isSuccess &&
-        !rawDiff.isFetching;
+      : draft !== null && draft === debounced && rawDiff.isSuccess && !rawDiff.isFetching;
+
+  const assessmentReady =
+    baseAssessmentReady &&
+    (cacheCutover === "" || (cutoverAssessment.isSuccess && !cutoverAssessment.isFetching));
 
   useEffect(() => {
     setSharingAcknowledged(false);
@@ -950,9 +971,10 @@ function AuthorizedConfigPanel() {
 
   const applyRaw = useMutation({
     mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) =>
-      applyConfig(current, baseVersion, confirmAdmin, "hot"),
+      applyConfig(current, baseVersion, confirmAdmin, "hot", cacheCutover),
     onSuccess: (res, variables) => {
       if (operationIDRef.current !== variables.operationID) return;
+      setCacheCutover("");
       setBaseline(current);
       setAppliedState({
         operationID: variables.operationID,
@@ -994,7 +1016,9 @@ function AuthorizedConfigPanel() {
     mutationFn: ({ confirmAdmin }: { confirmAdmin: boolean; operationID: number }) => {
       if (!patchDraft) throw new Error("no patch draft to apply");
       if (patchDraft.baseVersion === undefined || patchDraft.baseVersion.trim() === "") {
-        throw new Error("The structured patch has no pinned base version; generate a fresh preview.");
+        throw new Error(
+          "The structured patch has no pinned base version; generate a fresh preview.",
+        );
       }
       // This mutation is reached only when the authoritative preview permits
       // hot apply. Restart-bound and update-staged patches use applyStage
@@ -1004,10 +1028,12 @@ function AuthorizedConfigPanel() {
         patchDraft.baseVersion,
         "hot",
         confirmAdmin,
+        cacheCutover,
       );
     },
     onSuccess: (res, variables) => {
       if (operationIDRef.current !== variables.operationID) return;
+      setCacheCutover("");
       // Reconcile the raw-editor state with the freshly-applied patch: the
       // candidate is now the persisted config and res.version is its
       // fingerprint. Without this, exiting patch mode leaves the editor looking
@@ -1131,6 +1157,10 @@ function AuthorizedConfigPanel() {
     rawHandoff === null || rawGuard.blocked ? "none" : rawHandoff.recommendedAction;
   const rawHandoffUsesStage =
     rawHandoffAction === "stage_restart" || rawHandoffAction === "update_staged";
+  useEffect(() => {
+    if (hasPendingRestart || patchUsesStage || rawHandoffUsesStage) setCacheCutover("");
+  }, [hasPendingRestart, patchUsesStage, rawHandoffUsesStage]);
+
   const primaryAction = isPatchMode
     ? patchAction.action
     : rawHandoff !== null
@@ -1310,6 +1340,7 @@ function AuthorizedConfigPanel() {
           runtimeObserved: false,
           mode: "stage_restart",
           isStagedUpdate: applied.staged_restart_is_update ?? false,
+          cacheCutover: reload?.cache_cutover ?? applied.cache_cutover_result,
           http: reload?.http,
           stream: reload?.stream,
           admin: reload?.admin,
@@ -1360,6 +1391,7 @@ function AuthorizedConfigPanel() {
                 : {}),
             }
           : {}),
+        cacheCutover: reload?.cache_cutover ?? applied.cache_cutover_result,
         http: reload?.http,
         stream: reload?.stream,
         admin: reload?.admin,
@@ -1409,41 +1441,42 @@ function AuthorizedConfigPanel() {
     readonly tone: "persisted-editable" | "candidate-readonly" | "persisted-baseline" | "diff-only";
     readonly label: string;
     readonly detail: string;
-  } = rawHandoff !== null
-    ? {
-        tone: "candidate-readonly",
-        label: "Proposed cache candidate — read-only",
-        detail:
-          "This complete cache candidate is held only in memory and pinned to the exact configuration version used to generate it. It will be staged, never hot-applied.",
-      }
-    : !isPatchMode
+  } =
+    rawHandoff !== null
       ? {
-        tone: "persisted-editable",
-        label: "Persisted configuration — editable",
-        detail:
-          "These are the bytes currently stored in the configuration file. The runtime may differ while a staged restart or external divergence exists.",
-      }
-    : rawForbidden || !canRawPerm || candidateForbidden || candidateFailed
-      ? {
-          tone: "diff-only",
-          label: "Proposed change — diff only",
-          detail: candidateFailed
-            ? "Candidate source is temporarily unavailable. The server-reviewed structured diff remains the proposed change."
-            : "The full candidate is hidden because this principal lacks config:raw. The structured diff is the proposed change.",
+          tone: "candidate-readonly",
+          label: "Proposed cache candidate — read-only",
+          detail:
+            "This complete cache candidate is held only in memory and pinned to the exact configuration version used to generate it. It will be staged, never hot-applied.",
         }
-      : patchDraft.candidate !== undefined
+      : !isPatchMode
         ? {
-            tone: "candidate-readonly",
-            label: "Proposed candidate — read-only",
+            tone: "persisted-editable",
+            label: "Persisted configuration — editable",
             detail:
-              "This candidate was generated server-side from the reviewed patch and pinned base version. It is not applied until confirmation.",
+              "These are the bytes currently stored in the configuration file. The runtime may differ while a staged restart or external divergence exists.",
           }
-        : {
-            tone: "persisted-baseline",
-            label: "Current persisted baseline",
-            detail:
-              "The structured diff is the proposed change. Candidate TOML is not currently available.",
-          };
+        : rawForbidden || !canRawPerm || candidateForbidden || candidateFailed
+          ? {
+              tone: "diff-only",
+              label: "Proposed change — diff only",
+              detail: candidateFailed
+                ? "Candidate source is temporarily unavailable. The server-reviewed structured diff remains the proposed change."
+                : "The full candidate is hidden because this principal lacks config:raw. The structured diff is the proposed change.",
+            }
+          : patchDraft.candidate !== undefined
+            ? {
+                tone: "candidate-readonly",
+                label: "Proposed candidate — read-only",
+                detail:
+                  "This candidate was generated server-side from the reviewed patch and pinned base version. It is not applied until confirmation.",
+              }
+            : {
+                tone: "persisted-baseline",
+                label: "Current persisted baseline",
+                detail:
+                  "The structured diff is the proposed change. Candidate TOML is not currently available.",
+              };
 
   if (isLoading) return <Loading label="Loading configuration…" />;
   if ((isError || !data) && !(rawForbidden && isPatchMode))
@@ -1566,6 +1599,7 @@ function AuthorizedConfigPanel() {
             disabled={
               !dirty ||
               !valid ||
+              (cacheCutover !== "" && !assessmentReady) ||
               pendingApplyID !== undefined ||
               applyActive.isPending ||
               applyStage.isPending ||
@@ -1666,8 +1700,8 @@ function AuthorizedConfigPanel() {
               <p className="font-medium text-jul-warning">Preview is stale</p>
               <p className="mt-1 text-xs text-jul-muted">
                 The persisted configuration changed since this patch was prepared, so the proposed
-                candidate could not be generated. Return to the originating editor and regenerate the
-                preview before applying.
+                candidate could not be generated. Return to the originating editor and regenerate
+                the preview before applying.
               </p>
             </div>
           )}
@@ -1686,9 +1720,7 @@ function AuthorizedConfigPanel() {
               draft={patchDraft}
               refreshing={patchAssessmentRefresh.isFetching}
               refreshError={
-                patchAssessmentRefresh.error instanceof Error
-                  ? patchAssessmentRefresh.error
-                  : null
+                patchAssessmentRefresh.error instanceof Error ? patchAssessmentRefresh.error : null
               }
             />
           )}
@@ -1701,8 +1733,8 @@ function AuthorizedConfigPanel() {
               <p className="mt-1 text-xs text-jul-muted">{patchAction.reason}</p>
               {patchAction.requiresFreshPreview && !canWritePerm && (
                 <p className="mt-1 text-xs text-jul-muted">
-                  Refreshing this preview requires the <span className="font-mono">config:write</span>{" "}
-                  permission.
+                  Refreshing this preview requires the{" "}
+                  <span className="font-mono">config:write</span> permission.
                 </p>
               )}
             </div>
@@ -1712,19 +1744,21 @@ function AuthorizedConfigPanel() {
               draft={rawHandoff}
               refreshing={rawAssessmentRefresh.isFetching}
               refreshError={
-                rawAssessmentRefresh.error instanceof Error
-                  ? rawAssessmentRefresh.error
-                  : null
+                rawAssessmentRefresh.error instanceof Error ? rawAssessmentRefresh.error : null
               }
             />
           )}
           {rawHandoff !== null && rawGuard.blocked && (
-            <div role="status" className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-3 text-sm">
+            <div
+              role="status"
+              className="rounded-md border border-jul-warning/40 bg-jul-warning/5 p-3 text-sm"
+            >
               <p className="font-medium text-jul-warning">Cache candidate cannot be staged yet</p>
               <p className="mt-1 text-xs text-jul-muted">{rawGuard.reason}</p>
               {rawGuard.requiresRefresh && !canWritePerm && (
                 <p className="mt-1 text-xs text-jul-muted">
-                  Refreshing the assessment requires <span className="font-mono">config:write</span>.
+                  Refreshing the assessment requires <span className="font-mono">config:write</span>
+                  .
                 </p>
               )}
             </div>
@@ -1916,7 +1950,9 @@ function AuthorizedConfigPanel() {
                       }}
                       className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
                     >
-                      {isPatchMode ? "Discard stale patch and preview again" : "Reload latest config"}
+                      {isPatchMode
+                        ? "Discard stale patch and preview again"
+                        : "Reload latest config"}
                     </button>
                   </div>
                 )}
@@ -1950,6 +1986,27 @@ function AuthorizedConfigPanel() {
             </div>
           )}
 
+          {dirty && valid && !hasPendingRestart && !patchUsesStage && !rawHandoffUsesStage && (
+            <CacheCutoverChoice
+              value={cacheCutover}
+              disabled={
+                applyActive.isPending || applyStage.isPending || pendingApplyID !== undefined
+              }
+              onChange={(value) => {
+                setCacheCutover(value);
+                setConfirming(false);
+                setSharingAcknowledged(false);
+              }}
+            />
+          )}
+          {cacheCutover !== "" && cutoverAssessment.isFetching && (
+            <p className="text-xs text-jul-muted">Previewing cache behavior…</p>
+          )}
+          {cacheCutover !== "" && cutoverAssessment.isError && (
+            <p className="text-xs text-jul-danger">
+              Unable to preview cache behavior. Apply is disabled.
+            </p>
+          )}
           {dirty && valid && (
             <div className="space-y-2">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
@@ -2119,8 +2176,8 @@ function AuthorizedConfigPanel() {
             <>
               <p>
                 The authoritative preview marked this exact ordered patch as restart-bound. It will
-                be validated and saved for the next process restart; no hot-apply attempt is made and
-                the running server remains unchanged.
+                be validated and saved for the next process restart; no hot-apply attempt is made
+                and the running server remains unchanged.
               </p>
               {patchDraft.lifecycle?.pending_subsystems &&
                 patchDraft.lifecycle.pending_subsystems.length > 0 && (

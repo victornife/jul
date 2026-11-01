@@ -83,12 +83,17 @@ func applyRoutePolicyToEffective(cfg *config.Config, loc config.LocationConfig, 
 		pol.DefaultTTLSeconds = cfg.Cache.DefaultTTL.Std().Seconds()
 		pol.SWRSeconds = cfg.Cache.StaleWhileRevalidate.Std().Seconds()
 		pol.SIESeconds = cfg.Cache.StaleIfError.Std().Seconds()
+		pol.ReloadPolicy = cfg.EffectiveReloadPolicy(loc)
 	}
 	pol.MaxTTLSeconds = nil
 	pol.BypassCookies = nil
 	pol.BypassAnyCookie = false
 	hasOverride := false
 	if cp := loc.CachePolicy; cp != nil {
+		if rp := strings.ToLower(strings.TrimSpace(cp.ReloadPolicy)); rp == "retain" || rp == "invalidate" {
+			pol.ReloadPolicy = rp
+			hasOverride = true
+		}
 		if cp.DefaultTTL != nil {
 			pol.DefaultTTLSeconds = cp.DefaultTTL.Std().Seconds()
 			hasOverride = true
@@ -390,7 +395,8 @@ func resolveInspectionRoutePolicy(sel cache.NormalizedSelector, cfg *config.Conf
 			nextPol.DefaultTTLSeconds != firstPol.DefaultTTLSeconds || nextPol.SWRSeconds != firstPol.SWRSeconds || nextPol.SIESeconds != firstPol.SIESeconds ||
 			(nextPol.MaxTTLSeconds == nil) != (firstPol.MaxTTLSeconds == nil) ||
 			(nextPol.MaxTTLSeconds != nil && firstPol.MaxTTLSeconds != nil && *nextPol.MaxTTLSeconds != *firstPol.MaxTTLSeconds) ||
-			nextPol.BypassAnyCookie != firstPol.BypassAnyCookie || strings.Join(nextPol.BypassCookies, ",") != strings.Join(firstPol.BypassCookies, ",") {
+			nextPol.BypassAnyCookie != firstPol.BypassAnyCookie || strings.Join(nextPol.BypassCookies, ",") != strings.Join(firstPol.BypassCookies, ",") ||
+			nextPol.ReloadPolicy != firstPol.ReloadPolicy {
 			ambiguous = true
 			break
 		}

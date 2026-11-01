@@ -212,6 +212,12 @@ func cmdRemoteStatus(args []string) int {
 		}
 		fmt.Fprintf(stdout, "apply %s: state=%s terminal=%t outcome=%s\n", v.ApplyID, v.State, v.Terminal, emptyDash(string(v.Outcome)))
 		fmt.Fprintf(stdout, "serving=%s persisted=%s boot_id=%s\n", emptyDash(v.ServingVersion), emptyDash(v.PersistedVersion), emptyDash(v.BootID))
+		if v.CacheCutoverResult != nil {
+			fmt.Fprintf(stdout, "cache cutover: %s (effectiveness=%s)\n", v.CacheCutoverState, v.CacheCutoverResult.InvalidationEffective)
+			if v.CacheCutoverResult.RecoveryGuidance != "" {
+				fmt.Fprintln(stdout, v.CacheCutoverResult.RecoveryGuidance)
+			}
+		}
 		if len(v.Degraded) != 0 {
 			fmt.Fprintf(stdout, "degraded: %d condition(s)\n", len(v.Degraded))
 		}
@@ -245,6 +251,7 @@ func cmdRemoteMutation(args []string, command, fixedMode string) int {
 	idem := fs.String("idempotency-key", "", "stable 8-128 byte [A-Za-z0-9_-] automation key")
 	confirmAdmin := fs.Bool("confirm-admin", false, "explicitly confirm a control-plane reachability change")
 	adoptExternal := fs.Bool("adopt-external", false, "preview and adopt the current external configuration (apply only)")
+	cacheCutover := fs.String("cache-cutover", "", "one-change cache behavior: retain or invalidate (live apply only)")
 	adoptMode := fs.String("adopt-mode", "hot", "adoption mode: hot or stage_restart")
 	pollTimeout := fs.Duration("poll-timeout", adminclient.DefaultPollTimeout, "maximum local wait for a terminal transaction")
 	client, code, ok := parseRemote(fs, args, &common)
@@ -256,6 +263,9 @@ func cmdRemoteMutation(args []string, command, fixedMode string) int {
 	}
 	if *pollTimeout <= 0 {
 		return renderUsageError(common.json, command, "--poll-timeout must be positive")
+	}
+	if *cacheCutover != "" && (*adoptExternal || fixedMode != "hot") {
+		return renderUsageError(common.json, command, "--cache-cutover is available only for a live configuration apply; use reload_policy for a staged restart")
 	}
 	if *adoptExternal {
 		if command != "apply" {
@@ -273,7 +283,7 @@ func cmdRemoteMutation(args []string, command, fixedMode string) int {
 	if err != nil {
 		return renderUsageError(common.json, command, err.Error())
 	}
-	prepared, err := client.PrepareApply(candidate, *base, fixedMode, *idem, *confirmAdmin)
+	prepared, err := client.PrepareApply(candidate, *base, fixedMode, *idem, *confirmAdmin, *cacheCutover)
 	if err != nil {
 		return renderUsageError(common.json, command, err.Error())
 	}
@@ -323,6 +333,7 @@ func cmdRemoteRollback(args []string) int {
 	base := fs.String("base-version", "", "reviewed canonical base version; must match preview when supplied")
 	idem := fs.String("idempotency-key", "", "stable 8-128 byte [A-Za-z0-9_-] automation key")
 	confirmAdmin := fs.Bool("confirm-admin", false, "explicitly confirm a control-plane reachability change")
+	cacheCutover := fs.String("cache-cutover", "", "one-change cache behavior: retain or invalidate")
 	pollTimeout := fs.Duration("poll-timeout", adminclient.DefaultPollTimeout, "maximum local wait for a terminal transaction")
 	client, code, ok := parseRemote(fs, args, &common)
 	if !ok {
@@ -333,7 +344,7 @@ func cmdRemoteRollback(args []string) int {
 	}
 	ctx, cancel := remoteContext()
 	defer cancel()
-	preview, err := client.HistoryDiff(ctx, *historyID)
+	preview, err := client.HistoryDiff(ctx, *historyID, *cacheCutover)
 	if err != nil {
 		return renderRemoteError(common.json, "rollback", err, preview.RequestID)
 	}
@@ -351,7 +362,7 @@ func cmdRemoteRollback(args []string) int {
 	if !common.json {
 		fmt.Fprintf(stdout, "rollback preview for %s against base %s\n", *historyID, previewBase)
 	}
-	prepared, err := client.PrepareRollback(*historyID, previewBase, *idem, *confirmAdmin)
+	prepared, err := client.PrepareRollback(*historyID, previewBase, *idem, *confirmAdmin, *cacheCutover)
 	if err != nil {
 		return renderUsageError(common.json, "rollback", err.Error())
 	}
@@ -550,6 +561,13 @@ func renderTerminal(common remoteCommon, command, outcome string, restored bool,
 		return writeJSON(obj, exit)
 	}
 	fmt.Fprintf(stdout, "%s: outcome=%s apply_id=%s\n", command, outcome, emptyDash(applyID))
+	var cutover adminapi.ConfigApplyResponse
+	if json.Unmarshal(raw, &cutover) == nil && cutover.CacheCutoverResult != nil {
+		fmt.Fprintf(stdout, "cache cutover: %s (effectiveness=%s, failed=%d, remaining=%d)\n", cutover.CacheCutoverState, cutover.CacheCutoverResult.InvalidationEffective, cutover.CacheCutoverResult.FailedEntries, cutover.CacheCutoverResult.RemainingEntries)
+		if cutover.CacheCutoverResult.RecoveryGuidance != "" {
+			fmt.Fprintln(stdout, cutover.CacheCutoverResult.RecoveryGuidance)
+		}
+	}
 	if outcome == "no_change" {
 		fmt.Fprintln(stdout, "Configuration is already effective; no runtime generation change was required.")
 	}

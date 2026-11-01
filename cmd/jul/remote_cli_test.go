@@ -325,3 +325,45 @@ func TestRemoteUsageFailuresAreMachineReadable(t *testing.T) {
 		}
 	})
 }
+
+func TestRemoteTerminalCacheCutoverGuidance(t *testing.T) {
+	raw := []byte(`{"cache_cutover_state":"uncertain","cache_cutover_result":{"state":"uncertain","invalidation_effective":"uncertain","operations":1,"failed_entries":2,"remaining_entries":3,"recovery_guidance":"Configuration is live. Repair storage and reconcile cache scopes."}}`)
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		exit := renderTerminal(remoteCommon{}, "apply", "applied_degraded", false, "", nil, "apply-624", "idempotent-624", "boot", raw)
+		if exit != 4 {
+			t.Fatalf("degraded committed apply exit=%d", exit)
+		}
+		if !strings.Contains(out.String(), "cache cutover: uncertain") || !strings.Contains(out.String(), "Configuration is live.") || strings.Contains(out.String(), "not yet serving") {
+			t.Fatalf("misleading cache result: %s", out.String())
+		}
+	})
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if exit := renderTerminal(remoteCommon{json: true}, "apply", "applied_degraded", false, "", nil, "apply-624", "idempotent-624", "boot", raw); exit != 4 {
+			t.Fatal(exit)
+		}
+		if !strings.Contains(out.String(), "cache_cutover_result") || !strings.Contains(out.String(), "recovery_guidance") {
+			t.Fatal(out.String())
+		}
+	})
+}
+
+func TestRemoteStatusShowsCorrelatedCutoverRecovery(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/config/applies/apply-624" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"api_version":"v1","apply_id":"apply-624","state":"terminal","terminal":true,"outcome":"applied_degraded","ok":true,"degraded":[],"boot_id":"boot","cache_cutover_state":"uncertain","cache_cutover_result":{"state":"uncertain","invalidation_effective":"uncertain","operations":1,"failed_entries":1,"remaining_entries":1,"recovery_guidance":"Configuration is live. Reconcile the cache scopes."}}`)
+	}))
+	defer srv.Close()
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemoteStatus([]string{"--endpoint", srv.URL, "--apply-id", "apply-624"}); code != 0 {
+			t.Fatalf("status=%d %s", code, errOut.String())
+		}
+		if !strings.Contains(out.String(), "cache cutover: uncertain") || !strings.Contains(out.String(), "Reconcile the cache scopes") {
+			t.Fatal(out.String())
+		}
+	})
+}

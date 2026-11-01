@@ -99,17 +99,45 @@ We retain the single `c.genMu` linearization owner (preserving atomic cutoff ass
    - `[servers.locations.cache_policy].reload_policy` (`""` = inherit `[cache].reload_policy` | `"retain"` | `"invalidate"`, lifecycle `hot_reload`): overrides the cutover policy for a specific location.
 2. **Per-change apply choice (`cache_cutover`):**
    - Managed apply/preview requests (`/api/config/preview`, `/api/config/patch/preview`, `/api/config/apply`, `/api/config/patch/apply`, `/api/config/rollback`, `/api/v1/config/plan`, `/api/v1/config/patch`, `/api/v1/config/apply`, `/api/v1/config/patch/apply`, `/api/v1/config/rollback`, `jul apply --cache-cutover=retain|invalidate`, and Console `ConfigPanel` / `HistoryPanel`) accept an optional `cache_cutover` (`""` = use configured `reload_policy`, `"retain"`, or `"invalidate"`).
+   - Raw TOML bodies carry the choice in the `cache_cutover` query parameter; structured patch/rollback bodies accept the same field. Invalid, repeated or conflicting options are rejected before mutation. Previews use the exact selected mode. The override is ephemeral and never rewrites persistent configuration.
    - `retain` never overrides `#623`/`#672` mandatory matcher compatibility, policy tightening (`max_ttl`, `default_ttl`, `stale_while_revalidate`, `stale_if_error`, `bypass_cookies`, `bypass_any_cookie`), or sensitive/transformed `Vary` rejection.
 3. **What changes trigger cutover invalidation when effective policy is `"invalidate"`:**
    - Route target/action changes (`proxy_pass`, `fastcgi_pass`, `uwsgi_pass`, `plugin`, `root`, `return`, `redirect`, `deny`, `grpc`, `grpc_transcode`), route-level `headers`/`rewrites`/`response_headers`/`cors` changes, referenced `[upstreams.NAME]` server list/LB/TLS changes, route deletion, or route matcher changes on routes whose effective cutover mode (before or after) is `"invalidate"`.
    - Runtime health-check transitions and service-discovery address refreshes do **not** invoke config `Publish` cutover and never trigger invalidation storms.
 4. **Transaction ordering and failure handling:**
-   - **Validate / Preview / Prepare:** Read-only with respect to cache contents and epochs (`BeginRouteCandidate` stages pending handler bindings; `Abort` calls `DiscardPendingRouteHandlers` without touching live epochs or cached entries). Preview computes and returns `cache_cutover_preview` (effective mode, affected selectors, broadened host/all warnings, and hot vs `stage_restart` disposition).
-   - **`stage_restart`:** Persists staged config without executing live cache cutover; reports `cache_cutover_state = "staged_for_restart"`.
+   - **Validate / Preview / Prepare:** Read-only with respect to cache contents and epochs (`BeginRouteCandidate` stages pending handler bindings; `Abort` calls `DiscardPendingRouteHandlers` without touching live epochs or cached entries). Preview computes and returns `diff.cache_cutover` (effective mode, affected selectors, broadened host/all warnings, and hot vs `stage_restart` disposition).
+   - **`stage_restart`:** Persists staged config without executing live cache cutover; reports `cache_cutover_state = "staged_for_restart"`. One-change overrides are live-only and rejected with `stage_restart` before persistence; use persistent `reload_policy` for restart behavior.
    - **Hot `Publish`:**
      1. Managed candidate TOML is written to disk.
      2. Inside `commitFn` (at the handler `Publish` boundary): `CommitRoutePoliciesWithCutover` advances `RouteEpoch` and `routeMatcherGen` (persisting `.jul-cache-route-epochs` before updating `routeStateSnap`) for all cutover-affected route scopes, and commits durable purge intents (`.jul-cache-purge-intents`) + selector fences for derived cutover selectors before the new router generation serves requests.
-     3. Subordinate physical cleanup (`InvalidateScope` batches) executes and reports `cache_cutover_result` (`succeeded`, `partial`, `failed`, `uncertain`) separately from configuration `Publish` (`applied = true`). If physical cleanup or disk persistence degrades after configuration `Publish`, the response reports the configuration as live/committed and the cache cutover as degraded/uncertain with retry guidance — never claiming configuration rollback when the new configuration is already serving.
+     3. Subordinate physical cleanup (`InvalidateScope` batches) executes and reports `reload.cache_cutover` (state `not_required`, `succeeded`, `partial` or `uncertain`, effectiveness and bounded counts/guidance), projected as `cache_cutover_state` and `cache_cutover_result` in versioned apply/exact-ID poll results, separately from configuration `Publish` (`published = true`, outcome `applied_live` or `applied_degraded`). If physical cleanup or disk persistence degrades after configuration `Publish`, the response reports the configuration as live/committed and the cache cutover as degraded/uncertain with retry guidance — never claiming configuration rollback when the new configuration is already serving.
+
+The same cutover comparison consumes the captured effective serving baseline
+and exact resolved candidate, including only referenced plugin definitions and
+private observed compiled module identities. This detects environment-backed
+target rotation and module replacement at an unchanged path. Missing serving
+evidence yields an explicit `unavailable` preview rather than false retention;
+public plans never carry resolved targets, plugin paths or module proofs.
+
+### 5. Restart-compatible policy transitions and operator outcomes
+
+The route-epoch v2 manifest persists explicit retain/invalidate posture for every
+active route alongside backend/matcher proofs. Startup uses the same previous-or-new
+invalidate rule as live reload. A policy-only change with an unchanged backend
+stays warm. V1 records with backend proofs but unknown posture compare identity
+conservatively once during upgrade; pre-cutover records without backend proofs
+retain their historical retain default. Invalid v2 posture metadata fails closed.
+
+Factory cleanup and epoch-persistence errors are projected by published generation
+into the correlated reload result. Degradation reports `applied_degraded`,
+`published = true`, failed HTTP subsystem and recovery guidance; it never claims
+configuration rollback. Exact-ID apply records, v1 results, CLI, Console and
+bounded reload/managed audit events preserve that outcome. Aborted/no-op reloads
+cannot inherit another generation's cutover failure. A simultaneous reload
+timeout does not suppress cache recovery guidance; the Console preserves both
+the committed-cache warning and timeout/phase annotation. Reconcile via the versioned
+purge flow after repairing storage; reapplying unchanged configuration is not a
+cache-cleanup retry.
 
 ## Consequences
 

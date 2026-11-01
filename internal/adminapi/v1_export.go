@@ -3,6 +3,8 @@
 
 package adminapi
 
+import "jul/internal/cachemeta"
+
 // ExportGlobal is the process-wide settings block of an export.
 //
 // It is an **allow-list**: a field appears here because it was reviewed and
@@ -99,8 +101,9 @@ type HistoryDiffResponse struct {
 	Affected []string `json:"affected,omitempty"`
 	// Warnings are consequences of applying the change that the entries alone
 	// do not convey.
-	Warnings      []string    `json:"warnings,omitempty"`
-	Additions     []DiffEntry `json:"additions,omitempty"`
-	Removals      []DiffEntry `json:"removals,omitempty"`
-	Modifications []DiffEntry `json:"modifications,omitempty"`
+	Warnings      []string               `json:"warnings,omitempty"`
+	Additions     []DiffEntry            `json:"additions,omitempty"`
+	Removals      []DiffEntry            `json:"removals,omitempty"`
+	Modifications []DiffEntry            `json:"modifications,omitempty"`
+	CacheCutover  *cachemeta.CutoverPlan `json:"cache_cutover,omitempty"`
 }

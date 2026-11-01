@@ -178,6 +178,7 @@ func projectLocationCachePolicy(c *config.Config, loc *config.LocationConfig, ac
 	if cp != nil {
 		state = &LocationCachePolicyState{
 			BypassAnyCookie: cp.BypassAnyCookie,
+			ReloadPolicy:    strings.ToLower(strings.TrimSpace(cp.ReloadPolicy)),
 		}
 		if len(cp.BypassCookies) > 0 {
 			state.BypassCookies = append([]string(nil), cp.BypassCookies...)
@@ -203,6 +204,10 @@ func projectLocationCachePolicy(c *config.Config, loc *config.LocationConfig, ac
 	if !cacheableAction && !loc.Cache && cp == nil {
 		return state, nil
 	}
+	globalReload := "retain"
+	if strings.EqualFold(strings.TrimSpace(c.Cache.ReloadPolicy), "invalidate") {
+		globalReload = "invalidate"
+	}
 	eff := &LocationCacheEffectiveState{
 		GlobalEnabled:        c.Cache.Enabled,
 		DefaultTTL:           c.Cache.DefaultTTL.Std().String(),
@@ -213,6 +218,8 @@ func projectLocationCachePolicy(c *config.Config, loc *config.LocationConfig, ac
 		StaleIfError:         c.Cache.StaleIfError.Std().String(),
 		SIESource:            "inherited_global",
 		BypassMode:           "none",
+		ReloadPolicy:         globalReload,
+		ReloadPolicySource:   "inherited_global",
 		LockEnabled:          c.Cache.Lock,
 		RangeEnabled:         c.Cache.RangeEnabled,
 		DiskEnabled:          strings.TrimSpace(c.Cache.DiskPath) != "",
@@ -270,6 +277,10 @@ func projectLocationCachePolicy(c *config.Config, loc *config.LocationConfig, ac
 		case len(cp.BypassCookies) > 0:
 			eff.BypassMode = "selected_cookies"
 			eff.BypassCookies = append([]string(nil), cp.BypassCookies...)
+		}
+		if rp := strings.ToLower(strings.TrimSpace(cp.ReloadPolicy)); rp == "retain" || rp == "invalidate" {
+			eff.ReloadPolicy = rp
+			eff.ReloadPolicySource = "route_override"
 		}
 	}
 	return state, eff

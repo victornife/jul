@@ -1130,18 +1130,30 @@ func (d *diskStore) snapshotItemsLocked() []diskItemSnapshot {
 }
 
 type routeEpochManifest struct {
-	Version  int               `json:"version"`
-	Epochs   map[string]uint64 `json:"epochs"`
-	Matchers map[string]string `json:"matchers,omitempty"`
+	Version        int               `json:"version"`
+	Epochs         map[string]uint64 `json:"epochs"`
+	Matchers       map[string]string `json:"matchers,omitempty"`
+	Backends       map[string]string `json:"backends,omitempty"`
+	ReloadPolicies map[string]string `json:"reload_policies"`
 }
 
 func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
+	epochs, matchers, _ := d.loadRouteEpochsWithBackends()
+	return epochs, matchers
+}
+
+func (d *diskStore) loadRouteEpochsWithBackends() (map[string]uint64, map[string]string, map[string]string) {
+	epochs, matchers, backends, _ := d.loadRouteEpochState()
+	return epochs, matchers, backends
+}
+
+func (d *diskStore) loadRouteEpochState() (map[string]uint64, map[string]string, map[string]string, map[string]string) {
 	if d == nil || d.dir == "" {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	f, err := os.Open(filepath.Join(d.dir, diskRouteEpochsFile))
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	var raw []byte
 	if err == nil {
@@ -1150,6 +1162,8 @@ func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
 	}
 	var epochs map[string]uint64
 	var matchers map[string]string
+	var backends map[string]string
+	var reloadPolicies map[string]string
 	var object map[string]json.RawMessage
 	valid := err == nil && len(raw) <= maxDiskMetaBytes && json.Unmarshal(raw, &object) == nil && object != nil
 	if valid {
@@ -1157,10 +1171,14 @@ func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
 			var manifest routeEpochManifest
 			decoder := json.NewDecoder(bytes.NewReader(raw))
 			decoder.DisallowUnknownFields()
-			valid = decoder.Decode(&manifest) == nil && manifest.Version == 1 && manifest.Epochs != nil
-			epochs, matchers = manifest.Epochs, manifest.Matchers
+			valid = decoder.Decode(&manifest) == nil && manifest.Epochs != nil &&
+				(manifest.Version == 1 && manifest.ReloadPolicies == nil || manifest.Version == 2 && manifest.ReloadPolicies != nil)
+			epochs, matchers, backends, reloadPolicies = manifest.Epochs, manifest.Matchers, manifest.Backends, manifest.ReloadPolicies
 			if matchers == nil {
 				matchers = make(map[string]string)
+			}
+			if backends == nil {
+				backends = make(map[string]string)
 			}
 		} else {
 			// Legacy epochs have no matcher proof. The next route commit must
@@ -1178,6 +1196,28 @@ func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
 			valid = false
 		}
 	}
+	for scope, proof := range backends {
+		if _, ok := versionid.Parse(proof); scope == "" || !ok {
+			valid = false
+		}
+	}
+	for scope, mode := range reloadPolicies {
+		if scope == "" || mode != "retain" && mode != "invalidate" {
+			valid = false
+		}
+	}
+	if reloadPolicies != nil {
+		for scope := range matchers {
+			if _, ok := reloadPolicies[scope]; !ok {
+				valid = false
+			}
+		}
+		for scope := range backends {
+			if _, ok := reloadPolicies[scope]; !ok {
+				valid = false
+			}
+		}
+	}
 	if !valid {
 		d.mu.Lock()
 		// Cleanup can fail while a later manifest write succeeds. Preserve a
@@ -1189,12 +1229,12 @@ func (d *diskStore) loadRouteEpochs() (map[string]uint64, map[string]string) {
 		}
 		d.purgeAllCacheFilesOnCorruptTombstoneLocked()
 		d.mu.Unlock()
-		return map[string]uint64{routeEpochFloorKey: floor}, nil
+		return map[string]uint64{routeEpochFloorKey: floor}, nil, nil, nil
 	}
-	return epochs, matchers
+	return epochs, matchers, backends, reloadPolicies
 }
 
-func (d *diskStore) persistRouteEpochs(epochs map[string]uint64, matchers map[string]string) {
+func (d *diskStore) persistRouteEpochState(epochs map[string]uint64, matchers, backends, reloadPolicies map[string]string) {
 	if d == nil || d.dir == "" {
 		return
 	}
@@ -1208,7 +1248,11 @@ func (d *diskStore) persistRouteEpochs(epochs map[string]uint64, matchers map[st
 		d.recordWriteFailure(errRouteEpochRecoveryPending)
 		return
 	}
-	raw, _ := json.Marshal(routeEpochManifest{Version: 1, Epochs: epochs, Matchers: matchers})
+	version := 1
+	if reloadPolicies != nil {
+		version = 2
+	}
+	raw, _ := json.Marshal(routeEpochManifest{Version: version, Epochs: epochs, Matchers: matchers, Backends: backends, ReloadPolicies: reloadPolicies})
 	err := d.testPersistRouteEpochErr
 	if len(raw) > maxDiskMetaBytes {
 		err = errDiskMetaTooLarge
@@ -1252,6 +1296,7 @@ type PurgeRecoveryIntent struct {
 	TagMatch            TagMatchMode `json:"tag_match,omitempty"`
 	RoutePath           string       `json:"route_path,omitempty"`
 	RouteType           string       `json:"route_type,omitempty"`
+	CutoverRouteScopes  []string     `json:"cutover_route_scopes,omitempty"`
 	MatchedResourceIDs  []string     `json:"matched_resource_ids"`
 	TargetHashes        []string     `json:"target_hashes,omitempty"`
 	TargetResourceMAC   string       `json:"target_resource_mac,omitempty"`
@@ -1316,6 +1361,14 @@ func validateDiskPurgeIntent(it PurgeRecoveryIntent) bool {
 	}
 	if !isValidLowerHexHashSlice(it.TargetHashes, MaxPurgeScanKeys) {
 		return false
+	}
+	if len(it.CutoverRouteScopes) > 1024 {
+		return false
+	}
+	for _, rs := range it.CutoverRouteScopes {
+		if len(rs) == 0 || len(rs) > 128 {
+			return false
+		}
 	}
 	if it.TargetResourceMAC != "" {
 		if _, ok := versionid.Parse(it.TargetResourceMAC); !ok {

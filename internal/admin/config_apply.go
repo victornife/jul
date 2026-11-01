@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 
+	"jul/internal/cachemeta"
 	"jul/internal/server"
 )
 
@@ -150,14 +151,16 @@ type ConfigApplyResult struct {
 	PersistedVersion string `json:"persisted_version,omitempty"`
 	// DesiredVersion identifies the resolved effective candidate submitted to
 	// the runtime. ServingVersion identifies the resolved live runtime.
-	DesiredVersion string                `json:"desired_version,omitempty"`
-	ServingVersion string                `json:"serving_version,omitempty"`
-	Conflict       bool                  `json:"conflict,omitempty"`
-	CurrentVersion string                `json:"current_version,omitempty"`
-	Status         []FeatureStatus       `json:"status,omitempty"`
-	Reload         *server.ReloadResult  `json:"reload,omitempty"`
-	PendingRestart *PendingRestartStatus `json:"pending_restart,omitempty"`
-	Message        string                `json:"message,omitempty"`
+	DesiredVersion     string                   `json:"desired_version,omitempty"`
+	ServingVersion     string                   `json:"serving_version,omitempty"`
+	Conflict           bool                     `json:"conflict,omitempty"`
+	CurrentVersion     string                   `json:"current_version,omitempty"`
+	Status             []FeatureStatus          `json:"status,omitempty"`
+	CacheCutoverState  string                   `json:"cache_cutover_state,omitempty"`
+	CacheCutoverResult *cachemeta.CutoverResult `json:"cache_cutover_result,omitempty"`
+	Reload             *server.ReloadResult     `json:"reload,omitempty"`
+	PendingRestart     *PendingRestartStatus    `json:"pending_restart,omitempty"`
+	Message            string                   `json:"message,omitempty"`
 	// ValidationErrors is set when the candidate could not be parsed or failed
 	// runtime preflight. The handler maps this field to a 400 Bad Request.
 	ValidationErrors []string `json:"validation_errors,omitempty"`

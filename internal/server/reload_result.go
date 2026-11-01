@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"time"
 
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/respwriter"
 	"jul/internal/versionid"
@@ -84,7 +85,8 @@ type ReloadResult struct {
 	// PluginModules lists WASM plugins whose executable content identity
 	// changed in the published generation (added, removed, or new bytes —
 	// including at an unchanged path). Digests only, never module bytes.
-	PluginModules []PluginModuleChange `json:"plugin_modules,omitempty"`
+	CacheCutover  *cachemeta.CutoverResult `json:"cache_cutover,omitempty"`
+	PluginModules []PluginModuleChange     `json:"plugin_modules,omitempty"`
 	// EntryRetirements reports the bounded per-entry exchange retirement outcomes
 	// produced by narrowing or uncertain changes in this publish (#642, #563, #562).
 	EntryRetirements []respwriter.EntryRetirementResult `json:"entry_retirements,omitempty"`

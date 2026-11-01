@@ -46,10 +46,11 @@ func patchBatchSelectors(summaries []patchOperationSummary) string {
 // configuration, one effective serving configuration, and one live-listener
 // snapshot. Every field is immutable input to executePatchBatch.
 type patchBatchBaseline struct {
-	Config    *config.Config
-	Effective *config.Config
-	Version   string
-	Live      lifecycle.Live
+	PluginModules map[string]string
+	Config        *config.Config
+	Effective     *config.Config
+	Version       string
+	Live          lifecycle.Live
 	// DenyMint is true in file_owned mode (ADR 0019 §4/§15): Jul never mints
 	// a route_id on any path, including preview, which otherwise runs
 	// without an authority gate because it is a read. The zero value
@@ -295,6 +296,7 @@ func executePatchBatch(
 	}
 
 	beforeEffective := baseline.Effective
+	cutoverBefore := beforeEffective
 	if beforeEffective != nil {
 		beforeEffective, err = beforeEffective.Clone()
 		if err != nil {
@@ -337,10 +339,13 @@ func executePatchBatch(
 		Candidate:          candidate,
 		OperationSummaries: operationSummaries,
 		ValidationErrors:   validationErrors,
-		Diff:               diffConfigs(beforeConfig, candidateConfig),
+		Diff:               diffConfigsWithEffectiveCutover(beforeConfig, candidateConfig, cutoverBefore, candidate.Effective, config.CacheCutoverMode(ctx), observeCutoverModules(ctx, candidate.Effective, baseline.PluginModules)),
 		Lifecycle:          classification,
 		Ops:                append([]patchRequest(nil), ops...),
 		Valid:              len(validationErrors) == 0 && len(classification.ValidationRejected) == 0,
+	}
+	if err := ctx.Err(); err != nil {
+		return patchBatchExecution{}, err
 	}
 	return out, nil
 }
@@ -362,12 +367,14 @@ func (s *Server) executeCurrentPatchBatch(
 	if reqCtx != nil {
 		reqCtx.Baseline = &state
 	}
-	effective, live := s.patchRuntimeBaseline(reqCtx, state.Config)
+	var moduleDigests map[string]string
+	effective, live := s.patchRuntimeBaseline(reqCtx, state.Config, &moduleDigests)
 	execution, err := executePatchBatch(ctx, patchBatchBaseline{
-		Config:    state.Config,
-		Effective: effective,
-		Version:   state.Version,
-		Live:      live,
+		PluginModules: moduleDigests,
+		Config:        state.Config,
+		Effective:     effective,
+		Version:       state.Version,
+		Live:          live,
 		// A route_id is never minted in file_owned mode, on any path — apply
 		// never reaches here in file_owned mode (denyIfFileOwned refuses it
 		// first), but preview deliberately runs without that gate because it
@@ -386,7 +393,7 @@ func (s *Server) executeCurrentPatchBatch(
 // patchRuntimeBaseline captures the effective config and bound listener
 // addresses in one LiveSnapshot call. Apply also binds the snapshot and auth
 // generations into its existing immutable request context.
-func (s *Server) patchRuntimeBaseline(reqCtx *ApplyRequestContext, _ *config.Config) (*config.Config, lifecycle.Live) {
+func (s *Server) patchRuntimeBaseline(reqCtx *ApplyRequestContext, _ *config.Config, moduleDest ...*map[string]string) (*config.Config, lifecycle.Live) {
 	if reqCtx != nil {
 		reqCtx.AuthGeneration = s.AuthGeneration()
 	}
@@ -395,6 +402,9 @@ func (s *Server) patchRuntimeBaseline(reqCtx *ApplyRequestContext, _ *config.Con
 	}
 
 	snapshot := s.deps.LiveSnapshot()
+	if len(moduleDest) > 0 && moduleDest[0] != nil {
+		*moduleDest[0] = snapshot.PluginModules
+	}
 	if reqCtx != nil {
 		reqCtx.LiveGeneration = snapshot.Generation
 	}

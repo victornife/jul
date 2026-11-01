@@ -1301,6 +1301,7 @@ strip_tag_headers = true
 | `max_ranges` | int | Maximum comma-separated range specs accepted when `range_enabled = true` (defaults to `1` when `range_enabled = true`, maximum `16`; setting a positive value with `range_enabled = false` is rejected) |
 | `tag_headers` | list | Opt-in list of 1 to 8 unique, non-reserved HTTP origin response header names from which Jul extracts grouping tags for tag-scoped invalidation (#621, [ADR 0027](adr/0027-scoped-cache-invalidation.md); e.g. `["Cache-Tag", "Surrogate-Key"]`; default `[]`) |
 | `strip_tag_headers` | bool | Remove configured `tag_headers` from downstream client responses and stored headers (defaults to `true` when `tag_headers` is non-empty, `false` otherwise; setting `strip_tag_headers = true` when `tag_headers` is empty is rejected) |
+| `reload_policy` | string | Route/backend cutover posture across configuration reloads (#624, [ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md)): `"retain"` (default; keep valid cached representations across backend/target changes until expiry or explicit purge) or `"invalidate"` (evict affected route scope and advance `RouteEpoch` at `Publish` so pre-cutover hits and in-flight fills/304/SWR cannot serve or publish). Overridable per location via `[servers.locations.cache_policy].reload_policy` |
 
 Per-location caching also requires `cache = true` on the location. See
 [docs/cache.md](cache.md) for the two-tier model, on-disk format, and

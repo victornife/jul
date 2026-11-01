@@ -184,6 +184,12 @@ export interface ApplyOutcomeInput {
   readonly restored?: boolean;
   readonly restoreError?: string;
   readonly reloadError?: string;
+  readonly cacheCutover?:
+    | {
+        readonly invalidation_effective: string;
+        readonly recovery_guidance?: string | undefined;
+      }
+    | undefined;
   /**
    * AC-11: False when the apply came back from a legacy (pre-managed) path that
    * carries no correlated per-ID reload record, so the console cannot prove the
@@ -395,7 +401,11 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
   // this as a warning so the operator investigates slow reload paths or raises
   // the timeout. Takes precedence over partial-reload and reload-pending.
   // M-03: Also surface the timed-out phase.
-  if ((input.reloadTimedOut || input.timedOutPhase) && input.published) {
+  if (
+    (input.reloadTimedOut || input.timedOutPhase) &&
+    input.published &&
+    (!input.cacheCutover || input.cacheCutover.invalidation_effective === "effective")
+  ) {
     const phaseInfo = input.timedOutPhase ? ` (phase: ${input.timedOutPhase})` : "";
     return {
       kind: "reload-timed-out",
@@ -425,6 +435,24 @@ export function deriveApplyOutcome(input: ApplyOutcomeInput): ApplyOutcome {
   // M-03: Also include stream status from legacy polling for backward compat.
   const streamFailure = streamReloadFailure(input.streamStatus);
   if (streamFailure) failures.push(streamFailure);
+
+  if (input.cacheCutover && input.cacheCutover.invalidation_effective !== "effective") {
+    const timeoutDetail =
+      input.reloadTimedOut || input.timedOutPhase
+        ? ` Reload exceeded its timeout${input.timedOutPhase ? ` (phase: ${input.timedOutPhase})` : ""}.`
+        : "";
+    return {
+      kind: "partial-reload",
+      severity: "warning",
+      blocking: false,
+      title: "Configuration applied; cache cleanup needs attention",
+      message:
+        (input.cacheCutover.recovery_guidance ??
+          "Configuration is live. Inspect cache health and reconcile the affected cache scopes. Do not reapply or roll back solely to retry cleanup.") +
+        timeoutDetail,
+      failures,
+    };
+  }
 
   if (failures.length > 0) {
     return {

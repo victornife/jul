@@ -78,11 +78,14 @@ range_enabled          = true     # opt-in Option A range-aware caching (#442)
 max_ranges             = 1        # bound accepted range specs (default 1 when range_enabled = true)
 tag_headers            = ["Cache-Tag", "Surrogate-Key"] # opt-in trusted origin grouping-tag headers (#621)
 strip_tag_headers      = true     # strip configured tag_headers from client responses (default true when tag_headers is set)
+reload_policy          = "retain" # "retain" (default) or "invalidate" on route/backend cutover (#624)
 ```
 
 Per-location opt-in is still required, and each location may optionally override
-freshness, caps, stale windows, and request-cookie bypass via
-`[servers.locations.cache_policy]` ([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md)):
+freshness, caps, stale windows, request-cookie bypass, and route/backend cutover
+invalidation via `[servers.locations.cache_policy]`
+([ADR 0029](adr/0029-route-scoped-cache-policy-and-vary-guards.md),
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md)):
 
 ```toml
 [[servers.locations]]
@@ -97,6 +100,7 @@ cache    = true
   stale_while_revalidate = "30s"
   stale_if_error         = "5m"
   bypass_cookies         = ["session_id", "__Host-auth"] # or bypass_any_cookie = true
+  reload_policy          = "invalidate" # invalidate & fence pre-cutover entries when route/backend changes
 ```
 
 ## Cache key and Vary
@@ -808,21 +812,58 @@ downstream handler.
 
 ### Cache data across reloads
 
-The cache instance is created once per process and is captured by every handler
-generation, so **cached data persists across ordinary configuration reloads**.
-This is the pre-existing, deliberately preserved policy: reloading configuration
-does not warm-start or flush the cache.
+`reload_policy = "retain"` is the default in `[cache]`; a location can override
+it in `[servers.locations.cache_policy]`. Retain permits compatible warm data
+and late old-generation work to be reused after a backend change. Mandatory
+matcher compatibility, tightened cache policy and sensitive/transformed `Vary`
+guards still take precedence.
 
-One consequence follows directly from it: a refresh that started on the old
-generation publishes into the process-shared cache even if it completes after a
-reload changed routes or backends. The result is the representation the **old**
-generation's route would have produced. Changing routing or backends therefore
-does not retroactively invalidate entries. After old-generation work drains,
-use the admin purge endpoint when the old representation must no longer be
-served. A restart alone clears the memory tier but **retains the disk tier**;
-changing `[cache].enabled` is itself restart-required. For a cutover that must
-exclude old entries, quiesce traffic and in-flight refreshes, restart if needed,
-purge both tiers, then resume traffic.
+Choose `reload_policy = "invalidate"` to fence old-generation publication and
+retire the affected route/backend scope at configuration Publish while keeping
+unrelated routes warm. Without a one-change override, a backend change
+invalidates when either the previous or new route policy is `invalidate`.
+Changing the policy alone with an unchanged backend preserves compatible data.
+Both behaviors apply to live reload and stop/edit/restart transitions.
+
+For one live managed change, Config and History offer **Configured**, **Retain**
+and **Invalidate** choices. The remote CLI accepts
+`jul apply --cache-cutover=invalidate`; raw TOML requests use the
+`cache_cutover=retain|invalidate` query parameter and structured patch/rollback
+requests accept the same field in JSON. The server previews the selected mode
+and applies it once without rewriting persistent `reload_policy`. A retain
+override cannot bypass the mandatory safety guards. A no-op configuration change
+does not become an arbitrary purge; use `jul cache purge` for content changes.
+
+Previews compare the captured serving effective configuration with the exact
+resolved candidate, including referenced plugin definitions and observed module
+bytes. Module reads are an as-of assessment; configure the plugin SHA256 pin
+when apply must use the reviewed bytes. Runtime ownership uses the actual compiled
+bytes even if an external file changed after preview. Replacing a referenced
+module at the same path is an identity change under invalidate. Unreferenced modules do not broaden the scope. When serving
+identity cannot be established, disposition `unavailable` and an explicit
+warning replace any claim of retained compatibility. Public previews carry no
+resolved backend targets, plugin paths or module digest evidence.
+
+A planned restart reports `cache_cutover_state = "staged_for_restart"` and does
+not run live cleanup. One-change overrides with `stage_restart` are rejected
+before persistence: set persistent `reload_policy` for restart behavior.
+
+A published configuration stays live even if physical cache cleanup degrades.
+The correlated reload then reports `applied_degraded`, a failed HTTP subsystem,
+and `reload.cache_cutover` with effectiveness, counts and recovery guidance.
+The versioned apply response and exact-ID poll expose `cache_cutover_state` and
+`cache_cutover_result`; CLI and Console preserve this warning. Repair cache
+storage and reconcile the previewed scopes with the versioned purge flow.
+Reapplying an unchanged config or rolling it back is not a cleanup retry.
+Already-admitted readers may finish; this is not stream revocation.
+
+The bounded `.jul-cache-route-epochs` v2 manifest records both backend proofs
+and each active route's retain/invalidate posture. Older v1 records with backend
+proofs but unknown posture compare backend identity conservatively on upgrade;
+unchanged backends stay warm, changed/unverifiable backends become cold. Records
+predating backend cutover retain their historical retain default. Invalid v2
+metadata fails closed. No raw backend credentials, matcher predicates or query
+values are persisted as proof material.
 
 ### Observability
 
@@ -1377,17 +1418,20 @@ the standard:
 
 Lifecycle behavior:
 
-11. **A reload does not invalidate cached entries.** The cache is process-scoped
-    and survives configuration reloads by design, so a routing or backend change
-    does not retroactively drop entries stored under the previous configuration.
-    A refresh that was already in flight when the reload ran also completes
-    against the *old* generation's route and publishes its result. Purge after
-    old-generation refreshes drain; a restart alone does not clear the disk
-    tier. See [Cache data across reloads](#cache-data-across-reloads) for the
-    cutover sequence. Characterized by
+11. **Reloads retain compatible entries by default; explicit invalidate cutover
+    fences the changed scope.** Under configured `retain`, compatible old data
+    and late old-generation refreshes may remain reusable. Under configured or
+    one-change `invalidate`, publication advances affected route ownership and
+    blocks retired fills while reconciling the selected memory/disk scope;
+    unrelated retained routes remain warm. Mandatory policy/matcher/security
+    guards still apply under retain. A restart retains the disk tier and honors
+    the persisted previous-or-new invalidate posture. See
+    [Cache data across reloads](#cache-data-across-reloads). Default-retain
+    generation leases are characterized by
     `TestReloadWaitsForCacheRevalidationHoldingGeneration` and
-    `TestReloadDuringMandatorySynchronousValidation` (`internal/server`) and the
-    generation-isolation tests in `internal/cache`.
+    `TestReloadDuringMandatorySynchronousValidation` (`internal/server`);
+    `TestRouteBackendCutoverInvalidateAndRetainMatrix` (`internal/app`) and the
+    route-cutover restart/override regressions cover explicit invalidation.
 
 12. **A background refresh or a synchronous validation delays retirement of its
     generation.** While either is running, the handler generation that started it
