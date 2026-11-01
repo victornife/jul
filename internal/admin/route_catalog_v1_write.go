@@ -285,7 +285,7 @@ func init() {
 				MaxBodyBytes:        v1BodyLimit,
 				Parameters: []ExternalParameter{
 					{Name: "mode", In: "query", Type: "string", Default: "hot", Enum: []string{"hot", "stage_restart"}},
-				v1CacheCutoverParameter(),
+					v1CacheCutoverParameter(),
 					v1IdempotencyParameter(),
 				},
 				Response:                  "ConfigApplyResponse",

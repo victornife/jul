@@ -372,8 +372,8 @@ var Catalog = []RouteSpec{
 				Summary: "What rolling back to a stored revision would change, against the persisted configuration, " +
 					"with the base_version to bind the rollback to what was reviewed.",
 				Parameters: []ExternalParameter{v1CacheCutoverParameter()},
-				Response: "HistoryDiffResponse",
-				Errors:   []string{"not_found", "internal_error", "storage_unavailable"},
+				Response:   "HistoryDiffResponse",
+				Errors:     []string{"not_found", "internal_error", "storage_unavailable"},
 			},
 		},
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1HistoryDiff) },
