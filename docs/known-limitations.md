@@ -402,17 +402,23 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   the entry serves from memory or the upstream.
 - **No distributed / shared cache.** Cache state is local to the single Jul.IA
   process. Multi-node setups each maintain independent cache pools.
-- **Reload is not a backend-cutover purge.** Path-only routes retain compatible
-  cached entries across reload/restart; route-policy tightening is enforced on
-  reuse and publication, and removal/cache disable advances route ownership.
+- **Backend-cutover invalidation is opt-in.** By default (`reload_policy = "retain"`),
+  path-only routes retain compatible cached entries across reload/restart;
+  route-policy tightening is enforced on reuse and publication, and removal/cache
+  disable advances route ownership.
   Unchanged predicate routes also remain warm: a separate keyed matcher proof
   under the existing durable version context establishes compatibility. Changed
   matching, incomparable key contexts or unverifiable old state cause affected
   scopes to become cold. Anonymous same-path slot edits can lose reuse; explicit
   route IDs preserve identity through reordering. Epoch-history compaction can
-  make other scoped routes cold. Backend-target changes do not themselves invalidate compatible
-  entries (#624); use an explicit purge for content cutover. Route-epoch write
-  failure disables and retires disk caching until a later successful route
+  make other scoped routes cold. Select `reload_policy = "invalidate"` globally
+  or per route, or a `cache_cutover` override of `invalidate` for one live managed
+  change, to retire the affected route/backend scope at configuration Publish and fence
+  late old-generation fills while keeping unrelated routes warm (#624).
+  Already-admitted readers may finish; cutover does not revoke streams. Use an
+  explicit scoped purge for application content changes without a configuration
+  identity change. Route-epoch write failure disables and retires disk caching
+  until a later successful route
   commit. If all durable invalidation/cleanup operations fail, restore disk
   health and clear affected files before restart. See [cache.md](cache.md).
 - **A background refresh or a synchronous validation delays retirement of its
