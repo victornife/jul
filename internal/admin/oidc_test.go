@@ -5,6 +5,7 @@ package admin
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -53,7 +54,14 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 		if strings.HasPrefix(path, "/") {
 			path = srv.URL + path
 		}
-		req, _ := http.NewRequest(method, path, nil)
+		var body io.Reader
+		if method == "POST" && strings.HasSuffix(path, "/api/v1/cache/purge") {
+			body = strings.NewReader(`{"selector":{"kind":"all","all":true},"confirm_broad":true}`)
+		}
+		req, _ := http.NewRequest(method, path, body)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
@@ -136,7 +144,7 @@ func TestOIDCAdminFlowRBACReloadAndAudit(t *testing.T) {
 	if call("GET", authorize.Header.Get("Location"), nil).Header.Get("Location") != "/" {
 		t.Fatal("operator callback")
 	}
-	if got := call("POST", "/cache/purge", csrf).StatusCode; got != 200 {
+	if got := call("POST", "/api/v1/cache/purge", csrf).StatusCode; got != 200 {
 		t.Fatalf("operator mutation denied: %d", got)
 	}
 	foundMutation := false

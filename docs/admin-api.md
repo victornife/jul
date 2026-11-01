@@ -584,9 +584,18 @@ Each internal route records its own reason in
   `/api/v1` route returns raw configuration bytes.** They remain available on
   the internal routes under `config:raw` and `history:raw` for the Console and
   for local operators, and a test fails if either is promoted.
-- **Legacy operational endpoints** (`/cache/purge`, `/reload`; the reload
-  trigger is available only with `file_owned` authority) and
+- **Legacy reload endpoint** (`/reload`, available only with `file_owned` authority) and
   `/debug/pprof/` are not part of the configuration surface `v1` publishes.
+
+### Retired internal cache purge endpoint
+
+`POST /cache/purge` and `POST /cache/purge?key=...` are removed in #674. They
+were explicitly internal and unsupported, not part of the external contract.
+Use `/api/v1/cache/purge/preview`, `/api/v1/cache/purge` and
+`/api/v1/cache/purges/{operation_id}`, or `jul cache purge`. The versioned
+selector supports `all` and `key` alongside scoped selectors. Inspect terminal
+`state` and `invalidation_effective`; HTTP 200 alone does not establish effective
+invalidation. No legacy HTTP alias remains.
 
 ## Configuration comparison permissions (#645)
 
@@ -717,3 +726,30 @@ retain their existing format. The internal Console `GET /api/traffic-controls`
 also accepts `cache:inspect`: when none of its pre-existing projection grants is
 held, it returns only `{ "inspection_only": true }`, without loading editable
 configuration. This does not grant the broader configuration/status projection.
+
+
+## Cache cutover on configuration changes
+
+Managed live previews/applies and history rollback accept optional
+`cache_cutover=retain|invalidate`; omit it to use configured `reload_policy`.
+Raw TOML requests use the query parameter, and structured patch/rollback requests
+can use the JSON field. Preview and execution use the same choice. Invalid,
+conflicting or repeated options fail before mutation. The choice affects one
+live change and does not rewrite persistent policy. `stage_restart` rejects a
+one-change override; configure persistent `reload_policy` instead.
+
+`jul apply --cache-cutover=invalidate` and the Console Config/History choice
+controls use this server-owned contract. Mandatory matcher/policy/security
+invalidation is preserved under retain. An unchanged configuration remains a
+no-op; content invalidation uses the versioned cache purge workflow.
+
+A cleanup failure after publication reports the configuration as committed:
+`applied_degraded`, `published: true`, and a structured `reload.cache_cutover`
+on the Console/reload result. Versioned mutation and exact-ID polling responses
+expose `cache_cutover_state` and `cache_cutover_result` with effectiveness,
+counts and recovery guidance. Staging reports `staged_for_restart` without live
+cleanup. Repair storage and use the versioned purge flow for the previewed
+scopes; do not reapply or roll back solely to retry cache cleanup.
+
+See [cache reload behavior](cache.md#cache-data-across-reloads) and
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md).

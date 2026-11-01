@@ -170,7 +170,6 @@ func TestRouteTransportPolicyInventory(t *testing.T) {
 		"/api/sharing":                            "tls_or_loopback",
 		"/api/sharing/value":                      "tls_or_loopback",
 		"/api/sharing/postcondition/evaluate":     "tls_or_loopback",
-		"/cache/purge":                            "tls_or_loopback",
 		"/reload":                                 "tls_or_loopback",
 		"/debug/pprof/":                           "tls_or_loopback",
 	}

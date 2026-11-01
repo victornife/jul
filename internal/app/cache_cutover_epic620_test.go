@@ -581,7 +581,7 @@ func TestRouteBackendCutoverInvalidateAndRetainMatrix(t *testing.T) {
 	}
 	_, _ = c.InvalidateScope(cancelCtx, pSel, cache.InvalidateOptions{
 		BatchSize: 1,
-		CommitFence: func(_ uint64, _ []string) error {
+		CommitFence: func(_ uint64, _ []string, _ cache.PurgeRecoveryIntent) error {
 			cancelPurge()
 			return nil
 		},

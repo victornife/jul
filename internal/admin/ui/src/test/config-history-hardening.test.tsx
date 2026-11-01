@@ -156,7 +156,9 @@ describe("open confirmations follow the current permission grants", () => {
         <HistoryPanel />
       </Scope>,
     );
-    await waitFor(() => { expect(submit).toBeEnabled(); });
+    await waitFor(() => {
+      expect(submit).toBeEnabled();
+    });
     expect(mutations("/config/rollback")).toHaveLength(0);
     fireEvent.click(submit);
     await waitFor(() => {
@@ -304,7 +306,9 @@ describe("open confirmations follow the current permission grants", () => {
           ops: [{ op: "server_add", listen: ":9090" }],
         });
       else expect(init?.body).toBe("# changed");
-      expect((await screen.findAllByText(stage ? "HTTP 403" : "Apply failed.")).length).toBeGreaterThan(0);
+      expect(
+        (await screen.findAllByText(stage ? "HTTP 403" : "Apply failed.")).length,
+      ).toBeGreaterThan(0);
       expect(mutations(endpoint)).toHaveLength(1);
     },
   );
@@ -520,7 +524,11 @@ describe("history identity, permission and recovery boundaries", () => {
       within(screen.getByRole("dialog")).getByRole("button", { name: /Working|Roll back/ }),
     );
     expect(mutations("/config/rollback")).toHaveLength(1);
-    view.rerender(<Scope permissions={[]}><HistoryPanel /></Scope>);
+    view.rerender(
+      <Scope permissions={[]}>
+        <HistoryPanel />
+      </Scope>,
+    );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     await act(async () => {
@@ -534,14 +542,126 @@ describe("history identity, permission and recovery boundaries", () => {
       mutations("/config/history").filter(([url]) => url === "/api/config/history").length,
     ).toBeGreaterThan(1);
   });
-  it.each(["unverifiable", "different_context"])("explains %s effective versions without offering discard", async (comparison) => {
-    network((url) => url === "/api/config/pending-restart" ? json({ pending: true, status: {
-      state: "managed_staged", managed: true, staged: true, discard_available: false,
-      inconsistent: false, subsystems: ["cache"], version_comparison: comparison,
-    } }) : undefined);
-    render(<Scope><ConfigPanel /></Scope>);
-    expect(await screen.findByText(/restore the original version key/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Discard staged configuration" })).toBeNull();
+  it.each(["unverifiable", "different_context"])(
+    "explains %s effective versions without offering discard",
+    async (comparison) => {
+      network((url) =>
+        url === "/api/config/pending-restart"
+          ? json({
+              pending: true,
+              status: {
+                state: "managed_staged",
+                managed: true,
+                staged: true,
+                discard_available: false,
+                inconsistent: false,
+                subsystems: ["cache"],
+                version_comparison: comparison,
+              },
+            })
+          : undefined,
+      );
+      render(
+        <Scope>
+          <ConfigPanel />
+        </Scope>,
+      );
+      expect(await screen.findByText(/restore the original version key/i)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Discard staged configuration" })).toBeNull();
+    },
+  );
+});
+
+describe("one-change cache cutover controls", () => {
+  it("requires a fresh raw override preview and sends the same live choice", async () => {
+    let finishPreview: ((response: Response) => void) | undefined;
+    network((url) => {
+      if (url === "/api/config/diff?cache_cutover=invalidate") {
+        return new Promise<Response>((resolve) => {
+          finishPreview = resolve;
+        });
+      }
+      if (url.includes("/api/config/apply")) {
+        return json({ ok: true, version: "v2", reload: { outcome: "applied_live" } });
+      }
+      return undefined;
+    });
+    render(
+      <Scope>
+        <ConfigPanel />
+      </Scope>,
+    );
+    await edit();
+    fireEvent.change(screen.getByLabelText("Cache behavior for this change"), {
+      target: { value: "invalidate" },
+    });
+    await waitFor(() => {
+      expect(finishPreview).toBeDefined();
+    });
+    expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
+    act(() => {
+      finishPreview?.(
+        json({
+          summary: "cutover",
+          cache_cutover: {
+            default_policy: "invalidate",
+            disposition: "invalidate_on_publish",
+            invalidated_scopes: ["prefix example.com/"],
+          },
+        }),
+      );
+    });
+    const apply = screen.getByRole("button", { name: "Apply live" });
+    await waitFor(() => {
+      expect(apply).toBeEnabled();
+    });
+    fireEvent.click(apply);
+    await confirm();
+    await waitFor(() => {
+      expect(mutations("/api/config/apply")).toHaveLength(1);
+    });
+    const [url, init] = mutations("/api/config/apply")[0] ?? [];
+    expect(url).toContain("cache_cutover=invalidate");
+    expect(init?.body).toBe("# changed");
   });
 
+  it("re-previews a rollback choice and freezes it in the structured request", async () => {
+    network((url) => {
+      if (url === "/api/config/history/snap-1/diff?cache_cutover=retain") {
+        return json({
+          summary: "retain selected",
+          base_version: "v1",
+          cache_cutover: { default_policy: "retain", disposition: "retain" },
+        });
+      }
+      if (url === "/api/config/rollback")
+        return json({ ok: true, reload: { outcome: "applied_live" } });
+      return undefined;
+    });
+    render(
+      <Scope>
+        <HistoryPanel />
+      </Scope>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Rollback" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Cache behavior for this change"), {
+      target: { value: "retain" },
+    });
+    await within(dialog).findByText("retain selected");
+    const submit = within(dialog).getByRole("button", { name: "Roll back" });
+    await waitFor(() => {
+      expect(submit).toBeEnabled();
+    });
+    fireEvent.click(submit);
+    await waitFor(() => {
+      expect(mutations("/api/config/rollback")).toHaveLength(1);
+    });
+    const [, init] = mutations("/api/config/rollback")[0] ?? [];
+    expect(JSON.parse(init?.body as string)).toMatchObject({
+      id: "snap-1",
+      base_version: "v1",
+      cache_cutover: "retain",
+    });
+  });
 });

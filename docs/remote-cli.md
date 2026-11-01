@@ -288,3 +288,30 @@ Never place realistic credentials in repository examples or idempotency keys.
 ## Cache metadata inspection
 
 `jul cache inspect --endpoint URL --token-file FILE --host HOST [--uri URI | --prefix PREFIX | --glob GLOB | --tag TAG] [--cursor CURSOR] [--page-size N] [--json]` reads one bounded page. Exact `--url`/`--key` and configured `--route-id` scopes are also supported. Repeat the same selector for later pages; never automatically restart an expired capture. Successful reads exit zero even for explicit partial/truncated states: automation must inspect result fields. See [permissions, errors and limits](cache.md#bounded-cache-inspection).
+
+
+## Cache cutover on configuration changes
+
+Managed live previews/applies and history rollback accept optional
+`cache_cutover=retain|invalidate`; omit it to use configured `reload_policy`.
+Raw TOML requests use the query parameter, and structured patch/rollback requests
+can use the JSON field. Preview and execution use the same choice. Invalid,
+conflicting or repeated options fail before mutation. The choice affects one
+live change and does not rewrite persistent policy. `stage_restart` rejects a
+one-change override; configure persistent `reload_policy` instead.
+
+`jul apply --cache-cutover=invalidate` and the Console Config/History choice
+controls use this server-owned contract. Mandatory matcher/policy/security
+invalidation is preserved under retain. An unchanged configuration remains a
+no-op; content invalidation uses the versioned cache purge workflow.
+
+A cleanup failure after publication reports the configuration as committed:
+`applied_degraded`, `published: true`, and a structured `reload.cache_cutover`
+on the Console/reload result. Versioned mutation and exact-ID polling responses
+expose `cache_cutover_state` and `cache_cutover_result` with effectiveness,
+counts and recovery guidance. Staging reports `staged_for_restart` without live
+cleanup. Repair storage and use the versioned purge flow for the previewed
+scopes; do not reapply or roll back solely to retry cache cleanup.
+
+See [cache reload behavior](cache.md#cache-data-across-reloads) and
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md).

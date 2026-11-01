@@ -14,10 +14,12 @@ import {
   ConfigAdminChangeError,
   ConfigConflictError,
   type HistoryEntry,
+  type CacheCutoverMode,
 } from "@/api/client.ts";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { EmptyState, Loading } from "@/components/ui.tsx";
+import { CacheCutoverChoice } from "@/features/config/CacheCutoverChoice.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
 import { useManagedApplyRecord } from "@/lib/useManagedApplyRecord.ts";
@@ -151,7 +153,11 @@ function RollbackConfirm({
 }: {
   readonly id: string;
   readonly busy: boolean;
-  readonly onConfirm: (baseVersion: string | undefined, confirmed: boolean) => void;
+  readonly onConfirm: (
+    baseVersion: string | undefined,
+    confirmed: boolean,
+    cacheCutover: CacheCutoverMode,
+  ) => void;
   readonly onCancel: () => void;
   readonly adminChallenge: AdminChallenge | null;
   readonly error: Error | null;
@@ -159,6 +165,7 @@ function RollbackConfirm({
   readonly pollingExpired: boolean;
 }) {
   const { has } = usePermission();
+  const [cacheCutover, setCacheCutover] = useState<CacheCutoverMode>("");
   const canRollback = has("history:rollback");
   const canPreview = canRollback && has("config:raw");
   // The preview reads the snapshot server-side and diffs it against the
@@ -168,8 +175,8 @@ function RollbackConfirm({
   // here, which is submitted with the rollback so the server rejects a stale
   // rollback with 409 rather than reverting a concurrent change (Net-new issue 1).
   const diff = useQuery({
-    queryKey: ["history-rollback-diff", id],
-    queryFn: () => diffHistorySnapshot(id),
+    queryKey: ["history-rollback-diff", id, cacheCutover],
+    queryFn: () => (cacheCutover ? diffHistorySnapshot(id, cacheCutover) : diffHistorySnapshot(id)),
     enabled: canPreview,
     staleTime: 0,
     refetchInterval: false,
@@ -182,7 +189,9 @@ function RollbackConfirm({
   // and silently confirm the new one, so confirmation is offered only while the
   // challenge still matches the live preview (R-01).
   const challengeActive =
-    adminChallenge !== null && adminChallenge.baseVersion === diff.data?.base_version;
+    adminChallenge !== null &&
+    adminChallenge.baseVersion === diff.data?.base_version &&
+    (adminChallenge.cacheCutover ?? "") === cacheCutover;
   const adminChanges = challengeActive ? adminChallenge.changes : [];
   return (
     <ConfirmDialog
@@ -198,7 +207,7 @@ function RollbackConfirm({
       cancelDisabled={pending && !pollingExpired}
       onConfirm={() => {
         if (!canPreview) return;
-        onConfirm(diff.data?.base_version, challengeActive);
+        onConfirm(diff.data?.base_version, challengeActive, cacheCutover);
       }}
       onCancel={onCancel}
     >
@@ -209,11 +218,18 @@ function RollbackConfirm({
         unavailable, the rollback can still apply and the Console will show a recovery warning.
       </p>
       <div className="mt-3">
+        <CacheCutoverChoice
+          value={cacheCutover}
+          onChange={setCacheCutover}
+          disabled={busy || pending}
+        />
         {!canRollback && (
           <p className="text-xs text-jul-warning">Requires the history:rollback permission.</p>
         )}
         {!has("config:raw") && (
-          <p role="note">Rollback previews also require config:raw. Ask an administrator to review this revision.</p>
+          <p role="note">
+            Rollback previews also require config:raw. Ask an administrator to review this revision.
+          </p>
         )}
         {adminChanges.length > 0 && (
           <ul className="mb-3 list-disc space-y-1 pl-5 text-xs text-jul-warning">
@@ -325,6 +341,7 @@ interface TrackedRollback {
 interface AdminChallenge {
   readonly baseVersion: string | undefined;
   readonly changes: readonly string[];
+  cacheCutover?: CacheCutoverMode;
 }
 
 export function HistoryPanel() {
@@ -358,12 +375,17 @@ export function HistoryPanel() {
       id,
       confirmed,
       baseVersion,
+      cacheCutover,
     }: {
       id: string;
       confirmed: boolean;
       baseVersion: string | undefined;
       attempt: number;
-    }) => rollback(id, confirmed, baseVersion),
+      cacheCutover: CacheCutoverMode;
+    }) =>
+      cacheCutover
+        ? rollback(id, confirmed, baseVersion, cacheCutover)
+        : rollback(id, confirmed, baseVersion),
     onMutate: ({ id }) => {
       setRollingId(id);
       setTerminalError(null);
@@ -393,7 +415,11 @@ export function HistoryPanel() {
         setTerminalError(null);
         return;
       }
-      if (result.reload?.outcome === "applied_degraded") {
+      const cutover = result.reload?.cache_cutover ?? result.cache_cutover_result;
+      if (
+        result.reload?.outcome === "applied_degraded" ||
+        (cutover && cutover.invalidation_effective !== "effective")
+      ) {
         // AC-10: applied_degraded is a COMMITTED rollback, not a failure. The
         // snapshot is now live; some subsystems reloaded degraded. Close the
         // dialog (and its repeatable rollback action), refresh dependent views,
@@ -404,7 +430,8 @@ export function HistoryPanel() {
         setAdminChallenge(null);
         setTerminalError(null);
         setDegradedNotice(
-          result.reload.error ??
+          cutover?.recovery_guidance ??
+            result.reload?.error ??
             "Rollback applied with a degraded reload. The snapshot is now the live configuration, but one or more subsystems reloaded degraded — review Runtime Overview.",
         );
         void qc.invalidateQueries();
@@ -424,6 +451,7 @@ export function HistoryPanel() {
         // later preview refresh cannot silently reuse this confirmation (R-01).
         setAdminChallenge({
           baseVersion: variables.baseVersion,
+          cacheCutover: variables.cacheCutover,
           changes: [...error.changes],
         });
         return;
@@ -488,8 +516,10 @@ export function HistoryPanel() {
     // The remainder handles a rollback that originally returned 202 saved_not_live.
     setAdminChallenge(null);
     const result = record.result;
+    const cutover = result.reload?.cache_cutover ?? result.cache_cutover_result;
     if (
       result.ok &&
+      (!cutover || cutover.invalidation_effective === "effective") &&
       (result.reload?.outcome === "applied_live" || result.reload?.outcome === "no_change")
     ) {
       setConfirmId(null);
@@ -505,7 +535,8 @@ export function HistoryPanel() {
       setConfirmId(null);
       setTerminalError(null);
       setDegradedNotice(
-        result.reload?.error ??
+        cutover?.recovery_guidance ??
+          result.reload?.error ??
           "Rollback applied with a degraded reload. The snapshot is now the live configuration, but one or more subsystems reloaded degraded — review Runtime Overview.",
       );
       setTrackedRollback(null);
@@ -673,12 +704,13 @@ export function HistoryPanel() {
         <RollbackConfirm
           id={confirmId}
           busy={rollbackMutation.isPending}
-          onConfirm={(baseVersion, confirmed) => {
+          onConfirm={(baseVersion, confirmed, cacheCutover) => {
             if (!has("history:rollback")) return;
             rollbackMutation.mutate({
               id: confirmId,
               confirmed,
               baseVersion,
+              cacheCutover,
               attempt: rollbackAttemptRef.current,
             });
           }}

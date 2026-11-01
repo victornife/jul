@@ -371,6 +371,7 @@ var Catalog = []RouteSpec{
 				ID: "diffHistoryRevision",
 				Summary: "What rolling back to a stored revision would change, against the persisted configuration, " +
 					"with the base_version to bind the rollback to what was reviewed.",
+				Parameters: []ExternalParameter{v1CacheCutoverParameter()},
 				Response: "HistoryDiffResponse",
 				Errors:   []string{"not_found", "internal_error", "storage_unavailable"},
 			},
@@ -872,14 +873,6 @@ var Catalog = []RouteSpec{
 		Methods:    []string{http.MethodGet, http.MethodPost},
 		Permission: rbac.AuditExport,
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleAuditExport) },
-	},
-
-	// ── Cache purge (cache:purge) ─────────────────────────────────────────────
-	{
-		Pattern:    "/cache/purge",
-		Methods:    []string{http.MethodPost},
-		Permission: rbac.CachePurge,
-		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handlePurge) },
 	},
 
 	// ── Reload trigger (reload:trigger) ──────────────────────────────────────

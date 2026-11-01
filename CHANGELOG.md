@@ -11,6 +11,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Report degraded cache cutover after committed reload/apply through correlated
+  API/CLI/Console and audit outcomes; persist previous retain/invalidate posture
+  across restart. Add one-change cutover controls with matching previews and
+  preserve final #674 recovery/capacity/selector corrections in #675 (#624/#620).
+
+- Update the Console's build-time `minimatch` dependency to 11.0.1 to address
+  globparts amplification (GHSA-g3hv-75wg-m249).
+
 - Preserve incomplete scoped-purge and sensitive-`Vary` retirement protection
   across process restarts (#666, #667, #668,
   [ADR 0030](docs/adr/0030-cache-purge-recovery-latency-and-cutover.md)):
@@ -22,10 +30,21 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   traffic while keeping in-memory selector fences active if any disk removal
   fails. Reduce 200,000-entry host-purge heap allocations by >90% and isolate
   unrelated-host warm memory hits from single-host incomplete-fence lock
-  acquisitions (#667). Surface durability failures on legacy `POST /cache/purge`
-  with `503 Service Unavailable` and audit `"failure"` without reflexively
-  disabling a healthy empty disk tier on marker-only `.jul-cache-gen` errors
-  (#668).
+  acquisitions (#667). Expose durability failures through structured versioned outcomes without
+  reflexively disabling a healthy empty disk tier on marker-only `.jul-cache-gen`
+  errors; retire the unsupported internal HTTP purge endpoint (#668).
+
+- Close purge recovery commit gaps in #674: persist complete private identity
+  with the cutoff and retain it across retries; preserve key-method/Vary
+  semantics on restart. Reject recovery journal byte/count capacity before
+  committing a cutoff, without evicting unrelated entries. Move all Console
+  purges to the versioned preview/confirmation flow, remove the internal
+  `POST /cache/purge` route / keyed form / unused HTTP adapter, and migrate
+  OIDC/security/audit/durability tests and docs. Recover valid historical tag
+  snapshots at their exact original scope, including explicit empty snapshots;
+  reserve broader recovery for missing/invalid/unverifiable identity. Keep unsafe-method `Delete()`
+  callers; retired mutations return 404 rather than a successful SPA shell. Add real disk/admin
+  ledger latency and journal-limit startup acceptance profiles (#666–#668).
 
 - Keep predicate values and their hashes out of persistent route-cache
   partitions. Separate private, route-specific matcher proofs preserve unchanged

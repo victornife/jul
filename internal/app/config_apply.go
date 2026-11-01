@@ -307,6 +307,10 @@ func (c *ConfigApplyCoordinator) ApplyRaw(ctx admin.ApplyRequestContext, data []
 		return ApplyResult{OK: false, Mode: mode, AuthorityDenied: true, Message: "Configuration is file-owned; the running server does not write it."}, nil
 	}
 
+	if err := config.ValidateCacheCutoverMode(ctx.CacheCutover, string(mode)); err != nil {
+		return ApplyResult{OK: false, Mode: mode, ValidationErrors: []string{err.Error()}, Message: err.Error()}, nil
+	}
+
 	// applyMu serializes applies so only one candidate is in flight at a time.
 	// c.mu protects coordinator state and is not held across the reload wait so
 	// the async finalizer can safely restore without deadlocking. For the
@@ -759,6 +763,7 @@ func (c *ConfigApplyCoordinator) applyCandidate(reqCtx admin.ApplyRequestContext
 		PreparedAdmin:      preparedAdmin,
 		ExpectedGeneration: reqCtx.LiveGeneration,
 		KeepOpenEntries:    reqCtx.KeepOpenEntries,
+		CacheCutover:       reqCtx.CacheCutover,
 		AuthGeneration:     reqCtx.AuthGeneration,
 		ValidateAuthGeneration: func(expected string) bool {
 			return c.AuthGeneration == nil || c.AuthGeneration() == expected

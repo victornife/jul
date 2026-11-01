@@ -113,6 +113,7 @@ func (s *Server) v1ConfigApplyResponse(result ConfigApplyResult, status int) adm
 		Degraded:         degraded,
 		BootID:           s.bootID(),
 	}
+	response.CacheCutoverState, response.CacheCutoverResult = cacheCutoverOutcome(result)
 	if result.PendingRestart != nil {
 		response.PendingRestart = v1PendingRestartFromApply(result.PendingRestart)
 	}

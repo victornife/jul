@@ -1,5 +1,10 @@
 # Slice 1 Review & Evidence Report — `#667`, `#666`, `#668`
 
+> Historical evidence only. The review below missed runtime defects at
+> `86432bd9`. Its completeness, capacity-coalescing and durable-ledger performance
+> claims are superseded by the [2026-10-31 corrective review](2026-10-31-pr674-confirmed-findings-and-validation.md).
+
+
 - **Date:** 2026-10-30
 - **Base (`main`):** `fddc34562a18d4047c27a6e1bcbe9f78917bf304` (includes merged `#621`/`#665`, `#622`/`#669`/`#670`, and `#623`/`#672`/`#673`)
 - **Reviewed Production Tree / Commit:** `de2a6160c6c3d29437b3a23931679c8b3bb005ab` (initial candidate `daf9b57e3a9e617c8fe1386f4d2da34f0b14efba`, post-review fix `2ea6d4826628057ea792caee9416f08a63ec840f`, lint cleanup `de2a6160c6c3d29437b3a23931679c8b3bb005ab`)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jul/internal/cache"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 )
@@ -19,13 +20,7 @@ import (
 
 // CacheCutoverPlan summarizes the cache cutover posture and invalidation
 // impact of a configuration change (#624 / CACHE-OPS-04).
-type CacheCutoverPlan struct {
-	DefaultPolicy        string   `json:"default_policy"`
-	InvalidatedScopes    []string `json:"invalidated_scopes,omitempty"`
-	RetainedScopes       []string `json:"retained_scopes,omitempty"`
-	BroadenedToHostOrAll bool     `json:"broadened_to_host_or_all,omitempty"`
-	Disposition          string   `json:"disposition"`
-}
+type CacheCutoverPlan = cachemeta.CutoverPlan
 
 // ConfigDiff is a structured before/after report for the Console v2 diff view.
 type ConfigDiff struct {
@@ -109,7 +104,7 @@ func DiffConfigs(before, after *config.Config) ConfigDiff {
 // any registered field that changed and was not already represented by the
 // comparators is emitted as a structured entry with its class and reason. This
 // makes the diff complete by construction with respect to the registry.
-func diffConfigs(before, after *config.Config) ConfigDiff {
+func diffConfigs(before, after *config.Config, cutoverModes ...string) ConfigDiff {
 	var d ConfigDiff
 	if before == nil || after == nil {
 		d.Summary = "Unable to diff — one of the configurations is unavailable."
@@ -135,7 +130,11 @@ func diffConfigs(before, after *config.Config) ConfigDiff {
 	// was not covered by the high-level comparators is reported here, so the
 	// diff cannot silently miss a field that the lifecycle registry classifies.
 	diffLifecycleCompleteness(before, after, &d)
-	diffCacheCutoverPlan(before, after, &d)
+	mode := ""
+	if len(cutoverModes) > 0 {
+		mode = cutoverModes[0]
+	}
+	diffCacheCutoverPlan(before, after, &d, mode)
 
 	if len(d.Affected) == 0 {
 		d.Summary = "No structural changes detected between the current configuration and the draft."
@@ -175,21 +174,24 @@ func diffLifecycleCompleteness(before, after *config.Config, d *ConfigDiff) {
 	}
 }
 
-func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff) {
+func diffCacheCutoverPlan(before, after *config.Config, d *ConfigDiff, override string, modules ...cache.CutoverModuleIdentities) {
 	if !before.Cache.Enabled && !after.Cache.Enabled {
 		return
 	}
 	if !after.Cache.Enabled {
 		return
 	}
-	allSels := cache.DeriveRouteCutoverSelectorsForPolicy(before, after, "all_cached")
+	allSels := cache.DeriveRouteCutoverSelectorsForPolicy(before, after, "all_cached", modules...)
 	if len(allSels) == 0 {
 		return
 	}
-	invSels := cache.DeriveRouteCutoverSelectorsForPolicy(before, after, "")
+	invSels := cache.DeriveRouteCutoverSelectorsForPolicy(before, after, override, modules...)
 	defaultPolicy := "retain"
 	if strings.EqualFold(strings.TrimSpace(after.Cache.ReloadPolicy), "invalidate") {
 		defaultPolicy = "invalidate"
+	}
+	if override != "" {
+		defaultPolicy = override
 	}
 	seenInvLabel := make(map[string]struct{}, len(invSels))
 	var invLabels []string
@@ -485,3 +487,36 @@ func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {
 // TLS change affects: it applies to new handshakes at reload (#486), while
 // connections already established keep the identity they were accepted with.
 const mtlsBindTimeWarn = "Server-level mutual TLS on %s applies to new TLS handshakes as soon as the reload succeeds; connections already established keep the client certificate they were accepted with."
+
+// diffConfigsWithEffectiveCutover keeps structural source diffs in unresolved
+// space, but derives execution consequences from the captured serving snapshot
+// and the exact resolved candidate. Resolving old source again could replace
+// both sides with the new environment and hide a real backend transition.
+func diffConfigsWithEffectiveCutover(before, after, beforeEffective, afterEffective *config.Config, mode string, modules ...cache.CutoverModuleIdentities) ConfigDiff {
+	d := diffConfigs(before, after, mode)
+	warnings := d.Warnings[:0]
+	for _, warning := range d.Warnings {
+		if !strings.HasPrefix(warning, "Cache cutover (") {
+			warnings = append(warnings, warning)
+		}
+	}
+	d.Warnings = warnings
+	d.CacheCutover = nil
+	if beforeEffective != nil && afterEffective != nil {
+		diffCacheCutoverPlan(beforeEffective, afterEffective, &d, mode, modules...)
+		return d
+	}
+	if (before == nil || !before.Cache.Enabled) && (after == nil || !after.Cache.Enabled) {
+		return d
+	}
+	policy := "retain"
+	if after != nil && after.Cache.ReloadPolicy == "invalidate" {
+		policy = "invalidate"
+	}
+	if mode != "" {
+		policy = mode
+	}
+	d.CacheCutover = &CacheCutoverPlan{DefaultPolicy: policy, Disposition: "unavailable"}
+	d.warn("Cache cutover (unavailable): the serving or candidate effective configuration is unavailable; affected cache scopes cannot be established. Refresh this preview against the live runtime before applying. No cache retention guarantee is implied.")
+	return d
+}

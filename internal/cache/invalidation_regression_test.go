@@ -179,7 +179,7 @@ func TestPurgeWaitsForInFlightDiskPublication(t *testing.T) {
 				committed := make(chan struct{})
 				go func() {
 					res, err := c.InvalidateScope(context.Background(), sel, InvalidateOptions{
-						CommitFence: func(uint64, []string) error {
+						CommitFence: func(_ uint64, _ []string, _ PurgeRecoveryIntent) error {
 							close(committed)
 							return nil
 						},

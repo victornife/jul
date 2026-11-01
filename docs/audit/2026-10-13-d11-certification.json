@@ -4366,13 +4366,13 @@
       "original_disposition": "not reviewed",
       "original_reason_and_limit": "generated OpenAPI, route classification, targeted admin mutation permission comparison and TLS self-lockout predicate sampled; full authorization matrix and Console UI not exercised",
       "current_paths": [
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js",
-        "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js.map",
-        "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js",
-        "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js.map",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-CHXzip_-.js",
+        "internal/admin/assets/dist/assets/CacheInvalidationPanel-CHXzip_-.js.map",
+        "internal/admin/assets/dist/assets/CodeEditor-BteXUsHe.js",
+        "internal/admin/assets/dist/assets/CodeEditor-BteXUsHe.js.map",
         "internal/admin/assets/dist/assets/index-C7sRNCYr.css",
-        "internal/admin/assets/dist/assets/index-DU7Bn--c.js",
-        "internal/admin/assets/dist/assets/index-DU7Bn--c.js.map",
+        "internal/admin/assets/dist/assets/index-C0fBWBL1.js",
+        "internal/admin/assets/dist/assets/index-C0fBWBL1.js.map",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js",
         "internal/admin/assets/dist/assets/query-DR5Dtfdd.js.map",
         "internal/admin/assets/dist/assets/rolldown-runtime-WkwZ5CU-.js",
@@ -4421,7 +4421,7 @@
       ],
       "open_defects": [],
       "establishing_pr": "https://github.com/victornife/jul/pull/604",
-      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing. PR615 and PR618 subsequently rebuild these four artifacts for Console UI updates; the prior mapping followed the original paths through PR597 and PR615 to the PR618 artifact names. This reconciles paths only and does not certify the new implementations under the historical D11 review. PR635 rebuilds these four artifacts for the selected ALPN Console integration; current paths and original-to-current mapping follow that rebuild. Historical rebuild records and review verdicts are preserved; this path reconciliation does not recertify new ALPN code under D11. #643 regenerates content-addressed Console assets; current paths and original-to-current mapping follow this build. A new rebuild record is appended; all earlier identities, mappings and review evidence remain unchanged. This does not recertify new code under D11. #644 integrates with merged PR646 and rebuilds the combined Console. Current paths now follow that combined build; both prior branch rebuild records remain unchanged, with a separate integration mapping appended. This is path reconciliation only, not historical D11 recertification. PR648 first rebuilt these assets for comparison authorization; that branch record is retained. Its main integration combines merged PR646/PR647 with PR648 and rebuilds the complete Console; current paths and original-to-current mapping follow the combined build, with both input mappings appended. Historical review evidence and verdicts are unchanged. PR669 rebuilds six content-addressed artifacts for cache inspection. Current paths follow that build, with an explicit subsequent rebuild mapping appended. This does not recertify #622 under the historical D11 review. PR669 review corrections rebuild the six current embedded asset paths again; the appended mapping preserves all earlier identities and evidence, without historical D11 recertification.",
+      "path_reconciliation": "Four original content-hashed embedded asset paths were renamed by the established Console build in selected repair PR597. Full original expansion remains in frozen JSON; all other original paths are retained. Explicit old-to-new mapping below; no wildcard or denominator narrowing. PR615 and PR618 subsequently rebuild these four artifacts for Console UI updates; the prior mapping followed the original paths through PR597 and PR615 to the PR618 artifact names. This reconciles paths only and does not certify the new implementations under the historical D11 review. PR635 rebuilds these four artifacts for the selected ALPN Console integration; current paths and original-to-current mapping follow that rebuild. Historical rebuild records and review verdicts are preserved; this path reconciliation does not recertify new ALPN code under D11. #643 regenerates content-addressed Console assets; current paths and original-to-current mapping follow this build. A new rebuild record is appended; all earlier identities, mappings and review evidence remain unchanged. This does not recertify new code under D11. #644 integrates with merged PR646 and rebuilds the combined Console. Current paths now follow that combined build; both prior branch rebuild records remain unchanged, with a separate integration mapping appended. This is path reconciliation only, not historical D11 recertification. PR648 first rebuilt these assets for comparison authorization; that branch record is retained. Its main integration combines merged PR646/PR647 with PR648 and rebuilds the complete Console; current paths and original-to-current mapping follow the combined build, with both input mappings appended. Historical review evidence and verdicts are unchanged. PR669 rebuilds six content-addressed artifacts for cache inspection. Current paths follow that build, with an explicit subsequent rebuild mapping appended. This does not recertify #622 under the historical D11 review. PR669 review corrections rebuild the six current embedded asset paths again; the appended mapping preserves all earlier identities and evidence, without historical D11 recertification. PR674 migrates Console cache purges to the versioned flow and rebuilds these six embedded artifacts. Current paths follow that build, with its source-bound old-to-new mapping appended. Frozen inventory, prior mappings, review verdicts and historical execution evidence remain unchanged; this is path reconciliation, not D11 recertification. PR675 integrates final merged PR674 and rebuilds the corrected cutover controls and outcomes. Current paths follow the combined source build; prior mappings and frozen evidence remain unchanged. This path reconciliation does not recertify the new implementation under D11. PR675 continuation rebuilds the combined corrected Console on Windows with relative source-map paths. This updates current paths only and does not recertify the new implementation or modify frozen historical D11 evidence.",
       "path_changes": {
         "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js": "internal/admin/assets/dist/assets/CodeEditor-DXuo0HqI.js",
         "internal/admin/assets/dist/assets/CodeEditor-UWWiHBzL.js.map": "internal/admin/assets/dist/assets/CodeEditor-DXuo0HqI.js.map",
@@ -4639,14 +4639,43 @@
         },
         {
           "pr": "https://github.com/victornife/jul/pull/674",
-          "context": "#624 rebuilds the Console to add reload_policy to the route cache policy editor and RouteDetail TOML view. Path reconciliation only; historical verdicts and review evidence are unchanged.",
+          "source_head": "16c6295cb51950500eca0f203639133f798e3351",
+          "context": "Console purge consumer migration and embedded asset rebuild. Path reconciliation only; preserve all historical D11 identities, mappings, verdicts and evidence without recertifying the new implementation.",
           "path_changes": {
-            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js",
-            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-BP3uXTnO.js.map",
-            "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js": "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js",
-            "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js.map": "internal/admin/assets/dist/assets/CodeEditor-DO-bZTDZ.js.map",
-            "internal/admin/assets/dist/assets/index-DaEnkoV1.js": "internal/admin/assets/dist/assets/index-DU7Bn--c.js",
-            "internal/admin/assets/dist/assets/index-DaEnkoV1.js.map": "internal/admin/assets/dist/assets/index-DU7Bn--c.js.map"
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-BkJ_xCcl.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-DF1Dth2b.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-BkJ_xCcl.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js": "internal/admin/assets/dist/assets/CodeEditor-DHO93XsP.js",
+            "internal/admin/assets/dist/assets/CodeEditor-DHiiFBrD.js.map": "internal/admin/assets/dist/assets/CodeEditor-DHO93XsP.js.map",
+            "internal/admin/assets/dist/assets/index-DaEnkoV1.js": "internal/admin/assets/dist/assets/index-SW-WH1rj.js",
+            "internal/admin/assets/dist/assets/index-DaEnkoV1.js.map": "internal/admin/assets/dist/assets/index-SW-WH1rj.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/675",
+          "source_parent": "d4beb49d41532fac814fd5294a05ffbf442589f7",
+          "integrated_main": "abe70dfcd5f3bac42264f72cf3969879dd94051b",
+          "context": "Final corrected PR675 cutover controls/outcomes source build integrated with final PR674. Path reconciliation only; preserve frozen D11 identities, historical mappings, verdicts and evidence.",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-BkJ_xCcl.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-D0nG7ZT3.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-BkJ_xCcl.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-D0nG7ZT3.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-DHO93XsP.js": "internal/admin/assets/dist/assets/CodeEditor-BkVpkJW-.js",
+            "internal/admin/assets/dist/assets/CodeEditor-DHO93XsP.js.map": "internal/admin/assets/dist/assets/CodeEditor-BkVpkJW-.js.map",
+            "internal/admin/assets/dist/assets/index-SW-WH1rj.js": "internal/admin/assets/dist/assets/index-C5GA5pwE.js",
+            "internal/admin/assets/dist/assets/index-SW-WH1rj.js.map": "internal/admin/assets/dist/assets/index-C5GA5pwE.js.map"
+          }
+        },
+        {
+          "pr": "https://github.com/victornife/jul/pull/675",
+          "source_parent": "d4beb49d41532fac814fd5294a05ffbf442589f7",
+          "integrated_main": "abe70dfcd5f3bac42264f72cf3969879dd94051b",
+          "context": "Continued corrective working tree; combined Console rebuilt with unchanged dependency lock. Path reconciliation only; historical evidence remains frozen.",
+          "path_changes": {
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-D0nG7ZT3.js": "internal/admin/assets/dist/assets/CacheInvalidationPanel-CHXzip_-.js",
+            "internal/admin/assets/dist/assets/CacheInvalidationPanel-D0nG7ZT3.js.map": "internal/admin/assets/dist/assets/CacheInvalidationPanel-CHXzip_-.js.map",
+            "internal/admin/assets/dist/assets/CodeEditor-BkVpkJW-.js": "internal/admin/assets/dist/assets/CodeEditor-BteXUsHe.js",
+            "internal/admin/assets/dist/assets/CodeEditor-BkVpkJW-.js.map": "internal/admin/assets/dist/assets/CodeEditor-BteXUsHe.js.map",
+            "internal/admin/assets/dist/assets/index-C5GA5pwE.js": "internal/admin/assets/dist/assets/index-C0fBWBL1.js",
+            "internal/admin/assets/dist/assets/index-C5GA5pwE.js.map": "internal/admin/assets/dist/assets/index-C0fBWBL1.js.map"
           }
         }
       ]

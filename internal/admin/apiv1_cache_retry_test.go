@@ -33,8 +33,8 @@ func (p *cancelPurgeAfterCommit) InvalidateScope(ctx context.Context, sel cache.
 		opCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		commit := opts.CommitFence
-		opts.CommitFence = func(gen uint64, resources []string) error {
-			if err := commit(gen, resources); err != nil {
+		opts.CommitFence = func(gen uint64, resources []string, intent cache.PurgeRecoveryIntent) error {
+			if err := commit(gen, resources, intent); err != nil {
 				return err
 			}
 			cancel()

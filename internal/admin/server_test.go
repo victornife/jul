@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"jul/internal/adminapi"
 	"jul/internal/config"
 	"jul/internal/observability"
 	"jul/internal/rbac"
@@ -24,15 +26,15 @@ import (
 
 func TestCachePurgeAuditUsesAuthenticatedPrincipal(t *testing.T) {
 	const token = "cache-purge-audit-scoped-token-fixture-514"
-	const key = "confidential-cache-key-fixture-514"
+	const key = "GET\nportal.example.com\n/a?secret=confidential-cache-key-fixture-514"
 	for _, test := range []struct {
 		name     string
-		path     string
+		selector adminapi.CacheSelector
 		disabled bool
 	}{
-		{name: "all", path: "/cache/purge"},
-		{name: "one", path: "/cache/purge?key=" + key},
-		{name: "disabled", path: "/cache/purge", disabled: true},
+		{name: "all", selector: adminapi.CacheSelector{Kind: "all", All: true}},
+		{name: "one", selector: adminapi.CacheSelector{Kind: "key", Key: key}},
+		{name: "disabled", selector: adminapi.CacheSelector{Kind: "all", All: true}, disabled: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mock := &fakePurger{}
@@ -53,7 +55,12 @@ func TestCachePurgeAuditUsesAuthenticatedPrincipal(t *testing.T) {
 				t.Fatal(err)
 			}
 			admin.UpdatePolicy(policy)
-			request := httptest.NewRequest(http.MethodPost, test.path, nil)
+			body, err := json.Marshal(adminapi.CachePurgeRequest{Selector: test.selector, ConfirmBroad: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
 			request.RemoteAddr = "127.0.0.1:4321"
 			request.Header.Set("Authorization", "Bearer "+token)
 			request.Header.Set("X-Forwarded-For", "203.0.113.99")
@@ -63,12 +70,7 @@ func TestCachePurgeAuditUsesAuthenticatedPrincipal(t *testing.T) {
 				t.Fatalf("purge status = %d, want 200", recorder.Code)
 			}
 			events := admin.audit.snapshot("cache.purge", "success", 0)
-			if test.disabled {
-				if len(events) != 0 {
-					t.Fatal("disabled cache reported a purge audit event")
-				}
-				return
-			}
+
 			if len(events) != 1 {
 				t.Fatalf("purge audit events = %d, want 1", len(events))
 			}
@@ -78,6 +80,9 @@ func TestCachePurgeAuditUsesAuthenticatedPrincipal(t *testing.T) {
 			}
 			if strings.Contains(event.Detail, key) || strings.Contains(event.Detail, token) || event.ResourceID != "" || event.Selector != "" {
 				t.Fatal("purge audit contains request content")
+			}
+			if test.name == "disabled" && (mock.purged.Load() != 0 || decodeInto[adminapi.CachePurgeResponse](t, recorder).Outcome != "cache_disabled") {
+				t.Fatal("disabled purge mutated cache or lost its structured outcome")
 			}
 			if test.name == "all" && mock.purged.Load() != 1 {
 				t.Fatal("whole-cache purge was not performed")
@@ -376,14 +381,14 @@ func TestBearerAuth(t *testing.T) {
 
 	// Missing token -> 401.
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/cache/purge", nil))
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", nil))
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("no token = %d, want 401", rr.Code)
 	}
 
 	// Wrong token -> 401.
 	rr = httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/cache/purge", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusUnauthorized {
@@ -392,7 +397,8 @@ func TestBearerAuth(t *testing.T) {
 
 	// Correct token -> 200 and purge invoked.
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/cache/purge", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/cache/purge", strings.NewReader(`{"selector":{"kind":"all","all":true},"confirm_broad":true}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer secret")
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
@@ -410,18 +416,18 @@ func TestPurgeMethodAndKey(t *testing.T) {
 
 	// GET not allowed.
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/cache/purge", nil))
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("GET purge = %d, want 405", rr.Code)
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/cache/purge", nil))
+	if rr.Code != http.StatusBadRequest || rr.Header().Get("Allow") != http.MethodPost {
+		t.Fatalf("GET purge = %d, want versioned invalid_request with Allow: POST", rr.Code)
 	}
 
-	// Key-scoped purge -> Delete.
-	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/cache/purge?key=GET%5Cnexample%5Cn/a", nil))
+	// Key-scoped versioned purge -> Delete.
+	key := "GET\nexample\n/a"
+	rr = postV1JSON(t, s, "/api/v1/cache/purge", "", "", adminapi.CachePurgeRequest{Selector: adminapi.CacheSelector{Kind: "key", Key: key}})
 	if rr.Code != http.StatusOK {
 		t.Fatalf("key purge = %d, want 200", rr.Code)
 	}
-	if got, _ := purger.deleted.Load().(string); got == "" {
+	if got, _ := purger.deleted.Load().(string); got != key {
 		t.Fatal("expected Delete to be called with a key")
 	}
 	if purger.purged.Load() != 0 {

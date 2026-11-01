@@ -94,6 +94,7 @@ type Cache struct {
 	routePolicyDigest         map[string][16]byte
 	routeMatchers             map[string]string
 	routeBackends             map[string]string
+	routeReloadPolicies       map[string]string
 	routeMatcherGen           map[string]uint64
 	routePolicyCommitted      bool
 	inCandidateBuild          bool
@@ -220,7 +221,7 @@ func NewWithVersionContext(cfg config.CacheConfig, logger *slog.Logger, versions
 		}
 		// Recover before attaching callbacks: corrupt metadata cleanup can call
 		// back into genMu, and must finish before taking the item snapshot.
-		c.routeEpoch, c.routeMatchers, c.routeBackends = d.loadRouteEpochsWithBackends()
+		c.routeEpoch, c.routeMatchers, c.routeBackends, c.routeReloadPolicies = d.loadRouteEpochState()
 		intents := d.loadPurgeIntents()
 		d.onEviction = func(k string) { c.recordKeyDecision(k, "disk_eviction") }
 		d.onSkip = c.captureSkipped

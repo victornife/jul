@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -86,6 +87,7 @@ type HandlerFactory struct {
 	liveConfig     *config.Config
 	lastCutover    []cache.InvalidateResult
 	lastCutoverErr error
+	lastCutoverGen uint64
 }
 
 // LastCacheCutover returns the results and any error from the most recent
@@ -96,10 +98,11 @@ func (f *HandlerFactory) LastCacheCutover() ([]cache.InvalidateResult, error) {
 	return append([]cache.InvalidateResult(nil), f.lastCutover...), f.lastCutoverErr
 }
 
-func (f *HandlerFactory) recordCacheCutover(results []cache.InvalidateResult, err error) {
+func (f *HandlerFactory) recordCacheCutover(genID uint64, results []cache.InvalidateResult, err error) {
 	f.moduleMu.Lock()
 	f.lastCutover = append([]cache.InvalidateResult(nil), results...)
 	f.lastCutoverErr = err
+	f.lastCutoverGen = genID
 	f.moduleMu.Unlock()
 }
 
@@ -194,6 +197,14 @@ func (f *HandlerFactory) PluginModules() map[string]plugins.ModuleIdentity {
 	return out
 }
 
+func cachePluginModuleDigests(modules map[string]plugins.ModuleIdentity) map[string]string {
+	out := make(map[string]string, len(modules))
+	for name, id := range modules {
+		out[name] = id.Digest
+	}
+	return out
+}
+
 // PluginModulesUnchanged proves that cfg's plugin modules resolve to exactly
 // the bytes the serving generation compiled, for the semantic no-op check.
 func (f *HandlerFactory) PluginModulesUnchanged(cfg map[string]config.PluginConfig) bool {
@@ -243,10 +254,11 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	if commit {
 		retireHandlers := gen.Commit()
 		if f.Cache != nil {
-			f.Cache.CommitRoutePolicies(gen.cacheRoutePolicies)
+			commitErr := f.Cache.CommitRoutePoliciesWithCutover(gen.cacheRoutePolicies, config.CacheCutoverMode(ctx))
+			f.recordCacheCutover(0, nil, commitErr)
 			if f.liveConfig != nil {
-				results, cutoverErr := f.Cache.ExecuteRouteCutover(ctx, f.liveConfig, c, "")
-				f.recordCacheCutover(results, cutoverErr)
+				results, cutoverErr := f.Cache.ExecuteRouteCutover(ctx, f.liveConfig, c, config.CacheCutoverMode(ctx), cache.CutoverModuleIdentities{Before: cachePluginModuleDigests(f.PluginModules()), After: cachePluginModuleDigests(gen.pluginModules)})
+				f.recordCacheCutover(0, results, errors.Join(commitErr, cutoverErr))
 				if cutoverErr != nil && f.Log != nil {
 					f.Log.Warn("cache cutover invalidation degraded after publish", "error", cutoverErr)
 				}
@@ -324,10 +336,11 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		committed = true
 		retireHandlers := gen.Commit()
 		if f.Cache != nil {
-			f.Cache.CommitRoutePolicies(gen.cacheRoutePolicies)
+			commitErr := f.Cache.CommitRoutePoliciesWithCutover(gen.cacheRoutePolicies, config.CacheCutoverMode(ctx))
+			f.recordCacheCutover(genID, nil, commitErr)
 			if f.liveConfig != nil {
-				results, cutoverErr := f.Cache.ExecuteRouteCutover(context.Background(), f.liveConfig, c, "")
-				f.recordCacheCutover(results, cutoverErr)
+				results, cutoverErr := f.Cache.ExecuteRouteCutover(context.Background(), f.liveConfig, c, config.CacheCutoverMode(ctx), cache.CutoverModuleIdentities{Before: cachePluginModuleDigests(f.PluginModules()), After: cachePluginModuleDigests(gen.pluginModules)})
+				f.recordCacheCutover(genID, results, errors.Join(commitErr, cutoverErr))
 				if cutoverErr != nil && f.Log != nil {
 					f.Log.Warn("cache cutover invalidation degraded after publish", "error", cutoverErr)
 				}
@@ -457,6 +470,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	}
 	gen.Stage(pluginSet)
 	gen.pluginModules = pluginSet.Identities()
+	compiledPluginDigests := cachePluginModuleDigests(gen.pluginModules)
 	gen.pluginResponse = make(map[string]bool, len(c.Plugins))
 	for name := range c.Plugins {
 		gen.pluginResponse[name] = pluginSet.ResponsePoint(name) != nil
@@ -488,7 +502,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		multiOverlap := totalCachedLocs > 1 || loc.Match.HasPredicates()
 		rc := cache.CompileRouteCacheConfig(scope, multiOverlap, loc.CachePolicy).
 			WithMatcher(loc, f.Versions).
-			WithBackendCutover(c, srv, loc, f.Versions)
+			WithBackendCutover(c, srv, loc, f.Versions, compiledPluginDigests)
 		rc.Epoch = f.Cache.CurrentRouteEpoch(scope)
 		switch action {
 		case router.ActionProxy:

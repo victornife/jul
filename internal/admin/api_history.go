@@ -336,6 +336,9 @@ type historyRollbackDiff struct {
 // while a staged restart or external divergence is pending, when a hot rollback
 // is already refused.
 func (s *Server) handleConfigHistoryDiff(w http.ResponseWriter, r *http.Request) {
+	if !prepareCacheCutoverRequest(w, r, "", "") {
+		return
+	}
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
 		return
@@ -372,8 +375,14 @@ func (s *Server) handleConfigHistoryDiff(w http.ResponseWriter, r *http.Request)
 		})
 		return
 	}
+	var moduleDigests map[string]string
+	beforeEffective, _ := s.patchRuntimeBaseline(nil, state.Config, &moduleDigests)
+	var afterEffective *config.Config
+	if candidate, candidateErr := config.NewCandidateContext(r.Context(), after); candidateErr == nil {
+		afterEffective = candidate.Effective
+	}
 	writeJSON(w, http.StatusOK, historyRollbackDiff{
-		ConfigDiff:  diffConfigs(state.Config, after),
+		ConfigDiff:  diffConfigsWithEffectiveCutover(state.Config, after, beforeEffective, afterEffective, config.CacheCutoverMode(r.Context()), observeCutoverModules(r.Context(), afterEffective, moduleDigests)),
 		BaseVersion: state.Version,
 	})
 }
@@ -390,8 +399,9 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		ID          string `json:"id"`
-		BaseVersion string `json:"base_version"`
+		ID           string `json:"id"`
+		BaseVersion  string `json:"base_version"`
+		CacheCutover string `json:"cache_cutover,omitempty"`
 	}
 	body, err := readBoundedBody(r, 1<<16)
 	if err == nil {
@@ -399,6 +409,12 @@ func (s *Server) handleConfigRollback(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !prepareCacheCutoverRequest(w, r, req.CacheCutover, r.URL.Query().Get("mode")) {
+		return
+	}
+	if !requireCacheCutoverSupport(w, r, s.deps.ApplyConfigRaw != nil) {
 		return
 	}
 	result, code, err := s.rollbackToSnapshot(req.ID, req.BaseVersion, w, r)

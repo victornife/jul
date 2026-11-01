@@ -1,3 +1,5 @@
+> **Superseded readiness checkpoint.** The later review found reproducible gaps at `d4beb49d`. See [the corrective findings and validation record](2026-11-01-pr675-corrections-and-validation.md) for the integrated #674 fixes, additional adversarial findings and final validation boundary. Earlier zero-finding claims below are historical, not final-head evidence.
+
 # Independent Review Report — `#624` Route/Backend Cutover & `#620` Integrated Epic Verification
 
 - **Date**: 2026-10-30

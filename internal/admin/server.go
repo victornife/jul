@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"jul/internal/buildcaps"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/logthrottle"
 	"jul/internal/observability"
@@ -111,6 +112,8 @@ type ApplyRequestContext struct {
 	// KeepOpenEntries lists the entry route_ids or coordinates the caller
 	// requested to keep open on an uncertain-only change (SD-09, #642).
 	KeepOpenEntries []string
+	// CacheCutover is a one-change retain/invalidate override, never persisted as configuration.
+	CacheCutover string
 
 	// StartedAt is the wall-clock time the handler admitted the operation. It
 	// is recorded on the terminal ledger record so a browser can observe when
@@ -230,17 +233,18 @@ func (e *AuthorizationError) Error() string { return e.Message }
 // including any async restoration. It is exposed in RuntimeOverview so the
 // console can show the final state of a previously timed-out apply.
 type ManagedApplyOutcome struct {
-	ID                  string    `json:"id"`
-	Mode                string    `json:"mode"`
-	OK                  bool      `json:"ok"`
-	Outcome             string    `json:"outcome"` // server.ReloadOutcome string
-	Restored            bool      `json:"restored,omitempty"`
-	RestoreError        string    `json:"restore_error,omitempty"`
-	FinalDiskVersion    string    `json:"final_disk_version,omitempty"`
-	FinalServingVersion string    `json:"final_serving_version,omitempty"`
-	CompletedAt         time.Time `json:"completed_at"`
-	Actor               string    `json:"actor,omitempty"`
-	SourceIP            string    `json:"source_ip,omitempty"`
+	CacheCutover        *cachemeta.CutoverResult `json:"cache_cutover,omitempty"`
+	ID                  string                   `json:"id"`
+	Mode                string                   `json:"mode"`
+	OK                  bool                     `json:"ok"`
+	Outcome             string                   `json:"outcome"` // server.ReloadOutcome string
+	Restored            bool                     `json:"restored,omitempty"`
+	RestoreError        string                   `json:"restore_error,omitempty"`
+	FinalDiskVersion    string                   `json:"final_disk_version,omitempty"`
+	FinalServingVersion string                   `json:"final_serving_version,omitempty"`
+	CompletedAt         time.Time                `json:"completed_at"`
+	Actor               string                   `json:"actor,omitempty"`
+	SourceIP            string                   `json:"source_ip,omitempty"`
 
 	// HistorySnapshotID, HistoryError, and FinalizationError surface the
 	// configuration-history finalization provenance (AC-14) separately from the
@@ -361,7 +365,7 @@ type Deps struct {
 	// PluginModules returns the content identity of each serving plugin's
 	// compiled module, keyed by plugin name (#429). Nil omits digests.
 	PluginModules func() map[string]PluginModule
-	// Cache, when non-nil, backs the /cache/purge endpoint.
+	// Cache, when non-nil, backs the versioned cache invalidation endpoints.
 	Cache Purger
 	// Reload triggers a configuration reload. It returns an error if the
 	// reload could not be enqueued within the implementation's timeout.
@@ -798,6 +802,12 @@ func (s *Server) RecordManagedApplyOutcome(ctx ApplyRequestContext, o ManagedApp
 	if o.FinalServingVersion != "" {
 		detail += " final_serving_version=" + o.FinalServingVersion
 	}
+	if o.CacheCutover != nil {
+		detail += fmt.Sprintf(" cache_cutover=%s invalidation_effective=%s failed_entries=%d remaining_entries=%d", o.CacheCutover.State, o.CacheCutover.InvalidationEffective, o.CacheCutover.FailedEntries, o.CacheCutover.RemainingEntries)
+		if o.CacheCutover.InvalidationEffective != "effective" {
+			result = "failure"
+		}
+	}
 	actor := ctx.Actor
 	if actor == "" {
 		actor = "system"
@@ -991,67 +1001,6 @@ func (s *Server) handleMetrics() http.Handler {
 		}
 		s.deps.Metrics.ServeHTTP(w, r)
 	})
-}
-
-// handlePurge clears the response cache. POST only. An optional ?key=<key>
-// removes a single entry; otherwise the whole cache is purged.
-func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if s.deps.Cache == nil {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "cache disabled"})
-		return
-	}
-	if key := r.URL.Query().Get("key"); key != "" {
-		if rp, ok := s.deps.Cache.(ResultPurger); ok {
-			res, err := rp.DeleteResult(key)
-			if err != nil || res.InvalidationEffective != "effective" {
-				status := res.InvalidationEffective
-				if status == "" {
-					status = "failed"
-				}
-				s.recordAudit(r, "cache.purge", "cache", "failure", "single-entry purge "+status)
-				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-					"status":                 status,
-					"outcome":                res.Outcome,
-					"invalidation_effective": res.InvalidationEffective,
-					"failed_entries":         res.FailedEntries,
-					"recovery_guidance":      res.RecoveryGuidance,
-				})
-				return
-			}
-		} else {
-			s.deps.Cache.Delete(key)
-		}
-		s.recordAudit(r, "cache.purge", "cache", "success", "single-entry purge requested")
-		writeJSON(w, http.StatusOK, map[string]string{"status": "purged", "key": key})
-		return
-	}
-	if rp, ok := s.deps.Cache.(ResultPurger); ok {
-		res, err := rp.PurgeResult()
-		if err != nil || res.InvalidationEffective != "effective" {
-			status := res.InvalidationEffective
-			if status == "" {
-				status = "failed"
-			}
-			s.recordAudit(r, "cache.purge", "cache", "failure", "whole-cache purge "+status)
-			writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-				"status":                 status,
-				"outcome":                res.Outcome,
-				"invalidation_effective": res.InvalidationEffective,
-				"failed_entries":         res.FailedEntries,
-				"recovery_guidance":      res.RecoveryGuidance,
-			})
-			return
-		}
-	} else {
-		s.deps.Cache.Purge()
-	}
-	s.recordAudit(r, "cache.purge", "cache", "success", "whole-cache purge completed")
-	writeJSON(w, http.StatusOK, map[string]string{"status": "purged"})
 }
 
 // handleReload triggers a configuration reload. POST only. It returns 202

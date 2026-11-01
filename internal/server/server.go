@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"jul/internal/background"
+	"jul/internal/cachemeta"
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/logthrottle"
@@ -97,6 +98,7 @@ type ReloadRequest struct {
 	// open exchanges the operator requested to keep open on an uncertain-only
 	// change (SD-09, ADR 0026 #642 amendment). Mandatory tightenings,
 	// withdrawals, and removals always override this list.
+	CacheCutover    string
 	KeepOpenEntries []string
 	// AdminErr, when set by the caller, is reported as a failed admin
 	// subsystem in the reload result. The app layer uses this to surface RBAC
@@ -263,6 +265,8 @@ type Server struct {
 	// PluginModuleChanges returns, once, the module content-identity changes
 	// published by generation genID, for the reload result.
 	PluginModuleChanges func(genID uint64) []PluginModuleChange
+	// CacheCutoverResult returns only the outcome belonging to this publication.
+	CacheCutoverResult func(genID uint64) *cachemeta.CutoverResult
 	// WAFSourceDigests returns the engine-owned external source digests of the
 	// compiled global and per-location WAF policies for generation genID (#642, #563).
 	WAFSourceDigests func(genID uint64) (string, map[[2]int]string)
@@ -350,6 +354,7 @@ type Server struct {
 // coherent view: the effective config, raw config, bound listener set, and
 // handler generation all belong to the same logical moment.
 type runtimeState struct {
+	PluginModules    map[string]string
 	EffectiveVersion string
 	// EffectiveConfig is the expanded effective config currently being served.
 	// Treat as read-only.
@@ -566,6 +571,10 @@ type BoundListenerInfo struct {
 // rebind checks, and restart-required classification are evaluated against
 // the live runtime instead of the on-disk config (R9-04, R9-13).
 type LiveSnapshot struct {
+	// PluginModules captures the exact generation-owned compiled module digests
+	// alongside EffectiveConfig. Callers must treat the map as read-only.
+	PluginModules map[string]string
+
 	// EffectiveVersion is keyed in the server's immutable version context.
 	EffectiveVersion string
 	// EffectiveConfig is the server's current effective config. Callers must
@@ -605,6 +614,7 @@ func (s *Server) LiveSnapshot() LiveSnapshot {
 	if rs := s.runtimeState.Load(); rs != nil {
 		return LiveSnapshot{
 			EffectiveConfig:  rs.EffectiveConfig,
+			PluginModules:    copyPluginModuleDigests(rs.PluginModules),
 			EffectiveVersion: rs.EffectiveVersion,
 			RawConfig:        rs.RawConfig,
 			Listeners:        copyListenerMap(rs.Listeners),
@@ -619,12 +629,28 @@ func (s *Server) LiveSnapshot() LiveSnapshot {
 // server's current fields. It is used by Run before serving begins.
 func (s *Server) publishRuntimeStateDirect(gen uint64) {
 	s.runtimeState.Store(&runtimeState{
+		PluginModules:    s.loadedPluginModuleDigests(),
 		EffectiveConfig:  s.cfg,
 		EffectiveVersion: s.versions.Config(s.cfg),
 		RawConfig:        s.rawCfg,
 		Listeners:        s.boundListenerSnapshot(),
 		Generation:       gen,
 	})
+}
+
+func copyPluginModuleDigests(src map[string]string) map[string]string {
+	out := make(map[string]string, len(src))
+	for name, digest := range src {
+		out[name] = digest
+	}
+	return out
+}
+
+func (s *Server) loadedPluginModuleDigests() map[string]string {
+	if s.loadedAccessFiles == nil {
+		return nil
+	}
+	return copyPluginModuleDigests(s.loadedAccessFiles.pluginDigestByName)
 }
 
 func copyListenerMap(src map[string]BoundListenerInfo) map[string]BoundListenerInfo {
@@ -1395,6 +1421,8 @@ func (s *Server) doReload(req ReloadRequest) {
 		reloadCtx = ctx
 	}
 
+	reloadCtx = config.WithCacheCutoverMode(reloadCtx, req.CacheCutover)
+
 	s.log.Info("reloading configuration", "source", s.source.Name(), "reload_id", req.ID)
 
 	var plan *ReloadPlan
@@ -1606,6 +1634,7 @@ func (s *Server) doReload(req ReloadRequest) {
 	}
 	result.Published = true
 	result.PluginModules = plan.pluginChanges
+	result.CacheCutover = plan.cacheCutover
 
 	// Phases 8–10: activation and post-commit side effects. After Publish we
 	// complete the minimum safe work even if the deadline has expired.
@@ -1691,6 +1720,17 @@ func (s *Server) doReload(req ReloadRequest) {
 	default:
 		result.Outcome = ReloadAppliedLive
 		s.log.Info("configuration reloaded", "duration_ms", result.DurationMS, "reload_id", req.ID)
+	}
+
+	if result.CacheCutover != nil && result.CacheCutover.InvalidationEffective != "effective" {
+		result.Outcome = ReloadAppliedDegraded
+		detail := "cache cutover " + result.CacheCutover.InvalidationEffective + "; " + result.CacheCutover.RecoveryGuidance
+		result.HTTP.Status = ReloadSubsystemFailed
+		result.HTTP.Error = detail
+		if result.Error != "" {
+			result.Error += "; "
+		}
+		result.Error += detail
 	}
 
 	if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {

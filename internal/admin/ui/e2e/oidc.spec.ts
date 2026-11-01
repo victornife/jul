@@ -27,12 +27,25 @@ test("sign-in, RBAC, CSRF, secret-free storage, expiry and logout", async ({ pag
   expect(JSON.stringify(storage)).not.toContain(session.value);
   expect(JSON.stringify(storage)).not.toMatch(/synthetic-not-for-Jul|id_token|code_verifier/);
   const csrf = await page.evaluate(
-    async () => (await fetch("/cache/purge", { method: "POST" })).status,
+    async () =>
+      (
+        await fetch("/api/v1/cache/purge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ selector: { kind: "all", all: true }, confirm_broad: true }),
+        })
+      ).status,
   );
   expect(csrf).toBe(401);
   const bypass = await page.evaluate(
     async () =>
-      (await fetch("/cache/purge", { method: "POST", headers: { "X-Jul-Console": "1" } })).status,
+      (
+        await fetch("/api/v1/cache/purge", {
+          method: "POST",
+          headers: { "X-Jul-Console": "1", "Content-Type": "application/json" },
+          body: JSON.stringify({ selector: { kind: "all", all: true }, confirm_broad: true }),
+        })
+      ).status,
   );
   expect(bypass).toBe(403);
   // Re-authentication is explicit, never a provider redirect for API callers.

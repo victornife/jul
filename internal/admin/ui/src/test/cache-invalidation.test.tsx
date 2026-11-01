@@ -21,7 +21,6 @@ import {
   fetchTimeline,
   fetchUpstreamHistory,
   previewCachePurge,
-  purgeCache,
   reportClientError,
   searchConfig,
   uploadPluginWasm,
@@ -1384,9 +1383,7 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
           ),
         );
       }
-      if (url === "/cache/purge") {
-        return Promise.resolve(new Response("{}", { status: 200 }));
-      }
+
       if (url === "/api/config") {
         return Promise.resolve(
           new Response(
@@ -1555,9 +1552,10 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
       screen.getByLabelText("Strip configured tag headers from client responses"),
     );
 
-    const purgeBtn = await screen.findByRole("button", { name: "Purge cache" });
-    fireEvent.click(purgeBtn);
-    expect(await screen.findByText("Cache purged.")).toBeInTheDocument();
+    // All cache invalidation uses the structured preview/confirm panel.
+    expect(await screen.findByRole("button", { name: "Preview invalidation scope" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Purge cache" })).not.toBeInTheDocument();
+
 
     const reviewBtn = screen.getByRole("button", { name: "Review staged change" });
     await waitFor(() => {
@@ -1566,7 +1564,7 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     fireEvent.click(reviewBtn);
   });
 
-  it("exercises observability, audit, plugin upload, and legacy purge methods in client.ts", async () => {
+  it("exercises observability, audit, plugin upload, methods in client.ts", async () => {
     globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url.includes("/api/search")) {
@@ -1637,7 +1635,6 @@ describe("CacheInvalidationPanel full operator workflow (#621)", () => {
     expect(auditExportUrl("csv", { op: "cache.purge", result: "success" })).toContain(
       "format=csv",
     );
-    await purgeCache("GET:example.com:/a");
     const uploaded = await uploadPluginWasm(new File(["wasm"], "test.wasm"));
     expect(uploaded.name).toBe("test.wasm");
     if (typeof URL.createObjectURL === "function") {

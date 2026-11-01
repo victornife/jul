@@ -1030,6 +1030,63 @@ func parseBaseKeyParts(k string) (method, host, requestURI string, isVariant boo
 	return method, host, requestURI, isVariant, true
 }
 
+// CutoverModuleIdentities binds selector derivation to module bytes observed by
+// the serving and prepared generations. Values are private digest identities,
+// not source paths or module bytes. Callers without a runtime inventory may
+// omit it; supplied but missing identities conservatively mark a referenced
+// plugin changed instead of claiming byte equality.
+type CutoverModuleIdentities struct {
+	Before map[string]string
+	After  map[string]string
+}
+
+// RoutePluginNames returns the plugin handler/filter names attached to one
+// route, including server-level filters, in execution declaration order.
+func RoutePluginNames(srv config.ServerConfig, loc config.LocationConfig) []string {
+	names := make([]string, 0, len(srv.Plugins)+len(loc.Plugins)+1)
+	names = append(names, srv.Plugins...)
+	names = append(names, loc.Plugins...)
+	if loc.Plugin != "" {
+		names = append(names, loc.Plugin)
+	}
+	return names
+}
+
+func changedPluginNames(before, after *config.Config, observed []CutoverModuleIdentities) map[string]bool {
+	out := make(map[string]bool)
+	if before == nil || after == nil {
+		return out
+	}
+	for name, prior := range before.Plugins {
+		next, exists := after.Plugins[name]
+		if !exists || !reflect.DeepEqual(prior, next) {
+			out[name] = true
+		}
+	}
+	for name := range after.Plugins {
+		if _, exists := before.Plugins[name]; !exists {
+			out[name] = true
+		}
+		if len(observed) > 0 {
+			previous := strings.TrimPrefix(observed[0].Before[name], "sha256:")
+			next := strings.TrimPrefix(observed[0].After[name], "sha256:")
+			if previous == "" || next == "" || previous != next {
+				out[name] = true
+			}
+		}
+	}
+	return out
+}
+
+func routeUsesChangedPlugin(srv config.ServerConfig, loc config.LocationConfig, changed map[string]bool) bool {
+	for _, name := range RoutePluginNames(srv, loc) {
+		if changed[name] {
+			return true
+		}
+	}
+	return false
+}
+
 // DeriveRouteCutoverSelectors computes the deduplicated minimal set of cache
 // invalidation selectors covering route or backend changes between before and
 // after configurations (reusable contract for #624 / CACHE-OPS-04, ADR 0027 §6.2).
@@ -1044,7 +1101,7 @@ func DeriveRouteCutoverSelectors(before, after *config.Config) []NormalizedSelec
 // "invalidate", all changed/deleted routes are included. When overrideMode is
 // empty (""), each changed/deleted route is included when its effective
 // reload_policy (in before or after) is "invalidate".
-func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, overrideMode string) []NormalizedSelector {
+func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, overrideMode string, modules ...CutoverModuleIdentities) []NormalizedSelector {
 	mode := strings.ToLower(strings.TrimSpace(overrideMode))
 	if mode == "retain" || (before == nil && after == nil) {
 		return nil
@@ -1052,16 +1109,17 @@ func DeriveRouteCutoverSelectorsForPolicy(before, after *config.Config, override
 	if mode != "invalidate" && (before == nil || after == nil) {
 		return nil
 	}
-	return deriveRouteCutoverSelectorsInternal(before, after, mode)
+	return deriveRouteCutoverSelectorsInternal(before, after, mode, modules...)
 }
 
-func deriveRouteCutoverSelectorsInternal(before, after *config.Config, mode string) []NormalizedSelector {
+func deriveRouteCutoverSelectorsInternal(before, after *config.Config, mode string, modules ...CutoverModuleIdentities) []NormalizedSelector {
 	if before == nil && after == nil {
 		return nil
 	}
 	includeUncached := mode == "all" || mode == "invalidate"
 	allCached := mode == "all_cached" || includeUncached
 	changedUpstreams := changedUpstreamNames(before, after)
+	changedPlugins := changedPluginNames(before, after, modules)
 	var selectors []NormalizedSelector
 	seenIdx := make(map[[32]byte]int)
 	addNorm := func(ns NormalizedSelector) {
@@ -1093,7 +1151,7 @@ func deriveRouteCutoverSelectorsInternal(before, after *config.Config, mode stri
 				if !useInvalidate {
 					continue
 				}
-				changed := oloc == nil || !sameLocationCutoverTarget(srv, loc, osrv, oloc)
+				changed := oloc == nil || !sameLocationCutoverTarget(srv, loc, osrv, oloc) || routeUsesChangedPlugin(*srv, *loc, changedPlugins)
 				if !changed {
 					if up := config.ResolveLocationUpstreamName(primary, *loc); up != "" && changedUpstreams[up] {
 						changed = true

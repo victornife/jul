@@ -43,6 +43,37 @@ describe("streamReloadFailure", () => {
 });
 
 describe("deriveApplyOutcome", () => {
+  it.each(["incomplete", "uncertain"])(
+    "preserves %s cache recovery guidance alongside a committed timeout",
+    (effectiveness) => {
+      const outcome = deriveApplyOutcome({
+        accepted: true,
+        pendingReload: false,
+        runtimeObserved: true,
+        reloadOutcome: "applied_degraded",
+        published: true,
+        reloadTimedOut: true,
+        timedOutPhase: "activate",
+        stream: { status: "failed", error: "stream listener failed" },
+        cacheCutover: {
+          invalidation_effective: effectiveness,
+          recovery_guidance: "Configuration is live. Reconcile the cache scopes; do not reapply.",
+        },
+      });
+      expect(outcome.kind).toBe("partial-reload");
+      expect(outcome.blocking).toBe(false);
+      expect(outcome.message).toContain("Reconcile the cache scopes");
+      expect(outcome.message).toContain("timeout (phase: activate)");
+      expect(outcome.failures).toContainEqual({
+        name: "L4 stream proxy",
+        detail: "stream listener failed",
+      });
+      render(<ApplyOutcomeBanner outcome={outcome} />);
+      expect(screen.getByText(/Configuration is live\. Reconcile/)).toBeInTheDocument();
+      expect(screen.queryByText(/Apply again/i)).not.toBeInTheDocument();
+    },
+  );
+
   it("no-change: successful without claiming a runtime publication", () => {
     expect(ReloadOutcomeSchema.parse("no_change")).toBe("no_change");
     const o = deriveApplyOutcome({

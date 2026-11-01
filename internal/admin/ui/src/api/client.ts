@@ -37,7 +37,18 @@ const ReloadSubsystemResultSchema = z.object({
   error: z.string().optional(),
 });
 
+export const CacheCutoverResultSchema = z.object({
+  state: z.enum(["not_required", "succeeded", "partial", "uncertain"]),
+  invalidation_effective: z.enum(["effective", "incomplete", "uncertain"]),
+  operations: z.number().int().nonnegative(),
+  invalidated_resources: z.number().int().nonnegative(),
+  failed_entries: z.number().int().nonnegative(),
+  remaining_entries: z.number().int().nonnegative(),
+  recovery_guidance: z.string().optional(),
+});
+
 export const ReloadResultSchema = z.object({
+  cache_cutover: CacheCutoverResultSchema.optional(),
   id: z.string().optional(),
   source: z.union([z.string(), z.number()]).optional(),
   outcome: ReloadOutcomeSchema.optional(),
@@ -548,6 +559,7 @@ export type AdminRuntimeStatus = z.infer<typeof AdminRuntimeStatusSchema>;
 // Exposed in RuntimeOverview as last_managed_apply so the console can surface
 // the final state of a previously timed-out apply without polling (H-06/M-05).
 export const ManagedApplyOutcomeSchema = z.object({
+  cache_cutover: CacheCutoverResultSchema.optional(),
   id: z.string(),
   mode: z.string(),
   ok: z.boolean(),
@@ -1554,25 +1566,6 @@ export function fetchStats(): Promise<StatsSnapshot> {
   return api<unknown>("/stats").then((d) => StatsSnapshotSchema.parse(d));
 }
 
-/**
- * Purges the response cache (Milestone 3.2). With no key the whole cache is
- * cleared; a key removes a single entry. The admin endpoint lives at the server
- * root (/cache/purge), not under /api, so this bypasses the /api-prefixed
- * client helper.
- */
-export async function purgeCache(key?: string): Promise<void> {
-  const headers = new Headers();
-  headers.set("X-Jul-Console", "1");
-  headers.set("Accept", "application/json");
-  const token = authToken.get();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const url = key ? `/cache/purge?key=${encodeURIComponent(key)}` : "/cache/purge";
-  const resp = await fetch(url, { method: "POST", headers });
-  if (!resp.ok) {
-    throw new ApiError("/cache/purge", resp.status, `${String(resp.status)} ${resp.statusText}`);
-  }
-}
-
 // ── Scoped cache invalidation (/api/v1/cache/purge*, #621) ───────────────────
 
 export type CacheSelectorKind = "exact_url" | "prefix" | "glob" | "tag" | "host" | "key" | "all";
@@ -1773,6 +1766,7 @@ export async function rollback(
   id: string,
   confirmAdmin = false,
   baseVersion?: string,
+  cacheCutover: CacheCutoverMode = "",
 ): Promise<ApplyResult> {
   const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
   headers.set("X-Jul-Console", "1");
@@ -1785,7 +1779,11 @@ export async function rollback(
   const resp = await fetch(`/api/config/rollback${query}`, {
     method: "POST",
     headers,
-    body: JSON.stringify(baseVersion ? { id, base_version: baseVersion } : { id }),
+    body: JSON.stringify({
+      id,
+      ...(baseVersion ? { base_version: baseVersion } : {}),
+      ...(cacheCutover ? { cache_cutover: cacheCutover } : {}),
+    }),
   });
   let data: unknown = null;
   try {
@@ -1968,6 +1966,8 @@ export const SharingPlanReportSchema = z.object({
 });
 export type SharingPlanReport = z.infer<typeof SharingPlanReportSchema>;
 
+export type CacheCutoverMode = "" | "retain" | "invalidate";
+
 export const ConfigDiffSchema = z.object({
   summary: z.string(),
   affected: z.array(z.string()).optional(),
@@ -1976,11 +1976,24 @@ export const ConfigDiffSchema = z.object({
   removals: z.array(DiffEntrySchema).optional(),
   modifications: z.array(DiffEntrySchema).optional(),
   sharing: SharingPlanReportSchema.optional(),
+  cache_cutover: z
+    .object({
+      default_policy: z.enum(["retain", "invalidate"]),
+      invalidated_scopes: z.array(z.string()).optional(),
+      retained_scopes: z.array(z.string()).optional(),
+      broadened_to_host_or_all: z.boolean().optional(),
+      disposition: z.enum(["retain", "invalidate_on_publish", "stage_for_restart", "unavailable"]),
+    })
+    .optional(),
 });
 export type ConfigDiff = z.infer<typeof ConfigDiffSchema>;
 
-export async function diffConfig(candidate: string): Promise<ConfigDiff> {
-  const data = await api<unknown>("/config/diff", {
+export async function diffConfig(
+  candidate: string,
+  cacheCutover: CacheCutoverMode = "",
+): Promise<ConfigDiff> {
+  const query = cacheCutover ? `?cache_cutover=${cacheCutover}` : "";
+  const data = await api<unknown>(`/config/diff${query}`, {
     method: "POST",
     headers: { "Content-Type": "application/toml" },
     body: candidate,
@@ -2006,8 +2019,12 @@ export type HistoryRollbackDiff = z.infer<typeof HistoryRollbackDiffSchema>;
  * TOML (N-02). The response carries base_version so the caller can bind the
  * subsequent rollback to the exact configuration reviewed here (Net-new issue 1).
  */
-export async function diffHistorySnapshot(id: string): Promise<HistoryRollbackDiff> {
-  const data = await api<unknown>(`/config/history/${encodeURIComponent(id)}/diff`);
+export async function diffHistorySnapshot(
+  id: string,
+  cacheCutover: CacheCutoverMode = "",
+): Promise<HistoryRollbackDiff> {
+  const query = cacheCutover ? `?cache_cutover=${cacheCutover}` : "";
+  const data = await api<unknown>(`/config/history/${encodeURIComponent(id)}/diff${query}`);
   return HistoryRollbackDiffSchema.parse(data);
 }
 
@@ -2510,6 +2527,7 @@ export type RawConfigPreview = z.infer<typeof RawConfigPreviewSchema>;
 export async function previewRawConfig(
   candidate: string,
   baseVersion: string,
+  cacheCutover: CacheCutoverMode = "",
 ): Promise<RawConfigPreview> {
   const assertIdentity = captureAdminIdentity();
   const headers = new Headers({
@@ -2520,7 +2538,8 @@ export async function previewRawConfig(
   headers.set("X-Jul-Console", "1");
   const token = authToken.get();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const resp = await fetch("/api/config/preview", {
+  const query = cacheCutover ? `?cache_cutover=${cacheCutover}` : "";
+  const resp = await fetch(`/api/config/preview${query}`, {
     method: "POST",
     headers,
     body: candidate,
@@ -2616,6 +2635,7 @@ export async function patchConfig(patch: ConfigPatch): Promise<PatchResult> {
 export async function patchConfigBatch(
   ops: ConfigPatch[],
   baseVersion?: string,
+  cacheCutover: CacheCutoverMode = "",
 ): Promise<PatchResult> {
   const assertIdentity = captureAdminIdentity();
   const headers = new Headers();
@@ -2627,7 +2647,11 @@ export async function patchConfigBatch(
   const resp = await fetch("/api/config/patch/preview", {
     method: "POST",
     headers,
-    body: JSON.stringify({ base_version: baseVersion, ops }),
+    body: JSON.stringify({
+      base_version: baseVersion,
+      ops,
+      ...(cacheCutover ? { cache_cutover: cacheCutover } : {}),
+    }),
   });
   let data: unknown = null;
   try {
@@ -2763,6 +2787,8 @@ export const ReloadSnapshotSchema = z.object({
 export type ReloadSnapshot = z.infer<typeof ReloadSnapshotSchema>;
 
 const ConfigApplyResultBaseSchema = z.object({
+  cache_cutover_state: z.string().optional(),
+  cache_cutover_result: CacheCutoverResultSchema.optional(),
   ok: z.boolean(),
   // apply_id is the monotonic transaction ID, present even when reload is absent
   // (e.g., enqueue failure). Used for outcome correlation and sequence guarding.
@@ -3079,6 +3105,7 @@ export async function applyConfig(
   baseVersion?: string,
   confirmAdmin = false,
   mode: ApplyMode = "hot",
+  cacheCutover: CacheCutoverMode = "",
 ): Promise<ApplyResult> {
   const headers = new Headers();
   headers.set("X-Jul-Console", "1");
@@ -3090,6 +3117,7 @@ export async function applyConfig(
   if (baseVersion) params.set("base_version", baseVersion);
   if (confirmAdmin) params.set("confirm_admin", "true");
   if (mode !== "hot") params.set("mode", mode);
+  if (cacheCutover) params.set("cache_cutover", cacheCutover);
   const query = params.toString();
   const url = query ? `/api/config/apply?${query}` : "/api/config/apply";
   const resp = await fetch(url, { method: "POST", headers, body: candidate });
@@ -3207,6 +3235,7 @@ export async function applyPatchBatch(
   baseVersion?: string,
   mode: ApplyMode = "hot",
   confirmAdmin = false,
+  cacheCutover: CacheCutoverMode = "",
 ): Promise<PatchApplyResult> {
   const headers = new Headers();
   headers.set("X-Jul-Console", "1");
@@ -3222,7 +3251,11 @@ export async function applyPatchBatch(
   const resp = await fetch(url, {
     method: "POST",
     headers,
-    body: JSON.stringify({ base_version: baseVersion, ops }),
+    body: JSON.stringify({
+      base_version: baseVersion,
+      ops,
+      ...(cacheCutover ? { cache_cutover: cacheCutover } : {}),
+    }),
   });
   let data: unknown = null;
   try {

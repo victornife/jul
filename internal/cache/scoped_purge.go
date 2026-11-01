@@ -31,9 +31,13 @@ const (
 // InvalidateOptions.RequireBroadConfirm is true.
 var ErrBroadConfirmRequired = errors.New("broad cache invalidation (>= 100 matched resources, truncated scan, host, or all) requires confirm_broad = true")
 
+// ErrPurgeIntentCapacity is backpressure before a cutoff commits. Retrying an
+// existing operation or reconciling retained intents frees capacity.
+var ErrPurgeIntentCapacity = errors.New("cache purge recovery journal capacity exhausted; retry unfinished purges or reconcile on restart before submitting a new purge")
+
 // ErrFenceCommit reports that durable invalidation intent could not be
-// committed. Resident entries are unchanged, but earlier origin publications
-// remain fenced because the write may have reached durable storage.
+// committed. Earlier origin publications remain fenced on uncertain writes.
+// Capacity rejection happens before either cutoff commit or fence installation.
 var ErrFenceCommit = errors.New("cache invalidation intent commit failed")
 
 // ErrRetrySnapshotUnavailable prevents a tag retry from forgetting its
@@ -93,13 +97,14 @@ type InvalidateOptions struct {
 	CrossBootRetry      bool
 	BatchSize           int
 	RequireBroadConfirm bool
-	// CommitFence persists the operation's cutoff before its fence is installed.
+	// CommitFence atomically persists the cutoff and executable recovery identity
+	// before its fence is installed. The intent contains no raw query/Vary values.
 	// It runs under genMu so publications cannot cross that boundary, and must
 	// not call back into the cache. An error leaves resident entries unchanged
 	// and conservatively fences earlier origin work against an uncertain write.
 	// Resource IDs are opaque hashes, never raw request URIs. A nil slice means
 	// no snapshot is required; an empty non-nil slice records zero tag targets.
-	CommitFence func(fenceGen uint64, resourceIDs []string) error
+	CommitFence func(fenceGen uint64, resourceIDs []string, intent PurgeRecoveryIntent) error
 }
 
 // StartupHighWaterGen returns the durable generation high-water mark recovered
@@ -1087,10 +1092,11 @@ func (c *Cache) onDiskRehydrated(items []diskItemSnapshot) {
 	}
 	if len(c.routeEpoch) > 0 || c.routeMatchers != nil {
 		snap := &routeStateSnapshot{
-			committed: false,
-			epochs:    maps.Clone(c.routeEpoch),
-			matchers:  maps.Clone(c.routeMatchers),
-			backends:  maps.Clone(c.routeBackends),
+			committed:      false,
+			epochs:         maps.Clone(c.routeEpoch),
+			matchers:       maps.Clone(c.routeMatchers),
+			backends:       maps.Clone(c.routeBackends),
+			reloadPolicies: maps.Clone(c.routeReloadPolicies),
 		}
 		c.routeStateSnap.Store(snap)
 	}
@@ -1632,11 +1638,11 @@ func (c *Cache) BeginSelectorFence(sel NormalizedSelector) (fenceGen uint64, com
 // ExecuteRouteCutover derives and executes scoped invalidations for route or
 // backend changes between before and after configurations that opt into
 // cutover invalidation (#624 / CACHE-OPS-04, ADR 0030 §4).
-func (c *Cache) ExecuteRouteCutover(ctx context.Context, before, after *config.Config, overrideMode string) ([]InvalidateResult, error) {
+func (c *Cache) ExecuteRouteCutover(ctx context.Context, before, after *config.Config, overrideMode string, modules ...CutoverModuleIdentities) ([]InvalidateResult, error) {
 	if c == nil || before == nil || after == nil {
 		return nil, nil
 	}
-	sels := DeriveRouteCutoverSelectorsForPolicy(before, after, overrideMode)
+	sels := DeriveRouteCutoverSelectorsForPolicy(before, after, overrideMode, modules...)
 	if len(sels) == 0 {
 		return nil, nil
 	}
@@ -1842,6 +1848,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			groups = make([]matchedGroup, 0, len(candidates))
 			flatKeys = make([]string, 0, len(candidates))
 		}
+		// Retained GET owners must not suppress a deleted HEAD resource.
+		// Reuse one buffer so large cutovers do not allocate per resource.
+		var siblingKeys []string
 		for _, bk := range candidates {
 			method, host, reqURI, _, ok := parseBaseKeyParts(bk)
 			if !ok {
@@ -1892,8 +1901,14 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 					if method == http.MethodHead {
 						getBK := "GET\n" + resKey
 						if hm := c.byHost[host]; hm != nil {
-							if _, hasGet := hm[getBK]; hasGet && c.hasResidentBaseLocked(getBK, exactFilter, evalFenceGen) {
-								isPrimary = false
+							if _, hasGet := hm[getBK]; hasGet {
+								if len(sel.cutoverRouteScopes) == 0 {
+									isPrimary = !c.hasResidentBaseLocked(getBK, exactFilter, evalFenceGen)
+								} else {
+									siblingKeys = siblingKeys[:0]
+									getReps, _, _ := c.collectOwnedKeysIntoForCutoverLocked(getBK, exactFilter, sel.cutoverRouteScopes, evalFenceGen, &siblingKeys)
+									isPrimary = getReps == 0
+								}
 							}
 						}
 					}
@@ -1932,8 +1947,29 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	} else {
 		fenceGen = c.genSeq.Add(1)
 	}
+	// Persist complete recovery identity BEFORE exposing the cutoff to the
+	// admin ledger. genMu serializes admission against other purges/publications;
+	// the independent intent mutex atomically checks both operation and encoded-byte capacity.
+	intent := c.buildDiskPurgeIntent(fenceGen, sel, resourceIDs, flatKeys)
+	intentCommitted := false
+	intentUncertain := false
+	if c.disk != nil {
+		var err error
+		intent, err = c.disk.commitPurgeIntent(intent)
+		if err != nil {
+			if errors.Is(err, ErrPurgeIntentCapacity) {
+				c.genMu.Unlock()
+				return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
+			}
+			// Actual I/O failure already installed the disk fail-closed fallback.
+			// Continue fencing/deletion, reporting an uncertain durability outcome.
+			intentUncertain = true
+		} else {
+			intentCommitted = true
+		}
+	}
 	if opts.CommitFence != nil {
-		if err := opts.CommitFence(fenceGen, resourceIDs); err != nil {
+		if err := opts.CommitFence(fenceGen, resourceIDs, intent); err != nil {
 			foundFence := false
 			for _, f := range c.fences {
 				if f.gen == fenceGen {
@@ -1948,6 +1984,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			}
 			c.reclaimFencesLocked()
 			c.genMu.Unlock()
+			if intentUncertain {
+				c.disk.failClosedOnIntentWriteError()
+			}
 			return InvalidateResult{}, fmt.Errorf("%w: %w", ErrFenceCommit, err)
 		}
 	}
@@ -2052,6 +2091,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		c.mem.purge()
 		c.genMu.Unlock()
 
+		if intentUncertain {
+			c.disk.failClosedOnIntentWriteError()
+		}
 		var diskRemoved, retiredReaders, diskFailed int
 		var uncertain bool
 		if c.disk != nil {
@@ -2068,14 +2110,7 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 			}
 			c.disk.mu.Unlock()
 
-			intentCommitted := false
-			if len(diskKeys) > 0 {
-				if err := c.disk.recordPurgeIntent(diskPurgeIntent{FenceGen: fenceGen, Kind: SelectorAll}); err != nil {
-					uncertain = true
-				} else {
-					intentCommitted = true
-				}
-			}
+			uncertain = intentUncertain
 			hwErr := c.disk.recordHighWaterGen(fenceGen)
 			if c.onAfterFenceInstall != nil {
 				c.onAfterFenceInstall(sel, fenceGen)
@@ -2122,6 +2157,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 		return res, nil
 	}
 	c.genMu.Unlock()
+	if intentUncertain {
+		c.disk.failClosedOnIntentWriteError()
+	}
 
 	invalidatedResCount := 0
 	invalidatedReps := 0
@@ -2130,19 +2168,9 @@ func (c *Cache) InvalidateScope(ctx context.Context, sel NormalizedSelector, opt
 	retiredReaders := 0
 	failedEntries := 0
 	remainingGroups := 0
-	uncertain := false
+	uncertain := intentUncertain
 	canceledMidway := false
-
-	intentCommitted := false
 	if c.disk != nil {
-		if hasDiskTargets || len(flatKeys) > 0 {
-			intent := c.buildDiskPurgeIntent(fenceGen, sel, resourceIDs, flatKeys)
-			if err := c.disk.recordPurgeIntent(intent); err != nil {
-				uncertain = true
-			} else {
-				intentCommitted = true
-			}
-		}
 		if err := c.disk.recordHighWaterGen(fenceGen); err != nil {
 			uncertain = true
 			if hasDiskTargets {
@@ -2415,8 +2443,8 @@ func (c *Cache) collectOwnedKeysIntoForCutoverLocked(baseKey, exactKeyFilter str
 	return repCount, hasDisk, liveOrInflight
 }
 
-func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, resourceIDs []string, flatKeys []string) diskPurgeIntent {
-	intent := diskPurgeIntent{
+func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, resourceIDs []string, flatKeys []string) PurgeRecoveryIntent {
+	intent := PurgeRecoveryIntent{
 		FenceGen:            fenceGen,
 		Kind:                sel.Kind,
 		Host:                sel.Host,
@@ -2433,24 +2461,12 @@ func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, re
 		CutoverRouteScopes:  append([]string(nil), sel.cutoverRouteScopes...),
 	}
 	if sel.Kind == SelectorTag {
-		if len(resourceIDs) > 4096 {
-			// When a tag purge spans >4,096 resources, coalesce the on-disk crash
-			// recovery intent to the tag's host scope (or all if host is empty)
-			// so the serialized intent stays well within the 1 MiB manifest bound (#666).
-			if sel.Host != "" {
-				intent.Kind = SelectorHost
-			} else {
-				intent.Kind = SelectorAll
-			}
-			intent.Tags = nil
-			intent.TagMatch = ""
-		} else {
-			intent.MatchedResourceIDs = append([]string(nil), resourceIDs...)
-		}
+		intent.MatchedResourceIDs = append([]string{}, resourceIDs...)
 	}
+
 	if sel.Kind == SelectorExactURL || sel.Kind == SelectorKey {
 		vctx := c.versionContext()
-		if sel.Host != "" && sel.URI != "" {
+		if sel.Kind == SelectorExactURL && sel.Host != "" && sel.URI != "" {
 			intent.TargetResourceMAC = vctx.Digest("cache-purge-target-v1", []byte(resourceKeyOf(sel.Host, sel.URI)))
 		}
 		if sel.Kind == SelectorKey && sel.Key != "" {
@@ -2477,7 +2493,6 @@ func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, re
 			addHash(keyFor(http.MethodHead, sel.Host, sel.URI))
 		case SelectorKey:
 			addHash(sel.Key)
-			addHash(baseKeyOf(sel.Key))
 		}
 		sort.Strings(hashes)
 		intent.TargetHashes = hashes
@@ -2485,12 +2500,12 @@ func (c *Cache) buildDiskPurgeIntent(fenceGen uint64, sel NormalizedSelector, re
 	return intent
 }
 
-func (c *Cache) reconcileRecoveredPurgeIntents(intents []diskPurgeIntent) {
+func (c *Cache) reconcileRecoveredPurgeIntents(intents []PurgeRecoveryIntent) {
 	if c == nil || c.disk == nil || len(intents) == 0 {
 		return
 	}
 	vctx := c.versionContext()
-	var remaining []diskPurgeIntent
+	var remaining []PurgeRecoveryIntent
 
 	for _, intent := range intents {
 		if intent.FenceGen == 0 {
@@ -2530,10 +2545,15 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []diskPurgeIntent) {
 
 		var targetKeys []string
 		seenKey := make(map[string]struct{})
+		seenGroup := make(map[string]bool)
 		matchedResSet := make(map[string]struct{})
 
 		c.genMu.Lock()
 		addGroup := func(bk string) {
+			if seenGroup[bk] {
+				return
+			}
+			seenGroup[bk] = true
 			_, _, _ = c.collectOwnedKeysIntoForCutoverLocked(bk, "", sel.cutoverRouteScopes, intent.FenceGen, &targetKeys)
 			if nl := strings.IndexByte(bk, '\n'); nl > 0 {
 				matchedResSet[bk[nl+1:]] = struct{}{}
@@ -2560,24 +2580,40 @@ func (c *Cache) reconcileRecoveredPurgeIntents(intents []diskPurgeIntent) {
 					matchedResSet[resKey] = struct{}{}
 				}
 			case SelectorTag:
-				var tags []string
-				if c.baseIndexedTags != nil {
-					tags = c.baseIndexedTags[resKey]
-				}
-				if _, inSnap := resIDSet[hashKey(resKey)]; (inSnap && sel.matchesHost(host)) || sel.MatchesResource(host, reqURI, tags) {
+				if _, inSnap := resIDSet[hashKey(resKey)]; inSnap && sel.matchesHost(host) {
 					addGroup(baseKeyOf(k))
 				}
-			case SelectorExactURL, SelectorKey:
-				kh := hashKey(k)
-				bkh := hashKey(baseKeyOf(k))
-				_, hMatch := targetHashSet[kh]
-				_, bMatch := targetHashSet[bkh]
-				_, rMatch := resIDSet[hashKey(resKey)]
-				macMatch := (intent.TargetResourceMAC != "" && vctx.Digest("cache-purge-target-v1", []byte(resKey)) == intent.TargetResourceMAC) ||
-					(intent.TargetKeyMAC != "" && (vctx.Digest("cache-purge-target-v1", []byte(k)) == intent.TargetKeyMAC || vctx.Digest("cache-purge-target-v1", []byte(baseKeyOf(k))) == intent.TargetKeyMAC))
-				if hMatch || bMatch || rMatch || macMatch {
+			case SelectorKey:
+				// A base key selects its owned variants, but a variant key selects
+				// only that representation. Never expand a matching variant to its
+				// base group or match a method-independent resource verifier.
+				_, hMatch := targetHashSet[hashKey(k)]
+				_, bMatch := targetHashSet[hashKey(baseKeyOf(k))]
+				macMatch := intent.TargetKeyMAC != "" &&
+					(vctx.Digest("cache-purge-target-v1", []byte(k)) == intent.TargetKeyMAC ||
+						vctx.Digest("cache-purge-target-v1", []byte(baseKeyOf(k))) == intent.TargetKeyMAC)
+				if hMatch || bMatch || macMatch {
+					// Reconstruct only in-memory identity for the fallback fence.
+					// The persisted hash of the selected base exists even if its
+					// stub was evicted; a variant selector never stores that hash.
+					if bMatch || (intent.TargetKeyMAC != "" && vctx.Digest("cache-purge-target-v1", []byte(baseKeyOf(k))) == intent.TargetKeyMAC) {
+						sel.Key = baseKeyOf(k)
+					} else if sel.Key == "" {
+						sel.Key = k
+					}
+					if _, seen := seenKey[k]; !seen {
+						seenKey[k] = struct{}{}
+						targetKeys = append(targetKeys, k)
+					}
+				}
+			case SelectorExactURL:
+				_, hMatch := targetHashSet[hashKey(k)]
+				_, bMatch := targetHashSet[hashKey(baseKeyOf(k))]
+				macMatch := intent.TargetResourceMAC != "" && vctx.Digest("cache-purge-target-v1", []byte(resKey)) == intent.TargetResourceMAC
+				if hMatch || bMatch || macMatch {
 					addGroup(baseKeyOf(k))
 				}
+
 			default:
 				if sel.MatchesResource(host, reqURI, nil) {
 					addGroup(baseKeyOf(k))

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"maps"
 	"math"
 	"net/http"
@@ -172,12 +173,13 @@ type pendingRouteHandler struct {
 }
 
 type routeStateSnapshot struct {
-	committed  bool
-	epochs     map[string]uint64
-	matchers   map[string]string
-	backends   map[string]string
-	configs    map[string]RouteCacheConfig
-	matcherGen map[string]uint64
+	committed      bool
+	epochs         map[string]uint64
+	matchers       map[string]string
+	backends       map[string]string
+	reloadPolicies map[string]string
+	configs        map[string]RouteCacheConfig
+	matcherGen     map[string]uint64
 }
 
 func sameRouteCutoverBackend(a, b RouteCacheConfig) bool {
@@ -185,6 +187,15 @@ func sameRouteCutoverBackend(a, b RouteCacheConfig) bool {
 		return true
 	}
 	return a.backendProof != "" && a.backendProof == b.backendProof
+}
+
+// priorReloadInvalidates preserves the previous posture across restart. Version-1
+// records with backend proofs came from cutover-capable builds but did not save
+// posture: compare backend identity conservatively on their first upgrade. Older
+// records without backend proofs predate invalidate mode and retain its default.
+func priorReloadInvalidates(policies, backends map[string]string, scope string) bool {
+	mode, known := policies[scope]
+	return mode == "invalidate" || !known && backends[scope] != ""
 }
 
 func sameDurableBackend(prevBackend, nextBackend string, invalidate bool) bool {
@@ -245,7 +256,7 @@ func (s *routeStateSnapshot) isStartupCompatible(rc RouteCacheConfig) bool {
 		if s.backends != nil {
 			prevBackend = s.backends[rc.Scope]
 		}
-		return m == rc.matcherProof && sameDurableBackend(prevBackend, rc.backendProof, rc.reloadInvalidate)
+		return m == rc.matcherProof && sameDurableBackend(prevBackend, rc.backendProof, rc.reloadInvalidate || priorReloadInvalidates(s.reloadPolicies, s.backends, rc.Scope))
 	}
 	return s.epochs[rc.Scope] == 0 && s.epochs[routeEpochFloorKey] == 0 && rc.matcherProof == ""
 }
@@ -351,12 +362,12 @@ func (rc RouteCacheConfig) WithMatcher(loc config.LocationConfig, versions *vers
 //   - changing a route's backend or upstream when either the previous or new
 //     posture is "invalidate" advances the route epoch and fences pre-cutover
 //     handlers and in-flight operations.
-func (rc RouteCacheConfig) WithBackendCutover(cfg *config.Config, srv config.ServerConfig, loc config.LocationConfig, versions *versionid.Context) RouteCacheConfig {
+func (rc RouteCacheConfig) WithBackendCutover(cfg *config.Config, srv config.ServerConfig, loc config.LocationConfig, versions *versionid.Context, moduleDigests ...map[string]string) RouteCacheConfig {
 	if cfg == nil {
 		return rc
 	}
 	rc.reloadInvalidate = cfg.EffectiveReloadPolicy(loc) == "invalidate"
-	backendID := canonicalLocationBackendIdentity(cfg, srv, loc)
+	backendID := canonicalLocationBackendIdentity(cfg, srv, loc, moduleDigests...)
 	var storage [512]byte
 	data := storage[:0]
 	for _, field := range []string{rc.Scope, backendID} {
@@ -366,11 +377,13 @@ func (rc RouteCacheConfig) WithBackendCutover(cfg *config.Config, srv config.Ser
 	return rc
 }
 
-func canonicalLocationBackendIdentity(cfg *config.Config, srv config.ServerConfig, loc config.LocationConfig) string {
+func canonicalLocationBackendIdentity(cfg *config.Config, srv config.ServerConfig, loc config.LocationConfig, moduleDigests ...map[string]string) string {
 	type backendSnapshot struct {
-		ServerPlugins []string               `json:"server_plugins,omitempty"`
-		Loc           config.LocationConfig  `json:"loc"`
-		Upstream      *config.UpstreamConfig `json:"upstream,omitempty"`
+		ServerPlugins []string                       `json:"server_plugins,omitempty"`
+		Loc           config.LocationConfig          `json:"loc"`
+		Upstream      *config.UpstreamConfig         `json:"upstream,omitempty"`
+		Plugins       map[string]config.PluginConfig `json:"plugins,omitempty"`
+		Modules       map[string]string              `json:"modules,omitempty"`
 	}
 	locCopy := loc
 	locCopy.Match = config.MatchConfig{}
@@ -388,7 +401,27 @@ func canonicalLocationBackendIdentity(cfg *config.Config, srv config.ServerConfi
 			}
 		}
 	}
+	var definitions map[string]config.PluginConfig
+	var modules map[string]string
+	if cfg != nil {
+		for _, name := range RoutePluginNames(srv, loc) {
+			if pc, ok := cfg.Plugins[name]; ok {
+				if definitions == nil {
+					definitions = make(map[string]config.PluginConfig)
+				}
+				definitions[name] = pc
+			}
+			if len(moduleDigests) > 0 {
+				if modules == nil {
+					modules = make(map[string]string)
+				}
+				modules[name] = strings.TrimPrefix(moduleDigests[0][name], "sha256:")
+			}
+		}
+	}
 	raw, _ := json.Marshal(backendSnapshot{
+		Plugins:       definitions,
+		Modules:       modules,
 		ServerPlugins: srv.Plugins,
 		Loc:           locCopy,
 		Upstream:      upPtr,
@@ -701,8 +734,18 @@ func (c *Cache) CurrentRouteEpoch(scope string) uint64 {
 // in-flight origin fill or revalidation started under an older policy cannot
 // publish into the cache after the new policy commits (#623).
 func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
+	_ = c.CommitRoutePoliciesWithCutover(routes, "")
+}
+
+// CommitRoutePoliciesWithCutover applies an ephemeral, one-change cutover
+// preference while preserving the configured posture in durable route state.
+// Mandatory matcher/policy/security compatibility remains authoritative.
+func (c *Cache) CommitRoutePoliciesWithCutover(routes []RouteCacheConfig, overrideMode string) error {
 	if c == nil {
-		return
+		return nil
+	}
+	if err := config.ValidateCacheCutoverMode(overrideMode, "hot"); err != nil {
+		return err
 	}
 	// Serialize durable commits without holding genMu during disk I/O or
 	// recovery callbacks (disk -> genMu is the established lock order).
@@ -726,9 +769,14 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	configs := make(map[string]RouteCacheConfig, len(routes))
 	matchers := make(map[string]string, len(routes))
 	backends := make(map[string]string, len(routes))
+	reloadPolicies := make(map[string]string, len(routes))
 	for _, rc := range routes {
 		if rc.Scope != "" {
 			configs[rc.Scope] = rc
+			reloadPolicies[rc.Scope] = "retain"
+			if rc.reloadInvalidate {
+				reloadPolicies[rc.Scope] = "invalidate"
+			}
 			if rc.matcherProof != "" {
 				matchers[rc.Scope] = rc.matcherProof
 			}
@@ -749,12 +797,11 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	}
 	for scope := range previous {
 		nextCfg, stillActive := configs[scope]
-		prevCfg := c.routeConfigs[scope]
 		var prevBackend string
 		if c.routeBackends != nil {
 			prevBackend = c.routeBackends[scope]
 		}
-		backendChanged := stillActive && !sameDurableBackend(prevBackend, backends[scope], nextCfg.reloadInvalidate || prevCfg.reloadInvalidate)
+		backendChanged := stillActive && !sameDurableBackend(prevBackend, backends[scope], cutoverInvalidates(priorReloadInvalidates(c.routeReloadPolicies, c.routeBackends, scope), nextCfg.reloadInvalidate, overrideMode))
 		if !stillActive || c.routeMatchers[scope] != matchers[scope] || backendChanged {
 			epochSnap[scope] = max(epochSnap[scope], epochSnap[routeEpochFloorKey]) + 1
 		}
@@ -791,7 +838,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 			prevCfg, wasActive := c.routeConfigs[scope]
 			if wasActive &&
 				prevCfg.matcherProof == rc.matcherProof &&
-				sameRouteCutoverBackend(prevCfg, rc) &&
+				sameDurableBackend(prevCfg.backendProof, rc.backendProof, cutoverInvalidates(prevCfg.reloadInvalidate, rc.reloadInvalidate, overrideMode)) &&
 				sameRoutePolicyOverrides(prevCfg, rc) {
 				nextMatcherGen[scope] = c.routeMatcherGen[scope]
 			} else {
@@ -823,7 +870,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	// An unchanged durable proof needs no rewrite/fsync. Besides avoiding I/O
 	// on no-op reloads, this keeps healthy warm entries usable when writes are
 	// temporarily unavailable. Nil distinguishes missing/legacy durable proof.
-	persist := c.routeMatchers == nil || !maps.Equal(epochSnap, c.routeEpoch) || !maps.Equal(matchers, c.routeMatchers) || !maps.Equal(backends, c.routeBackends)
+	persist := c.routeMatchers == nil || !maps.Equal(epochSnap, c.routeEpoch) || !maps.Equal(matchers, c.routeMatchers) || !maps.Equal(backends, c.routeBackends) || !maps.Equal(reloadPolicies, c.routeReloadPolicies)
 	if c.disk != nil && c.disk.routeEpochFailed.Load() {
 		persist = true
 	}
@@ -831,7 +878,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	// Durability precedes visibility. A crash after this write may make the
 	// cache colder, but cannot restore pre-retirement compatibility evidence.
 	if c.disk != nil && persist {
-		c.disk.persistRouteEpochs(epochSnap, matchers, backends)
+		c.disk.persistRouteEpochState(epochSnap, matchers, backends, reloadPolicies)
 	}
 	c.genMu.Lock()
 	for scope, prev := range c.routePolicyDigest {
@@ -846,7 +893,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 			prevBackend = c.routeBackends[scope]
 		}
 		if c.routeMatchers[scope] != rc.matcherProof ||
-			!sameDurableBackend(prevBackend, backends[scope], rc.reloadInvalidate || prevCfg.reloadInvalidate) {
+			!sameDurableBackend(prevBackend, backends[scope], cutoverInvalidates(priorReloadInvalidates(c.routeReloadPolicies, c.routeBackends, scope), rc.reloadInvalidate, overrideMode)) {
 			c.routePolicyFloor[scope] = c.genSeq.Add(1)
 		} else if hadPrev && !sameVaryGuard(prevCfg.varyGuard, rc.varyGuard) {
 			c.routePolicyFloor[scope] = c.genSeq.Add(1)
@@ -859,6 +906,7 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 	c.routeConfigs = configs
 	c.routeMatchers = matchers
 	c.routeBackends = backends
+	c.routeReloadPolicies = reloadPolicies
 	c.routeMatcherGen = nextMatcherGen
 	if len(c.pendingRouteHandlers) > 0 {
 		for _, ph := range c.pendingRouteHandlers {
@@ -875,12 +923,13 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 		c.pendingRouteHandlers = nil
 	}
 	c.routeStateSnap.Store(&routeStateSnapshot{
-		committed:  true,
-		epochs:     maps.Clone(epochSnap),
-		matchers:   maps.Clone(matchers),
-		backends:   maps.Clone(backends),
-		configs:    maps.Clone(configs),
-		matcherGen: maps.Clone(nextMatcherGen),
+		committed:      true,
+		epochs:         maps.Clone(epochSnap),
+		matchers:       maps.Clone(matchers),
+		backends:       maps.Clone(backends),
+		reloadPolicies: maps.Clone(reloadPolicies),
+		configs:        maps.Clone(configs),
+		matcherGen:     maps.Clone(nextMatcherGen),
 	})
 	if len(c.routePolicyFloor) > 1024 {
 		if c.minInflightStartGenLocked() == ^uint64(0) {
@@ -894,4 +943,21 @@ func (c *Cache) CommitRoutePolicies(routes []RouteCacheConfig) {
 		}
 	}
 	c.genMu.Unlock()
+	if c.disk != nil && c.disk.routeEpochFailed.Load() {
+		return errors.New("cache route epoch persistence failed; restart protection is uncertain")
+	}
+	return nil
+}
+
+// cutoverInvalidates chooses only optional backend retirement, never mandatory
+// matcher/policy isolation. The default honors both sides of a transition.
+func cutoverInvalidates(previous, next bool, overrideMode string) bool {
+	switch overrideMode {
+	case "retain":
+		return false
+	case "invalidate":
+		return true
+	default:
+		return previous || next
+	}
 }

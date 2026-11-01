@@ -1165,7 +1165,7 @@ consumes the endpoints below.
 | Audit | `GET /api/audit`, `GET /api/audit/export` |
 | Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/preview`, `/patch/candidate`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
 | Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
-| Operational actions | `POST /cache/purge`, `POST /reload` |
+| Operational actions | `POST /api/v1/cache/purge/preview`, `POST /api/v1/cache/purge`, `GET /api/v1/cache/purges/{operation_id}`, `POST /reload` |
 
 ## Consistency, feedback & discoverability
 
@@ -1344,3 +1344,30 @@ status/configuration/purge grants retain their previous traffic-control view.
 The limited view avoids unauthorized overview/health polling. Unknown publication
 dates display `unknown` / `no recorded validation`, including older zero-date
 responses. Inspection access still does not grant configuration or purge access.
+
+
+## Cache cutover on configuration changes
+
+Managed live previews/applies and history rollback accept optional
+`cache_cutover=retain|invalidate`; omit it to use configured `reload_policy`.
+Raw TOML requests use the query parameter, and structured patch/rollback requests
+can use the JSON field. Preview and execution use the same choice. Invalid,
+conflicting or repeated options fail before mutation. The choice affects one
+live change and does not rewrite persistent policy. `stage_restart` rejects a
+one-change override; configure persistent `reload_policy` instead.
+
+`jul apply --cache-cutover=invalidate` and the Console Config/History choice
+controls use this server-owned contract. Mandatory matcher/policy/security
+invalidation is preserved under retain. An unchanged configuration remains a
+no-op; content invalidation uses the versioned cache purge workflow.
+
+A cleanup failure after publication reports the configuration as committed:
+`applied_degraded`, `published: true`, and a structured `reload.cache_cutover`
+on the Console/reload result. Versioned mutation and exact-ID polling responses
+expose `cache_cutover_state` and `cache_cutover_result` with effectiveness,
+counts and recovery guidance. Staging reports `staged_for_restart` without live
+cleanup. Repair storage and use the versioned purge flow for the previewed
+scopes; do not reapply or roll back solely to retry cache cleanup.
+
+See [cache reload behavior](cache.md#cache-data-across-reloads) and
+[ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md).

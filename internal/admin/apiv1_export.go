@@ -73,6 +73,9 @@ func exportGlobal(c *config.Config) adminapi.ExportGlobal {
 // answer the operator needs, and the body would be a second raw-readback path
 // (ADR 0019 §24).
 func (s *Server) handleV1HistoryDiff(w http.ResponseWriter, r *http.Request) {
+	if !prepareCacheCutoverRequest(w, r, "", "") {
+		return
+	}
 	if !requireExternalMethod(w, r, http.MethodGet) {
 		return
 	}
@@ -95,7 +98,13 @@ func (s *Server) handleV1HistoryDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	diff := diffConfigs(state.Config, after)
+	var moduleDigests map[string]string
+	beforeEffective, _ := s.patchRuntimeBaseline(nil, state.Config, &moduleDigests)
+	var afterEffective *config.Config
+	if candidate, candidateErr := config.NewCandidateContext(r.Context(), after); candidateErr == nil {
+		afterEffective = candidate.Effective
+	}
+	diff := diffConfigsWithEffectiveCutover(state.Config, after, beforeEffective, afterEffective, config.CacheCutoverMode(r.Context()), observeCutoverModules(r.Context(), afterEffective, moduleDigests))
 	writeAPIJSON(w, http.StatusOK, adminapi.HistoryDiffResponse{
 		APIVersion:    adminapi.APIVersion,
 		BaseVersion:   state.Version,
@@ -106,6 +115,7 @@ func (s *Server) handleV1HistoryDiff(w http.ResponseWriter, r *http.Request) {
 		Additions:     v1DiffEntries(diff.Additions),
 		Removals:      v1DiffEntries(diff.Removals),
 		Modifications: v1DiffEntries(diff.Modifications),
+		CacheCutover:  diff.CacheCutover,
 	})
 }
 

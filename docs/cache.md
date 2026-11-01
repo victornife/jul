@@ -812,21 +812,58 @@ downstream handler.
 
 ### Cache data across reloads
 
-The cache instance is created once per process and is captured by every handler
-generation, so **cached data persists across ordinary configuration reloads**.
-This is the pre-existing, deliberately preserved policy: reloading configuration
-does not warm-start or flush the cache.
+`reload_policy = "retain"` is the default in `[cache]`; a location can override
+it in `[servers.locations.cache_policy]`. Retain permits compatible warm data
+and late old-generation work to be reused after a backend change. Mandatory
+matcher compatibility, tightened cache policy and sensitive/transformed `Vary`
+guards still take precedence.
 
-One consequence follows directly from it: a refresh that started on the old
-generation publishes into the process-shared cache even if it completes after a
-reload changed routes or backends. The result is the representation the **old**
-generation's route would have produced. Changing routing or backends therefore
-does not retroactively invalidate entries. After old-generation work drains,
-use the admin purge endpoint when the old representation must no longer be
-served. A restart alone clears the memory tier but **retains the disk tier**;
-changing `[cache].enabled` is itself restart-required. For a cutover that must
-exclude old entries, quiesce traffic and in-flight refreshes, restart if needed,
-purge both tiers, then resume traffic.
+Choose `reload_policy = "invalidate"` to fence old-generation publication and
+retire the affected route/backend scope at configuration Publish while keeping
+unrelated routes warm. Without a one-change override, a backend change
+invalidates when either the previous or new route policy is `invalidate`.
+Changing the policy alone with an unchanged backend preserves compatible data.
+Both behaviors apply to live reload and stop/edit/restart transitions.
+
+For one live managed change, Config and History offer **Configured**, **Retain**
+and **Invalidate** choices. The remote CLI accepts
+`jul apply --cache-cutover=invalidate`; raw TOML requests use the
+`cache_cutover=retain|invalidate` query parameter and structured patch/rollback
+requests accept the same field in JSON. The server previews the selected mode
+and applies it once without rewriting persistent `reload_policy`. A retain
+override cannot bypass the mandatory safety guards. A no-op configuration change
+does not become an arbitrary purge; use `jul cache purge` for content changes.
+
+Previews compare the captured serving effective configuration with the exact
+resolved candidate, including referenced plugin definitions and observed module
+bytes. Module reads are an as-of assessment; configure the plugin SHA256 pin
+when apply must use the reviewed bytes. Runtime ownership uses the actual compiled
+bytes even if an external file changed after preview. Replacing a referenced
+module at the same path is an identity change under invalidate. Unreferenced modules do not broaden the scope. When serving
+identity cannot be established, disposition `unavailable` and an explicit
+warning replace any claim of retained compatibility. Public previews carry no
+resolved backend targets, plugin paths or module digest evidence.
+
+A planned restart reports `cache_cutover_state = "staged_for_restart"` and does
+not run live cleanup. One-change overrides with `stage_restart` are rejected
+before persistence: set persistent `reload_policy` for restart behavior.
+
+A published configuration stays live even if physical cache cleanup degrades.
+The correlated reload then reports `applied_degraded`, a failed HTTP subsystem,
+and `reload.cache_cutover` with effectiveness, counts and recovery guidance.
+The versioned apply response and exact-ID poll expose `cache_cutover_state` and
+`cache_cutover_result`; CLI and Console preserve this warning. Repair cache
+storage and reconcile the previewed scopes with the versioned purge flow.
+Reapplying an unchanged config or rolling it back is not a cleanup retry.
+Already-admitted readers may finish; this is not stream revocation.
+
+The bounded `.jul-cache-route-epochs` v2 manifest records both backend proofs
+and each active route's retain/invalidate posture. Older v1 records with backend
+proofs but unknown posture compare backend identity conservatively on upgrade;
+unchanged backends stay warm, changed/unverifiable backends become cold. Records
+predating backend cutover retain their historical retain default. Invalid v2
+metadata fails closed. No raw backend credentials, matcher predicates or query
+values are persisted as proof material.
 
 ### Observability
 
@@ -1259,6 +1296,46 @@ Tag-based invalidation is opt-in via `[cache].tag_headers`:
    already-admitted readers may finish once their retirement is durable.
    Old fenced fills cannot mutate Vary membership or delete newer variants.
 
+### Restart recovery and journal capacity
+
+With a disk tier, `.jul-cache-purge-intents` stores executable normalized purge
+identity before the cutoff is committed to the administrative ledger. That
+ledger atomically stores the same recovery identity with its cutoff. Startup
+reconciles unfinished purges before serving cache reads, preserving newer
+fills. Exact-URL purges select GET/HEAD resource groups; key purges retain their
+method and representation semantics. Retries preserve original target hashes
+and tag snapshots even after live catalog generations advance.
+
+The journal supports at most **256 retained intents subject to a shared 1 MiB
+encoded-byte limit**. It may fill much earlier for large tag snapshots. New
+operations are rejected with HTTP 503 and capacity guidance before committing
+a cutoff; capacity pressure neither flushes unrelated hosts nor broadens the
+requested scope. Retry unfinished operations to complete cleanup, or reconcile
+on restart before submitting new operations. Valid historical tag resource snapshots
+(including explicit `matched_resource_ids: []` for zero original targets)
+retain their exact scope on restart, without consulting current tag membership.
+Absent/null or invalid snapshots require the documented broader fallback. Completed operations release
+capacity. Actual filesystem/corrupt-metadata failures retain the fail-closed
+policy. Older ledger records whose identity cannot be reconstructed explicitly
+sweep pre-cutoff disk entries (including unrelated scopes), log that migration
+fallback, and preserve post-cutoff data.
+
+All Console purge actions use the versioned preview → confirm → execute →
+observe/recover panel. The duplicate legacy shortcut is removed; structured
+incomplete/uncertain results show recovery guidance. The internal unversioned `POST /cache/purge` endpoint, including `?key=`, is
+removed in #674. Migrate scripts to `/api/v1/cache/purge*` or `jul cache purge`;
+no legacy HTTP alias remains. This was an unsupported internal route under
+ADR 0019, so retirement does not remove a supported external contract. Retired
+mutation requests return 404 even with the full Console enabled.
+
+Internal `Delete()` / `DeleteResult()` and `Purge()` / `PurgeResult()` remain Go
+cache operations, not exposed endpoints. Unsafe-method invalidation still uses
+`Delete()` to retire GET/HEAD and their owned Vary representations through the
+current durability machinery.
+
+The [PR #674 validation record](reviews/2026-10-31-pr674-confirmed-findings-and-validation.md)
+defines measured local latency budgets and their workload/hardware limits.
+
 ### Console retry confirmation
 
 The Console retries a terminal incomplete operation using its canonical
@@ -1341,17 +1418,20 @@ the standard:
 
 Lifecycle behavior:
 
-11. **A reload does not invalidate cached entries.** The cache is process-scoped
-    and survives configuration reloads by design, so a routing or backend change
-    does not retroactively drop entries stored under the previous configuration.
-    A refresh that was already in flight when the reload ran also completes
-    against the *old* generation's route and publishes its result. Purge after
-    old-generation refreshes drain; a restart alone does not clear the disk
-    tier. See [Cache data across reloads](#cache-data-across-reloads) for the
-    cutover sequence. Characterized by
+11. **Reloads retain compatible entries by default; explicit invalidate cutover
+    fences the changed scope.** Under configured `retain`, compatible old data
+    and late old-generation refreshes may remain reusable. Under configured or
+    one-change `invalidate`, publication advances affected route ownership and
+    blocks retired fills while reconciling the selected memory/disk scope;
+    unrelated retained routes remain warm. Mandatory policy/matcher/security
+    guards still apply under retain. A restart retains the disk tier and honors
+    the persisted previous-or-new invalidate posture. See
+    [Cache data across reloads](#cache-data-across-reloads). Default-retain
+    generation leases are characterized by
     `TestReloadWaitsForCacheRevalidationHoldingGeneration` and
-    `TestReloadDuringMandatorySynchronousValidation` (`internal/server`) and the
-    generation-isolation tests in `internal/cache`.
+    `TestReloadDuringMandatorySynchronousValidation` (`internal/server`);
+    `TestRouteBackendCutoverInvalidateAndRetainMatrix` (`internal/app`) and the
+    route-cutover restart/override regressions cover explicit invalidation.
 
 12. **A background refresh or a synchronous validation delays retirement of its
     generation.** While either is running, the handler generation that started it
@@ -1687,7 +1767,7 @@ fields. There is no automatic cursor restart or page accumulation.
 
 Purge uses the existing preview → confirm → execute → observe/recover flow and
 its own permission. Durable incomplete-operation recovery across restart (#666),
-measured large-purge lock/allocation bounds (#667), and legacy `POST /cache/purge`
+measured large-purge lock/allocation bounds (#667), and internal HTTP purge retirement / structured
 durability outcomes (#668) are documented in
 [ADR 0030](adr/0030-cache-purge-recovery-latency-and-cutover.md). No release, GA or soak claim is
 made. NGINX migration impact is **not applicable**: this is a Jul-specific

@@ -32,6 +32,7 @@ type patchApplyRequest struct {
 	BaseVersion     string         `json:"base_version,omitempty"`
 	Ops             []patchRequest `json:"ops"`
 	KeepOpenEntries []string       `json:"keep_open_entries,omitempty"`
+	CacheCutover    string         `json:"cache_cutover,omitempty"`
 }
 
 // conflictResponse is the 409 body returned when the current editable
@@ -132,6 +133,9 @@ func patchReadAvailable(s *Server) bool {
 func decodePatchBatch(r *http.Request) (patchApplyRequest, error) {
 	var req patchApplyRequest
 	err := decodeBoundedPatchJSON(r, &req)
+	if err == nil {
+		err = bindCacheCutoverRequest(r, req.CacheCutover, r.URL.Query().Get("mode"))
+	}
 	return req, err
 }
 
@@ -378,6 +382,9 @@ type patchApplyParams struct {
 // no route can bypass validation or the audit trail.
 func (s *Server) applyPatchOps(w http.ResponseWriter, r *http.Request, params patchApplyParams) {
 	if s.denyIfFileOwned(w, r, params.auditAction) {
+		return
+	}
+	if !requireCacheCutoverSupport(w, r, s.deps.ApplyConfig != nil) {
 		return
 	}
 	reqCtx := applyRequestContext(r, ApplyOperationPatchApply)
