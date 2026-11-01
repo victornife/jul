@@ -4,6 +4,10 @@
 allowBuilds:
   esbuild: true
 
+# Source maps record pnpm's peer-dependency folder names. Use the Windows-safe
+# limit on every platform instead of platform-dependent 60/120 defaults.
+virtualStoreDirMaxLength: 60
+
 overrides:
   # minimatch is a build-time dependency of eslint and TypeScript tooling.
   # Require the globparts-amplification fix (GHSA-g3hv-75wg-m249).

@@ -12,6 +12,16 @@
 # contributor regenerating one would commit bytes the Linux gate rejects.
 docs/generated/** text eol=lf
 
+# Console source text is embedded in published source maps. Keep the same bytes
+# on Windows and Linux so rebuilding the committed bundle is reproducible.
+internal/admin/ui/**/*.ts text eol=lf
+internal/admin/ui/**/*.tsx text eol=lf
+internal/admin/ui/**/*.css text eol=lf
+internal/admin/ui/**/*.html text eol=lf
+internal/admin/ui/**/*.json text eol=lf
+internal/admin/ui/**/*.mjs text eol=lf
+internal/admin/ui/**/*.yaml text eol=lf
+
 # Git hooks run under /bin/sh (Git for Windows' bundled sh included) and must
 # keep LF endings on every platform, regardless of core.autocrlf.
 .githooks/* text eol=lf

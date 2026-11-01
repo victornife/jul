@@ -31,6 +31,7 @@ These reviews do not certify absence of every defect or replace hosted CI.
 - Full-tag cache/admin/config/lifecycle/server/adminapi/adminclient suites also pass on the final source.
 - Console build/typecheck/lint pass. All **1,006 tests in 86 files** pass. Statement coverage is **81.91%**; the existing global and exact-target coverage contract passes. No coverage floor or exclusion was weakened.
 - Generated lifecycle/configuration/API contract drift checks pass. The Console was rebuilt from the combined source; public source maps contain no local workspace paths. D11 current asset names are reconciled without changing frozen evidence.
+- Hosted CI exposed platform-dependent source-map text and pnpm peer-folder paths. The follow-up pins Console text to LF and the virtual-store folder limit to 60 on every platform. Two consecutive local builds have identical file hashes; source-map mappings and application code are unchanged. The embedded-build drift gate remains enabled, with clean Linux CI providing the final portability check.
 
 Local app/CLI execution stops in the existing Windows effective-key fixture: the shared temporary directory and user-owned ancestors do not meet its private-key ACL requirements under the execution account. Actual WASM app tests compile, but their execution and race/platform/browser gates require hosted CI. The race detector also lacks a local C compiler. These checks remain required and were not bypassed. Historical Linux validation from the interrupted chat is retained separately and is not substituted for final-head CI.
 
