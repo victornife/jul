@@ -669,6 +669,21 @@ export const TLSProjectionSchema = z.object({
 });
 export type TLSProjection = z.infer<typeof TLSProjectionSchema>;
 
+export const WAFExceptionSchema = z.object({
+  id: z.string().optional(),
+  rule_id: z.number(),
+  scope: z.string().optional(),
+  target: z.string().optional(),
+  methods: z.array(z.string()).optional(),
+  rationale: z.string().optional(),
+  owner: z.string().optional(),
+  reference: z.string().optional(),
+  created_at: z.string().optional(),
+  review_at: z.string().optional(),
+  fixtures: z.array(z.string()).optional(),
+});
+export type WAFException = z.infer<typeof WAFExceptionSchema>;
+
 // LocationWAFStateSchema is a location's own [waf] override state, present only
 // when the location defines one. As of Phase 4e it carries the full override —
 // the basic knobs plus the advanced SecLang fields — so the guided per-location
@@ -679,6 +694,9 @@ export const LocationWAFStateSchema = z.object({
   crs_enabled: z.boolean().default(false),
   block_status: z.number().optional(),
   paranoia: z.number().optional(),
+  blocking_paranoia: z.number().optional(),
+  detection_paranoia: z.number().optional(),
+  exceptions: z.array(WAFExceptionSchema).optional(),
   request_body_limit: z.string().optional(),
   response_body_check: z.boolean().optional(),
   directives_files: z.array(z.string()).optional(),
@@ -944,15 +962,21 @@ export type CertProjection = z.infer<typeof CertProjectionSchema>;
 // so a guided editor can target the exact block; the policy fields carry the
 // full override (Phase 4e) so the editor seeds and round-trips every field.
 export const LocationWAFSchema = z.object({
+  route_id: z.string().optional(),
   listen: z.string(),
   server_names: z.array(z.string()).optional(),
   match_type: z.string().optional(),
   path: z.string().optional(),
+  match_ordinal: z.number().optional(),
+  selector_version: z.string().optional(),
   enabled: z.boolean(),
   mode: z.string().optional(),
   crs_enabled: z.boolean().optional().default(false),
   block_status: z.number().optional(),
   paranoia: z.number().optional(),
+  blocking_paranoia: z.number().optional(),
+  detection_paranoia: z.number().optional(),
+  exceptions: z.array(WAFExceptionSchema).optional(),
   request_body_limit: z.string().optional(),
   response_body_check: z.boolean().optional(),
   directives_files: z.array(z.string()).optional(),
@@ -1012,6 +1036,11 @@ export const WAFPolicySummarySchema = z.object({
   crs_version: z.string().optional(),
   paranoia: z.number().optional(),
   paranoia_default: z.boolean().optional(),
+  blocking_paranoia: z.number().optional(),
+  detection_paranoia: z.number().optional(),
+  exceptions_count: z.number().optional(),
+  exceptions_review_due: z.number().optional(),
+  has_custom_tuning_directives: z.boolean().optional(),
   request_body_limit_bytes: z.number().optional(),
   response_body_inspection: z.boolean(),
   rule_files_configured: z.number(),
@@ -1072,10 +1101,12 @@ export const WAFEffectivePolicySchema = z.object({
   overrides: z
     .array(
       z.object({
+        route_id: z.string().optional(),
         listen: z.string(),
         server_names: z.array(z.string()).optional(),
         match_type: z.string().optional(),
         path: z.string().optional(),
+        match_ordinal: z.number().optional(),
         enabled: z.boolean(),
         policy: WAFPolicySummarySchema.optional(),
       }),
@@ -1109,6 +1140,9 @@ export const SecurityProjectionSchema = z.object({
   waf_block_status: z.number().optional(),
   waf_crs_enabled: z.boolean().optional().default(false),
   waf_paranoia: z.number().optional(),
+  waf_blocking_paranoia: z.number().optional(),
+  waf_detection_paranoia: z.number().optional(),
+  waf_exceptions: z.array(WAFExceptionSchema).optional(),
   waf_request_body_limit: z.string().optional(),
   waf_response_body_check: z.boolean().optional().default(false),
   waf_directives_files: z.array(z.string()).optional(),
@@ -1127,6 +1161,7 @@ export const SecurityProjectionSchema = z.object({
   // waf_effective is the serving generation's compiled WAF policy (#440),
   // absent from servers that predate it.
   waf_effective: WAFEffectivePolicySchema.optional(),
+  base_version: z.string().optional(),
 });
 export type SecurityProjection = z.infer<typeof SecurityProjectionSchema>;
 
@@ -2104,6 +2139,9 @@ export type LocationWAFPatch = {
   crs_enabled?: boolean;
   block_status?: number;
   paranoia?: number;
+  blocking_paranoia?: number;
+  detection_paranoia?: number;
+  exceptions?: WAFException[];
   request_body_limit?: string;
   response_body_check?: boolean;
   directives_files?: string[];

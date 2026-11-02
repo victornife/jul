@@ -1843,12 +1843,28 @@
                       ],
                       "x-jul-constraint": "100..599 effective"
                     },
+                    "blocking_paranoia": {
+                      "description": "BlockingParanoia sets the CRS blocking paranoia level (1–4) independently of DetectionParanoia when CRSEnabled is set",
+                      "type": "integer",
+                      "x-jul-capability": [
+                        "waf"
+                      ],
+                      "x-jul-constraint": "0 or 1..4; non-zero requires CRS and cannot conflict with legacy paranoia"
+                    },
                     "crs_enabled": {
                       "description": "CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the rules ship inside the binary in builds with the \"waf\" tag)",
                       "type": "boolean",
                       "x-jul-capability": [
                         "waf"
                       ]
+                    },
+                    "detection_paranoia": {
+                      "description": "DetectionParanoia sets the CRS detection paranoia level (1–4) when CRSEnabled is set, allowing higher-paranoia rules to execute and log without contributing to the blocking anomaly threshold",
+                      "type": "integer",
+                      "x-jul-capability": [
+                        "waf"
+                      ],
+                      "x-jul-constraint": "0 or 1..4; non-zero requires CRS and must be at least blocking_paranoia"
                     },
                     "directives_files": {
                       "description": "DirectivesFiles lists SecLang rule files to load, in order, after the CRS (when crs_enabled) and before InlineRules",
@@ -1866,6 +1882,116 @@
                       "x-jul-capability": [
                         "waf"
                       ]
+                    },
+                    "exceptions": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "created_at": {
+                            "description": "CreatedAt records the ISO-8601 date (YYYY-MM-DD) when the exception was created",
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ]
+                          },
+                          "fixtures": {
+                            "description": "Fixtures lists synthetic regression fixture IDs associated with this exception",
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array",
+                            "x-jul-capability": [
+                              "waf"
+                            ]
+                          },
+                          "id": {
+                            "description": "ID is an optional stable operator identifier for this exception",
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ]
+                          },
+                          "methods": {
+                            "description": "Methods restricts the exception to specific HTTP methods, e.g. POST or PUT",
+                            "items": {
+                              "enum": [
+                                "GET",
+                                "HEAD",
+                                "POST",
+                                "PUT",
+                                "PATCH",
+                                "DELETE",
+                                "OPTIONS"
+                              ],
+                              "type": "string"
+                            },
+                            "type": "array",
+                            "uniqueItems": true,
+                            "x-jul-capability": [
+                              "waf"
+                            ],
+                            "x-jul-constraint": "non-duplicate uppercase HTTP method tokens"
+                          },
+                          "owner": {
+                            "description": "Owner records the responsible team or operator handle for review",
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ]
+                          },
+                          "rationale": {
+                            "description": "Rationale records the bounded non-secret operator reason for the exception",
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ]
+                          },
+                          "reference": {
+                            "description": "Reference records an issue, pull request, or change-management identifier",
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ]
+                          },
+                          "review_at": {
+                            "description": "ReviewAt records the ISO-8601 date (YYYY-MM-DD) when the exception is due for review; past-due dates emit a waf_exception_review_due lint warning",
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ]
+                          },
+                          "rule_id": {
+                            "description": "RuleID is the target CRS or custom rule identifier (e.g. 942100)",
+                            "type": "integer",
+                            "x-jul-capability": [
+                              "waf"
+                            ],
+                            "x-jul-constraint": "1..99999999 excluding Jul reserved generated IDs 890000..900001"
+                          },
+                          "scope": {
+                            "description": "Scope selects the exception breadth: \"narrow_target\" (default when target is set; removes only target from rule_id) or \"rule_remove\" (whole-rule removal on the selected policy scope)",
+                            "enum": [
+                              "narrow_target",
+                              "rule_remove"
+                            ],
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ],
+                            "x-jul-constraint": "exact lowercase enum"
+                          },
+                          "target": {
+                            "description": "Target names the bounded variable and field excluded when scope is \"narrow_target\", e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent",
+                            "type": "string",
+                            "x-jul-capability": [
+                              "waf"
+                            ],
+                            "x-jul-constraint": "<COLLECTION>:<KEY> with COLLECTION in {ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, REQUEST_COOKIES} and 1..64 byte token key"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
                     },
                     "inline_rules": {
                       "description": "InlineRules is a SecLang snippet appended last (after files and the CRS)",
@@ -2887,12 +3013,28 @@
           ],
           "x-jul-constraint": "100..599 effective"
         },
+        "blocking_paranoia": {
+          "description": "BlockingParanoia sets the CRS blocking paranoia level (1–4) independently of DetectionParanoia when CRSEnabled is set",
+          "type": "integer",
+          "x-jul-capability": [
+            "waf"
+          ],
+          "x-jul-constraint": "0 or 1..4; non-zero requires CRS and cannot conflict with legacy paranoia"
+        },
         "crs_enabled": {
           "description": "CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the rules ship inside the binary in builds with the \"waf\" tag)",
           "type": "boolean",
           "x-jul-capability": [
             "waf"
           ]
+        },
+        "detection_paranoia": {
+          "description": "DetectionParanoia sets the CRS detection paranoia level (1–4) when CRSEnabled is set, allowing higher-paranoia rules to execute and log without contributing to the blocking anomaly threshold",
+          "type": "integer",
+          "x-jul-capability": [
+            "waf"
+          ],
+          "x-jul-constraint": "0 or 1..4; non-zero requires CRS and must be at least blocking_paranoia"
         },
         "directives_files": {
           "description": "DirectivesFiles lists SecLang rule files to load, in order, after the CRS (when crs_enabled) and before InlineRules",
@@ -2910,6 +3052,116 @@
           "x-jul-capability": [
             "waf"
           ]
+        },
+        "exceptions": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "created_at": {
+                "description": "CreatedAt records the ISO-8601 date (YYYY-MM-DD) when the exception was created",
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ]
+              },
+              "fixtures": {
+                "description": "Fixtures lists synthetic regression fixture IDs associated with this exception",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array",
+                "x-jul-capability": [
+                  "waf"
+                ]
+              },
+              "id": {
+                "description": "ID is an optional stable operator identifier for this exception",
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ]
+              },
+              "methods": {
+                "description": "Methods restricts the exception to specific HTTP methods, e.g. POST or PUT",
+                "items": {
+                  "enum": [
+                    "GET",
+                    "HEAD",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true,
+                "x-jul-capability": [
+                  "waf"
+                ],
+                "x-jul-constraint": "non-duplicate uppercase HTTP method tokens"
+              },
+              "owner": {
+                "description": "Owner records the responsible team or operator handle for review",
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ]
+              },
+              "rationale": {
+                "description": "Rationale records the bounded non-secret operator reason for the exception",
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ]
+              },
+              "reference": {
+                "description": "Reference records an issue, pull request, or change-management identifier",
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ]
+              },
+              "review_at": {
+                "description": "ReviewAt records the ISO-8601 date (YYYY-MM-DD) when the exception is due for review; past-due dates emit a waf_exception_review_due lint warning",
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ]
+              },
+              "rule_id": {
+                "description": "RuleID is the target CRS or custom rule identifier (e.g. 942100)",
+                "type": "integer",
+                "x-jul-capability": [
+                  "waf"
+                ],
+                "x-jul-constraint": "1..99999999 excluding Jul reserved generated IDs 890000..900001"
+              },
+              "scope": {
+                "description": "Scope selects the exception breadth: \"narrow_target\" (default when target is set; removes only target from rule_id) or \"rule_remove\" (whole-rule removal on the selected policy scope)",
+                "enum": [
+                  "narrow_target",
+                  "rule_remove"
+                ],
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ],
+                "x-jul-constraint": "exact lowercase enum"
+              },
+              "target": {
+                "description": "Target names the bounded variable and field excluded when scope is \"narrow_target\", e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent",
+                "type": "string",
+                "x-jul-capability": [
+                  "waf"
+                ],
+                "x-jul-constraint": "<COLLECTION>:<KEY> with COLLECTION in {ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, REQUEST_COOKIES} and 1..64 byte token key"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
         },
         "inline_rules": {
           "description": "InlineRules is a SecLang snippet appended last (after files and the CRS)",

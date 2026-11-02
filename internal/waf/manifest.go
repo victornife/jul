@@ -35,25 +35,30 @@ type ExternalAssetRecord struct {
 // PolicyManifest is the reproducible identity and external-asset inventory for
 // a compiled WAF policy (#630, #584, ADR 0031 §3).
 type PolicyManifest struct {
-	SchemaVersion          int                   `json:"schema_version"`
-	GeneratedAt            string                `json:"generated_at"`
-	Scope                  string                `json:"scope"`
-	WAFCompiled            bool                  `json:"waf_compiled"`
-	EngineVersion          string                `json:"engine_version,omitempty"`
-	EmbeddedCRSVersion     string                `json:"embedded_crs_version,omitempty"`
-	Mode                   string                `json:"mode"`
-	BlockStatus            int                   `json:"block_status"`
-	CRSEnabled             bool                  `json:"crs_enabled"`
-	Paranoia               int                   `json:"paranoia,omitempty"`
-	RequestBodyLimitBytes  int64                 `json:"request_body_limit_bytes,omitempty"`
-	ResponseBodyInspection bool                  `json:"response_body_inspection"`
-	PolicyDigest           string                `json:"policy_digest,omitempty"`
-	ExternalDigest         string                `json:"external_digest,omitempty"`
-	RawPolicySHA256        string                `json:"raw_policy_sha256,omitempty"`
-	RawExternalSHA256      string                `json:"raw_external_sha256,omitempty"`
-	InlineRulesSHA256      string                `json:"inline_rules_sha256,omitempty"`
-	Rules                  RuleCounts            `json:"rules"`
-	ExternalAssets         []ExternalAssetRecord `json:"external_assets,omitempty"`
+	SchemaVersion             int                   `json:"schema_version"`
+	GeneratedAt               string                `json:"generated_at"`
+	Scope                     string                `json:"scope"`
+	WAFCompiled               bool                  `json:"waf_compiled"`
+	EngineVersion             string                `json:"engine_version,omitempty"`
+	EmbeddedCRSVersion        string                `json:"embedded_crs_version,omitempty"`
+	Mode                      string                `json:"mode"`
+	BlockStatus               int                   `json:"block_status"`
+	CRSEnabled                bool                  `json:"crs_enabled"`
+	Paranoia                  int                   `json:"paranoia,omitempty"`
+	BlockingParanoia          int                   `json:"blocking_paranoia,omitempty"`
+	DetectionParanoia         int                   `json:"detection_paranoia,omitempty"`
+	ExceptionsCount           int                   `json:"exceptions_count,omitempty"`
+	ExceptionsReviewDue       int                   `json:"exceptions_review_due,omitempty"`
+	HasCustomTuningDirectives bool                  `json:"has_custom_tuning_directives,omitempty"`
+	RequestBodyLimitBytes     int64                 `json:"request_body_limit_bytes,omitempty"`
+	ResponseBodyInspection    bool                  `json:"response_body_inspection"`
+	PolicyDigest              string                `json:"policy_digest,omitempty"`
+	ExternalDigest            string                `json:"external_digest,omitempty"`
+	RawPolicySHA256           string                `json:"raw_policy_sha256,omitempty"`
+	RawExternalSHA256         string                `json:"raw_external_sha256,omitempty"`
+	InlineRulesSHA256         string                `json:"inline_rules_sha256,omitempty"`
+	Rules                     RuleCounts            `json:"rules"`
+	ExternalAssets            []ExternalAssetRecord `json:"external_assets,omitempty"`
 }
 
 // AssetVerificationResult reports whether the current on-disk external files,
@@ -100,25 +105,30 @@ func BuildPolicyManifest(ctx context.Context, scope string, cfg config.WAFConfig
 		inlineSHA = hex.EncodeToString(sum[:])
 	}
 	m := &PolicyManifest{
-		SchemaVersion:          PolicyManifestSchemaVersion,
-		GeneratedAt:            time.Now().UTC().Format(time.RFC3339),
-		Scope:                  scope,
-		WAFCompiled:            Compiled,
-		EngineVersion:          EngineVersion(),
-		EmbeddedCRSVersion:     EmbeddedCRSVersion(),
-		Mode:                   info.Mode,
-		BlockStatus:            info.BlockStatus,
-		CRSEnabled:             info.CRSEnabled,
-		Paranoia:               info.Paranoia,
-		RequestBodyLimitBytes:  info.RequestBodyLimitBytes,
-		ResponseBodyInspection: info.ResponseBodyInspection,
-		PolicyDigest:           info.PolicyDigest,
-		ExternalDigest:         info.ExternalDigest,
-		RawPolicySHA256:        fw.RawPolicyDigest(),
-		RawExternalSHA256:      fw.SourceDigest(),
-		InlineRulesSHA256:      inlineSHA,
-		Rules:                  info.Rules,
-		ExternalAssets:         fw.ExternalAssets(),
+		SchemaVersion:             PolicyManifestSchemaVersion,
+		GeneratedAt:               time.Now().UTC().Format(time.RFC3339),
+		Scope:                     scope,
+		WAFCompiled:               Compiled,
+		EngineVersion:             EngineVersion(),
+		EmbeddedCRSVersion:        EmbeddedCRSVersion(),
+		Mode:                      info.Mode,
+		BlockStatus:               info.BlockStatus,
+		CRSEnabled:                info.CRSEnabled,
+		Paranoia:                  info.Paranoia,
+		BlockingParanoia:          info.BlockingParanoia,
+		DetectionParanoia:         info.DetectionParanoia,
+		ExceptionsCount:           info.ExceptionsCount,
+		ExceptionsReviewDue:       info.ExceptionsReviewDue,
+		HasCustomTuningDirectives: info.HasCustomTuningDirectives,
+		RequestBodyLimitBytes:     info.RequestBodyLimitBytes,
+		ResponseBodyInspection:    info.ResponseBodyInspection,
+		PolicyDigest:              info.PolicyDigest,
+		ExternalDigest:            info.ExternalDigest,
+		RawPolicySHA256:           fw.RawPolicyDigest(),
+		RawExternalSHA256:         fw.SourceDigest(),
+		InlineRulesSHA256:         inlineSHA,
+		Rules:                     info.Rules,
+		ExternalAssets:            fw.ExternalAssets(),
 	}
 	return m, fw, nil
 }

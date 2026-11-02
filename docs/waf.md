@@ -468,6 +468,65 @@ reproducible policy manifest (`jul-waf-manifest-v1`):
   `asset_changed`, `policy_mismatch`, or `compile_failed`), proving exact policy
   recovery after same-path external file edits or restarts.
 
+### Narrow tuning, reviewable exceptions and separate paranoia (#631)
+
+When legitimate requests trigger a specific CRS or custom rule on a single
+form field, query parameter, header, or cookie, prefer a structured narrow
+exception (`[[waf.exceptions]]` or `[[servers.locations.waf.exceptions]]`)
+over broad `SecRuleRemoveById` snippets:
+
+```toml
+[servers.locations.waf]
+enabled = true
+mode = "block"
+crs_enabled = true
+blocking_paranoia = 1
+detection_paranoia = 2
+
+  [[servers.locations.waf.exceptions]]
+  id = "allow-bio-sql-keywords"
+  rule_id = 942100
+  scope = "narrow_target"
+  target = "ARGS:profile_bio"
+  methods = ["POST"]
+  rationale = "Markdown biography field accepts SQL snippets"
+  owner = "secops"
+  reference = "SEC-631"
+  created_at = "2026-11-01"
+  review_at = "2027-02-01"
+  fixtures = ["benign-bio"]
+```
+
+- **Engine semantics (`Coraza v3.8.1`).** Jul compiles each structured
+  exception into a deterministic `phase:1` `SecAction`/`SecRule` (`id:890001`
+  to `890064`) emitted **before** `Include @owasp_crs/*.conf`, `directives_files`,
+  and `inline_rules`. Unlike post-CRS `SecRuleUpdateTargetById` (which in
+  Coraza `v3.8.1` mutates only the parent rule's target list and misses chain
+  children), `phase:1` `ctl:ruleRemoveTargetById` applies dynamically to
+  phase-1 rules, phase-2 rules, and chain children while leaving neighboring
+  fields, methods, rules, and routes protected.
+- **Target & rule validation.** `target` must be a non-empty literal
+  `<COLLECTION>:<KEY>` (`ARGS`, `ARGS_GET`, `ARGS_POST`, `ARGS_NAMES`,
+  `REQUEST_HEADERS`, or `REQUEST_COOKIES` followed by a 1–64 byte token key).
+  Empty keys (`ARGS:`) and wildcards/regexes are rejected at validation time so
+  an exception can never accidentally strip an entire variable collection.
+  During engine compilation, Jul verifies that every `rule_id` referenced by an
+  exception exists in the compiled ruleset and fails closed if a target rule is
+  missing or removed.
+- **Advisory review dates (`review_at`).** Past-due `review_at` dates emit a
+  `waf_exception_review_due` diagnostic in `jul lint` and surface in
+  `waf_effective.global.exceptions_review_due` without automatically expiring
+  runtime enforcement on a wall-clock boundary.
+- **Disclosure boundary.** Exception `rationale`, `owner`, and `reference`
+  metadata is returned to `config:read` principals to seed the guided Console
+  editors and stripped for `status:read`-only principals (which see only
+  bounded counts in `waf_effective`).
+- **Separate blocking and detection paranoia.** `blocking_paranoia` (1–4) and
+  `detection_paranoia` (1–4, `>= blocking_paranoia`) configure CRS
+  `tx.blocking_paranoia_level` and `tx.detection_paranoia_level` independently,
+  allowing higher-paranoia rules to execute and log without contributing to the
+  blocking anomaly threshold.
+
 ## Behaviour matrix
 
 The matrix below enumerates every supported rule source and mode combination
@@ -477,7 +536,8 @@ switching modes or rule sources.
 | Capability | `block` mode | `detect` mode | Notes |
 | --- | :-: | :-: | --- |
 | **Rule sources** ||||
-| Embedded OWASP CRS (`crs_enabled`) | ✅ | ✅ | Paranoia 1–4 configurable |
+| Embedded OWASP CRS (`crs_enabled`) | ✅ | ✅ | Paranoia 1–4 configurable; separate `blocking_paranoia` and `detection_paranoia` supported |
+| Structured narrow exceptions (`[[waf.exceptions]]`) | ✅ | ✅ | Pre-CRS `phase:1` `ctl:ruleRemoveTargetById` / `ctl:ruleRemoveById` (`890001..890064`) |
 | Custom directive files (`directives_files`) | ✅ | ✅ | Include order respected |
 | Inline rules (`inline_rules`) | ✅ | ✅ | Useful for allow-lists / tuning |
 | Empty / no rules | ✅ | ✅ | Firewall compiles but never matches (awaiting rules) |

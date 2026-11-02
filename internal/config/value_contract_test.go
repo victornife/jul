@@ -128,6 +128,7 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"RateLimitConfig.Key", "ResponseHeaderOp.Op", "RewriteConfig.Flag", "StreamServer.Protocol",
 		"StreamServer.ProxyProtocol", "TLSConfig.MinVersion", "TracingConfig.Exporter",
 		"UpstreamConfig.Strategy", "WAFConfig.Mode",
+		"WAFException.Methods", "WAFException.Scope", "WAFException.Target",
 	}
 	for _, field := range expectedStringConstraints {
 		if _, ok := inventory[field]; !ok {

@@ -482,6 +482,29 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 				d.warn("Lowering WAF paranoia on route %s on %s reduces rule coverage.", key, server)
 			}
 		}
+		if bEffWAF.BlockingParanoia != aEffWAF.BlockingParanoia {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bEffWAF.BlockingParanoia), After: fmt.Sprintf("%d", aEffWAF.BlockingParanoia), Detail: "Change WAF blocking paranoia level on route " + key}, "route "+name+" waf blocking_paranoia")
+			if aEffWAF.BlockingParanoia < bEffWAF.BlockingParanoia {
+				d.warn("Lowering WAF blocking paranoia on route %s on %s reduces blocking rule coverage.", key, server)
+			}
+		}
+		if bEffWAF.DetectionParanoia != aEffWAF.DetectionParanoia {
+			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bEffWAF.DetectionParanoia), After: fmt.Sprintf("%d", aEffWAF.DetectionParanoia), Detail: "Change WAF detection paranoia level on route " + key}, "route "+name+" waf detection_paranoia")
+		}
+		if formatWAFExceptionsDiff(bEffWAF.Exceptions) != formatWAFExceptionsDiff(aEffWAF.Exceptions) {
+			d.mod(DiffEntry{
+				Kind:   "waf",
+				Name:   name,
+				Before: formatWAFExceptionsDiff(bEffWAF.Exceptions),
+				After:  formatWAFExceptionsDiff(aEffWAF.Exceptions),
+				Detail: fmt.Sprintf("Change WAF exceptions on route %s (%d -> %d)", key, len(bEffWAF.Exceptions), len(aEffWAF.Exceptions)),
+			}, "route "+name+" waf exceptions")
+			for _, exc := range aEffWAF.Exceptions {
+				if config.CanonicalizeWAFExceptionScope(exc) == "rule_remove" {
+					d.warn("WAF exception on route %s on %s removes entire rule %d (scope=rule_remove); prefer narrow_target when possible.", key, server, exc.RuleID)
+				}
+			}
+		}
 		if bEffWAF.CRSEnabled != aEffWAF.CRSEnabled {
 			action := "Enable"
 			if !aEffWAF.CRSEnabled {

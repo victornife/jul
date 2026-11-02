@@ -74,15 +74,20 @@ type WAFEvaluationSummaryView struct {
 
 // WAFPolicySummary is one compiled policy's bounded effective settings.
 type WAFPolicySummary struct {
-	Mode                   string `json:"mode"`
-	BlockStatus            int    `json:"block_status"`
-	CRSEnabled             bool   `json:"crs_enabled"`
-	CRSVersion             string `json:"crs_version,omitempty"`
-	Paranoia               int    `json:"paranoia,omitempty"`
-	ParanoiaDefault        bool   `json:"paranoia_default,omitempty"`
-	RequestBodyLimitBytes  int64  `json:"request_body_limit_bytes,omitempty"`
-	ResponseBodyInspection bool   `json:"response_body_inspection"`
-	RuleFilesConfigured    int    `json:"rule_files_configured"`
+	Mode                      string `json:"mode"`
+	BlockStatus               int    `json:"block_status"`
+	CRSEnabled                bool   `json:"crs_enabled"`
+	CRSVersion                string `json:"crs_version,omitempty"`
+	Paranoia                  int    `json:"paranoia,omitempty"`
+	ParanoiaDefault           bool   `json:"paranoia_default,omitempty"`
+	BlockingParanoia          int    `json:"blocking_paranoia,omitempty"`
+	DetectionParanoia         int    `json:"detection_paranoia,omitempty"`
+	ExceptionsCount           int    `json:"exceptions_count,omitempty"`
+	ExceptionsReviewDue       int    `json:"exceptions_review_due,omitempty"`
+	HasCustomTuningDirectives bool   `json:"has_custom_tuning_directives,omitempty"`
+	RequestBodyLimitBytes     int64  `json:"request_body_limit_bytes,omitempty"`
+	ResponseBodyInspection    bool   `json:"response_body_inspection"`
+	RuleFilesConfigured       int    `json:"rule_files_configured"`
 	// ExternalFiles/ExternalDigest identify the exact bytes read from disk at
 	// compile time under the server's private version context ("ev1:<ctx>:<tag>",
 	// #649): same path with changed content yields a new digest without exposing

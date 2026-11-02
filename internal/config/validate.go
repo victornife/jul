@@ -407,6 +407,29 @@ func validateWAF(c WAFConfig, where string) []error {
 	if c.Paranoia != 0 && !c.CRSEnabled {
 		errs = append(errs, fmt.Errorf("%s paranoia applies only when crs_enabled = true", where))
 	}
+	if c.BlockingParanoia < 0 || c.BlockingParanoia > 4 {
+		errs = append(errs, fmt.Errorf("%s blocking_paranoia must be between 1 and 4, got %d", where, c.BlockingParanoia))
+	}
+	if c.BlockingParanoia != 0 && !c.CRSEnabled {
+		errs = append(errs, fmt.Errorf("%s blocking_paranoia applies only when crs_enabled = true", where))
+	}
+	if c.DetectionParanoia < 0 || c.DetectionParanoia > 4 {
+		errs = append(errs, fmt.Errorf("%s detection_paranoia must be between 1 and 4, got %d", where, c.DetectionParanoia))
+	}
+	if c.DetectionParanoia != 0 && !c.CRSEnabled {
+		errs = append(errs, fmt.Errorf("%s detection_paranoia applies only when crs_enabled = true", where))
+	}
+	if c.Paranoia != 0 && c.BlockingParanoia != 0 && c.BlockingParanoia != c.Paranoia {
+		errs = append(errs, fmt.Errorf("%s cannot combine legacy paranoia (%d) with conflicting blocking_paranoia (%d); use blocking_paranoia and detection_paranoia alone", where, c.Paranoia, c.BlockingParanoia))
+	}
+	effBlocking := c.EffectiveBlockingParanoia()
+	if effBlocking == 0 && c.DetectionParanoia > 0 {
+		effBlocking = 1
+	}
+	if c.DetectionParanoia > 0 && effBlocking > 0 && c.DetectionParanoia < effBlocking {
+		errs = append(errs, fmt.Errorf("%s detection_paranoia (%d) must be >= blocking_paranoia (%d)", where, c.DetectionParanoia, effBlocking))
+	}
+	errs = append(errs, validateWAFExceptions(c.Exceptions, where+".exceptions")...)
 	if !c.CRSEnabled && len(c.DirectivesFiles) == 0 && strings.TrimSpace(c.InlineRules) == "" {
 		errs = append(errs, fmt.Errorf("%s enabled but has no rules; set crs_enabled, directives_files, or inline_rules", where))
 	}
@@ -433,6 +456,210 @@ func validateWAF(c WAFConfig, where string) []error {
 		errs = append(errs, fmt.Errorf("%s request_body_limit must be >= 0", where))
 	}
 	return errs
+}
+
+const (
+	// MaxWAFExceptions is the maximum number of structured narrow exceptions per
+	// WAF policy (#631 / ADR 0031 §6.2).
+	MaxWAFExceptions = 64
+	// WAFGeneratedExceptionIDBase is the first rule ID reserved by Jul for
+	// compiled narrow exceptions (890001..890064).
+	WAFGeneratedExceptionIDBase = 890001
+	// WAFGeneratedRuleIDMax is the highest rule ID reserved by Jul for its own
+	// generated SecAction/SecRule directives (890001..900001).
+	WAFGeneratedRuleIDMax = 900001
+)
+
+// ValidateWAFExceptionTarget validates and canonicalizes a narrow WAF exception
+// target selector (<COLLECTION>:<KEY>). In Coraza v3.8.1, an empty key in
+// ctl:ruleRemoveTargetById=ID;ARGS: sets KeyStr == "" and strips the entire
+// ARGS collection, so non-empty literal token keys are strictly enforced.
+func ValidateWAFExceptionTarget(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", errors.New("target is required for narrow_target scope")
+	}
+	col, key, ok := strings.Cut(trimmed, ":")
+	if !ok {
+		return "", fmt.Errorf("target %q must have form <COLLECTION>:<KEY> (e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent)", raw)
+	}
+	colUpper := strings.ToUpper(strings.TrimSpace(col))
+	switch colUpper {
+	case "ARGS", "ARGS_GET", "ARGS_POST", "ARGS_NAMES", "REQUEST_HEADERS", "REQUEST_COOKIES":
+	default:
+		return "", fmt.Errorf("target %q uses unsupported collection %q (want ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, or REQUEST_COOKIES)", raw, col)
+	}
+	if key == "" || len(key) > 64 || strings.TrimSpace(key) != key {
+		return "", fmt.Errorf("target %q must have a non-empty field/header key (1–64 bytes) with no leading/trailing spaces", raw)
+	}
+	for i := 0; i < len(key); i++ {
+		ch := key[i]
+		valid := (ch >= 'a' && ch <= 'z') ||
+			(ch >= 'A' && ch <= 'Z') ||
+			(ch >= '0' && ch <= '9') ||
+			ch == '_' || ch == '-' || ch == '.' || ch == '[' || ch == ']'
+		if !valid {
+			return "", fmt.Errorf("target %q contains unsupported character %q in key %q (only literal token characters [A-Za-z0-9_.-[]] are allowed)", raw, ch, key)
+		}
+	}
+	return colUpper + ":" + key, nil
+}
+
+// CanonicalizeWAFExceptionScope resolves the effective scope of a WAFException.
+func CanonicalizeWAFExceptionScope(exc WAFException) string {
+	s := strings.ToLower(strings.TrimSpace(exc.Scope))
+	if s != "" {
+		return s
+	}
+	if strings.TrimSpace(exc.Target) != "" {
+		return "narrow_target"
+	}
+	return "rule_remove"
+}
+
+// CanonicalizeWAFExceptionMethods validates and canonicalizes HTTP method names
+// on a WAFException.
+func CanonicalizeWAFExceptionMethods(methods []string) ([]string, error) {
+	if len(methods) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool, len(methods))
+	out := make([]string, 0, len(methods))
+	for _, m := range methods {
+		upper := strings.ToUpper(strings.TrimSpace(m))
+		switch upper {
+		case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS":
+		default:
+			return nil, fmt.Errorf("invalid HTTP method %q (want GET, HEAD, POST, PUT, PATCH, DELETE, or OPTIONS)", m)
+		}
+		if seen[upper] {
+			return nil, fmt.Errorf("duplicate HTTP method %q", upper)
+		}
+		seen[upper] = true
+		out = append(out, upper)
+	}
+	return out, nil
+}
+
+func validateWAFExceptions(exceptions []WAFException, where string) []error {
+	if len(exceptions) == 0 {
+		return nil
+	}
+	var errs []error
+	if len(exceptions) > MaxWAFExceptions {
+		errs = append(errs, fmt.Errorf("%s exceeds maximum of %d exceptions (got %d)", where, MaxWAFExceptions, len(exceptions)))
+	}
+	seenIDs := make(map[string]int, len(exceptions))
+	seenTuples := make(map[string]int, len(exceptions))
+	for i, exc := range exceptions {
+		ew := fmt.Sprintf("%s[%d]", where, i)
+		if id := strings.TrimSpace(exc.ID); id != "" {
+			if len(id) > 64 || !isSafeWAFLiteralID(id) {
+				errs = append(errs, fmt.Errorf("%s.id %q must be 1–64 characters matching [A-Za-z0-9_.-]+", ew, exc.ID))
+			} else if prev, dup := seenIDs[id]; dup {
+				errs = append(errs, fmt.Errorf("%s.id %q duplicates %s[%d].id", ew, id, where, prev))
+			} else {
+				seenIDs[id] = i
+			}
+		}
+		if exc.RuleID <= 0 || exc.RuleID > 99999999 {
+			errs = append(errs, fmt.Errorf("%s.rule_id must be a positive rule ID (1–99999999), got %d", ew, exc.RuleID))
+		} else if exc.RuleID >= WAFGeneratedExceptionIDBase-1 && exc.RuleID <= WAFGeneratedRuleIDMax {
+			errs = append(errs, fmt.Errorf("%s.rule_id %d falls in Jul's reserved generated rule ID range (%d–%d)", ew, exc.RuleID, WAFGeneratedExceptionIDBase-1, WAFGeneratedRuleIDMax))
+		}
+		scope := CanonicalizeWAFExceptionScope(exc)
+		var canonTarget string
+		switch scope {
+		case "narrow_target":
+			t, err := ValidateWAFExceptionTarget(exc.Target)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s.target: %w", ew, err))
+			} else {
+				canonTarget = t
+			}
+		case "rule_remove":
+			if strings.TrimSpace(exc.Target) != "" {
+				errs = append(errs, fmt.Errorf("%s.target must be empty when scope is %q", ew, scope))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("%s.scope %q is invalid (want %q or %q)", ew, exc.Scope, "narrow_target", "rule_remove"))
+		}
+		canonMethods, err := CanonicalizeWAFExceptionMethods(exc.Methods)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s.methods: %w", ew, err))
+		}
+		if len(exc.Rationale) > 256 || hasControlChars(exc.Rationale) {
+			errs = append(errs, fmt.Errorf("%s.rationale must be <= 256 printable characters without control characters", ew))
+		}
+		if len(exc.Owner) > 128 || hasControlChars(exc.Owner) {
+			errs = append(errs, fmt.Errorf("%s.owner must be <= 128 printable characters without control characters", ew))
+		}
+		if len(exc.Reference) > 128 || hasControlChars(exc.Reference) {
+			errs = append(errs, fmt.Errorf("%s.reference must be <= 128 printable characters without control characters", ew))
+		}
+		var createdTime, reviewTime time.Time
+		if raw := strings.TrimSpace(exc.CreatedAt); raw != "" {
+			t, err := time.Parse("2006-01-02", raw)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s.created_at %q must be a valid YYYY-MM-DD date", ew, exc.CreatedAt))
+			} else {
+				createdTime = t
+			}
+		}
+		if raw := strings.TrimSpace(exc.ReviewAt); raw != "" {
+			t, err := time.Parse("2006-01-02", raw)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s.review_at %q must be a valid YYYY-MM-DD date", ew, exc.ReviewAt))
+			} else {
+				reviewTime = t
+			}
+		}
+		if !createdTime.IsZero() && !reviewTime.IsZero() && reviewTime.Before(createdTime) {
+			errs = append(errs, fmt.Errorf("%s.review_at (%s) cannot precede created_at (%s)", ew, exc.ReviewAt, exc.CreatedAt))
+		}
+		if len(exc.Fixtures) > 16 {
+			errs = append(errs, fmt.Errorf("%s.fixtures exceeds maximum of 16 fixture IDs", ew))
+		}
+		for fi, fid := range exc.Fixtures {
+			if !isSafeWAFLiteralID(strings.TrimSpace(fid)) || len(strings.TrimSpace(fid)) > 64 {
+				errs = append(errs, fmt.Errorf("%s.fixtures[%d] %q must be 1–64 characters matching [A-Za-z0-9_.-]+", ew, fi, fid))
+			}
+		}
+		if exc.RuleID > 0 && (scope == "narrow_target" && canonTarget != "" || scope == "rule_remove") {
+			sortedMethods := append([]string(nil), canonMethods...)
+			sort.Strings(sortedMethods)
+			tupleKey := fmt.Sprintf("%d|%s|%s|%s", exc.RuleID, scope, canonTarget, strings.Join(sortedMethods, ","))
+			if prev, dup := seenTuples[tupleKey]; dup {
+				errs = append(errs, fmt.Errorf("%s duplicates exception %s[%d] (rule_id=%d, scope=%s, target=%q)", ew, where, prev, exc.RuleID, scope, canonTarget))
+			} else {
+				seenTuples[tupleKey] = i
+			}
+		}
+	}
+	return errs
+}
+
+func isSafeWAFLiteralID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		ok := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.'
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func hasControlChars(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 || s[i] == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidRateKey reports whether a rate-limit key spec is well-formed.

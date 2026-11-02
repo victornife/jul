@@ -19,6 +19,7 @@ import (
 
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 
+	"jul/internal/config"
 	"jul/internal/versionid"
 )
 
@@ -29,10 +30,11 @@ import (
 type sourceRecorder struct {
 	inner fs.FS
 
-	mu     sync.Mutex
-	names  map[string]struct{}
-	assets []ExternalAssetRecord
-	chain  bytes.Buffer
+	mu        sync.Mutex
+	names     map[string]struct{}
+	assets    []ExternalAssetRecord
+	chain     bytes.Buffer
+	customTun bool
 }
 
 func newSourceRecorder(inner fs.FS) *sourceRecorder {
@@ -42,8 +44,13 @@ func newSourceRecorder(inner fs.FS) *sourceRecorder {
 func (r *sourceRecorder) record(name string, data []byte) {
 	sum := sha256.Sum256(data)
 	hexSum := hex.EncodeToString(sum[:])
+	text := string(data)
+	hasCustom := DetectCustomTuningDirectives(text)
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if hasCustom {
+		r.customTun = true
+	}
 	if _, seen := r.names[name]; !seen {
 		r.assets = append(r.assets, ExternalAssetRecord{
 			Path:      name,
@@ -55,6 +62,12 @@ func (r *sourceRecorder) record(name string, data []byte) {
 	r.chain.WriteString("sha256:")
 	r.chain.WriteString(hexSum)
 	r.chain.WriteByte('\n')
+}
+
+func (r *sourceRecorder) hasCustomTuning() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.customTun
 }
 
 func (r *sourceRecorder) externalAssets() []ExternalAssetRecord {
@@ -139,7 +152,11 @@ func (m *memFile) Close() error               { return nil }
 // ruleCounter classifies rules as the parser adds them, by source file:
 // embedded assets are "@"-prefixed, inline directives have no file or the
 // parser's "_inline_" marker, anything else was read from disk.
-type ruleCounter struct{ counts RuleCounts }
+type ruleCounter struct {
+	counts      RuleCounts
+	seenRuleIDs map[int]bool
+	collisionID int
+}
 
 func (c *ruleCounter) observe(file string) {
 	c.counts.Total++
@@ -151,6 +168,19 @@ func (c *ruleCounter) observe(file string) {
 	default:
 		c.counts.External++
 	}
+}
+
+func (c *ruleCounter) observeRule(id int, file string) {
+	if c.seenRuleIDs == nil {
+		c.seenRuleIDs = make(map[int]bool, 64)
+	}
+	if id > 0 {
+		if id >= config.WAFGeneratedExceptionIDBase-1 && id <= config.WAFGeneratedRuleIDMax && file != "" && file != "_inline_" {
+			c.collisionID = id
+		}
+		c.seenRuleIDs[id] = true
+	}
+	c.observe(file)
 }
 
 var crsSignature = regexp.MustCompile(`SecComponentSignature\s+"OWASP_CRS/([0-9][0-9A-Za-z.\-]*)"`)

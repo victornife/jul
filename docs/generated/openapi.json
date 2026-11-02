@@ -9227,8 +9227,16 @@
                       "type": "integer",
                       "format": "int64"
                     },
+                    "blocking_paranoia": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
                     "crs_enabled": {
                       "type": "boolean"
+                    },
+                    "detection_paranoia": {
+                      "type": "integer",
+                      "format": "int64"
                     },
                     "directives_files": {
                       "type": "array",
@@ -9238,6 +9246,58 @@
                     },
                     "enabled": {
                       "type": "boolean"
+                    },
+                    "exceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "fixtures": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "methods": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "owner": {
+                            "type": "string"
+                          },
+                          "rationale": {
+                            "type": "string"
+                          },
+                          "reference": {
+                            "type": "string"
+                          },
+                          "review_at": {
+                            "type": "string"
+                          },
+                          "rule_id": {
+                            "type": "integer",
+                            "format": "int64"
+                          },
+                          "scope": {
+                            "type": "string"
+                          },
+                          "target": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "rule_id"
+                        ],
+                        "additionalProperties": false
+                      }
                     },
                     "inline_rules": {
                       "type": "string"

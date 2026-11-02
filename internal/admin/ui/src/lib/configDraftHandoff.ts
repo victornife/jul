@@ -66,6 +66,7 @@ export interface PendingRawDraft {
 export interface LegacyPendingRawDraft {
   readonly kind: "toml";
   readonly toml: string;
+  readonly pinnedBaseVersion?: string | undefined;
 }
 
 export interface LegacyPendingPatchDraftInput {
