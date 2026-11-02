@@ -160,6 +160,13 @@ cross-build capability boundary.
 
 Dedicated package floors do not replace:
 
+- the versioned cross-route and protocol security-isolation matrix (`#634`,
+  [`docs/security-isolation-matrix.json`](security-isolation-matrix.json) and
+  `internal/app/security_isolation_matrix_test.go`), which verifies
+  `public_private_isolation`, `trusted_identity`, `cache_isolation`,
+  `policy_lifecycle`, and `protocol_applicability` boundaries across real
+  handlers and fails `VerifySecurityIsolationReport` on missing discovery,
+  stale source identities, or required skips;
 - repository-wide default/full tests and the global coverage floor;
 - the full-tag race detector;
 - fuzz smoke targets for attacker-controlled parsers;

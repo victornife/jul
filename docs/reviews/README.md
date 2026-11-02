@@ -26,6 +26,7 @@ durable, promoted to an [ADR](../adr/).
 
 | Date | Review | Scope |
 | --- | --- | --- |
+| 2026-11-02 | [#629 WAF & security-operations programme acceptance and evidence ledger](2026-11-02-629-waf-programme-ledger.md) | Shared architecture ([ADR 0031](../adr/0031-waf-operations-posture-isolation-and-alerting.md)), baseline measurements, predeclared budgets, per-child acceptance mapping (`#630`–`#634`, `#628-B`), and adversarial review ledger |
 | 2026-10-25 | [#621 scoped cache invalidation 6-lane review & re-audit](2026-10-25-621-scoped-cache-invalidation.md) | Pre-implementation design review ([ADR 0027](../adr/0027-scoped-cache-invalidation.md)) and 6-lane adversarial implementation review + re-audit (`D-01`..`D-09`, `F-L12-01`..`F-L56-05`) for `CACHE-OPS-01` |
 | 2026-10-14 | [Eight-hour #590 result and collection review](2026-10-14-ga-soak-590-results.md) | Completes criterion 5 for exactly routing/CORS, resilience and auxiliary egress on unchanged full v2.2.0; preserves the original count failure and authorised supplement |
 | 2026-10-14 | [#590 pre-run contract](2026-10-14-ga-soak-590.md) | Fixed source/host/workload/threshold declaration, retained separately from results |
