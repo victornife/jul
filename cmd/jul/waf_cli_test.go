@@ -350,6 +350,10 @@ listen = "${env:JUL_TEST_WAF_LISTEN}"
 	// 6. Verify jul waf events CLI against an httptest server.
 	statusMode := 200
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if statusMode == 302 {
+			http.Redirect(w, r, tsURLForRedirect, http.StatusFound)
+			return
+		}
 		if statusMode != 200 {
 			w.WriteHeader(statusMode)
 			_, _ = w.Write([]byte(`{"error":"forbidden"}`))
@@ -359,7 +363,16 @@ listen = "${env:JUL_TEST_WAF_LISTEN}"
 		_, _ = w.Write([]byte(`{"api_version":"v1","collection_state":"active","retention":{"max_events":256,"max_event_bytes":4096,"ttl_seconds":900},"stats":{"retained_events":1,"recorded_total":1},"events":[{"event_id":"wev_0123456789abcdef0123456789abcdef","time":"2026-11-02T00:00:00Z","outcome":"interrupted_request","mode":"block","client_status":403,"origin_reached":false,"method":"POST","host":"example.test","path":"/login","route":{"route_id":"rt-1"},"total_matched_rules":1}]}`))
 	}))
 	defer ts.Close()
+	tsURLForRedirect = ts.URL
 
+	tokFile := filepath.Join(tmpDir, "events-token.txt")
+	if err := os.WriteFile(tokFile, []byte("tok-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reset()
+	if _, code := dispatchDiagnosticsSubcommand([]string{"waf", "events", "-url", ts.URL, "-token-file", tokFile}); code != 0 || !strings.Contains(outBuf.String(), "wev_0123456789abcdef0123456789abcdef") {
+		t.Fatalf("jul waf events -token-file code = %d, out=%s err=%s", code, outBuf.String(), errBuf.String())
+	}
 	reset()
 	if _, code := dispatchDiagnosticsSubcommand([]string{"waf", "events", "-url", ts.URL, "-token", "tok-1", "-event-id", "wev_0123456789abcdef0123456789abcdef", "-outcome", "interrupted_request", "-rule-id", "942100", "-route-id", "rt-1", "-limit", "10"}); code != 0 || !strings.Contains(outBuf.String(), "wev_0123456789abcdef0123456789abcdef") {
 		t.Fatalf("jul waf events text code = %d, out=%s err=%s", code, outBuf.String(), errBuf.String())
@@ -368,9 +381,16 @@ listen = "${env:JUL_TEST_WAF_LISTEN}"
 	if _, code := dispatchDiagnosticsSubcommand([]string{"waf", "events", "-url", ts.URL, "-json"}); code != 0 || !strings.Contains(outBuf.String(), `"collection_state": "active"`) {
 		t.Fatalf("jul waf events -json code = %d, out=%s err=%s", code, outBuf.String(), errBuf.String())
 	}
+	statusMode = 302
+	reset()
+	if _, code := dispatchDiagnosticsSubcommand([]string{"waf", "events", "-url", ts.URL}); code == 0 {
+		t.Fatal("expected redirect response not to be followed and to return non-zero")
+	}
 	statusMode = 403
 	for _, badEvents := range [][]string{
 		{"waf", "events", "extra-arg"},
+		{"waf", "events", "-url", "http://remote.example:9090"},
+		{"waf", "events", "-url", ts.URL, "-token-file", filepath.Join(tmpDir, "missing-token.txt")},
 		{"waf", "events", "-url", ts.URL},
 		{"waf", "events", "-url", "http://127.0.0.1:1"},
 	} {
@@ -380,3 +400,5 @@ listen = "${env:JUL_TEST_WAF_LISTEN}"
 		}
 	}
 }
+
+var tsURLForRedirect string

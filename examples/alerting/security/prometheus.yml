@@ -1,0 +1,39 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Prometheus configuration for Jul.IA Security Operations Alerting (#628-B + #632).
+# Scrapes Jul's authenticated /metrics endpoint (requires metrics:read permission
+# and loopback or TLS transport).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/security-alerts.rules.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "127.0.0.1:9093"
+
+scrape_configs:
+  - job_name: "jul-admin-metrics"
+    metrics_path: "/metrics"
+    # Shared-loopback arrangement (network_mode: host): Prometheus connects from
+    # 127.0.0.1 to Jul's loopback admin listener (127.0.0.1:9090), satisfying
+    # Jul's loopback-or-TLS transport gate without exposing :9090 off-loopback.
+    scheme: "http"
+    authorization:
+      type: "Bearer"
+      credentials_file: "/etc/prometheus/secrets/metrics-bearer-token"
+    static_configs:
+      - targets:
+          - "127.0.0.1:9090"
+    # For off-loopback or bridge-network scraping, enable TLS on Jul's [admin.tls]
+    # listener and switch scheme to "https" with your CA bundle:
+    # scheme: "https"
+    # tls_config:
+    #   ca_file: "/etc/prometheus/secrets/jul-admin-ca.pem"
+    #   insecure_skip_verify: false

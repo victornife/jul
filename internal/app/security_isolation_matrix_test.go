@@ -1406,14 +1406,24 @@ func TestSecurityIsolationMatrixEndToEndExecutionGate(t *testing.T) {
 		t.Fatalf("LoadSecurityIsolationManifest: %v", err)
 	}
 
-	// Ensure all three execution suites have run in this test binary invocation.
+	// Ensure all execution suites required by the manifest have run in this test binary invocation.
 	executedIsolationMu.Lock()
-	count := len(executedIsolationResults)
+	_, hasRoute := executedIsolationResults["ISO-ROUTE-001"]
+	_, hasCache := executedIsolationResults["ISO-CACHE-001"]
+	_, hasProto := executedIsolationResults["ISO-PROTO-001"]
+	_, hasWAF3 := executedIsolationResults["ISO-WAF-003"]
 	executedIsolationMu.Unlock()
-	if count < len(m.Cases) {
+	if !hasRoute {
 		t.Run("exec_public_restricted_admin_identity", TestSecurityIsolationPublicRestrictedAdminAndIdentity)
+	}
+	if !hasCache {
 		t.Run("exec_cache_auth_waf", TestSecurityIsolationCacheAuthAndWAFBoundaries)
+	}
+	if !hasProto {
 		t.Run("exec_lifecycle_protocols", TestSecurityIsolationLifecycleAndProtocolBoundaries)
+	}
+	if !hasWAF3 {
+		t.Run("exec_epic629_waf_isolation", TestWAFProgrammeIntegratedOperatorJourneyEpic629)
 	}
 
 	executedIsolationMu.Lock()

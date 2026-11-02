@@ -1,0 +1,50 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Optional version-pinned Prometheus + Alertmanager recipe for Jul.IA security alerting (#628-B).
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.11.2
+    network_mode: host
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=24h"
+      - "--web.listen-address=127.0.0.1:9091"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./security-alerts.rules.yml:/etc/prometheus/security-alerts.rules.yml:ro
+      - ./secrets:/etc/prometheus/secrets:ro
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.32.0
+    network_mode: host
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--web.listen-address=127.0.0.1:9093"
+      - "--cluster.listen-address="
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      - receiver
+    restart: unless-stopped
+
+  receiver:
+    image: python:3.13-alpine
+    network_mode: host
+    command:
+      - "python3"
+      - "-u"
+      - "-c"
+      - |
+        import http.server, sys
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length", "0"))
+                sys.stdout.write(self.rfile.read(n).decode("utf-8", "replace") + "\n")
+                sys.stdout.flush()
+                self.send_response(200)
+                self.end_headers()
+        http.server.HTTPServer(("127.0.0.1", 19095), H).serve_forever()
+    restart: unless-stopped

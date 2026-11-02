@@ -1,0 +1,39 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Alertmanager configuration for Jul.IA Security Operations Alerting (#628-B + #632).
+# Delivers grouped firing and resolved notifications to a local disposable receiver
+# by default, with a commented external destination example using secret placeholders.
+
+route:
+  receiver: "local-disposable-receiver"
+  group_by: ["alertname", "category", "symptom", "area", "producer"]
+  group_wait: 5s
+  group_interval: 30s
+  repeat_interval: 4h
+
+inhibit_rules:
+  # When WAF evidence is unavailable (e.g. on a lean build without -tags waf),
+  # inhibit only causally related WAF posture warnings (area = "waf"); never
+  # suppress independent trust, certificate, admin, cache, intent, or maintenance warnings.
+  - source_matchers:
+      - alertname = "JulSecurityEvidenceUnavailableOrDegraded"
+      - producer =~ "waf_.*"
+      - state = "unavailable"
+    target_matchers:
+      - alertname = "JulSecurityPostureWarningSustained"
+      - area = "waf"
+
+receivers:
+  - name: "local-disposable-receiver"
+    webhook_configs:
+      - url: "http://127.0.0.1:19095/alerts"
+        send_resolved: true
+        max_alerts: 32
+
+  # Optional operator-configured external destination example (never required for automated tests):
+  # - name: "external-secops-webhook"
+  #   webhook_configs:
+  #     - url_file: "/etc/alertmanager/secrets/external_webhook_url" # e.g. ${SECRET_WEBHOOK_URL}
+  #       send_resolved: true
+  #       max_alerts: 32

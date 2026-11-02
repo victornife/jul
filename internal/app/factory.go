@@ -303,7 +303,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAFDigests(0, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		f.publishWAFAssets(gen.wafGlobalPolicyRaw, gen.wafGlobalAssets, gen.wafOverridePolicyRaw, gen.wafOverrideExtRaw, gen.wafOverrideAssets)
-		f.publishWAF(0, gen.wafPolicy)
+		f.publishWAF(0, gen.wafPolicy, gen.wafActiveCounts, c)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -396,7 +396,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAFDigests(genID, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		f.publishWAFAssets(gen.wafGlobalPolicyRaw, gen.wafGlobalAssets, gen.wafOverridePolicyRaw, gen.wafOverrideExtRaw, gen.wafOverrideAssets)
-		f.publishWAF(genID, gen.wafPolicy)
+		f.publishWAF(genID, gen.wafPolicy, gen.wafActiveCounts, c)
 		if commitMetricLabels != nil {
 			commitMetricLabels()
 			f.Metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
@@ -812,6 +812,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		gen.wafGlobalAssets = globalFW.ExternalAssets()
 	}
 	gen.wafPolicy = wafReport.finish(time.Now())
+	gen.wafActiveCounts = wafReport.activeCounts
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 		scopeKey := WAFScope(srv, loc)
 		fw := wafByScope[scopeKey]

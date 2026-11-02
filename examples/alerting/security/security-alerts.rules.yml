@@ -1,0 +1,96 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Jul.IA Security Operations Alerting Rules (#628-B + #632 rejection-alert extension)
+# Producer contract: ADR 0031 §8, docs/metrics-contract.json
+# Pinned evaluator: Prometheus v3.11.2 / Alertmanager v0.32.0
+
+groups:
+  - name: security_operations_alerts
+    interval: 15s
+    rules:
+      # 1. #630 Serving WAF protection weakened or all block routes removed
+      - alert: JulWAFProtectionWeakened
+        expr: |
+          (
+            sum(increase(jul_waf_protection_changes_total{transition="weakened"}[5m])) > 0
+          )
+          or
+          (
+            sum(jul_waf_serving_routes{state="block"}) == 0
+            and
+            sum(jul_waf_serving_routes{state=~"detect|disabled_override|unprotected"}) > 0
+          )
+        for: 30s
+        labels:
+          severity: warning
+          category: security_protection
+          symptom: waf_protection_weakened
+        annotations:
+          summary: "Jul.IA serving WAF protection was weakened or has zero block-mode routes."
+          description: "A committed reload reduced block-mode route coverage or switched enforcement to detect-only/disabled. Inspect /security and configuration history to verify whether this change was intentional."
+          runbook_url: "https://127.0.0.1:9090/security"
+
+      # 2. #633 Material gateway security posture error finding active
+      - alert: JulSecurityPostureErrorPresent
+        expr: |
+          sum by (area) (jul_security_posture_findings{severity="error"}) > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: security_posture
+          symptom: posture_error_present
+        annotations:
+          summary: "Jul.IA gateway security posture reports an active error finding in area {{ $labels.area }}."
+          description: "Run `jul posture` or open the Console Security Posture drawer (`GET /api/v1/security/posture`) to inspect the finding and apply its remediation."
+          runbook_url: "https://127.0.0.1:9090/security"
+
+      # 3. #633 Material gateway security posture warning sustained
+      - alert: JulSecurityPostureWarningSustained
+        expr: |
+          sum by (area) (jul_security_posture_findings{severity="warning"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+          category: security_posture
+          symptom: posture_warning_sustained
+        annotations:
+          summary: "Jul.IA gateway security posture reports sustained warning(s) in area {{ $labels.area }}."
+          description: "Inspect `GET /api/v1/security/posture` or `jul posture` to review the warning and its epistemic state."
+          runbook_url: "https://127.0.0.1:9090/security"
+
+      # 4. #633 Required security evidence producer stale, degraded, or unavailable
+      - alert: JulSecurityEvidenceUnavailableOrDegraded
+        expr: |
+          max by (producer, state) (jul_security_evidence_state{state=~"stale|degraded|unavailable"}) == 1
+        for: 1m
+        labels:
+          severity: warning
+          category: security_evidence
+          symptom: security_evidence_degraded
+        annotations:
+          summary: "Jul.IA security evidence producer {{ $labels.producer }} is {{ $labels.state }}."
+          description: "Required security evidence (WAF fixture evaluation, bounded investigation ring, or admin audit log sink) is stale, degraded, or unavailable. Check `GET /api/v1/security/posture` and `GET /api/security`."
+          runbook_url: "https://127.0.0.1:9090/security"
+
+      # 5. #632 Actual WAF rejection symptom elevated (with minimum inspected-traffic guard)
+      # Uses actual transaction outcomes (jul_waf_transactions_total), never rule-match counters
+      # or the bounded investigation ring. Excludes detect-only matches and non-WAF 403s.
+      - alert: JulWAFRejectionSymptomElevated
+        expr: |
+          (
+            sum(rate(jul_waf_transactions_total{mode="block",outcome=~"interrupted_request|interrupted_response|rejected_body_limit|inspection_error"}[5m]))
+            /
+            clamp_min(sum(rate(jul_waf_transactions_total[5m])), 1e-9)
+          ) > 0.05
+          and
+          sum(rate(jul_waf_transactions_total[5m])) >= 0.05
+        for: 1m
+        labels:
+          severity: warning
+          category: waf_outcomes
+          symptom: waf_rejection_elevated
+        annotations:
+          summary: "Elevated actual WAF request/response rejections (>5% of inspected traffic over 5m)."
+          description: "WAF block-mode interruptions or body-limit rejections exceed 5% of inspected transactions. This is an operational symptom — it may indicate an active attack, a recent policy/paranoia change, or a false positive on legitimate traffic. Query `GET /api/v1/waf/events` or `jul waf events` before tuning."
+          runbook_url: "https://127.0.0.1:9090/security"

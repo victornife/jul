@@ -23,8 +23,9 @@ import (
 
 // wafReport accumulates one generation's compiled WAF policies (#440).
 type wafReport struct {
-	out    admin.WAFEffectivePolicy
-	counts map[wafRouteCoordinate]int
+	out          admin.WAFEffectivePolicy
+	counts       map[wafRouteCoordinate]int
+	activeCounts [4]int // [block, detect, disabled_override, unprotected] excluding withdrawn routes (#630, CR-04)
 }
 
 type wafRouteCoordinate struct {
@@ -92,8 +93,14 @@ func (r *wafReport) unprotected(srv config.ServerConfig, loc config.LocationConf
 		r.out.RouteProtection[wafRouteIdentityKey(srv, loc, ord)] = "unprotected"
 	}
 	r.out.UnprotectedRoutes++
+	if !loc.Withdrawn {
+		r.activeCounts[3]++
+	}
 	if loc.WAF != nil {
 		r.out.DisabledOverrideRoutes++
+		if !loc.Withdrawn {
+			r.activeCounts[2]++
+		}
 		r.out.Overrides = append(r.out.Overrides, wafRouteOverride(srv, loc, ord, nil))
 	}
 }
@@ -105,8 +112,14 @@ func (r *wafReport) protected(srv config.ServerConfig, loc config.LocationConfig
 	if info.Mode == "detect" {
 		mode = "detect"
 		r.out.DetectRoutes++
+		if !loc.Withdrawn {
+			r.activeCounts[1]++
+		}
 	} else {
 		r.out.BlockRoutes++
+		if !loc.Withdrawn {
+			r.activeCounts[0]++
+		}
 	}
 	if !loc.Withdrawn {
 		r.out.RouteProtection[wafRouteIdentityKey(srv, loc, ord)] = mode
@@ -176,8 +189,9 @@ func wafPolicySummary(info waf.PolicyInfo) *admin.WAFPolicySummary {
 }
 
 // publishWAF records the WAF policy of a generation that just became live and
-// emits bounded protection-state and transition signals (#440, #630, #628-B).
-func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy) {
+// emits bounded protection-state, posture, and transition signals (#440, #630,
+// #633, #628-B).
+func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy, activeCounts [4]int, cfg *config.Config) {
 	if p == nil {
 		return
 	}
@@ -190,9 +204,12 @@ func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy) {
 	liveRawCfg := f.liveRawConfig
 	liveCfg := f.liveConfig
 	f.moduleMu.Unlock()
+	if cfg != nil {
+		liveCfg = cfg
+	}
 
 	transition := classifyWAFProtectionTransition(prev, &cp)
-	f.Metrics.ObserveWAFServingRoutes(cp.BlockRoutes, cp.DetectRoutes, cp.DisabledOverrideRoutes, cp.UnprotectedRoutes)
+	f.Metrics.ObserveWAFServingRoutes(activeCounts[0], activeCounts[1], activeCounts[2], activeCounts[3])
 	f.Metrics.ObserveWAFProtectionChange(transition)
 	f.Metrics.SetPreGatherHook(f.RefreshSecurityEvidenceMetrics)
 	f.RefreshSecurityEvidenceMetrics()
@@ -1120,6 +1137,10 @@ func (f *HandlerFactory) wafEffectiveSnapshot(updateMetrics bool) *admin.WAFEffe
 			cp.State = "stale_asset_changed"
 		}
 		out.Evaluation = &cp
+	} else if out.Global == nil && !assetsMatch {
+		out.Evaluation = &admin.WAFEvaluationSummaryView{
+			State: "stale_asset_changed",
+		}
 	}
 	if updateMetrics && f.Metrics != nil && out.Generation > 0 {
 		wafState := aggregateWAFEvidenceState(&out)
@@ -1155,6 +1176,9 @@ func evalStatePriority(state string) int {
 func diskAssetsMatchRecorded(assets []waf.ExternalAssetRecord) bool {
 	for _, a := range assets {
 		f, err := os.Open(a.Path)
+		if err != nil && !strings.HasPrefix(a.Path, "/") {
+			f, err = os.Open("/" + a.Path)
+		}
 		if err != nil {
 			return false
 		}

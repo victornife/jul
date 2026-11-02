@@ -186,6 +186,9 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 	if info.BlockStatus == 0 {
 		info.BlockStatus = 403
 	}
+	if info.RequestBodyLimitBytes == 0 {
+		info.RequestBodyLimitBytes = 128 << 10
+	}
 	for _, p := range cfg.DirectivesFiles {
 		if strings.TrimSpace(p) != "" {
 			info.RuleFilesConfigured++

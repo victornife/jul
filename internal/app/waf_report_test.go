@@ -67,12 +67,12 @@ func TestWAFEffectivePublishesServingGeneration(t *testing.T) {
 		t.Fatalf("embedded CRS version %q inconsistent with Compiled=%v", before.EmbeddedCRSVersion, waf.Compiled)
 	}
 
-	f.publishWAF(3, nil)
+	f.publishWAF(3, nil, [4]int{}, nil)
 	if f.WAFEffective().Generation != 0 {
 		t.Fatal("a nil policy must not replace the serving one")
 	}
 	p := &admin.WAFEffectivePolicy{GlobalEnabled: true, InheritingRoutes: 1, Overrides: []admin.WAFRouteOverride{{Path: "/a"}}}
-	f.publishWAF(7, p)
+	f.publishWAF(7, p, [4]int{1, 0, 0, 0}, nil)
 	got := f.WAFEffective()
 	if got.Generation != 7 || got.InheritingRoutes != 1 || p.Generation != 0 {
 		t.Fatalf("published = %+v (source mutated: %d)", got, p.Generation)
@@ -291,7 +291,7 @@ func TestWAFScopedEvaluationAndRollupCoverage(t *testing.T) {
 
 	// Exercise RecordWAFEvaluation and overrides-only WAFEffective rollup priority.
 	f := &HandlerFactory{}
-	f.publishWAF(1, effOverridesOnly)
+	f.publishWAF(1, effOverridesOnly, [4]int{}, nil)
 	f.RecordWAFEvaluation(&waf.WAFEvaluationReport{
 		Summary: waf.WAFEvaluationSummary{
 			State:        "current",
@@ -319,6 +319,19 @@ func TestWAFScopedEvaluationAndRollupCoverage(t *testing.T) {
 		t.Fatal("findScopedEvaluationView(nil) must be nil")
 	}
 	_ = findScopedEvaluationView(effAfter, "checkout")
+
+	if diskAssetsMatchRecorded([]waf.ExternalAssetRecord{{Path: "relative/missing/asset.conf"}}) {
+		t.Fatal("expected relative missing asset to return false")
+	}
+	fNoOverrides := &HandlerFactory{
+		liveWAF:            &admin.WAFEffectivePolicy{Generation: 1},
+		liveGlobalAssets:   []waf.ExternalAssetRecord{{Path: "relative/missing/asset.conf"}},
+		liveOverrideAssets: map[string][]waf.ExternalAssetRecord{},
+	}
+	effStaleAsset := fNoOverrides.WAFEffective()
+	if effStaleAsset.Evaluation == nil || effStaleAsset.Evaluation.State != "stale_asset_changed" {
+		t.Fatalf("expected stale_asset_changed when out.Global == nil and asset is missing, got %+v", effStaleAsset.Evaluation)
+	}
 
 	// Item 10A, 10B, 10C:
 	// - 10A: Inherited-route CLI report import resolves through liveCfg to "global"
@@ -443,7 +456,7 @@ func testItem10ScopedLifecycleAndConcurrency(t *testing.T) {
 			},
 		},
 	}
-	f.publishWAF(1, eff)
+	f.publishWAF(1, eff, [4]int{}, nil)
 
 	// 10A-1: Importing a separate-process CLI report for an inheriting route by durable route_id ("inherit-docs")
 	// and by unambiguous path ("/docs") must bind to the serving global policy and return State="current".
@@ -499,7 +512,7 @@ func testItem10ScopedLifecycleAndConcurrency(t *testing.T) {
 		effWithoutPay := *eff
 		effWithoutPay.OverrideRoutes = 0
 		effWithoutPay.Overrides = nil
-		f.publishWAF(2, &effWithoutPay)
+		f.publishWAF(2, &effWithoutPay, [4]int{}, nil)
 	}
 	gotRemovedDuringLive, err := f.HandleAdminWAFEvaluate(ctx, []byte(`{"scope":"override-pay"}`))
 	f.onBeforeEvalCommit = nil
@@ -517,12 +530,12 @@ func testItem10ScopedLifecycleAndConcurrency(t *testing.T) {
 	f.moduleMu.Lock()
 	f.liveConfig = serveCfg
 	f.moduleMu.Unlock()
-	f.publishWAF(3, eff)
+	f.publishWAF(3, eff, [4]int{}, nil)
 	f.onBeforeEvalCommit = func(scope string) {
 		f.moduleMu.Lock()
 		f.liveConfig = &config.Config{}
 		f.moduleMu.Unlock()
-		f.publishWAF(4, &admin.WAFEffectivePolicy{Generation: 4})
+		f.publishWAF(4, &admin.WAFEffectivePolicy{Generation: 4}, [4]int{}, nil)
 	}
 	gotDisabledDuringImport, err := f.HandleAdminWAFEvaluate(ctx, ovBytes)
 	f.onBeforeEvalCommit = nil
@@ -534,7 +547,7 @@ func testItem10ScopedLifecycleAndConcurrency(t *testing.T) {
 	f.moduleMu.Lock()
 	f.liveConfig = serveCfg
 	f.moduleMu.Unlock()
-	f.publishWAF(5, eff)
+	f.publishWAF(5, eff, [4]int{}, nil)
 	badPackJSON := `{"schema_version":1,"pack_id":"bad-origin","fixtures":[{"id":"legit-1","category":"legitimate","method":"GET","path":"/ok","origin_status":99,"expected_outcome":"clean","expected_status":200},{"id":"mal-1","category":"malicious","method":"GET","path":"/bad","expected_outcome":"interrupted_request","expected_status":403}]}`
 	if _, err := f.HandleAdminWAFEvaluate(ctx, []byte(badPackJSON)); err == nil || !strings.Contains(err.Error(), "origin_status") {
 		t.Fatalf("10D expected origin_status error from HandleAdminWAFEvaluate, got %v", err)
@@ -579,7 +592,7 @@ func testItem10ScopedLifecycleAndConcurrency(t *testing.T) {
 				},
 			},
 		}
-		f.publishWAF(uint64(10+i), churnEff)
+		f.publishWAF(uint64(10+i), churnEff, [4]int{}, nil)
 		f.RecordWAFEvaluationForScope(rid, overrideRep)
 		// Attempt to record a retired route ID from a previous iteration.
 		f.RecordWAFEvaluationForScope("retired-ghost-route", overrideRep)

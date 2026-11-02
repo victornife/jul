@@ -106,6 +106,18 @@
       "owner_test": "internal/app:TestSecurityIsolationLifecycleAndProtocolBoundaries/websocket_sse_grpc_and_stream_boundaries",
       "required": true,
       "limitations": "Opaque protobuf gRPC streams, post-101 hijacked WebSocket frames, and L4 TCP passthrough are not HTTP-body-inspected by Coraza"
+    },
+    {
+      "id": "ISO-WAF-003",
+      "property": "policy_lifecycle",
+      "scenario": "Narrow WAF exceptions (#631) and separate blocking/detection paranoia preserve protection on neighboring fields, HTTP methods, rules, and sibling routes across reloads",
+      "route_scope": "app.example.test:/profile vs app.example.test:/sibling",
+      "protocols": ["HTTP/1.1", "HTTP/2"],
+      "build_profile": "full",
+      "expected_boundary": "narrow_exception_and_detection_paranoia_never_weaken_neighboring_scope",
+      "owner_test": "internal/app:TestWAFProgrammeIntegratedOperatorJourneyEpic629",
+      "required": true,
+      "limitations": "Requires -tags waf for Coraza pre-CRS phase:1 ctl:ruleRemoveTargetById compilation"
     }
   ]
 }

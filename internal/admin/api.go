@@ -176,7 +176,21 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		if raw, err := config.Marshal(c); err == nil {
 			w.Header().Set("X-Jul-Config-Version", configVersion(raw))
 		}
-		writeJSON(w, http.StatusOK, projectRoutes(c))
+		routes := projectRoutes(c)
+		if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
+			for i := range routes {
+				for j := range routes[i].Locations {
+					if routes[i].Locations[j].WAF != nil {
+						w := *routes[i].Locations[j].WAF
+						w.Exceptions = nil
+						w.DirectivesFiles = nil
+						w.InlineRules = ""
+						routes[i].Locations[j].WAF = &w
+					}
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, routes)
 	})(w, r)
 }
 

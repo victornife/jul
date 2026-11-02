@@ -11,6 +11,15 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Complete the `#629` WAF & security-operations programme with the version-pinned
+  Prometheus `v3.11.2` + Alertmanager `v0.32.0` external security-alerting recipe
+  (`examples/alerting/security/`, #628 Milestone B + #632 actual-rejection
+  symptom alert extension), the expanded `#634` cross-route/protocol security
+  isolation matrix (`docs/security-isolation-matrix.json`), the end-to-end
+  integrated operator journey (`TestWAFProgrammeIntegratedOperatorJourneyEpic629`),
+  and adversarial security/correctness hardening (`SR-01`..`SR-05`,
+  `CR-01`..`CR-04`).
+
 - Deliver bounded WAF outcome investigation (`GET /api/v1/waf/events`,
   `jul waf events`, Console `WAFInvestigationDrawer` with narrow-exception
   handoff; #632 Milestone B) and actionable 7-area gateway security posture
