@@ -29,6 +29,8 @@ func dispatchDiagnosticsSubcommand(args []string) (handled bool, code int) {
 		return true, cmdSupportBundle(args[1:])
 	case "waf":
 		return true, cmdWAF(args[1:])
+	case "posture":
+		return true, cmdPosture(args[1:])
 	default:
 		return false, 0
 	}
@@ -40,10 +42,12 @@ func extendedUsage() {
 Local diagnostics:
   jul doctor [-config f] [-json] [-strict] [-check-network]
                                        run deterministic read-only checks
+  jul posture [-config f] [-json]
+                                       evaluate the 7-area gateway security posture
   jul support-bundle [-config f] [-output file] [-json] [-include-logs]
                                        write a bounded, secret-safe local archive
-  jul waf <evaluate|manifest|verify-assets> [-config f] [-json]
-                                       evaluate WAF fixtures and verify external policy assets
+  jul waf <evaluate|manifest|verify-assets|events> [-config f] [-json]
+                                       evaluate WAF fixtures, verify policy assets, or inspect WAF events
 `)
 }
 

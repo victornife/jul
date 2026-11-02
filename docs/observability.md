@@ -246,6 +246,8 @@ metric dimension rather than request-handling behavior.
 | `jul_waf_protection_changes_total` | Counter | `transition` | Merged / release pending | Published serving WAF protection transitions across reloads, labeled by transition (`initial`/`unchanged`/`tightened`/`weakened`/`reloaded`). |
 | `jul_waf_serving_routes` | Gauge | `state` | Merged / release pending | Configured HTTP routes in the active serving generation by effective WAF enforcement state (`block`/`detect`/`disabled_override`/`unprotected`). |
 | `jul_waf_transactions_total` | Counter | `mode`, `outcome` | Merged / release pending | Web-application-firewall inspected HTTP transactions, labeled by policy mode (`block`/`detect`) and final outcome (`clean`/`matched_observed`/`interrupted_request`/`interrupted_response`/`rejected_body_limit`/`inspection_error`). |
+| `jul_security_posture_findings` | Gauge | `area`, `severity` | Merged / release pending | Active gateway security posture findings by bounded area (`admin`/`trust`/`waf`/`cache`/`certificates`/`intent`/`maintenance`) and severity (`warning`/`error`). |
+| `jul_security_evidence_state` | Gauge | `producer`, `state` | Merged / release pending | Availability state of security evidence producers (`1` for active state, `0` otherwise) by `producer` (`waf_effective`/`waf_investigation`/`audit_sink`/`posture_evaluator`) and `state` (`ok`/`stale`/`degraded`/`disabled`/`unavailable`). |
 
 Metric labels must remain bounded and must never contain request paths, queries,
 client identity, destination URLs, raw errors, or secrets. See the

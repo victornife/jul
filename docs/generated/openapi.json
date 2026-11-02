@@ -3776,6 +3776,102 @@
         ]
       }
     },
+    "/api/v1/security/posture": {
+      "get": {
+        "operationId": "getSecurityPosture",
+        "summary": "Actionable 7-area gateway security posture review (admin, trust, waf, cache, certificates, intent, maintenance) with explicit epistemic state and remediation guidance.",
+        "tags": [
+          "status"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityPostureResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`insecure_transport` — The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.\n\n`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`storage_unavailable` — The configuration or history store cannot be read or written.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "status:read"
+        ],
+        "x-jul-error-codes": [
+          "insecure_transport",
+          "unauthenticated",
+          "forbidden",
+          "rate_limited",
+          "internal_error",
+          "storage_unavailable"
+        ]
+      }
+    },
     "/api/v1/status": {
       "get": {
         "operationId": "getStatus",
@@ -4167,6 +4263,168 @@
           "internal_error",
           "not_found",
           "storage_unavailable"
+        ]
+      }
+    },
+    "/api/v1/waf/events": {
+      "get": {
+        "operationId": "listWAFEvents",
+        "summary": "Bounded, secret-safe WAF transaction outcome records from the in-memory investigation buffer, filtered by event_id, outcome, rule_id, route_id, path, or correlation hints.",
+        "tags": [
+          "status"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "query",
+            "description": "Filter by exact server-owned event_id (wev_...).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "request_id",
+            "in": "query",
+            "description": "Filter by untrusted client X-Request-ID hint.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "trace_id",
+            "in": "query",
+            "description": "Filter by untrusted trace correlation hint.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "route_id",
+            "in": "query",
+            "description": "Filter by durable route_id.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Filter by sanitized path prefix or exact match.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "description": "Filter by transaction outcome (matched_observed, interrupted_request, interrupted_response, rejected_body_limit, inspection_error).",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "query",
+            "description": "Filter by matched or interrupting rule_id.",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of events to return (1..256, default 50).",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "headers": {
+              "X-Request-ID": {
+                "description": "Server-minted correlation identifier for this request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WAFEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` — The request was malformed: an unparseable body, an unknown field, a bad parameter or a missing required parameter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`unauthenticated` — No credential was presented, or the credential is not valid. Carries no signal about whether the addressed resource exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "`insecure_transport` — The request arrived in cleartext on a listener that is neither TLS-terminated nor bound to loopback, on a route that consumes an admin credential. Rejected before route lookup and before authentication.\n\n`forbidden` — The principal is authenticated but does not hold the required permission. The check runs before the resource is looked up, so this carries no existence signal either.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`rate_limited` — The admin rate limit was exceeded. retry_after_seconds is a requirement, and is also sent as Retry-After.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`internal_error` — An unexpected server failure. The request_id correlates the response with the server log, which holds the detail this response deliberately does not.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminToken": []
+          }
+        ],
+        "x-jul-stability": "external",
+        "x-jul-permissions": [
+          "observability:read"
+        ],
+        "x-jul-error-codes": [
+          "insecure_transport",
+          "unauthenticated",
+          "forbidden",
+          "rate_limited",
+          "internal_error",
+          "invalid_request"
         ]
       }
     },
@@ -10949,6 +11207,142 @@
         ],
         "additionalProperties": false
       },
+      "SecurityPostureAreaSummary": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string"
+          },
+          "epistemic_state": {
+            "type": "string"
+          },
+          "error_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "info_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "warning_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "area",
+          "epistemic_state",
+          "error_count",
+          "info_count",
+          "status",
+          "summary",
+          "warning_count"
+        ],
+        "additionalProperties": false
+      },
+      "SecurityPostureFinding": {
+        "type": "object",
+        "properties": {
+          "area": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "epistemic_state": {
+            "type": "string"
+          },
+          "policy_digest": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "serving_generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "area",
+          "code",
+          "epistemic_state",
+          "severity",
+          "summary"
+        ],
+        "additionalProperties": false
+      },
+      "SecurityPostureResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "areas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecurityPostureAreaSummary"
+            }
+          },
+          "base_version": {
+            "type": "string"
+          },
+          "error_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "evaluated_at": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SecurityPostureFinding"
+            }
+          },
+          "info_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "overall_status": {
+            "type": "string"
+          },
+          "serving_generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "warning_count": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "api_version",
+          "areas",
+          "error_count",
+          "evaluated_at",
+          "findings",
+          "info_count",
+          "overall_status",
+          "warning_count"
+        ],
+        "additionalProperties": false
+      },
       "StatusResponse": {
         "type": "object",
         "properties": {
@@ -11223,6 +11617,321 @@
           "code",
           "severity",
           "summary"
+        ],
+        "additionalProperties": false
+      },
+      "WAFCollectionStats": {
+        "type": "object",
+        "properties": {
+          "dropped_total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "recorded_total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "retained_events": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "truncated_total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "dropped_total",
+          "recorded_total",
+          "retained_events",
+          "truncated_total"
+        ],
+        "additionalProperties": false
+      },
+      "WAFEventRecord": {
+        "type": "object",
+        "properties": {
+          "client_status": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "crs_version": {
+            "type": "string"
+          },
+          "error_category": {
+            "type": "string"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "event_truncated": {
+            "type": "boolean"
+          },
+          "external_digest": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hijacked": {
+            "type": "boolean"
+          },
+          "host": {
+            "type": "string"
+          },
+          "interrupted_action": {
+            "type": "string"
+          },
+          "interrupted_rule_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "matched_rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WAFMatchedRuleRecord"
+            }
+          },
+          "matches_truncated": {
+            "type": "boolean"
+          },
+          "method": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "origin_reached": {
+            "type": "boolean"
+          },
+          "origin_status": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "paranoia": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "partial_response_delivered": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "phases_evaluated": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "policy_digest": {
+            "type": "string"
+          },
+          "query_omitted": {
+            "type": "boolean"
+          },
+          "request_id_hint": {
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/WAFRouteRef"
+          },
+          "stale_policy": {
+            "type": "boolean"
+          },
+          "support_header_emitted": {
+            "type": "boolean"
+          },
+          "time": {
+            "type": "string"
+          },
+          "total_matched_rules": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "trace_id_hint": {
+            "type": "string"
+          },
+          "would_interrupt": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "client_status",
+          "event_id",
+          "generation",
+          "hijacked",
+          "host",
+          "matches_truncated",
+          "method",
+          "mode",
+          "origin_reached",
+          "outcome",
+          "partial_response_delivered",
+          "path",
+          "query_omitted",
+          "route",
+          "stale_policy",
+          "support_header_emitted",
+          "time",
+          "total_matched_rules",
+          "would_interrupt"
+        ],
+        "additionalProperties": false
+      },
+      "WAFEventsResponse": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string"
+          },
+          "collection_state": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WAFEventRecord"
+            }
+          },
+          "retention": {
+            "$ref": "#/components/schemas/WAFRetentionSpec"
+          },
+          "serving_generation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "serving_policy_digest": {
+            "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/WAFCollectionStats"
+          }
+        },
+        "required": [
+          "api_version",
+          "collection_state",
+          "events",
+          "retention",
+          "stats"
+        ],
+        "additionalProperties": false
+      },
+      "WAFMatchedRuleRecord": {
+        "type": "object",
+        "properties": {
+          "disruptive": {
+            "type": "boolean"
+          },
+          "logged": {
+            "type": "boolean"
+          },
+          "matched_targets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "phase": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rule_id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "source_class": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "disruptive",
+          "logged",
+          "phase",
+          "rule_id",
+          "source_class"
+        ],
+        "additionalProperties": false
+      },
+      "WAFRetentionSpec": {
+        "type": "object",
+        "properties": {
+          "max_event_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "max_events": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "max_event_bytes",
+          "max_events",
+          "ttl_seconds"
+        ],
+        "additionalProperties": false
+      },
+      "WAFRouteRef": {
+        "type": "object",
+        "properties": {
+          "canonical_predicates": {
+            "type": "string"
+          },
+          "listen": {
+            "type": "string"
+          },
+          "match_ordinal": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "match_type": {
+            "type": "string"
+          },
+          "methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path_pattern": {
+            "type": "string"
+          },
+          "predicates": {
+            "type": "string"
+          },
+          "route_id": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "server_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "match_ordinal"
         ],
         "additionalProperties": false
       }

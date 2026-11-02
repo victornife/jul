@@ -969,6 +969,9 @@ export const LocationWAFSchema = z.object({
   path: z.string().optional(),
   match_ordinal: z.number().optional(),
   selector_version: z.string().optional(),
+  methods: z.array(z.string()).optional(),
+  predicates: z.string().optional(),
+  canonical_predicates: z.string().optional(),
   enabled: z.boolean(),
   mode: z.string().optional(),
   crs_enabled: z.boolean().optional().default(false),
@@ -983,6 +986,22 @@ export const LocationWAFSchema = z.object({
   inline_rules: z.string().optional(),
 });
 export type LocationWAF = z.infer<typeof LocationWAFSchema>;
+
+export const WAFEditableRouteSchema = z.object({
+  route_id: z.string().optional(),
+  listen: z.string(),
+  server_names: z.array(z.string()).optional(),
+  match_type: z.string().optional(),
+  path: z.string().optional(),
+  match_ordinal: z.number(),
+  selector_version: z.string().optional(),
+  methods: z.array(z.string()).optional(),
+  predicates: z.string().optional(),
+  canonical_predicates: z.string().optional(),
+  scope: z.string(),
+  enabled: z.boolean(),
+});
+export type WAFEditableRoute = z.infer<typeof WAFEditableRouteSchema>;
 
 // RBACStatusSchema mirrors admin.RBACStatusProjection: the secret-free summary
 // of the admin RBAC posture. It carries only counts and booleans — never a
@@ -1112,6 +1131,8 @@ export const WAFEffectivePolicySchema = z.object({
       }),
     )
     .optional(),
+  serving_base_version: z.string().optional(),
+  serving_routes: z.array(WAFEditableRouteSchema).optional(),
 });
 export type WAFEffectivePolicy = z.infer<typeof WAFEffectivePolicySchema>;
 
@@ -1151,6 +1172,7 @@ export const SecurityProjectionSchema = z.object({
   // route. Surfacing them lets the panel disclose per-location WAF rather than
   // implying the single global policy governs every route.
   location_wafs: z.array(LocationWAFSchema).optional(),
+  waf_routes: z.array(WAFEditableRouteSchema).optional(),
   secret_refs: z.number(),
   // rbac summarises the admin access-control posture as serving vs persisted.
   // Optional for forward compatibility with older servers that predate it.
@@ -1558,6 +1580,144 @@ export function fetchTLS(): Promise<CertProjection[]> {
 
 export function fetchSecurity(): Promise<SecurityProjection> {
   return api<unknown>("/security").then((d) => SecurityProjectionSchema.parse(d));
+}
+
+export const WAFMatchedRuleRecordSchema = z.object({
+  rule_id: z.number(),
+  phase: z.number(),
+  severity: z.string().optional(),
+  source_class: z.string(),
+  disruptive: z.boolean(),
+  logged: z.boolean(),
+  tags: z.array(z.string()).optional(),
+  matched_targets: z.array(z.string()).optional(),
+});
+export type WAFMatchedRuleRecord = z.infer<typeof WAFMatchedRuleRecordSchema>;
+
+export const WAFEventRecordSchema = z.object({
+  event_id: z.string(),
+  time: z.string(),
+  outcome: z.string(),
+  mode: z.string(),
+  would_interrupt: z.boolean(),
+  interrupted_action: z.string().optional(),
+  interrupted_rule_id: z.number().optional(),
+  client_status: z.number(),
+  origin_reached: z.boolean(),
+  origin_status: z.number().optional(),
+  partial_response_delivered: z.boolean(),
+  hijacked: z.boolean(),
+  phases_evaluated: z.array(z.string()).optional(),
+  method: z.string(),
+  host: z.string(),
+  path: z.string(),
+  query_omitted: z.boolean(),
+  route: z.object({
+    route_id: z.string().optional(),
+    listen: z.string().optional(),
+    server_names: z.array(z.string()).optional(),
+    match_type: z.string().optional(),
+    path_pattern: z.string().optional(),
+    match_ordinal: z.number(),
+    scope: z.string().optional(),
+    methods: z.array(z.string()).optional(),
+    predicates: z.string().optional(),
+    canonical_predicates: z.string().optional(),
+  }),
+  generation: z.number(),
+  policy_digest: z.string().optional(),
+  external_digest: z.string().optional(),
+  crs_version: z.string().optional(),
+  paranoia: z.number().optional(),
+  stale_policy: z.boolean().optional(),
+  matched_rules: z.array(WAFMatchedRuleRecordSchema).optional(),
+  total_matched_rules: z.number(),
+  matches_truncated: z.boolean(),
+  event_truncated: z.boolean().optional(),
+  support_header_emitted: z.boolean(),
+  request_id_hint: z.string().optional(),
+  trace_id_hint: z.string().optional(),
+  error_category: z.string().optional(),
+});
+export type WAFEventRecord = z.infer<typeof WAFEventRecordSchema>;
+
+export const WAFEventsResponseSchema = z.object({
+  api_version: z.string(),
+  collection_state: z.string(),
+  serving_generation: z.number().optional(),
+  serving_policy_digest: z.string().optional(),
+  retention: z.object({
+    max_events: z.number(),
+    max_event_bytes: z.number(),
+    ttl_seconds: z.number(),
+  }),
+  stats: z.object({
+    retained_events: z.number(),
+    recorded_total: z.number(),
+    truncated_total: z.number(),
+    dropped_total: z.number(),
+  }),
+  events: z.array(WAFEventRecordSchema),
+});
+export type WAFEventsResponse = z.infer<typeof WAFEventsResponseSchema>;
+
+export function fetchWAFEvents(params?: {
+  event_id?: string;
+  outcome?: string;
+  rule_id?: string;
+  route_id?: string;
+  limit?: number;
+}): Promise<WAFEventsResponse> {
+  const qs = new URLSearchParams();
+  if (params?.event_id?.trim()) qs.set("event_id", params.event_id.trim());
+  if (params?.outcome?.trim()) qs.set("outcome", params.outcome.trim());
+  if (params?.rule_id?.trim()) qs.set("rule_id", params.rule_id.trim());
+  if (params?.route_id?.trim()) qs.set("route_id", params.route_id.trim());
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return api<unknown>(`/v1/waf/events${suffix}`).then((d) => WAFEventsResponseSchema.parse(d));
+}
+
+export const SecurityPostureAreaSummarySchema = z.object({
+  area: z.string(),
+  status: z.string(),
+  epistemic_state: z.string(),
+  error_count: z.number(),
+  warning_count: z.number(),
+  info_count: z.number(),
+  summary: z.string(),
+});
+export type SecurityPostureAreaSummary = z.infer<typeof SecurityPostureAreaSummarySchema>;
+
+export const SecurityPostureFindingSchema = z.object({
+  code: z.string(),
+  area: z.string(),
+  severity: z.string(),
+  epistemic_state: z.string(),
+  scope: z.string().optional(),
+  summary: z.string(),
+  remediation: z.string().optional(),
+  serving_generation: z.number().optional(),
+  policy_digest: z.string().optional(),
+});
+export type SecurityPostureFinding = z.infer<typeof SecurityPostureFindingSchema>;
+
+export const SecurityPostureResponseSchema = z.object({
+  api_version: z.string(),
+  evaluated_at: z.string(),
+  base_version: z.string().optional(),
+  serving_generation: z.number().optional(),
+  overall_status: z.string(),
+  error_count: z.number(),
+  warning_count: z.number(),
+  info_count: z.number(),
+  areas: z.array(SecurityPostureAreaSummarySchema),
+  findings: z.array(SecurityPostureFindingSchema),
+});
+export type SecurityPostureResponse = z.infer<typeof SecurityPostureResponseSchema>;
+
+export function fetchSecurityPosture(): Promise<SecurityPostureResponse> {
+  return api<unknown>("/v1/security/posture").then((d) => SecurityPostureResponseSchema.parse(d));
 }
 
 // OIDC browser plumbing deliberately sends no local bearer token: cookies and

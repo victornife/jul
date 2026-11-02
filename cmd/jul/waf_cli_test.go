@@ -5,6 +5,8 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -206,8 +208,8 @@ listen = "127.0.0.1:8080"
 	}
 
 	// 4. Item 3 Subcases A & B: ${file:...} and ${env:...} provider resolution in
-	// evaluate -> manifest -> verify-assets, plus durable version-key context binding
-	// and redaction of resolved secret values on CLI error paths.
+	// evaluate -> manifest -> verify-assets -> posture, plus durable version-key
+	// context binding and redaction of resolved secret values on CLI error paths.
 	rulePathSecretFile := filepath.Join(tmpDir, "rule-path-ref.txt")
 	if err := os.WriteFile(ruleFile, []byte(initialRule), 0o600); err != nil {
 		t.Fatal(err)
@@ -302,6 +304,16 @@ listen = "${env:JUL_TEST_WAF_LISTEN}"
 		t.Fatalf("provider jul waf verify-assets failed (code=%d): err=%s", code, errBuf.String())
 	}
 
+	// Verify jul posture on providerCfgFile resolves ${env:...} and ${file:...}
+	// without emitting a false certificates_literal_secret_in_config warning.
+	reset()
+	if _, code := dispatchDiagnosticsSubcommand([]string{"posture", "-config", providerCfgFile, "-json"}); code != 0 {
+		t.Fatalf("provider jul posture -json failed (code=%d): err=%s", code, errBuf.String())
+	}
+	if strings.Contains(outBuf.String(), "certificates_literal_secret_in_config") || strings.Contains(outBuf.String(), "canary-cli-provider-secret-999") {
+		t.Fatalf("provider jul posture emitted false literal secret or leaked canary: %s", outBuf.String())
+	}
+
 	// Verify an error on a provider-resolved config redacts the secret canary.
 	reset()
 	_, errCode := dispatchDiagnosticsSubcommand([]string{
@@ -311,5 +323,60 @@ listen = "${env:JUL_TEST_WAF_LISTEN}"
 	})
 	if errCode == 0 || strings.Contains(errBuf.String(), "canary-cli-provider-secret-999") {
 		t.Fatalf("expected redacted non-zero error, got code=%d stderr=%q", errCode, errBuf.String())
+	}
+
+	// 5. Verify jul posture CLI (both text and -json) and error branches.
+	if err := os.WriteFile(ruleFile, []byte(initialRule+"# edited\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reset()
+	if _, code := dispatchDiagnosticsSubcommand([]string{"posture", "-config", cfgFile}); code != 0 || !strings.Contains(outBuf.String(), "Gateway Security Posture") {
+		t.Fatalf("jul posture text code = %d, out=%s err=%s", code, outBuf.String(), errBuf.String())
+	}
+	reset()
+	if _, code := dispatchDiagnosticsSubcommand([]string{"posture", "-config", cfgFile, "-json"}); code != 0 || !strings.Contains(outBuf.String(), `"overall_status"`) {
+		t.Fatalf("jul posture -json code = %d, out=%s err=%s", code, outBuf.String(), errBuf.String())
+	}
+	for _, badPosture := range [][]string{
+		{"posture", "extra-arg"},
+		{"posture", "-config", filepath.Join(tmpDir, "missing.toml")},
+	} {
+		reset()
+		if _, code := dispatchDiagnosticsSubcommand(badPosture); code == 0 {
+			t.Fatalf("expected non-zero exit code for %v", badPosture)
+		}
+	}
+
+	// 6. Verify jul waf events CLI against an httptest server.
+	statusMode := 200
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if statusMode != 200 {
+			w.WriteHeader(statusMode)
+			_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"api_version":"v1","collection_state":"active","retention":{"max_events":256,"max_event_bytes":4096,"ttl_seconds":900},"stats":{"retained_events":1,"recorded_total":1},"events":[{"event_id":"wev_0123456789abcdef0123456789abcdef","time":"2026-11-02T00:00:00Z","outcome":"interrupted_request","mode":"block","client_status":403,"origin_reached":false,"method":"POST","host":"example.test","path":"/login","route":{"route_id":"rt-1"},"total_matched_rules":1}]}`))
+	}))
+	defer ts.Close()
+
+	reset()
+	if _, code := dispatchDiagnosticsSubcommand([]string{"waf", "events", "-url", ts.URL, "-token", "tok-1", "-event-id", "wev_0123456789abcdef0123456789abcdef", "-outcome", "interrupted_request", "-rule-id", "942100", "-route-id", "rt-1", "-limit", "10"}); code != 0 || !strings.Contains(outBuf.String(), "wev_0123456789abcdef0123456789abcdef") {
+		t.Fatalf("jul waf events text code = %d, out=%s err=%s", code, outBuf.String(), errBuf.String())
+	}
+	reset()
+	if _, code := dispatchDiagnosticsSubcommand([]string{"waf", "events", "-url", ts.URL, "-json"}); code != 0 || !strings.Contains(outBuf.String(), `"collection_state": "active"`) {
+		t.Fatalf("jul waf events -json code = %d, out=%s err=%s", code, outBuf.String(), errBuf.String())
+	}
+	statusMode = 403
+	for _, badEvents := range [][]string{
+		{"waf", "events", "extra-arg"},
+		{"waf", "events", "-url", ts.URL},
+		{"waf", "events", "-url", "http://127.0.0.1:1"},
+	} {
+		reset()
+		if _, code := dispatchDiagnosticsSubcommand(badEvents); code == 0 {
+			t.Fatalf("expected non-zero exit code for %v", badEvents)
+		}
 	}
 }

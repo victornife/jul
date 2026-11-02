@@ -36,6 +36,7 @@ import (
 	"jul/internal/rbac"
 	"jul/internal/server"
 	"jul/internal/versionid"
+	"jul/internal/waf"
 )
 
 // Purger clears cached responses. A nil Purger means caching is disabled.
@@ -462,6 +463,15 @@ type Deps struct {
 	// EvaluateWAF runs or records a bounded synthetic fixture evaluation for
 	// the serving or candidate WAF policy (#630).
 	EvaluateWAF func(context.Context, []byte) (*WAFEvaluationSummaryView, error)
+
+	// WAFInvestigation returns a point-in-time snapshot of recent non-clean
+	// WAF transaction outcomes from the bounded ring buffer (#632).
+	WAFInvestigation func(waf.InvestigationFilter) waf.InvestigationSnapshot
+
+	// ObserveSecurityPosture and ObserveSecurityEvidenceState update the
+	// bounded security posture and evidence-availability gauges (#633, #628-B).
+	ObserveSecurityPosture       func(map[string]map[string]int)
+	ObserveSecurityEvidenceState func(producer, activeState string)
 
 	// EgressBlocked returns the bounded per-subsystem/reason tally of egress
 	// allow-list blocks for the Console Security panel (P4-01). Nil omits the

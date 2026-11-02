@@ -461,6 +461,9 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// candidate.
 	deps.WAFEffective = f.WAFEffective
 	deps.EvaluateWAF = f.HandleAdminWAFEvaluate
+	deps.WAFInvestigation = f.WAFInvestigationSnapshot
+	deps.ObserveSecurityPosture = metrics.ObserveSecurityPostureFindings
+	deps.ObserveSecurityEvidenceState = metrics.ObserveSecurityEvidenceState
 
 	var configPath string
 	if ts, ok := src.(*config.TOMLSource); ok {
@@ -989,8 +992,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	if adminSrv != nil {
 		storage.admin = adminSrv.StorageTargets
 		storage.audit = adminSrv.AuditWriteHealth
+		f.SetAuditHealthSource(adminSrv.AuditWriteHealth)
 	}
 	metrics.SetStorageSource(storage.headroom, storageHintsView(storage.hints))
+	metrics.SetPreGatherHook(f.RefreshSecurityEvidenceMetrics)
 	if adminSrv != nil {
 		// Install the initial RBAC policy from the startup candidate.
 		// H-01: Fail-closed when RBAC is enabled but policy build fails.

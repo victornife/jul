@@ -716,6 +716,24 @@ handling, key backup/loss and the binary-downgrade boundary.
 
 `POST /api/v1/cache/inspect` is a read-only, authenticated bounded metadata operation under `cache:inspect`. See [bounds, cursor authorization, errors and examples](cache.md#bounded-cache-inspection). Its request/response authority is the generated OpenAPI; it performs no origin request.
 
+## WAF outcome investigation and gateway posture review (#632, #633)
+
+- `GET /api/v1/waf/events` (`observability:read`) returns bounded, secret-safe
+  WAF transaction outcome records from the in-memory ring buffer (`256` events,
+  `4096 B` per-event cap, `15m` TTL), filtered by `event_id` (`wev_...`),
+  `outcome`, `rule_id`, `route_id`, `path`, `request_id`, or `trace_id`. Each
+  record reports whether its `generation`/`policy_digest` is stale relative to
+  the currently serving generation (`stale_policy`). Callers without
+  `config:read` receive durable `route_id` and `scope` attribution with raw
+  `path_pattern` and `server_names` omitted.
+- `GET /api/v1/security/posture` (`status:read`) evaluates the finite 7-area
+  gateway security posture (`admin`, `trust`, `waf`, `cache`, `certificates`,
+  `intent`, `maintenance`), reporting each finding's severity (`error`,
+  `warning`, `info`), epistemic state (`observed`, `configured`, `inferred`,
+  `external_unknown`, `unanalysed_custom`, `unavailable`), and remediation.
+  Callers without `config:read` receive area-scoped findings without
+  configuration path details.
+
 Inspection `page_size` is an upper bound: encoded responses are also limited to
 2 MiB. Wide representation metadata can shorten a page. Follow `next_cursor`
 until absent, even when fewer than the requested resources were returned.

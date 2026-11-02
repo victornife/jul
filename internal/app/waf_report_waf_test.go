@@ -731,3 +731,162 @@ func TestWAFEvaluationPerScopeOverridesOnlyAndServingBinding(t *testing.T) {
 		t.Fatalf("after reload to evaluated asset bytes, state = top:%q ov:%q, want current", effAfterReload.Evaluation.State, effAfterReload.Overrides[0].Evaluation.State)
 	}
 }
+
+func TestWAFEvidenceMetricsTransitionOnScrapeWithoutAdminReads(t *testing.T) {
+	// Finding 5, Item 4, and Item 5:
+	// 1. After a successful reload/evaluation with an external rule file, modifying
+	//    that file on disk and scraping ONLY /metrics transitions waf_effective to "stale".
+	// 2. Audit sink health transitions (disabled -> ok -> degraded -> ok) refresh on
+	//    /metrics scrapes without calling /api/v1/security/posture.
+	// 3. Explicit raw/effective provenance survives >64 unrelated candidate builds
+	//    and aborted previews without any global ring buffer.
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	var auditConfigured atomic.Bool
+	var auditFailing atomic.Bool
+	f.SetAuditHealthSource(func() (uint64, bool, bool) {
+		return 0, auditFailing.Load(), auditConfigured.Load()
+	})
+
+	dir := t.TempDir()
+	rulePath := filepath.Join(dir, "external.conf")
+	initialRule := `SecRule ARGS:probe "@streq bad" "id:107501,phase:1,deny,status:403,log"` + "\n"
+	if err := os.WriteFile(rulePath, []byte(initialRule), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		WAF: config.WAFConfig{
+			Enabled:         true,
+			Mode:            "block",
+			BlockStatus:     403,
+			DirectivesFiles: []string{rulePath},
+		},
+		Servers: []config.ServerConfig{
+			{
+				Listen:    ":8080",
+				Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},
+			},
+		},
+	}
+
+	_, _, commit, _, err := f.Prepare(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	_, retire := commit()
+	defer retire()
+
+	scrapeMetrics := func() string {
+		rec := httptest.NewRecorder()
+		f.Metrics.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+		return rec.Body.String()
+	}
+
+	// 1. Initial scrape reports producer="waf_effective",state="ok" 1 and audit_sink state="disabled" 1.
+	body1 := scrapeMetrics()
+	if !strings.Contains(body1, `jul_security_evidence_state{producer="waf_effective",state="ok"} 1`) {
+		t.Fatalf("initial /metrics missing waf_effective ok=1:\n%s", body1)
+	}
+	if !strings.Contains(body1, `jul_security_evidence_state{producer="audit_sink",state="disabled"} 1`) {
+		t.Fatalf("initial /metrics missing audit_sink disabled=1:\n%s", body1)
+	}
+
+	// Item 4: Audit sink transitions ok -> degraded -> ok on /metrics scrapes with zero posture reads!
+	auditConfigured.Store(true)
+	auditFailing.Store(false)
+	if !strings.Contains(scrapeMetrics(), `jul_security_evidence_state{producer="audit_sink",state="ok"} 1`) {
+		t.Fatal("expected audit_sink state=ok=1 on scrape")
+	}
+	auditFailing.Store(true)
+	if !strings.Contains(scrapeMetrics(), `jul_security_evidence_state{producer="audit_sink",state="degraded"} 1`) {
+		t.Fatal("expected audit_sink state=degraded=1 on scrape after failure")
+	}
+	auditFailing.Store(false)
+	if !strings.Contains(scrapeMetrics(), `jul_security_evidence_state{producer="audit_sink",state="ok"} 1`) {
+		t.Fatal("expected audit_sink state=ok=1 on scrape after recovery")
+	}
+
+	// 2. Modify the external rule file on disk WITHOUT calling any admin/Console endpoint.
+	modifiedRule := `SecRule ARGS:probe "@streq worse" "id:107501,phase:1,deny,status:403,log"` + "\n"
+	if err := os.WriteFile(rulePath, []byte(modifiedRule), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Scraping /metrics alone detects the on-disk asset change and flips state="stale" to 1!
+	body2 := scrapeMetrics()
+	if !strings.Contains(body2, `jul_security_evidence_state{producer="waf_effective",state="stale"} 1`) {
+		t.Fatalf("scrape after external file edit without admin read did not flip waf_effective to stale:\n%s", body2)
+	}
+	if !strings.Contains(body2, `jul_security_evidence_state{producer="waf_effective",state="ok"} 0`) {
+		t.Fatalf("scrape after external file edit left waf_effective ok!=0:\n%s", body2)
+	}
+
+	// 4. Disabling or degrading waf_investigation must be reflected on /metrics scrapes.
+	f.WAFInvestigation.SetEnabled(false)
+	bodyDisabled := scrapeMetrics()
+	if !strings.Contains(bodyDisabled, `jul_security_evidence_state{producer="waf_investigation",state="disabled"} 1`) {
+		t.Fatalf("scrape with disabled investigation store did not report state=disabled=1:\n%s", bodyDisabled)
+	}
+	f.WAFInvestigation.SetEnabled(true)
+	f.WAFInvestigation.Record(waf.TransactionEvent{
+		Outcome:        waf.OutcomeInterruptedRequest,
+		Mode:           "block",
+		EventTruncated: true,
+	})
+	bodyDegraded := scrapeMetrics()
+	if !strings.Contains(bodyDegraded, `jul_security_evidence_state{producer="waf_investigation",state="degraded"} 1`) {
+		t.Fatalf("scrape with truncated investigation event did not report state=degraded=1:\n%s", bodyDegraded)
+	}
+
+	// 5. Item 5: Explicit raw/effective provenance through config.WithRawConfig across
+	// aborted candidates and >64 unrelated candidate creations before commit.
+	t.Setenv("JUL_TEST_POSTURE_ADMIN_SECRET", "resolved-secret-value-9876543210")
+	rawSecretCfg := *cfg
+	rawSecretCfg.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		Token:   "${env:JUL_TEST_POSTURE_ADMIN_SECRET}",
+	}
+	candSecret, err := config.NewCandidate(&rawSecretCfg)
+	if err != nil {
+		t.Fatalf("NewCandidate: %v", err)
+	}
+
+	// Aborted preview candidate with literal secret must not affect live posture metrics.
+	literalCfg := *cfg
+	literalCfg.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		Token:   "literal-secret-in-aborted-candidate",
+	}
+	candAborted, err := config.NewCandidate(&literalCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, abortPreview, err := f.Prepare(config.WithRawConfig(context.Background(), candAborted.Raw), candAborted.Effective)
+	if err != nil {
+		t.Fatalf("Prepare aborted candidate: %v", err)
+	}
+	abortPreview()
+
+	// Stage candSecret, then create 100 (>64) unrelated candidates before committing candSecret.
+	_, _, commitSecret, abortSecret, err := f.Prepare(config.WithRawConfig(context.Background(), candSecret.Raw), candSecret.Effective)
+	if err != nil {
+		t.Fatalf("Prepare candSecret.Effective: %v", err)
+	}
+	defer abortSecret()
+	for i := 0; i < 100; i++ {
+		if _, err := config.NewCandidate(&literalCfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, retireSecret := commitSecret()
+	defer retireSecret()
+
+	bodySecret := scrapeMetrics()
+	if !strings.Contains(bodySecret, `jul_security_posture_findings{area="certificates",severity="warning"} 0`) {
+		t.Fatalf("secret-backed config published false certificates warning on /metrics after >64 candidates:\n%s", bodySecret)
+	}
+}

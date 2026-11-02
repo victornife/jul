@@ -9,6 +9,32 @@ import (
 	"jul/internal/redact"
 )
 
+type rawConfigContextKey struct{}
+
+// WithRawConfig attaches the pre-expansion raw Config to ctx for a startup or
+// reload prepare transaction so downstream posture/lint evaluators receive the
+// exact raw/effective pair without any global provenance registry.
+func WithRawConfig(ctx context.Context, raw *Config) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if raw == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, rawConfigContextKey{}, raw)
+}
+
+// RawConfigFromContext extracts the pre-expansion raw Config attached to ctx by
+// WithRawConfig, or returns fallback when none is attached.
+func RawConfigFromContext(ctx context.Context, fallback *Config) *Config {
+	if ctx != nil {
+		if raw, ok := ctx.Value(rawConfigContextKey{}).(*Config); ok && raw != nil {
+			return raw
+		}
+	}
+	return fallback
+}
+
 // Candidate is the single immutable configuration object for a startup,
 // preflight, or reload transaction. It carries the raw (on-disk/admin-facing)
 // configuration, the secret-expanded effective configuration, the redaction

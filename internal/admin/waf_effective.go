@@ -41,6 +41,13 @@ type WAFEffectivePolicy struct {
 	Evaluation    *WAFEvaluationSummaryView `json:"evaluation,omitempty"`
 	// Overrides lists routes whose own [waf] block replaces the global policy.
 	Overrides []WAFRouteOverride `json:"overrides,omitempty"`
+	// ServingBaseVersion is the canonical version of the serving generation's
+	// raw configuration so Console investigation handoff can detect when the
+	// editable configuration revision has drifted from the serving generation.
+	ServingBaseVersion string `json:"serving_base_version,omitempty"`
+	// ServingRoutes is the serving generation's route inventory with predicate
+	// attribution (#632).
+	ServingRoutes []WAFEditableRouteProjection `json:"serving_routes,omitempty"`
 	// RouteProtection maps canonical route identity -> protection mode
 	// ("block", "detect", "unprotected") for per-route transition classification.
 	RouteProtection map[string]string `json:"-"`

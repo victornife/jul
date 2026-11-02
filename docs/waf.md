@@ -527,6 +527,26 @@ detection_paranoia = 2
   allowing higher-paranoia rules to execute and log without contributing to the
   blocking anomaly threshold.
 
+### Bounded WAF outcome investigation (#632) and gateway posture (#633)
+
+- `GET /api/v1/waf/events` (`observability:read`), `jul waf events`, and the
+  Console **Investigate outcomes** drawer query the bounded in-memory WAF
+  transaction outcome ring buffer (`256` events, `4096 B` cap, `15m` TTL).
+  Operators can look up an opaque `X-Jul-WAF-Event` (`wev_...`) support
+  reference, distinguish request-phase interruption (`interrupted_request`,
+  origin not reached) from response-phase interruption (`interrupted_response`,
+  origin reached) or detect-only observation (`matched_observed`), inspect
+  sanitized `matched_targets` (`ARGS:field_name`, `REQUEST_HEADERS:Header-Name`),
+  and click **Tune `<target>` →** in the Console to seed a narrow `#631`
+  exception directly in the guided WAF editor.
+- `GET /api/v1/security/posture` (`status:read`), `jul posture -config jul.toml`,
+  and the Console **Posture review** drawer evaluate the finite 7-area gateway
+  security posture (`admin`, `trust`, `waf`, `cache`, `certificates`, `intent`,
+  `maintenance`) with explicit epistemic states (`observed`, `configured`,
+  `inferred`, `external_unknown`, `unanalysed_custom`, `unavailable`) and publish
+  `jul_security_posture_findings` and `jul_security_evidence_state` metrics for
+  `#628-B` alerting.
+
 ## Behaviour matrix
 
 The matrix below enumerates every supported rule source and mode combination

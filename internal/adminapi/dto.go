@@ -93,6 +93,16 @@ var schemaTypes = map[string]reflect.Type{
 	"CachePurgePreviewResponse": reflect.TypeFor[CachePurgePreviewResponse](),
 	"CachePurgeRequest":         reflect.TypeFor[CachePurgeRequest](),
 	"CachePurgeResponse":        reflect.TypeFor[CachePurgeResponse](),
+
+	"WAFEventsResponse":          reflect.TypeFor[WAFEventsResponse](),
+	"WAFEventRecord":             reflect.TypeFor[WAFEventRecord](),
+	"WAFMatchedRuleRecord":       reflect.TypeFor[WAFMatchedRuleRecord](),
+	"WAFRouteRef":                reflect.TypeFor[WAFRouteRef](),
+	"WAFRetentionSpec":           reflect.TypeFor[WAFRetentionSpec](),
+	"WAFCollectionStats":         reflect.TypeFor[WAFCollectionStats](),
+	"SecurityPostureResponse":    reflect.TypeFor[SecurityPostureResponse](),
+	"SecurityPostureAreaSummary": reflect.TypeFor[SecurityPostureAreaSummary](),
+	"SecurityPostureFinding":     reflect.TypeFor[SecurityPostureFinding](),
 }
 
 // SchemaTypes returns the registered external DTOs by component name.

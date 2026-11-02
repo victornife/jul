@@ -4,6 +4,7 @@
 package config
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -81,5 +82,24 @@ func TestNewCandidateRedactionCoversResolvedSecret(t *testing.T) {
 	masked := cand.Redaction.Apply("value=" + secret)
 	if !strings.Contains(masked, "***") {
 		t.Errorf("candidate redaction did not mask resolved secret: %q", masked)
+	}
+}
+
+func TestWithRawConfigContext(t *testing.T) {
+	raw := ProxyTarget(":8080", ":3000")
+	if got := RawConfigFromContext(context.Background(), raw); got != raw {
+		t.Fatal("RawConfigFromContext without value should return fallback")
+	}
+	//nolint:staticcheck // SA1012: intentionally testing nil ctx guard
+	if got := WithRawConfig(nil, nil); got == nil {
+		t.Fatal("WithRawConfig(nil, nil) should return non-nil context")
+	}
+	cand, err := NewCandidate(raw)
+	if err != nil {
+		t.Fatalf("NewCandidate failed: %v", err)
+	}
+	ctx := WithRawConfig(context.Background(), cand.Raw)
+	if got := RawConfigFromContext(ctx, cand.Effective); got != cand.Raw {
+		t.Fatal("RawConfigFromContext should return attached cand.Raw")
 	}
 }

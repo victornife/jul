@@ -727,7 +727,7 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	// The startup effective config is already resolved by the composition root
 	// and passed as s.cfg. The factory receives the same candidate that will be
 	// served, so there is no second secret resolution at startup (R7-05).
-	handlers, genID, commit, _, err := s.factory(ctx, s.cfg)
+	handlers, genID, commit, _, err := s.factory(config.WithRawConfig(ctx, s.rawCfg), s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
 	}

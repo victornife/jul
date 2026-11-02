@@ -232,7 +232,7 @@ func (p *ReloadPlan) Prepare() error {
 			}
 			p.PreparedAdmin = prepared
 		}
-		handlers, genID, commit, abort, err := p.s.factory(p.ctx, p.Candidate.Effective)
+		handlers, genID, commit, abort, err := p.s.factory(config.WithRawConfig(p.ctx, p.Candidate.Raw), p.Candidate.Effective)
 		if err != nil {
 			return fmt.Errorf("build: %w", err)
 		}

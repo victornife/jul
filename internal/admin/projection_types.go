@@ -370,6 +370,11 @@ type SecurityProjection struct {
 	// per-location — the Security panel must not present the single global "Edit"
 	// as if it governed every route. Empty when only the global policy applies.
 	LocationWAFs []LocationWAFProjection `json:"location_wafs,omitempty"`
+	// WAFRoutes is the authoritative editable route inventory (including
+	// inherited and override routes, match_ordinal, and predicate signatures)
+	// for BaseVersion so investigation handoff can verify route identity before
+	// synthesizing a route-local override (#631, #632).
+	WAFRoutes []WAFEditableRouteProjection `json:"waf_routes,omitempty"`
 	// WAFEffective is the serving generation's compiled WAF policy (#440),
 	// overlaid by the HTTP handler; the fields above describe configuration.
 	WAFEffective *WAFEffectivePolicy `json:"waf_effective,omitempty"`
@@ -461,22 +466,43 @@ type RBACStatusProjection struct {
 	Generation string `json:"generation,omitempty"`
 }
 
+// WAFEditableRouteProjection describes one location in the editable (or
+// serving) configuration revision with its authoritative selector coordinates,
+// match_ordinal, and predicate identity (#631, #632).
+type WAFEditableRouteProjection struct {
+	RouteID             string   `json:"route_id,omitempty"`
+	Listen              string   `json:"listen"`
+	ServerNames         []string `json:"server_names,omitempty"`
+	MatchType           string   `json:"match_type,omitempty"`
+	Path                string   `json:"path,omitempty"`
+	MatchOrdinal        int      `json:"match_ordinal"`
+	SelectorVersion     string   `json:"selector_version"`
+	Methods             []string `json:"methods,omitempty"`
+	Predicates          string   `json:"predicates,omitempty"`
+	CanonicalPredicates string   `json:"canonical_predicates,omitempty"`
+	Scope               string   `json:"scope"`
+	Enabled             bool     `json:"enabled"`
+}
+
 // LocationWAFProjection describes one location whose [waf] override differs from
 // the global policy. The identity fields mirror the structured-patch location
 // selector (listen + server_names + match type/path) so a future guided editor
 // can target the exact block; the policy fields summarise the override so the
 // panel can show its mode and CRS state without exposing rule contents.
 type LocationWAFProjection struct {
-	RouteID         string   `json:"route_id,omitempty"`
-	Listen          string   `json:"listen"`
-	ServerNames     []string `json:"server_names,omitempty"`
-	MatchType       string   `json:"match_type,omitempty"`
-	Path            string   `json:"path,omitempty"`
-	MatchOrdinal    int      `json:"match_ordinal"`
-	SelectorVersion string   `json:"selector_version"`
-	Enabled         bool     `json:"enabled"`
-	Mode            string   `json:"mode,omitempty"`
-	CRSEnabled      bool     `json:"crs_enabled"`
+	RouteID             string   `json:"route_id,omitempty"`
+	Listen              string   `json:"listen"`
+	ServerNames         []string `json:"server_names,omitempty"`
+	MatchType           string   `json:"match_type,omitempty"`
+	Path                string   `json:"path,omitempty"`
+	MatchOrdinal        int      `json:"match_ordinal"`
+	SelectorVersion     string   `json:"selector_version"`
+	Methods             []string `json:"methods,omitempty"`
+	Predicates          string   `json:"predicates,omitempty"`
+	CanonicalPredicates string   `json:"canonical_predicates,omitempty"`
+	Enabled             bool     `json:"enabled"`
+	Mode                string   `json:"mode,omitempty"`
+	CRSEnabled          bool     `json:"crs_enabled"`
 	// Advanced override detail (Phase 4e) so the guided editor seeds and
 	// round-trips every field rather than clobbering unshown SecLang rules.
 	BlockStatus       int                   `json:"block_status,omitempty"`
