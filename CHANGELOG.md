@@ -11,6 +11,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Add reproducible WAF policy evaluation, compiled policy manifests, and exact
+  external-asset recovery (#630, [ADR 0031](docs/adr/0031-waf-operations-posture-isolation-and-alerting.md)):
+  compute context-keyed `policy_digest` (`waf-compiled-policy-v1`) on compiled
+  serving policies while keeping raw SHA-256 asset digests inside local CLI
+  manifests (`jul-waf-manifest-v1`, preserving #649); ship a versioned synthetic
+  regression fixture pack (`examples/waf-policy/fixtures.json`) covering benign
+  forms, JSON, multipart uploads, size boundaries, and SQLi/XSS/RCE/LFI controls;
+  add `jul waf evaluate`, `jul waf manifest`, and `jul waf verify-assets` CLI
+  subcommands plus `POST /api/security/waf/evaluate` (`config:write`) and Console
+  serving-policy verification with live on-disk staleness detection; and publish
+  `jul_waf_serving_routes` and `jul_waf_protection_changes_total` metrics for
+  serving-protection change alerting.
+
 - Record trustworthy WAF transaction outcomes (`clean`, `matched_observed`,
   `interrupted_request`, `interrupted_response`, `rejected_body_limit`, and
   `inspection_error`) via a transaction-local Coraza connector (#632 Milestone A,

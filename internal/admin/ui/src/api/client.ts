@@ -1017,6 +1017,7 @@ export const WAFPolicySummarySchema = z.object({
   rule_files_configured: z.number(),
   external_files: z.number(),
   external_digest: z.string().optional(),
+  policy_digest: z.string().optional(),
   inline_rules: z.boolean(),
   rules: z.object({
     total: z.number(),
@@ -1028,6 +1029,31 @@ export const WAFPolicySummarySchema = z.object({
 });
 export type WAFPolicySummary = z.infer<typeof WAFPolicySummarySchema>;
 
+export const WAFEvaluationSummarySchema = z.object({
+  state: z.string(),
+  source: z.string().optional(),
+  evaluated_at: z.string().optional(),
+  pack_id: z.string().optional(),
+  scope: z.string().optional(),
+  policy_digest: z.string().optional(),
+  external_digest: z.string().optional(),
+  engine_version: z.string().optional(),
+  embedded_crs_version: z.string().optional(),
+  analysis_completeness: z.string().optional(),
+  warnings: z.array(z.string()).optional(),
+  total_cases: z.number(),
+  passed_cases: z.number(),
+  failed_cases: z.number(),
+  legitimate_total: z.number().optional(),
+  legitimate_blocked: z.number().optional(),
+  malicious_total: z.number().optional(),
+  malicious_allowed: z.number().optional(),
+  changed_from_baseline: z.number().optional(),
+  compile_duration_ms: z.number().optional(),
+  eval_duration_ms: z.number().optional(),
+});
+export type WAFEvaluationSummary = z.infer<typeof WAFEvaluationSummarySchema>;
+
 export const WAFEffectivePolicySchema = z.object({
   compiled: z.boolean(),
   embedded_crs_version: z.string().optional(),
@@ -1038,8 +1064,11 @@ export const WAFEffectivePolicySchema = z.object({
   override_routes: z.number(),
   disabled_override_routes: z.number(),
   unprotected_routes: z.number(),
+  block_routes: z.number().optional(),
+  detect_routes: z.number().optional(),
   global_enabled: z.boolean(),
   global: WAFPolicySummarySchema.optional(),
+  evaluation: WAFEvaluationSummarySchema.optional(),
   overrides: z
     .array(
       z.object({

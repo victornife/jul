@@ -11,10 +11,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
@@ -43,6 +45,8 @@ type Firewall struct {
 	hasExternal bool
 	sourceSum   [32]byte
 	policySum   [32]byte
+	assets      []ExternalAssetRecord
+	closed      *atomic.Bool
 }
 
 // New builds a Firewall from a WAF policy. It assembles the SecLang directive
@@ -87,6 +91,7 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		return nil, fmt.Errorf("waf: compiling rules: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
+		_ = closeWAF(w)
 		return nil, err
 	}
 	// Wrap the engine so rules see Jul's canonical client address rather than
@@ -99,6 +104,8 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		hasExternal: info.ExternalFiles > 0,
 		sourceSum:   rawSum,
 		policySum:   polSum,
+		assets:      rec.externalAssets(),
+		closed:      &atomic.Bool{},
 	}, nil
 }
 
@@ -132,6 +139,16 @@ func (f *Firewall) RawPolicyDigest() string {
 		return ""
 	}
 	return hex.EncodeToString(f.policySum[:])
+}
+
+// ExternalAssets returns a copy of the private per-file external asset records
+// read during compilation (#630, #584). It is used only by privileged local
+// manifest/recovery verification and never exposed on status endpoints.
+func (f *Firewall) ExternalAssets() []ExternalAssetRecord {
+	if f == nil || len(f.assets) == 0 {
+		return nil
+	}
+	return append([]ExternalAssetRecord(nil), f.assets...)
 }
 
 func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, versions *versionid.Context) (PolicyInfo, [32]byte, [32]byte) {
@@ -211,10 +228,39 @@ func (f *Firewall) RouteMiddleware(route RouteAttribution, genFn func() uint64) 
 	}
 }
 
-// Close releases engine resources. The Coraza engine holds no resources that
-// require explicit release, so this is a no-op kept for interface symmetry with
-// the stub.
-func (f *Firewall) Close() error { return nil }
+// Close releases cached memoizer resources owned by the Coraza engine. It is
+// idempotent so verification, evaluation, and generational teardown paths can
+// close safely.
+func (f *Firewall) Close() error {
+	if f == nil {
+		return nil
+	}
+	if f.closed != nil && !f.closed.CompareAndSwap(false, true) {
+		return nil
+	}
+	return closeWAF(f.waf)
+}
+
+// IsClosed reports whether Close has been called on f.
+func (f *Firewall) IsClosed() bool {
+	if f == nil || f.closed == nil {
+		return true
+	}
+	return f.closed.Load()
+}
+
+func closeWAF(w coraza.WAF) error {
+	if w == nil {
+		return nil
+	}
+	if cw, ok := w.(*clientAddrWAF); ok {
+		w = cw.WAF
+	}
+	if closer, ok := w.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
 
 // rootFS selects the filesystem the SecLang parser resolves Include directives
 // against. With the embedded CRS it merges the rule-set assets with the OS

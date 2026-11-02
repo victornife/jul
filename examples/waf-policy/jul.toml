@@ -1,0 +1,29 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
+[global]
+config_authority = "file_owned"
+
+[waf]
+enabled = true
+mode = "block"
+block_status = 403
+crs_enabled = true
+paranoia = 1
+request_body_limit = "1mb"
+directives_files = ["rules/site-custom.conf"]
+
+[[upstreams]]
+name = "app_backend"
+strategy = "round_robin"
+servers = ["127.0.0.1:9001"]
+
+[[servers]]
+name = "portal"
+listen = "127.0.0.1:8080"
+server_names = ["portal.example.test", "app.example.test"]
+
+  [[servers.locations]]
+  route_id = "portal-root"
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://app_backend"

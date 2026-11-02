@@ -215,11 +215,15 @@ func TestObserveWAFEvent(t *testing.T) {
 	nilMetrics.ObserveWAFEvent("block", "1")
 	nilMetrics.ObserveWAFTransaction("block", "clean")
 	nilMetrics.ObserveWAFInvestigationEvent("recorded")
+	nilMetrics.ObserveWAFServingRoutes(1, 0, 0, 0)
+	nilMetrics.ObserveWAFProtectionChange("initial")
 
 	m := NewMetrics()
 	m.ObserveWAFEvent("block", "rule-1")
 	m.ObserveWAFTransaction("block", "interrupted_request")
 	m.ObserveWAFInvestigationEvent("recorded")
+	m.ObserveWAFServingRoutes(2, 1, 0, 1)
+	m.ObserveWAFProtectionChange("weakened")
 }
 
 func TestObserveBackendHealth(t *testing.T) {

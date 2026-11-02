@@ -387,6 +387,7 @@ not-yet-reloaded candidate never appears active.
 | `embedded_crs_version` | read from the embedded rule set's own `SecComponentSignature "OWASP_CRS/…"`, i.e. what the binary actually embeds; `""` without the `waf` tag |
 | route coverage | routes inheriting the global policy, with their own override, turned off by an override, and not inspected at all |
 | `policy_digest` | context-keyed `ev1:<128-bit context id>:<256-bit tag>` HMAC-SHA-256 digest (`waf-compiled-policy-v1`) over the complete compiled policy inputs |
+| `evaluation` | serving policy fixture evaluation state (`unrun`, `verified`, `stale`, `failed`, `unknown`), fixtures passed/total, false positives, false negatives, evaluated timestamp, and staleness reason |
 | `global`, `overrides[].policy` | one summary per compiled policy: mode, block status, CRS version, paranoia (flagged when it is the CRS default), request-body limit, response-body inspection, rule-file and rule counts, content identity |
 
 **Resolved server-side.** Inheritance is resolved before the Console sees it:
@@ -425,11 +426,47 @@ as absolute, so a drive-letter path such as `C:/rules/bad-words.data` is joined
 onto the rule file's directory and fails to load.
 
 **Bounded and secret-safe.** No rule file path, rule text, rule message or
-matched data appears in `waf_effective`, and no new metric is added —
-`jul_waf_events_total` keeps its existing labels. The configuration projection
+matched data appears in `waf_effective`. The configuration projection
 (`waf_directives_files`, `waf_inline_rules`, `location_wafs`) is unchanged and
-remains the editor's seed. This is visibility only: there is no rule feed,
-online CRS update, marketplace or rule editor.
+remains the editor's seed. This is visibility and disposable-fixture evaluation
+only: there is no rule feed, online CRS update, marketplace or arbitrary rule
+editor.
+
+### Policy evaluation, promotion and exact asset recovery (#630)
+
+Before or after activating a WAF policy change, operators can evaluate the
+compiled policy against a versioned synthetic fixture pack (`jul-waf-fixtures-v1`,
+see [examples/waf-policy/](../examples/waf-policy/README.md)) and record a
+reproducible policy manifest (`jul-waf-manifest-v1`):
+
+- `jul waf evaluate -config jul.toml [-baseline baseline.toml] [-fixtures fixtures.json] [-scope global|<route_id>|<path>] [-version-key-file path] [-json]`
+  resolves `${env:...}` and `${file:...}` references through `config.NewCandidateContext`,
+  compiles the candidate (and optional baseline) policy in-process under the
+  node's durable `versionid.Context` (loaded from `-version-key-file`,
+  `JUL_EFFECTIVE_VERSION_KEY_FILE`, or the default protected node key path when
+  readable, falling back to an ephemeral process context for offline runs), and
+  runs each synthetic fixture through the real `waf.Middleware` and origin
+  counter, checking outcome, HTTP status, origin execution, and expected rule
+  matches.
+- `POST /api/security/waf/evaluate` (`config:write` or `config:apply`) evaluates
+  the currently serving compiled policy (or accepts a CLI `WAFEvaluationReport`
+  for the target scope after stripping private unkeyed digests) and binds the
+  verification result per scope (`global` or route override) to the serving
+  `policy_digest` and `external_digest`. If an external directive or
+  `@pmFromFile` asset is modified on disk at the same path without reloading,
+  both `POST /api/security/waf/evaluate` and `GET /api/security` report
+  `waf_effective.evaluation.state = "stale_asset_changed"` (and if any fixture
+  fails, `state = "failed"`).
+- `jul waf manifest -config jul.toml [-scope global|<route_id>|<path>] -out waf-manifest.json [-version-key-file path] [-json]`
+  writes the privileged local recovery manifest (`schema_version: 1`) containing
+  the linked Coraza and embedded CRS versions plus the exact ordered external
+  asset paths, sizes, and raw SHA-256 digests (`config:raw` / local CLI boundary,
+  preserving #649 so raw file hashes never appear on `status:read`).
+- `jul waf verify-assets -config jul.toml -manifest waf-manifest.json [-version-key-file path] [-json]`
+  verifies that the running binary and on-disk external rule/data files still
+  match the recorded manifest (`verified`, `package_mismatch`, `asset_missing`,
+  `asset_changed`, `policy_mismatch`, or `compile_failed`), proving exact policy
+  recovery after same-path external file edits or restarts.
 
 ## Behaviour matrix
 
@@ -462,6 +499,8 @@ switching modes or rule sources.
 | Prometheus `jul_waf_events_total` | ✅ | ✅ | Labeled by `action` and `rule` (logged rule matches) |
 | Prometheus `jul_waf_transactions_total` | ✅ | ✅ | Labeled by `mode` and final transaction `outcome` |
 | Prometheus `jul_waf_investigation_events_total` | ✅ | ✅ | Labeled by bounded buffer `result` |
+| Prometheus `jul_waf_serving_routes` | ✅ | ✅ | Gauge of serving routes by effective WAF `state` |
+| Prometheus `jul_waf_protection_changes_total` | ✅ | ✅ | Counter of committed serving WAF `change` transitions |
 | Rejection support header `X-Jul-WAF-Event` | ✅ | ☐ | Opaque `wev_...` reference on WAF-interrupted responses; never cached |
 | Structured log `waf rule matched` | ✅ | ✅ | Path-only, bounded/redacted; raw query and macro-expanded message omitted |
 | Flapping / health history | ☐ | ☐ | Not yet integrated (future) |

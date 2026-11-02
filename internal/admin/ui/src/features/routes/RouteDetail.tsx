@@ -106,7 +106,6 @@ function RouteMetrics({ routeId }: { readonly routeId: string | undefined }) {
 }
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
-import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
 import { AuthEditor } from "@/features/routes/AuthEditor.tsx";
 import { PredicatesEditor } from "@/features/routes/PredicatesEditor.tsx";
 import { ResponseHeadersEditor } from "@/features/routes/ResponseHeadersEditor.tsx";
@@ -118,6 +117,12 @@ import {
 } from "@/features/routes/RouteEditors.tsx";
 import { LocationRateLimitEditor } from "@/features/routes/LocationRateLimitEditor.tsx";
 import { TranscodeQuickEdit } from "@/features/routes/TranscodeQuickEdit.tsx";
+
+const LocationWAFEditor = lazy(() =>
+  import("@/features/security/LocationWAFEditor.tsx").then((m) => ({
+    default: m.LocationWAFEditor,
+  })),
+);
 
 const LocationCachePolicyEditor = lazy(() =>
   import("@/features/routes/LocationCachePolicyEditor.tsx").then((m) => ({
@@ -576,15 +581,17 @@ function QuickEdits({
       <ForbiddenAction permission="config:write" />
 
       {wafEditing && (
-        <LocationWAFEditor
-          baseVersion={route.base_version}
-          selector={routeTarget}
-          target={wafTarget}
-          existing={Boolean(loc.waf)}
-          onClose={() => {
-            setWafEditing(false);
-          }}
-        />
+        <Suspense fallback={null}>
+          <LocationWAFEditor
+            baseVersion={route.base_version}
+            selector={routeTarget}
+            target={wafTarget}
+            existing={Boolean(loc.waf)}
+            onClose={() => {
+              setWafEditing(false);
+            }}
+          />
+        </Suspense>
       )}
 
       {authEditing && (

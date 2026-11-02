@@ -5,7 +5,13 @@
 
 import type { SecurityProjection, WAFEffectivePolicy, WAFPolicySummary } from "@/api/client.ts";
 import { formatBytes } from "@/lib/formatBytes.ts";
-import { plural, ruleSources, servingDiffers, shortDigest } from "@/lib/wafEffective.ts";
+import {
+  evaluationStateLabel,
+  plural,
+  ruleSources,
+  servingDiffers,
+  shortDigest,
+} from "@/lib/wafEffective.ts";
 
 function PolicySummary({ p }: { readonly p: WAFPolicySummary }) {
   return (
@@ -63,6 +69,14 @@ function PolicySummary({ p }: { readonly p: WAFPolicySummary }) {
           </div>
         ) : (
           <div className="text-jul-muted">no file read from disk</div>
+        )}
+        {p.policy_digest && (
+          <div>
+            compiled policy identity{" "}
+            <code className="font-mono" title={p.policy_digest}>
+              {shortDigest(p.policy_digest)}
+            </code>
+          </div>
         )}
       </dd>
     </dl>
@@ -151,6 +165,37 @@ export function WAFEffectiveCard({
                 : "Global policy disabled."}
             </div>
           )
+        )}
+        {e.compiled && (e.global || (e.overrides?.length ?? 0) > 0) && (
+          <div className="space-y-1 border-t border-jul-border pt-2">
+            {(() => {
+              const evInfo = evaluationStateLabel(e.evaluation);
+              const badgeTone =
+                evInfo.tone === "success"
+                  ? "bg-jul-success/15 text-jul-success"
+                  : evInfo.tone === "warning"
+                    ? "bg-jul-warning/15 text-jul-warning"
+                    : "bg-jul-border text-jul-muted";
+              return (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold">Fixture evaluation &amp; asset recovery</span>
+                    <span className={`rounded-full px-2 py-0.5 font-medium ${badgeTone}`}>
+                      {evInfo.badge}
+                    </span>
+                  </div>
+                  <p className="text-jul-muted">{evInfo.detail}</p>
+                  {(e.global?.external_files ?? 0) > 0 && (
+                    <p className="text-jul-muted">
+                      External rule files are not restored by configuration rollback alone. Record
+                      exact asset digests with <code>jul waf manifest</code> and verify recovery
+                      after file edits or restarts with <code>jul waf verify-assets</code>.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
         )}
         {(e.overrides ?? []).map((o, i) => (
           <div key={`waf-eff-${String(i)}`} className="space-y-1 border-t border-jul-border pt-2">

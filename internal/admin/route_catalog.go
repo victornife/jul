@@ -493,6 +493,12 @@ var Catalog = []RouteSpec{
 		Handler:    func(s *Server) http.Handler { return http.HandlerFunc(s.handleSecurity) },
 	},
 	{
+		Pattern:        "/api/security/waf/evaluate",
+		Methods:        []string{http.MethodPost},
+		AnyPermissions: []rbac.Permission{rbac.StatusRead, rbac.ConfigRead, rbac.ConfigWrite, rbac.ConfigApply},
+		Handler:        func(s *Server) http.Handler { return http.HandlerFunc(s.handleWAFEvaluate) },
+	},
+	{
 		Pattern:        "/api/traffic-controls",
 		Methods:        []string{http.MethodGet},
 		AnyPermissions: append(append([]rbac.Permission{}, trafficControlsProjectionPermissions...), rbac.CacheInspect),

@@ -27,6 +27,8 @@ func dispatchDiagnosticsSubcommand(args []string) (handled bool, code int) {
 		return true, cmdDoctor(args[1:])
 	case "support-bundle":
 		return true, cmdSupportBundle(args[1:])
+	case "waf":
+		return true, cmdWAF(args[1:])
 	default:
 		return false, 0
 	}
@@ -40,6 +42,8 @@ Local diagnostics:
                                        run deterministic read-only checks
   jul support-bundle [-config f] [-output file] [-json] [-include-logs]
                                        write a bounded, secret-safe local archive
+  jul waf <evaluate|manifest|verify-assets> [-config f] [-json]
+                                       evaluate WAF fixtures and verify external policy assets
 `)
 }
 

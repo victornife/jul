@@ -183,6 +183,8 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveWAFEvent("block", "942100")
 	m.ObserveWAFTransaction("block", "clean")
 	m.ObserveWAFInvestigationEvent("recorded")
+	m.ObserveWAFServingRoutes(1, 0, 0, 1)
+	m.ObserveWAFProtectionChange("initial")
 	m.ObserveEgressDecision("jwks", "allow", "", 1)
 	m.ObserveBackendHealth("pool-a", "10.0.0.1:80", true)
 	m.ObserveBackendsHealthy("pool-a", 2)
