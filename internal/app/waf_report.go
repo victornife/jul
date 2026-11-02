@@ -4,6 +4,8 @@
 package app
 
 import (
+	"encoding/json"
+	"sort"
 	"time"
 
 	"jul/internal/admin"
@@ -71,6 +73,7 @@ func wafPolicySummary(info waf.PolicyInfo) *admin.WAFPolicySummary {
 		RuleFilesConfigured:    info.RuleFilesConfigured,
 		ExternalFiles:          info.ExternalFiles,
 		ExternalDigest:         info.ExternalDigest,
+		PolicyDigest:           info.PolicyDigest,
 		InlineRules:            info.InlineRules,
 		Rules: admin.WAFRuleCounts{
 			Total:     info.Rules.Total,
@@ -138,4 +141,47 @@ func (f *HandlerFactory) WAFEffective() *admin.WAFEffectivePolicy {
 	out.EmbeddedCRSVersion = waf.EmbeddedCRSVersion()
 	out.EngineVersion = waf.EngineVersion()
 	return &out
+}
+
+// wafInvestigationStore returns the factory's bounded WAF investigation ring
+// buffer, lazily creating a default instance when nil so unit and integration
+// tests share the same collection contract as production (#632).
+func (f *HandlerFactory) wafInvestigationStore() *waf.InvestigationStore {
+	f.moduleMu.Lock()
+	defer f.moduleMu.Unlock()
+	if f.WAFInvestigation == nil {
+		f.WAFInvestigation = waf.NewInvestigationStore(0, 0)
+	}
+	return f.WAFInvestigation
+}
+
+// WAFInvestigationSnapshot returns a point-in-time snapshot of recent non-clean
+// WAF transaction outcomes matching filter (#632).
+func (f *HandlerFactory) WAFInvestigationSnapshot(filter waf.InvestigationFilter) waf.InvestigationSnapshot {
+	return f.wafInvestigationStore().Snapshot(time.Now().UTC(), filter)
+}
+
+func computeWAFRouteOrdinals(c *config.Config) [][]int {
+	if c == nil {
+		return nil
+	}
+	type coordinate struct{ server, matchType, path string }
+	counts := make(map[coordinate]int)
+	ordinals := make([][]int, len(c.Servers))
+	for i, srv := range c.Servers {
+		names := append([]string(nil), srv.ServerNames...)
+		sort.Strings(names)
+		framed, _ := json.Marshal(struct {
+			Listen string
+			Names  []string
+		}{srv.Listen, names})
+		serverKey := string(framed)
+		ordinals[i] = make([]int, len(srv.Locations))
+		for j, loc := range srv.Locations {
+			key := coordinate{serverKey, matchTypeOrDefault(loc.Match.Type), loc.Match.Path}
+			ordinals[i][j] = counts[key]
+			counts[key]++
+		}
+	}
+	return ordinals
 }

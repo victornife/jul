@@ -6,6 +6,7 @@ package app
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"jul/internal/admin"
 	"jul/internal/cache"
@@ -84,6 +85,22 @@ type Generation struct {
 	// each Basic-authenticated location (srvIdx, locIdx) in this generation (#642, #563).
 	basicByLoc         map[[2]int][]byte
 	cacheRoutePolicies []cache.RouteCacheConfig
+	publishedGenID     atomic.Uint64
+}
+
+// SetPublishedGeneration records the generation ID assigned to this generation.
+func (g *Generation) SetPublishedGeneration(id uint64) {
+	if g != nil {
+		g.publishedGenID.Store(id)
+	}
+}
+
+// PublishedGeneration returns the generation ID assigned to this generation.
+func (g *Generation) PublishedGeneration() uint64 {
+	if g == nil {
+		return 0
+	}
+	return g.publishedGenID.Load()
 }
 
 // Begin opens a new staging generation, starting the pool registry's staging

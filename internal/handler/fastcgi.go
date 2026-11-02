@@ -793,7 +793,7 @@ func writeCGIResponse(br *bufio.Reader, w http.ResponseWriter) error {
 			parsedHeaders.Del(strings.TrimSpace(token))
 		}
 	}
-	for _, hop := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Proxy-Authenticate", "Proxy-Authorization"} {
+	for _, hop := range []string{"Connection", "Proxy-Connection", "Keep-Alive", "TE", "Trailer", "Transfer-Encoding", "Upgrade", "Proxy-Authenticate", "Proxy-Authorization", "X-Jul-WAF-Event"} {
 		parsedHeaders.Del(hop)
 	}
 	declaredLength := int64(-1)

@@ -211,8 +211,15 @@ func TestObserveAuthDecision(t *testing.T) {
 }
 
 func TestObserveWAFEvent(t *testing.T) {
+	var nilMetrics *Metrics
+	nilMetrics.ObserveWAFEvent("block", "1")
+	nilMetrics.ObserveWAFTransaction("block", "clean")
+	nilMetrics.ObserveWAFInvestigationEvent("recorded")
+
 	m := NewMetrics()
 	m.ObserveWAFEvent("block", "rule-1")
+	m.ObserveWAFTransaction("block", "interrupted_request")
+	m.ObserveWAFInvestigationEvent("recorded")
 }
 
 func TestObserveBackendHealth(t *testing.T) {

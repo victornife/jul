@@ -84,6 +84,15 @@ func (c *Context) Config(cfg *config.Config) string {
 	}
 	return c.Digest("effective-config", data)
 }
+
+// RoutePredicates returns a confidential, context-keyed HMAC-SHA-256 digest of
+// m's canonical predicates, or "" when m declares no predicates (#632, #649).
+func (c *Context) RoutePredicates(m config.MatchConfig) string {
+	if !m.HasPredicates() {
+		return ""
+	}
+	return c.Digest("waf-route-predicates-v1", []byte(m.CanonicalPredicates()))
+}
 func (c *Context) ID() string {
 	if c == nil {
 		return Process().id

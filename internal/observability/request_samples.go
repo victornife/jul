@@ -235,34 +235,36 @@ func SanitizePath(path string) string {
 	if !strings.Contains(path, "/") {
 		path = redactSegment(path)
 		if len(path) > samplePathMaxLen {
-			return path[:samplePathMaxLen]
+			return strings.Clone(path[:samplePathMaxLen])
 		}
-		return path
+		return strings.Clone(path)
 	}
 	needsRedact := false
+	scanned := 0
 	for rest := path; ; {
 		seg, tail, ok := strings.Cut(rest, "/")
 		if redactSegment(seg) != seg {
 			needsRedact = true
 			break
 		}
-		if !ok {
+		scanned += len(seg) + 1
+		if !ok || scanned > samplePathMaxLen {
 			break
 		}
 		rest = tail
 	}
 	if !needsRedact {
 		if len(path) > samplePathMaxLen {
-			return path[:samplePathMaxLen]
+			return strings.Clone(path[:samplePathMaxLen])
 		}
-		return path
+		return strings.Clone(path)
 	}
 	var b strings.Builder
 	b.Grow(min(len(path), samplePathMaxLen))
 	for rest := path; ; {
 		seg, tail, ok := strings.Cut(rest, "/")
 		b.WriteString(redactSegment(seg))
-		if !ok {
+		if !ok || b.Len() >= samplePathMaxLen {
 			break
 		}
 		b.WriteByte('/')
@@ -270,7 +272,7 @@ func SanitizePath(path string) string {
 	}
 	out := b.String()
 	if len(out) > samplePathMaxLen {
-		return out[:samplePathMaxLen]
+		return strings.Clone(out[:samplePathMaxLen])
 	}
 	return out
 }

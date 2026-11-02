@@ -31,6 +31,11 @@ func New(_ context.Context, _ config.WAFConfig, _ Options) (*Firewall, error) {
 // wrapping entirely.
 func (f *Firewall) Middleware() middleware.Middleware { return nil }
 
+// RouteMiddleware is a no-op in the stub.
+func (f *Firewall) RouteMiddleware(_ RouteAttribution, _ func() uint64) middleware.Middleware {
+	return nil
+}
+
 // Close is a no-op for the stub.
 func (f *Firewall) Close() error { return nil }
 
@@ -47,6 +52,9 @@ func (f *Firewall) SourceChanged(other *Firewall) bool {
 
 // SourceDigest returns "" in the no-WAF stub.
 func (f *Firewall) SourceDigest() string { return "" }
+
+// RawPolicyDigest returns "" in the no-WAF stub.
+func (f *Firewall) RawPolicyDigest() string { return "" }
 
 // EmbeddedCRSVersion is "" in a build without the "waf" tag: no rule set is
 // embedded.

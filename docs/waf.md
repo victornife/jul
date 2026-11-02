@@ -301,12 +301,25 @@ uncompressed body.
 
 | Metric | Type | Labels | Meaning |
 | ------ | ---- | ------ | ------- |
-| `jul_waf_events_total` | counter | `action`, `rule` | A rule that logs matched. `action` is the policy mode (`block` or `detect`); `rule` is the matched rule ID |
+| `jul_waf_events_total` | counter | `action`, `rule` | A rule that logs matched. `action` is the configured policy mode (`block` or `detect`); `rule` is the matched rule ID |
+| `jul_waf_transactions_total` | counter | `mode`, `outcome` | Final outcome of each WAF-inspected HTTP transaction: `clean`, `matched_observed`, `interrupted_request`, `interrupted_response`, `rejected_body_limit`, or `inspection_error` |
+| `jul_waf_investigation_events_total` | counter | `result` | Bounded WAF investigation buffer collection events: `recorded`, `truncated`, `dropped`, or `sampled_out` |
 
-The counter reflects **logged rule matches** (standard ModSecurity behaviour) —
-CRS rules log by default; raw inline rules need an explicit `,log` action to be
-counted. In `block` mode a counted match generally corresponds to a blocked
-request; in `detect` mode it is an observation only.
+`jul_waf_events_total` reflects **logged rule matches** (standard ModSecurity
+behaviour) — CRS rules log by default; raw inline rules need an explicit `,log`
+action to be counted. A logged match is **not** identical to a blocked request:
+in `block` mode, a single transaction can match multiple CRS scoring rules or
+match a non-disruptive/below-threshold rule without being interrupted, while a
+disruptive `nolog` rule or a request-body limit rejection (`413`) interrupts a
+transaction without firing `jul_waf_events_total`.
+
+Use `jul_waf_transactions_total` to measure actual transaction outcomes and
+inspected request volume. When the WAF interrupts a request or response before
+headers are flushed, Jul emits an opaque server-owned support reference header
+(`X-Jul-WAF-Event: wev_<32-hex>`) that correlates the rejection with the bounded
+in-memory investigation buffer without exposing rule IDs or policy digests.
+Client-supplied `X-Request-ID` values remain untrusted correlation hints, and
+`X-Jul-WAF-Event` is never stored in or replayed from the response cache.
 
 ## Middleware ordering
 
@@ -373,6 +386,7 @@ not-yet-reloaded candidate never appears active.
 | `compiled`, `engine_version` | whether the binary links Coraza (the `waf` tag), and its module version from build info when present |
 | `embedded_crs_version` | read from the embedded rule set's own `SecComponentSignature "OWASP_CRS/…"`, i.e. what the binary actually embeds; `""` without the `waf` tag |
 | route coverage | routes inheriting the global policy, with their own override, turned off by an override, and not inspected at all |
+| `policy_digest` | context-keyed `ev1:<128-bit context id>:<256-bit tag>` HMAC-SHA-256 digest (`waf-compiled-policy-v1`) over the complete compiled policy inputs |
 | `global`, `overrides[].policy` | one summary per compiled policy: mode, block status, CRS version, paranoia (flagged when it is the CRS default), request-body limit, response-body inspection, rule-file and rule counts, content identity |
 
 **Resolved server-side.** Inheritance is resolved before the Console sees it:
@@ -445,7 +459,10 @@ switching modes or rule sources.
 | Response body (phase 4) | ✅ | ✅ | Opt-in via `response_body_check` |
 | Uncompressed body inspection | ✅ | ✅ | WAF runs before compression middleware |
 | **Integration** ||||
-| Prometheus `jul_waf_events_total` | ✅ | ✅ | Labeled by `action` and `rule` |
+| Prometheus `jul_waf_events_total` | ✅ | ✅ | Labeled by `action` and `rule` (logged rule matches) |
+| Prometheus `jul_waf_transactions_total` | ✅ | ✅ | Labeled by `mode` and final transaction `outcome` |
+| Prometheus `jul_waf_investigation_events_total` | ✅ | ✅ | Labeled by bounded buffer `result` |
+| Rejection support header `X-Jul-WAF-Event` | ✅ | ☐ | Opaque `wev_...` reference on WAF-interrupted responses; never cached |
 | Structured log `waf rule matched` | ✅ | ✅ | Path-only, bounded/redacted; raw query and macro-expanded message omitted |
 | Flapping / health history | ☐ | ☐ | Not yet integrated (future) |
 | Access-log / audit sink integration | ☐ | ☐ | Future — events are metric+log only today |

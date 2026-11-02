@@ -50,6 +50,7 @@ type WAFPolicySummary struct {
 	// an unkeyed offline dictionary verifier.
 	ExternalFiles  int           `json:"external_files"`
 	ExternalDigest string        `json:"external_digest,omitempty"`
+	PolicyDigest   string        `json:"policy_digest,omitempty"`
 	InlineRules    bool          `json:"inline_rules"`
 	Rules          WAFRuleCounts `json:"rules"`
 }

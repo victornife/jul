@@ -727,6 +727,8 @@ func TestSecurityIsolationCacheAuthAndWAFBoundaries(t *testing.T) {
 		if reqID := r.Header.Get("X-Request-ID"); reqID != "" {
 			w.Header().Set("X-Upstream-Saw-ReqID", reqID)
 		}
+		// Simulate an upstream trying to forge X-Jul-WAF-Event; cache and WAF must strip it.
+		w.Header().Set(waf.HeaderWAFEvent, "wev_forged_by_upstream_origin")
 		_, _ = fmt.Fprintf(w, "cached-payload-%d-lang-%s", n, r.Header.Get("Accept-Language"))
 	}))
 	defer origin.Close()
@@ -809,9 +811,12 @@ func TestSecurityIsolationCacheAuthAndWAFBoundaries(t *testing.T) {
 		if rr1.Header().Get("X-Request-ID") != "req-client-1" {
 			t.Fatalf("req1 X-Request-ID = %q, want req-client-1", rr1.Header().Get("X-Request-ID"))
 		}
+		if got := rr1.Header().Get(waf.HeaderWAFEvent); got != "" {
+			t.Fatalf("cold miss leaked forged %s = %q", waf.HeaderWAFEvent, got)
+		}
 
 		// 2. Warm hit from a second client with X-Request-ID "req-client-2" must receive
-		// its own X-Request-ID ("req-client-2"), never the cached "req-client-1".
+		// its own X-Request-ID ("req-client-2"), never the cached "req-client-1" or forged X-Jul-WAF-Event.
 		req2 := httptest.NewRequest(http.MethodGet, "http://portal.example.test/cached/item", nil)
 		req2.Header.Set("Accept-Language", "en")
 		req2.Header.Set("X-Request-ID", "req-client-2")
@@ -822,6 +827,9 @@ func TestSecurityIsolationCacheAuthAndWAFBoundaries(t *testing.T) {
 		}
 		if rr2.Header().Get("X-Request-ID") != "req-client-2" {
 			t.Fatalf("warm hit replayed wrong X-Request-ID: %q", rr2.Header().Get("X-Request-ID"))
+		}
+		if got := rr2.Header().Get(waf.HeaderWAFEvent); got != "" {
+			t.Fatalf("warm hit replayed forged %s = %q", waf.HeaderWAFEvent, got)
 		}
 
 		// 3. Request with session_id cookie bypasses the shared cache.
@@ -974,8 +982,25 @@ func TestSecurityIsolationCacheAuthAndWAFBoundaries(t *testing.T) {
 		if attackRR.Code != http.StatusForbidden {
 			t.Fatalf("attack against warm cached URL = %d, want 403", attackRR.Code)
 		}
+		evHeader := attackRR.Header().Get(waf.HeaderWAFEvent)
+		if !strings.HasPrefix(evHeader, "wev_") {
+			t.Fatalf("expected server-owned %s header on WAF block, got %q", waf.HeaderWAFEvent, evHeader)
+		}
 		if originHits.Load() != before {
 			t.Fatalf("originHits changed on WAF-blocked request: %d -> %d", before, originHits.Load())
+		}
+		invSnap := factory.WAFInvestigationSnapshot(waf.InvestigationFilter{EventID: evHeader})
+		if len(invSnap.Events) != 1 || invSnap.Events[0].Outcome != waf.OutcomeInterruptedRequest || invSnap.Events[0].OriginReached || invSnap.Events[0].Route.RouteID != "portal-cached" {
+			t.Fatalf("unexpected WAF investigation event for warm-cache block: %+v", invSnap.Events)
+		}
+
+		// Subsequent clean warm hit must NOT replay the previous blocked request's X-Jul-WAF-Event header!
+		cleanReq2 := httptest.NewRequest(http.MethodGet, "http://portal.example.test/cached/item", nil)
+		cleanReq2.Header.Set("Accept-Language", "en")
+		cleanRR2 := httptest.NewRecorder()
+		wafHandler.ServeHTTP(cleanRR2, cleanReq2)
+		if cleanRR2.Code != http.StatusOK || cleanRR2.Header().Get(waf.HeaderWAFEvent) != "" {
+			t.Fatalf("clean warm hit after block = %d %s=%q", cleanRR2.Code, waf.HeaderWAFEvent, cleanRR2.Header().Get(waf.HeaderWAFEvent))
 		}
 
 		// Reload with explicit cache invalidation cutover policy (reload_policy = "invalidate")
@@ -1058,7 +1083,6 @@ func TestSecurityIsolationCacheAuthAndWAFBoundaries(t *testing.T) {
 		if rrAfterRestart.Code != http.StatusForbidden || originHits.Load() != beforeReopenHits {
 			t.Fatalf("attack after restart against reopened disk cache = %d hits=%d->%d", rrAfterRestart.Code, beforeReopenHits, originHits.Load())
 		}
-
 		recordExecutedIsolationCase("ISO-CACHE-002", "cache_isolation", "pass", "waf_executes_before_cache_hit_and_cutover_fences_stale_fills")
 	})
 }

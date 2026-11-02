@@ -35,6 +35,12 @@ func TestLeanFirewallSurfaceIsNoOp(t *testing.T) {
 	if firewall.Middleware() != nil {
 		t.Fatal("lean firewall unexpectedly returned middleware")
 	}
+	if firewall.RouteMiddleware(RouteAttribution{}, nil) != nil {
+		t.Fatal("lean firewall unexpectedly returned route middleware")
+	}
+	if firewall.SourceDigest() != "" || firewall.RawPolicyDigest() != "" {
+		t.Fatal("lean firewall digests must be empty")
+	}
 	if err := firewall.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

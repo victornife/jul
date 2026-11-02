@@ -409,6 +409,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 					r.Body = respwriter.AttachUpgradedBackend(req.Context(), rwc, r.Header)
 				}
 			}
+			r.Header.Del("X-Jul-WAF-Event")
 			resp = r
 			return upstream.AttemptResult{Retain: true, RetainContext: &finishRetryContext}
 		}

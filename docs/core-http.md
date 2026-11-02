@@ -485,6 +485,8 @@ Labels fall into three classes by what bounds them:
 | `jul_client_addr_derivations_total` | `source`, `result` | fixed (3 × 4 enums, never an address) |
 | `jul_auth_decisions_total` | `method`, `result` | fixed gate × `allow`/`deny` |
 | `jul_waf_events_total` | `action`, `rule` | `block`/`detect` × loaded rule IDs |
+| `jul_waf_investigation_events_total` | `result` | fixed (`recorded`/`truncated`/`dropped`/`sampled_out`) |
+| `jul_waf_transactions_total` | `mode`, `outcome` | fixed (`block`/`detect`) × fixed (`clean`/`matched_observed`/`interrupted_request`/`interrupted_response`/`rejected_body_limit`/`inspection_error`) |
 | `jul_egress_decisions_total` | `subsystem`, `result`, `reason` | fixed subsystem/result/reason enums |
 | `jul_egress_dns_answers_total` | `subsystem`, `result` | fixed subsystem/result enums |
 | `jul_upstream_backends_healthy` | `pool` | configured pools |

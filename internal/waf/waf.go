@@ -27,16 +27,28 @@ import (
 // so this package stays decoupled from the metrics implementation. Each may be
 // nil.
 type Hooks struct {
-	// OnEvent is invoked once per matched rule that drives a decision, labeled
-	// by action ("block" or "detect") and the matched rule's ID (as a string).
+	// OnEvent is invoked once per matched rule that logs, labeled by policy
+	// mode ("block" or "detect") and the matched rule's ID (as a string).
+	// Preserves jul_waf_events_total's released logged-match meaning (#127, #632).
 	OnEvent func(action, ruleID string)
+	// OnTransaction is invoked once per completed WAF transaction with the
+	// policy mode ("block" or "detect") and actual outcome (OutcomeClean,
+	// OutcomeMatchedObserved, OutcomeInterruptedRequest,
+	// OutcomeInterruptedResponse, OutcomeRejectedBodyLimit, or
+	// OutcomeInspectionError) (#632-A).
+	OnTransaction func(mode, outcome string)
+	// OnInvestigationEvent is invoked when a non-clean transaction event is
+	// processed by the bounded investigation buffer (InvestigationRecorded,
+	// InvestigationTruncated, InvestigationDropped, or InvestigationSampledOut).
+	OnInvestigationEvent func(result string)
 }
 
 // Options configures a Firewall.
 type Options struct {
-	Logger   *slog.Logger
-	Hooks    Hooks
-	Versions *versionid.Context
+	Logger        *slog.Logger
+	Hooks         Hooks
+	Versions      *versionid.Context
+	Investigation *InvestigationStore
 }
 
 // Enabled reports whether any WAF policy is turned on in the configuration —

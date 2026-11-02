@@ -242,6 +242,8 @@ metric dimension rather than request-handling behavior.
 | `jul_upstream_probe_duration_seconds` | Histogram | `pool` | Released `v2.0.0` | Active health-check probe latency in seconds, labeled by pool. |
 | `jul_upstream_probes_total` | Counter | `pool`, `result` | Released `v2.0.0` | Active health-check probes, labeled by pool and result (success/failure). |
 | `jul_waf_events_total` | Counter | `action`, `rule` | Released `v1.32.0` | Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID. |
+| `jul_waf_investigation_events_total` | Counter | `result` | Merged / release pending | Web-application-firewall investigation buffer collection events, labeled by bounded result (`recorded`/`truncated`/`dropped`/`sampled_out`). |
+| `jul_waf_transactions_total` | Counter | `mode`, `outcome` | Merged / release pending | Web-application-firewall inspected HTTP transactions, labeled by policy mode (`block`/`detect`) and final outcome (`clean`/`matched_observed`/`interrupted_request`/`interrupted_response`/`rejected_body_limit`/`inspection_error`). |
 
 Metric labels must remain bounded and must never contain request paths, queries,
 client identity, destination URLs, raw errors, or secrets. See the

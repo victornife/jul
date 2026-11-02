@@ -181,6 +181,8 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveClientAddrDerivation("xff", "accepted")
 	m.ObserveAuthDecision("jwt", "allow")
 	m.ObserveWAFEvent("block", "942100")
+	m.ObserveWAFTransaction("block", "clean")
+	m.ObserveWAFInvestigationEvent("recorded")
 	m.ObserveEgressDecision("jwks", "allow", "", 1)
 	m.ObserveBackendHealth("pool-a", "10.0.0.1:80", true)
 	m.ObserveBackendsHealthy("pool-a", 2)

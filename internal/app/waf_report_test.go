@@ -91,4 +91,15 @@ func TestWAFEffectivePublishesServingGeneration(t *testing.T) {
 	if gDig, byLoc := f.WAFSourceDigests(999); gDig != "" || byLoc != nil {
 		t.Fatalf("WAFSourceDigests(999) = %q, %v; want empty", gDig, byLoc)
 	}
+	if computeWAFRouteOrdinals(nil) != nil {
+		t.Fatal("computeWAFRouteOrdinals(nil) must be nil")
+	}
+	snap := f.WAFInvestigationSnapshot(waf.InvestigationFilter{})
+	if !snap.Enabled || snap.Capacity != waf.MaxInvestigationEvents {
+		t.Fatalf("unexpected default WAFInvestigationSnapshot: %+v", snap)
+	}
+	var nilGen *Generation
+	if nilGen.PublishedGeneration() != 0 {
+		t.Fatal("nil Generation PublishedGeneration must be 0")
+	}
 }

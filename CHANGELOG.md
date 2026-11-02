@@ -11,6 +11,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Record trustworthy WAF transaction outcomes (`clean`, `matched_observed`,
+  `interrupted_request`, `interrupted_response`, `rejected_body_limit`, and
+  `inspection_error`) via a transaction-local Coraza connector (#632 Milestone A,
+  [ADR 0031](docs/adr/0031-waf-operations-posture-isolation-and-alerting.md)):
+  separate logged rule matches (`jul_waf_events_total`) from final transaction
+  decisions (`jul_waf_transactions_total`), capture `nolog` interruptions and
+  response-phase partial-delivery state, fail closed with `400`/`413` on
+  request-body read errors instead of upstream `coraza/v3/http`'s silent `200`,
+  emit opaque server-owned `X-Jul-WAF-Event` (`wev_...`) support references on
+  WAF rejections without caching or replaying them, and retain bounded
+  secret-safe metadata in an in-memory investigation ring
+  (`jul_waf_investigation_events_total`).
+
 - Report degraded cache cutover after committed reload/apply through correlated
   API/CLI/Console and audit outcomes; persist previous retain/invalidate posture
   across restart. Add one-change cutover controls with matching previews and
