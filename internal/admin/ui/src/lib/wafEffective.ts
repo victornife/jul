@@ -140,20 +140,20 @@ function normalizeMatchType(mt?: string): string {
   return t || "prefix";
 }
 
-function normalizeServerNamesKey(names?: readonly string[]): string {
-  return [...(names ?? [])]
-    .map((s) => s.trim().toLowerCase())
+function normalizeList(items?: readonly string[], upper?: boolean): string {
+  return [...(items ?? [])]
+    .map((s) => (upper ? s.trim().toUpperCase() : s.trim().toLowerCase()))
     .filter((s) => s.length > 0)
     .sort()
     .join(",");
 }
 
+function normalizeServerNamesKey(names?: readonly string[]): string {
+  return normalizeList(names, false);
+}
+
 function normalizeMethodsKey(methods?: readonly string[]): string {
-  return [...(methods ?? [])]
-    .map((s) => s.trim().toUpperCase())
-    .filter((s) => s.length > 0)
-    .sort()
-    .join(",");
+  return normalizeList(methods, true);
 }
 
 function methodAcceptedByPredicate(evMethod: string | undefined, allowed?: readonly string[]): boolean {
@@ -183,40 +183,42 @@ function routePredicatesMatch(
   const evCanon = ev.route.canonical_predicates ?? servingRoute?.canonical_predicates;
   const evPred = ev.route.predicates ?? servingRoute?.predicates;
   const evMethods = ev.route.methods ?? servingRoute?.methods;
-
-  if (
-    evCanon !== undefined &&
-    candidate.canonical_predicates !== undefined &&
-    evCanon !== candidate.canonical_predicates
-  ) {
-    return false;
-  }
-  if (evPred !== undefined && candidate.predicates !== undefined && evPred !== candidate.predicates) {
-    return false;
-  }
-  if (
-    evMethods !== undefined &&
-    candidate.methods !== undefined &&
-    normalizeMethodsKey(evMethods) !== normalizeMethodsKey(candidate.methods)
-  ) {
-    return false;
-  }
-  if (!methodAcceptedByPredicate(ev.method, candidate.methods)) {
-    return false;
-  }
-  const candidateHasPredicates =
+  if (evCanon !== undefined && candidate.canonical_predicates !== undefined && evCanon !== candidate.canonical_predicates) return false;
+  if (evPred !== undefined && candidate.predicates !== undefined && evPred !== candidate.predicates) return false;
+  if (evMethods !== undefined && candidate.methods !== undefined && normalizeMethodsKey(evMethods) !== normalizeMethodsKey(candidate.methods)) return false;
+  if (!methodAcceptedByPredicate(ev.method, candidate.methods)) return false;
+  const hasPreds =
     Boolean(candidate.canonical_predicates && candidate.canonical_predicates !== "methods=*\n") ||
     Boolean(candidate.predicates) ||
     Boolean(candidate.methods && candidate.methods.length > 0);
-  if (
-    (siblingCountAtCoords > 1 || candidateHasPredicates) &&
-    evCanon === undefined &&
-    evPred === undefined &&
-    evMethods === undefined
-  ) {
-    return false;
-  }
-  return true;
+  return !((siblingCountAtCoords > 1 || hasPreds) && evCanon === undefined && evPred === undefined && evMethods === undefined);
+}
+
+function sameCoordGroup(
+  a: {
+    readonly listen?: string | undefined;
+    readonly path?: string | undefined;
+    readonly match_type?: string | undefined;
+    readonly server_names?: readonly string[] | undefined;
+  },
+  listen?: string,
+  path?: string,
+  matchType?: string,
+  serverNames?: readonly string[],
+): boolean {
+  return (
+    Boolean(listen && path) &&
+    a.listen === listen &&
+    (a.path ?? "") === path &&
+    normalizeMatchType(a.match_type) === normalizeMatchType(matchType) &&
+    normalizeServerNamesKey(a.server_names) === normalizeServerNamesKey(serverNames)
+  );
+}
+
+const STALE_ERR = "Editable configuration or serving generation changed since this event was recorded; refresh or reload before tuning.";
+
+function reject(reason = STALE_ERR): { readonly kind: "rejected"; readonly reason: string } {
+  return { kind: "rejected", reason };
 }
 
 export function matchLocationWAFForEvent(
@@ -227,251 +229,99 @@ export function matchLocationWAFForEvent(
   | { readonly kind: "matched"; readonly target: LocationWAF; readonly existing: boolean }
   | { readonly kind: "global" }
   | { readonly kind: "rejected"; readonly reason: string } {
-  if (ev.stale_policy) {
-    return {
-      kind: "rejected",
-      reason:
-        "Cannot tune exception from a stale policy event; refresh and select an event from the currently serving generation.",
-    };
-  }
-  if (globalConfig?.waf_effective) {
-    if (servingDiffers(globalConfig, globalConfig.waf_effective) || globalConfig.rbac?.pending) {
-      return {
-        kind: "rejected",
-        reason:
-          "The editable persisted/staged configuration differs from the serving generation that produced this event; reload or apply pending changes before tuning.",
-      };
-    }
-    if (
-      globalConfig.base_version &&
-      globalConfig.waf_effective.serving_base_version &&
-      globalConfig.base_version !== globalConfig.waf_effective.serving_base_version
-    ) {
-      return {
-        kind: "rejected",
-        reason:
-          "The editable configuration revision differs from the serving generation that produced this event; reload or apply pending changes before tuning.",
-      };
-    }
-    if (
-      ev.generation > 0 &&
-      globalConfig.waf_effective.generation > 0 &&
-      ev.generation !== globalConfig.waf_effective.generation
-    ) {
-      return {
-        kind: "rejected",
-        reason:
-          "The serving generation has advanced since this event was recorded; refresh and select a current event.",
-      };
-    }
-  }
+  if (ev.stale_policy) return reject();
+  const eff = globalConfig?.waf_effective;
   if (
-    globalConfig &&
-    globalConfig.waf_locations === 0 &&
-    !globalConfig.waf_global_enabled &&
-    locationWafs.length === 0
+    eff &&
+    (servingDiffers(globalConfig, eff) ||
+      globalConfig.rbac?.pending ||
+      Boolean(globalConfig.base_version && eff.serving_base_version && globalConfig.base_version !== eff.serving_base_version) ||
+      (ev.generation > 0 && eff.generation > 0 && ev.generation !== eff.generation))
   ) {
-    return {
-      kind: "rejected",
-      reason:
-        "The route that produced this event was removed or is no longer protected in the current configuration revision.",
-    };
+    return reject();
+  }
+  if (globalConfig && globalConfig.waf_locations === 0 && !globalConfig.waf_global_enabled && locationWafs.length === 0) {
+    return reject();
   }
 
   const route = ev.route;
   const rid = (route.route_id ?? "").trim();
-  const servingRoute = globalConfig?.waf_effective?.serving_routes?.find((sr) => {
+  const matchesEventCoords = (r: {
+    readonly listen?: string | undefined;
+    readonly path?: string | undefined;
+    readonly match_type?: string | undefined;
+    readonly match_ordinal?: number | undefined;
+    readonly server_names?: readonly string[] | undefined;
+  }): boolean =>
+    sameCoordGroup(r, route.listen, route.path_pattern, route.match_type, route.server_names) &&
+    (r.match_ordinal ?? 0) === route.match_ordinal;
+
+  const servingRoute = eff?.serving_routes?.find((sr) => {
     const srRid = (sr.route_id ?? "").trim();
-    if (rid && srRid) return srRid === rid;
-    return (
-      Boolean(route.listen && route.path_pattern) &&
-      sr.listen === route.listen &&
-      (sr.path ?? "") === route.path_pattern &&
-      normalizeMatchType(sr.match_type) === normalizeMatchType(route.match_type) &&
-      sr.match_ordinal === route.match_ordinal &&
-      normalizeServerNamesKey(sr.server_names) === normalizeServerNamesKey(route.server_names)
-    );
+    return rid && srRid ? srRid === rid : matchesEventCoords(sr);
   });
 
   if (globalConfig?.waf_routes) {
     const editableRoutes = globalConfig.waf_routes;
     if (rid) {
       const byId = editableRoutes.filter((r) => (r.route_id ?? "").trim() === rid);
-      if (byId.length !== 1) {
-        return {
-          kind: "rejected",
-          reason:
-            "The route_id for this event is missing or ambiguous in the current editable configuration revision.",
-        };
-      }
-      const matchedEditable = byId[0];
-      if (!matchedEditable || !matchedEditable.enabled || matchedEditable.scope === "unprotected") {
-        return {
-          kind: "rejected",
-          reason:
-            "The route for this event is no longer WAF-protected in the current editable configuration revision.",
-        };
-      }
+      const matched = byId[0];
       if (
-        route.listen &&
-        route.path_pattern &&
-        (matchedEditable.listen !== route.listen ||
-          (matchedEditable.path ?? "") !== route.path_pattern ||
-          normalizeMatchType(matchedEditable.match_type) !== normalizeMatchType(route.match_type) ||
-          matchedEditable.match_ordinal !== route.match_ordinal ||
-          normalizeServerNamesKey(matchedEditable.server_names) !==
-            normalizeServerNamesKey(route.server_names))
+        byId.length !== 1 ||
+        !matched ||
+        !matched.enabled ||
+        matched.scope === "unprotected" ||
+        (route.listen && route.path_pattern && !matchesEventCoords(matched))
       ) {
-        return {
-          kind: "rejected",
-          reason:
-            "The route_id for this event was reassigned to different route coordinates or ordinal in the current configuration revision.",
-        };
+        return reject();
       }
-      const siblingsAtCoords = editableRoutes.filter(
-        (r) =>
-          r.listen === matchedEditable.listen &&
-          (r.path ?? "") === (matchedEditable.path ?? "") &&
-          normalizeMatchType(r.match_type) === normalizeMatchType(matchedEditable.match_type) &&
-          normalizeServerNamesKey(r.server_names) ===
-            normalizeServerNamesKey(matchedEditable.server_names),
+      const siblings = editableRoutes.filter((r) =>
+        sameCoordGroup(r, matched.listen, matched.path ?? "", matched.match_type, matched.server_names),
       );
-      if (!routePredicatesMatch(ev, servingRoute, matchedEditable, siblingsAtCoords.length)) {
-        return {
-          kind: "rejected",
-          reason:
-            "The route predicates for this event changed in the current editable configuration revision; reload or refresh before tuning.",
-        };
-      }
+      if (!routePredicatesMatch(ev, servingRoute, matched, siblings.length)) return reject();
     } else if (route.listen && route.path_pattern) {
-      const siblingsAtCoords = editableRoutes.filter(
-        (r) =>
-          r.listen === route.listen &&
-          (r.path ?? "") === route.path_pattern &&
-          normalizeMatchType(r.match_type) === normalizeMatchType(route.match_type) &&
-          normalizeServerNamesKey(r.server_names) === normalizeServerNamesKey(route.server_names),
+      const siblings = editableRoutes.filter((r) =>
+        sameCoordGroup(r, route.listen, route.path_pattern, route.match_type, route.server_names),
       );
-      const atOrdinal = siblingsAtCoords.filter((r) => r.match_ordinal === route.match_ordinal);
-      if (atOrdinal.length !== 1) {
-        return {
-          kind: "rejected",
-          reason:
-            "The route that produced this event was removed or reordered in the current editable configuration revision.",
-        };
-      }
+      const atOrdinal = siblings.filter((r) => r.match_ordinal === route.match_ordinal);
       const editableRoute = atOrdinal[0];
-      if (!editableRoute || (editableRoute.route_id ?? "").trim() !== "") {
-        return {
-          kind: "rejected",
-          reason:
-            "The route at these coordinates was reordered or reassigned to a route_id in the current configuration revision.",
-        };
-      }
-      if (!editableRoute.enabled || editableRoute.scope === "unprotected") {
-        return {
-          kind: "rejected",
-          reason:
-            "The route at these coordinates is no longer WAF-protected in the current editable configuration revision.",
-        };
-      }
-      if (!routePredicatesMatch(ev, servingRoute, editableRoute, siblingsAtCoords.length)) {
-        return {
-          kind: "rejected",
-          reason:
-            "The route at this ordinal in the editable configuration has different match predicates than the route that served this event; reload or refresh before tuning.",
-        };
+      if (
+        atOrdinal.length !== 1 ||
+        !editableRoute ||
+        (editableRoute.route_id ?? "").trim() !== "" ||
+        !editableRoute.enabled ||
+        editableRoute.scope === "unprotected" ||
+        !routePredicatesMatch(ev, servingRoute, editableRoute, siblings.length)
+      ) {
+        return reject();
       }
     }
   }
 
   for (const w of locationWafs) {
     const wRid = (w.route_id ?? "").trim();
-    const sameCoords =
-      Boolean(route.listen && route.path_pattern) &&
-      w.listen === route.listen &&
-      (w.path ?? "") === route.path_pattern &&
-      normalizeMatchType(w.match_type) === normalizeMatchType(route.match_type) &&
-      (w.match_ordinal ?? 0) === route.match_ordinal &&
-      normalizeServerNamesKey(w.server_names) === normalizeServerNamesKey(route.server_names);
-    if (rid && wRid === rid && route.listen && route.path_pattern && !sameCoords) {
-      return {
-        kind: "rejected",
-        reason:
-          "The route_id for this event was reassigned to different route coordinates or ordinal in the current configuration revision.",
-      };
-    }
-    if (sameCoords && rid !== wRid && (rid !== "" || wRid !== "")) {
-      return {
-        kind: "rejected",
-        reason:
-          "The route at these coordinates was reordered or reassigned to a different route_id in the current configuration revision.",
-      };
+    const sameCoords = matchesEventCoords(w);
+    if ((rid && wRid === rid && route.listen && route.path_pattern && !sameCoords) || (sameCoords && rid !== wRid && (rid !== "" || wRid !== ""))) {
+      return reject();
     }
   }
 
   const candidates = locationWafs.filter((w) => {
     const wRid = (w.route_id ?? "").trim();
-    if (rid && wRid) {
-      return wRid === rid;
-    }
-    if (!route.listen || !route.path_pattern) {
-      return false;
-    }
-    const sameListen = w.listen === route.listen;
-    const samePath = (w.path ?? "") === route.path_pattern;
-    const sameMatchType =
-      normalizeMatchType(w.match_type) === normalizeMatchType(route.match_type);
-    const sameOrdinal = (w.match_ordinal ?? 0) === route.match_ordinal;
-    const sameNames =
-      normalizeServerNamesKey(w.server_names) === normalizeServerNamesKey(route.server_names);
-    return sameListen && samePath && sameMatchType && sameOrdinal && sameNames;
+    return rid && wRid ? wRid === rid : matchesEventCoords(w);
   });
 
-  if (candidates.length > 1) {
-    return {
-      kind: "rejected",
-      reason:
-        "Route identity is ambiguous across multiple location WAF overrides; assign a distinct route_id before tuning.",
-    };
-  }
+  if (candidates.length > 1) return reject("Route identity is ambiguous across multiple location WAF overrides.");
 
   const first = candidates[0];
   if (first) {
-    const sameCoordOverrides = locationWafs.filter(
-      (w) =>
-        w.listen === first.listen &&
-        (w.path ?? "") === (first.path ?? "") &&
-        normalizeMatchType(w.match_type) === normalizeMatchType(first.match_type) &&
-        normalizeServerNamesKey(w.server_names) === normalizeServerNamesKey(first.server_names),
+    const sameCoordOverrides = locationWafs.filter((w) =>
+      sameCoordGroup(w, first.listen, first.path ?? "", first.match_type, first.server_names),
     );
-    if (!routePredicatesMatch(ev, servingRoute, first, sameCoordOverrides.length)) {
-      return {
-        kind: "rejected",
-        reason:
-          "The route override at this ordinal has different match predicates than the route that served this event; reload or refresh before tuning.",
-      };
-    }
+    if (!routePredicatesMatch(ev, servingRoute, first, sameCoordOverrides.length)) return reject();
   }
 
-  if (route.scope === "override") {
-    if (!first) {
-      return {
-        kind: "rejected",
-        reason:
-          "The route override that produced this event is stale or no longer exists in the current configuration revision.",
-      };
-    }
-    return {
-      kind: "matched",
-      target: {
-        ...first,
-        match_ordinal: first.match_ordinal ?? route.match_ordinal,
-        selector_version: first.selector_version ?? "global-v1",
-      },
-      existing: true,
-    };
-  }
-
+  if (route.scope === "override" && !first) return reject();
   if (first) {
     return {
       kind: "matched",
@@ -484,16 +334,8 @@ export function matchLocationWAFForEvent(
     };
   }
 
-  // For an inherited route without a durable route_id, synthesizing a
-  // revision-relative match_ordinal target requires the authoritative editable
-  // route inventory (waf_routes) to verify that the ordinal still identifies
-  // the same route and predicates in the editable configuration revision.
   if (globalConfig && !rid && (!globalConfig.waf_routes || globalConfig.waf_routes.length === 0)) {
-    return {
-      kind: "rejected",
-      reason:
-        "Cannot verify ordinal route identity for an inherited route without the authoritative editable route inventory; refresh security info before tuning.",
-    };
+    return reject();
   }
 
   // When an event comes from a concrete route that currently inherits the
