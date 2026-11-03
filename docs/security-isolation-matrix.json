@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "matrix_id": "jul-sec-isolation-v1",
+  "owner": "victornife",
+  "revalidation_triggers": [
+    "routing or host/path normalization changes in internal/router or internal/middleware",
+    "client-address or backend-TLS trust changes in internal/clientaddr or internal/backendtls",
+    "authentication or withdrawal gate changes in internal/auth or internal/app",
+    "cache key, Vary, or cutover changes in internal/cache",
+    "WAF connector, outcome, or exception compilation changes in internal/waf",
+    "protocol adapter changes in internal/handler, internal/server, or internal/stream"
+  ],
+  "cases": [
+    {
+      "id": "ISO-ROUTE-001",
+      "property": "public_private_isolation",
+      "scenario": "Intentional-public static portal succeeds while restricted backend denies anonymous and wrong-credential requests before origin",
+      "route_scope": "portal.example.test:/ vs app.example.test:/dashboard/",
+      "protocols": ["HTTP/1.1", "HTTP/2"],
+      "build_profile": "lean_and_full",
+      "expected_boundary": "denied_before_origin_on_restricted_allowed_on_public",
+      "owner_test": "internal/app:TestSecurityIsolationPublicRestrictedAdminAndIdentity/public_vs_restricted_and_admin",
+      "required": true,
+      "limitations": "Loopback/in-process listener fixture; physical multi-host LAN tested separately in #581 F1"
+    },
+    {
+      "id": "ISO-ROUTE-002",
+      "property": "public_private_isolation",
+      "scenario": "Alternate Host header, unmatched-Host fallback, dot-segment encoded paths, rewrites, and method/header predicates cannot shadow or widen restricted routes",
+      "route_scope": "app.example.test:/dashboard/ and fallback block",
+      "protocols": ["HTTP/1.1", "HTTP/2"],
+      "build_profile": "lean_and_full",
+      "expected_boundary": "denied_before_origin_zero_origin_hits",
+      "owner_test": "internal/app:TestSecurityIsolationPublicRestrictedAdminAndIdentity/alternate_host_encoded_path_and_predicates",
+      "required": true,
+      "limitations": "Tests Jul HTTP router normalization and predicate dispatch"
+    },
+    {
+      "id": "ISO-TRUST-001",
+      "property": "trusted_identity",
+      "scenario": "Forged X-Forwarded-For, Forwarded, X-Real-IP, and client-certificate headers from untrusted peer are ignored by CIDR auth, WAF REMOTE_ADDR, and upstream forwarding",
+      "route_scope": "app.example.test:/cidr-only/ and trusted-proxy listener",
+      "protocols": ["HTTP/1.1", "HTTP/2"],
+      "build_profile": "lean_and_full",
+      "expected_boundary": "untrusted_peer_headers_ignored_trusted_proxy_accepted",
+      "owner_test": "internal/app:TestSecurityIsolationPublicRestrictedAdminAndIdentity/forged_forwarding_and_identity_headers",
+      "required": true,
+      "limitations": "Requires explicit [servers.client_address] trusted_proxies for proxy hops"
+    },
+    {
+      "id": "ISO-TRUST-002",
+      "property": "trusted_identity",
+      "scenario": "Backend TLS verification rejects untrusted/wrong-SAN upstream certificates while mTLS client-certificate requirement denies unverified clients on H1/H2/H3",
+      "route_scope": "app.example.test:/mtls/ and https upstream pool",
+      "protocols": ["HTTP/1.1", "HTTP/2", "HTTP/3"],
+      "build_profile": "full",
+      "expected_boundary": "tls_peer_and_client_cert_verified_before_origin",
+      "owner_test": "internal/app:TestSecurityIsolationPublicRestrictedAdminAndIdentity/mtls_and_backend_tls_boundaries",
+      "required": true,
+      "limitations": "HTTP/3 mTLS parity additionally covered by internal/server:TestHTTP3ClientAuthParity"
+    },
+    {
+      "id": "ISO-CACHE-001",
+      "property": "cache_isolation",
+      "scenario": "Warm/cold GET/HEAD, Vary, Range, Authorization, and cookie-bypass preserve route/user isolation and never replay per-request X-Request-ID or X-Jul-WAF-Event headers",
+      "route_scope": "portal.example.test:/cached/ and app.example.test:/cached-api/",
+      "protocols": ["HTTP/1.1", "HTTP/2"],
+      "build_profile": "lean_and_full",
+      "expected_boundary": "no_cross_user_cache_hit_and_no_correlation_header_replay",
+      "owner_test": "internal/app:TestSecurityIsolationCacheAuthAndWAFBoundaries/warm_cold_vary_auth_and_correlation_headers",
+      "required": true,
+      "limitations": "Shared response cache; private/authenticated caching stays disabled or explicitly gated"
+    },
+    {
+      "id": "ISO-CACHE-002",
+      "property": "cache_isolation",
+      "scenario": "WAF policy tightening and route/backend cutover across reload/restart enforce new WAF rules on warm cached routes without leaking pre-cutover origin responses",
+      "route_scope": "portal.example.test:/cached/ under WAF block/detect transitions",
+      "protocols": ["HTTP/1.1", "HTTP/2"],
+      "build_profile": "full",
+      "expected_boundary": "waf_executes_before_cache_hit_and_cutover_fences_stale_fills",
+      "owner_test": "internal/app:TestSecurityIsolationCacheAuthAndWAFBoundaries/waf_tightening_with_warm_cache_and_reload",
+      "required": true,
+      "limitations": "Requires -tags waf for real Coraza inspection before cache lookup"
+    },
+    {
+      "id": "ISO-LIFE-001",
+      "property": "policy_lifecycle",
+      "scenario": "Failed Prepare/compile reload preserves active serving generation and provenance; successful tightening, withdrawal gate, and rollback isolate unrelated routes under concurrent traffic",
+      "route_scope": "multi-route portal + restricted app under concurrent reload",
+      "protocols": ["HTTP/1.1", "HTTP/2"],
+      "build_profile": "full",
+      "expected_boundary": "failed_prepare_no_side_effect_and_atomic_generation_cutover",
+      "owner_test": "internal/app:TestSecurityIsolationLifecycleAndProtocolBoundaries/failed_prepare_tightening_rollback_and_concurrency",
+      "required": true,
+      "limitations": "In-flight exchanges on un-narrowed routes continue to completion"
+    },
+    {
+      "id": "ISO-PROTO-001",
+      "property": "protocol_applicability",
+      "scenario": "WebSocket upgrade handshake and SSE receive HTTP request-phase auth/WAF checks; native gRPC, transcoded gRPC, and L4 passthrough enforce their declared boundaries without false HTTP body inspection claims",
+      "route_scope": "ws/sse/grpc/transcode/stream endpoints",
+      "protocols": ["HTTP/1.1", "HTTP/2", "WebSocket", "SSE", "gRPC", "L4-TCP"],
+      "build_profile": "full",
+      "expected_boundary": "explicit_protocol_inspection_and_session_boundaries",
+      "owner_test": "internal/app:TestSecurityIsolationLifecycleAndProtocolBoundaries/websocket_sse_grpc_and_stream_boundaries",
+      "required": true,
+      "limitations": "Opaque protobuf gRPC streams, post-101 hijacked WebSocket frames, and L4 TCP passthrough are not HTTP-body-inspected by Coraza"
+    }
+  ]
+}
