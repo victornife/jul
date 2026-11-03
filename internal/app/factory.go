@@ -92,11 +92,25 @@ type HandlerFactory struct {
 	liveOverrideAssets    map[string][]waf.ExternalAssetRecord
 	lastWAFEval           *waf.WAFEvaluationReport
 	lastWAFEvalByScope    map[string]*waf.WAFEvaluationReport
+	liveRawConfig         *config.Config
 	liveConfig            *config.Config
 	onBeforeEvalCommit    func(scope string)
+	auditHealth           func() (uint64, bool, bool)
 	lastCutover           []cache.InvalidateResult
 	lastCutoverErr        error
 	lastCutoverGen        uint64
+}
+
+// SetAuditHealthSource wires the admin audit sink health callback into the
+// factory so /metrics scrapes refresh jul_security_evidence_state{producer="audit_sink"}
+// without requiring posture API reads (#633, #628-B).
+func (f *HandlerFactory) SetAuditHealthSource(fn func() (uint64, bool, bool)) {
+	if f == nil {
+		return
+	}
+	f.moduleMu.Lock()
+	f.auditHealth = fn
+	f.moduleMu.Unlock()
 }
 
 // LastCacheCutover returns the results and any error from the most recent
@@ -274,7 +288,11 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 				}
 			}
 		}
+		rawCfg := config.RawConfigFromContext(ctx, c)
+		f.moduleMu.Lock()
+		f.liveRawConfig = rawCfg
 		f.liveConfig = c
+		f.moduleMu.Unlock()
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)
@@ -358,7 +376,11 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 				}
 			}
 		}
+		rawCfg := config.RawConfigFromContext(ctx, c)
+		f.moduleMu.Lock()
+		f.liveRawConfig = rawCfg
 		f.liveConfig = c
+		f.moduleMu.Unlock()
 		var retiredEgress *egress.Generation
 		if egressChanged && f.Egress != nil {
 			retiredEgress = f.Egress.Publish(candidateEgress)

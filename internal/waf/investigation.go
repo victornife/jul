@@ -145,6 +145,8 @@ func isSafeTargetKey(key string) bool {
 // InvestigationStore.Snapshot (#632-B).
 type InvestigationFilter struct {
 	EventID    string
+	RequestID  string
+	TraceID    string
 	Outcome    string
 	Mode       string
 	RuleID     int
@@ -445,6 +447,12 @@ func (s *InvestigationStore) Snapshot(now time.Time, filter InvestigationFilter)
 
 func matchesInvestigationFilter(ev TransactionEvent, f InvestigationFilter) bool {
 	if f.EventID != "" && ev.EventID != f.EventID {
+		return false
+	}
+	if f.RequestID != "" && ev.RequestIDHint != f.RequestID {
+		return false
+	}
+	if f.TraceID != "" && ev.TraceIDHint != f.TraceID {
 		return false
 	}
 	if f.Outcome != "" && ev.Outcome != f.Outcome {

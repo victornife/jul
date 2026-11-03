@@ -577,6 +577,10 @@ func projectCertRisk(certs []CertProjection) *CertRiskProjection {
 }
 
 func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
+	return projectSecurityWithVersions(c, wafCompiled, nil)
+}
+
+func projectSecurityWithVersions(c *config.Config, wafCompiled bool, versions *versionid.Context) SecurityProjection {
 	sp := SecurityProjection{
 		WAFCompiled: wafCompiled,
 		BaseVersion: server.CanonicalVersion(c),
@@ -625,33 +629,63 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 				sp.RequireCertCount++
 			}
 			countBackendTLS(loc.BackendTLS)
+			var routeID string
+			if loc.RouteID != nil {
+				routeID = *loc.RouteID
+			}
+			routeScope := "unprotected"
+			routeEnabled := false
+			if loc.WAF != nil {
+				routeScope = "override"
+				routeEnabled = loc.WAF.Enabled
+			} else if c.WAF.Enabled {
+				routeScope = "global"
+				routeEnabled = true
+			}
+			matchType := loc.Match.Type
+			if matchType == "" {
+				matchType = "prefix"
+			}
+			sp.WAFRoutes = append(sp.WAFRoutes, WAFEditableRouteProjection{
+				RouteID:             routeID,
+				Listen:              srv.Listen,
+				ServerNames:         append([]string(nil), srv.ServerNames...),
+				MatchType:           matchType,
+				Path:                loc.Match.Path,
+				MatchOrdinal:        ord,
+				SelectorVersion:     routeSelectorVersion,
+				Methods:             append([]string(nil), loc.Match.Methods...),
+				Predicates:          locationPredicateSummary(loc),
+				CanonicalPredicates: versions.RoutePredicates(loc.Match),
+				Scope:               routeScope,
+				Enabled:             routeEnabled,
+			})
 			// A non-nil loc.WAF is a per-location override that replaces the
 			// global policy for this location, so disclose it explicitly.
 			if loc.WAF != nil {
-				var routeID string
-				if loc.RouteID != nil {
-					routeID = *loc.RouteID
-				}
 				sp.LocationWAFs = append(sp.LocationWAFs, LocationWAFProjection{
-					RouteID:           routeID,
-					Listen:            srv.Listen,
-					ServerNames:       srv.ServerNames,
-					MatchType:         loc.Match.Type,
-					Path:              loc.Match.Path,
-					MatchOrdinal:      ord,
-					SelectorVersion:   routeSelectorVersion,
-					Enabled:           loc.WAF.Enabled,
-					Mode:              wafModeOrDefault(loc.WAF.Mode),
-					CRSEnabled:        loc.WAF.CRSEnabled,
-					BlockStatus:       loc.WAF.BlockStatus,
-					Paranoia:          loc.WAF.Paranoia,
-					BlockingParanoia:  loc.WAF.BlockingParanoia,
-					DetectionParanoia: loc.WAF.DetectionParanoia,
-					Exceptions:        append([]config.WAFException(nil), loc.WAF.Exceptions...),
-					RequestBodyLimit:  wafBodyLimitStr(loc.WAF.RequestBodyLimit),
-					ResponseBodyCheck: loc.WAF.ResponseBodyCheck,
-					DirectivesFiles:   loc.WAF.DirectivesFiles,
-					InlineRules:       loc.WAF.InlineRules,
+					RouteID:             routeID,
+					Listen:              srv.Listen,
+					ServerNames:         srv.ServerNames,
+					MatchType:           loc.Match.Type,
+					Path:                loc.Match.Path,
+					MatchOrdinal:        ord,
+					SelectorVersion:     routeSelectorVersion,
+					Methods:             append([]string(nil), loc.Match.Methods...),
+					Predicates:          locationPredicateSummary(loc),
+					CanonicalPredicates: versions.RoutePredicates(loc.Match),
+					Enabled:             loc.WAF.Enabled,
+					Mode:                wafModeOrDefault(loc.WAF.Mode),
+					CRSEnabled:          loc.WAF.CRSEnabled,
+					BlockStatus:         loc.WAF.BlockStatus,
+					Paranoia:            loc.WAF.Paranoia,
+					BlockingParanoia:    loc.WAF.BlockingParanoia,
+					DetectionParanoia:   loc.WAF.DetectionParanoia,
+					Exceptions:          append([]config.WAFException(nil), loc.WAF.Exceptions...),
+					RequestBodyLimit:    wafBodyLimitStr(loc.WAF.RequestBodyLimit),
+					ResponseBodyCheck:   loc.WAF.ResponseBodyCheck,
+					DirectivesFiles:     loc.WAF.DirectivesFiles,
+					InlineRules:         loc.WAF.InlineRules,
 				})
 			}
 		}

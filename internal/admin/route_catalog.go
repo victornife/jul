@@ -345,6 +345,39 @@ var Catalog = []RouteSpec{
 		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1Streams) },
 	},
 	{
+		Pattern:    "/api/v1/waf/events",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.ObservabilityRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "listWAFEvents",
+				Summary: "Bounded, secret-safe WAF transaction outcome records from the in-memory investigation buffer, " +
+					"filtered by event_id, outcome, rule_id, route_id, path, or correlation hints.",
+				Parameters: v1WAFEventParameters(),
+				Response:   "WAFEventsResponse",
+				Errors:     []string{"invalid_request"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1WAFEvents) },
+	},
+	{
+		Pattern:    "/api/v1/security/posture",
+		Methods:    []string{http.MethodGet},
+		Permission: rbac.StatusRead,
+		Stability:  StabilityExternal,
+		Operations: map[string]ExternalOperation{
+			http.MethodGet: {
+				ID: "getSecurityPosture",
+				Summary: "Actionable 7-area gateway security posture review (admin, trust, waf, cache, certificates, intent, maintenance) " +
+					"with explicit epistemic state and remediation guidance.",
+				Response: "SecurityPostureResponse",
+				Errors:   []string{"storage_unavailable"},
+			},
+		},
+		Handler: func(s *Server) http.Handler { return http.HandlerFunc(s.handleV1SecurityPosture) },
+	},
+	{
 		Pattern:    "/api/v1/config/export",
 		Methods:    []string{http.MethodGet},
 		Permission: rbac.ConfigRead,

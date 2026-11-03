@@ -91,6 +91,8 @@ func TestRouteTransportPolicyInventory(t *testing.T) {
 		"/api/v1/listeners":                       "tls_or_loopback",
 		"/api/v1/listeners/{addr}/client_address": "tls_or_loopback",
 		"/api/v1/streams":                         "tls_or_loopback",
+		"/api/v1/waf/events":                      "tls_or_loopback",
+		"/api/v1/security/posture":                "tls_or_loopback",
 		"/api/v1/config/export":                   "tls_or_loopback",
 		"/api/v1/config/history/{id}/diff":        "tls_or_loopback",
 		"/api/v1/config/validate":                 "tls_or_loopback",

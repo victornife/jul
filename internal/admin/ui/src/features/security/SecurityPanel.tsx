@@ -13,8 +13,10 @@ import {
   type RBACPosture,
   type EgressProjection,
   type ListenerClientAddress,
+  type WAFException,
 } from "@/api/client.ts";
 import { WAFEffectiveCard } from "@/features/security/WAFEffectiveCard.tsx";
+import { matchLocationWAFForEvent } from "@/lib/wafEffective.ts";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, MaturityBadge } from "@/components/ui.tsx";
 
@@ -36,6 +38,16 @@ const LocationWAFEditor = lazy(() =>
 const SecretHelper = lazy(() =>
   import("@/features/security/SecretHelper.tsx").then((m) => ({
     default: m.SecretHelper,
+  })),
+);
+const WAFInvestigationDrawer = lazy(() =>
+  import("@/features/security/WAFInvestigationDrawer.tsx").then((m) => ({
+    default: m.WAFInvestigationDrawer,
+  })),
+);
+const SecurityPostureDrawer = lazy(() =>
+  import("@/features/security/SecurityPostureDrawer.tsx").then((m) => ({
+    default: m.SecurityPostureDrawer,
   })),
 );
 
@@ -228,15 +240,20 @@ export function SecurityPanel() {
   const [editingWAF, setEditingWAF] = useState<{
     readonly projection: SecurityProjection;
     readonly baseVersion: string | undefined;
+    readonly initialException?: WAFException | undefined;
   } | null>(null);
+  const [tuneError, setTuneError] = useState<string | null>(null);
   const [editingClientAddress, setEditingClientAddress] = useState<ListenerClientAddress | null>(
     null,
   );
   const [editingLocationWAF, setEditingLocationWAF] = useState<{
     readonly target: LocationWAF;
     readonly baseVersion: string | undefined;
+    readonly existing: boolean;
   } | null>(null);
   const [externalizing, setExternalizing] = useState(false);
+  const [investigatingWAF, setInvestigatingWAF] = useState(false);
+  const [reviewingPosture, setReviewingPosture] = useState(false);
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["security"],
     queryFn: fetchSecurity,
@@ -310,15 +327,35 @@ export function SecurityPanel() {
             ) : (
               <OnOff on={false} />
             )}
-            <button
-              type="button"
-              onClick={() => {
-                setEditingWAF({ projection: data, baseVersion: data.base_version });
-              }}
-              className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
-            >
-              {locationWafs.length > 0 ? "Edit global" : data.waf_enabled ? "Edit" : "Configure"}
-            </button>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setInvestigatingWAF(true);
+                }}
+                className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+              >
+                Investigate outcomes
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewingPosture(true);
+                }}
+                className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+              >
+                Posture review
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingWAF({ projection: data, baseVersion: data.base_version });
+                }}
+                className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+              >
+                {locationWafs.length > 0 ? "Edit global" : data.waf_enabled ? "Edit" : "Configure"}
+              </button>
+            </div>
           </span>
         </Row>
         {locationWafs.length > 0 && (
@@ -338,7 +375,11 @@ export function SecurityPanel() {
                   <button
                     type="button"
                     onClick={() => {
-                      setEditingLocationWAF({ target: w, baseVersion: data.base_version });
+                      setEditingLocationWAF({
+                        target: w,
+                        baseVersion: data.base_version,
+                        existing: true,
+                      });
                     }}
                     className="shrink-0 rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
                   >
@@ -423,6 +464,7 @@ export function SecurityPanel() {
           <WAFEditor
             current={editingWAF.projection}
             baseVersion={editingWAF.baseVersion}
+            {...(editingWAF.initialException ? { initialException: editingWAF.initialException } : {})}
             onClose={() => {
               setEditingWAF(null);
             }}
@@ -433,6 +475,7 @@ export function SecurityPanel() {
           <LocationWAFEditor
             target={editingLocationWAF.target}
             baseVersion={editingLocationWAF.baseVersion}
+            existing={editingLocationWAF.existing}
             onClose={() => {
               setEditingLocationWAF(null);
             }}
@@ -452,6 +495,63 @@ export function SecurityPanel() {
           <SecretHelper
             onClose={() => {
               setExternalizing(false);
+            }}
+          />
+        )}
+
+        {investigatingWAF && (
+          <WAFInvestigationDrawer
+            tuneError={tuneError}
+            onClose={() => {
+              setInvestigatingWAF(false);
+              setTuneError(null);
+            }}
+            onTuneException={(exc, ev) => {
+              const res = matchLocationWAFForEvent(ev, locationWafs, data);
+              if (res.kind === "rejected") {
+                setTuneError(res.reason);
+                return;
+              }
+              setTuneError(null);
+              setInvestigatingWAF(false);
+              if (res.kind === "matched") {
+                setEditingLocationWAF({
+                  target: {
+                    ...res.target,
+                    exceptions: [...(res.target.exceptions ?? []), exc],
+                  },
+                  baseVersion: data.base_version,
+                  existing: res.existing,
+                });
+              } else {
+                setEditingWAF({
+                  projection: data,
+                  baseVersion: data.base_version,
+                  initialException: exc,
+                });
+              }
+            }}
+            onTuneGlobalException={(exc, ev) => {
+              const res = matchLocationWAFForEvent(ev, locationWafs, data);
+              if (res.kind === "rejected") {
+                setTuneError(res.reason);
+                return;
+              }
+              setTuneError(null);
+              setInvestigatingWAF(false);
+              setEditingWAF({
+                projection: data,
+                baseVersion: data.base_version,
+                initialException: exc,
+              });
+            }}
+          />
+        )}
+
+        {reviewingPosture && (
+          <SecurityPostureDrawer
+            onClose={() => {
+              setReviewingPosture(false);
             }}
           />
         )}

@@ -367,3 +367,21 @@ func TestConnState(t *testing.T) {
 	// Hijacked should also decrement.
 	m.ConnState(conn, http.StateHijacked)
 }
+
+func TestSetPreGatherHook(t *testing.T) {
+	var nilMetrics *Metrics
+	nilMetrics.SetPreGatherHook(func() {})
+	nilMetrics.runPreGather()
+	nilMetrics.ObserveSecurityEvidenceState("waf_effective", "ok")
+	nilMetrics.ObserveSecurityPostureFindings(nil)
+
+	m := NewMetrics()
+	called := 0
+	m.SetPreGatherHook(func() { called++ })
+	if _, err := m.Gather(); err != nil {
+		t.Fatalf("Gather failed: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("preGather hook called %d times, want 1", called)
+	}
+}

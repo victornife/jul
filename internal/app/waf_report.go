@@ -17,6 +17,7 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/server"
 	"jul/internal/waf"
 )
 
@@ -186,11 +187,111 @@ func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy) {
 	prev := f.liveWAF
 	f.liveWAF = &cp
 	f.pruneScopedEvaluationsLocked(&cp)
+	liveRawCfg := f.liveRawConfig
+	liveCfg := f.liveConfig
 	f.moduleMu.Unlock()
 
 	transition := classifyWAFProtectionTransition(prev, &cp)
 	f.Metrics.ObserveWAFServingRoutes(cp.BlockRoutes, cp.DetectRoutes, cp.DisabledOverrideRoutes, cp.UnprotectedRoutes)
 	f.Metrics.ObserveWAFProtectionChange(transition)
+	f.Metrics.SetPreGatherHook(f.RefreshSecurityEvidenceMetrics)
+	f.RefreshSecurityEvidenceMetrics()
+	f.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "ok")
+	if liveCfg != nil && f.Metrics != nil {
+		if liveRawCfg == nil {
+			liveRawCfg = liveCfg
+		}
+		posture := admin.EvaluateSecurityPostureOffline(liveRawCfg, liveCfg, waf.Compiled)
+		counts := make(map[string]map[string]int, len(posture.Areas))
+		for _, a := range posture.Areas {
+			counts[a.Area] = map[string]int{
+				"warning": a.WarningCount,
+				"error":   a.ErrorCount,
+			}
+		}
+		f.Metrics.ObserveSecurityPostureFindings(counts)
+	}
+}
+
+// RefreshSecurityEvidenceMetrics checks on-disk external WAF rule assets,
+// evaluation bindings, and admin audit-sink health so jul_security_evidence_state
+// transitions on /metrics scrapes even if no operator opens the Console or
+// calls administrative APIs (#628-B, #630, #633).
+func (f *HandlerFactory) RefreshSecurityEvidenceMetrics() {
+	if f == nil || f.Metrics == nil {
+		return
+	}
+	f.moduleMu.Lock()
+	auditFn := f.auditHealth
+	f.moduleMu.Unlock()
+	if auditFn != nil {
+		_, failing, configured := auditFn()
+		switch {
+		case !configured:
+			f.Metrics.ObserveSecurityEvidenceState("audit_sink", "disabled")
+		case failing:
+			f.Metrics.ObserveSecurityEvidenceState("audit_sink", "degraded")
+		default:
+			f.Metrics.ObserveSecurityEvidenceState("audit_sink", "ok")
+		}
+	}
+	if !waf.Compiled {
+		f.Metrics.ObserveSecurityEvidenceState("waf_effective", "unavailable")
+		f.Metrics.ObserveSecurityEvidenceState("waf_investigation", "unavailable")
+		return
+	}
+	f.moduleMu.Lock()
+	hasLive := f.liveWAF != nil
+	globalAssets := append([]waf.ExternalAssetRecord(nil), f.liveGlobalAssets...)
+	var overrideAssets []waf.ExternalAssetRecord
+	for _, oa := range f.liveOverrideAssets {
+		overrideAssets = append(overrideAssets, oa...)
+	}
+	hasEval := f.lastWAFEval != nil || len(f.lastWAFEvalByScope) > 0
+	f.moduleMu.Unlock()
+	if !hasLive {
+		return
+	}
+	wafState := "ok"
+	allAssets := append(globalAssets, overrideAssets...)
+	if len(allAssets) > 0 && !diskAssetsMatchRecorded(allAssets) {
+		wafState = "stale"
+	} else if hasEval {
+		eff := f.wafEffectiveSnapshot(false)
+		wafState = aggregateWAFEvidenceState(eff)
+	}
+	f.Metrics.ObserveSecurityEvidenceState("waf_effective", wafState)
+	invState := f.WAFInvestigationSnapshot(waf.InvestigationFilter{Limit: 1}).EvidenceState()
+	f.Metrics.ObserveSecurityEvidenceState("waf_investigation", invState)
+}
+
+func aggregateWAFEvidenceState(eff *admin.WAFEffectivePolicy) string {
+	if eff == nil {
+		return "ok"
+	}
+	hasStale := false
+	hasFailed := false
+	check := func(ev *admin.WAFEvaluationSummaryView) {
+		if ev == nil {
+			return
+		}
+		if strings.HasPrefix(ev.State, "stale") {
+			hasStale = true
+		} else if ev.State == "failed" {
+			hasFailed = true
+		}
+	}
+	check(eff.Evaluation)
+	for _, ov := range eff.Overrides {
+		check(ov.Evaluation)
+	}
+	if hasStale {
+		return "stale"
+	}
+	if hasFailed {
+		return "degraded"
+	}
+	return "ok"
 }
 
 func (f *HandlerFactory) pruneScopedEvaluationsLocked(p *admin.WAFEffectivePolicy) {
@@ -863,6 +964,10 @@ func (f *HandlerFactory) WAFSourceDigests(genID uint64) (string, map[[2]int]stri
 // binary's WAF capability. Before the first generation is live only the
 // capability is reported.
 func (f *HandlerFactory) WAFEffective() *admin.WAFEffectivePolicy {
+	return f.wafEffectiveSnapshot(true)
+}
+
+func (f *HandlerFactory) wafEffectiveSnapshot(updateMetrics bool) *admin.WAFEffectivePolicy {
 	f.moduleMu.Lock()
 	var out admin.WAFEffectivePolicy
 	var evalRep *waf.WAFEvaluationReport
@@ -901,10 +1006,50 @@ func (f *HandlerFactory) WAFEffective() *admin.WAFEffectivePolicy {
 	globalPolicySHA = f.liveGlobalPolicySHA
 	globalExtSHA = f.wafDigests.global
 	globalAssets = append([]waf.ExternalAssetRecord(nil), f.liveGlobalAssets...)
+	liveRawCfg := f.liveRawConfig
+	liveCfg := f.liveConfig
 	f.moduleMu.Unlock()
 	out.Compiled = waf.Compiled
 	out.EmbeddedCRSVersion = waf.EmbeddedCRSVersion()
 	out.EngineVersion = waf.EngineVersion()
+	if liveRawCfg != nil {
+		out.ServingBaseVersion = server.CanonicalVersion(liveRawCfg)
+	} else if liveCfg != nil {
+		out.ServingBaseVersion = server.CanonicalVersion(liveCfg)
+	}
+	if liveCfg != nil {
+		ordinals := computeWAFRouteOrdinals(liveCfg)
+		for i, srv := range liveCfg.Servers {
+			for j, loc := range srv.Locations {
+				var routeID string
+				if loc.RouteID != nil {
+					routeID = *loc.RouteID
+				}
+				rScope := "unprotected"
+				rEnabled := false
+				if loc.WAF != nil {
+					rScope = "override"
+					rEnabled = loc.WAF.Enabled
+				} else if liveCfg.WAF.Enabled {
+					rScope = "global"
+					rEnabled = true
+				}
+				out.ServingRoutes = append(out.ServingRoutes, admin.WAFEditableRouteProjection{
+					RouteID:             routeID,
+					Listen:              srv.Listen,
+					ServerNames:         append([]string(nil), srv.ServerNames...),
+					MatchType:           matchTypeOrDefault(loc.Match.Type),
+					Path:                loc.Match.Path,
+					MatchOrdinal:        ordinals[i][j],
+					SelectorVersion:     "global-v1",
+					Methods:             append([]string(nil), loc.Match.Methods...),
+					CanonicalPredicates: f.Versions.RoutePredicates(loc.Match),
+					Scope:               rScope,
+					Enabled:             rEnabled,
+				})
+			}
+		}
+	}
 
 	allAssets := append(append([]waf.ExternalAssetRecord(nil), globalAssets...), allOverrideAssets...)
 	assetsMatch := len(allAssets) == 0 || diskAssetsMatchRecorded(allAssets)
@@ -975,6 +1120,15 @@ func (f *HandlerFactory) WAFEffective() *admin.WAFEffectivePolicy {
 			cp.State = "stale_asset_changed"
 		}
 		out.Evaluation = &cp
+	}
+	if updateMetrics && f.Metrics != nil && out.Generation > 0 {
+		wafState := aggregateWAFEvidenceState(&out)
+		if !waf.Compiled {
+			wafState = "unavailable"
+		} else if !assetsMatch {
+			wafState = "stale"
+		}
+		f.Metrics.ObserveSecurityEvidenceState("waf_effective", wafState)
 	}
 	return &out
 }

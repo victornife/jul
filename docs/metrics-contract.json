@@ -526,6 +526,26 @@
       "state": "released_v2.0.0"
     },
     {
+      "name": "jul_security_evidence_state",
+      "type": "gauge",
+      "help": "Availability state of security evidence producers (1 for active state, 0 otherwise), labeled by producer (waf_effective/waf_investigation/audit_sink/posture_evaluator) and state (ok/stale/degraded/disabled/unavailable).",
+      "labels": [
+        "producer",
+        "state"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_security_posture_findings",
+      "type": "gauge",
+      "help": "Active gateway security posture findings, labeled by bounded area (admin/trust/waf/cache/certificates/intent/maintenance) and severity (warning/error).",
+      "labels": [
+        "area",
+        "severity"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_storage_bytes",
       "type": "gauge",
       "help": "Capacity of the filesystem holding a Jul-owned storage category, labeled by category (cache/access_log/audit_log/config/config_history/plugin_upload/acme) and kind (available/total). Absent when the platform cannot report it.",

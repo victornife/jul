@@ -8,11 +8,17 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
+	"jul/internal/admin"
+	"jul/internal/adminapi"
 	"jul/internal/atomicfile"
 	"jul/internal/config"
 	"jul/internal/versionid"
@@ -31,6 +37,8 @@ func cmdWAF(args []string) int {
 		return cmdWAFManifest(args[1:])
 	case "verify-assets":
 		return cmdWAFVerifyAssets(args[1:])
+	case "events":
+		return cmdWAFEvents(args[1:])
 	default:
 		printWAFUsage()
 		return 2
@@ -42,6 +50,7 @@ func printWAFUsage() {
   jul waf evaluate [-config f] [-baseline f] [-fixtures f] [-scope s] [-version-key-file f] [-json]
   jul waf manifest [-config f] [-scope s] [-out f] [-version-key-file f] [-json]
   jul waf verify-assets [-config f] -manifest f [-version-key-file f] [-json]
+  jul waf events [-url u] [-token t] [-event-id id] [-outcome o] [-rule-id n] [-route-id r] [-limit n] [-json]
 `)
 }
 
@@ -386,6 +395,138 @@ func cmdWAFVerifyAssets(args []string) int {
 		}
 	}
 	if !res.Verified {
+		return 1
+	}
+	return 0
+}
+
+func cmdWAFEvents(args []string) int {
+	fs := flag.NewFlagSet("waf events", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	adminURL := fs.String("url", "http://127.0.0.1:9090", "admin API base URL")
+	token := fs.String("token", "", "admin bearer token (or set JUL_ADMIN_TOKEN)")
+	eventID := fs.String("event-id", "", "filter by server-owned event_id (wev_...)")
+	outcome := fs.String("outcome", "", "filter by transaction outcome")
+	ruleID := fs.Int("rule-id", 0, "filter by matched or interrupting rule_id")
+	routeID := fs.String("route-id", "", "filter by durable route_id")
+	limit := fs.Int("limit", 50, "maximum number of events to return (1..256)")
+	jsonOut := fs.Bool("json", false, "emit events response as JSON")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		printWAFUsage()
+		return 2
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(*adminURL), "/")
+	q := url.Values{}
+	if strings.TrimSpace(*eventID) != "" {
+		q.Set("event_id", strings.TrimSpace(*eventID))
+	}
+	if strings.TrimSpace(*outcome) != "" {
+		q.Set("outcome", strings.TrimSpace(*outcome))
+	}
+	if *ruleID > 0 {
+		q.Set("rule_id", strconv.Itoa(*ruleID))
+	}
+	if strings.TrimSpace(*routeID) != "" {
+		q.Set("route_id", strings.TrimSpace(*routeID))
+	}
+	if *limit > 0 {
+		q.Set("limit", strconv.Itoa(*limit))
+	}
+	endpoint := baseURL + "/api/v1/waf/events"
+	if len(q) > 0 {
+		endpoint += "?" + q.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		return writeWAFCLIError(*jsonOut, 1, err.Error())
+	}
+	tok := strings.TrimSpace(*token)
+	if tok == "" {
+		tok = strings.TrimSpace(os.Getenv("JUL_ADMIN_TOKEN"))
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return writeWAFCLIError(*jsonOut, 1, fmt.Sprintf("request %s: %v", endpoint, err))
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return writeWAFCLIError(*jsonOut, 1, err.Error())
+	}
+	if resp.StatusCode != http.StatusOK {
+		return writeWAFCLIError(*jsonOut, 1, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+	}
+	var parsed adminapi.WAFEventsResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return writeWAFCLIError(*jsonOut, 1, fmt.Sprintf("decode response: %v", err))
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(parsed)
+		return 0
+	}
+	fmt.Fprintf(stdout, "WAF Investigation (%s): retained=%d/%d recorded=%d truncated=%d dropped=%d\n",
+		parsed.CollectionState, parsed.Stats.RetainedEvents, parsed.Retention.MaxEvents,
+		parsed.Stats.RecordedTotal, parsed.Stats.TruncatedTotal, parsed.Stats.DroppedTotal)
+	for _, ev := range parsed.Events {
+		fmt.Fprintf(stdout, "  - %s  %-20s  mode=%-6s  status=%d (origin=%v)  %s %s  route=%s  rules=%d\n",
+			ev.EventID, ev.Outcome, ev.Mode, ev.ClientStatus, ev.OriginReached,
+			ev.Method, ev.Path, ev.Route.RouteID, ev.TotalMatchedRules)
+	}
+	return 0
+}
+
+func cmdPosture(args []string) int {
+	fs := flag.NewFlagSet("posture", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "server.toml", "path to the TOML configuration file")
+	jsonOut := fs.Bool("json", false, "emit posture report as JSON")
+	timeout := fs.Duration("timeout", 30*time.Second, "posture evaluation timeout")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "usage: jul posture [-config f] [-json]")
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *timeout)
+		defer cancel()
+	}
+	cand, err := loadResolvedCLICandidate(ctx, *configPath)
+	if err != nil {
+		return writeWAFCLIError(*jsonOut, 1, err.Error())
+	}
+	report := admin.EvaluateSecurityPostureOffline(cand.Raw, cand.Effective, waf.Compiled)
+	var outBuf strings.Builder
+	if *jsonOut {
+		enc := json.NewEncoder(&outBuf)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(report)
+	} else {
+		fmt.Fprintf(&outBuf, "Gateway Security Posture: status=%s (errors=%d warnings=%d info=%d)\n",
+			report.OverallStatus, report.ErrorCount, report.WarningCount, report.InfoCount)
+		for _, a := range report.Areas {
+			fmt.Fprintf(&outBuf, "  [%-12s] %-11s (%s) — %s\n", a.Area, a.Status, a.EpistemicState, a.Summary)
+		}
+		for _, f := range report.Findings {
+			fmt.Fprintf(&outBuf, "  * [%s/%s] %s (%s): %s\n", f.Area, f.Severity, f.Code, f.EpistemicState, f.Summary)
+		}
+	}
+	_, _ = io.WriteString(stdout, cand.Redaction.Apply(outBuf.String()))
+	if report.ErrorCount > 0 {
 		return 1
 	}
 	return 0

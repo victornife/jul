@@ -487,6 +487,8 @@ Labels fall into three classes by what bounds them:
 | `jul_waf_events_total` | `action`, `rule` | `block`/`detect` × loaded rule IDs |
 | `jul_waf_investigation_events_total` | `result` | fixed (`recorded`/`truncated`/`dropped`/`sampled_out`) |
 | `jul_waf_protection_changes_total` | `transition` | fixed (`initial`/`unchanged`/`tightened`/`weakened`/`reloaded`) |
+| `jul_security_posture_findings` | `area`, `severity` | fixed (`7 × 2`) |
+| `jul_security_evidence_state` | `producer`, `state` | fixed (`4 × 5`) |
 | `jul_waf_serving_routes` | `state` | fixed (`block`/`detect`/`disabled_override`/`unprotected`) |
 | `jul_waf_transactions_total` | `mode`, `outcome` | fixed (`block`/`detect`) × fixed (`clean`/`matched_observed`/`interrupted_request`/`interrupted_response`/`rejected_body_limit`/`inspection_error`) |
 | `jul_egress_decisions_total` | `subsystem`, `result`, `reason` | fixed subsystem/result/reason enums |

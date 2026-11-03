@@ -132,6 +132,8 @@ type Metrics struct {
 	wafInvestigationEvents *prometheus.CounterVec
 	wafProtectionChanges   *prometheus.CounterVec
 	wafServingRoutes       *prometheus.GaugeVec
+	securityPosture        *prometheus.GaugeVec
+	securityEvidenceState  *prometheus.GaugeVec
 	egressDecisions        *prometheus.CounterVec
 	egressDNSAnswers       *prometheus.CounterVec
 
@@ -228,6 +230,11 @@ type Metrics struct {
 	// request-rate baseline is a plain zero on the very first call.
 	statsLastCPU float64
 	statsHaveCPU bool
+
+	// preGather holds an optional callback invoked before Gather() or Handler()
+	// scrapes metrics so scrape-driven gauges stay fresh without requiring
+	// administrative API or Console reads (#628-B, #630, #633).
+	preGather atomic.Value
 }
 
 // MetricsOption customises a Metrics at construction time.
@@ -384,6 +391,14 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_waf_serving_routes",
 			Help: "Configured HTTP routes in the active serving generation by effective WAF enforcement state (block/detect/disabled_override/unprotected).",
 		}, []string{"state"}),
+		securityPosture: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "jul_security_posture_findings",
+			Help: "Active gateway security posture findings, labeled by bounded area (admin/trust/waf/cache/certificates/intent/maintenance) and severity (warning/error).",
+		}, []string{"area", "severity"}),
+		securityEvidenceState: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "jul_security_evidence_state",
+			Help: "Availability state of security evidence producers (1 for active state, 0 otherwise), labeled by producer (waf_effective/waf_investigation/audit_sink/posture_evaluator) and state (ok/stale/degraded/disabled/unavailable).",
+		}, []string{"producer", "state"}),
 		egressDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_egress_decisions_total",
 			Help: "Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow).",
@@ -678,6 +693,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.wafInvestigationEvents,
 		m.wafProtectionChanges,
 		m.wafServingRoutes,
+		m.securityPosture,
+		m.securityEvidenceState,
 		m.egressDecisions,
 		m.egressDNSAnswers,
 		m.reloadTotal,
@@ -700,13 +717,42 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 	return m
 }
 
+// SetPreGatherHook registers an optional callback invoked before Gather() or
+// Handler() collects metrics so scrape-driven gauges (such as on-disk external
+// rule-file staleness on jul_security_evidence_state) update even when no
+// operator opens the Console or calls administrative read endpoints.
+func (m *Metrics) SetPreGatherHook(fn func()) {
+	if m == nil {
+		return
+	}
+	m.preGather.Store(fn)
+}
+
+func (m *Metrics) runPreGather() {
+	if m == nil {
+		return
+	}
+	if v := m.preGather.Load(); v != nil {
+		if fn, ok := v.(func()); ok && fn != nil {
+			fn()
+		}
+	}
+}
+
 // Handler returns the Prometheus exposition handler for this registry.
 // Gather returns the currently exported metric families. It exists for tests
 // and tooling that need to inspect labels without scraping over HTTP.
-func (m *Metrics) Gather() ([]*dto.MetricFamily, error) { return m.registry.Gather() }
+func (m *Metrics) Gather() ([]*dto.MetricFamily, error) {
+	m.runPreGather()
+	return m.registry.Gather()
+}
 
 func (m *Metrics) Handler() http.Handler {
-	return promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+	inner := promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m.runPreGather()
+		inner.ServeHTTP(w, r)
+	})
 }
 
 // Middleware instruments next with request counters, latency, in-flight gauge,
@@ -1009,6 +1055,45 @@ func (m *Metrics) ObserveWAFProtectionChange(transition string) {
 		return
 	}
 	m.wafProtectionChanges.WithLabelValues(transition).Inc()
+}
+
+var (
+	securityPostureAreas      = []string{"admin", "trust", "waf", "cache", "certificates", "intent", "maintenance"}
+	securityPostureSeverities = []string{"warning", "error"}
+	securityEvidenceStates    = []string{"ok", "stale", "degraded", "disabled", "unavailable"}
+)
+
+// ObserveSecurityPostureFindings sets the active gateway security posture
+// finding counts across all 7 areas and both material severities (#633, #628-B).
+func (m *Metrics) ObserveSecurityPostureFindings(counts map[string]map[string]int) {
+	if m == nil {
+		return
+	}
+	for _, area := range securityPostureAreas {
+		for _, sev := range securityPostureSeverities {
+			val := 0
+			if bySev, ok := counts[area]; ok {
+				val = bySev[sev]
+			}
+			m.securityPosture.WithLabelValues(area, sev).Set(float64(val))
+		}
+	}
+}
+
+// ObserveSecurityEvidenceState records the current availability state of a
+// security evidence producer (1 for activeState, 0 for all other states; #633,
+// #628-B).
+func (m *Metrics) ObserveSecurityEvidenceState(producer, activeState string) {
+	if m == nil || producer == "" {
+		return
+	}
+	for _, st := range securityEvidenceStates {
+		v := 0.0
+		if st == activeState {
+			v = 1.0
+		}
+		m.securityEvidenceState.WithLabelValues(producer, st).Set(v)
+	}
 }
 
 // ObserveBackendHealth records an active health-check transition for a backend.

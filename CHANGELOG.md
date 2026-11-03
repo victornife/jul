@@ -11,6 +11,17 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Deliver bounded WAF outcome investigation (`GET /api/v1/waf/events`,
+  `jul waf events`, Console `WAFInvestigationDrawer` with narrow-exception
+  handoff; #632 Milestone B) and actionable 7-area gateway security posture
+  review (`GET /api/v1/security/posture`, `jul posture`, Console
+  `SecurityPostureDrawer`, `jul_security_posture_findings`, and
+  `jul_security_evidence_state`; #633, [ADR 0031](docs/adr/0031-waf-operations-posture-isolation-and-alerting.md)):
+  distinguish deliberate `public` sharing intent (`info`/`configured`) from
+  unverified `external_enforcer` declarations (`external_unknown`), unanalysed
+  manual SecLang (`unanalysed_custom`), and unprotected `restricted` routes
+  (`error`).
+
 - Add narrow WAF rule exceptions (`[[waf.exceptions]]` and
   `[[servers.locations.waf.exceptions]]`) and separate `blocking_paranoia` /
   `detection_paranoia` settings (#631, [ADR 0031](docs/adr/0031-waf-operations-posture-isolation-and-alerting.md)):
