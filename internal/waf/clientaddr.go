@@ -63,6 +63,13 @@ type clientAddrTx struct {
 	client string
 }
 
+// Unwrap returns the inner Coraza transaction so outcome inspection can query
+// optional transaction interfaces without losing canonical client-address
+// substitution (#632).
+func (t *clientAddrTx) Unwrap() types.Transaction {
+	return t.Transaction
+}
+
 // ProcessConnection substitutes the canonical client address. The port is
 // dropped: an address asserted by a proxy has no port on this connection, and
 // reporting the proxy's port next to the client's address would be a lie that

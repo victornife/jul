@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,6 +26,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/observability"
+	"jul/internal/waf"
 )
 
 // newCache builds a response cache with the same defaults a `cache = true`
@@ -469,6 +472,143 @@ func TestInformationalResponseSurvivesTheFullMiddlewareChain(t *testing.T) {
 	}
 	if body2 != wantBody {
 		t.Fatalf("cached body = %q, want %q", body2, wantBody)
+	}
+
+	if waf.Compiled {
+		t.Run("with_waf_enabled", func(t *testing.T) {
+			wafBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Link", "</style.css>; rel=preload")
+				w.Header().Set("Content-Type", "text/plain")
+				w.Header().Set("Cache-Control", "max-age=60")
+				w.Header().Set(waf.HeaderWAFEvent, "wev_forged_on_103")
+				w.WriteHeader(http.StatusEarlyHints)
+				w.WriteHeader(http.StatusEarlyHints)
+				w.Header().Set(waf.HeaderWAFEvent, "wev_forged_on_final")
+				if r.URL.Path == "/hints-block" {
+					w.WriteHeader(http.StatusTeapot)
+				} else {
+					w.WriteHeader(http.StatusNotFound)
+				}
+				_, _ = io.WriteString(w, wantBody)
+			}))
+			defer wafBackend.Close()
+
+			inv := waf.NewInvestigationStore(32, 15*time.Minute)
+			wafCfg := config.WAFConfig{
+				Enabled:          true,
+				Mode:             "block",
+				BlockStatus:      http.StatusForbidden,
+				CRSEnabled:       false,
+				RequestBodyLimit: config.Size(1 << 20),
+				InlineRules: strings.Join([]string{
+					`SecRule RESPONSE_STATUS "@streq 103" "id:3301,phase:3,deny,status:502,log,msg:'falsely inspected 103 as final status'"`,
+					`SecRule RESPONSE_STATUS "@streq 404" "id:3302,phase:3,pass,log,msg:'observed final 404 after 103',tag:'final-404'"`,
+					`SecRule RESPONSE_STATUS "@streq 418" "id:3303,phase:3,deny,status:403,log,msg:'blocked final 418 after 103'"`,
+				}, "\n"),
+			}
+			fw, err := waf.New(t.Context(), wafCfg, waf.Options{
+				Investigation: inv,
+			})
+			if err != nil {
+				t.Fatalf("waf.New: %v", err)
+			}
+			t.Cleanup(func() { _ = fw.Close() })
+
+			cWAF := newCache(t)
+			sinkWAF := &recordingSink{}
+			inner := fw.RouteMiddleware(waf.RouteAttribution{
+				RouteID:     "rt-hints",
+				Listen:      ":8080",
+				MatchType:   "prefix",
+				PathPattern: "/",
+				Scope:       "global",
+			}, func() uint64 { return 1 })(cWAF.Handler(newProxy(t, config.LocationConfig{ProxyPass: wafBackend.URL}, nil)))
+
+			compress, err := middleware.NewCompression(middleware.CompressionOptions{
+				Encoders: []string{"gzip"},
+				MinSize:  1,
+				Types:    []string{"text/*"},
+			})
+			if err != nil {
+				t.Fatalf("NewCompression: %v", err)
+			}
+			frontWAF := httptest.NewServer(middleware.Chain(inner,
+				middleware.RequestID(),
+				observability.NewMetrics().Middleware,
+				middleware.AccessLog(sinkWAF),
+				middleware.Recover(slog.New(slog.NewTextHandler(io.Discard, nil))),
+				compress,
+			))
+			defer frontWAF.Close()
+
+			var got103Count int
+			var leaked103EventHeader string
+			traceCtx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{
+				Got1xxResponse: func(code int, header textproto.MIMEHeader) error {
+					if code == http.StatusEarlyHints {
+						got103Count++
+						if v := header.Get(waf.HeaderWAFEvent); v != "" {
+							leaked103EventHeader = v
+						}
+					}
+					return nil
+				},
+			})
+			req1, err := http.NewRequestWithContext(traceCtx, http.MethodGet, frontWAF.URL+"/hints", nil)
+			if err != nil {
+				t.Fatalf("NewRequestWithContext: %v", err)
+			}
+			respWAF1, err := frontWAF.Client().Do(req1)
+			if err != nil {
+				t.Fatalf("Do /hints: %v", err)
+			}
+			bWAF1, _ := io.ReadAll(respWAF1.Body)
+			_ = respWAF1.Body.Close()
+
+			if got103Count < 2 {
+				t.Fatalf("got103Count = %d, want >= 2", got103Count)
+			}
+			if leaked103EventHeader != "" {
+				t.Fatalf("103 response leaked forged %s = %q", waf.HeaderWAFEvent, leaked103EventHeader)
+			}
+			if respWAF1.StatusCode != http.StatusNotFound {
+				t.Fatalf("WAF 103->404 status = %d, want 404", respWAF1.StatusCode)
+			}
+			if respWAF1.Header.Get(waf.HeaderWAFEvent) != "" {
+				t.Fatalf("allowed 404 response leaked %s = %q", waf.HeaderWAFEvent, respWAF1.Header.Get(waf.HeaderWAFEvent))
+			}
+			if string(bWAF1) != wantBody {
+				t.Fatalf("WAF 103->404 body = %q, want %q", string(bWAF1), wantBody)
+			}
+
+			snap := inv.Snapshot(time.Now().UTC(), waf.InvestigationFilter{Limit: 10})
+			if len(snap.Events) != 1 {
+				t.Fatalf("expected 1 WAF investigation event, got %d (%+v)", len(snap.Events), snap.Events)
+			}
+			ev := snap.Events[0]
+			if ev.Outcome != waf.OutcomeMatchedObserved || ev.OriginStatus != http.StatusNotFound || ev.ClientStatus != http.StatusNotFound || !ev.OriginReached {
+				t.Fatalf("unexpected WAF outcome metadata after 103->404: %+v", ev)
+			}
+			if len(ev.MatchedRules) != 1 || ev.MatchedRules[0].RuleID != 3302 {
+				t.Fatalf("expected phase-3 rule 3302 on final 404, got %+v", ev.MatchedRules)
+			}
+
+			// Warm cache hit on the second request:
+			respWAF2, bodyWAF2 := do(t, frontWAF.Client(), http.MethodGet, frontWAF.URL+"/hints")
+			if respWAF2.StatusCode != http.StatusNotFound || respWAF2.Header.Get("X-Cache") != "HIT" || bodyWAF2 != wantBody {
+				t.Fatalf("warm cache after WAF 103->404: status=%d X-Cache=%q bodyLen=%d", respWAF2.StatusCode, respWAF2.Header.Get("X-Cache"), len(bodyWAF2))
+			}
+
+			// Phase-3 blocking rule on final status 418 after 103 Early Hints:
+			respBlock, _ := do(t, frontWAF.Client(), http.MethodGet, frontWAF.URL+"/hints-block")
+			if respBlock.StatusCode != http.StatusForbidden {
+				t.Fatalf("phase-3 block after 103 status = %d, want 403", respBlock.StatusCode)
+			}
+			snapBlock := inv.Snapshot(time.Now().UTC(), waf.InvestigationFilter{RuleID: 3303, Limit: 1})
+			if len(snapBlock.Events) != 1 || snapBlock.Events[0].Outcome != waf.OutcomeInterruptedResponse || snapBlock.Events[0].OriginStatus != http.StatusTeapot || snapBlock.Events[0].ClientStatus != http.StatusForbidden {
+				t.Fatalf("expected interrupted_response on final 418 after 103, got %+v", snapBlock.Events)
+			}
+		})
 	}
 }
 

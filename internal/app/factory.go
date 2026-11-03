@@ -59,12 +59,13 @@ type HandlerFactory struct {
 	// EgressDial is the legacy injection seam used by focused factory tests.
 	// Production sets Egress and never reads this field; when Egress is nil the
 	// factory preserves the old caller-supplied dial behavior.
-	EgressDial func(context.Context, string, string) (net.Conn, error)
-	PoolReg    *upstream.Registry
-	PluginMgr  *plugins.Manager
-	GenRes     *GenerationResources
-	RT         *Runtime           // Tracer.Middleware, ACME
-	Versions   *versionid.Context // private effective-version context (#649)
+	EgressDial       func(context.Context, string, string) (net.Conn, error)
+	PoolReg          *upstream.Registry
+	PluginMgr        *plugins.Manager
+	GenRes           *GenerationResources
+	RT               *Runtime                // Tracer.Middleware, ACME
+	Versions         *versionid.Context      // private effective-version context (#649)
+	WAFInvestigation *waf.InvestigationStore // bounded WAF transaction investigation buffer (#632)
 
 	mu sync.Mutex // serialises every build (startup, reload, preflight)
 
@@ -252,6 +253,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	}
 	var retirePrev func()
 	if commit {
+		gen.SetPublishedGeneration(1)
 		retireHandlers := gen.Commit()
 		if f.Cache != nil {
 			commitErr := f.Cache.CommitRoutePoliciesWithCutover(gen.cacheRoutePolicies, config.CacheCutoverMode(ctx))
@@ -327,6 +329,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		commitMetricLabels = f.Metrics.PrepareHTTPLabelInventory(c.Servers)
 	}
 	genID = f.genCounter.Add(1)
+	gen.SetPublishedGeneration(genID)
 
 	committed := false
 	commitFn = func() (upstream.SnapshotMap, func()) {
@@ -704,8 +707,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// build (no "waf" tag) waf.New is never reached because waf.Check already
 	// rejected the configuration at startup.
 	wafByScope := make(map[string]*waf.Firewall)
+	wafRouteAttrByScope := make(map[string]waf.RouteAttribution)
 	wafReport := newWAFReport(c)
 	gen.wafDigestByLoc = make(map[[2]int]string)
+	ordinals := computeWAFRouteOrdinals(c)
+	invStore := f.wafInvestigationStore()
 	var globalFW *waf.Firewall
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
@@ -719,9 +725,14 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if loc.WAF != nil || fw == nil {
 				var err error
 				fw, err = newFirewall(ctx, wcfg, waf.Options{
-					Logger:   f.Log,
-					Hooks:    waf.Hooks{OnEvent: f.Metrics.ObserveWAFEvent},
-					Versions: f.Versions,
+					Logger: f.Log,
+					Hooks: waf.Hooks{
+						OnEvent:              f.Metrics.ObserveWAFEvent,
+						OnTransaction:        f.Metrics.ObserveWAFTransaction,
+						OnInvestigationEvent: f.Metrics.ObserveWAFInvestigationEvent,
+					},
+					Versions:      f.Versions,
+					Investigation: invStore,
 				})
 				if err != nil {
 					return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
@@ -731,9 +742,27 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				}
 			}
 			wafReport.protected(c.Servers[i], loc, fw.Info())
-			wafByScope[WAFScope(c.Servers[i], loc)] = fw
+			scopeKey := WAFScope(c.Servers[i], loc)
+			wafByScope[scopeKey] = fw
+			scopeKind := "global"
 			if loc.WAF != nil {
+				scopeKind = "override"
 				gen.wafDigestByLoc[[2]int{i, j}] = fw.SourceDigest()
+			}
+			var routeID string
+			if loc.RouteID != nil {
+				routeID = *loc.RouteID
+			}
+			wafRouteAttrByScope[scopeKey] = waf.RouteAttribution{
+				RouteID:             routeID,
+				Listen:              c.Servers[i].Listen,
+				ServerNames:         append([]string(nil), c.Servers[i].ServerNames...),
+				MatchType:           matchTypeOrDefault(loc.Match.Type),
+				PathPattern:         loc.Match.Path,
+				MatchOrdinal:        ordinals[i][j],
+				Scope:               scopeKind,
+				Methods:             append([]string(nil), loc.Match.Methods...),
+				CanonicalPredicates: f.Versions.RoutePredicates(loc.Match),
 			}
 		}
 	}
@@ -742,11 +771,12 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	}
 	gen.wafPolicy = wafReport.finish(time.Now())
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
-		fw := wafByScope[WAFScope(srv, loc)]
+		scopeKey := WAFScope(srv, loc)
+		fw := wafByScope[scopeKey]
 		if fw == nil {
 			return nil
 		}
-		return fw.Middleware()
+		return fw.RouteMiddleware(wafRouteAttrByScope[scopeKey], gen.PublishedGeneration)
 	}
 
 	// locPreflightRateLimit is the CORS preflight terminator's own rate guard

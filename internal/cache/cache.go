@@ -1504,6 +1504,7 @@ func (c *Cache) serveDownstreamWithStrip(w http.ResponseWriter, r *http.Request,
 	pol := c.Policy()
 	if !pol.StripTagHeaders || pol.TagHeaderCount == 0 {
 		next.ServeHTTP(w, r)
+		w.Header().Del("X-Jul-WAF-Event")
 		return
 	}
 	tagHeaders := pol.TagHeaderSlice()
@@ -1514,6 +1515,7 @@ func (c *Cache) serveDownstreamWithStrip(w http.ResponseWriter, r *http.Request,
 	}
 	next.ServeHTTP(respwriter.Wrap(sw, w), r)
 	if !sw.wroteHeader && !sw.hijacked {
+		w.Header().Del("X-Jul-WAF-Event")
 		stripConfiguredTagHeaders(w.Header(), tagHeaders)
 	}
 }
@@ -1733,6 +1735,7 @@ func (c *Cache) fetchAndStoreWithPolicy(w http.ResponseWriter, r *http.Request, 
 		if cw.stripTagHeaders && len(cw.tagHeaders) > 0 {
 			stripOriginTagHeadersFromResponse(w.Header(), cw.entrySnapshot, cw.tagHeaders)
 		}
+		w.Header().Del("X-Jul-WAF-Event")
 	}
 
 	if tagSkipReason != "" {

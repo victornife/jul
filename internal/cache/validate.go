@@ -326,6 +326,7 @@ func writeRecorded(w http.ResponseWriter, r *http.Request, rec *recorder, publis
 	if rec.stripTagHeaders && len(rec.tagHeaders) > 0 {
 		stripConfiguredTagHeaders(h, rec.tagHeaders)
 	}
+	h.Del("X-Jul-WAF-Event")
 	h.Set("X-Cache", state)
 	status := rec.status
 	if status == 0 {

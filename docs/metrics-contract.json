@@ -741,6 +741,25 @@
         "rule"
       ],
       "state": "released_v1.32.0"
+    },
+    {
+      "name": "jul_waf_investigation_events_total",
+      "type": "counter",
+      "help": "Web-application-firewall investigation buffer collection events, labeled by result (recorded/truncated/dropped/sampled_out).",
+      "labels": [
+        "result"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_waf_transactions_total",
+      "type": "counter",
+      "help": "Web-application-firewall inspected HTTP transactions, labeled by policy mode (block/detect) and final outcome (clean/matched_observed/interrupted_request/interrupted_response/rejected_body_limit/inspection_error).",
+      "labels": [
+        "mode",
+        "outcome"
+      ],
+      "state": "merged_release_pending"
     }
   ]
 }

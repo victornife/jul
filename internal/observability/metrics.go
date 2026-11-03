@@ -128,6 +128,8 @@ type Metrics struct {
 	mtlsHandshakes         *prometheus.CounterVec
 	mtlsCRLNextUpdate      *prometheus.GaugeVec
 	wafEvents              *prometheus.CounterVec
+	wafTransactions        *prometheus.CounterVec
+	wafInvestigationEvents *prometheus.CounterVec
 	egressDecisions        *prometheus.CounterVec
 	egressDNSAnswers       *prometheus.CounterVec
 
@@ -364,6 +366,14 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_waf_events_total",
 			Help: "Web-application-firewall rule matches, labeled by action (block/detect) and matched rule ID.",
 		}, []string{"action", "rule"}),
+		wafTransactions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_waf_transactions_total",
+			Help: "Web-application-firewall inspected HTTP transactions, labeled by policy mode (block/detect) and final outcome (clean/matched_observed/interrupted_request/interrupted_response/rejected_body_limit/inspection_error).",
+		}, []string{"mode", "outcome"}),
+		wafInvestigationEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_waf_investigation_events_total",
+			Help: "Web-application-firewall investigation buffer collection events, labeled by result (recorded/truncated/dropped/sampled_out).",
+		}, []string{"result"}),
 		egressDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_egress_decisions_total",
 			Help: "Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow).",
@@ -654,6 +664,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.mtlsHandshakes,
 		m.mtlsCRLNextUpdate,
 		m.wafEvents,
+		m.wafTransactions,
+		m.wafInvestigationEvents,
 		m.egressDecisions,
 		m.egressDNSAnswers,
 		m.reloadTotal,
@@ -939,7 +951,30 @@ func (m *Metrics) ObserveAuthDecision(method, result string) {
 // fixed/low-cardinality. It is wired into the WAF as its OnEvent hook (the waf
 // package cannot import observability directly).
 func (m *Metrics) ObserveWAFEvent(action, rule string) {
+	if m == nil {
+		return
+	}
 	m.wafEvents.WithLabelValues(action, rule).Inc()
+}
+
+// ObserveWAFTransaction records the final outcome of one WAF-inspected HTTP
+// transaction (#632-A). mode is "block" or "detect"; outcome is one of the
+// closed WAFOutcome values.
+func (m *Metrics) ObserveWAFTransaction(mode, outcome string) {
+	if m == nil {
+		return
+	}
+	m.wafTransactions.WithLabelValues(mode, outcome).Inc()
+}
+
+// ObserveWAFInvestigationEvent records one event processed by the bounded WAF
+// investigation buffer (#632-A). result is one of recorded, truncated, dropped,
+// or sampled_out.
+func (m *Metrics) ObserveWAFInvestigationEvent(result string) {
+	if m == nil {
+		return
+	}
+	m.wafInvestigationEvents.WithLabelValues(result).Inc()
 }
 
 // ObserveBackendHealth records an active health-check transition for a backend.

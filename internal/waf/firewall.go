@@ -6,7 +6,9 @@
 package waf
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io/fs"
@@ -17,7 +19,6 @@ import (
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
 	"github.com/corazawaf/coraza/v3/experimental"
-	corazahttp "github.com/corazawaf/coraza/v3/http"
 	"github.com/corazawaf/coraza/v3/types"
 	"github.com/jcchavezs/mergefs"
 	mergefsio "github.com/jcchavezs/mergefs/io"
@@ -38,8 +39,10 @@ const Compiled = true
 type Firewall struct {
 	waf         coraza.WAF
 	info        PolicyInfo
+	opts        Options
 	hasExternal bool
 	sourceSum   [32]byte
+	policySum   [32]byte
 }
 
 // New builds a Firewall from a WAF policy. It assembles the SecLang directive
@@ -71,6 +74,9 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	wcfg = experimental.WAFConfigWithRuleObserver(wcfg, func(r types.RuleMetadata) { counter.observe(r.File()) })
 	if limit := cfg.RequestBodyLimit.Bytes(); limit > 0 {
 		wcfg = wcfg.WithRequestBodyLimit(int(limit))
+		if limit < 131072 {
+			wcfg = wcfg.WithRequestBodyInMemoryLimit(int(limit))
+		}
 	}
 	if cfg.ResponseBodyCheck {
 		wcfg = wcfg.WithResponseBodyAccess()
@@ -85,12 +91,14 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	}
 	// Wrap the engine so rules see Jul's canonical client address rather than
 	// Coraza's own parse of RemoteAddr (see clientaddr.go).
-	info, rawSum := policyInfo(cfg, counter.counts, rec, opts.Versions)
+	info, rawSum, polSum := policyInfo(cfg, counter.counts, rec, opts.Versions)
 	return &Firewall{
 		waf:         &clientAddrWAF{WAF: w},
 		info:        info,
+		opts:        opts,
 		hasExternal: info.ExternalFiles > 0,
 		sourceSum:   rawSum,
+		policySum:   polSum,
 	}, nil
 }
 
@@ -117,7 +125,16 @@ func (f *Firewall) SourceDigest() string {
 	return hex.EncodeToString(f.sourceSum[:])
 }
 
-func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, versions *versionid.Context) (PolicyInfo, [32]byte) {
+// RawPolicyDigest returns the hex-encoded private in-memory SHA-256 digest of
+// the complete compiled policy inputs (#630, ADR 0031 §3.1).
+func (f *Firewall) RawPolicyDigest() string {
+	if f == nil {
+		return ""
+	}
+	return hex.EncodeToString(f.policySum[:])
+}
+
+func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, versions *versionid.Context) (PolicyInfo, [32]byte, [32]byte) {
 	info := PolicyInfo{
 		Mode:                   "block",
 		BlockStatus:            cfg.BlockStatus,
@@ -151,7 +168,29 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 	}
 	var rawSum [32]byte
 	info.ExternalFiles, info.ExternalDigest, rawSum = rec.identity(versions)
-	return info, rawSum
+	polBytes := canonicalPolicyBytes(cfg, info, rawSum)
+	polSum := sha256.Sum256(polBytes)
+	info.PolicyDigest = versions.Digest("waf-compiled-policy-v1", polBytes)
+	return info, rawSum, polSum
+}
+
+func canonicalPolicyBytes(cfg config.WAFConfig, info PolicyInfo, rawExternalSum [32]byte) []byte {
+	var b bytes.Buffer
+	writeFramed := func(k, v string) {
+		fmt.Fprintf(&b, "%s=%d:%s\n", k, len(v), v)
+	}
+	writeFramed("engine", EngineVersion())
+	writeFramed("crs_version", info.CRSVersion)
+	writeFramed("mode", info.Mode)
+	writeFramed("block_status", strconv.Itoa(info.BlockStatus))
+	writeFramed("crs_enabled", strconv.FormatBool(info.CRSEnabled))
+	writeFramed("paranoia", strconv.Itoa(info.Paranoia))
+	writeFramed("request_body_limit", strconv.FormatInt(info.RequestBodyLimitBytes, 10))
+	writeFramed("response_body_inspection", strconv.FormatBool(info.ResponseBodyInspection))
+	writeFramed("external_raw_sha256", hex.EncodeToString(rawExternalSum[:]))
+	inlineSum := sha256.Sum256([]byte(strings.TrimSpace(cfg.InlineRules)))
+	writeFramed("inline_sha256", hex.EncodeToString(inlineSum[:]))
+	return b.Bytes()
 }
 
 // Middleware returns the per-location middleware that runs each request (and,
@@ -159,8 +198,16 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 // request is short-circuited by Coraza with the status configured in the
 // SecLang program.
 func (f *Firewall) Middleware() middleware.Middleware {
+	return f.RouteMiddleware(RouteAttribution{}, nil)
+}
+
+// RouteMiddleware returns a per-location middleware bound to route and genFn
+// while sharing the compiled Coraza engine (#632-A).
+func (f *Firewall) RouteMiddleware(route RouteAttribution, genFn func() uint64) middleware.Middleware {
 	return func(next http.Handler) http.Handler {
-		return corazahttp.WrapHandler(f.waf, next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			f.serveHTTP(w, r, next, route, genFn)
+		})
 	}
 }
 

@@ -341,6 +341,7 @@ func (w *cacheWriter) WriteHeader(code int) {
 	if w.stripTagHeaders && len(w.tagHeaders) > 0 {
 		stripOriginTagHeadersFromResponse(w.Header(), w.entrySnapshot, w.tagHeaders)
 	}
+	w.Header().Del("X-Jul-WAF-Event")
 	w.ResponseWriter.WriteHeader(code)
 }
 
@@ -595,6 +596,7 @@ func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func (w *statusWriter) WriteHeader(code int) {
+	w.Header().Del("X-Jul-WAF-Event")
 	if w.stripTagHeaders && len(w.tagHeaders) > 0 {
 		stripConfiguredTagHeaders(w.Header(), w.tagHeaders)
 	}
@@ -787,11 +789,12 @@ func headerDifference(final, entry http.Header) http.Header {
 	return diff
 }
 
-// hopByHopHeaders are connection-specific headers that must not be cached or
-// forwarded.
+// hopByHopHeaders are connection-specific or per-transaction headers that must
+// not be cached or replayed from stored responses (#632).
 var hopByHopHeaders = []string{
 	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
 	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+	"X-Jul-WAF-Event",
 }
 
 func removeHopByHop(h http.Header) {
