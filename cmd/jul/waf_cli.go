@@ -19,6 +19,7 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/adminapi"
+	"jul/internal/adminclient"
 	"jul/internal/atomicfile"
 	"jul/internal/config"
 	"jul/internal/versionid"
@@ -404,7 +405,8 @@ func cmdWAFEvents(args []string) int {
 	fs := flag.NewFlagSet("waf events", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	adminURL := fs.String("url", "http://127.0.0.1:9090", "admin API base URL")
-	token := fs.String("token", "", "admin bearer token (or set JUL_ADMIN_TOKEN)")
+	token := fs.String("token", "", "admin bearer token (or set JUL_ADMIN_TOKEN or -token-file)")
+	tokenFile := fs.String("token-file", "", "path to file containing admin bearer token")
 	eventID := fs.String("event-id", "", "filter by server-owned event_id (wev_...)")
 	outcome := fs.String("outcome", "", "filter by transaction outcome")
 	ruleID := fs.Int("rule-id", 0, "filter by matched or interrupting rule_id")
@@ -418,7 +420,11 @@ func cmdWAFEvents(args []string) int {
 		printWAFUsage()
 		return 2
 	}
-	baseURL := strings.TrimRight(strings.TrimSpace(*adminURL), "/")
+	parsedEndpoint, err := adminclient.ParseEndpoint(*adminURL)
+	if err != nil {
+		return writeWAFCLIError(*jsonOut, 1, err.Error())
+	}
+	baseURL := strings.TrimRight(parsedEndpoint.String(), "/")
 	q := url.Values{}
 	if strings.TrimSpace(*eventID) != "" {
 		q.Set("event_id", strings.TrimSpace(*eventID))
@@ -445,13 +451,26 @@ func cmdWAFEvents(args []string) int {
 		return writeWAFCLIError(*jsonOut, 1, err.Error())
 	}
 	tok := strings.TrimSpace(*token)
+	if tf := strings.TrimSpace(*tokenFile); tf != "" {
+		rawTok, readErr := os.ReadFile(tf)
+		if readErr != nil {
+			return writeWAFCLIError(*jsonOut, 1, fmt.Sprintf("read token-file: %v", readErr))
+		}
+		tok = strings.TrimSpace(string(rawTok))
+	}
 	if tok == "" {
 		tok = strings.TrimSpace(os.Getenv("JUL_ADMIN_TOKEN"))
 	}
 	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout:   10 * time.Second,
+		Transport: &http.Transport{Proxy: nil},
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return writeWAFCLIError(*jsonOut, 1, fmt.Sprintf("request %s: %v", endpoint, err))

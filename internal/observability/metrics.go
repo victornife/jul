@@ -1036,7 +1036,10 @@ func (m *Metrics) ObserveWAFInvestigationEvent(result string) {
 }
 
 // ObserveWAFServingRoutes updates the serving-generation route counts by
-// effective WAF enforcement state (#630, #628-B).
+// effective WAF enforcement state (#630, #628-B). It also ensures the bounded
+// WAF transaction and protection-change counter series are initialized at 0 so
+// Prometheus rate()/increase() queries observe a baseline sample before the
+// first rejection or weakening event.
 func (m *Metrics) ObserveWAFServingRoutes(blockRoutes, detectRoutes, disabledOverrideRoutes, unprotectedRoutes int) {
 	if m == nil {
 		return
@@ -1045,6 +1048,14 @@ func (m *Metrics) ObserveWAFServingRoutes(blockRoutes, detectRoutes, disabledOve
 	m.wafServingRoutes.WithLabelValues("detect").Set(float64(detectRoutes))
 	m.wafServingRoutes.WithLabelValues("disabled_override").Set(float64(disabledOverrideRoutes))
 	m.wafServingRoutes.WithLabelValues("unprotected").Set(float64(unprotectedRoutes))
+	for _, tr := range []string{"initial", "unchanged", "tightened", "weakened", "reloaded"} {
+		m.wafProtectionChanges.WithLabelValues(tr).Add(0)
+	}
+	for _, mode := range []string{"block", "detect"} {
+		for _, out := range []string{"clean", "matched_observed", "interrupted_request", "interrupted_response", "rejected_body_limit", "inspection_error"} {
+			m.wafTransactions.WithLabelValues(mode, out).Add(0)
+		}
+	}
 }
 
 // ObserveWAFProtectionChange records a published serving WAF protection

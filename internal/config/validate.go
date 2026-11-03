@@ -506,15 +506,14 @@ func ValidateWAFExceptionTarget(raw string) (string, error) {
 }
 
 // CanonicalizeWAFExceptionScope resolves the effective scope of a WAFException.
+// Omitted scope defaults to "narrow_target" so a missing target is rejected
+// rather than silently broadening into whole-rule removal (#631, SR-03).
 func CanonicalizeWAFExceptionScope(exc WAFException) string {
 	s := strings.ToLower(strings.TrimSpace(exc.Scope))
 	if s != "" {
 		return s
 	}
-	if strings.TrimSpace(exc.Target) != "" {
-		return "narrow_target"
-	}
-	return "rule_remove"
+	return "narrow_target"
 }
 
 // CanonicalizeWAFExceptionMethods validates and canonicalizes HTTP method names

@@ -21,10 +21,23 @@ import (
 	"jul/internal/waf"
 )
 
+// declaredWAFRouteMatch selects predicate identity inputs from the immutable
+// candidate's raw configuration. Secret resolution changes matching values,
+// not the identity of the declaration the operator edits. Using that same
+// domain for editable, serving and event views avoids re-reading providers.
+// Embedding callers without a raw candidate retain their supplied match.
+func declaredWAFRouteMatch(raw *config.Config, serverIndex, locationIndex int, effective config.MatchConfig) config.MatchConfig {
+	if raw != nil && serverIndex < len(raw.Servers) && locationIndex < len(raw.Servers[serverIndex].Locations) {
+		return raw.Servers[serverIndex].Locations[locationIndex].Match
+	}
+	return effective
+}
+
 // wafReport accumulates one generation's compiled WAF policies (#440).
 type wafReport struct {
-	out    admin.WAFEffectivePolicy
-	counts map[wafRouteCoordinate]int
+	out          admin.WAFEffectivePolicy
+	counts       map[wafRouteCoordinate]int
+	activeCounts [4]int // [block, detect, disabled_override, unprotected] excluding withdrawn routes (#630, CR-04)
 }
 
 type wafRouteCoordinate struct {
@@ -92,8 +105,14 @@ func (r *wafReport) unprotected(srv config.ServerConfig, loc config.LocationConf
 		r.out.RouteProtection[wafRouteIdentityKey(srv, loc, ord)] = "unprotected"
 	}
 	r.out.UnprotectedRoutes++
+	if !loc.Withdrawn {
+		r.activeCounts[3]++
+	}
 	if loc.WAF != nil {
 		r.out.DisabledOverrideRoutes++
+		if !loc.Withdrawn {
+			r.activeCounts[2]++
+		}
 		r.out.Overrides = append(r.out.Overrides, wafRouteOverride(srv, loc, ord, nil))
 	}
 }
@@ -105,8 +124,14 @@ func (r *wafReport) protected(srv config.ServerConfig, loc config.LocationConfig
 	if info.Mode == "detect" {
 		mode = "detect"
 		r.out.DetectRoutes++
+		if !loc.Withdrawn {
+			r.activeCounts[1]++
+		}
 	} else {
 		r.out.BlockRoutes++
+		if !loc.Withdrawn {
+			r.activeCounts[0]++
+		}
 	}
 	if !loc.Withdrawn {
 		r.out.RouteProtection[wafRouteIdentityKey(srv, loc, ord)] = mode
@@ -176,8 +201,9 @@ func wafPolicySummary(info waf.PolicyInfo) *admin.WAFPolicySummary {
 }
 
 // publishWAF records the WAF policy of a generation that just became live and
-// emits bounded protection-state and transition signals (#440, #630, #628-B).
-func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy) {
+// emits bounded protection-state, posture, and transition signals (#440, #630,
+// #633, #628-B).
+func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy, activeCounts [4]int, cfg *config.Config) {
 	if p == nil {
 		return
 	}
@@ -190,11 +216,14 @@ func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy) {
 	liveRawCfg := f.liveRawConfig
 	liveCfg := f.liveConfig
 	f.moduleMu.Unlock()
+	if cfg != nil {
+		liveCfg = cfg
+	}
 
 	transition := classifyWAFProtectionTransition(prev, &cp)
-	f.Metrics.ObserveWAFServingRoutes(cp.BlockRoutes, cp.DetectRoutes, cp.DisabledOverrideRoutes, cp.UnprotectedRoutes)
+	f.Metrics.ObserveWAFServingRoutes(activeCounts[0], activeCounts[1], activeCounts[2], activeCounts[3])
 	f.Metrics.ObserveWAFProtectionChange(transition)
-	f.Metrics.SetPreGatherHook(f.RefreshSecurityEvidenceMetrics)
+	f.Metrics.SetPreGatherHook(f.RefreshSecurityMetrics)
 	f.RefreshSecurityEvidenceMetrics()
 	f.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "ok")
 	if liveCfg != nil && f.Metrics != nil {
@@ -211,6 +240,35 @@ func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy) {
 		}
 		f.Metrics.ObserveSecurityPostureFindings(counts)
 	}
+}
+
+// RefreshSecurityMetrics is the scrape-only composition of the existing posture
+// and evidence owners. Do not invoke the admin snapshot callback during factory
+// publication: the server publishes its LiveSnapshot after the factory commits.
+func (f *HandlerFactory) RefreshSecurityMetrics() {
+	if f == nil || f.Metrics == nil {
+		return
+	}
+	f.moduleMu.Lock()
+	refresh := f.refreshPosture
+	rawCfg, effCfg := f.liveRawConfig, f.liveConfig
+	f.moduleMu.Unlock()
+	if refresh != nil {
+		refresh()
+	} else if effCfg != nil {
+		posture := admin.EvaluateSecurityPostureOffline(rawCfg, effCfg, waf.Compiled)
+		counts := make(map[string]map[string]int, len(posture.Areas))
+		for _, a := range posture.Areas {
+			counts[a.Area] = map[string]int{"warning": a.WarningCount, "error": a.ErrorCount}
+		}
+		f.Metrics.ObserveSecurityPostureFindings(counts)
+		f.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "ok")
+	} else {
+		f.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "unavailable")
+	}
+	// Asset drift and current audit/investigation health must win over the
+	// posture evaluator's projection of these independently owned producers.
+	f.RefreshSecurityEvidenceMetrics()
 }
 
 // RefreshSecurityEvidenceMetrics checks on-disk external WAF rule assets,
@@ -1043,7 +1101,7 @@ func (f *HandlerFactory) wafEffectiveSnapshot(updateMetrics bool) *admin.WAFEffe
 					MatchOrdinal:        ordinals[i][j],
 					SelectorVersion:     "global-v1",
 					Methods:             append([]string(nil), loc.Match.Methods...),
-					CanonicalPredicates: f.Versions.RoutePredicates(loc.Match),
+					CanonicalPredicates: f.Versions.RoutePredicates(declaredWAFRouteMatch(liveRawCfg, i, j, loc.Match)),
 					Scope:               rScope,
 					Enabled:             rEnabled,
 				})
@@ -1120,6 +1178,10 @@ func (f *HandlerFactory) wafEffectiveSnapshot(updateMetrics bool) *admin.WAFEffe
 			cp.State = "stale_asset_changed"
 		}
 		out.Evaluation = &cp
+	} else if out.Global == nil && !assetsMatch {
+		out.Evaluation = &admin.WAFEvaluationSummaryView{
+			State: "stale_asset_changed",
+		}
 	}
 	if updateMetrics && f.Metrics != nil && out.Generation > 0 {
 		wafState := aggregateWAFEvidenceState(&out)
@@ -1155,6 +1217,9 @@ func evalStatePriority(state string) int {
 func diskAssetsMatchRecorded(assets []waf.ExternalAssetRecord) bool {
 	for _, a := range assets {
 		f, err := os.Open(a.Path)
+		if err != nil && !strings.HasPrefix(a.Path, "/") {
+			f, err = os.Open("/" + a.Path)
+		}
 		if err != nil {
 			return false
 		}

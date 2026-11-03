@@ -528,7 +528,7 @@ var Catalog = []RouteSpec{
 	{
 		Pattern:        "/api/security/waf/evaluate",
 		Methods:        []string{http.MethodPost},
-		AnyPermissions: []rbac.Permission{rbac.StatusRead, rbac.ConfigRead, rbac.ConfigWrite, rbac.ConfigApply},
+		AnyPermissions: []rbac.Permission{rbac.ConfigWrite, rbac.ConfigApply},
 		Handler:        func(s *Server) http.Handler { return http.HandlerFunc(s.handleWAFEvaluate) },
 	},
 	{

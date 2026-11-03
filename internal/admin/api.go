@@ -176,7 +176,21 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 		if raw, err := config.Marshal(c); err == nil {
 			w.Header().Set("X-Jul-Config-Version", configVersion(raw))
 		}
-		writeJSON(w, http.StatusOK, projectRoutes(c))
+		routes := projectRoutes(c)
+		if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
+			for i := range routes {
+				for j := range routes[i].Locations {
+					if routes[i].Locations[j].WAF != nil {
+						w := *routes[i].Locations[j].WAF
+						w.Exceptions = nil
+						w.DirectivesFiles = nil
+						w.InlineRules = ""
+						routes[i].Locations[j].WAF = &w
+					}
+				}
+			}
+		}
+		writeJSON(w, http.StatusOK, routes)
 	})(w, r)
 }
 
@@ -225,55 +239,70 @@ func (s *Server) handleTLS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {
-	s.withConfig(func(c *config.Config, w http.ResponseWriter) {
-		sp := projectSecurityWithVersions(c, s.deps.WAFCompiled, s.deps.EffectiveVersions)
-		if state, err := s.currentWriteState(false); err == nil && state.Version != "" {
-			sp.BaseVersion = state.Version
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w, http.MethodGet)
+		return
+	}
+	if s.deps.LoadConfig == nil && s.deps.ReadConfigRaw == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"loaded": false})
+		return
+	}
+	// Selectors and their CAS fence must describe the same editable revision.
+	// Reuse the raw-first snapshot owner; never project one read and attach a
+	// newer version from another read, even when an apply races this request.
+	state, err := s.currentWriteState(false)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "the editable configuration is unavailable",
+		})
+		return
+	}
+	c := state.Config
+	sp := projectSecurityWithVersions(c, s.deps.WAFCompiled, s.deps.EffectiveVersions)
+	sp.BaseVersion = state.Version
+	if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
+		// Lower-privilege status:read callers (such as auditor) receive
+		// bounded serving counts in WAFEffective without configuration-owned
+		// exception rationale/owner/reference metadata or rule file paths (#631).
+		sp.WAFExceptions = nil
+		sp.WAFDirectivesFiles = nil
+		sp.WAFInlineRules = ""
+		sp.WAFRoutes = nil
+		for i := range sp.LocationWAFs {
+			sp.LocationWAFs[i].Exceptions = nil
+			sp.LocationWAFs[i].DirectivesFiles = nil
+			sp.LocationWAFs[i].InlineRules = ""
+			sp.LocationWAFs[i].Methods = nil
+			sp.LocationWAFs[i].Predicates = ""
+			sp.LocationWAFs[i].CanonicalPredicates = ""
 		}
-		if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
-			// Lower-privilege status:read callers (such as auditor) receive
-			// bounded serving counts in WAFEffective without configuration-owned
-			// exception rationale/owner/reference metadata or rule file paths (#631).
-			sp.WAFExceptions = nil
-			sp.WAFDirectivesFiles = nil
-			sp.WAFInlineRules = ""
-			sp.WAFRoutes = nil
-			for i := range sp.LocationWAFs {
-				sp.LocationWAFs[i].Exceptions = nil
-				sp.LocationWAFs[i].DirectivesFiles = nil
-				sp.LocationWAFs[i].InlineRules = ""
-				sp.LocationWAFs[i].Methods = nil
-				sp.LocationWAFs[i].Predicates = ""
-				sp.LocationWAFs[i].CanonicalPredicates = ""
+	}
+	// Overlay the real serving posture from the installed auth snapshot so a
+	// staged-but-not-live policy is never shown as active (N-03).
+	sp.RBAC = s.rbacPosture(c)
+	if s.deps.WAFEffective != nil {
+		eff := s.deps.WAFEffective()
+		if eff != nil {
+			if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
+				cp := *eff
+				cp.ServingRoutes = nil
+				eff = &cp
 			}
 		}
-		// Overlay the real serving posture from the installed auth snapshot so a
-		// staged-but-not-live policy is never shown as active (N-03).
-		sp.RBAC = s.rbacPosture(c)
-		if s.deps.WAFEffective != nil {
-			eff := s.deps.WAFEffective()
-			if eff != nil {
-				if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
-					cp := *eff
-					cp.ServingRoutes = nil
-					eff = &cp
-				}
-			}
-			sp.WAFEffective = eff
+		sp.WAFEffective = eff
+	}
+	// Overlay the running process's bounded egress block tally (P4-01); the
+	// pure config projection only knows enabled/rule-count.
+	if s.deps.EgressBlocked != nil {
+		for _, b := range s.deps.EgressBlocked() {
+			sp.Egress.RecentBlocked = append(sp.Egress.RecentBlocked, EgressBlockedCount{
+				Subsystem: b.Subsystem,
+				Reason:    b.Reason,
+				Count:     b.Count,
+			})
 		}
-		// Overlay the running process's bounded egress block tally (P4-01); the
-		// pure config projection only knows enabled/rule-count.
-		if s.deps.EgressBlocked != nil {
-			for _, b := range s.deps.EgressBlocked() {
-				sp.Egress.RecentBlocked = append(sp.Egress.RecentBlocked, EgressBlockedCount{
-					Subsystem: b.Subsystem,
-					Reason:    b.Reason,
-					Count:     b.Count,
-				})
-			}
-		}
-		writeJSON(w, http.StatusOK, sp)
-	})(w, r)
+	}
+	writeJSON(w, http.StatusOK, sp)
 }
 
 func (s *Server) handleTrafficControls(w http.ResponseWriter, r *http.Request) {

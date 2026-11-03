@@ -87,6 +87,8 @@ func (c *Context) Config(cfg *config.Config) string {
 
 // RoutePredicates returns a confidential, context-keyed HMAC-SHA-256 digest of
 // m's canonical predicates, or "" when m declares no predicates (#632, #649).
+// Route editing/correlation callers pass the raw declaration from the same
+// candidate revision, never a mixture of raw and secret-resolved matches.
 func (c *Context) RoutePredicates(m config.MatchConfig) string {
 	if !m.HasPredicates() {
 		return ""

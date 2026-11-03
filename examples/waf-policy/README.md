@@ -25,6 +25,19 @@ Compare a candidate configuration against a baseline configuration:
 jul waf evaluate -config jul.toml -baseline jul.toml -fixtures fixtures.json
 ```
 
+The default pack covers encoding and parser boundaries. The companion versioned
+size-boundary pack exercises 127-, 128- and 129-byte bodies against its paired
+128-byte blocking policy (127 bytes pass; the pinned Coraza engine rejects
+bodies reaching or exceeding its threshold with 413):
+
+```bash
+jul waf evaluate -config size-boundaries.toml -fixtures fixtures-size-boundaries.json
+```
+
+This deliberately small limit is for synthetic evaluation only. Adapt the paired
+policy and cases to your production `request_body_limit`, mode and SecLang
+body-limit actions; a passing pack does not establish arbitrary policy limits.
+
 ## 2. Record the exact compiled policy and external-asset manifest
 
 Configuration rollback (`jul rollback`) restores `server.toml`, not external

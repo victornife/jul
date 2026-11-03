@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "pack_id": "jul-waf-body-size-128-v1",
+  "description": "Policy-specific body-size boundaries paired with size-boundaries.toml; synthetic only",
+  "fixtures": [
+    {
+      "id": "body-below-128-byte-limit",
+      "category": "boundary",
+      "description": "127-byte synthetic form body against the paired 128-byte blocking policy",
+      "method": "POST",
+      "host": "app.example.test",
+      "path": "/upload",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 JulFixture/1.0"
+      },
+      "body": "note=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected_outcome": "clean",
+      "expected_status": 200,
+      "expected_origin_reached": true
+    },
+    {
+      "id": "body-at-128-byte-limit",
+      "category": "boundary",
+      "description": "128-byte synthetic form body against the paired 128-byte blocking policy",
+      "method": "POST",
+      "host": "app.example.test",
+      "path": "/upload",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 JulFixture/1.0"
+      },
+      "body": "note=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected_outcome": "rejected_body_limit",
+      "expected_status": 413,
+      "expected_origin_reached": false
+    },
+    {
+      "id": "body-above-128-byte-limit",
+      "category": "boundary",
+      "description": "129-byte synthetic form body against the paired 128-byte blocking policy",
+      "method": "POST",
+      "host": "app.example.test",
+      "path": "/upload",
+      "headers": {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "Mozilla/5.0 JulFixture/1.0"
+      },
+      "body": "note=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "expected_outcome": "rejected_body_limit",
+      "expected_status": 413,
+      "expected_origin_reached": false
+    },
+    {
+      "id": "legit-get-catalog",
+      "category": "legitimate",
+      "description": "Standard GET catalog query with pagination and sorting parameters",
+      "method": "GET",
+      "host": "portal.example.test",
+      "path": "/products?page=2&sort=name_asc",
+      "headers": {
+        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) JulFixture/1.0"
+      },
+      "expected_outcome": "clean",
+      "expected_status": 200,
+      "expected_origin_reached": true
+    },
+    {
+      "id": "attack-sqli-query",
+      "category": "malicious",
+      "description": "Classic boolean SQL injection probe in query parameter",
+      "method": "GET",
+      "host": "app.example.test",
+      "path": "/products?id=1%27%20OR%20%271%27%3D%271",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 JulFixture/1.0"
+      },
+      "expected_outcome": "interrupted_request",
+      "expected_status": 403,
+      "expected_origin_reached": false,
+      "expected_rule_ids": [
+        942100
+      ]
+    }
+  ]
+}

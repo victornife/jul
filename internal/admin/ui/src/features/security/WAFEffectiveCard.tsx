@@ -3,7 +3,12 @@
  * SPDX-License-Identifier: agpl
  */
 
-import type { SecurityProjection, WAFEffectivePolicy, WAFPolicySummary } from "@/api/client.ts";
+import type {
+  SecurityProjection,
+  WAFEffectivePolicy,
+  WAFEvaluationSummary,
+  WAFPolicySummary,
+} from "@/api/client.ts";
 import { formatBytes } from "@/lib/formatBytes.ts";
 import {
   evaluationStateLabel,
@@ -106,6 +111,32 @@ function routeLabel(o: NonNullable<WAFEffectivePolicy["overrides"]>[number]): st
   return `${o.listen}${host} ${o.match_type ?? "prefix"} ${o.path ?? "/"}`;
 }
 
+function EvaluationSummary({
+  evaluation,
+  scope,
+}: {
+  readonly evaluation: WAFEvaluationSummary | undefined;
+  readonly scope: string;
+}) {
+  const info = evaluationStateLabel(evaluation);
+  const tone =
+    info.tone === "success"
+      ? "bg-jul-success/15 text-jul-success"
+      : info.tone === "warning"
+        ? "bg-jul-warning/15 text-jul-warning"
+        : "bg-jul-border text-jul-muted";
+  return (
+    <div role="group" aria-label={`Fixture evaluation: ${scope}`} className="space-y-1 pt-1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span>Fixture evaluation: {scope}</span>
+        <span className={`rounded-full px-2 py-0.5 font-medium ${tone}`}>{info.badge}</span>
+      </div>
+      <p className="text-jul-muted">{info.detail}</p>
+      {evaluation?.scope && <p className="text-jul-muted">Report scope: {evaluation.scope}</p>}
+    </div>
+  );
+}
+
 // WAFEffectiveCard shows the WAF policy the serving generation enforces
 // (#440). It is read-only: configuration is edited above, and a candidate
 // that fails to compile never changes what is shown here.
@@ -118,6 +149,13 @@ export function WAFEffectiveCard({
 }) {
   if (!effective) return null;
   const e = effective;
+  const evaluations = [
+    ...(e.global ? [e.evaluation] : []),
+    ...(e.overrides ?? []).filter((o) => o.enabled && o.policy).map((o) => o.evaluation),
+  ];
+  const verified = evaluations.filter(
+    (ev) => ev?.state === "current" && ev.failed_cases === 0,
+  ).length;
   const compiledAt = e.compiled_at ? new Date(e.compiled_at).toLocaleString() : undefined;
   return (
     <section
@@ -174,6 +212,7 @@ export function WAFEffectiveCard({
           <div className="space-y-1">
             <h3 className="font-semibold">Global policy</h3>
             <PolicySummary p={e.global} />
+            {e.compiled && <EvaluationSummary evaluation={e.evaluation} scope="global" />}
           </div>
         ) : (
           e.generation > 0 && (
@@ -186,40 +225,37 @@ export function WAFEffectiveCard({
         )}
         {e.compiled && (e.global || (e.overrides?.length ?? 0) > 0) && (
           <div className="space-y-1 border-t border-jul-border pt-2">
-            {(() => {
-              const evInfo = evaluationStateLabel(e.evaluation);
-              const badgeTone =
-                evInfo.tone === "success"
-                  ? "bg-jul-success/15 text-jul-success"
-                  : evInfo.tone === "warning"
-                    ? "bg-jul-warning/15 text-jul-warning"
-                    : "bg-jul-border text-jul-muted";
-              return (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="font-semibold">Fixture evaluation &amp; asset recovery</span>
-                    <span className={`rounded-full px-2 py-0.5 font-medium ${badgeTone}`}>
-                      {evInfo.badge}
-                    </span>
-                  </div>
-                  <p className="text-jul-muted">{evInfo.detail}</p>
-                  {(e.global?.external_files ?? 0) > 0 && (
-                    <p className="text-jul-muted">
-                      External rule files are not restored by configuration rollback alone. Record
-                      exact asset digests with <code>jul waf manifest</code> and verify recovery
-                      after file edits or restarts with <code>jul waf verify-assets</code>.
-                    </p>
-                  )}
-                </>
-              );
-            })()}
+            <h3 className="font-semibold">Fixture evaluation &amp; asset recovery</h3>
+            <p className={verified === evaluations.length ? "text-jul-muted" : "text-jul-warning"}>
+              {verified} of {evaluations.length} active policies have a current passing fixture
+              evaluation.
+              {verified < evaluations.length
+                ? " Review each policy below; a verified scope does not cover its siblings."
+                : ""}
+            </p>
+            {((e.global?.external_files ?? 0) > 0 ||
+              (e.overrides ?? []).some((o) => (o.policy?.external_files ?? 0) > 0)) && (
+              <p className="text-jul-muted">
+                External rule files are not restored by configuration rollback alone. Record exact
+                asset digests with <code>jul waf manifest</code> and verify recovery after file
+                edits or restarts with <code>jul waf verify-assets</code>.
+              </p>
+            )}
           </div>
         )}
         {(e.overrides ?? []).map((o, i) => (
           <div key={`waf-eff-${String(i)}`} className="space-y-1 border-t border-jul-border pt-2">
             <h3 className="font-mono font-semibold">{routeLabel(o)}</h3>
             {o.policy ? (
-              <PolicySummary p={o.policy} />
+              <>
+                <PolicySummary p={o.policy} />
+                {e.compiled && o.enabled && (
+                  <EvaluationSummary
+                    evaluation={o.evaluation}
+                    scope={o.route_id || routeLabel(o)}
+                  />
+                )}
+              </>
             ) : (
               <div className="text-jul-muted">WAF turned off for this route by its override.</div>
             )}

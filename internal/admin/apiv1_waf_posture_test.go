@@ -404,6 +404,35 @@ func TestSecurityPostureCatalogAllAreasAndEpistemicStates(t *testing.T) {
 		t.Fatalf("expected posture and evidence metrics to be updated, got posture=%+v evidence=%+v", observedPosture, evidenceStates)
 	}
 
+	// Verify status:read-only caller on the full 7-area cfg hits every redactPostureSummaryForStatusRead branch
+	// and handleRoutes strips LocationWAFState details for non-config:read callers (SR-02).
+	reqAudFull := httptest.NewRequest(http.MethodGet, "/api/v1/security/posture", nil)
+	reqAudFull = reqAudFull.WithContext(rbac.WithIdentity(reqAudFull.Context(), rbac.Identity{
+		Principal:   "aud",
+		Role:        rbac.RoleAuditor,
+		Permissions: []rbac.Permission{rbac.StatusRead},
+	}))
+	recAudFull := httptest.NewRecorder()
+	s.handleV1SecurityPosture(recAudFull, reqAudFull)
+	if recAudFull.Code != http.StatusOK {
+		t.Fatalf("auditor full posture status = %d", recAudFull.Code)
+	}
+	if strings.Contains(recAudFull.Body.String(), "cloudflare-access") || strings.Contains(recAudFull.Body.String(), "due-exc") {
+		t.Fatalf("status:read posture summary leaked config details: %s", recAudFull.Body.String())
+	}
+
+	reqAudRoutes := httptest.NewRequest(http.MethodGet, "/api/routes", nil)
+	reqAudRoutes = reqAudRoutes.WithContext(rbac.WithIdentity(reqAudRoutes.Context(), rbac.Identity{
+		Principal:   "aud",
+		Role:        rbac.RoleAuditor,
+		Permissions: []rbac.Permission{rbac.StatusRead},
+	}))
+	recAudRoutes := httptest.NewRecorder()
+	s.handleRoutes(recAudRoutes, reqAudRoutes)
+	if recAudRoutes.Code != http.StatusOK {
+		t.Fatalf("auditor handleRoutes status = %d", recAudRoutes.Code)
+	}
+
 	// Verify status:read-only caller on /api/v1/security/posture has scope redacted to area name,
 	// plus additional posture branches (unauthenticated admin, cookie bypass, native gRPC, body limit, uncompiled WAF).
 	cfgExtra := *cfg
@@ -992,13 +1021,13 @@ server_names = ["api.example.test"]
 			PathPattern:         "/api",
 			MatchOrdinal:        0,
 			Scope:               "global",
-			CanonicalPredicates: vCtx.RoutePredicates(candPred.Effective.Servers[0].Locations[0].Match),
+			CanonicalPredicates: vCtx.RoutePredicates(candPred.Raw.Servers[0].Locations[0].Match),
 		},
 	})
 	sPred := newTestServer(t, config.AdminConfig{}, Deps{
 		EffectiveVersions: vCtx,
 		ReadConfigRaw:     func() ([]byte, error) { return []byte(rawPredTOML), nil },
-		LoadConfig:        func() (*config.Config, error) { return candPred.Effective, nil },
+		LoadConfig:        func() (*config.Config, error) { return candPred.Raw, nil },
 		WAFCompiled:       true,
 		WAFEffective: func() *WAFEffectivePolicy {
 			return &WAFEffectivePolicy{
@@ -1016,7 +1045,7 @@ server_names = ["api.example.test"]
 						Path:                "/api",
 						MatchOrdinal:        0,
 						SelectorVersion:     "global-v1",
-						CanonicalPredicates: vCtx.RoutePredicates(candPred.Effective.Servers[0].Locations[0].Match),
+						CanonicalPredicates: vCtx.RoutePredicates(candPred.Raw.Servers[0].Locations[0].Match),
 						Scope:               "global",
 						Enabled:             true,
 					},
@@ -1027,7 +1056,7 @@ server_names = ["api.example.test"]
 						Path:                "/api",
 						MatchOrdinal:        1,
 						SelectorVersion:     "global-v1",
-						CanonicalPredicates: vCtx.RoutePredicates(candPred.Effective.Servers[0].Locations[1].Match),
+						CanonicalPredicates: vCtx.RoutePredicates(candPred.Raw.Servers[0].Locations[1].Match),
 						Scope:               "global",
 						Enabled:             true,
 					},

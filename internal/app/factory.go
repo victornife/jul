@@ -96,6 +96,7 @@ type HandlerFactory struct {
 	liveConfig            *config.Config
 	onBeforeEvalCommit    func(scope string)
 	auditHealth           func() (uint64, bool, bool)
+	refreshPosture        func()
 	lastCutover           []cache.InvalidateResult
 	lastCutoverErr        error
 	lastCutoverGen        uint64
@@ -110,6 +111,17 @@ func (f *HandlerFactory) SetAuditHealthSource(fn func() (uint64, bool, bool)) {
 	}
 	f.moduleMu.Lock()
 	f.auditHealth = fn
+	f.moduleMu.Unlock()
+}
+
+// SetSecurityPostureSource reuses the admin posture evaluator for scrape-driven
+// findings, including persisted drift and live-generation state (#633, #628-B).
+func (f *HandlerFactory) SetSecurityPostureSource(fn func()) {
+	if f == nil {
+		return
+	}
+	f.moduleMu.Lock()
+	f.refreshPosture = fn
 	f.moduleMu.Unlock()
 }
 
@@ -303,7 +315,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAFDigests(0, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		f.publishWAFAssets(gen.wafGlobalPolicyRaw, gen.wafGlobalAssets, gen.wafOverridePolicyRaw, gen.wafOverrideExtRaw, gen.wafOverrideAssets)
-		f.publishWAF(0, gen.wafPolicy)
+		f.publishWAF(0, gen.wafPolicy, gen.wafActiveCounts, c)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -396,7 +408,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAFDigests(genID, gen.wafGlobalDigest, gen.wafDigestByLoc)
 		f.publishWAFAssets(gen.wafGlobalPolicyRaw, gen.wafGlobalAssets, gen.wafOverridePolicyRaw, gen.wafOverrideExtRaw, gen.wafOverrideAssets)
-		f.publishWAF(genID, gen.wafPolicy)
+		f.publishWAF(genID, gen.wafPolicy, gen.wafActiveCounts, c)
 		if commitMetricLabels != nil {
 			commitMetricLabels()
 			f.Metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
@@ -738,6 +750,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// reload with a clear message instead of surfacing per request. In a lean
 	// build (no "waf" tag) waf.New is never reached because waf.Check already
 	// rejected the configuration at startup.
+	rawWAFConfig := config.RawConfigFromContext(ctx, c)
 	wafByScope := make(map[string]*waf.Firewall)
 	wafRouteAttrByScope := make(map[string]waf.RouteAttribution)
 	wafReport := newWAFReport(c)
@@ -802,7 +815,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				MatchOrdinal:        ordinals[i][j],
 				Scope:               scopeKind,
 				Methods:             append([]string(nil), loc.Match.Methods...),
-				CanonicalPredicates: f.Versions.RoutePredicates(loc.Match),
+				CanonicalPredicates: f.Versions.RoutePredicates(declaredWAFRouteMatch(rawWAFConfig, i, j, loc.Match)),
 			}
 		}
 	}
@@ -812,6 +825,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		gen.wafGlobalAssets = globalFW.ExternalAssets()
 	}
 	gen.wafPolicy = wafReport.finish(time.Now())
+	gen.wafActiveCounts = wafReport.activeCounts
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 		scopeKey := WAFScope(srv, loc)
 		fw := wafByScope[scopeKey]

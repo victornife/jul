@@ -285,3 +285,42 @@ func TestValidateEvaluationReportAndMalformedFixtures(t *testing.T) {
 		t.Fatalf("expected valid origin_status pack to pass, got %v", err)
 	}
 }
+
+// Exercise the delivered versioned operator pack through the real evaluator,
+// including exact-limit behavior and a deliberately wrong candidate limit.
+func TestExampleBodySizeBoundaryFixturePack(t *testing.T) {
+	root := filepath.Join("..", "..", "examples", "waf-policy")
+	raw, err := os.ReadFile(filepath.Join(root, "size-boundaries.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Validate(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "fixtures-size-boundaries.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pack, err := ParseFixturePack(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range []int{127, 128, 129} {
+		if len(pack.Fixtures[i].Body) != n {
+			t.Fatalf("case%d has%d bytes, want%d", i, len(pack.Fixtures[i].Body), n)
+		}
+	}
+	report, err := EvaluatePolicy(context.Background(), "global", cfg.WAF, nil, pack, versionid.Process())
+	if err != nil || report.Summary.PassedCases != 5 || report.Summary.FailedCases != 0 {
+		t.Fatalf("boundary evaluation: %+v err=%v", report, err)
+	}
+	cfg.WAF.RequestBodyLimit = config.Size(127)
+	report, err = EvaluatePolicy(context.Background(), "global", cfg.WAF, nil, pack, versionid.Process())
+	if err != nil || report.Summary.FailedCases == 0 {
+		t.Fatalf("a changed limit must invalidate expectations: %+v err=%v", report, err)
+	}
+}

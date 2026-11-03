@@ -1,0 +1,171 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Native promtool unit tests for Jul.IA security alerting rules (#628-B + #632).
+# Run with:
+#   promtool test rules examples/alerting/security/security-alerts.test.yml
+
+rule_files:
+  - security-alerts.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 1. Quiet/healthy traffic, detect-only rule matches, and auth/origin 403s must NOT fire WAF rejection alerts.
+  - interval: 1m
+    input_series:
+      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+        values: "0+60x10"
+      - series: 'jul_waf_transactions_total{mode="detect",outcome="matched_observed"}'
+        values: "0+30x10"
+      - series: 'jul_waf_events_total{action="detect",rule="942100"}'
+        values: "0+90x10"
+      - series: 'jul_http_requests_total{method="GET",host="example.test",code="403"}'
+        values: "0+50x10"
+      - series: 'jul_waf_serving_routes{state="block"}'
+        values: "2+0x10"
+      - series: 'jul_waf_serving_routes{state="detect"}'
+        values: "0+0x10"
+      - series: 'jul_waf_serving_routes{state="disabled_override"}'
+        values: "0+0x10"
+      - series: 'jul_waf_serving_routes{state="unprotected"}'
+        values: "0+0x10"
+      - series: 'jul_security_posture_findings{area="waf",severity="error"}'
+        values: "0+0x10"
+      - series: 'jul_security_evidence_state{producer="waf_effective",state="ok"}'
+        values: "1+0x10"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: JulWAFProtectionWeakened
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: JulSecurityPostureErrorPresent
+        exp_alerts: []
+
+  # 2. Actual WAF block-mode rejection spike fires JulWAFRejectionSymptomElevated and resolves after traffic recovers.
+  - interval: 1m
+    input_series:
+      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+        values: "0 60 120 180 240 300 360 420 480 540 600 660 720"
+      - series: 'jul_waf_transactions_total{mode="block",outcome="interrupted_request"}'
+        values: "0 10 20 30 40 50 50 50 50 50 50 50 50"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: waf_outcomes
+              symptom: waf_rejection_elevated
+            exp_annotations:
+              summary: "Elevated actual WAF request/response rejections (>5% of inspected traffic over 5m)."
+              description: "WAF block-mode interruptions or body-limit rejections exceed 5% of inspected transactions. This is an operational symptom — it may indicate an active attack, a recent policy/paranoia change, or a false positive on legitimate traffic. Query `GET /api/v1/waf/events` or `jul waf events` before tuning."
+              runbook_url: "https://127.0.0.1:9090/security"
+      - eval_time: 12m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts: []
+
+  # 3. Protection weakening, posture error finding, and stale evidence fire and resolve after remediation.
+  - interval: 1m
+    input_series:
+      - series: 'jul_waf_serving_routes{state="block"}'
+        values: "0 0 0 2 2 2"
+      - series: 'jul_waf_serving_routes{state="detect"}'
+        values: "1 1 1 0 0 0"
+      - series: 'jul_waf_serving_routes{state="disabled_override"}'
+        values: "0 0 0 0 0 0"
+      - series: 'jul_waf_serving_routes{state="unprotected"}'
+        values: "1 1 1 0 0 0"
+      - series: 'jul_security_posture_findings{area="intent",severity="error"}'
+        values: "1 1 1 0 0 0"
+      - series: 'jul_security_evidence_state{producer="waf_effective",state="stale"}'
+        values: "1 1 1 0 0 0"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulWAFProtectionWeakened
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              category: security_protection
+              symptom: waf_protection_weakened
+            exp_annotations:
+              summary: "Jul.IA serving WAF protection was weakened or has zero block-mode routes."
+              description: "A committed reload reduced block-mode route coverage or switched enforcement to detect-only/disabled. Inspect /security and configuration history to verify whether this change was intentional."
+              runbook_url: "https://127.0.0.1:9090/security"
+      - eval_time: 2m
+        alertname: JulSecurityPostureErrorPresent
+        exp_alerts:
+          - exp_labels:
+              area: intent
+              severity: critical
+              category: security_posture
+              symptom: posture_error_present
+            exp_annotations:
+              summary: "Jul.IA gateway security posture reports an active error finding in area intent."
+              description: "Run `jul posture` or open the Console Security Posture drawer (`GET /api/v1/security/posture`) to inspect the finding and apply its remediation."
+              runbook_url: "https://127.0.0.1:9090/security"
+      - eval_time: 2m
+        alertname: JulSecurityEvidenceUnavailableOrDegraded
+        exp_alerts:
+          - exp_labels:
+              producer: waf_effective
+              state: stale
+              severity: warning
+              category: security_evidence
+              symptom: security_evidence_degraded
+            exp_annotations:
+              summary: "Jul.IA security evidence producer waf_effective is stale."
+              description: "Required security evidence (WAF fixture evaluation, bounded investigation ring, or admin audit log sink) is stale, degraded, or unavailable. Check `GET /api/v1/security/posture` and `GET /api/security`."
+              runbook_url: "https://127.0.0.1:9090/security"
+      - eval_time: 5m
+        alertname: JulWAFProtectionWeakened
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: JulSecurityPostureErrorPresent
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: JulSecurityEvidenceUnavailableOrDegraded
+        exp_alerts: []
+
+  # 4. Flapping spike (< for: 1m window) and process restart / counter reset must NOT cause false firing.
+  - interval: 1m
+    input_series:
+      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+        values: "0 60 120 180 0 60 120 180 240"
+      - series: 'jul_waf_transactions_total{mode="block",outcome="interrupted_request"}'
+        values: "0 10 10 10 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts: []
+
+  # 5. Sustained posture warning fires after 5m and resolves after remediation.
+  - interval: 1m
+    input_series:
+      - series: 'jul_security_posture_findings{area="waf",severity="warning"}'
+        values: "1 1 1 1 1 1 1 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: JulSecurityPostureWarningSustained
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: JulSecurityPostureWarningSustained
+        exp_alerts:
+          - exp_labels:
+              area: waf
+              severity: warning
+              category: security_posture
+              symptom: posture_warning_sustained
+            exp_annotations:
+              summary: "Jul.IA gateway security posture reports sustained warning(s) in area waf."
+              description: "Inspect `GET /api/v1/security/posture` or `jul posture` to review the warning and its epistemic state."
+              runbook_url: "https://127.0.0.1:9090/security"
+      - eval_time: 9m
+        alertname: JulSecurityPostureWarningSustained
+        exp_alerts: []

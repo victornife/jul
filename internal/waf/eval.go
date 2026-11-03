@@ -131,7 +131,7 @@ type WAFEvaluationReport struct {
 }
 
 // DefaultFixturePack returns the built-in versioned synthetic regression pack
-// covering normal forms, JSON, multipart uploads, size/encoding boundaries, and
+// covering normal forms, JSON, multipart uploads, encoding/parser boundaries, and
 // malicious CRS controls (#630).
 func DefaultFixturePack() *WAFFixturePack {
 	multipartBoundary := "----JulWAFFixtureBoundary7MA4YWxkTrZu0gW"
@@ -152,7 +152,7 @@ func DefaultFixturePack() *WAFFixturePack {
 	return &WAFFixturePack{
 		SchemaVersion: FixturePackSchemaVersion,
 		PackID:        "jul-waf-default-v1",
-		Description:   "Synthetic legitimate requests, encoding/size boundaries, and malicious attack controls for OWASP CRS v4.25.0 and Coraza v3.8.1",
+		Description:   "Synthetic legitimate requests, encoding/parser boundaries, and malicious attack controls for OWASP CRS v4.25.0 and Coraza v3.8.1",
 		Fixtures: []WAFFixtureCase{
 			{
 				ID:                    "legit-get-catalog",

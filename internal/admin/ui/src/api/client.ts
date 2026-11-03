@@ -1128,6 +1128,7 @@ export const WAFEffectivePolicySchema = z.object({
         match_ordinal: z.number().optional(),
         enabled: z.boolean(),
         policy: WAFPolicySummarySchema.optional(),
+        evaluation: WAFEvaluationSummarySchema.optional(),
       }),
     )
     .optional(),

@@ -736,6 +736,9 @@ type Server struct {
 	// are atomic, closing the read-modify-write race between concurrent edits
 	// (P2-12).
 	applyMu sync.Mutex
+	// postureMu serializes API and scrape-driven evaluations of the same
+	// current-finding gauges; it retains no reports or configuration copies.
+	postureMu sync.Mutex
 
 	// certProvider is nil unless [admin.tls] was enabled at startup. TLS on/off
 	// is a structural transition applied only on restart, so this is fixed for
