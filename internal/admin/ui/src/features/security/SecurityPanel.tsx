@@ -225,11 +225,17 @@ function clientAddressSummary(l: ListenerClientAddress): string {
 }
 
 export function SecurityPanel() {
-  const [editingWAF, setEditingWAF] = useState(false);
+  const [editingWAF, setEditingWAF] = useState<{
+    readonly projection: SecurityProjection;
+    readonly baseVersion: string | undefined;
+  } | null>(null);
   const [editingClientAddress, setEditingClientAddress] = useState<ListenerClientAddress | null>(
     null,
   );
-  const [editingLocationWAF, setEditingLocationWAF] = useState<LocationWAF | null>(null);
+  const [editingLocationWAF, setEditingLocationWAF] = useState<{
+    readonly target: LocationWAF;
+    readonly baseVersion: string | undefined;
+  } | null>(null);
   const [externalizing, setExternalizing] = useState(false);
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["security"],
@@ -307,7 +313,7 @@ export function SecurityPanel() {
             <button
               type="button"
               onClick={() => {
-                setEditingWAF(true);
+                setEditingWAF({ projection: data, baseVersion: data.base_version });
               }}
               className="ml-auto rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
             >
@@ -332,7 +338,7 @@ export function SecurityPanel() {
                   <button
                     type="button"
                     onClick={() => {
-                      setEditingLocationWAF(w);
+                      setEditingLocationWAF({ target: w, baseVersion: data.base_version });
                     }}
                     className="shrink-0 rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
                   >
@@ -415,16 +421,18 @@ export function SecurityPanel() {
       <Suspense fallback={null}>
         {editingWAF && (
           <WAFEditor
-            current={data}
+            current={editingWAF.projection}
+            baseVersion={editingWAF.baseVersion}
             onClose={() => {
-              setEditingWAF(false);
+              setEditingWAF(null);
             }}
           />
         )}
 
         {editingLocationWAF && (
           <LocationWAFEditor
-            target={editingLocationWAF}
+            target={editingLocationWAF.target}
+            baseVersion={editingLocationWAF.baseVersion}
             onClose={() => {
               setEditingLocationWAF(null);
             }}

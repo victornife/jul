@@ -152,6 +152,36 @@ describe("wafOverrideToPatch", () => {
       inline_rules: "SecRule A B",
     });
   });
+
+  it("round-trips separate blocking/detection paranoia and narrow exceptions", () => {
+    const t = target({
+      enabled: true,
+      mode: "block",
+      crs_enabled: true,
+      blocking_paranoia: 1,
+      detection_paranoia: 3,
+      exceptions: [
+        {
+          id: "exc-1",
+          rule_id: 942100,
+          scope: "narrow_target",
+          target: "ARGS:profile_bio",
+          methods: ["POST"],
+          rationale: "Allow markdown bio",
+        },
+      ],
+    });
+    const p = wafOverrideToPatch(seedWAFOverride(t));
+    expect(p.blocking_paranoia).toBe(1);
+    expect(p.detection_paranoia).toBe(3);
+    expect(p.exceptions).toHaveLength(1);
+    expect(p.exceptions?.[0]?.target).toBe("ARGS:profile_bio");
+
+    const edited = wafOverrideToPatch({ ...seedWAFOverride(t), paranoia: "2" });
+    expect(edited.blocking_paranoia).toBe(2);
+    expect(edited.detection_paranoia).toBe(3);
+    expect(edited).not.toHaveProperty("paranoia");
+  });
 });
 
 describe("wafOverrideWarnings", () => {

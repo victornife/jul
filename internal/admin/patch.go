@@ -117,6 +117,9 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 			InlineRules:       strings.TrimSpace(req.WAF.InlineRules),
 			CRSEnabled:        req.WAF.CRSEnabled,
 			Paranoia:          req.WAF.Paranoia,
+			BlockingParanoia:  req.WAF.BlockingParanoia,
+			DetectionParanoia: req.WAF.DetectionParanoia,
+			Exceptions:        append([]config.WAFException(nil), req.WAF.Exceptions...),
 			RequestBodyLimit:  bodyLimit,
 			ResponseBodyCheck: req.WAF.ResponseBodyCheck,
 		}

@@ -384,6 +384,13 @@ function QuickEdits({
     response_body_check: loc.waf?.response_body_check ?? false,
     ...(loc.waf?.block_status !== undefined ? { block_status: loc.waf.block_status } : {}),
     ...(loc.waf?.paranoia !== undefined ? { paranoia: loc.waf.paranoia } : {}),
+    ...(loc.waf?.blocking_paranoia !== undefined
+      ? { blocking_paranoia: loc.waf.blocking_paranoia }
+      : {}),
+    ...(loc.waf?.detection_paranoia !== undefined
+      ? { detection_paranoia: loc.waf.detection_paranoia }
+      : {}),
+    ...(loc.waf?.exceptions !== undefined ? { exceptions: loc.waf.exceptions } : {}),
     ...(loc.waf?.request_body_limit !== undefined
       ? { request_body_limit: loc.waf.request_body_limit }
       : {}),

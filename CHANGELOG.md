@@ -11,6 +11,19 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Add narrow WAF rule exceptions (`[[waf.exceptions]]` and
+  `[[servers.locations.waf.exceptions]]`) and separate `blocking_paranoia` /
+  `detection_paranoia` settings (#631, [ADR 0031](docs/adr/0031-waf-operations-posture-isolation-and-alerting.md)):
+  compile narrow target exclusions (`ctl:ruleRemoveTargetById`) and explicit
+  whole-rule removals (`ctl:ruleRemoveById`) into deterministic pre-CRS
+  `phase:1` rules (`890001..890064`) that cover phase-1 rules, phase-2 rules,
+  and chain children while preserving protection on neighboring fields, methods,
+  rules, and routes; verify referenced `rule_id` existence at compile time;
+  surface past-due `review_at` dates via `waf_exception_review_due` lint
+  warnings without surprise runtime expiry; enforce a `config:read` disclosure
+  boundary on exception `rationale`/`owner`/`reference` metadata; and expose
+  guided tuning controls in the Console WAF editors.
+
 - Add reproducible WAF policy evaluation, compiled policy manifests, and exact
   external-asset recovery (#630, [ADR 0031](docs/adr/0031-waf-operations-posture-isolation-and-alerting.md)):
   compute context-keyed `policy_digest` (`waf-compiled-policy-v1`) on compiled

@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 366 configurable leaves.
+Coverage: 392 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3207,6 +3207,22 @@ BlockStatus is the HTTP status returned when a request is blocked in "block" mod
 | Zero/empty semantics | omitted/zero defaults to 403 |
 | Active when | WAF enabled |
 
+## `servers.*.locations.*.waf.blocking_paranoia` {#servers-x-locations-x-waf-blocking_paranoia}
+
+BlockingParanoia sets the CRS blocking paranoia level (1–4) independently of DetectionParanoia when CRSEnabled is set.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | 0 or 1..4; non-zero requires CRS and cannot conflict with legacy paranoia |
+| Zero/empty semantics | 0 falls back to legacy paranoia or CRS default (1) |
+| Active when | WAF enabled |
+
 ## `servers.*.locations.*.waf.crs_enabled` {#servers-x-locations-x-waf-crs_enabled}
 
 CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the rules ship inside the binary in builds with the "waf" tag).
@@ -3218,6 +3234,22 @@ CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the 
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+
+## `servers.*.locations.*.waf.detection_paranoia` {#servers-x-locations-x-waf-detection_paranoia}
+
+DetectionParanoia sets the CRS detection paranoia level (1–4) when CRSEnabled is set, allowing higher-paranoia rules to execute and log without contributing to the blocking anomaly threshold.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | 0 or 1..4; non-zero requires CRS and must be at least blocking_paranoia |
+| Zero/empty semantics | 0 defaults to effective blocking_paranoia |
+| Active when | WAF enabled |
 
 ## `servers.*.locations.*.waf.directives_files` {#servers-x-locations-x-waf-directives_files}
 
@@ -3242,6 +3274,162 @@ Enabled turns the firewall on for the scope it appears in.
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.created_at` {#servers-x-locations-x-waf-exceptions-x-created_at}
+
+CreatedAt records the ISO-8601 date (YYYY-MM-DD) when the exception was created.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.fixtures` {#servers-x-locations-x-waf-exceptions-x-fixtures}
+
+Fixtures lists synthetic regression fixture IDs associated with this exception.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.id` {#servers-x-locations-x-waf-exceptions-x-id}
+
+ID is an optional stable operator identifier for this exception.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.methods` {#servers-x-locations-x-waf-exceptions-x-methods}
+
+Methods restricts the exception to specific HTTP methods, e.g. POST or PUT.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Allowed values | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
+| Constraint | non-duplicate uppercase HTTP method tokens |
+| Zero/empty semantics | omitted/empty applies the exception to all HTTP methods |
+| Active when | WAF exception configured |
+
+## `servers.*.locations.*.waf.exceptions.*.owner` {#servers-x-locations-x-waf-exceptions-x-owner}
+
+Owner records the responsible team or operator handle for review.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.rationale` {#servers-x-locations-x-waf-exceptions-x-rationale}
+
+Rationale records the bounded non-secret operator reason for the exception.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.reference` {#servers-x-locations-x-waf-exceptions-x-reference}
+
+Reference records an issue, pull request, or change-management identifier.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.review_at` {#servers-x-locations-x-waf-exceptions-x-review_at}
+
+ReviewAt records the ISO-8601 date (YYYY-MM-DD) when the exception is due for review; past-due dates emit a waf_exception_review_due lint warning.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `servers.*.locations.*.waf.exceptions.*.rule_id` {#servers-x-locations-x-waf-exceptions-x-rule_id}
+
+RuleID is the target CRS or custom rule identifier (e.g. 942100).
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | 1..99999999 excluding Jul reserved generated IDs 890000..900001 |
+| Zero/empty semantics | 0 is rejected |
+| Active when | WAF exception configured |
+
+## `servers.*.locations.*.waf.exceptions.*.scope` {#servers-x-locations-x-waf-exceptions-x-scope}
+
+Scope selects the exception breadth: "narrow_target" (default when target is set; removes only target from rule_id) or "rule_remove" (whole-rule removal on the selected policy scope).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Allowed values | `narrow_target`, `rule_remove` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted defaults to narrow_target when target is set or rule_remove otherwise |
+| Active when | WAF exception configured |
+
+## `servers.*.locations.*.waf.exceptions.*.target` {#servers-x-locations-x-waf-exceptions-x-target}
+
+Target names the bounded variable and field excluded when scope is "narrow_target", e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | <COLLECTION>:<KEY> with COLLECTION in {ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, REQUEST_COOKIES} and 1..64 byte token key |
+| Zero/empty semantics | required when scope is narrow_target; must be empty when scope is rule_remove |
+| Active when | WAF exception configured |
 
 ## `servers.*.locations.*.waf.inline_rules` {#servers-x-locations-x-waf-inline_rules}
 
@@ -4818,6 +5006,22 @@ BlockStatus is the HTTP status returned when a request is blocked in "block" mod
 | Zero/empty semantics | omitted/zero defaults to 403 |
 | Active when | WAF enabled |
 
+## `waf.blocking_paranoia` {#waf-blocking_paranoia}
+
+BlockingParanoia sets the CRS blocking paranoia level (1–4) independently of DetectionParanoia when CRSEnabled is set.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | 0 or 1..4; non-zero requires CRS and cannot conflict with legacy paranoia |
+| Zero/empty semantics | 0 falls back to legacy paranoia or CRS default (1) |
+| Active when | WAF enabled |
+
 ## `waf.crs_enabled` {#waf-crs_enabled}
 
 CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the rules ship inside the binary in builds with the "waf" tag).
@@ -4829,6 +5033,22 @@ CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the 
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+
+## `waf.detection_paranoia` {#waf-detection_paranoia}
+
+DetectionParanoia sets the CRS detection paranoia level (1–4) when CRSEnabled is set, allowing higher-paranoia rules to execute and log without contributing to the blocking anomaly threshold.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | 0 or 1..4; non-zero requires CRS and must be at least blocking_paranoia |
+| Zero/empty semantics | 0 defaults to effective blocking_paranoia |
+| Active when | WAF enabled |
 
 ## `waf.directives_files` {#waf-directives_files}
 
@@ -4853,6 +5073,162 @@ Enabled turns the firewall on for the scope it appears in.
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+
+## `waf.exceptions.*.created_at` {#waf-exceptions-x-created_at}
+
+CreatedAt records the ISO-8601 date (YYYY-MM-DD) when the exception was created.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `waf.exceptions.*.fixtures` {#waf-exceptions-x-fixtures}
+
+Fixtures lists synthetic regression fixture IDs associated with this exception.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `waf.exceptions.*.id` {#waf-exceptions-x-id}
+
+ID is an optional stable operator identifier for this exception.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `waf.exceptions.*.methods` {#waf-exceptions-x-methods}
+
+Methods restricts the exception to specific HTTP methods, e.g. POST or PUT.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Allowed values | `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
+| Constraint | non-duplicate uppercase HTTP method tokens |
+| Zero/empty semantics | omitted/empty applies the exception to all HTTP methods |
+| Active when | WAF exception configured |
+
+## `waf.exceptions.*.owner` {#waf-exceptions-x-owner}
+
+Owner records the responsible team or operator handle for review.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `waf.exceptions.*.rationale` {#waf-exceptions-x-rationale}
+
+Rationale records the bounded non-secret operator reason for the exception.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `waf.exceptions.*.reference` {#waf-exceptions-x-reference}
+
+Reference records an issue, pull request, or change-management identifier.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `waf.exceptions.*.review_at` {#waf-exceptions-x-review_at}
+
+ReviewAt records the ISO-8601 date (YYYY-MM-DD) when the exception is due for review; past-due dates emit a waf_exception_review_due lint warning.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+
+## `waf.exceptions.*.rule_id` {#waf-exceptions-x-rule_id}
+
+RuleID is the target CRS or custom rule identifier (e.g. 942100).
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | 1..99999999 excluding Jul reserved generated IDs 890000..900001 |
+| Zero/empty semantics | 0 is rejected |
+| Active when | WAF exception configured |
+
+## `waf.exceptions.*.scope` {#waf-exceptions-x-scope}
+
+Scope selects the exception breadth: "narrow_target" (default when target is set; removes only target from rule_id) or "rule_remove" (whole-rule removal on the selected policy scope).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Allowed values | `narrow_target`, `rule_remove` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted defaults to narrow_target when target is set or rule_remove otherwise |
+| Active when | WAF exception configured |
+
+## `waf.exceptions.*.target` {#waf-exceptions-x-target}
+
+Target names the bounded variable and field excluded when scope is "narrow_target", e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `waf` |
+| Why | the WAF policy is rebuilt on each successful reload |
+| Requires | `waf` |
+| Constraint | <COLLECTION>:<KEY> with COLLECTION in {ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, REQUEST_COOKIES} and 1..64 byte token key |
+| Zero/empty semantics | required when scope is narrow_target; must be empty when scope is rule_remove |
+| Active when | WAF exception configured |
 
 ## `waf.inline_rules` {#waf-inline_rules}
 

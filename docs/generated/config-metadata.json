@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 434,
-    "schema_leaves": 366,
+    "schema_paths": 462,
+    "schema_leaves": 392,
     "resources": 9
   },
   "capability_build_tags": {
@@ -3711,6 +3711,25 @@
       "description": "BlockStatus is the HTTP status returned when a request is blocked in \"block\" mode",
       "anchor": "servers-x-locations-x-waf-block_status"
     },
+    "servers.*.locations.*.waf.blocking_paranoia": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "integer",
+      "constraint": "0 or 1..4; non-zero requires CRS and cannot conflict with legacy paranoia",
+      "zero_semantics": "0 falls back to legacy paranoia or CRS default (1)",
+      "active_when": "WAF enabled",
+      "description": "BlockingParanoia sets the CRS blocking paranoia level (1–4) independently of DetectionParanoia when CRSEnabled is set",
+      "anchor": "servers-x-locations-x-waf-blocking_paranoia"
+    },
     "servers.*.locations.*.waf.crs_enabled": {
       "kind": "scalar",
       "scalar": "bool",
@@ -3725,6 +3744,25 @@
       ],
       "description": "CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the rules ship inside the binary in builds with the \"waf\" tag)",
       "anchor": "servers-x-locations-x-waf-crs_enabled"
+    },
+    "servers.*.locations.*.waf.detection_paranoia": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "integer",
+      "constraint": "0 or 1..4; non-zero requires CRS and must be at least blocking_paranoia",
+      "zero_semantics": "0 defaults to effective blocking_paranoia",
+      "active_when": "WAF enabled",
+      "description": "DetectionParanoia sets the CRS detection paranoia level (1–4) when CRSEnabled is set, allowing higher-paranoia rules to execute and log without contributing to the blocking anomaly threshold",
+      "anchor": "servers-x-locations-x-waf-detection_paranoia"
     },
     "servers.*.locations.*.waf.directives_files": {
       "kind": "list",
@@ -3755,6 +3793,200 @@
       ],
       "description": "Enabled turns the firewall on for the scope it appears in",
       "anchor": "servers-x-locations-x-waf-enabled"
+    },
+    "servers.*.locations.*.waf.exceptions.*.created_at": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "CreatedAt records the ISO-8601 date (YYYY-MM-DD) when the exception was created",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-created_at"
+    },
+    "servers.*.locations.*.waf.exceptions.*.fixtures": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Fixtures lists synthetic regression fixture IDs associated with this exception",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-fixtures"
+    },
+    "servers.*.locations.*.waf.exceptions.*.id": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "ID is an optional stable operator identifier for this exception",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-id"
+    },
+    "servers.*.locations.*.waf.exceptions.*.methods": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "enum_list",
+      "constraint": "non-duplicate uppercase HTTP method tokens",
+      "zero_semantics": "omitted/empty applies the exception to all HTTP methods",
+      "active_when": "WAF exception configured",
+      "allowed": [
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS"
+      ],
+      "description": "Methods restricts the exception to specific HTTP methods, e.g. POST or PUT",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-methods"
+    },
+    "servers.*.locations.*.waf.exceptions.*.owner": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Owner records the responsible team or operator handle for review",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-owner"
+    },
+    "servers.*.locations.*.waf.exceptions.*.rationale": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Rationale records the bounded non-secret operator reason for the exception",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-rationale"
+    },
+    "servers.*.locations.*.waf.exceptions.*.reference": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Reference records an issue, pull request, or change-management identifier",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-reference"
+    },
+    "servers.*.locations.*.waf.exceptions.*.review_at": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "ReviewAt records the ISO-8601 date (YYYY-MM-DD) when the exception is due for review; past-due dates emit a waf_exception_review_due lint warning",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-review_at"
+    },
+    "servers.*.locations.*.waf.exceptions.*.rule_id": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "integer",
+      "constraint": "1..99999999 excluding Jul reserved generated IDs 890000..900001",
+      "zero_semantics": "0 is rejected",
+      "active_when": "WAF exception configured",
+      "description": "RuleID is the target CRS or custom rule identifier (e.g. 942100)",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-rule_id"
+    },
+    "servers.*.locations.*.waf.exceptions.*.scope": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to narrow_target when target is set or rule_remove otherwise",
+      "active_when": "WAF exception configured",
+      "allowed": [
+        "narrow_target",
+        "rule_remove"
+      ],
+      "description": "Scope selects the exception breadth: \"narrow_target\" (default when target is set; removes only target from rule_id) or \"rule_remove\" (whole-rule removal on the selected policy scope)",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-scope"
+    },
+    "servers.*.locations.*.waf.exceptions.*.target": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "grammar",
+      "constraint": "<COLLECTION>:<KEY> with COLLECTION in {ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, REQUEST_COOKIES} and 1..64 byte token key",
+      "zero_semantics": "required when scope is narrow_target; must be empty when scope is rule_remove",
+      "active_when": "WAF exception configured",
+      "description": "Target names the bounded variable and field excluded when scope is \"narrow_target\", e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent",
+      "anchor": "servers-x-locations-x-waf-exceptions-x-target"
     },
     "servers.*.locations.*.waf.inline_rules": {
       "kind": "scalar",
@@ -5674,6 +5906,25 @@
       "description": "BlockStatus is the HTTP status returned when a request is blocked in \"block\" mode",
       "anchor": "waf-block_status"
     },
+    "waf.blocking_paranoia": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": true,
+      "dynamic": false,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "integer",
+      "constraint": "0 or 1..4; non-zero requires CRS and cannot conflict with legacy paranoia",
+      "zero_semantics": "0 falls back to legacy paranoia or CRS default (1)",
+      "active_when": "WAF enabled",
+      "description": "BlockingParanoia sets the CRS blocking paranoia level (1–4) independently of DetectionParanoia when CRSEnabled is set",
+      "anchor": "waf-blocking_paranoia"
+    },
     "waf.crs_enabled": {
       "kind": "scalar",
       "scalar": "bool",
@@ -5688,6 +5939,25 @@
       ],
       "description": "CRSEnabled loads the embedded OWASP Core Rule Set with zero external setup (the rules ship inside the binary in builds with the \"waf\" tag)",
       "anchor": "waf-crs_enabled"
+    },
+    "waf.detection_paranoia": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": true,
+      "dynamic": false,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "integer",
+      "constraint": "0 or 1..4; non-zero requires CRS and must be at least blocking_paranoia",
+      "zero_semantics": "0 defaults to effective blocking_paranoia",
+      "active_when": "WAF enabled",
+      "description": "DetectionParanoia sets the CRS detection paranoia level (1–4) when CRSEnabled is set, allowing higher-paranoia rules to execute and log without contributing to the blocking anomaly threshold",
+      "anchor": "waf-detection_paranoia"
     },
     "waf.directives_files": {
       "kind": "list",
@@ -5718,6 +5988,200 @@
       ],
       "description": "Enabled turns the firewall on for the scope it appears in",
       "anchor": "waf-enabled"
+    },
+    "waf.exceptions.*.created_at": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "CreatedAt records the ISO-8601 date (YYYY-MM-DD) when the exception was created",
+      "anchor": "waf-exceptions-x-created_at"
+    },
+    "waf.exceptions.*.fixtures": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Fixtures lists synthetic regression fixture IDs associated with this exception",
+      "anchor": "waf-exceptions-x-fixtures"
+    },
+    "waf.exceptions.*.id": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "ID is an optional stable operator identifier for this exception",
+      "anchor": "waf-exceptions-x-id"
+    },
+    "waf.exceptions.*.methods": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "enum_list",
+      "constraint": "non-duplicate uppercase HTTP method tokens",
+      "zero_semantics": "omitted/empty applies the exception to all HTTP methods",
+      "active_when": "WAF exception configured",
+      "allowed": [
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS"
+      ],
+      "description": "Methods restricts the exception to specific HTTP methods, e.g. POST or PUT",
+      "anchor": "waf-exceptions-x-methods"
+    },
+    "waf.exceptions.*.owner": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Owner records the responsible team or operator handle for review",
+      "anchor": "waf-exceptions-x-owner"
+    },
+    "waf.exceptions.*.rationale": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Rationale records the bounded non-secret operator reason for the exception",
+      "anchor": "waf-exceptions-x-rationale"
+    },
+    "waf.exceptions.*.reference": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "Reference records an issue, pull request, or change-management identifier",
+      "anchor": "waf-exceptions-x-reference"
+    },
+    "waf.exceptions.*.review_at": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "description": "ReviewAt records the ISO-8601 date (YYYY-MM-DD) when the exception is due for review; past-due dates emit a waf_exception_review_due lint warning",
+      "anchor": "waf-exceptions-x-review_at"
+    },
+    "waf.exceptions.*.rule_id": {
+      "kind": "scalar",
+      "scalar": "integer",
+      "go_type": "int",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "integer",
+      "constraint": "1..99999999 excluding Jul reserved generated IDs 890000..900001",
+      "zero_semantics": "0 is rejected",
+      "active_when": "WAF exception configured",
+      "description": "RuleID is the target CRS or custom rule identifier (e.g. 942100)",
+      "anchor": "waf-exceptions-x-rule_id"
+    },
+    "waf.exceptions.*.scope": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to narrow_target when target is set or rule_remove otherwise",
+      "active_when": "WAF exception configured",
+      "allowed": [
+        "narrow_target",
+        "rule_remove"
+      ],
+      "description": "Scope selects the exception breadth: \"narrow_target\" (default when target is set; removes only target from rule_id) or \"rule_remove\" (whole-rule removal on the selected policy scope)",
+      "anchor": "waf-exceptions-x-scope"
+    },
+    "waf.exceptions.*.target": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "waf",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the WAF policy is rebuilt on each successful reload",
+      "capabilities": [
+        "waf"
+      ],
+      "value_kind": "grammar",
+      "constraint": "<COLLECTION>:<KEY> with COLLECTION in {ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, REQUEST_COOKIES} and 1..64 byte token key",
+      "zero_semantics": "required when scope is narrow_target; must be empty when scope is rule_remove",
+      "active_when": "WAF exception configured",
+      "description": "Target names the bounded variable and field excluded when scope is \"narrow_target\", e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent",
+      "anchor": "waf-exceptions-x-target"
     },
     "waf.inline_rules": {
       "kind": "scalar",

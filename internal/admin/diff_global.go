@@ -291,6 +291,30 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 			d.warn("Lowering global WAF paranoia reduces rule coverage.")
 		}
 	}
+	if b.BlockingParanoia != a.BlockingParanoia {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: fmt.Sprintf("%d", b.BlockingParanoia), After: fmt.Sprintf("%d", a.BlockingParanoia), Detail: "Change global WAF blocking paranoia level"}, "waf global blocking_paranoia")
+		if a.BlockingParanoia < b.BlockingParanoia {
+			d.warn("Lowering global WAF blocking paranoia reduces blocking rule coverage.")
+		}
+	}
+	if b.DetectionParanoia != a.DetectionParanoia {
+		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: fmt.Sprintf("%d", b.DetectionParanoia), After: fmt.Sprintf("%d", a.DetectionParanoia), Detail: "Change global WAF detection paranoia level"}, "waf global detection_paranoia")
+	}
+	if formatWAFExceptionsDiff(b.Exceptions) != formatWAFExceptionsDiff(a.Exceptions) {
+		d.mod(DiffEntry{
+			Kind:   "waf",
+			Name:   "global",
+			Before: formatWAFExceptionsDiff(b.Exceptions),
+			After:  formatWAFExceptionsDiff(a.Exceptions),
+			Detail: fmt.Sprintf("Change global WAF exceptions (%d -> %d)", len(b.Exceptions), len(a.Exceptions)),
+		}, "waf global exceptions")
+		for _, exc := range a.Exceptions {
+			if config.CanonicalizeWAFExceptionScope(exc) == "rule_remove" {
+				d.warn("Global WAF exception removes entire rule %d (scope=rule_remove) across inheriting routes; prefer route-scoped narrow_target exceptions.", exc.RuleID)
+			}
+		}
+		d.cover("waf.exceptions")
+	}
 	if b.CRSEnabled != a.CRSEnabled {
 		action := "Enable"
 		if !a.CRSEnabled {
@@ -323,6 +347,33 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 	d.cover("waf.enabled")
 	d.cover("waf.mode")
 	d.cover("waf.crs_enabled")
+	d.cover("waf.blocking_paranoia")
+	d.cover("waf.detection_paranoia")
+	d.cover("waf.exceptions")
+}
+
+func formatWAFExceptionsDiff(excs []config.WAFException) string {
+	if len(excs) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(excs))
+	for i, exc := range excs {
+		scope := config.CanonicalizeWAFExceptionScope(exc)
+		genID := config.WAFGeneratedExceptionIDBase + i
+		entry := fmt.Sprintf("id:%d->rule:%d(%s", genID, exc.RuleID, scope)
+		if exc.Target != "" {
+			entry += ":" + strings.TrimSpace(exc.Target)
+		}
+		if len(exc.Methods) > 0 {
+			entry += ",methods=" + strings.Join(exc.Methods, "|")
+		}
+		if exc.ReviewAt != "" {
+			entry += ",review_at=" + strings.TrimSpace(exc.ReviewAt)
+		}
+		entry += ")"
+		parts = append(parts, entry)
+	}
+	return strings.Join(parts, "; ")
 }
 
 func diffSecretRefs(before, after *config.Config, d *ConfigDiff) {

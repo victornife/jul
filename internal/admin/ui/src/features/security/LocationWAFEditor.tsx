@@ -34,12 +34,14 @@ export interface LocationWAFEditorProps {
 // routeTarget builds the structured location selector the patch ops require —
 // the same coordinates the security projection exposes — so the edit lands on
 // exactly one location and never on the wrong vhost or a repeated path.
-function routeTarget(w: LocationWAF) {
+function routeTarget(w: LocationWAF): RouteTarget {
   return {
     listen: w.listen,
     server_names: w.server_names ?? [],
     match_type: w.match_type ?? "",
     path: w.path ?? "",
+    ...(w.match_ordinal !== undefined ? { match_ordinal: w.match_ordinal } : {}),
+    ...(w.selector_version !== undefined ? { selector_version: w.selector_version } : {}),
   };
 }
 
@@ -55,13 +57,22 @@ function routeTarget(w: LocationWAF) {
  * editor for Validate → Diff → Apply.
  */
 export function LocationWAFEditor({ target, baseVersion, selector, existing = true, onClose }: LocationWAFEditorProps) {
-  const [draft, setDraft] = useState<WAFOverrideDraft>(() => seedWAFOverride(target));
-  const { run: runPatch, error, busy } = useRunPatch(baseVersion);
+  // Freeze the target, selector, and base_version captured when the editor
+  // opened so background polling refreshes cannot mutate the route ordinal or
+  // renew the CAS version fence of an in-progress draft.
+  const [snapshot] = useState(() => ({
+    target,
+    baseVersion,
+    selector: selector ?? routeTarget(target),
+    existing,
+  }));
+  const [draft, setDraft] = useState<WAFOverrideDraft>(() => seedWAFOverride(snapshot.target));
+  const { run: runPatch, error, busy } = useRunPatch(snapshot.baseVersion);
   const { has } = usePermission();
   const canWrite = has("config:write");
   const warnings = wafOverrideWarnings(draft);
 
-  const where = `${target.listen}${target.path ? ` ${target.path}` : ""}`;
+  const where = `${snapshot.target.listen}${snapshot.target.path ? ` ${snapshot.target.path}` : ""}`;
 
   function set<K extends keyof WAFOverrideDraft>(key: K, val: WAFOverrideDraft[K]): void {
     setDraft((d) => ({ ...d, [key]: val }));
@@ -70,25 +81,25 @@ export function LocationWAFEditor({ target, baseVersion, selector, existing = tr
   function save(): void {
     runPatch({
       op: "location_waf_set",
-      ...(selector ?? routeTarget(target)),
+      ...snapshot.selector,
       waf: wafOverrideToPatch(draft),
     });
   }
 
   function clearOverride(): void {
-    runPatch({ op: "location_waf_clear", ...(selector ?? routeTarget(target)) });
+    runPatch({ op: "location_waf_clear", ...snapshot.selector });
   }
 
   return (
     <Drawer
-      title={existing ? "Edit per-location WAF" : "Add per-location WAF"}
+      title={snapshot.existing ? "Edit per-location WAF" : "Add per-location WAF"}
       subtitle={`Override for ${where}`}
       onClose={onClose}
       footer={
         <div className="w-full space-y-2">
           <div className="flex items-center justify-between gap-3">
             {error && <span className="text-xs text-jul-danger">{error}</span>}
-            {existing && (
+            {snapshot.existing && (
               <button
                 type="button"
                 disabled={busy || !canWrite}
@@ -113,7 +124,7 @@ export function LocationWAFEditor({ target, baseVersion, selector, existing = tr
     >
       <div className="space-y-5">
         <p className="rounded-md border border-jul-border bg-jul-surface p-3 text-xs text-jul-muted">
-          {existing ? (
+          {snapshot.existing ? (
             <>
               This override <strong>replaces</strong> the global{" "}
               <span className="font-mono">[waf]</span> policy for{" "}
@@ -183,23 +194,158 @@ export function LocationWAFEditor({ target, baseVersion, selector, existing = tr
             </label>
 
             {draft.crsEnabled && (
-              <label className="block space-y-1">
-                <span className="text-sm font-medium text-jul-text">Paranoia level</span>
-                <select
-                  value={draft.paranoia}
-                  onChange={(e) => {
-                    set("paranoia", e.target.value);
-                  }}
-                  className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
-                >
-                  <option value="">Default (1)</option>
-                  <option value="1">1 — fewest false positives</option>
-                  <option value="2">2</option>
-                  <option value="3">3</option>
-                  <option value="4">4 — most aggressive</option>
-                </select>
-              </label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-jul-text">Paranoia level</span>
+                  <select
+                    value={(draft.blockingParanoia ?? "").trim() || draft.paranoia}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDraft((d) => ({
+                        ...d,
+                        paranoia: val,
+                        ...(d.blockingParanoia !== undefined ||
+                        (d.detectionParanoia ?? "").trim() !== ""
+                          ? { blockingParanoia: val }
+                          : {}),
+                      }));
+                    }}
+                    className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                  >
+                    <option value="">Default (1)</option>
+                    <option value="1">1 — fewest false positives</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4 — most aggressive</option>
+                  </select>
+                </label>
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-jul-text">
+                    Detection paranoia (optional)
+                  </span>
+                  <select
+                    value={draft.detectionParanoia ?? ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDraft((d) => {
+                        const copy: WAFOverrideDraft = { ...d };
+                        if (!val) {
+                          delete copy.detectionParanoia;
+                        } else {
+                          copy.detectionParanoia = val;
+                          copy.blockingParanoia =
+                            (d.blockingParanoia ?? "").trim() || d.paranoia || "1";
+                        }
+                        return copy;
+                      });
+                    }}
+                    className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                  >
+                    <option value="">Same as blocking</option>
+                    <option value="1">1</option>
+                    <option value="2">2 — observe PL2 without blocking</option>
+                    <option value="3">3 — observe PL3 without blocking</option>
+                    <option value="4">4 — observe PL4 without blocking</option>
+                  </select>
+                </label>
+              </div>
             )}
+
+            <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium text-jul-text">
+                    Narrow rule exceptions ({String((draft.exceptions ?? []).length)})
+                  </span>
+                  <p className="text-xs text-jul-muted">
+                    Exclude a single field (e.g. <code>ARGS:profile_bio</code>) from one rule on
+                    this route while preserving protection on neighboring fields, methods, and
+                    routes.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = [
+                      ...(draft.exceptions ?? []),
+                      {
+                        rule_id: 942100,
+                        scope: "narrow_target",
+                        target: "ARGS:field_name",
+                        rationale: "",
+                      },
+                    ];
+                    set("exceptions", next);
+                  }}
+                  className="rounded border border-jul-border px-2 py-1 text-xs text-jul-text hover:bg-jul-bg"
+                >
+                  + Add exception
+                </button>
+              </div>
+              {(draft.exceptions ?? []).map((exc, idx) => (
+                <div
+                  key={`exc-${String(idx)}`}
+                  className="grid grid-cols-1 gap-2 rounded border border-jul-border bg-jul-bg/40 p-2 text-xs sm:grid-cols-3"
+                >
+                  <label className="space-y-0.5">
+                    <span className="text-jul-muted">Rule ID</span>
+                    <input
+                      type="number"
+                      aria-label={`Exception ${String(idx + 1)} rule ID`}
+                      value={String(exc.rule_id)}
+                      onChange={(e) => {
+                        const list = [...(draft.exceptions ?? [])];
+                        list[idx] = { ...exc, rule_id: Number(e.target.value) || 0 };
+                        set("exceptions", list);
+                      }}
+                      className="w-full rounded border border-jul-border bg-jul-surface px-2 py-1 font-mono text-jul-text"
+                    />
+                  </label>
+                  <label className="space-y-0.5">
+                    <span className="text-jul-muted">Target (COLLECTION:KEY)</span>
+                    <input
+                      type="text"
+                      aria-label={`Exception ${String(idx + 1)} target`}
+                      value={exc.target ?? ""}
+                      placeholder="ARGS:profile_bio"
+                      onChange={(e) => {
+                        const list = [...(draft.exceptions ?? [])];
+                        list[idx] = { ...exc, target: e.target.value, scope: "narrow_target" };
+                        set("exceptions", list);
+                      }}
+                      className="w-full rounded border border-jul-border bg-jul-surface px-2 py-1 font-mono text-jul-text"
+                    />
+                  </label>
+                  <div className="flex items-end gap-2">
+                    <label className="flex-1 space-y-0.5">
+                      <span className="text-jul-muted">Rationale / review</span>
+                      <input
+                        type="text"
+                        aria-label={`Exception ${String(idx + 1)} rationale`}
+                        value={exc.rationale ?? ""}
+                        placeholder="Why this field is excluded"
+                        onChange={(e) => {
+                          const list = [...(draft.exceptions ?? [])];
+                          list[idx] = { ...exc, rationale: e.target.value };
+                          set("exceptions", list);
+                        }}
+                        className="w-full rounded border border-jul-border bg-jul-surface px-2 py-1 text-jul-text"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const list = (draft.exceptions ?? []).filter((_, j) => j !== idx);
+                        set("exceptions", list);
+                      }}
+                      className="rounded border border-jul-border px-2 py-1 text-jul-danger hover:bg-jul-bg"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
 
             <TextField
               label="Request body limit"

@@ -117,10 +117,23 @@ type PolicyInfo struct {
 	CRSEnabled  bool
 	// CRSVersion is the embedded CRS version, set only when CRSEnabled.
 	CRSVersion string
-	// Paranoia is the CRS paranoia level Jul set, or the CRS default (1) when
-	// ParanoiaDefault; 0 without CRS. A post-CRS rule file may still change it.
+	// Paranoia is the CRS blocking paranoia level Jul set, or the CRS default (1)
+	// when ParanoiaDefault; 0 without CRS. A post-CRS rule file may still change it.
 	Paranoia        int
 	ParanoiaDefault bool
+	// BlockingParanoia and DetectionParanoia report the separate CRS blocking and
+	// detection paranoia levels (1–4 when CRSEnabled, 0 otherwise; #631).
+	BlockingParanoia  int
+	DetectionParanoia int
+	// ExceptionsCount is the number of structured narrow exceptions compiled into
+	// this policy, and ExceptionsReviewDue is how many have a past-due review_at
+	// date (#631).
+	ExceptionsCount     int
+	ExceptionsReviewDue int
+	// HasCustomTuningDirectives reports whether inline_rules or external rule
+	// files contain manual SecRuleRemove*/SecRuleUpdateTarget*/ctl:ruleRemove*
+	// directives outside structured exceptions (#631, #633).
+	HasCustomTuningDirectives bool
 	// RequestBodyLimitBytes is authoritative: Jul applies it after the rule
 	// directives, so no SecRequestBodyLimit in a rule file can change it.
 	RequestBodyLimitBytes int64

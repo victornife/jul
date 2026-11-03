@@ -37,9 +37,27 @@ function PolicySummary({ p }: { readonly p: WAFPolicySummary }) {
       <dt className="text-jul-muted">Core Rule Set</dt>
       <dd>
         {p.crs_enabled
-          ? `OWASP CRS ${p.crs_version || "(version not reported)"} · paranoia ${String(p.paranoia ?? 1)}${p.paranoia_default ? " (CRS default)" : ""}`
+          ? `OWASP CRS ${p.crs_version || "(version not reported)"} · ${
+              p.detection_paranoia &&
+              p.blocking_paranoia &&
+              p.detection_paranoia > p.blocking_paranoia
+                ? `paranoia ${String(p.blocking_paranoia)} blocking / ${String(p.detection_paranoia)} detection`
+                : `paranoia ${String(p.paranoia ?? 1)}${p.paranoia_default ? " (CRS default)" : ""}`
+            }`
           : "not loaded"}
       </dd>
+      {((p.exceptions_count ?? 0) > 0 || p.has_custom_tuning_directives) && (
+        <>
+          <dt className="text-jul-muted">Rule tuning</dt>
+          <dd>
+            {plural(p.exceptions_count ?? 0, "narrow exception")}
+            {(p.exceptions_review_due ?? 0) > 0
+              ? ` (${String(p.exceptions_review_due)} review due)`
+              : ""}
+            {p.has_custom_tuning_directives ? " · manual SecLang tuning" : ""}
+          </dd>
+        </>
+      )}
       <dt className="text-jul-muted">Request body</dt>
       <dd>
         {p.request_body_limit_bytes !== undefined

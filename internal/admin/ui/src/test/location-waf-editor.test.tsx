@@ -16,8 +16,9 @@ import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
+import { WAFEditor } from "@/features/security/WAFEditor.tsx";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
-import type { ConfigPatch, LocationWAF } from "@/api/client.ts";
+import type { ConfigPatch, LocationWAF, SecurityProjection } from "@/api/client.ts";
 
 const realFetch = globalThis.fetch;
 let seenBody = "";
@@ -179,6 +180,190 @@ describe("LocationWAFEditor", () => {
       op: "location_waf_clear",
       listen: ":8080",
       path: "/api",
+    });
+  });
+
+  it("allows adding a narrow rule exception and validates target syntax", async () => {
+    render(
+      <Wrapper>
+        <LocationWAFEditor
+          target={target({ enabled: true, mode: "block", crs_enabled: true })}
+          onClose={() => undefined}
+        />
+      </Wrapper>,
+    );
+
+    fireEvent.click(screen.getByText("+ Add exception"));
+    fireEvent.change(screen.getByLabelText("Exception 1 target"), {
+      target: { value: "ARGS:profile_bio" },
+    });
+    fireEvent.change(screen.getByLabelText("Exception 1 rationale"), {
+      target: { value: "Allow bio markdown" },
+    });
+    fireEvent.click(screen.getByText("Review lifecycle and diff →"));
+
+    await waitFor(() => {
+      expect(seenBody).not.toBe("");
+    });
+    const patch = (JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0];
+    expect(patch).toMatchObject({
+      op: "location_waf_set",
+      waf: {
+        exceptions: [
+          {
+            rule_id: 942100,
+            scope: "narrow_target",
+            target: "ARGS:profile_bio",
+            rationale: "Allow bio markdown",
+          },
+        ],
+      },
+    });
+  });
+});
+
+describe("WAFEditor", () => {
+  it("updates blocking_paranoia on modern policies when CRS paranoia level changes and seeds initialException", () => {
+    const proj: SecurityProjection = {
+      auth_enabled: false,
+      require_cert_count: 0,
+      waf_enabled: true,
+      waf_compiled: true,
+      waf_locations: 1,
+      waf_block_locs: 1,
+      waf_detect_locs: 0,
+      waf_crs_locs: 1,
+      waf_global_enabled: true,
+      waf_global_mode: "block",
+      waf_crs_enabled: true,
+      waf_paranoia: 1,
+      waf_blocking_paranoia: 1,
+      waf_detection_paranoia: 3,
+      waf_response_body_check: false,
+      secret_refs: 0,
+    };
+
+    render(
+      <Wrapper>
+        <WAFEditor
+          current={proj}
+          initialException={{
+            id: "tune-942100",
+            rule_id: 942100,
+            scope: "narrow_target",
+            target: "ARGS:profile_bio",
+            rationale: "Tuned from event",
+          }}
+          onClose={() => undefined}
+        />
+      </Wrapper>,
+    );
+
+    const paranoiaSelect = screen.getByLabelText("CRS paranoia level");
+    expect((paranoiaSelect as HTMLSelectElement).value).toBe("1");
+    fireEvent.change(paranoiaSelect, { target: { value: "2" } });
+
+    expect(screen.getByText(/blocking_paranoia = 2/)).toBeInTheDocument();
+    expect(screen.getByText(/detection_paranoia = 3/)).toBeInTheDocument();
+    expect(screen.getByText(/\[\[waf\.exceptions\]\]/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("ARGS:profile_bio")).toBeInTheDocument();
+  });
+
+  it("freezes base_version at open time and refuses to overwrite intervening server changes", async () => {
+    const projV1: SecurityProjection = {
+      base_version: "ver-initial-1",
+      auth_enabled: false,
+      require_cert_count: 0,
+      waf_enabled: true,
+      waf_compiled: true,
+      waf_locations: 1,
+      waf_block_locs: 1,
+      waf_detect_locs: 0,
+      waf_crs_locs: 1,
+      waf_global_enabled: true,
+      waf_global_mode: "block",
+      waf_crs_enabled: true,
+      waf_paranoia: 1,
+      waf_response_body_check: false,
+      secret_refs: 0,
+    };
+
+    const { rerender } = render(
+      <Wrapper>
+        <WAFEditor current={projV1} onClose={() => undefined} />
+      </Wrapper>,
+    );
+
+    // Simulate a 15-second background query refresh delivering base_version = "ver-polled-2".
+    rerender(
+      <Wrapper>
+        <WAFEditor
+          current={{ ...projV1, base_version: "ver-polled-2", waf_global_mode: "detect" }}
+          onClose={() => undefined}
+        />
+      </Wrapper>,
+    );
+
+    // Server now reports base_version = "ver-polled-2" on /api/config/raw; save must reject
+    // rather than silently overlaying the old ver-initial-1 draft onto ver-polled-2!
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve(
+        json({
+          raw: '[waf]\nenabled = true\nmode = "detect"\n',
+          base_version: "ver-polled-2",
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Review in editor/i }));
+    expect(
+      await screen.findByText(/Configuration changed on the server since this editor was opened/i),
+    ).toBeInTheDocument();
+    expect(takePendingDraft()).toBeNull();
+  });
+
+  it("round-trips a dotted-key root WAF document through WAFEditor Review in editor without duplicate waf declarations (Item 7)", async () => {
+    takePendingDraft();
+    const projDotted = {
+      base_version: "ver-dotted-1",
+      auth_enabled: false,
+      require_cert_count: 0,
+      waf_enabled: true,
+      waf_compiled: true,
+      waf_locations: 1,
+      waf_block_locs: 1,
+      waf_detect_locs: 0,
+      waf_crs_locs: 0,
+      waf_global_enabled: true,
+      waf_global_mode: "block",
+      waf_crs_enabled: false,
+      waf_response_body_check: false,
+      secret_refs: 0,
+    };
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve(
+        json({
+          raw: 'waf.enabled = true\nwaf.mode = "block"\nwaf.crs_enabled = false\n\n[[servers]]\nlisten = ":8080"\n',
+          base_version: "ver-dotted-1",
+        }),
+      ),
+    );
+
+    render(
+      <MemoryRouter>
+        <WAFEditor current={projDotted} onClose={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Review in editor/i }));
+    await waitFor(() => {
+      const pending = takePendingDraft();
+      expect(pending).not.toBeNull();
+      if (pending && "raw" in pending) {
+        expect(pending.raw).not.toContain("waf.enabled");
+        expect(pending.raw).toContain("[waf]\nenabled = true");
+        expect(pending.raw).toContain('[[servers]]\nlisten = ":8080"');
+      }
     });
   });
 });

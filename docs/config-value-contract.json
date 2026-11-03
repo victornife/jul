@@ -1445,6 +1445,22 @@
       "active_when": "WAF enabled"
     },
     {
+      "go_field": "WAFConfig.BlockingParanoia",
+      "path": "waf.blocking_paranoia / servers[].locations[].waf.blocking_paranoia",
+      "kind": "integer",
+      "constraint": "0 or 1..4; non-zero requires CRS and cannot conflict with legacy paranoia",
+      "zero_semantics": "0 falls back to legacy paranoia or CRS default (1)",
+      "active_when": "WAF enabled"
+    },
+    {
+      "go_field": "WAFConfig.DetectionParanoia",
+      "path": "waf.detection_paranoia / servers[].locations[].waf.detection_paranoia",
+      "kind": "integer",
+      "constraint": "0 or 1..4; non-zero requires CRS and must be at least blocking_paranoia",
+      "zero_semantics": "0 defaults to effective blocking_paranoia",
+      "active_when": "WAF enabled"
+    },
+    {
       "go_field": "WAFConfig.Mode",
       "path": "waf.mode / servers[].locations[].waf.mode",
       "kind": "enum",
@@ -1471,6 +1487,51 @@
       "constraint": "non-negative",
       "zero_semantics": "omitted/zero defaults to 128 KiB",
       "active_when": "WAF enabled"
+    },
+    {
+      "go_field": "WAFException.Methods",
+      "path": "waf.exceptions[].methods / servers[].locations[].waf.exceptions[].methods",
+      "kind": "enum_list",
+      "constraint": "non-duplicate uppercase HTTP method tokens",
+      "zero_semantics": "omitted/empty applies the exception to all HTTP methods",
+      "active_when": "WAF exception configured",
+      "allowed": [
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS"
+      ]
+    },
+    {
+      "go_field": "WAFException.RuleID",
+      "path": "waf.exceptions[].rule_id / servers[].locations[].waf.exceptions[].rule_id",
+      "kind": "integer",
+      "constraint": "1..99999999 excluding Jul reserved generated IDs 890000..900001",
+      "zero_semantics": "0 is rejected",
+      "active_when": "WAF exception configured"
+    },
+    {
+      "go_field": "WAFException.Scope",
+      "path": "waf.exceptions[].scope / servers[].locations[].waf.exceptions[].scope",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to narrow_target when target is set or rule_remove otherwise",
+      "active_when": "WAF exception configured",
+      "allowed": [
+        "narrow_target",
+        "rule_remove"
+      ]
+    },
+    {
+      "go_field": "WAFException.Target",
+      "path": "waf.exceptions[].target / servers[].locations[].waf.exceptions[].target",
+      "kind": "grammar",
+      "constraint": "<COLLECTION>:<KEY> with COLLECTION in {ARGS, ARGS_GET, ARGS_POST, ARGS_NAMES, REQUEST_HEADERS, REQUEST_COOKIES} and 1..64 byte token key",
+      "zero_semantics": "required when scope is narrow_target; must be empty when scope is rule_remove",
+      "active_when": "WAF exception configured"
     }
   ]
 }

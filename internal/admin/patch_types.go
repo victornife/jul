@@ -3,6 +3,8 @@
 
 package admin
 
+import "jul/internal/config"
+
 // This file holds the wire/DTO types for the structured configuration-patch API
 // (the `/api/config/patch` surface). They are the JSON envelope and per-operation
 // payloads decoded from the console; the mutation logic that consumes them lives
@@ -368,15 +370,18 @@ type transcodePatch struct {
 // payload wholesale; the editor seeds every field from the security projection
 // first, so a round-trip is faithful rather than clobbering unshown rules.
 type locationWAF struct {
-	Enabled           bool     `json:"enabled"`
-	Mode              string   `json:"mode,omitempty"`        // "block" (default) or "detect"
-	CRSEnabled        bool     `json:"crs_enabled,omitempty"` // load the embedded OWASP CRS
-	BlockStatus       int      `json:"block_status,omitempty"`
-	Paranoia          int      `json:"paranoia,omitempty"`
-	RequestBodyLimit  string   `json:"request_body_limit,omitempty"` // size string, e.g. "128k"
-	ResponseBodyCheck bool     `json:"response_body_check,omitempty"`
-	DirectivesFiles   []string `json:"directives_files,omitempty"`
-	InlineRules       string   `json:"inline_rules,omitempty"`
+	Enabled           bool                  `json:"enabled"`
+	Mode              string                `json:"mode,omitempty"`        // "block" (default) or "detect"
+	CRSEnabled        bool                  `json:"crs_enabled,omitempty"` // load the embedded OWASP CRS
+	BlockStatus       int                   `json:"block_status,omitempty"`
+	Paranoia          int                   `json:"paranoia,omitempty"`
+	BlockingParanoia  int                   `json:"blocking_paranoia,omitempty"`
+	DetectionParanoia int                   `json:"detection_paranoia,omitempty"`
+	Exceptions        []config.WAFException `json:"exceptions,omitempty"`
+	RequestBodyLimit  string                `json:"request_body_limit,omitempty"` // size string, e.g. "128k"
+	ResponseBodyCheck bool                  `json:"response_body_check,omitempty"`
+	DirectivesFiles   []string              `json:"directives_files,omitempty"`
+	InlineRules       string                `json:"inline_rules,omitempty"`
 }
 
 // rateLimitPatch is the one wire payload behind the public "rate_limit" JSON

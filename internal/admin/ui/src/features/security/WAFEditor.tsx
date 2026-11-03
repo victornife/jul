@@ -6,7 +6,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import { captureAdminIdentity,  fetchRawConfig, type SecurityProjection } from "@/api/client.ts";
+import {
+  captureAdminIdentity,
+  fetchRawConfig,
+  type SecurityProjection,
+  type WAFException,
+} from "@/api/client.ts";
 import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
 import { upsertTopLevelTable } from "@/lib/trafficToml.ts";
 import {
@@ -73,6 +78,8 @@ function Toggle({
 
 export interface WAFEditorProps {
   readonly current: SecurityProjection;
+  readonly baseVersion?: string | undefined;
+  readonly initialException?: WAFException;
   readonly onClose: () => void;
 }
 
@@ -89,7 +96,11 @@ function hasGlobalWAFConfig(p: SecurityProjection): boolean {
     Boolean(p.waf_request_body_limit) ||
     Boolean(p.waf_inline_rules) ||
     (p.waf_block_status ?? 0) > 0 ||
-    (p.waf_directives_files?.length ?? 0) > 0
+    (p.waf_paranoia ?? 0) > 0 ||
+    (p.waf_blocking_paranoia ?? 0) > 0 ||
+    (p.waf_detection_paranoia ?? 0) > 0 ||
+    (p.waf_directives_files?.length ?? 0) > 0 ||
+    (p.waf_exceptions?.length ?? 0) > 0
   );
 }
 
@@ -97,13 +108,36 @@ function hasGlobalWAFConfig(p: SecurityProjection): boolean {
 // draft so every field round-trips: opening and re-saving the editor without
 // changes must reproduce the same policy rather than clobber CRS, paranoia,
 // response-body inspection, rule files, or inline rules.
-function seedDraftFromProjection(p: SecurityProjection): WAFDraft {
+function seedDraftFromProjection(
+  p: SecurityProjection,
+  initialException?: WAFException,
+): WAFDraft {
+  const baseExceptions = [...(p.waf_exceptions ?? [])];
+  if (
+    initialException &&
+    !baseExceptions.some(
+      (e) =>
+        e.rule_id === initialException.rule_id &&
+        (e.target ?? "") === (initialException.target ?? ""),
+    )
+  ) {
+    baseExceptions.push(initialException);
+  }
+  const effectiveParanoia =
+    p.waf_blocking_paranoia && p.waf_blocking_paranoia >= 1
+      ? p.waf_blocking_paranoia
+      : p.waf_paranoia && p.waf_paranoia >= 1
+        ? p.waf_paranoia
+        : 1;
   return {
     enabled: p.waf_global_enabled,
     mode: p.waf_global_mode === "block" ? "block" : "detect",
     blockStatus: p.waf_block_status ?? 0,
     crsEnabled: p.waf_crs_enabled,
-    paranoia: p.waf_paranoia && p.waf_paranoia >= 1 ? p.waf_paranoia : 1,
+    paranoia: effectiveParanoia,
+    ...(p.waf_blocking_paranoia ? { blockingParanoia: p.waf_blocking_paranoia } : {}),
+    ...(p.waf_detection_paranoia ? { detectionParanoia: p.waf_detection_paranoia } : {}),
+    ...(baseExceptions.length > 0 ? { exceptions: baseExceptions } : {}),
     directivesFiles: (p.waf_directives_files ?? []).join("\n"),
     inlineRules: p.waf_inline_rules ?? "",
     requestBodyLimit: p.waf_request_body_limit ?? "",
@@ -118,12 +152,22 @@ function seedDraftFromProjection(p: SecurityProjection): WAFDraft {
  * editor defaults to detect mode and warns on a block-mode CRS rollout so the
  * operator observes events before enforcing.
  */
-export function WAFEditor({ current, onClose }: WAFEditorProps) {
+export function WAFEditor({ current, baseVersion, initialException, onClose }: WAFEditorProps) {
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<WAFDraft>(() =>
-    hasGlobalWAFConfig(current) ? seedDraftFromProjection(current) : emptyWAFDraft(),
-  );
+  // Freeze the base revision and projection captured when the editor opened so
+  // background 15s polling refreshes cannot renew the CAS fence of an older draft.
+  const [snapshot] = useState(() => ({
+    projection: current,
+    baseVersion: baseVersion ?? current.base_version,
+  }));
+  const [draft, setDraft] = useState<WAFDraft>(() => {
+    if (hasGlobalWAFConfig(snapshot.projection)) {
+      return seedDraftFromProjection(snapshot.projection, initialException);
+    }
+    const base = emptyWAFDraft();
+    return initialException ? { ...base, exceptions: [initialException] } : base;
+  });
 
   const fragment = generateWafToml(draft);
   const warnings = wafWarnings(draft);
@@ -138,7 +182,22 @@ export function WAFEditor({ current, onClose }: WAFEditorProps) {
     try {
       const raw = await fetchRawConfig();
       assertIdentity();
-      setPendingDraft({ kind: "toml", toml: upsertTopLevelTable(raw.raw ?? "", "waf", fragment) });
+      if (
+        snapshot.baseVersion !== undefined &&
+        raw.base_version !== undefined &&
+        raw.base_version !== snapshot.baseVersion
+      ) {
+        setError(
+          "Configuration changed on the server since this editor was opened (409 Conflict). Close and reopen the editor to load the latest WAF policy.",
+        );
+        return;
+      }
+      const pinnedBaseVersion = snapshot.baseVersion ?? raw.base_version;
+      setPendingDraft({
+        kind: "toml",
+        toml: upsertTopLevelTable(raw.raw ?? "", "waf", fragment),
+        ...(pinnedBaseVersion !== undefined ? { pinnedBaseVersion } : {}),
+      });
       void navigate("/config");
     } catch {
       setError("Could not load the current configuration to merge this WAF change.");
@@ -205,22 +264,155 @@ export function WAFEditor({ current, onClose }: WAFEditorProps) {
             />
 
             {draft.crsEnabled && (
-              <label className="block space-y-1">
-                <span className="text-sm font-medium text-jul-text">CRS paranoia level</span>
-                <select
-                  value={String(draft.paranoia)}
-                  onChange={(e) => {
-                    set("paranoia", Number(e.target.value));
-                  }}
-                  className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
-                >
-                  <option value="1">1 — fewest false positives (recommended)</option>
-                  <option value="2">2 — stricter</option>
-                  <option value="3">3 — aggressive</option>
-                  <option value="4">4 — paranoid (many false positives)</option>
-                </select>
-              </label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-jul-text">CRS paranoia level</span>
+                  <select
+                    value={String(draft.blockingParanoia ?? draft.paranoia)}
+                    onChange={(e) => {
+                      const nextLevel = Number(e.target.value);
+                      setDraft((d) => ({
+                        ...d,
+                        paranoia: nextLevel,
+                        ...(d.blockingParanoia !== undefined || d.detectionParanoia !== undefined
+                          ? { blockingParanoia: nextLevel }
+                          : {}),
+                      }));
+                    }}
+                    className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                  >
+                    <option value="1">1 — fewest false positives (recommended)</option>
+                    <option value="2">2 — stricter</option>
+                    <option value="3">3 — aggressive</option>
+                    <option value="4">4 — paranoid (many false positives)</option>
+                  </select>
+                </label>
+
+                <label className="block space-y-1">
+                  <span className="text-sm font-medium text-jul-text">
+                    Detection paranoia (optional)
+                  </span>
+                  <select
+                    value={draft.detectionParanoia ? String(draft.detectionParanoia) : ""}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setDraft((d) => {
+                        const copy: WAFDraft = { ...d };
+                        if (!raw) {
+                          delete copy.detectionParanoia;
+                        } else {
+                          copy.detectionParanoia = Number(raw);
+                          copy.blockingParanoia = d.blockingParanoia ?? d.paranoia;
+                        }
+                        return copy;
+                      });
+                    }}
+                    className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+                  >
+                    <option value="">Same as blocking</option>
+                    <option value="1">1</option>
+                    <option value="2">2 — observe PL2 without blocking</option>
+                    <option value="3">3 — observe PL3 without blocking</option>
+                    <option value="4">4 — observe PL4 without blocking</option>
+                  </select>
+                </label>
+              </div>
             )}
+
+            <div className="space-y-2 rounded-md border border-jul-border bg-jul-surface p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium text-jul-text">
+                    Narrow rule exceptions ({String((draft.exceptions ?? []).length)})
+                  </span>
+                  <p className="text-xs text-jul-muted">
+                    Exclude a single field (e.g. <code>ARGS:profile_bio</code>) from one rule
+                    without disabling the rule globally.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = [
+                      ...(draft.exceptions ?? []),
+                      {
+                        rule_id: 942100,
+                        scope: "narrow_target",
+                        target: "ARGS:field_name",
+                        rationale: "",
+                      },
+                    ];
+                    set("exceptions", next);
+                  }}
+                  className="rounded border border-jul-border px-2 py-1 text-xs text-jul-text hover:bg-jul-bg"
+                >
+                  + Add exception
+                </button>
+              </div>
+              {(draft.exceptions ?? []).map((exc, idx) => (
+                <div
+                  key={`gexc-${String(idx)}`}
+                  className="grid grid-cols-1 gap-2 rounded border border-jul-border bg-jul-bg/40 p-2 text-xs sm:grid-cols-3"
+                >
+                  <label className="space-y-0.5">
+                    <span className="text-jul-muted">Rule ID</span>
+                    <input
+                      type="number"
+                      aria-label={`Global exception ${String(idx + 1)} rule ID`}
+                      value={String(exc.rule_id)}
+                      onChange={(e) => {
+                        const list = [...(draft.exceptions ?? [])];
+                        list[idx] = { ...exc, rule_id: Number(e.target.value) || 0 };
+                        set("exceptions", list);
+                      }}
+                      className="w-full rounded border border-jul-border bg-jul-surface px-2 py-1 font-mono text-jul-text"
+                    />
+                  </label>
+                  <label className="space-y-0.5">
+                    <span className="text-jul-muted">Target (COLLECTION:KEY)</span>
+                    <input
+                      type="text"
+                      aria-label={`Global exception ${String(idx + 1)} target`}
+                      value={exc.target ?? ""}
+                      placeholder="ARGS:profile_bio"
+                      onChange={(e) => {
+                        const list = [...(draft.exceptions ?? [])];
+                        list[idx] = { ...exc, target: e.target.value, scope: "narrow_target" };
+                        set("exceptions", list);
+                      }}
+                      className="w-full rounded border border-jul-border bg-jul-surface px-2 py-1 font-mono text-jul-text"
+                    />
+                  </label>
+                  <div className="flex items-end gap-2">
+                    <label className="flex-1 space-y-0.5">
+                      <span className="text-jul-muted">Rationale / review</span>
+                      <input
+                        type="text"
+                        aria-label={`Global exception ${String(idx + 1)} rationale`}
+                        value={exc.rationale ?? ""}
+                        placeholder="Why this field is excluded"
+                        onChange={(e) => {
+                          const list = [...(draft.exceptions ?? [])];
+                          list[idx] = { ...exc, rationale: e.target.value };
+                          set("exceptions", list);
+                        }}
+                        className="w-full rounded border border-jul-border bg-jul-surface px-2 py-1 text-jul-text"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const list = (draft.exceptions ?? []).filter((_, j) => j !== idx);
+                        set("exceptions", list);
+                      }}
+                      className="rounded border border-jul-border px-2 py-1 text-jul-danger hover:bg-jul-bg"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
 
             <TextField
               label="Block status (optional)"

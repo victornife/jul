@@ -76,12 +76,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 434
-  schema_leaves: 366
-  registry_entries: 366
+  schema_paths: 462
+  schema_leaves: 392
+  registry_entries: 392
   startup_consumed: 29
   by_class:
-    hot_reload: 323
+    hot_reload: 349
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -1098,7 +1098,15 @@ fields:
     class: hot_reload
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.blocking_paranoia"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
   - path: "servers.*.locations.*.waf.crs_enabled"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.detection_paranoia"
     class: hot_reload
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
@@ -1107,6 +1115,50 @@ fields:
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
   - path: "servers.*.locations.*.waf.enabled"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.created_at"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.fixtures"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.id"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.methods"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.owner"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.rationale"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.reference"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.review_at"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.rule_id"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.scope"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "servers.*.locations.*.waf.exceptions.*.target"
     class: hot_reload
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
@@ -1620,7 +1672,15 @@ fields:
     class: hot_reload
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.blocking_paranoia"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
   - path: "waf.crs_enabled"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.detection_paranoia"
     class: hot_reload
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
@@ -1629,6 +1689,50 @@ fields:
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"
   - path: "waf.enabled"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.created_at"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.fixtures"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.id"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.methods"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.owner"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.rationale"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.reference"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.review_at"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.rule_id"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.scope"
+    class: hot_reload
+    subsystem: waf
+    reason: "the WAF policy is rebuilt on each successful reload"
+  - path: "waf.exceptions.*.target"
     class: hot_reload
     subsystem: waf
     reason: "the WAF policy is rebuilt on each successful reload"

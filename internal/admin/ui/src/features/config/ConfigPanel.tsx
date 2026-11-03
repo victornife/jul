@@ -667,8 +667,17 @@ function AuthorizedConfigPanel() {
           } else {
             // Compatibility for raw editors outside issue #81. They retain the
             // existing raw validation/diff path and do not inherit cache's
-            // lifecycle assessment or planned-restart claims.
-            setBaseVersion(data.base_version);
+            // lifecycle assessment or planned-restart claims, while honoring an
+            // explicit pinned base revision when captured at editor open time.
+            const pinned = handoff.pinnedBaseVersion ?? data.base_version;
+            setBaseVersion(pinned);
+            if (
+              handoff.pinnedBaseVersion !== undefined &&
+              data.base_version !== undefined &&
+              data.base_version !== handoff.pinnedBaseVersion
+            ) {
+              setConflictVersion(data.base_version);
+            }
           }
         } else {
           setPatchDraft(handoff);

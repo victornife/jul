@@ -764,6 +764,44 @@ func lintWAFFit(c *Config) []Diagnostic {
 					Hint:     "raise waf.request_body_limit to the largest body this route must accept, or lower client_max_body_size to match",
 				})
 			}
+			if loc.WAF != nil {
+				diags = append(diags, lintWAFExceptionsForScope(loc.WAF.Exceptions, field+".waf.exceptions")...)
+			}
+		}
+	}
+	if c.WAF.Enabled {
+		diags = append(diags, lintWAFExceptionsForScope(c.WAF.Exceptions, "[waf].exceptions")...)
+	}
+	return diags
+}
+
+func lintWAFExceptionsForScope(exceptions []WAFException, where string) []Diagnostic {
+	if len(exceptions) == 0 {
+		return nil
+	}
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	var diags []Diagnostic
+	for i, exc := range exceptions {
+		raw := strings.TrimSpace(exc.ReviewAt)
+		if raw == "" {
+			continue
+		}
+		reviewDate, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			continue
+		}
+		if reviewDate.Before(today) {
+			label := fmt.Sprintf("rule %d", exc.RuleID)
+			if id := strings.TrimSpace(exc.ID); id != "" {
+				label = fmt.Sprintf("%s (rule %d)", id, exc.RuleID)
+			}
+			diags = append(diags, Diagnostic{
+				Code:     "waf_exception_review_due",
+				Severity: SeverityWarning,
+				Field:    fmt.Sprintf("%s[%d].review_at", where, i),
+				Message:  fmt.Sprintf("WAF exception %s review_at (%s) is past due; enforcement remains active until explicitly modified or removed", label, raw),
+				Hint:     "re-verify the exception against current synthetic fixtures and application behaviour, then update review_at or remove the exception",
+			})
 		}
 	}
 	return diags

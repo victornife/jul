@@ -5,6 +5,7 @@ package admin
 
 import (
 	"jul/internal/adminapi"
+	"jul/internal/config"
 	"jul/internal/server"
 )
 
@@ -184,15 +185,18 @@ type LocationAuthState struct {
 // mirrors the policy fields of LocationWAFProjection without repeating the
 // location coordinates (the route already provides them).
 type LocationWAFState struct {
-	Enabled           bool     `json:"enabled"`
-	Mode              string   `json:"mode,omitempty"`
-	CRSEnabled        bool     `json:"crs_enabled"`
-	BlockStatus       int      `json:"block_status,omitempty"`
-	Paranoia          int      `json:"paranoia,omitempty"`
-	RequestBodyLimit  string   `json:"request_body_limit,omitempty"`
-	ResponseBodyCheck bool     `json:"response_body_check"`
-	DirectivesFiles   []string `json:"directives_files,omitempty"`
-	InlineRules       string   `json:"inline_rules,omitempty"`
+	Enabled           bool                  `json:"enabled"`
+	Mode              string                `json:"mode,omitempty"`
+	CRSEnabled        bool                  `json:"crs_enabled"`
+	BlockStatus       int                   `json:"block_status,omitempty"`
+	Paranoia          int                   `json:"paranoia,omitempty"`
+	BlockingParanoia  int                   `json:"blocking_paranoia,omitempty"`
+	DetectionParanoia int                   `json:"detection_paranoia,omitempty"`
+	Exceptions        []config.WAFException `json:"exceptions,omitempty"`
+	RequestBodyLimit  string                `json:"request_body_limit,omitempty"`
+	ResponseBodyCheck bool                  `json:"response_body_check"`
+	DirectivesFiles   []string              `json:"directives_files,omitempty"`
+	InlineRules       string                `json:"inline_rules,omitempty"`
 }
 
 // LocationCORSState summarises a location's own [cors] policy for the route
@@ -348,15 +352,18 @@ type SecurityProjection struct {
 	// the operator saves. WAFGlobalEnabled distinguishes "global WAF is on" from
 	// the location-level WAFEnabled above (a location may opt in while [waf] is
 	// off, and vice versa).
-	WAFGlobalEnabled     bool     `json:"waf_global_enabled"`
-	WAFGlobalMode        string   `json:"waf_global_mode,omitempty"`
-	WAFBlockStatus       int      `json:"waf_block_status,omitempty"`
-	WAFCRSEnabled        bool     `json:"waf_crs_enabled"`
-	WAFParanoia          int      `json:"waf_paranoia,omitempty"`
-	WAFRequestBodyLimit  string   `json:"waf_request_body_limit,omitempty"`
-	WAFResponseBodyCheck bool     `json:"waf_response_body_check"`
-	WAFDirectivesFiles   []string `json:"waf_directives_files,omitempty"`
-	WAFInlineRules       string   `json:"waf_inline_rules,omitempty"`
+	WAFGlobalEnabled     bool                  `json:"waf_global_enabled"`
+	WAFGlobalMode        string                `json:"waf_global_mode,omitempty"`
+	WAFBlockStatus       int                   `json:"waf_block_status,omitempty"`
+	WAFCRSEnabled        bool                  `json:"waf_crs_enabled"`
+	WAFParanoia          int                   `json:"waf_paranoia,omitempty"`
+	WAFBlockingParanoia  int                   `json:"waf_blocking_paranoia,omitempty"`
+	WAFDetectionParanoia int                   `json:"waf_detection_paranoia,omitempty"`
+	WAFExceptions        []config.WAFException `json:"waf_exceptions,omitempty"`
+	WAFRequestBodyLimit  string                `json:"waf_request_body_limit,omitempty"`
+	WAFResponseBodyCheck bool                  `json:"waf_response_body_check"`
+	WAFDirectivesFiles   []string              `json:"waf_directives_files,omitempty"`
+	WAFInlineRules       string                `json:"waf_inline_rules,omitempty"`
 	// LocationWAFs lists the locations that define their own [waf] override.
 	// Such an override REPLACES the global policy for that location wholesale, so
 	// surfacing it is the truthful disclosure that the WAF is configured
@@ -387,7 +394,8 @@ type SecurityProjection struct {
 	RBAC RBACPostureProjection `json:"rbac"`
 	// Egress is the outbound egress allow-list posture (P4-01). It exposes only
 	// bounded counts and booleans; no destination host or IP is ever projected.
-	Egress EgressProjection `json:"egress"`
+	Egress      EgressProjection `json:"egress"`
+	BaseVersion string           `json:"base_version,omitempty"`
 }
 
 // EgressProjection is the outbound egress allow-list posture for the Security
@@ -459,21 +467,27 @@ type RBACStatusProjection struct {
 // can target the exact block; the policy fields summarise the override so the
 // panel can show its mode and CRS state without exposing rule contents.
 type LocationWAFProjection struct {
-	Listen      string   `json:"listen"`
-	ServerNames []string `json:"server_names,omitempty"`
-	MatchType   string   `json:"match_type,omitempty"`
-	Path        string   `json:"path,omitempty"`
-	Enabled     bool     `json:"enabled"`
-	Mode        string   `json:"mode,omitempty"`
-	CRSEnabled  bool     `json:"crs_enabled"`
+	RouteID         string   `json:"route_id,omitempty"`
+	Listen          string   `json:"listen"`
+	ServerNames     []string `json:"server_names,omitempty"`
+	MatchType       string   `json:"match_type,omitempty"`
+	Path            string   `json:"path,omitempty"`
+	MatchOrdinal    int      `json:"match_ordinal"`
+	SelectorVersion string   `json:"selector_version"`
+	Enabled         bool     `json:"enabled"`
+	Mode            string   `json:"mode,omitempty"`
+	CRSEnabled      bool     `json:"crs_enabled"`
 	// Advanced override detail (Phase 4e) so the guided editor seeds and
 	// round-trips every field rather than clobbering unshown SecLang rules.
-	BlockStatus       int      `json:"block_status,omitempty"`
-	Paranoia          int      `json:"paranoia,omitempty"`
-	RequestBodyLimit  string   `json:"request_body_limit,omitempty"`
-	ResponseBodyCheck bool     `json:"response_body_check"`
-	DirectivesFiles   []string `json:"directives_files,omitempty"`
-	InlineRules       string   `json:"inline_rules,omitempty"`
+	BlockStatus       int                   `json:"block_status,omitempty"`
+	Paranoia          int                   `json:"paranoia,omitempty"`
+	BlockingParanoia  int                   `json:"blocking_paranoia,omitempty"`
+	DetectionParanoia int                   `json:"detection_paranoia,omitempty"`
+	Exceptions        []config.WAFException `json:"exceptions,omitempty"`
+	RequestBodyLimit  string                `json:"request_body_limit,omitempty"`
+	ResponseBodyCheck bool                  `json:"response_body_check"`
+	DirectivesFiles   []string              `json:"directives_files,omitempty"`
+	InlineRules       string                `json:"inline_rules,omitempty"`
 }
 
 // TrafficControlsProjection is the traffic/observability settings panel.

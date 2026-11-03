@@ -11,53 +11,204 @@ function tomlString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function escapeRe(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+interface TomlScanState {
+  mlState: "none" | "ml_basic" | "ml_literal";
+  bracketDepth: number;
+}
+
+function advanceTomlLineState(line: string, state: TomlScanState): TomlScanState {
+  let cur = state.mlState;
+  let depth = state.bracketDepth;
+  let i = 0;
+  while (i < line.length) {
+    if (cur === "none") {
+      const ch = line[i];
+      if (ch === "#") break;
+      if (line.startsWith('"""', i)) {
+        cur = "ml_basic";
+        i += 3;
+        continue;
+      }
+      if (line.startsWith("'''", i)) {
+        cur = "ml_literal";
+        i += 3;
+        continue;
+      }
+      if (ch === '"') {
+        i += 1;
+        while (i < line.length) {
+          if (line[i] === "\\") {
+            i += 2;
+            continue;
+          }
+          if (line[i] === '"') {
+            i += 1;
+            break;
+          }
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === "'") {
+        i += 1;
+        while (i < line.length && line[i] !== "'") i += 1;
+        i += 1;
+        continue;
+      }
+      if (ch === "[" || ch === "{") {
+        depth += 1;
+      } else if ((ch === "]" || ch === "}") && depth > 0) {
+        depth -= 1;
+      }
+      i += 1;
+    } else if (cur === "ml_basic") {
+      if (line[i] === "\\") {
+        i += 2;
+        continue;
+      }
+      if (line.startsWith('"""', i)) {
+        cur = "none";
+        i += 3;
+        continue;
+      }
+      i += 1;
+    } else {
+      if (line.startsWith("'''", i)) {
+        cur = "none";
+        i += 3;
+        continue;
+      }
+      i += 1;
+    }
+  }
+  return { mlState: cur, bracketDepth: depth };
+}
+
+function parseTomlHeaderRoot(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("[")) return null;
+  const m = /^(?:\[\[\s*([^[\]]+?)\s*\]\]|\[\s*([^[\]]+?)\s*\])\s*(?:#.*)?$/.exec(trimmed);
+  if (!m) return null;
+  const path = (m[1] ?? m[2] ?? "").trim();
+  const seg = /^(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(?:\.|$)/.exec(
+    path,
+  );
+  if (!seg) return null;
+  const first = seg[1] ?? seg[2] ?? seg[3] ?? "";
+  return first.length > 0 ? first : null;
+}
+
+function parseRootAssignmentKey(line: string): string | null {
+  const trimmed = line.trim();
+  if (trimmed.length === 0 || trimmed.startsWith("#") || trimmed.startsWith("[")) {
+    return null;
+  }
+  const m = /^(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*(?:\.|=)/.exec(
+    trimmed,
+  );
+  if (!m) return null;
+  return m[1] ?? m[2] ?? m[3] ?? null;
 }
 
 /**
- * Replaces the first occurrence of a top-level table or appends it. Raw editors
- * remain an authorized compatibility path; typed compression and rate-limit
- * editors no longer call this helper. Cache deliberately remains a complete
- * table raw/stage-only path until a cache_set operation exists.
+ * Replaces all sections and root-level dotted/inline assignments belonging to
+ * a top-level table (`[table]`, `[table.*]`, `[[table.*]]`, `table.* = ...`,
+ * `table = { ... }`) even when sub-tables or array-of-tables are dispersed
+ * after unrelated top-level sections, while preserving multiline strings and
+ * nested tables under other roots (such as `[servers.locations.waf]`).
  */
 export function upsertTopLevelTable(raw: string, table: string, fragment: string): string {
   const lines = raw.split(/\r?\n/);
-  const headerRe = new RegExp(`^\\[+\\s*${escapeRe(table)}(\\.|\\s*\\]\\])`);
-  const belongs = (line: string): boolean => {
-    const trimmed = line.trim();
-    return trimmed === `[${table}]` || headerRe.test(trimmed);
+  interface Section {
+    root: string | null;
+    isHeader: boolean;
+    lines: string[];
+  }
+  const sections: Section[] = [];
+  let inHeaderSection = false;
+  let current: Section = { root: null, isHeader: false, lines: [] };
+  let scanState: TomlScanState = { mlState: "none", bracketDepth: 0 };
+  let inRootTargetedStatement = false;
+
+  const flushCurrent = (): void => {
+    if (current.lines.length > 0 || current.root !== null) {
+      sections.push(current);
+    }
   };
 
-  let start = -1;
-  for (let index = 0; index < lines.length; index += 1) {
-    if (belongs(lines[index] ?? "")) {
-      start = index;
-      break;
+  for (const line of lines) {
+    const atStatementBoundary = scanState.mlState === "none" && scanState.bracketDepth === 0;
+    if (atStatementBoundary) {
+      if (inRootTargetedStatement) {
+        flushCurrent();
+        current = { root: null, isHeader: false, lines: [] };
+        inRootTargetedStatement = false;
+      }
+      const headerRoot = parseTomlHeaderRoot(line);
+      if (headerRoot !== null) {
+        flushCurrent();
+        inHeaderSection = true;
+        current = { root: headerRoot, isHeader: true, lines: [line] };
+        scanState = advanceTomlLineState(line, scanState);
+        continue;
+      }
+      if (!inHeaderSection) {
+        const assignKey = parseRootAssignmentKey(line);
+        if (assignKey === table) {
+          flushCurrent();
+          current = { root: table, isHeader: false, lines: [line] };
+          inRootTargetedStatement = true;
+          scanState = advanceTomlLineState(line, scanState);
+          continue;
+        }
+      }
+    }
+    current.lines.push(line);
+    scanState = advanceTomlLineState(line, scanState);
+  }
+  flushCurrent();
+
+  const rootPreambleLines: string[] = [];
+  let hadRootTargetedStatement = false;
+  const headerSections: Section[] = [];
+  for (const sec of sections) {
+    if (sec.isHeader) {
+      headerSections.push(sec);
+    } else if (sec.root === table) {
+      hadRootTargetedStatement = true;
+    } else {
+      rootPreambleLines.push(...sec.lines);
     }
   }
-  if (start === -1) {
-    const base = raw.trimEnd();
-    return base.length > 0 ? `${base}\n\n${fragment}\n` : `${fragment}\n`;
-  }
 
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    if (line.startsWith("[") && !belongs(line)) {
-      end = index;
-      break;
+  let replaced = false;
+  const outParts: string[] = [];
+  const rootPreambleText = rootPreambleLines.join("\n").trim();
+  if (rootPreambleText.length > 0) {
+    outParts.push(rootPreambleText);
+  }
+  const hasHeaderTarget = headerSections.some((sec) => sec.root === table);
+  if (hadRootTargetedStatement && !hasHeaderTarget) {
+    outParts.push(fragment.trim());
+    replaced = true;
+  }
+  for (const sec of headerSections) {
+    if (sec.root === table) {
+      if (!replaced) {
+        outParts.push(fragment.trim());
+        replaced = true;
+      }
+      continue;
+    }
+    const text = sec.lines.join("\n").trim();
+    if (text.length > 0) {
+      outParts.push(text);
     }
   }
-
-  const before = lines.slice(0, start).join("\n").trim();
-  const after = lines.slice(end).join("\n").trim();
-  return (
-    [before, fragment, after]
-      .filter((part) => part.length > 0)
-      .join("\n\n")
-      .trim() + "\n"
-  );
+  if (!replaced) {
+    outParts.push(fragment.trim());
+  }
+  return outParts.filter((part) => part.length > 0).join("\n\n").trim() + "\n";
 }
 
 export function isValidCacheMaxRanges(draft: CacheDraft): boolean {

@@ -127,6 +127,9 @@ func projectRoutes(c *config.Config) []RouteProjection {
 					CRSEnabled:        loc.WAF.CRSEnabled,
 					BlockStatus:       loc.WAF.BlockStatus,
 					Paranoia:          loc.WAF.Paranoia,
+					BlockingParanoia:  loc.WAF.BlockingParanoia,
+					DetectionParanoia: loc.WAF.DetectionParanoia,
+					Exceptions:        append([]config.WAFException(nil), loc.WAF.Exceptions...),
 					RequestBodyLimit:  wafBodyLimitStr(loc.WAF.RequestBodyLimit),
 					ResponseBodyCheck: loc.WAF.ResponseBodyCheck,
 					DirectivesFiles:   loc.WAF.DirectivesFiles,
@@ -574,7 +577,11 @@ func projectCertRisk(certs []CertProjection) *CertRiskProjection {
 }
 
 func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
-	sp := SecurityProjection{WAFCompiled: wafCompiled}
+	sp := SecurityProjection{
+		WAFCompiled: wafCompiled,
+		BaseVersion: server.CanonicalVersion(c),
+	}
+	ordinals := routeOrdinals(c)
 	countBackendTLS := func(b *config.BackendTLSConfig) {
 		if b == nil {
 			return
@@ -610,6 +617,7 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 		}
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
+			ord := ordinals[i][j]
 			if loc.Auth != nil {
 				sp.AuthEnabled = true
 			}
@@ -620,16 +628,26 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 			// A non-nil loc.WAF is a per-location override that replaces the
 			// global policy for this location, so disclose it explicitly.
 			if loc.WAF != nil {
+				var routeID string
+				if loc.RouteID != nil {
+					routeID = *loc.RouteID
+				}
 				sp.LocationWAFs = append(sp.LocationWAFs, LocationWAFProjection{
+					RouteID:           routeID,
 					Listen:            srv.Listen,
 					ServerNames:       srv.ServerNames,
 					MatchType:         loc.Match.Type,
 					Path:              loc.Match.Path,
+					MatchOrdinal:      ord,
+					SelectorVersion:   routeSelectorVersion,
 					Enabled:           loc.WAF.Enabled,
 					Mode:              wafModeOrDefault(loc.WAF.Mode),
 					CRSEnabled:        loc.WAF.CRSEnabled,
 					BlockStatus:       loc.WAF.BlockStatus,
 					Paranoia:          loc.WAF.Paranoia,
+					BlockingParanoia:  loc.WAF.BlockingParanoia,
+					DetectionParanoia: loc.WAF.DetectionParanoia,
+					Exceptions:        append([]config.WAFException(nil), loc.WAF.Exceptions...),
 					RequestBodyLimit:  wafBodyLimitStr(loc.WAF.RequestBodyLimit),
 					ResponseBodyCheck: loc.WAF.ResponseBodyCheck,
 					DirectivesFiles:   loc.WAF.DirectivesFiles,
@@ -655,6 +673,9 @@ func projectSecurity(c *config.Config, wafCompiled bool) SecurityProjection {
 	sp.WAFBlockStatus = g.BlockStatus
 	sp.WAFCRSEnabled = g.CRSEnabled
 	sp.WAFParanoia = g.Paranoia
+	sp.WAFBlockingParanoia = g.BlockingParanoia
+	sp.WAFDetectionParanoia = g.DetectionParanoia
+	sp.WAFExceptions = append([]config.WAFException(nil), g.Exceptions...)
 	sp.WAFResponseBodyCheck = g.ResponseBodyCheck
 	sp.WAFDirectivesFiles = g.DirectivesFiles
 	sp.WAFInlineRules = g.InlineRules

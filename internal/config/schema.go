@@ -204,6 +204,18 @@ type WAFConfig struct {
 	// set. Zero leaves the CRS default (1). Higher levels catch more attacks at
 	// the cost of more false positives.
 	Paranoia int `toml:"paranoia"`
+	// BlockingParanoia sets the CRS blocking paranoia level (1–4) independently
+	// of DetectionParanoia when CRSEnabled is set. Zero falls back to Paranoia
+	// or the CRS default (1).
+	BlockingParanoia int `toml:"blocking_paranoia,omitempty"`
+	// DetectionParanoia sets the CRS detection paranoia level (1–4) when
+	// CRSEnabled is set, allowing higher-paranoia rules to execute and log
+	// without contributing to the blocking anomaly threshold. Zero defaults to
+	// the effective BlockingParanoia.
+	DetectionParanoia int `toml:"detection_paranoia,omitempty"`
+	// Exceptions declares narrow, reviewable rule-tuning exceptions compiled
+	// before the CRS in phase 1 (IDs 890001–890064).
+	Exceptions []WAFException `toml:"exceptions,omitempty"`
 	// RequestBodyLimit caps how many request-body bytes are buffered for
 	// inspection. Zero applies a 128 KiB default.
 	RequestBodyLimit Size `toml:"request_body_limit"`
@@ -211,6 +223,64 @@ type WAFConfig struct {
 	// It buffers the response up to Coraza's response-body limit and so adds
 	// latency and memory; leave it off unless outbound rules are needed.
 	ResponseBodyCheck bool `toml:"response_body_check"`
+}
+
+// EffectiveBlockingParanoia returns the configured blocking paranoia level
+// (1–4), or 0 when neither BlockingParanoia nor Paranoia is set (leaving the
+// CRS default of 1).
+func (w WAFConfig) EffectiveBlockingParanoia() int {
+	if w.BlockingParanoia > 0 {
+		return w.BlockingParanoia
+	}
+	if w.Paranoia > 0 {
+		return w.Paranoia
+	}
+	return 0
+}
+
+// EffectiveDetectionParanoia returns the configured detection paranoia level
+// (1–4), or 0 when none of DetectionParanoia, BlockingParanoia, or Paranoia is
+// set. When DetectionParanoia is set and BlockingParanoia/Paranoia are 0,
+// EffectiveBlockingParanoia defaults to 1 at compile time.
+func (w WAFConfig) EffectiveDetectionParanoia() int {
+	if w.DetectionParanoia > 0 {
+		return w.DetectionParanoia
+	}
+	return w.EffectiveBlockingParanoia()
+}
+
+// WAFException declares a narrow, reviewable WAF rule tuning exception (#631,
+// ADR 0031 §6). Exceptions are compiled into deterministic pre-CRS phase:1
+// SecAction/SecRule ctl: directives (IDs 890001..890064) so they apply to
+// phase-1 rules, phase-2 rules, and chain children without weakening
+// neighboring fields, methods, or routes.
+type WAFException struct {
+	// ID is an optional stable operator identifier for this exception.
+	ID string `toml:"id,omitempty" json:"id,omitempty"`
+	// RuleID is the target CRS or custom rule identifier (e.g. 942100).
+	RuleID int `toml:"rule_id" json:"rule_id"`
+	// Scope selects the exception breadth: "narrow_target" (default when target
+	// is set; removes only target from rule_id) or "rule_remove" (whole-rule
+	// removal on the selected policy scope).
+	Scope string `toml:"scope,omitempty" json:"scope,omitempty"`
+	// Target names the bounded variable and field excluded when scope is
+	// "narrow_target", e.g. ARGS:profile_bio or REQUEST_HEADERS:User-Agent.
+	Target string `toml:"target,omitempty" json:"target,omitempty"`
+	// Methods restricts the exception to specific HTTP methods, e.g. POST or PUT.
+	Methods []string `toml:"methods,omitempty" json:"methods,omitempty"`
+	// Rationale records the bounded non-secret operator reason for the exception.
+	Rationale string `toml:"rationale,omitempty" json:"rationale,omitempty"`
+	// Owner records the responsible team or operator handle for review.
+	Owner string `toml:"owner,omitempty" json:"owner,omitempty"`
+	// Reference records an issue, pull request, or change-management identifier.
+	Reference string `toml:"reference,omitempty" json:"reference,omitempty"`
+	// CreatedAt records the ISO-8601 date (YYYY-MM-DD) when the exception was created.
+	CreatedAt string `toml:"created_at,omitempty" json:"created_at,omitempty"`
+	// ReviewAt records the ISO-8601 date (YYYY-MM-DD) when the exception is due
+	// for review; past-due dates emit a waf_exception_review_due lint warning.
+	ReviewAt string `toml:"review_at,omitempty" json:"review_at,omitempty"`
+	// Fixtures lists synthetic regression fixture IDs associated with this exception.
+	Fixtures []string `toml:"fixtures,omitempty" json:"fixtures,omitempty"`
 }
 
 // GlobalConfig holds process-wide settings.

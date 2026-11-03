@@ -14,9 +14,11 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	coreruleset "github.com/corazawaf/coraza-coreruleset/v4"
 	"github.com/corazawaf/coraza/v3"
@@ -75,7 +77,7 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		WithDirectives(directives).
 		WithRequestBodyAccess().
 		WithErrorCallback(errorCallback(cfg, opts))
-	wcfg = experimental.WAFConfigWithRuleObserver(wcfg, func(r types.RuleMetadata) { counter.observe(r.File()) })
+	wcfg = experimental.WAFConfigWithRuleObserver(wcfg, func(r types.RuleMetadata) { counter.observeRule(r.ID(), r.File()) })
 	if limit := cfg.RequestBodyLimit.Bytes(); limit > 0 {
 		wcfg = wcfg.WithRequestBodyLimit(int(limit))
 		if limit < 131072 {
@@ -89,6 +91,23 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	w, err := coraza.NewWAF(wcfg)
 	if err != nil {
 		return nil, fmt.Errorf("waf: compiling rules: %w", err)
+	}
+	if counter.collisionID != 0 {
+		_ = closeWAF(w)
+		return nil, fmt.Errorf("waf: compiling rules: external rule id %d collides with Jul reserved generated range (%d–%d)",
+			counter.collisionID, config.WAFGeneratedExceptionIDBase-1, config.WAFGeneratedRuleIDMax)
+	}
+	activeRuleIDs, err := compiledRuleIDs(w)
+	if err != nil {
+		_ = closeWAF(w)
+		return nil, err
+	}
+	for i, exc := range cfg.Exceptions {
+		if !activeRuleIDs[exc.RuleID] {
+			_ = closeWAF(w)
+			return nil, fmt.Errorf("waf: compiling rules: exception[%d] references rule_id %d which does not exist in the compiled ruleset",
+				i, exc.RuleID)
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		_ = closeWAF(w)
@@ -174,21 +193,46 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 	}
 	if cfg.CRSEnabled {
 		info.CRSVersion = EmbeddedCRSVersion()
-		info.Paranoia = cfg.Paranoia
-		if cfg.Paranoia <= 0 {
-			info.Paranoia, info.ParanoiaDefault = 1, true
-		} else if info.Rules.Inline > 0 {
+		blocking, detection, isDefault := effectiveCRSParanoia(cfg)
+		info.Paranoia = blocking
+		info.BlockingParanoia = blocking
+		info.DetectionParanoia = detection
+		info.ParanoiaDefault = isDefault
+		if !isDefault && info.Rules.Inline > 0 {
 			// buildDirectives emitted the paranoia SecAction (id 900000).
 			info.Rules.Inline--
 			info.Rules.Generated++
 		}
 	}
+	if n := len(cfg.Exceptions); n > 0 {
+		info.ExceptionsCount, info.ExceptionsReviewDue = SummarizeExceptions(cfg.Exceptions, time.Now())
+		for i := 0; i < n && info.Rules.Inline > 0; i++ {
+			info.Rules.Inline--
+			info.Rules.Generated++
+		}
+	}
+	info.HasCustomTuningDirectives = rec.hasCustomTuning() || DetectCustomTuningDirectives(cfg.InlineRules)
 	var rawSum [32]byte
 	info.ExternalFiles, info.ExternalDigest, rawSum = rec.identity(versions)
 	polBytes := canonicalPolicyBytes(cfg, info, rawSum)
 	polSum := sha256.Sum256(polBytes)
 	info.PolicyDigest = versions.Digest("waf-compiled-policy-v1", polBytes)
 	return info, rawSum, polSum
+}
+
+func effectiveCRSParanoia(cfg config.WAFConfig) (blocking int, detection int, isDefault bool) {
+	blocking = cfg.EffectiveBlockingParanoia()
+	detection = cfg.EffectiveDetectionParanoia()
+	if blocking <= 0 && detection <= 0 {
+		return 1, 1, true
+	}
+	if blocking <= 0 {
+		blocking = 1
+	}
+	if detection <= 0 {
+		detection = blocking
+	}
+	return blocking, detection, false
 }
 
 func canonicalPolicyBytes(cfg config.WAFConfig, info PolicyInfo, rawExternalSum [32]byte) []byte {
@@ -202,11 +246,17 @@ func canonicalPolicyBytes(cfg config.WAFConfig, info PolicyInfo, rawExternalSum 
 	writeFramed("block_status", strconv.Itoa(info.BlockStatus))
 	writeFramed("crs_enabled", strconv.FormatBool(info.CRSEnabled))
 	writeFramed("paranoia", strconv.Itoa(info.Paranoia))
+	writeFramed("blocking_paranoia", strconv.Itoa(info.BlockingParanoia))
+	writeFramed("detection_paranoia", strconv.Itoa(info.DetectionParanoia))
 	writeFramed("request_body_limit", strconv.FormatInt(info.RequestBodyLimitBytes, 10))
 	writeFramed("response_body_inspection", strconv.FormatBool(info.ResponseBodyInspection))
 	writeFramed("external_raw_sha256", hex.EncodeToString(rawExternalSum[:]))
 	inlineSum := sha256.Sum256([]byte(strings.TrimSpace(cfg.InlineRules)))
 	writeFramed("inline_sha256", hex.EncodeToString(inlineSum[:]))
+	if excLines, _, err := BuildExceptionDirectives(cfg.Exceptions); err == nil && len(excLines) > 0 {
+		excSum := sha256.Sum256([]byte(strings.Join(excLines, "\n")))
+		writeFramed("exceptions_sha256", hex.EncodeToString(excSum[:]))
+	}
 	return b.Bytes()
 }
 
@@ -314,15 +364,30 @@ func buildDirectives(cfg config.WAFConfig) (string, error) {
 		}
 	}
 
+	excLines, _, err := BuildExceptionDirectives(cfg.Exceptions)
+	if err != nil {
+		return "", err
+	}
+
 	if cfg.CRSEnabled {
 		b.WriteString("Include @coraza.conf-recommended\n")
 		b.WriteString("Include @crs-setup.conf.example\n")
-		if cfg.Paranoia > 0 {
+		blocking, detection, isDefault := effectiveCRSParanoia(cfg)
+		if !isDefault {
 			fmt.Fprintf(&b,
 				"SecAction \"id:900000,phase:1,nolog,pass,t:none,setvar:tx.blocking_paranoia_level=%d,setvar:tx.detection_paranoia_level=%d\"\n",
-				cfg.Paranoia, cfg.Paranoia)
+				blocking, detection)
+		}
+		for _, line := range excLines {
+			b.WriteString(line)
+			b.WriteByte('\n')
 		}
 		b.WriteString("Include @owasp_crs/*.conf\n")
+	} else {
+		for _, line := range excLines {
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
 	}
 
 	for _, path := range cfg.DirectivesFiles {
@@ -379,4 +444,52 @@ func errorCallback(cfg config.WAFConfig, opts Options) func(types.MatchedRule) {
 				"severity", mr.Rule().Severity().String())
 		}
 	}
+}
+
+// compiledRuleIDs is the isolated compatibility adapter that extracts the
+// authoritative final set of active rule IDs from the compiled Coraza WAF's
+// RuleGroup after Coraza's SecLang parser has processed all includes,
+// backslash continuations, and sequential rule additions/removals (#631,
+// ADR 0031 §4.2). If an upstream Coraza version changes its internal struct
+// layout, it fails closed with an explicit compatibility error distinct from a
+// missing rule_id.
+func compiledRuleIDs(w coraza.WAF) (map[int]bool, error) {
+	v := reflect.ValueOf(w)
+	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: nil wrapper (%T)", w)
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: expected wrapper struct, got %T", w)
+	}
+	wafField := v.FieldByName("waf")
+	if !wafField.IsValid() || wafField.Kind() != reflect.Pointer || wafField.IsNil() || wafField.Elem().Kind() != reflect.Struct {
+		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing *corazawaf.WAF field on %T", w)
+	}
+	rulesGroup := wafField.Elem().FieldByName("Rules")
+	if !rulesGroup.IsValid() || rulesGroup.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing Rules struct field on %T", w)
+	}
+	rulesSlice := rulesGroup.FieldByName("rules")
+	if !rulesSlice.IsValid() || rulesSlice.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing Rules.rules slice field on %T", w)
+	}
+	elemType := rulesSlice.Type().Elem()
+	if elemType.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: Rules.rules element is %s, want struct", elemType.Kind())
+	}
+	idStructField, ok := elemType.FieldByName("ID_")
+	if !ok || (idStructField.Type.Kind() != reflect.Int && idStructField.Type.Kind() != reflect.Int64) {
+		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing Rule.ID_ int field on %s", elemType.String())
+	}
+	out := make(map[int]bool, rulesSlice.Len())
+	for i := 0; i < rulesSlice.Len(); i++ {
+		idField := rulesSlice.Index(i).FieldByName("ID_")
+		if id := int(idField.Int()); id > 0 {
+			out[id] = true
+		}
+	}
+	return out, nil
 }
