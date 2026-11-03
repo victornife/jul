@@ -993,9 +993,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		storage.admin = adminSrv.StorageTargets
 		storage.audit = adminSrv.AuditWriteHealth
 		f.SetAuditHealthSource(adminSrv.AuditWriteHealth)
+		f.SetSecurityPostureSource(adminSrv.RefreshSecurityPostureMetrics)
 	}
 	metrics.SetStorageSource(storage.headroom, storageHintsView(storage.hints))
-	metrics.SetPreGatherHook(f.RefreshSecurityEvidenceMetrics)
+	metrics.SetPreGatherHook(f.RefreshSecurityMetrics)
 	if adminSrv != nil {
 		// Install the initial RBAC policy from the startup candidate.
 		// H-01: Fail-closed when RBAC is enabled but policy build fails.

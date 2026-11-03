@@ -447,6 +447,20 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 	}
 
 	// 1. Start in block mode with clean baseline, then start real Prometheus + Alertmanager scraping Jul's real admin /metrics.
+	// This notification-transport test controls the bounded posture input. The
+	// actual scrape-driven evaluator is tested separately without injected counts
+	// in TestSecurityPostureMetricsRefreshWithoutPostureReads.
+	var postureError atomic.Bool
+	factory.SetSecurityPostureSource(func() {
+		count := 0
+		if postureError.Load() {
+			count = 1
+		}
+		factory.Metrics.ObserveSecurityPostureFindings(map[string]map[string]int{
+			"intent": {"error": count, "warning": 0},
+		})
+		factory.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "ok")
+	})
 	hMap, _, commit1, _, err := factory.Prepare(ctx, makeCfg("block", true))
 	if err != nil {
 		t.Fatalf("Prepare initial block: %v", err)
@@ -489,9 +503,7 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 	if err := os.WriteFile(extRuleFile, []byte(initialRule+"# modified on disk\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	factory.Metrics.ObserveSecurityPostureFindings(map[string]map[string]int{
-		"intent": {"error": 1, "warning": 0},
-	})
+	postureError.Store(true)
 
 	waitForWebhook := func(alertName, wantStatus string, timeout time.Duration, stepFn func()) bool {
 		deadline := time.Now().Add(timeout)
@@ -551,9 +563,7 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 	if err := os.WriteFile(extRuleFile, []byte(initialRule), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	factory.Metrics.ObserveSecurityPostureFindings(map[string]map[string]int{
-		"intent": {"error": 0, "warning": 0},
-	})
+	postureError.Store(false)
 	for i := 0; i < 200; i++ {
 		reqClean := httptest.NewRequest(http.MethodGet, "http://example.test/public?id=clean", nil)
 		recClean := httptest.NewRecorder()

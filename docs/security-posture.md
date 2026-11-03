@@ -9,6 +9,21 @@ production deployment today.
 
 > **Audit sink path safety.** HR-07C prepares the candidate destination before Publish, rejects unsafe final symlinks/special files, identity-checks the opened regular file, and exposes only bounded failure categories outside the authenticated `config:read` settings surface. See [audit sink hot reload](audit-sink-hot-reload.md).
 
+## Current findings for external monitoring
+
+Authenticated `/metrics` scrapes refresh `jul_security_posture_findings` through
+the same read-only evaluator as `GET /api/v1/security/posture`. Certificate time
+checks, local certificate-file changes and persisted/serving drift therefore do
+not depend on opening the Console. No network scanning or background polling is
+added. Scrapes use the retained raw/effective serving snapshot without resolving
+secret providers again.
+
+If the persisted configuration cannot be read, findings still describe the
+serving snapshot but `jul_security_evidence_state{producer="posture_evaluator",
+state="stale"}` is active because drift is unknown. With no usable snapshot the
+producer is `unavailable`; neither state means healthy. The existing WAF asset,
+investigation and audit health owners refresh their own evidence independently.
+
 ## Admin authentication model
 
 ### Current state

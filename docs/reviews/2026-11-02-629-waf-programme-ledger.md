@@ -90,7 +90,7 @@ States: `not started` | `implemented/unverified` | `verified` | `unavailable` | 
 | Criterion ID | Requirement Summary | Owner Surface | Named Test(s) | Docs | Status |
 | --- | --- | --- | --- | --- | --- |
 | `630-1` | Compiled policy manifest and context-keyed `policy_digest` (`waf-compiled-policy-v1`) vs. private raw digests (`config:raw` / local CLI only, preserving `#649`) | `internal/waf/policy.go`, `internal/waf/manifest.go`, `internal/admin/waf_effective.go` | `TestWAFPolicyManifestAndVerifyAssetsAfterSamePathEdit`, `TestBuildWAFEffective_Confidentiality` | `docs/waf.md`, `docs/effective-versions.md` | `verified` |
-| `630-2` | Versioned synthetic regression fixture pack (`examples/waf-policy/fixtures.json`) covering normal forms, JSON, multipart uploads, size/encoding boundaries, and malicious SQLi/XSS/RCE/LFI controls | `internal/waf/eval.go`, `examples/waf-policy/fixtures.json` | `TestWAFFixturePackBaselineAndCandidateComparison` | `docs/waf.md`, `examples/waf-policy/README.md` | `verified` |
+| `630-2` | Versioned synthetic regression fixture packs (`examples/waf-policy/fixtures.json` and `fixtures-size-boundaries.json`) covering normal forms, JSON, multipart uploads, encoding/parser and paired body-size boundaries, and malicious SQLi/XSS/RCE/scanner controls | `internal/waf/eval.go`, `examples/waf-policy/fixtures.json` | `TestWAFFixturePackBaselineAndCandidateComparison` | `docs/waf.md`, `examples/waf-policy/README.md` | `verified` |
 | `630-3` | Reproducible candidate evaluation (`jul waf evaluate`, `POST /api/security/waf/evaluate`) comparing baseline vs. candidate verdicts, rules, origin effects, and resource costs; re-verified for same-path file changes | `internal/waf/eval.go`, `cmd/jul/waf_cli.go`, `internal/admin/waf_effective.go`, `internal/app/waf_report.go` | `TestWAFFixturePackBaselineAndCandidateComparison`, `TestWAFCLIEvaluateManifestAndVerifyAssets`, `TestWAFEffectiveEvaluateAndStalenessOnDisk` | `docs/waf.md`, `docs/admin-api.md`, `docs/remote-cli.md` | `verified` |
 | `630-4` | Promotion via existing preview/diff/apply/stage/history machinery; failed compile/Prepare leaves prior generation serving; `jul_waf_serving_routes` & `jul_waf_protection_changes_total` signals for `#628-B` | `internal/app/waf_report.go`, `internal/observability/metrics.go`, `internal/admin/ui/src/features/security/WAFEffectiveCard.tsx` | `TestWAFEffectiveEvaluateAndStalenessOnDisk`, `waf-effective.test.tsx` | `docs/waf.md`, `docs/observability.md`, `docs/metrics-contract.json` | `verified` |
 | `630-5` | Exact external-asset recovery across same-path file modification and restart (`jul waf manifest`, `jul waf verify-assets`, rollback asset-mismatch detection, `#584` coordination) | `internal/waf/manifest.go`, `cmd/jul/waf_cli.go` | `TestWAFPolicyManifestAndVerifyAssetsAfterSamePathEdit`, `TestWAFCLIEvaluateManifestAndVerifyAssets` | `docs/waf.md`, `docs/reload-semantics.md` | `verified` |
@@ -212,3 +212,51 @@ Both regressions fail against the preceding production implementation and pass w
 | Move-aware changed Go production statements for this follow-up | 31/32 = 96.875% (floor 90%) |
 
 NGINX migration: not applicable; this corrects internal Console/investigation snapshot correlation without changing imported configuration semantics. No new schema, database, identity owner, permission grant or provider read path is introduced. Fresh hosted CI/Codecov results belong to the subsequently published head; the local coverage figure is not hosted or cumulative programme coverage. CLI/macOS CLI certification, merge and issue closure are not claimed by this follow-up.
+
+## 11. Fresh Whole-Programme Re-audit and Closure (2026-11-03)
+
+A fresh review compared all six PRs (#678–#683), integrated at
+`82a9b132b6172edc44625a601bab3803d902c2a8`, against the programme base
+`70277d9886131b3e88927b150eb43af97ad7c312`, the original mandate, the accepted
+issue contracts and the consolidated findings. This reviewed the whole
+programme, including CLI, rather than just repeating the last fix review. CI
+was excluded; CLI was included. Two independent read-only reviews covered the
+security/architecture and acceptance/operator workflows, then reviewed these
+corrections. No additional concrete practical blocker remained in their scopes.
+
+| Finding at `82a9b132` | Correction and direct evidence | Disposition |
+| --- | --- | --- |
+| Unattended posture findings stayed unchanged after certificate expiry until an API/Console read | Authenticated scrapes reuse the existing admin snapshot evaluator through `RefreshSecurityMetrics`. The callback runs only on gathering, outside factory publication; raw/effective serving provenance and independent WAF/audit evidence remain authoritative. A real Jul process with a certificate expiring after 12 seconds now changes `certificates.error` from 0 to 1 through metrics alone. `TestSecurityPostureMetricsRefreshWithoutPostureReads` covers certificate degradation/recovery, persisted drift, source failure and concurrent authenticated scrapes without provider re-resolution; `TestPostureSnapshotAvailabilityForAPIAndMetrics` covers shared fallback/error behavior. | Fixed and re-verified |
+| Console showed one verified override summary while hiding an untested sibling | The existing client schema now preserves `overrides[].evaluation`. The serving card renders global and enabled override results separately, report scope and the number of active policies with current passing evidence. `waf-effective.test.tsx` parses through the production schema before asserting verified A, untested B and disabled-policy exclusion. | Fixed and re-verified |
+| Default fixture description overstated size coverage | The main pack is accurately described as encoding/parser coverage. The additional versioned `fixtures-size-boundaries.json` and paired `size-boundaries.toml` exercise 127/128/129-byte bodies plus legitimate/malicious controls. `TestExampleBodySizeBoundaryFixturePack` loads the delivered files, validates the configuration and pack, evaluates the actual engine and proves a changed candidate limit fails expectations. Actual CLI evaluation passes 5/5. The pinned Coraza threshold rejects at 128 bytes as well as above it; the example and WAF guide state that behavior. | Completed |
+
+The notification transport test's controlled posture input now uses the existing
+scrape callback seam, so refreshing real production posture does not overwrite
+that test's deliberate signal. Its real monitor/receiver execution remains
+separate from the actual-producer freshness tests. ADR 0031 records the refresh
+contract and the existing single-node causal inhibition recipe accurately.
+
+| Local validation of the corrected candidate | Actual result |
+| --- | --- |
+| Lean and full-profile owner suites: `internal/admin`, `internal/app`, `internal/waf`, `internal/versionid` | PASS |
+| Focused WAF-tag race tests, including shared posture/API availability and actual provider-backed Console handoff | PASS |
+| Full-profile programme operator journey, isolation matrix/executed gate and scoped evaluation/evidence regressions | PASS |
+| Full-profile `go vet` for the four owner packages | PASS |
+| Full frontend coverage suite | 87 suites / 1,028 tests PASS; coverage contract PASS |
+| Typecheck, affected-file ESLint, five focused WAF/Console suites and production asset build | PASS; focused suites 61 tests |
+| Full-profile focused CLI suite and separate-process CLI evaluation/asset recovery | PASS; default pack 10/10, paired size pack 5/5, exact recovery verified → asset_changed → verified |
+| Generated/configuration contracts, license check, docs and D11 inventory | PASS; docs 2,617 passed / 0 failed, D11 0 errors |
+| Move-aware changed Go production statements for this follow-up, combining owner and cross-package integration profiles | 70/70 = 100% (floor 90%) |
+
+Execution limits are not recorded as passes: this host has no Docker/promtool,
+so the real Prometheus/Alertmanager container pipeline and native rule-tool test
+skip locally. Unix sockets are denied by the host, limiting the full importer
+CLI corpus lane; `/proc` resource-stat access also makes the unrelated
+`TestSnapshotResourceFieldsPopulated` fail identically on the pre-fix source.
+These are local environment limitations, independently reproduced, rather than
+fresh CI results or programme regressions. Earlier recorded container evidence
+is historical and does not certify a fresh run at this candidate. The local
+changed-statement figure does not claim hosted or cumulative programme coverage.
+No merge, issue closure, release/maturity promotion or native macOS certification
+is performed by this review. NGINX migration: not applicable to these internal
+operator/evidence corrections; no importer semantics change.

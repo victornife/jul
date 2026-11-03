@@ -223,7 +223,7 @@ func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy, a
 	transition := classifyWAFProtectionTransition(prev, &cp)
 	f.Metrics.ObserveWAFServingRoutes(activeCounts[0], activeCounts[1], activeCounts[2], activeCounts[3])
 	f.Metrics.ObserveWAFProtectionChange(transition)
-	f.Metrics.SetPreGatherHook(f.RefreshSecurityEvidenceMetrics)
+	f.Metrics.SetPreGatherHook(f.RefreshSecurityMetrics)
 	f.RefreshSecurityEvidenceMetrics()
 	f.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "ok")
 	if liveCfg != nil && f.Metrics != nil {
@@ -240,6 +240,35 @@ func (f *HandlerFactory) publishWAF(genID uint64, p *admin.WAFEffectivePolicy, a
 		}
 		f.Metrics.ObserveSecurityPostureFindings(counts)
 	}
+}
+
+// RefreshSecurityMetrics is the scrape-only composition of the existing posture
+// and evidence owners. Do not invoke the admin snapshot callback during factory
+// publication: the server publishes its LiveSnapshot after the factory commits.
+func (f *HandlerFactory) RefreshSecurityMetrics() {
+	if f == nil || f.Metrics == nil {
+		return
+	}
+	f.moduleMu.Lock()
+	refresh := f.refreshPosture
+	rawCfg, effCfg := f.liveRawConfig, f.liveConfig
+	f.moduleMu.Unlock()
+	if refresh != nil {
+		refresh()
+	} else if effCfg != nil {
+		posture := admin.EvaluateSecurityPostureOffline(rawCfg, effCfg, waf.Compiled)
+		counts := make(map[string]map[string]int, len(posture.Areas))
+		for _, a := range posture.Areas {
+			counts[a.Area] = map[string]int{"warning": a.WarningCount, "error": a.ErrorCount}
+		}
+		f.Metrics.ObserveSecurityPostureFindings(counts)
+		f.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "ok")
+	} else {
+		f.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "unavailable")
+	}
+	// Asset drift and current audit/investigation health must win over the
+	// posture evaluator's projection of these independently owned producers.
+	f.RefreshSecurityEvidenceMetrics()
 }
 
 // RefreshSecurityEvidenceMetrics checks on-disk external WAF rule assets,

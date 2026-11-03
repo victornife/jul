@@ -1,0 +1,21 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
+# Synthetic-only small limit; use jul.toml for the ordinary example policy.
+[global]
+config_authority = "file_owned"
+
+[waf]
+enabled = true
+mode = "block"
+crs_enabled = true
+paranoia = 1
+request_body_limit = "128b"
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["app.example.test"]
+
+[[servers.locations]]
+match = { type = "prefix", path = "/" }
+return = 200

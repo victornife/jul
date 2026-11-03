@@ -319,6 +319,31 @@ func (s *Server) handleV1SecurityPosture(w http.ResponseWriter, r *http.Request)
 	if !requireExternalMethod(w, r, http.MethodGet) {
 		return
 	}
+	includeConfigDetails := true
+	if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
+		includeConfigDetails = false
+	}
+	resp, apiErr := s.securityPostureSnapshot(includeConfigDetails)
+	if apiErr != nil {
+		writeAPIError(w, r, apiErr)
+		return
+	}
+	writeAPIJSON(w, http.StatusOK, resp)
+}
+
+// RefreshSecurityPostureMetrics uses the same read-only evaluator as the API.
+// The metrics pre-gather hook calls it so time-dependent findings and persisted
+// drift update without an operator opening the Console. No provider resolution,
+// network probing, or configuration mutation is performed.
+func (s *Server) RefreshSecurityPostureMetrics() {
+	_, _ = s.securityPostureSnapshot(false)
+}
+
+func (s *Server) securityPostureSnapshot(includeConfigDetails bool) (adminapi.SecurityPostureResponse, *adminapi.Error) {
+	// Serialize scrapes and interactive evaluations so an older observation
+	// cannot overwrite a newer observation's metrics after it completes.
+	s.postureMu.Lock()
+	defer s.postureMu.Unlock()
 	state, apiErr := s.v1ConfigState()
 	var persistedCfg *config.Config
 	var baseVersion string
@@ -346,19 +371,22 @@ func (s *Server) handleV1SecurityPosture(w http.ResponseWriter, r *http.Request)
 	}
 	if effServingCfg == nil {
 		if apiErr != nil {
-			writeAPIError(w, r, apiErr)
-			return
+			if s.deps.ObserveSecurityEvidenceState != nil {
+				s.deps.ObserveSecurityEvidenceState("posture_evaluator", "unavailable")
+			}
+			return adminapi.SecurityPostureResponse{}, apiErr
 		}
 		effServingCfg = persistedCfg
 		rawServingCfg = persistedCfg
 	}
 
-	includeConfigDetails := true
-	if id, ok := rbac.IdentityFromContext(r.Context()); ok && !id.Has(rbac.ConfigRead) {
-		includeConfigDetails = false
-	}
 	resp := s.evaluateSecurityPostureWithPersisted(rawServingCfg, effServingCfg, persistedCfg, baseVersion, includeConfigDetails)
-	writeAPIJSON(w, http.StatusOK, resp)
+	if apiErr != nil && s.deps.ObserveSecurityEvidenceState != nil {
+		// The serving generation remains inspectable, but persisted drift is
+		// unknown. Do not advertise complete fresh evidence after a read failure.
+		s.deps.ObserveSecurityEvidenceState("posture_evaluator", "stale")
+	}
+	return resp, nil
 }
 
 // EvaluateSecurityPostureOffline evaluates the 7-area gateway security posture

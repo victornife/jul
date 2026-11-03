@@ -11,6 +11,7 @@ import type { ReactNode } from "react";
 
 import {
   SecurityProjectionSchema,
+  WAFEffectivePolicySchema,
   type SecurityProjection,
   type WAFEffectivePolicy,
   type WAFPolicySummary,
@@ -215,7 +216,9 @@ describe("WAFEffectiveCard (#440)", () => {
     expect(screen.getByText("OWASP CRS (version not reported) · paranoia 3")).toBeInTheDocument();
     expect(screen.getByText("limit not reported")).toBeInTheDocument();
     expect(screen.getByText("Verified (10/10 fixtures)")).toBeInTheDocument();
-    expect(screen.getByText(/External rule files are not restored by configuration rollback alone/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/External rule files are not restored by configuration rollback alone/),
+    ).toBeInTheDocument();
   });
 
   it("renders stale evaluation warning badges", () => {
@@ -236,6 +239,52 @@ describe("WAFEffectiveCard (#440)", () => {
       },
     });
     expect(screen.getByText("Stale: external asset changed")).toBeInTheDocument();
+  });
+
+  it("keeps verified and untested sibling policies visibly separate", () => {
+    const current = {
+      state: "current",
+      scope: "app-a",
+      source: "server_observed",
+      total_cases: 10,
+      passed_cases: 10,
+      failed_cases: 0,
+      legitimate_total: 4,
+      legitimate_blocked: 0,
+      malicious_total: 4,
+      malicious_allowed: 0,
+      changed_from_baseline: 0,
+    };
+    renderCard(
+      WAFEffectivePolicySchema.parse({
+        ...serving,
+        global: undefined,
+        global_enabled: false,
+        evaluation: current,
+        overrides: [
+          {
+            listen: ":8443",
+            path: "/a",
+            route_id: "app-a",
+            enabled: true,
+            policy: crsGlobal,
+            evaluation: current,
+          },
+          { listen: ":8443", path: "/b", route_id: "app-b", enabled: true, policy: detectOverride },
+          { listen: ":8443", path: "/off", route_id: "off", enabled: false },
+        ],
+      }),
+    );
+    expect(screen.getByText(/1 of 2 active policies/)).toHaveClass("text-jul-warning");
+    const a = screen.getByRole("group", { name: "Fixture evaluation: app-a" });
+    const b = screen.getByRole("group", { name: "Fixture evaluation: app-b" });
+    expect(within(a).getByText("Verified (10/10 fixtures)")).toBeInTheDocument();
+    expect(within(a).getByText("Report scope: app-a")).toBeInTheDocument();
+    expect(within(b).getByText("Not yet evaluated")).toBeInTheDocument();
+    expect(within(b).queryByText(/Verified/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "Fixture evaluation: off" }),
+    ).not.toBeInTheDocument();
   });
 });
 

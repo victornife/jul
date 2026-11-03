@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "pack_id": "jul-waf-default-v1",
-  "description": "Synthetic legitimate requests, encoding/size boundaries, and malicious attack controls for OWASP CRS v4.25.0 and Coraza v3.8.1",
+  "description": "Synthetic legitimate requests, encoding/parser boundaries, and malicious attack controls for OWASP CRS v4.25.0 and Coraza v3.8.1",
   "fixtures": [
     {
       "id": "legit-get-catalog",

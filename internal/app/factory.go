@@ -96,6 +96,7 @@ type HandlerFactory struct {
 	liveConfig            *config.Config
 	onBeforeEvalCommit    func(scope string)
 	auditHealth           func() (uint64, bool, bool)
+	refreshPosture        func()
 	lastCutover           []cache.InvalidateResult
 	lastCutoverErr        error
 	lastCutoverGen        uint64
@@ -110,6 +111,17 @@ func (f *HandlerFactory) SetAuditHealthSource(fn func() (uint64, bool, bool)) {
 	}
 	f.moduleMu.Lock()
 	f.auditHealth = fn
+	f.moduleMu.Unlock()
+}
+
+// SetSecurityPostureSource reuses the admin posture evaluator for scrape-driven
+// findings, including persisted drift and live-generation state (#633, #628-B).
+func (f *HandlerFactory) SetSecurityPostureSource(fn func()) {
+	if f == nil {
+		return
+	}
+	f.moduleMu.Lock()
+	f.refreshPosture = fn
 	f.moduleMu.Unlock()
 }
 

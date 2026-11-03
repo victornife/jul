@@ -122,7 +122,7 @@ override):
 | `paranoia` | int | `1` | CRS paranoia level `1`–`4` (only with `crs_enabled`). Higher catches more, with more false positives |
 | `directives_files` | string list | — | SecLang rule files to `Include`, in order, before the inline rules |
 | `inline_rules` | string | — | A SecLang snippet appended last — handy for small tuning/allow-list rules |
-| `request_body_limit` | size | `128kb` | How many request-body bytes to buffer for inspection (e.g. `1mb`); a larger body is rejected with `413` |
+| `request_body_limit` | size | `128kb` | Request-body buffering threshold (e.g. `1mb`); with the pinned engine's default Reject action, a body reaching or exceeding this threshold is rejected with `413` |
 | `response_body_check` | bool | `false` | Also inspect response bodies (CRS phase 4). Adds latency + memory |
 
 At least one rule source — `crs_enabled`, a `directives_files` entry, or
@@ -690,3 +690,12 @@ Use the Console’s diff-and-apply flow and the config-history rollback feature
 | 9 | Self-explanatory Console surface | ✅ Console **Status**/**Security** report *Web application firewall (WAF)* with mode + location count |
 
 The WAF is now **GA**.
+
+
+### Reading scoped fixture evidence in Console
+
+The serving WAF card shows a fixture result for the global policy and each
+enabled route override, plus the count of active policies with a current passing
+evaluation. A verified report on one scope does not verify its siblings. Untested,
+failed and stale policies remain visible individually; disabled overrides are
+not counted as active policies. Report scope labels identify scoped evidence.

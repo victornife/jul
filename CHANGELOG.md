@@ -11,6 +11,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Refresh bounded security posture findings on authenticated metrics scrapes,
+  including certificate changes and persisted drift, and expose verified versus
+  untested WAF policy scopes separately in the Console (#629, #630, #633, #628-B).
+
 - Keep Security route selectors and their concurrency version in one editable
   snapshot, and correlate WAF investigation against confidential raw predicate
   declarations so env/file-backed matches remain tunable without disclosing or
