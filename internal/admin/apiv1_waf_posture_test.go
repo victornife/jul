@@ -1021,13 +1021,13 @@ server_names = ["api.example.test"]
 			PathPattern:         "/api",
 			MatchOrdinal:        0,
 			Scope:               "global",
-			CanonicalPredicates: vCtx.RoutePredicates(candPred.Effective.Servers[0].Locations[0].Match),
+			CanonicalPredicates: vCtx.RoutePredicates(candPred.Raw.Servers[0].Locations[0].Match),
 		},
 	})
 	sPred := newTestServer(t, config.AdminConfig{}, Deps{
 		EffectiveVersions: vCtx,
 		ReadConfigRaw:     func() ([]byte, error) { return []byte(rawPredTOML), nil },
-		LoadConfig:        func() (*config.Config, error) { return candPred.Effective, nil },
+		LoadConfig:        func() (*config.Config, error) { return candPred.Raw, nil },
 		WAFCompiled:       true,
 		WAFEffective: func() *WAFEffectivePolicy {
 			return &WAFEffectivePolicy{
@@ -1045,7 +1045,7 @@ server_names = ["api.example.test"]
 						Path:                "/api",
 						MatchOrdinal:        0,
 						SelectorVersion:     "global-v1",
-						CanonicalPredicates: vCtx.RoutePredicates(candPred.Effective.Servers[0].Locations[0].Match),
+						CanonicalPredicates: vCtx.RoutePredicates(candPred.Raw.Servers[0].Locations[0].Match),
 						Scope:               "global",
 						Enabled:             true,
 					},
@@ -1056,7 +1056,7 @@ server_names = ["api.example.test"]
 						Path:                "/api",
 						MatchOrdinal:        1,
 						SelectorVersion:     "global-v1",
-						CanonicalPredicates: vCtx.RoutePredicates(candPred.Effective.Servers[0].Locations[1].Match),
+						CanonicalPredicates: vCtx.RoutePredicates(candPred.Raw.Servers[0].Locations[1].Match),
 						Scope:               "global",
 						Enabled:             true,
 					},

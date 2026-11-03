@@ -190,3 +190,25 @@ Populated across stage reviews and the final whole-programme review (`sec-review
 
 
 
+
+## 10. Integrated Security Snapshot Regression Closure (2026-11-03)
+
+The two regressions reproduced at integrated source `80766edc355e8f8fb8976d982e56612228b39303` are corrected together:
+
+- **Selector/version coherence:** `/api/security` obtains `Config` and `Version` from the same raw-first `currentWriteState` snapshot. `TestSecuritySnapshotKeepsSelectorsAndVersionTogether` deterministically supplies old loader data and newer raw bytes, and verifies the projection uses the latter's selectors and fence together with one read. Method, unavailable-source and safe-error regressions are covered by `TestSecuritySnapshotAvailabilityAndMethod`.
+- **Confidential predicate identity domain:** editable, serving and event correlation hashes the raw declaration retained by the existing immutable candidate. The runtime continues matching resolved values; investigation reads never re-resolve providers or publish their values. `TestWAFSecretPredicateSecurityWorkflow` uses a real TOML source, resolved candidate, actual routing/Coraza, authenticated HTTP APIs, env/file-backed header/query siblings, changed provider contents after publication, the actual Console TypeScript matcher and real typed preview. It verifies successful current targeting, secret-free responses, operator permission denial, authorized previews and CAS rejection after a persisted reorder. The Node subtest explicitly reports a skip if Node is absent; it executed successfully in this validation.
+
+Both regressions fail against the preceding production implementation and pass with this correction. Two independent read-only reviews cleared the production changes and adjacent lifecycle/privacy/operator paths. Validation on the local candidate based on `80766edc`:
+
+| Check | Actual result |
+| --- | --- |
+| Lean, WAF-tag and full-profile tests for `internal/admin`, `internal/app`, `internal/waf`, `internal/versionid` | PASS |
+| Focused `-race -tags waf` admin/app snapshot, provider workflow and generation regressions | PASS |
+| Full-profile `go vet` on the four affected packages | PASS |
+| Five affected Console Vitest suites | 58 tests PASS |
+| `make generated-check`, `make config-check`, pinned `addlicense` license check | PASS |
+| `scripts/docs-check.py` | 2,617 PASS, 0 failures |
+| `scripts/check-d11-certification.py` | 0 errors |
+| Move-aware changed Go production statements for this follow-up | 31/32 = 96.875% (floor 90%) |
+
+NGINX migration: not applicable; this corrects internal Console/investigation snapshot correlation without changing imported configuration semantics. No new schema, database, identity owner, permission grant or provider read path is introduced. Fresh hosted CI/Codecov results belong to the subsequently published head; the local coverage figure is not hosted or cumulative programme coverage. CLI/macOS CLI certification, merge and issue closure are not claimed by this follow-up.

@@ -539,6 +539,10 @@ detection_paranoia = 2
   sanitized `matched_targets` (`ARGS:field_name`, `REQUEST_HEADERS:Header-Name`),
   and click **Tune `<target>` →** in the Console to seed a narrow `#631`
   exception directly in the guided WAF editor.
+  Secret-backed header/query matches remain usable in this workflow without
+  exposing their values or reloading their providers during investigation.
+  Route selection and its configuration version describe one snapshot; a
+  later configuration change requires refreshing the selection before tuning.
 - `GET /api/v1/security/posture` (`status:read`), `jul posture -config jul.toml`,
   and the Console **Posture review** drawer evaluate the finite 7-area gateway
   security posture (`admin`, `trust`, `waf`, `cache`, `certificates`, `intent`,

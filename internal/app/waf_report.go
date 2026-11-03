@@ -21,6 +21,18 @@ import (
 	"jul/internal/waf"
 )
 
+// declaredWAFRouteMatch selects predicate identity inputs from the immutable
+// candidate's raw configuration. Secret resolution changes matching values,
+// not the identity of the declaration the operator edits. Using that same
+// domain for editable, serving and event views avoids re-reading providers.
+// Embedding callers without a raw candidate retain their supplied match.
+func declaredWAFRouteMatch(raw *config.Config, serverIndex, locationIndex int, effective config.MatchConfig) config.MatchConfig {
+	if raw != nil && serverIndex < len(raw.Servers) && locationIndex < len(raw.Servers[serverIndex].Locations) {
+		return raw.Servers[serverIndex].Locations[locationIndex].Match
+	}
+	return effective
+}
+
 // wafReport accumulates one generation's compiled WAF policies (#440).
 type wafReport struct {
 	out          admin.WAFEffectivePolicy
@@ -1060,7 +1072,7 @@ func (f *HandlerFactory) wafEffectiveSnapshot(updateMetrics bool) *admin.WAFEffe
 					MatchOrdinal:        ordinals[i][j],
 					SelectorVersion:     "global-v1",
 					Methods:             append([]string(nil), loc.Match.Methods...),
-					CanonicalPredicates: f.Versions.RoutePredicates(loc.Match),
+					CanonicalPredicates: f.Versions.RoutePredicates(declaredWAFRouteMatch(liveRawCfg, i, j, loc.Match)),
 					Scope:               rScope,
 					Enabled:             rEnabled,
 				})

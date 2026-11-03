@@ -11,6 +11,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Keep Security route selectors and their concurrency version in one editable
+  snapshot, and correlate WAF investigation against confidential raw predicate
+  declarations so env/file-backed matches remain tunable without disclosing or
+  re-reading secrets (#629, #632).
+
 - Complete the `#629` WAF & security-operations programme with the version-pinned
   Prometheus `v3.11.2` + Alertmanager `v0.32.0` external security-alerting recipe
   (`examples/alerting/security/`, #628 Milestone B + #632 actual-rejection

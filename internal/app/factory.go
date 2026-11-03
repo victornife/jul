@@ -738,6 +738,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// reload with a clear message instead of surfacing per request. In a lean
 	// build (no "waf" tag) waf.New is never reached because waf.Check already
 	// rejected the configuration at startup.
+	rawWAFConfig := config.RawConfigFromContext(ctx, c)
 	wafByScope := make(map[string]*waf.Firewall)
 	wafRouteAttrByScope := make(map[string]waf.RouteAttribution)
 	wafReport := newWAFReport(c)
@@ -802,7 +803,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				MatchOrdinal:        ordinals[i][j],
 				Scope:               scopeKind,
 				Methods:             append([]string(nil), loc.Match.Methods...),
-				CanonicalPredicates: f.Versions.RoutePredicates(loc.Match),
+				CanonicalPredicates: f.Versions.RoutePredicates(declaredWAFRouteMatch(rawWAFConfig, i, j, loc.Match)),
 			}
 		}
 	}
