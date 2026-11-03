@@ -17,7 +17,13 @@ import {
 } from "@/api/client.ts";
 import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
 import { WAFEffectiveCard } from "@/features/security/WAFEffectiveCard.tsx";
-import { plural, ruleSources, servingDiffers, shortDigest } from "@/lib/wafEffective.ts";
+import {
+  evaluationStateLabel,
+  plural,
+  ruleSources,
+  servingDiffers,
+  shortDigest,
+} from "@/lib/wafEffective.ts";
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -188,14 +194,128 @@ describe("WAFEffectiveCard (#440)", () => {
         paranoia: 3,
         paranoia_default: false,
         request_body_limit_bytes: undefined,
+        external_files: 1,
+        external_digest: detectOverride.external_digest,
+        policy_digest: detectOverride.external_digest,
+      },
+      evaluation: {
+        state: "current",
+        source: "server_observed",
+        pack_id: "jul-waf-default-v1",
+        total_cases: 10,
+        passed_cases: 10,
+        failed_cases: 0,
+        legitimate_total: 4,
+        legitimate_blocked: 0,
+        malicious_total: 4,
+        malicious_allowed: 0,
+        changed_from_baseline: 0,
       },
     });
     expect(screen.getByText("OWASP CRS (version not reported) · paranoia 3")).toBeInTheDocument();
     expect(screen.getByText("limit not reported")).toBeInTheDocument();
+    expect(screen.getByText("Verified (10/10 fixtures)")).toBeInTheDocument();
+    expect(screen.getByText(/External rule files are not restored by configuration rollback alone/)).toBeInTheDocument();
+  });
+
+  it("renders stale evaluation warning badges", () => {
+    renderCard({
+      ...serving,
+      overrides: [],
+      evaluation: {
+        state: "stale_asset_changed",
+        source: "supplied_report",
+        total_cases: 10,
+        passed_cases: 9,
+        failed_cases: 1,
+        legitimate_total: 4,
+        legitimate_blocked: 1,
+        malicious_total: 4,
+        malicious_allowed: 0,
+        changed_from_baseline: 1,
+      },
+    });
+    expect(screen.getByText("Stale: external asset changed")).toBeInTheDocument();
   });
 });
 
 describe("wafEffective helpers", () => {
+  it("describes evaluation states (#630)", () => {
+    expect(evaluationStateLabel(undefined).badge).toBe("Not yet evaluated");
+    expect(
+      evaluationStateLabel({
+        state: "current",
+        source: "supplied_report",
+        pack_id: "custom",
+        total_cases: 5,
+        passed_cases: 4,
+        failed_cases: 1,
+        legitimate_total: 3,
+        legitimate_blocked: 1,
+        malicious_total: 2,
+        malicious_allowed: 0,
+        changed_from_baseline: 0,
+      }).badge,
+    ).toBe("Evaluated (1 failed)");
+    expect(
+      evaluationStateLabel({
+        state: "failed",
+        source: "server_observed",
+        pack_id: "jul-waf-default-v1",
+        total_cases: 10,
+        passed_cases: 8,
+        failed_cases: 2,
+        legitimate_total: 5,
+        legitimate_blocked: 1,
+        malicious_total: 5,
+        malicious_allowed: 1,
+        changed_from_baseline: 2,
+      }),
+    ).toMatchObject({
+      badge: "Evaluation failed (2 failed)",
+      tone: "warning",
+    });
+    expect(
+      evaluationStateLabel({
+        state: "stale_policy_changed",
+        total_cases: 5,
+        passed_cases: 5,
+        failed_cases: 0,
+        legitimate_total: 3,
+        legitimate_blocked: 0,
+        malicious_total: 2,
+        malicious_allowed: 0,
+        changed_from_baseline: 0,
+      }).badge,
+    ).toBe("Stale: policy changed");
+    expect(
+      evaluationStateLabel({
+        state: "stale_engine_or_crs_changed",
+        total_cases: 5,
+        passed_cases: 5,
+        failed_cases: 0,
+        legitimate_total: 3,
+        legitimate_blocked: 0,
+        malicious_total: 2,
+        malicious_allowed: 0,
+        changed_from_baseline: 0,
+      }).badge,
+    ).toBe("Stale: engine or CRS version changed");
+    expect(
+      evaluationStateLabel({
+        state: "unavailable",
+        total_cases: 0,
+        passed_cases: 0,
+        failed_cases: 0,
+        legitimate_total: 0,
+        legitimate_blocked: 0,
+        malicious_total: 0,
+        malicious_allowed: 0,
+        changed_from_baseline: 0,
+      }).badge,
+    ).toBe("Evaluation unavailable");
+  });
+
   it("pluralizes and describes rule sources", () => {
     expect(plural(1, "rule")).toBe("1 rule");
     expect(plural(2, "rule")).toBe("2 rules");

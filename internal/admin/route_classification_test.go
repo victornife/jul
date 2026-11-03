@@ -119,6 +119,7 @@ func TestRouteTransportPolicyInventory(t *testing.T) {
 		"/api/certs":                              "tls_or_loopback",
 		"/api/tls":                                "tls_or_loopback",
 		"/api/security":                           "tls_or_loopback",
+		"/api/security/waf/evaluate":              "tls_or_loopback",
 		"/api/traffic-controls":                   "tls_or_loopback",
 		"/api/plugins":                            "tls_or_loopback",
 		"/api/streams":                            "tls_or_loopback",

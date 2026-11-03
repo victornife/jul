@@ -459,6 +459,10 @@ type Deps struct {
 	// enforces (#440). Nil omits waf_effective from /api/security.
 	WAFEffective func() *WAFEffectivePolicy
 
+	// EvaluateWAF runs or records a bounded synthetic fixture evaluation for
+	// the serving or candidate WAF policy (#630).
+	EvaluateWAF func(context.Context, []byte) (*WAFEvaluationSummaryView, error)
+
 	// EgressBlocked returns the bounded per-subsystem/reason tally of egress
 	// allow-list blocks for the Console Security panel (P4-01). Nil omits the
 	// recent-blocked breakdown (e.g. on a build/test without a live metrics

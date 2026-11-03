@@ -83,12 +83,20 @@ type HandlerFactory struct {
 	moduleChanges moduleChangeRecord
 	// liveWAF is the serving generation's compiled WAF policy (#440), also
 	// guarded by moduleMu.
-	liveWAF        *admin.WAFEffectivePolicy
-	wafDigests     wafDigestRecord
-	liveConfig     *config.Config
-	lastCutover    []cache.InvalidateResult
-	lastCutoverErr error
-	lastCutoverGen uint64
+	liveWAF               *admin.WAFEffectivePolicy
+	wafDigests            wafDigestRecord
+	liveGlobalPolicySHA   string
+	liveGlobalAssets      []waf.ExternalAssetRecord
+	liveOverridePolicySHA map[string]string
+	liveOverrideExtSHA    map[string]string
+	liveOverrideAssets    map[string][]waf.ExternalAssetRecord
+	lastWAFEval           *waf.WAFEvaluationReport
+	lastWAFEvalByScope    map[string]*waf.WAFEvaluationReport
+	liveConfig            *config.Config
+	onBeforeEvalCommit    func(scope string)
+	lastCutover           []cache.InvalidateResult
+	lastCutoverErr        error
+	lastCutoverGen        uint64
 }
 
 // LastCacheCutover returns the results and any error from the most recent
@@ -275,8 +283,9 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		committed = true
 		f.publishPluginModules(0, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
-		f.publishWAF(0, gen.wafPolicy)
 		f.publishWAFDigests(0, gen.wafGlobalDigest, gen.wafDigestByLoc)
+		f.publishWAFAssets(gen.wafGlobalPolicyRaw, gen.wafGlobalAssets, gen.wafOverridePolicyRaw, gen.wafOverrideExtRaw, gen.wafOverrideAssets)
+		f.publishWAF(0, gen.wafPolicy)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
 	}
 	return handlers, retirePrev, nil
@@ -363,8 +372,9 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 		f.PoolReg.Activate()
 		f.publishPluginModules(genID, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
-		f.publishWAF(genID, gen.wafPolicy)
 		f.publishWAFDigests(genID, gen.wafGlobalDigest, gen.wafDigestByLoc)
+		f.publishWAFAssets(gen.wafGlobalPolicyRaw, gen.wafGlobalAssets, gen.wafOverridePolicyRaw, gen.wafOverrideExtRaw, gen.wafOverrideAssets)
+		f.publishWAF(genID, gen.wafPolicy)
 		if commitMetricLabels != nil {
 			commitMetricLabels()
 			f.Metrics.SetHostLabel(c.Observability.Metrics.HostLabel)
@@ -710,6 +720,9 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	wafRouteAttrByScope := make(map[string]waf.RouteAttribution)
 	wafReport := newWAFReport(c)
 	gen.wafDigestByLoc = make(map[[2]int]string)
+	gen.wafOverridePolicyRaw = make(map[string]string)
+	gen.wafOverrideExtRaw = make(map[string]string)
+	gen.wafOverrideAssets = make(map[string][]waf.ExternalAssetRecord)
 	ordinals := computeWAFRouteOrdinals(c)
 	invStore := f.wafInvestigationStore()
 	var globalFW *waf.Firewall
@@ -737,6 +750,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				if err != nil {
 					return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
 				}
+				gen.Stage(fw)
 				if loc.WAF == nil {
 					globalFW = fw
 				}
@@ -748,6 +762,10 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if loc.WAF != nil {
 				scopeKind = "override"
 				gen.wafDigestByLoc[[2]int{i, j}] = fw.SourceDigest()
+				ovKey := wafRouteIdentityKey(c.Servers[i], loc, ordinals[i][j])
+				gen.wafOverridePolicyRaw[ovKey] = fw.RawPolicyDigest()
+				gen.wafOverrideExtRaw[ovKey] = fw.SourceDigest()
+				gen.wafOverrideAssets[ovKey] = fw.ExternalAssets()
 			}
 			var routeID string
 			if loc.RouteID != nil {
@@ -768,6 +786,8 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	}
 	if globalFW != nil {
 		gen.wafGlobalDigest = globalFW.SourceDigest()
+		gen.wafGlobalPolicyRaw = globalFW.RawPolicyDigest()
+		gen.wafGlobalAssets = globalFW.ExternalAssets()
 	}
 	gen.wafPolicy = wafReport.finish(time.Now())
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {

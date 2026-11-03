@@ -13,10 +13,11 @@ const HeaderWAFEvent = "X-Jul-WAF-Event"
 // Bounded retention and aggregation limits for the in-memory WAF investigation
 // ring buffer (#632, ADR 0031 §5).
 const (
-	MaxInvestigationEvents  = 256
-	MaxMatchedRulesPerEvent = 16
-	MaxEventBytes           = 4096
-	InvestigationEventTTL   = 15 * time.Minute
+	MaxExternalRuleFileBytes = 16 << 20
+	MaxInvestigationEvents   = 256
+	MaxMatchedRulesPerEvent  = 16
+	MaxEventBytes            = 4096
+	InvestigationEventTTL    = 15 * time.Minute
 )
 
 // Closed WAF transaction outcome values (#632-A, ADR 0031 §1.2). Every

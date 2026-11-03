@@ -130,6 +130,8 @@ type Metrics struct {
 	wafEvents              *prometheus.CounterVec
 	wafTransactions        *prometheus.CounterVec
 	wafInvestigationEvents *prometheus.CounterVec
+	wafProtectionChanges   *prometheus.CounterVec
+	wafServingRoutes       *prometheus.GaugeVec
 	egressDecisions        *prometheus.CounterVec
 	egressDNSAnswers       *prometheus.CounterVec
 
@@ -374,6 +376,14 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_waf_investigation_events_total",
 			Help: "Web-application-firewall investigation buffer collection events, labeled by result (recorded/truncated/dropped/sampled_out).",
 		}, []string{"result"}),
+		wafProtectionChanges: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_waf_protection_changes_total",
+			Help: "Published serving WAF protection transitions across reloads, labeled by transition (initial/unchanged/tightened/weakened/reloaded).",
+		}, []string{"transition"}),
+		wafServingRoutes: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "jul_waf_serving_routes",
+			Help: "Configured HTTP routes in the active serving generation by effective WAF enforcement state (block/detect/disabled_override/unprotected).",
+		}, []string{"state"}),
 		egressDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_egress_decisions_total",
 			Help: "Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow).",
@@ -666,6 +676,8 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.wafEvents,
 		m.wafTransactions,
 		m.wafInvestigationEvents,
+		m.wafProtectionChanges,
+		m.wafServingRoutes,
 		m.egressDecisions,
 		m.egressDNSAnswers,
 		m.reloadTotal,
@@ -975,6 +987,28 @@ func (m *Metrics) ObserveWAFInvestigationEvent(result string) {
 		return
 	}
 	m.wafInvestigationEvents.WithLabelValues(result).Inc()
+}
+
+// ObserveWAFServingRoutes updates the serving-generation route counts by
+// effective WAF enforcement state (#630, #628-B).
+func (m *Metrics) ObserveWAFServingRoutes(blockRoutes, detectRoutes, disabledOverrideRoutes, unprotectedRoutes int) {
+	if m == nil {
+		return
+	}
+	m.wafServingRoutes.WithLabelValues("block").Set(float64(blockRoutes))
+	m.wafServingRoutes.WithLabelValues("detect").Set(float64(detectRoutes))
+	m.wafServingRoutes.WithLabelValues("disabled_override").Set(float64(disabledOverrideRoutes))
+	m.wafServingRoutes.WithLabelValues("unprotected").Set(float64(unprotectedRoutes))
+}
+
+// ObserveWAFProtectionChange records a published serving WAF protection
+// transition (#630, #628-B). transition is one of initial, unchanged,
+// tightened, weakened, or reloaded.
+func (m *Metrics) ObserveWAFProtectionChange(transition string) {
+	if m == nil {
+		return
+	}
+	m.wafProtectionChanges.WithLabelValues(transition).Inc()
 }
 
 // ObserveBackendHealth records an active health-check transition for a backend.

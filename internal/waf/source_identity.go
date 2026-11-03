@@ -29,15 +29,11 @@ import (
 type sourceRecorder struct {
 	inner fs.FS
 
-	mu    sync.Mutex
-	names map[string]struct{}
-	chain bytes.Buffer
+	mu     sync.Mutex
+	names  map[string]struct{}
+	assets []ExternalAssetRecord
+	chain  bytes.Buffer
 }
-
-// External rule files are read into memory to bind their digest to the bytes
-// Coraza compiles. Limit each read, including non-regular files with no useful
-// Stat size, so a bad input cannot make policy preparation grow without bound.
-const MaxExternalRuleFileBytes = 16 << 20
 
 func newSourceRecorder(inner fs.FS) *sourceRecorder {
 	return &sourceRecorder{inner: inner, names: map[string]struct{}{}}
@@ -45,12 +41,26 @@ func newSourceRecorder(inner fs.FS) *sourceRecorder {
 
 func (r *sourceRecorder) record(name string, data []byte) {
 	sum := sha256.Sum256(data)
+	hexSum := hex.EncodeToString(sum[:])
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, seen := r.names[name]; !seen {
+		r.assets = append(r.assets, ExternalAssetRecord{
+			Path:      name,
+			SizeBytes: int64(len(data)),
+			SHA256:    hexSum,
+		})
+	}
 	r.names[name] = struct{}{}
 	r.chain.WriteString("sha256:")
-	r.chain.WriteString(hex.EncodeToString(sum[:]))
+	r.chain.WriteString(hexSum)
 	r.chain.WriteByte('\n')
+}
+
+func (r *sourceRecorder) externalAssets() []ExternalAssetRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]ExternalAssetRecord(nil), r.assets...)
 }
 
 // identity returns the number of distinct files read, the context-keyed

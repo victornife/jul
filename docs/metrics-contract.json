@@ -752,6 +752,24 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_waf_protection_changes_total",
+      "type": "counter",
+      "help": "Published serving WAF protection transitions across reloads, labeled by transition (initial/unchanged/tightened/weakened/reloaded).",
+      "labels": [
+        "transition"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_waf_serving_routes",
+      "type": "gauge",
+      "help": "Configured HTTP routes in the active serving generation by effective WAF enforcement state (block/detect/disabled_override/unprotected).",
+      "labels": [
+        "state"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_waf_transactions_total",
       "type": "counter",
       "help": "Web-application-firewall inspected HTTP transactions, labeled by policy mode (block/detect) and final outcome (clean/matched_observed/interrupted_request/interrupted_response/rejected_body_limit/inspection_error).",

@@ -11,6 +11,7 @@ import (
 	"jul/internal/admin"
 	"jul/internal/cache"
 	"jul/internal/plugins"
+	"jul/internal/waf"
 )
 
 // PoolStager abstracts the generational staging span of the upstream pool
@@ -79,8 +80,13 @@ type Generation struct {
 	wafPolicy *admin.WAFEffectivePolicy
 	// wafGlobalDigest and wafDigestByLoc hold the engine-owned external source
 	// digests of the compiled global and per-location WAF policies (#642, #563).
-	wafGlobalDigest string
-	wafDigestByLoc  map[[2]int]string
+	wafGlobalDigest      string
+	wafGlobalPolicyRaw   string
+	wafGlobalAssets      []waf.ExternalAssetRecord
+	wafDigestByLoc       map[[2]int]string
+	wafOverridePolicyRaw map[string]string
+	wafOverrideExtRaw    map[string]string
+	wafOverrideAssets    map[string][]waf.ExternalAssetRecord
 	// basicByLoc holds the exact htpasswd file bytes loaded by auth.New for
 	// each Basic-authenticated location (srvIdx, locIdx) in this generation (#642, #563).
 	basicByLoc         map[[2]int][]byte

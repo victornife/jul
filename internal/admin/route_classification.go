@@ -44,6 +44,7 @@ var internalRouteReasons = map[string]string{
 	"/api/tls":                            "A runtime projection that will change as the TLS subsystem completes.",
 	"/api/mtls":                           "A runtime projection that will change as the mTLS subsystem completes.",
 	"/api/security":                       "A runtime projection that will change as the security subsystem completes.",
+	"/api/security/waf/evaluate":          "Internal Console WAF synthetic-fixture evaluation endpoint (#630).",
 	"/api/plugins":                        "A runtime projection that will change as the plugin subsystem completes.",
 	"/api/sharing":                        "Internal sharing projection (ADR 0026 / spec §4.3); its bounded paged shape is refined across the first sharing journeys before external /api/v1 promotion.",
 	"/api/sharing/value":                  "Internal snapshot-bound chunked full-value read for the sharing projection (spec §4.3).",

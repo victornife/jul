@@ -8,6 +8,7 @@ package waf
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
@@ -19,7 +20,10 @@ import (
 const Compiled = false
 
 // Firewall is the no-WAF stub. It holds no engine and inspects nothing.
-type Firewall struct{}
+type Firewall struct {
+	opts   Options
+	closed *atomic.Bool
+}
 
 // New rejects construction in a build without the "waf" tag. The startup-time
 // safety net is Check; this guards any direct construction path.
@@ -37,7 +41,20 @@ func (f *Firewall) RouteMiddleware(_ RouteAttribution, _ func() uint64) middlewa
 }
 
 // Close is a no-op for the stub.
-func (f *Firewall) Close() error { return nil }
+func (f *Firewall) Close() error {
+	if f != nil && f.closed != nil {
+		f.closed.Store(true)
+	}
+	return nil
+}
+
+// IsClosed reports whether Close has been called on f.
+func (f *Firewall) IsClosed() bool {
+	if f == nil || f.closed == nil {
+		return true
+	}
+	return f.closed.Load()
+}
 
 // Info is empty in the stub: there is no compiled policy to describe.
 func (f *Firewall) Info() PolicyInfo { return PolicyInfo{} }
@@ -55,6 +72,9 @@ func (f *Firewall) SourceDigest() string { return "" }
 
 // RawPolicyDigest returns "" in the no-WAF stub.
 func (f *Firewall) RawPolicyDigest() string { return "" }
+
+// ExternalAssets returns nil in the no-WAF stub.
+func (f *Firewall) ExternalAssets() []ExternalAssetRecord { return nil }
 
 // EmbeddedCRSVersion is "" in a build without the "waf" tag: no rule set is
 // embedded.

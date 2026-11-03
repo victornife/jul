@@ -1,0 +1,2 @@
+import{n as e}from"./rolldown-runtime-WkwZ5CU-.js";import{x as t}from"./query-DR5Dtfdd.js";var n=e(t(),1),r=(0,n.createContext)({identity:null,isLoading:!1,ready:!1,has:()=>!0});function i(){return(0,n.useContext)(r)}export{i as n,r as t};
+//# sourceMappingURL=usePermission-CsofFkN1.js.map

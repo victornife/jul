@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchSecurity,
@@ -14,13 +14,30 @@ import {
   type EgressProjection,
   type ListenerClientAddress,
 } from "@/api/client.ts";
-import { ClientAddressEditor } from "@/features/security/ClientAddressEditor.tsx";
-import { WAFEditor } from "@/features/security/WAFEditor.tsx";
-import { LocationWAFEditor } from "@/features/security/LocationWAFEditor.tsx";
-import { SecretHelper } from "@/features/security/SecretHelper.tsx";
 import { WAFEffectiveCard } from "@/features/security/WAFEffectiveCard.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, MaturityBadge } from "@/components/ui.tsx";
+
+const ClientAddressEditor = lazy(() =>
+  import("@/features/security/ClientAddressEditor.tsx").then((m) => ({
+    default: m.ClientAddressEditor,
+  })),
+);
+const WAFEditor = lazy(() =>
+  import("@/features/security/WAFEditor.tsx").then((m) => ({
+    default: m.WAFEditor,
+  })),
+);
+const LocationWAFEditor = lazy(() =>
+  import("@/features/security/LocationWAFEditor.tsx").then((m) => ({
+    default: m.LocationWAFEditor,
+  })),
+);
+const SecretHelper = lazy(() =>
+  import("@/features/security/SecretHelper.tsx").then((m) => ({
+    default: m.SecretHelper,
+  })),
+);
 
 // wafIsMixed reports whether protected locations run a mix of block and detect
 // modes, in which case a single mode badge would mislead.
@@ -395,40 +412,42 @@ export function SecurityPanel() {
 
       <WAFEffectiveCard data={data} effective={data.waf_effective} />
 
-      {editingWAF && (
-        <WAFEditor
-          current={data}
-          onClose={() => {
-            setEditingWAF(false);
-          }}
-        />
-      )}
+      <Suspense fallback={null}>
+        {editingWAF && (
+          <WAFEditor
+            current={data}
+            onClose={() => {
+              setEditingWAF(false);
+            }}
+          />
+        )}
 
-      {editingLocationWAF && (
-        <LocationWAFEditor
-          target={editingLocationWAF}
-          onClose={() => {
-            setEditingLocationWAF(null);
-          }}
-        />
-      )}
+        {editingLocationWAF && (
+          <LocationWAFEditor
+            target={editingLocationWAF}
+            onClose={() => {
+              setEditingLocationWAF(null);
+            }}
+          />
+        )}
 
-      {editingClientAddress && (
-        <ClientAddressEditor
-          listener={editingClientAddress}
-          onClose={() => {
-            setEditingClientAddress(null);
-          }}
-        />
-      )}
+        {editingClientAddress && (
+          <ClientAddressEditor
+            listener={editingClientAddress}
+            onClose={() => {
+              setEditingClientAddress(null);
+            }}
+          />
+        )}
 
-      {externalizing && (
-        <SecretHelper
-          onClose={() => {
-            setExternalizing(false);
-          }}
-        />
-      )}
+        {externalizing && (
+          <SecretHelper
+            onClose={() => {
+              setExternalizing(false);
+            }}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }
