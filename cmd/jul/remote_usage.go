@@ -22,6 +22,10 @@ Remote automation (stable /api/v1):
   jul apply --endpoint u --adopt-external [--base-version v] [--adopt-mode hot|stage_restart]
   jul cache inspect --endpoint u (--host h | --route-id id) [--uri u | --prefix p | --glob g | --tag t] [--cursor c] [--page-size n] [--json]
   jul cache purge --endpoint u (--url u | --host h [--prefix p | --glob g | --tag t] | --route-id id | --key k | --all) [--preview] [--confirm-broad] [--idempotency-key k] [--json]
+  jul waf events -url u [-token-file f] [-event-id id] [-outcome o] [-rule-id n] [-route-id r] [-limit n] [-json]
+
+Sharing verification (admin endpoint outside /api/v1):
+  jul postcondition --endpoint u --file plan.json [--json]
 
 Remote connection flags:
   --endpoint u       explicit Jul admin endpoint; otherwise profile/JUL_ENDPOINT
@@ -36,6 +40,7 @@ Remote connection flags:
 
 Remote credential precedence:
   explicit flags/profile selection > named profile > JUL_ENDPOINT/JUL_TOKEN_FILE/JUL_TOKEN > no endpoint
+  (these common flags do not apply to the WAF events command)
 
 Remote automation exit contract:
   0  successful live/read/ordinary operation
@@ -50,7 +55,8 @@ Remote automation exit contract:
   9  server/capability/storage/operation-timeout/internal failure
 
 Security:
-  No raw --token argument or generic --insecure bypass exists. Plain HTTP is
-  accepted only for loopback. Control-plane redirects are not followed.
+  Shared remote automation has no raw --token argument or generic --insecure bypass.
+  Plain HTTP is accepted only for loopback. Control-plane redirects are not followed.
+  The WAF events command has a separate -token option; prefer -token-file or JUL_ADMIN_TOKEN.
 `)
 }
