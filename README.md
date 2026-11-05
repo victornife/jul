@@ -111,7 +111,7 @@ large-object and range-aware caching, and offered-ALPN TCP passthrough routing.
 Two operational programmes have since completed on `main`:
 
 - **Cache operations ([#620](https://github.com/victornife/jul/issues/620); children #621–#624)** — scoped invalidation, bounded cache inspection and decision explanations, route-scoped cache controls, and explicit cache handling during route/backend changes.
-- **WAF and security operations ([#629](https://github.com/victornife/jul/issues/629), [#630–#634](https://github.com/victornife/jul/issues/629))** — bounded outcome investigation, fixture-based policy verification and recovery, scoped rule exceptions, posture/isolation evidence, and security alerting delivered through [#628 Milestone B](https://github.com/victornife/jul/issues/628).
+- **WAF and security operations ([#629](https://github.com/victornife/jul/issues/629), #630–#634)** — bounded outcome investigation, fixture-based policy verification and recovery, scoped rule exceptions, posture/isolation evidence, and security alerting delivered through [#628 Milestone B](https://github.com/victornife/jul/issues/628).
 
 These operational additions are **Beta and unreleased**; completion does not
 promote them to GA or soak-certified status. The established base WAF and
