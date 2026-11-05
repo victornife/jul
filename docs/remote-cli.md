@@ -1,9 +1,11 @@
 # Remote automation CLI
 
-Jul's remote automation commands are a thin client over the supported `/api/v1`
-control plane. The server remains authoritative for TOML validation, lifecycle,
-diffing, authority, apply/stage decisions, rollback, adoption and terminal state.
-The CLI never falls back to the private Console API.
+Jul's remote automation commands use the supported `/api/v1` control plane,
+except `jul postcondition`, which calls the sharing evaluator at
+`/api/sharing/postcondition/evaluate`. The server remains authoritative for
+TOML validation, lifecycle, diffing, authority, apply/stage decisions, rollback,
+adoption and terminal state. The CLI never falls back to the private Console
+API. The sharing evaluator exception is described below.
 
 ## Commands
 
@@ -18,8 +20,11 @@ The CLI never falls back to the private Console API.
 | `jul rollback` | history diff + `POST /api/v1/config/rollback` + polling |
 | `jul export` | `GET /api/v1/config/export` |
 | `jul diagnostics` | `GET /api/v1/status` + `GET /api/v1/capabilities` |
+| `jul postcondition` | `POST /api/sharing/postcondition/evaluate` (read-only sharing evaluator; outside `/api/v1`) |
 | `jul apply --adopt-external` | adoption preview + mutation + polling |
+| `jul cache inspect` | `POST /api/v1/cache/inspect` |
 | `jul cache purge` | `POST /api/v1/cache/purge/preview`, `POST /api/v1/cache/purge`, `GET /api/v1/cache/purges/{operation_id}` |
+| `jul waf events` | `GET /api/v1/waf/events` (bounded, read-only WAF event query) |
 
 Remote export is the redacted structured projection. Exact raw TOML remains a
 local expert workflow and is deliberately not part of v1. Remote diagnostics is
@@ -65,14 +70,18 @@ be regular files of at most 64 KiB. Stdin tokens have the same 64 KiB cap.
 ## Credentials and TLS
 
 Bearer credentials may come from a token file, `JUL_TOKEN`, a profile token-file
-reference, or stdin via `--token-file -`. There is intentionally no `--token`
-argument because command-line secrets leak into shell history/process listings.
-Environment variables are convenient but are not a perfect secret store; a
-restricted token file/profile reference is preferred for automation.
+reference, or stdin via `--token-file -`. The shared remote-automation commands
+intentionally expose no raw `--token` argument because command-line secrets
+leak into shell history/process listings. (`jul waf events` has a separate
+`-token` option, described below.) Environment variables are convenient but are
+not a perfect secret store; a restricted token file/profile reference is
+preferred for automation.
 
 The client rejects credential-bearing endpoint URLs. HTTPS verifies certificates
 and hostnames normally. `--ca-file` adds a trust bundle and `--client-cert` plus
 `--client-key` enable mTLS. There is no generic `--insecure` verification bypass.
+The common `--timeout` flag sets the ordinary HTTP request timeout (default
+`15s`); the named-profile `timeout` field sets the same value.
 Plain HTTP is accepted only for loopback. Plaintext dials resolve `localhost`
 to loopback addresses only and ignore environment proxies, so a bearer token
 cannot travel to a changed localhost mapping. Control-plane redirects are not
@@ -116,6 +125,9 @@ jul stage --endpoint https://jul-admin.example.net \
   --json
 ```
 
+For `plan`, `diff --config`, `apply` and `stage`, pass `--config -` to read
+candidate TOML from stdin (up to 2 MiB); otherwise pass a file path.
+
 `--confirm-admin` is the narrow explicit acknowledgement used only when the
 server reports that a candidate affects the current admin reachability path. It
 is not a general force switch.
@@ -151,9 +163,11 @@ The server's `terminal` boolean is authoritative. `saved_not_live` is progress,
 not success, so polling continues. `no_change` is terminal success and stops
 polling immediately.
 
-Polling has a bounded interval and local deadline. Ctrl-C stops only the local
-wait; it does **not** cancel the server transaction. Human output surfaces the
-`apply_id` and the operator can inspect it later with:
+Polling uses a bounded interval. The local deadline is controlled by
+`--poll-timeout` on `apply` (including adoption), `stage` and `rollback`
+(default `2m`). Ctrl-C or that deadline stops only the local wait; neither
+cancels the server transaction. Human output surfaces the `apply_id`; inspect it
+later with:
 
 ```sh
 jul status --endpoint https://jul-admin.example.net \
@@ -182,6 +196,30 @@ jul apply --endpoint https://jul-admin.example.net \
 The CLI performs the server adoption preview, carries the returned observed
 raw digest/base fence into the confirmed mutation, and polls the normal apply
 ledger. Drift/adoption rules remain server-owned.
+
+## Sharing postcondition evaluation (`jul postcondition`)
+
+This read-only command evaluates a plan's sharing postcondition against the
+server's current serving snapshot. It requires `status:read` and uses
+`POST /api/sharing/postcondition/evaluate`, outside the versioned `/api/v1`
+control plane.
+
+```sh
+jul plan --endpoint https://jul-admin.example.net \
+  --token-file /secure/path/token \
+  --config candidate.toml --json > plan.json
+
+jul postcondition --endpoint https://jul-admin.example.net \
+  --token-file /secure/path/token \
+  --file plan.json --json
+```
+
+`--file` accepts either a direct postcondition JSON object or plan JSON
+containing `.sharing.postcondition`; use `--file -` to read JSON from stdin
+(up to 2 MiB).
+The result reports candidate and access state, with a summary and recovery
+guidance when available. Common endpoint, profile, credential and TLS flags
+apply.
 
 ## Authority modes
 
@@ -220,11 +258,14 @@ jul cache purge --endpoint https://jul-admin.example.net \
 
 Supported selector flags are `--url`, `--host` with `--uri` / `--prefix` /
 `--glob` / `--tag` (`--tag-match any|all`), `--host --confirm-broad`, `--key`,
-and `--all --confirm-broad` (plus optional `--route-id`). Inspect an operation by
-ID with `--operation-id cp_...` or retry an incomplete operation at its original
-fence with `--retry-operation-id cp_...`. On an operation-ID retry, omit
-`--idempotency-key` or reuse the operation's original key; a newly supplied key
-is rejected rather than silently ignored. A runnable deployment/content-update
+and `--all --confirm-broad` (plus optional `--route-id`). Use
+`--kind exact_url|prefix|glob|tag|host|key|all` to specify the selector kind
+explicitly. Optional `--max-scan-entries` bounds a preview scan, and
+`--operation-timeout-ms` sets the server-side operation timeout. Inspect an
+operation by ID with `--operation-id cp_...` or retry an incomplete operation at
+its original fence with `--retry-operation-id cp_...`. On an operation-ID retry, omit
+`--idempotency-key` or reuse the operation's original key; a newly supplied
+key is rejected rather than silently ignored. A runnable deployment/content-update
 helper script is provided in
 [`examples/cache-invalidation/purge-on-deploy.sh`](../examples/cache-invalidation/purge-on-deploy.sh).
 
@@ -287,8 +328,47 @@ Never place realistic credentials in repository examples or idempotency keys.
 
 ## Cache metadata inspection
 
-`jul cache inspect --endpoint URL --token-file FILE --host HOST [--uri URI | --prefix PREFIX | --glob GLOB | --tag TAG] [--cursor CURSOR] [--page-size N] [--json]` reads one bounded page. Exact `--url`/`--key` and configured `--route-id` scopes are also supported. Repeat the same selector for later pages; never automatically restart an expired capture. Successful reads exit zero even for explicit partial/truncated states: automation must inspect result fields. See [permissions, errors and limits](cache.md#bounded-cache-inspection).
+`jul cache inspect --endpoint URL --token-file FILE --host HOST
+[--uri URI | --prefix PREFIX | --glob GLOB | --tag TAG] [--cursor CURSOR]
+[--page-size N] [--json]` reads one bounded page. Exact `--url`/`--key` and
+configured `--route-id` scopes are also supported. Choose at most one exact
+URL/URI/prefix/glob/tag/key selector. Page size defaults to 50 resources and is
+limited to 1–50. Repeat the same selector for later pages; never automatically
+restart an expired capture. Successful reads exit zero even for explicit partial/truncated states: automation must inspect result fields. See [permissions, errors and limits](cache.md#bounded-cache-inspection).
 
+
+## WAF outcome events (`jul waf events`)
+
+`jul waf events` reads the bounded server-side WAF outcome ring through
+`GET /api/v1/waf/events`; it requires `observability:read` and does not mutate
+configuration.
+
+```sh
+jul waf events -url https://jul-admin.example.net \
+  -token-file /secure/path/token \
+  -event-id wev_... -outcome interrupted_request \
+  -rule-id 942100 -route-id public-api -limit 50 -json
+```
+
+The URL defaults to `http://127.0.0.1:9090`. Filters are optional:
+`-event-id`, `-outcome`, `-rule-id`, and `-route-id`; `-limit` defaults to 50
+and accepts 1–256. Authentication can use `-token-file`, `JUL_ADMIN_TOKEN`, or
+`-token`; prefer the file or environment variable to avoid exposing a token in
+process arguments. This command has a fixed 10-second request timeout and a
+separate connection interface: it does not accept `--endpoint`, `--profile`,
+`--ca-file`, `--client-cert`, `--client-key`, or `--timeout`. It rejects
+plaintext URLs except loopback, uses the system TLS trust store, disables
+proxies, and does not follow redirects. On success, `-json` writes the event
+response; failures use a small `status`/`error` object. Successful requests
+exit 0, request/API failures exit 1, and usage errors exit 2; these codes are
+separate from the remote automation exit table above.
+
+Only `jul waf events` is remote. `jul waf evaluate`, `jul waf manifest`, and
+`jul waf verify-assets` use local configuration and files; `jul posture` also
+evaluates locally. See the [WAF guide](waf.md) and
+[security posture guide](security-posture.md) for those workflows. Remote WAF
+policy changes use `plan` and `apply`/`stage`; there is no separate remote
+WAF policy mutation command.
 
 ## Cache cutover on configuration changes
 
