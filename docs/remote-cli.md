@@ -216,10 +216,9 @@ jul postcondition --endpoint https://jul-admin.example.net \
 
 `--file` accepts either a direct postcondition JSON object or plan JSON
 containing `.sharing.postcondition`; use `--file -` to read JSON from stdin
-(up to 2 MiB).
-The result reports candidate and access state, with a summary and recovery
-guidance when available. Common endpoint, profile, credential and TLS flags
-apply.
+(stdin reader limited to 2 MiB). The result reports candidate and access
+state, with a summary and recovery guidance when available. Common endpoint,
+profile, credential and TLS flags apply.
 
 ## Authority modes
 
@@ -328,14 +327,18 @@ Never place realistic credentials in repository examples or idempotency keys.
 
 ## Cache metadata inspection
 
-`jul cache inspect --endpoint URL --token-file FILE --host HOST
-[--uri URI | --prefix PREFIX | --glob GLOB | --tag TAG] [--cursor CURSOR]
-[--page-size N] [--json]` reads one bounded page. Exact `--url`/`--key` and
-configured `--route-id` scopes are also supported. Choose at most one exact
-URL/URI/prefix/glob/tag/key selector. Page size defaults to 50 resources and is
-limited to 1–50. Repeat the same selector for later pages; never automatically
-restart an expired capture. Successful reads exit zero even for explicit partial/truncated states: automation must inspect result fields. See [permissions, errors and limits](cache.md#bounded-cache-inspection).
+```sh
+jul cache inspect --endpoint URL --token-file FILE --host HOST \
+  [--uri URI | --prefix PREFIX | --glob GLOB | --tag TAG] \
+  [--cursor CURSOR] [--page-size N] [--json]
+```
 
+Exact `--url` and `--key` selectors are also supported, and `--route-id` can
+scope an inspection. Choose at most one exact URL/URI/prefix/glob/tag/key
+selector. Page size defaults to 50 resources and is limited to 1–50. Repeat the
+same selector for later pages; never automatically restart an expired capture.
+Successful reads exit zero even for explicit partial/truncated states; inspect
+the result fields. See [permissions, errors and limits](cache.md#bounded-cache-inspection).
 
 ## WAF outcome events (`jul waf events`)
 
