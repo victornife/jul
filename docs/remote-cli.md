@@ -328,13 +328,15 @@ Never place realistic credentials in repository examples or idempotency keys.
 ## Cache metadata inspection
 
 ```sh
-jul cache inspect --endpoint URL --token-file FILE --host HOST \
-  [--uri URI | --prefix PREFIX | --glob GLOB | --tag TAG] \
+jul cache inspect --endpoint URL --token-file FILE \
+  [--host HOST] [--route-id ID] \
+  [--url URL | --uri URI | --prefix PREFIX | --glob GLOB | --tag TAG | --key KEY] \
   [--cursor CURSOR] [--page-size N] [--json]
 ```
 
-Exact `--url` and `--key` selectors are also supported, and `--route-id` can
-scope an inspection. Choose at most one exact URL/URI/prefix/glob/tag/key
+Exact `--url` and `--key` selectors can be used without `--host`; URI,
+prefix, glob and tag selectors require `--host`. `--route-id` can be used by
+itself or added as a scope. Choose at most one URL/URI/prefix/glob/tag/key
 selector. Page size defaults to 50 resources and is limited to 1–50. Repeat the
 same selector for later pages; never automatically restart an expired capture.
 Successful reads exit zero even for explicit partial/truncated states; inspect
