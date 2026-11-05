@@ -110,7 +110,7 @@ large-object and range-aware caching, and offered-ALPN TCP passthrough routing.
 
 Two operational programmes have since completed on `main`:
 
-- **Cache operations ([#620](https://github.com/victornife/jul/issues/620), [#621–#624](https://github.com/victornife/jul/issues/620))** — scoped invalidation, bounded cache inspection and decision explanations, route-scoped cache controls, and explicit cache handling during route/backend changes.
+- **Cache operations ([#620](https://github.com/victornife/jul/issues/620); children #621–#624)** — scoped invalidation, bounded cache inspection and decision explanations, route-scoped cache controls, and explicit cache handling during route/backend changes.
 - **WAF and security operations ([#629](https://github.com/victornife/jul/issues/629), [#630–#634](https://github.com/victornife/jul/issues/629))** — bounded outcome investigation, fixture-based policy verification and recovery, scoped rule exceptions, posture/isolation evidence, and security alerting delivered through [#628 Milestone B](https://github.com/victornife/jul/issues/628).
 
 These operational additions are **Beta and unreleased**; completion does not
@@ -127,11 +127,13 @@ sharing work and remaining operational candidates are tracked separately in
 [#62](https://github.com/victornife/jul/issues/62).
 
 - **Application sharing ([#579](https://github.com/victornife/jul/issues/579), [contract](docs/specs/application-sharing.md))** —
-  Verify and document how public, private-network, restricted-browser, and
-  local-preview services coexist safely on one instance; prove recovery and
-  portability through [reproducible application recipes](https://github.com/victornife/jul/issues/613);
+  Verify and document how public, private-network (Tailscale), restricted-browser
+  (Cloudflare Tunnel/Access and self-hosted login), and local-preview services
+  coexist safely on one instance; prove recovery and portability through
+  [reproducible application recipes](https://github.com/victornife/jul/issues/613);
   then use that evidence to guide sharing, access-summary, and withdrawal
-  workflows in the Console. The next Tailscale composition, [#582](https://github.com/victornife/jul/issues/582),
+  workflows in the Console before exploring provider-backed audience and
+  invitation management. The next Tailscale composition, [#582](https://github.com/victornife/jul/issues/582),
   is ready but requires an authorized disposable tailnet and intended/excluded
   clients.
 - **Cross-Console explanations ([#625](https://github.com/victornife/jul/issues/625))** —
@@ -144,8 +146,8 @@ sharing work and remaining operational candidates are tracked separately in
   Security milestone B is delivered. Operational milestone A, covering core
   availability/certificate/backend/storage alerts, remains open.
 
-These candidates and remaining work are not presented as active commitments;
-selection and sequencing remain in the programme tracker.
+The candidate items remain unselected; selection and sequencing for open work
+stay in the programme tracker.
 
 **What stays out of scope:** Correctness and security fixes always take priority
 over feature work, and new capabilities earn their own maturity rather than
