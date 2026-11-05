@@ -5,7 +5,8 @@ documentation conventions, and the contribution workflow.
 
 ## Code of conduct
 
-Be respectful, constructive, and inclusive. All contributions are evaluated on
+Participation in Jul.IA community spaces is governed by the
+[Code of Conduct](CODE_OF_CONDUCT.md). All contributions are evaluated on
 technical merit aligned with the project's vision.
 
 ## Getting started
