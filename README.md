@@ -401,7 +401,7 @@ server command.
 
 ### jul version-key init
 
-Initializes a protected, random key file. It does not replace an existing file.
+Initializes a protected, cryptographically random 32-byte key file. It does not replace an existing file.
 Keep the file private and back it up securely; losing it changes the effective
 version context.
 
@@ -535,9 +535,9 @@ preserved.
 | <code>-w</code> | Write the formatted file in place. |
 | <code>-diff</code> | Print a unified diff without writing. |
 
-Exit codes: <code>0</code> formatting succeeded or no diff is needed,
-<code>1</code> parse/validation or I/O error, or <code>-diff</code> found
-changes, <code>2</code> invalid usage.
+Exit codes: <code>0</code> formatting succeeded (or no diff changes are needed),
+<code>1</code> parse/validation or I/O error, or changes are present with
+<code>-diff</code>; <code>2</code> invalid usage.
 
 ### jul run
 
@@ -572,10 +572,10 @@ documents the assessment contract and bounded include behavior.
 | <code>-assess</code> | Emit the human migration assessment without generated TOML. |
 | <code>-report FILE</code> | Write the versioned JSON assessment to a file. |
 | <code>-json</code> | Emit only the versioned JSON assessment to stdout. |
-| <code>-path-style relative or absolute</code> | Assessment path format; defaults to <code>relative</code>. |
+| <code>-path-style</code> | Set to <code>relative</code> (default) or <code>absolute</code> for assessment paths. |
 | <code>-source-order</code> | Preserve source order in a human assessment; requires <code>-assess</code>. |
 | <code>-follow-includes</code> | Resolve includes using bounded, root-confined traversal. Off by default. |
-| <code>-root DIR</code>, <code>-include-root DIR</code> | Include root; the two flags are aliases. |
+| <code>-root DIR</code>, <code>-include-root DIR</code> | Include root (aliases); requires <code>-follow-includes</code>. Defaults to the input file directory. |
 | <code>-max-include-depth N</code> | Maximum nested include depth; default <code>16</code>. |
 | <code>-max-include-files N</code> | Maximum source files including the root; default <code>256</code>. |
 | <code>-max-include-file-bytes N</code> | Maximum bytes per source file; default <code>4194304</code>. |
