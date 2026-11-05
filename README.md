@@ -339,195 +339,325 @@ Print the version:
 
 ## Command-line usage
 
+This section covers local commands. The remote administration commands, including
+the WAF event query, are documented in [Remote CLI](docs/remote-cli.md).
+
 ```text
-jul [flags]                                   run the server (default)
-jul version-key init [--file PATH]            provision private effective-version key
-jul serve [-config f]                         run the server (explicit form)
-jul check [-config f] [-json] [-quiet]        full runtime preflight check
-jul doctor [-config f] [-json] [-strict] [-check-network]
-                                              run read-only local diagnostics
-jul support-bundle [-config f] [-output file] [-json] [-include-logs]
-                                              write a bounded local diagnostic archive
-jul healthcheck [-config f] [-addr h:p | -url u] [-ready] [-timeout d] [-json] [-quiet]
-                                              probe a running server's health endpoint
-jul lint [-config f] [-strict] [-json] [-quiet]
-                                              validate + best-practice checks
-jul fmt  [-config f] [-w] [-diff]             rewrite the config in canonical TOML
-jul run  --serve <dir> | --proxy <target> [--listen addr]
-                                              run a zero-config server (no file)
-jul import nginx [-o out.toml] [-strict] <nginx.conf>
-                                              translate an NGINX config (importer tag)
-jul version [-json]                           print version and build metadata
-jul completion <bash|zsh|fish|powershell>     print a shell completion script
-
-Legacy flags (default command, still supported; deprecated — prefer the subcommands above):
-  --config string   path to the TOML configuration file (default "server.toml")
-  --check           validate the configuration and exit  (prefer "jul check")
-  --version         print version and exit               (prefer "jul version")
+jul [flags]                                      run the configured server (default)
+jul serve [-config FILE] [-effective-version-key-file PATH]
+                                                 explicit configured-server form
+jul version-key init [-file PATH]               provision the private version key
+jul check [-config FILE] [-json] [-quiet] [-skip-static-roots]
+                                                 structural and stateless runtime checks
+jul doctor [-config FILE] [-json] [-strict] [-check-network]
+           [-timeout D] [-per-check-timeout D]   read-only local diagnostics
+jul support-bundle [-config FILE] [-output FILE] [-json] [-check-network]
+                   [-include-logs] [limits]      write a bounded diagnostic archive
+jul healthcheck [-config FILE] [-addr HOST:PORT | -url URL] [-ready]
+                [-timeout D] [-ca-file FILE] [-client-cert FILE -client-key FILE]
+                [-json] [-quiet]                 probe a running server
+jul lint [-config FILE] [-strict] [-json] [-quiet]
+                                                 validate and lint configuration
+jul fmt [-config FILE] [-w] [-diff]              format TOML
+jul run --serve DIR | --proxy TARGET [--listen ADDR]
+        [-effective-version-key-file PATH]        run a zero-config server
+jul import nginx [options] CONFIG                 translate or assess NGINX config
+jul version [-json]                              print version/build metadata
+jul capabilities [-json]                         report compiled features and exit codes
+jul posture [-config FILE] [-json] [-timeout D]  evaluate local security posture
+jul waf evaluate, manifest, or verify-assets       evaluate or verify local WAF policy
+jul completion <bash|zsh|fish|powershell>         generate shell completions
 ```
 
-### `jul check`
+### Serving and effective-version key
 
-Performs a **full runtime preflight**: it validates structurally *and* dry-runs
-every component that could fail during serve/reload (WAF rule compilation, auth
-initialisation, compression encoder availability, plugin compile, etc.).  This
-is stronger than `jul lint`, which only checks schema and best-practice
-warnings.  Use `check` in CI before deploying, or locally when you want
-certainty that the binary you built can actually start with this config.
+A private effective-version key is required before **every serving mode**:
+the default <code>jul</code> command, <code>jul serve</code>, <code>jul run</code>,
+and Windows service startup. Provision it once with
+<code>jul version-key init</code>, then preserve the same protected file across
+restarts and upgrades. Jul does not create or repair the key during server
+startup.
 
-```bash
-jul check -config server.toml
-jul check -config server.toml -json   # machine-readable output
-```
+<code>--effective-version-key-file PATH</code> is available on the default
+server command, <code>jul serve</code>, and <code>jul run</code>. It takes
+precedence over <code>JUL_EFFECTIVE_VERSION_KEY_FILE</code>, which takes
+precedence over the platform default. <code>jul version-key init --file PATH</code>
+selects the path to initialize; without <code>--file</code>, it uses the
+environment override or platform default. See
+[Effective-version key provisioning and recovery](docs/effective-versions.md).
 
-Exit codes: `0` ok, `1` validation or runtime error.  The legacy `--check` flag
-on the default command (`jul -check`) is equivalent but `jul check` is the
-canonical subcommand.
+The default command keeps these compatibility flags:
 
-### `jul doctor`
+| Flag | Effect |
+| --- | --- |
+| <code>-config FILE</code> | Read the TOML configuration; defaults to <code>server.toml</code>. |
+| <code>-effective-version-key-file PATH</code> | Select the protected effective-version key for startup. |
+| <code>-check</code> | Validate the configuration and exit. Prefer <code>jul check</code>. |
+| <code>-version</code> | Print version and exit. Prefer <code>jul version</code>. |
 
-Runs deterministic, read-only checks for strict configuration parsing, semantic validation, configured files and certificates, admin exposure, bounded topology, and process/build state. The default run is network-free; `-check-network` explicitly enables bounded runtime preflight and immediate-close listener bind probes. Use `-json` for the versioned machine contract and `-strict` to make warnings fail CI.
+<code>jul serve</code> accepts <code>-config</code> and
+<code>-effective-version-key-file</code>. It is the explicit form of the default
+server command.
 
-```bash
-jul doctor -config server.toml
-jul doctor -config server.toml -json -strict
-```
+### jul version-key init
 
-Exit codes: `0` no errors, `1` one or more diagnostic errors, and `2` invalid usage or warnings under `-strict`. See [docs/diagnostics.md](docs/diagnostics.md).
+Initializes a protected, random key file. It does not replace an existing file.
+Keep the file private and back it up securely; losing it changes the effective
+version context.
 
-### `jul support-bundle`
+| Flag | Meaning |
+| --- | --- |
+| <code>-file PATH</code> | Key file to initialize. Defaults to <code>JUL_EFFECTIVE_VERSION_KEY_FILE</code> or the platform path. |
 
-Creates an owner-only, bounded `tar.gz` containing a versioned manifest, safe build/configuration metadata, and the in-process `jul doctor` report. It never uploads automatically, never accepts arbitrary include paths, and excludes raw configuration, private keys, environment dumps, request/response bodies, and traffic captures. Logs are opt-in and limited to a bounded tail of the configured Jul access-log file.
+Exit codes: <code>0</code> initialized, <code>1</code> initialization or path
+error, <code>2</code> invalid usage.
 
-```bash
-jul support-bundle -config server.toml -output jul-support.tar.gz
-jul support-bundle -config server.toml -include-logs -json
-```
+### jul check
 
-Review every bundle before sharing it. See [docs/diagnostics.md](docs/diagnostics.md) for archive layout, limits, privacy guarantees, and limitations.
+Checks configuration structure, stateless runtime prerequisites, and configured
+static-root directories. It does **not** build all serving handlers, bind the
+actual listeners, or check live backends; a successful check does not guarantee
+that startup will succeed. Use it as an early validation step, not as a full
+startup rehearsal.
 
-### `jul healthcheck`
+| Flag | Meaning |
+| --- | --- |
+| <code>-config FILE</code> | Configuration file; defaults to <code>server.toml</code>. |
+| <code>-json</code> | Emit the result as JSON. |
+| <code>-quiet</code> | Suppress non-error output. |
+| <code>-skip-static-roots</code> | Do not open configured static-content directories. |
 
-Probes a **running** server's admin health endpoint and exits with a
-deterministic status, so it can drive container, systemd, and Kubernetes
-liveness/readiness checks — including from a shell-less distroless image where
-`curl`/`wget` are unavailable. It reads the `[admin] listen` address from the
-config (or takes `-addr`/`-url`) and GETs `/healthz` (liveness) or, with
-`-ready`, `/readyz` (readiness). The admin listener must be enabled.
+Exit codes: <code>0</code> checks passed, <code>1</code> configuration/runtime
+check failed, <code>2</code> invalid flags or usage. The legacy
+<code>jul -check</code> form remains supported.
 
-```bash
-jul healthcheck                                       # discover [admin] listen from server.toml
-jul healthcheck -config /etc/jul/server.toml -ready   # readiness probe
-jul healthcheck -addr 127.0.0.1:9090 -quiet           # exit code only, no output
-jul healthcheck -url http://127.0.0.1:9090/healthz -json
-```
+### jul doctor
 
-Exit codes: `0` healthy (endpoint returned `2xx`), `1` unhealthy (non-`2xx`, or
-the server was unreachable / timed out), `2` usage or config error (bad flags,
-unreadable config, or the admin listener is disabled). The health verdict is
-strictly `0`/`1`, so the command is safe to use directly in a Docker
-`HEALTHCHECK` — see [deployment.md](docs/deployment.md#health-checks).
+Runs deterministic, read-only checks for configuration, configured files and
+certificates, admin exposure, bounded topology, and build/process state. It is
+network-free by default. <code>-check-network</code> opts into bounded secret
+resolution, stateless runtime preflight, and immediate-close local listener
+bind probes. Even with that option, doctor does not build every serving handler
+or probe live backends; start Jul and exercise routes to establish deployment
+readiness. See [Diagnostics and support bundles](docs/diagnostics.md).
 
-### `jul lint`
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| <code>-config FILE</code> | <code>server.toml</code> | Configuration file. |
+| <code>-json</code> | off | Emit the versioned JSON report. |
+| <code>-strict</code> | off | Exit 2 when warning results are present. |
+| <code>-check-network</code> | off | Enable bounded network-capable checks and local bind probes. |
+| <code>-timeout D</code> | <code>20s</code> | Total diagnostic timeout. |
+| <code>-per-check-timeout D</code> | <code>5s</code> | Timeout for each check. |
 
-Parses and validates the configuration and additionally reports best-practice
-warnings in a single pass: an unauthenticated off-loopback admin listener,
-disabled compression, TLS without an explicit `min_version`, unreachable
-(duplicate) locations, directory listing exposure, and servers without
-locations. Each finding includes a hint. Exit codes are CI-friendly: `0` when
-there are no errors, `1` on validation errors, and `2` when warnings are present
-under `-strict`. Parse errors point at the offending line and column.
+Exit codes: <code>0</code> no errors (warnings allowed unless strict),
+<code>1</code> one or more diagnostic error results or output failure, <code>2</code> invalid usage or warnings
+under <code>-strict</code>.
 
-### `jul fmt`
+### jul support-bundle
 
-Validates and rewrites the configuration into canonical TOML. Invalid known
-values are rejected before anything is printed or written. By default it prints
-to stdout; `-w` writes the result back to the file. `-diff` shows a unified diff
-of the changes without writing: exits 0 when nothing would change, 1 when
-changes are needed (useful for CI enforcement). Comments and original formatting
-are not preserved.
+Writes a bounded, secret-safe <code>tar.gz</code> archive locally. It never
+uploads automatically. Logs are opt-in and limited to a tail of the configured
+Jul access-log file. Review a bundle before sharing it; see
+[the diagnostics guide](docs/diagnostics.md) for its contents and privacy limits.
 
-### `jul run` (zero-config)
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| <code>-config FILE</code> | <code>server.toml</code> | Configuration file. |
+| <code>-output FILE</code> | timestamped file in the current directory | Archive destination. |
+| <code>-json</code> | off | Emit generation status and manifest as JSON. |
+| <code>-check-network</code> | off | Include bounded network-capable doctor checks. |
+| <code>-include-logs</code> | off | Include a bounded tail of the configured access log. |
+| <code>-log-tail-bytes N</code> | <code>65536</code> | Maximum configured log bytes to inspect. |
+| <code>-timeout D</code> | <code>30s</code> | Total collection timeout. |
+| <code>-per-collector-timeout D</code> | <code>8s</code> | Timeout for each collector. |
+| <code>-max-artifact-bytes N</code> | <code>2097152</code> | Maximum uncompressed size per artifact. |
+| <code>-max-uncompressed-bytes N</code> | <code>12582912</code> | Maximum total uncompressed archive content. |
+| <code>-max-compressed-bytes N</code> | <code>8388608</code> | Maximum compressed archive size. |
 
-Provision a private key once with `jul version-key init` before serving. Preserve
-it across restarts; see [upgrade and recovery](docs/effective-versions.md).
+Exit codes: <code>0</code> bundle generated, <code>1</code> collection or
+output failure, <code>2</code> invalid usage or limits.
 
+### jul healthcheck
 
-Starts a server from a synthesized profile without any config file:
+Probes a **running** server's admin health endpoint: <code>/healthz</code> by
+default, or <code>/readyz</code> with <code>-ready</code>. The admin listener
+must be enabled. HTTPS probes use the system trust roots unless the CA or
+client-certificate flags below are supplied.
 
-```bash
-jul run --serve ./public            # serve a directory of static files
-jul run --proxy 127.0.0.1:3000      # reverse-proxy everything to a backend
-jul run --proxy :3000 --listen :80  # proxy to loopback :3000, listen on :80
-```
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| <code>-config FILE</code> | <code>server.toml</code> | Read the admin listen address from this config. |
+| <code>-addr HOST:PORT</code> | — | Override the admin address while keeping the selected endpoint path. |
+| <code>-url URL</code> | — | Probe this full URL instead of discovering it from config. |
+| <code>-ready</code> | off | Probe readiness at <code>/readyz</code> instead of liveness at <code>/healthz</code>. |
+| <code>-timeout D</code> | <code>3s</code> | Overall request timeout. |
+| <code>-ca-file FILE</code> | — | Additional PEM CA bundle for HTTPS. |
+| <code>-client-cert FILE</code> and <code>-client-key FILE</code> | — | Client certificate and private key for an mTLS HTTPS probe. |
+| <code>-json</code> | off | Emit the result as JSON. |
+| <code>-quiet</code> | off | Suppress output; use the exit code. |
 
-Zero-config defaults enable compression and sensible timeouts. The default
-listen address is `:8080`.
+Exit codes: <code>0</code> healthy (HTTP 2xx), <code>1</code> unhealthy or
+unreachable, <code>2</code> usage/configuration error. See
+[deployment health checks](docs/deployment.md#health-checks).
 
-### `jul import`
+### jul lint
 
-Translates an existing NGINX configuration into Jul.IA TOML. It is gated behind
-the `importer` build tag (see [Migrating from NGINX](#migrating-from-nginx)):
+Parses and validates configuration, then reports lint findings with remediation
+hints. Findings include warnings and informational guidance; some security
+findings have error severity. Examples include risky backend TLS settings,
+unsafe admin exposure, disabled compression, missing TLS minimums, unreachable
+locations, directory listing exposure, and configuration-authority issues.
+This list is illustrative, not exhaustive.
 
-```bash
-jul import nginx /etc/nginx/nginx.conf            # write TOML to stdout
-jul import nginx -o server.toml /etc/nginx/nginx.conf
-```
+| Flag | Meaning |
+| --- | --- |
+| <code>-config FILE</code> | Configuration file; defaults to <code>server.toml</code>. |
+| <code>-strict</code> | Return exit code 2 when warnings are present. |
+| <code>-json</code> | Emit findings as JSON. |
+| <code>-quiet</code> | Suppress warning/info output; errors remain visible. Strict mode still fails on warnings. |
 
-Every directive it cannot translate is reported with its source line, both on
-stderr and as a comment header in the output, so nothing is dropped silently.
-The generated config is re-parsed and validated before it is emitted. Exit
-codes: `0` ok, `1` parse/translate error or invalid output, `2` warnings under
-`-strict`.
+Exit codes: <code>0</code> no errors (warnings allowed unless strict),
+<code>1</code> config or error-severity lint findings,
+<code>2</code> invalid usage or warnings under <code>-strict</code>. The JSON
+contract keeps lint findings under its <code>warnings</code> field with an
+individual severity. Parse errors include the source location.
 
-### `jul version`
+### jul fmt
 
-Prints the version and build metadata. Human-readable by default; `-json` emits
-a stable machine object (keys: `product`, `version`, `commit`, `build_date`,
-`dirty`, `go_version`, `os`, `arch`) for scripts and CI.
+Validates and rewrites the TOML configuration into canonical form. By default
+it writes formatted TOML to stdout; comments and original formatting are not
+preserved.
 
-```bash
-jul version           # human-readable
-jul version -json     # machine-readable object
-```
+| Flag | Meaning |
+| --- | --- |
+| <code>-config FILE</code> | File to read; defaults to <code>server.toml</code>. |
+| <code>-w</code> | Write the formatted file in place. |
+| <code>-diff</code> | Print a unified diff without writing. |
 
-The `version` string is stamped by the release pipeline (and `make build`); the
-commit, build date, and dirty flag are read from the Go build info the toolchain
-embeds automatically, so they populate for any `go build` from the repository and
-degrade to `unknown` when VCS metadata is absent. To stamp a custom version:
+Exit codes: <code>0</code> formatting succeeded or no diff is needed,
+<code>1</code> parse/validation or I/O error, or <code>-diff</code> found
+changes, <code>2</code> invalid usage.
 
-```bash
-go build -ldflags "-X main.version=1.2.3" -o jul ./cmd/jul
-```
+### jul run
 
-### `jul completion`
+Creates a server from a synthesized profile without a configuration file.
+Exactly one of <code>--serve DIR</code> and <code>--proxy TARGET</code> is
+required. The default listen address is <code>:8080</code>.
 
-Generates a shell completion script for `bash`, `zsh`, `fish`, or `powershell`
-(`pwsh`). Source it for the current session, or install it into the shell's
-completion directory:
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| <code>--serve DIR</code> | — | Serve a directory of static files. |
+| <code>--proxy TARGET</code> | — | Reverse-proxy requests to a URL, host:port, or :port target. |
+| <code>--listen ADDR</code> | <code>:8080</code> | Listen address. |
+| <code>--effective-version-key-file PATH</code> | key path selection rules above | Select the protected key used for this server process. |
 
-```bash
-source <(jul completion bash)                                # bash, current session
-jul completion zsh  > "${fpath[1]}/_jul"                     # zsh, installed
-jul completion fish > ~/.config/fish/completions/jul.fish    # fish
-jul completion powershell | Out-String | Invoke-Expression   # PowerShell
-```
+The zero-config profile does not configure TLS or admin authentication. Binding
+to a non-loopback address makes the service reachable from other hosts and
+prints a notice; expose it only behind protections appropriate to your
+deployment. For an example, see [Getting started](docs/getting-started.md).
 
-Completion covers the subcommand verbs and the arguments of `completion` and
-`version`; file paths complete elsewhere.
+### jul import nginx
+
+Translates or assesses an NGINX configuration. Build the binary with
+<code>-tags importer</code>. Include traversal is off by default; enable it
+explicitly and confine it to a root. The [NGINX importer guide](docs/nginx-importer.md)
+documents the assessment contract and bounded include behavior.
+
+| Flag | Meaning |
+| --- | --- |
+| <code>-o FILE</code>, <code>-output FILE</code> | Write generated TOML to a file; otherwise write it to stdout. |
+| <code>-input FILE</code> | Input file alternative to the positional argument. |
+| <code>-strict</code> | Exit 3 if approximated, ignored, blocking, or Jul lint findings exist. |
+| <code>-assess</code> | Emit the human migration assessment without generated TOML. |
+| <code>-report FILE</code> | Write the versioned JSON assessment to a file. |
+| <code>-json</code> | Emit only the versioned JSON assessment to stdout. |
+| <code>-path-style relative or absolute</code> | Assessment path format; defaults to <code>relative</code>. |
+| <code>-source-order</code> | Preserve source order in a human assessment; requires <code>-assess</code>. |
+| <code>-follow-includes</code> | Resolve includes using bounded, root-confined traversal. Off by default. |
+| <code>-root DIR</code>, <code>-include-root DIR</code> | Include root; the two flags are aliases. |
+| <code>-max-include-depth N</code> | Maximum nested include depth; default <code>16</code>. |
+| <code>-max-include-files N</code> | Maximum source files including the root; default <code>256</code>. |
+| <code>-max-include-file-bytes N</code> | Maximum bytes per source file; default <code>4194304</code>. |
+| <code>-max-include-total-bytes N</code> | Maximum bytes across the source tree; default <code>33554432</code>. |
+| <code>-max-include-glob-matches N</code> | Maximum matches per include glob; default <code>1024</code>. |
+
+Exit codes: <code>0</code> success, <code>1</code> internal error,
+<code>2</code> usage error, <code>3</code> blocking or strict findings,
+<code>4</code> NGINX parse error, <code>5</code> generated-candidate validation
+error, <code>6</code> file I/O error. The migration overview below includes
+examples and links to the migration corpus and assessment schema.
+
+### jul version and jul capabilities
+
+<code>jul version</code> prints version/build metadata. Use <code>-json</code>
+for the stable object with product, version, commit, build date, dirty state,
+Go version, operating system, and architecture. The legacy
+<code>jul -version</code> flag remains supported.
+
+<code>jul capabilities</code> reports compiled features and the canonical exit
+code contract. It prints JSON automatically when stdout is not a terminal;
+<code>-json</code> forces JSON. See also the build profile in
+[diagnostics](docs/diagnostics.md).
+
+### jul posture
+
+Evaluates Jul's seven-area gateway security posture locally from the supplied
+configuration. It does not query a running server.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| <code>-config FILE</code> | <code>server.toml</code> | Configuration file. |
+| <code>-json</code> | off | Emit the report as JSON. |
+| <code>-timeout D</code> | <code>30s</code> | Evaluation timeout. |
+
+Exit codes: <code>0</code> no error findings, <code>1</code> report contains
+errors or evaluation failed, <code>2</code> invalid usage. See
+[Security posture](docs/security-posture.md).
+
+### jul waf evaluate, manifest, and verify-assets
+
+These are **local** WAF policy commands. Build with <code>-tags waf</code>.
+All accept <code>-timeout D</code> (default <code>30s</code>) and
+<code>-json</code>. WAF event inspection is a remote admin API query documented
+in [Remote CLI](docs/remote-cli.md).
+
+| Command | Options | Purpose |
+| --- | --- | --- |
+| <code>jul waf evaluate</code> | <code>-config FILE</code>, <code>-baseline FILE</code>, <code>-fixtures FILE</code>, <code>-scope SCOPE</code>, <code>-version-key-file PATH</code>, <code>-timeout D</code>, <code>-json</code> | Evaluate a candidate policy against built-in or supplied fixtures. |
+| <code>jul waf manifest</code> | <code>-config FILE</code>, <code>-scope SCOPE</code>, <code>-out FILE</code>, <code>-version-key-file PATH</code>, <code>-timeout D</code>, <code>-json</code> | Write or print a manifest of the selected policy and external assets. |
+| <code>jul waf verify-assets</code> | <code>-config FILE</code>, required <code>-manifest FILE</code>, <code>-version-key-file PATH</code>, <code>-timeout D</code>, <code>-json</code> | Verify the policy and external assets against a saved manifest. |
+
+A scope is <code>global</code>, a durable route ID, or a location path. The
+version-key flag is optional for offline operations; see
+[WAF policy evaluation and asset recovery](docs/waf.md). Exit codes:
+<code>0</code> completed successfully, <code>1</code> evaluation/verification or
+configuration error, <code>2</code> invalid usage.
+
+### jul completion
+
+Generates scripts for <code>bash</code>, <code>zsh</code>, <code>fish</code>,
+and <code>powershell</code> (also accepted as <code>pwsh</code>). Completion is
+currently partial: the generated scripts do not yet list local
+<code>posture</code> or <code>waf evaluate</code>, <code>waf manifest</code>, or <code>waf verify-assets</code>
+commands. The completion command itself accepts a shell name; install or source
+the output according to your shell's conventions.
 
 ### CLI troubleshooting
 
-For a full incident playbook — startup, reloads and restart-required changes,
-service discovery, plugins, and soak interpretation — see
+For a full incident playbook covering startup, reloads and restart-required
+changes, service discovery, plugins, and soak interpretation, see
 [docs/troubleshooting.md](docs/troubleshooting.md).
 
-- **Config rejected on start or reload?** Run `jul lint -config server.toml` to
-  see every error and warning at once; the running server keeps its last valid
-  configuration on a failed reload.
-- **Not sure a change is safe?** `jul lint` before reloading, or rely on the
-  admin GUI which validates before applying.
-- **Want a quick local server?** `jul run --serve .` needs no config file.
+- **Config rejected on start or reload?** Run <code>jul lint -config server.toml</code>
+  for lint findings and <code>jul doctor -config server.toml</code> for read-only
+  local diagnostics. A running server keeps its last valid configuration on a
+  failed reload.
+- **Not sure a change is safe?** Run <code>jul check -config server.toml</code>
+  for structural and stateless runtime checks, then exercise the relevant routes
+  in a running instance.
+- **Want a quick local server?** <code>jul run --serve .</code> needs no config
+  file.
 
 ---
 
