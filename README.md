@@ -108,34 +108,46 @@ audience-change checks, and in-place route withdrawal with active-stream
 retirement), alongside targeted additions such as single-provider Console OIDC,
 large-object and range-aware caching, and offered-ALPN TCP passthrough routing.
 
-**Where we are going:** Our focus is making powerful gateway controls
+Two operational programmes have since completed on `main`:
+
+- **Cache operations ([#620](https://github.com/victornife/jul/issues/620); children #621–#624)** — scoped invalidation, bounded cache inspection and decision explanations, route-scoped cache controls, and explicit cache handling during route/backend changes.
+- **WAF and security operations ([#629](https://github.com/victornife/jul/issues/629); children #630–#634)** — bounded outcome investigation, fixture-based policy verification and recovery, scoped rule exceptions, posture/isolation evidence, and security alerting delivered through [#628 Milestone B](https://github.com/victornife/jul/issues/628).
+
+These operational additions are **Beta and unreleased**; completion does not
+promote them to GA or soak-certified status. The established base WAF and
+response cache retain their separate maturity entries in the
+[feature status matrix](docs/status.md).
+
+**Where we are going:** The strategic focus is making powerful gateway controls
 understandable and dependable for people and teams running and sharing several
 useful applications on one machine—bridging the gap between a capable standalone
-gateway and an intentional sharing experience. Active programmes and backlog
-priorities are organized around three tracks:
+gateway and an intentional sharing experience. The completed WAF and cache
+programmes are delivered capabilities, not active roadmap tracks. Current
+sharing work and remaining operational candidates are tracked separately in
+[#62](https://github.com/victornife/jul/issues/62).
 
 - **Application sharing ([#579](https://github.com/victornife/jul/issues/579), [contract](docs/specs/application-sharing.md))** —
-  Verifying and documenting how public, private-network (Tailscale),
-  restricted-browser (Cloudflare Tunnel/Access and self-hosted login), and
-  local-preview services coexist safely on one instance; proving recovery and
-  portability across [reproducible application recipes](https://github.com/victornife/jul/issues/613);
-  and using that evidence to build guided sharing, access-summary, and
-  withdrawal workflows in the Console before exploring provider-backed
-  audience and invitation management.
-- **Security operations and access-control clarity ([#629](https://github.com/victornife/jul/issues/629))** —
-  Making day-two protection maintainable without a separate security platform:
-  trustworthy WAF outcome correlation and bounded investigation, candidate
-  policy testing/promotion/rollback, scoped rule exceptions, actionable gateway
-  posture and exposure reviews, and route/protocol isolation verification.
-- **Gateway usability and cache operations ([#620](https://github.com/victornife/jul/issues/620))** —
-  Practical operational depth for multi-application hosts: scoped cache
-  invalidation by exact URL, segment-bounded prefix, bounded anchored glob,
-  trusted origin grouping tag, or hostname ([#621](https://github.com/victornife/jul/issues/621),
-  implemented on PR), plus planned cache decision inspection (#622), route
-  caching profiles (#623), cutover invalidation (#624), and Console IA (#625).
-  route-scoped cache defaults and bypass rules, plain-language effective-behavior
-  summaries in the Console, aggregate download bandwidth controls, and external
-  alerting recipes.
+  Verify and document how public, private-network (Tailscale), restricted-browser
+  (Cloudflare Tunnel/Access and self-hosted login), and local-preview services
+  coexist safely on one instance; prove recovery and portability through
+  [reproducible application recipes](https://github.com/victornife/jul/issues/613);
+  then use that evidence to guide sharing, access-summary, and withdrawal
+  workflows in the Console before exploring provider-backed audience and
+  invitation management. The next Tailscale composition, [#582](https://github.com/victornife/jul/issues/582),
+  is ready but requires an authorized disposable tailnet and intended/excluded
+  clients.
+- **Cross-Console explanations ([#625](https://github.com/victornife/jul/issues/625))** —
+  A candidate, not started. Cache-specific decision and cutover explanations
+  have shipped; this issue remains for the broader shared explanation catalog.
+- **HTTP download bandwidth controls ([#626](https://github.com/victornife/jul/issues/626))** —
+  A separate candidate, not started; it is distinct from request-rate limiting
+  and cache operations.
+- **External alert recipes ([#628](https://github.com/victornife/jul/issues/628))** —
+  Security milestone B is delivered. Operational milestone A, covering core
+  availability/certificate/backend/storage alerts, remains open.
+
+The candidate items remain unselected; selection and sequencing for open work
+stay in the programme tracker.
 
 **What stays out of scope:** Correctness and security fixes always take priority
 over feature work, and new capabilities earn their own maturity rather than
