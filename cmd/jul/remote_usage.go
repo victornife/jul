@@ -40,7 +40,7 @@ Remote connection flags:
 
 Remote credential precedence:
   explicit flags/profile selection > named profile > JUL_ENDPOINT/JUL_TOKEN_FILE/JUL_TOKEN > no endpoint
-  (these common flags do not apply to `jul waf events`)
+  (these common flags do not apply to the WAF events command)
 
 Remote automation exit contract:
   0  successful live/read/ordinary operation
@@ -57,6 +57,6 @@ Remote automation exit contract:
 Security:
   Shared remote automation has no raw --token argument or generic --insecure bypass.
   Plain HTTP is accepted only for loopback. Control-plane redirects are not followed.
-  `jul waf events` has a separate -token option; prefer -token-file or JUL_ADMIN_TOKEN.
+  The WAF events command has a separate -token option; prefer -token-file or JUL_ADMIN_TOKEN.
 `)
 }
