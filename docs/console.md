@@ -177,7 +177,11 @@ This area groups **Runtime Resources**, **Capacity**, and Jul-owned **Storage**.
 Details are collapsed by default when nothing is elevated; they open when a
 resource or storage warning appears. Named active warnings remain at the top
 even if the operator closes the details. Unavailable or unjudged readings are
-not treated as healthy. The first two sections answer "is this instance healthy,
+not treated as healthy.
+
+##### Runtime Resources and Capacity (#431)
+
+These sections answer "is this instance healthy,
 and which resource will saturate first?" from data Jul already collects (the
 standard Go/process Prometheus collectors, the cache, and the upstream
 resilience projection) — this is not a second telemetry stack, a host-monitoring
