@@ -545,7 +545,7 @@ export function Layout() {
   const authority = overview?.authority;
 
   const controlsTop = (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
       <IdentityBadge /><OidcSession />
       <ConsoleHealthBadge />
       <CommandPaletteButton />
@@ -582,7 +582,7 @@ export function Layout() {
     return (
       <div className="flex min-h-screen bg-jul-bg text-jul-text">
         <aside
-          className={`flex shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface py-4 ${
+          className={`hidden shrink-0 flex-col gap-4 border-r border-jul-border bg-jul-surface py-4 sm:flex ${
             collapsed ? "w-16 px-2" : "w-56 px-4"
           }`}
         >
@@ -610,15 +610,24 @@ export function Layout() {
           <NavLinks pathname={loc.pathname} orientation="col" collapsed={collapsed} />
           {controlsSide}
         </aside>
-        <main className="flex-1 p-6">
-          <CertAlertBanner certRisk={certRisk} />
-          <RestartRequiredBanner subsystems={pendingRestart} />
-          <ConfigAuthorityBanner authority={authority} />
-          <Outlet />
-        </main>
-        <footer className="px-6 py-2 text-[10px] text-jul-muted">
-          Licensed under AGPL-3.0-or-later
-        </footer>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="space-y-2 border-b border-jul-border bg-jul-surface p-4 sm:hidden">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-bold tracking-wide text-jul-accent">{product}</span>
+              {controlsTop}
+            </div>
+            <NavLinks pathname={loc.pathname} orientation="row" />
+          </div>
+          <main className="min-w-0 flex-1 p-4 sm:p-6">
+            <CertAlertBanner certRisk={certRisk} />
+            <RestartRequiredBanner subsystems={pendingRestart} />
+            <ConfigAuthorityBanner authority={authority} />
+            <Outlet />
+          </main>
+          <footer className="px-6 py-2 text-[10px] text-jul-muted">
+            Licensed under AGPL-3.0-or-later
+          </footer>
+        </div>
         {palette}
       </div>
     );
@@ -626,10 +635,10 @@ export function Layout() {
 
   return (
     <div className="flex h-screen flex-col bg-jul-bg text-jul-text">
-      <header className="flex items-center gap-4 border-b border-jul-border bg-jul-surface px-6 py-3">
+      <header className="flex flex-wrap items-center gap-4 border-b border-jul-border bg-jul-surface px-4 py-3 sm:px-6">
         <span className="font-bold tracking-wide text-jul-accent">{product}</span>
         {version && <span className="text-xs text-jul-muted">v{version}</span>}
-        <div className="ml-auto flex items-center gap-4">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center gap-4">
           <NavLinks pathname={loc.pathname} orientation="row" />
           {controlsTop}
         </div>
@@ -637,7 +646,7 @@ export function Layout() {
       <CertAlertBanner certRisk={certRisk} />
       <RestartRequiredBanner subsystems={pendingRestart} />
       <ConfigAuthorityBanner authority={authority} />
-      <main className="flex-1 overflow-auto p-6">
+      <main className="min-w-0 flex-1 overflow-auto p-4 sm:p-6">
         <Outlet />
       </main>
       <footer className="border-t border-jul-border px-6 py-2 text-[10px] text-jul-muted">

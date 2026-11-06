@@ -92,6 +92,7 @@ export interface MetricsHistory {
 export function useMetricsHistory(
   stats: StatsSnapshot | undefined,
   windowSize = 60,
+  sampledAt?: number,
 ): MetricsHistory {
   const bufferRef = useRef<MetricsHistory>({
     requestsPerSec: [],
@@ -167,7 +168,7 @@ export function useMetricsHistory(
 
     // Trigger re-render with new reference
     setHistory({ ...buffer });
-  }, [stats, windowSize]);
+  }, [stats, windowSize, sampledAt]);
 
   return history;
 }

@@ -862,7 +862,7 @@ flag (#563, #642).
   describes resource retirement, not proof that every active stream ended.
   The existing warning still supplies generation/grace detail. See
   [retirement alerting](observability.md#handler-generation-retirement).
-  The read-only **Generation retirement** card shows graceful/forced totals
+  The read-only **Connection lifecycle across reloads** card shows graceful/forced generation-retirement totals
   since process start, with explicit zero/unavailable and restart-reset
   behavior. Per-entry exchange retirement outcomes (`ended_exchanges`,
   `graceful_count`, `forced_count`, `completed_within_bound`,

@@ -128,17 +128,18 @@ outcome visible rather than replaying after credential/grant recovery.
 The landing page of the console and the primary monitoring surface. Answers
 "is anything wrong?" at a glance and provides a direct path to the relevant
 configuration panel when something needs attention. Backed by
-`GET /api/overview`, polled every two seconds.
+`GET /api/runtime/overview`, polled every two seconds. Its response includes
+the statistics and traffic-source data used by this page; Overview makes no
+separate `/api/stats` request.
 
-#### Health band
+#### At a glance
 
-A row of chips at the top of the page gives a coarse health signal before
-scrolling into the detail below. Each chip shows a label, current value, and a
-tone (green / yellow / red):
+Health chips and active warnings appear above the detail sections. Each chip
+shows a label, current value, and a tone (green / yellow / red / neutral):
 
 | Chip | OK | Warn | Down |
 | --- | --- | --- | --- |
-| **Traffic** | > 0 req/s | — | 0 req/s (idle) |
+| **Traffic** | > 0 req/s | — | 0 req/s is neutral (idle), not down |
 | **Errors (5xx)** | 0% | > 0% | ≥ 5% |
 | **Latency p95** | < 250 ms | 250–999 ms | ≥ 1 000 ms |
 | **Backends** | all healthy | any unhealthy | — |
@@ -149,20 +150,34 @@ The **Backends** and **Certificates** chips are clickable and navigate to the
 Apps and TLS panels respectively; **Storage** (shown only when Jul owns at
 least one storage location) scrolls to the Storage section.
 
-#### Live Traffic
+#### Traffic and connections
 
 Numeric metric cards show the current snapshot: uptime, req/s, in-flight
 requests, connections, latency (avg/p50/p95/p99), error rate, status-class
 counts (2xx / 3xx / 4xx / 5xx), cache hit ratio, cache events, and HTTP method
 breakdown. All values are point-in-time from the most recent poll.
 
-**2-Minute Trends** shows six sparkline cards — one per tracked metric —
-covering the last 60 samples (~2 minutes at 2 s polling). Each card is
-keyboard-reachable and can be expanded.
+**Connection lifecycle across reloads** includes the graceful and forced
+generation-retirement totals. These are cumulative since process start and
+reset on restart. Forced retirement describes resource cleanup after grace;
+it does not prove requests were dropped. Aggregate totals cannot identify
+which reload caused a retirement. The card links to the
+[long-lived connection matrix](reload-semantics.md#long-lived-connection-matrix).
 
-#### Runtime Resources and Capacity (#431)
+**2-Minute Trends** is collapsed by default and shows six sparkline cards — one
+per tracked metric — covering the last 60 samples (~2 minutes at 2 s
+polling). Each card is keyboard-reachable and can be expanded. **Traffic
+Sources**, also collapsed by default and shown only when data is available,
+shows a CORS summary (preflight, same-origin, cross-origin counts) and top-eight
+tables for client hosts, origins, and referer hosts.
 
-Below the traffic cards, two further sections answer "is this instance healthy,
+#### Resources and storage (#431, #437)
+
+This area groups **Runtime Resources**, **Capacity**, and Jul-owned **Storage**.
+Details are collapsed by default when nothing is elevated; they open when a
+resource or storage warning appears. Named active warnings remain at the top
+even if the operator closes the details. Unavailable or unjudged readings are
+not treated as healthy. The first two sections answer "is this instance healthy,
 and which resource will saturate first?" from data Jul already collects (the
 standard Go/process Prometheus collectors, the cache, and the upstream
 resilience projection) — this is not a second telemetry stack, a host-monitoring
@@ -193,7 +208,7 @@ Traffic** above: history is ephemeral and scoped to this browser tab. Prometheus
 (`/metrics`) remains the long-term, cross-restart, cross-instance source of
 truth; the Console's local window is for at-a-glance operator context only.
 
-#### Storage (#437)
+##### Storage (#437)
 
 This section is Beta/merged on post-v2.0.0 `main` and requires the `console`
 build tag; it is not present in the stable v2.0.0 Console.
@@ -226,14 +241,17 @@ failed) with the bounded reason — never `0 B` or a fabricated percentage. See
 [observability.md](observability.md#jul-owned-storage-headroom-437) for the
 path-resolution rules.
 
-#### Diagnostics guidance (#445)
+#### Diagnostics and next steps (#445)
 
 The last resource section, **Diagnostics guidance**, turns the readings above
 into "what to collect next" using Jul's existing primitives only — gated
 `/debug/pprof/`, `jul doctor`, `jul support-bundle` and Operations. Each card
 (CPU, memory, goroutines, file descriptors, storage) carries a text badge
 (**Elevated now** / **Within hints** / **Not judged**), the observation in
-numbers, and bounded next steps; elevated cards sort first. Memory guidance
+numbers, and bounded next steps; elevated cards appear first and remain visible.
+Other guidance is collapsed by default with a summary of the counts within
+hints and not judged. When none is elevated, a compact summary says so without
+claiming unjudged signals are healthy. Memory guidance
 keeps RSS and Go heap apart and says explicitly when most memory is outside
 the heap (not a Go heap leak). The section states that it is guidance, not a
 diagnosis, and collects nothing.
@@ -272,13 +290,22 @@ Click or press Enter on any sparkline card to open the expanded chart:
 
 #### Capabilities & Configuration
 
-Shows which features are active in the running configuration, grouped into
+Collapsed by default, this section shows feature status in the running configuration, grouped into
 Traffic, Security, Protocols, Upstreams, Observability, and Extensibility. Each
-row shows a dual-encoded status indicator (coloured dot **and** the words
-"active" / "inactive"), the feature name, any available detail (counts or kinds
+row shows a dual-encoded status indicator (coloured dot **and** a text label),
+the feature name, any available detail (counts or kinds
 — never tokens or credentials), and for features with a known configuration
 destination, a visible action button that navigates directly to the relevant
 panel:
+
+For WASM plugins, L4 streams, WAF, and tracing, the labels are **configured** /
+**not configured**, not a claim that the build contains the corresponding tag.
+When the overview reports `admin_runtime.plugins_compiled`, the WASM row also
+shows whether that runtime is available in the build. Other build-tag support
+is not established by the status rows. Follow the relevant panel and apply
+preflight for known limitations; tracing config is
+accepted without `otel` but does not export spans. Server-side validation
+remains authoritative. See [Build-tag degradation](#build-tag-degradation).
 
 | Feature (name or group) | Navigates to |
 | --- | --- |
@@ -293,12 +320,6 @@ panel:
 
 Features not in this list render as informational rows with no action button.
 
-#### Traffic Sources
-
-When traffic-sources data is available, also shows a CORS summary (preflight,
-same-origin, cross-origin counts) and top-8 tables for client hosts, origins,
-and referer hosts.
-
 ### Status
 
 The capability status grid (Traffic, Security, Protocols, Upstreams,
@@ -307,7 +328,7 @@ Observability, Extensibility) is now embedded in the **Overview** panel's
 navigation action to the relevant configuration panel. See
 [Overview → Capabilities & Configuration](#capabilities--configuration) above.
 The underlying data is derived from the parsed running configuration and backed
-by `GET /api/overview`.
+by `GET /api/runtime/overview`.
 
 ### Upstreams
 
@@ -1151,7 +1172,7 @@ consumes the endpoints below.
 
 | Panel / surface | Endpoints |
 | --- | --- |
-| Overview | `GET /api/runtime/overview`, `GET /api/stats` |
+| Overview | `GET /api/runtime/overview` |
 | Routes | `GET /api/routes`, `POST /api/routes/test` |
 | Apps & Upstreams | `GET /api/apps`, `GET /api/upstreams`, `GET /api/upstreams/{name}/resilience` |
 | TLS & Certificates | `GET /api/tls`, `GET /api/certs`, `GET /api/mtls` |

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -300,8 +300,8 @@ describe("OverviewPanel storage integration", () => {
     );
     render(<OverviewPanel />, { wrapper: Wrapper });
     const chip = await screen.findByRole("button", { name: /Storage: low/ });
-    chip.click();
-    expect(scroll).toHaveBeenCalled();
+    fireEvent.click(chip);
+    await waitFor(() => { expect(scroll).toHaveBeenCalled(); });
     expect(await screen.findByRole("heading", { name: "Storage", level: 2 })).toBeInTheDocument();
   });
 

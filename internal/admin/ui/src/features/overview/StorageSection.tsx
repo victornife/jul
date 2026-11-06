@@ -68,14 +68,27 @@ function StorageCard({ h }: { readonly h: StorageHeadroom }) {
             of {formatBytes(h.totalBytes)} — {(h.availableRatio * 100).toFixed(1)}% available
           </div>
         )}
-        {!known && h.reason && <div>{STORAGE_REASON_TEXT[h.reason] ?? h.reason}</div>}
+        {!known && h.reason && (
+          <div>
+            {Object.hasOwn(STORAGE_REASON_TEXT, h.reason)
+              ? STORAGE_REASON_TEXT[h.reason]
+              : "capacity reason not reported"}
+          </div>
+        )}
         {!known && !h.reason && <div>capacity not reported for this location</div>}
         {h.pendingCreation && (
           <div>not created yet — measured on the filesystem it will be created in</div>
         )}
-        {h.sharedWith && h.sharedWith.length > 0 && (
-          <div>shares a filesystem with {h.sharedWith.map(storageLabel).join(", ")}</div>
-        )}
+        {h.sharedWith &&
+          h.sharedWith.some((category) => Object.hasOwn(STORAGE_CATEGORY_META, category)) && (
+            <div>
+              shares a filesystem with{" "}
+              {h.sharedWith
+                .filter((category) => Object.hasOwn(STORAGE_CATEGORY_META, category))
+                .map(storageLabel)
+                .join(", ")}
+            </div>
+          )}
         {h.writesFailing && (
           <div className="font-medium text-jul-danger">
             The most recent write failed — this subsystem is already losing writes.
