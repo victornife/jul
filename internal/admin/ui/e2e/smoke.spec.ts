@@ -223,8 +223,10 @@ test.describe("Overview operator layout", () => {
       });
     });
     const calls: string[] = [];
+    const assets: string[] = [];
     page.on("request", (request) => {
       if (request.url().includes("/api/")) calls.push(request.url());
+      if (request.url().includes("/assets/")) assets.push(new URL(request.url()).pathname);
     });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "At a glance" })).toBeVisible();
@@ -237,10 +239,12 @@ test.describe("Overview operator layout", () => {
       page.getByRole("button", { name: /trend\..*samples\. Click to expand/ }),
     ).toHaveCount(6);
     await expect(trigger).toHaveAttribute("aria-label", /[2-9] samples/, { timeout: 8000 });
+    expect(assets.some((path) => /\/ChartDetailPanel-/.test(path))).toBe(false);
     await trigger.focus();
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog", { name: "Request Rate" });
     await expect(dialog).toBeVisible();
+    expect(assets.some((path) => /\/ChartDetailPanel-/.test(path))).toBe(true);
     await expect(dialog.getByText("Hover or use arrow keys to inspect values")).toBeVisible();
     await dialog.getByRole("img", { name: /Request Rate detail chart/ }).focus();
     await page.keyboard.press("ArrowRight");
@@ -263,6 +267,10 @@ test.describe("Overview operator layout", () => {
       page.getByText(/plugin declarations are rejected by apply preflight/),
     ).toBeVisible();
     expect(calls.some((url) => new URL(url).pathname === "/api/stats")).toBe(false);
+    expect(assets.some((path) => /\/WizardPanel-/.test(path))).toBe(false);
+    await page.goto("/wizard");
+    await expect(page.getByRole("heading", { name: "Setup Wizard" })).toBeVisible();
+    expect(assets.some((path) => /\/WizardPanel-/.test(path))).toBe(true);
   });
 
   for (const layout of ["top", "side"] as const) {

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -15,7 +15,6 @@ import {
 import { Sparkline } from "@/components/Sparkline";
 import { formatBytes, formatBytesPerSec, formatCores } from "@/lib/formatBytes.ts";
 import type { MetricsHistory } from "@/lib/useMetricsHistory";
-import { ChartDetailPanel } from "@/components/ChartDetailPanel";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
@@ -25,6 +24,12 @@ import { StorageSection } from "./StorageSection.tsx";
 import { DiagnosticsGuidanceSection } from "./DiagnosticsGuidanceSection.tsx";
 import { STORAGE_CATEGORY_META, storageLabel, storageSummary } from "@/lib/storage.ts";
 import { buildGuidance } from "@/lib/diagnostics.ts";
+
+const ChartDetailPanel = lazy(() =>
+  import("@/components/ChartDetailPanel").then((module) => ({
+    default: module.ChartDetailPanel,
+  })),
+);
 
 // Compact a large number into human-readable SI form (e.g., 1,234,567 → 1.2 M).
 function compactNumber(n: number): string {
@@ -1228,14 +1233,16 @@ export function OverviewPanel() {
       </section>
 
       {activeMetric !== null && (
-        <ChartDetailPanel
-          metricKey={activeMetric.key}
-          data={activeMetric.data}
-          timestamps={activeMetric.timestamps}
-          onClose={() => {
-            setActiveMetric(null);
-          }}
-        />
+        <Suspense fallback={<Loading label="Loading chart detail…" />}>
+          <ChartDetailPanel
+            metricKey={activeMetric.key}
+            data={activeMetric.data}
+            timestamps={activeMetric.timestamps}
+            onClose={() => {
+              setActiveMetric(null);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

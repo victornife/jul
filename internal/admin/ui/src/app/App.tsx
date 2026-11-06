@@ -19,11 +19,16 @@ import { OperationsPanel } from "@/features/operations/OperationsPanel.tsx";
 import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
 import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
-import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
+import { Loading } from "@/components/ui.tsx";
 
 const TranscodeDesignerPanel = lazy(() =>
   import("@/features/transcode/TranscodeDesignerPanel.tsx").then((m) => ({
     default: m.TranscodeDesignerPanel,
+  })),
+);
+const WizardPanel = lazy(() =>
+  import("@/features/wizard/WizardPanel.tsx").then((m) => ({
+    default: m.WizardPanel,
   })),
 );
 
@@ -60,7 +65,14 @@ export function App() {
         <Route path="/config" element={<ConfigPanel />} />
         <Route path="/ui" element={<Navigate to="/config" replace />} />
         <Route path="/history" element={<HistoryPanel />} />
-        <Route path="/wizard" element={<WizardPanel />} />
+        <Route
+          path="/wizard"
+          element={
+            <Suspense fallback={<Loading label="Loading setup wizard…" />}>
+              <WizardPanel />
+            </Suspense>
+          }
+        />
         <Route
           path="*"
           element={<div className="p-8 text-center text-jul-muted">Page not found.</div>}
