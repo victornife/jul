@@ -308,10 +308,10 @@ describe("OverviewPanel", () => {
         }),
     );
     render(<OverviewPanel />, { wrapper: Wrapper });
-    const card = await screen.findByRole("region", { name: "Generation retirement" });
+    const card = await screen.findByRole("region", { name: "Connection lifecycle across reloads" });
     expect(within(card).getByText("12")).toBeInTheDocument();
     expect(within(card).getByText("3")).toBeInTheDocument();
-    expect(within(card).getByText(/Totals since process start/)).toBeInTheDocument();
+    expect(within(card).getByText(/totals since process start/)).toBeInTheDocument();
     expect(within(card).getByText(/does not prove requests were dropped/)).toBeInTheDocument();
     expect(within(card).getByText(/cannot identify which reload/)).toBeInTheDocument();
     expect(within(card).getByRole("link", { name: "Lifecycle documentation" })).toHaveAttribute(
@@ -334,7 +334,7 @@ describe("OverviewPanel", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    const card = await screen.findByRole("region", { name: "Generation retirement" });
+    const card = await screen.findByRole("region", { name: "Connection lifecycle across reloads" });
     expect(within(card).getAllByText("0")).toHaveLength(2);
     expect(within(card).queryByText("Unavailable")).toBeNull();
     queryClient.setQueryData(["overview"], { ...base, stats: { ...base.stats, available: false } });
@@ -367,7 +367,7 @@ describe("OverviewPanel", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    const card = await screen.findByRole("region", { name: "Generation retirement" });
+    const card = await screen.findByRole("region", { name: "Connection lifecycle across reloads" });
     expect(within(card).getByText("12")).toBeInTheDocument();
     queryClient.setQueryData(["overview"], {
       ...base,
@@ -400,6 +400,7 @@ describe("OverviewPanel", () => {
   it("renders product name and grouped status rows", async () => {
     render(<OverviewPanel />, { wrapper: Wrapper });
     expect(await screen.findByText(/Jul\.IA/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Show capabilities and configuration"));
     expect(await screen.findByText("TLS")).toBeInTheDocument();
     expect(await screen.findByText("HTTP/3")).toBeInTheDocument();
     // Group header
@@ -409,12 +410,14 @@ describe("OverviewPanel", () => {
 
   it("shows active badges for active features", async () => {
     render(<OverviewPanel />, { wrapper: Wrapper });
+    fireEvent.click(await screen.findByText("Show capabilities and configuration"));
     const badges = await screen.findAllByText("active");
     expect(badges.length).toBeGreaterThanOrEqual(2);
   });
 
   it("shows inactive badge for inactive features", async () => {
     render(<OverviewPanel />, { wrapper: Wrapper });
+    fireEvent.click(await screen.findByText("Show capabilities and configuration"));
     expect(await screen.findByText("inactive")).toBeInTheDocument();
   });
 });

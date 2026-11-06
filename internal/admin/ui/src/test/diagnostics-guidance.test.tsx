@@ -331,7 +331,7 @@ describe("OverviewPanel diagnostics guidance", () => {
     );
     render(<OverviewPanel />, { wrapper: Wrapper });
     expect(
-      await screen.findByRole("heading", { name: "Diagnostics guidance" }),
+      await screen.findByRole("heading", { name: "Diagnostics and next steps" }),
     ).toBeInTheDocument();
     const fds = screen.getByRole("listitem", { name: "File descriptors guidance" });
     expect(within(fds).getByText("Elevated now")).toBeInTheDocument();

@@ -38,6 +38,25 @@ const OVERVIEW = {
   ],
 };
 
+const OVERVIEW_STATS = {
+  available: true, uptimeSeconds: 30, requestsTotal: 0, requestsPerSec: 0,
+  inFlight: 0, connections: 0, errorRate: 0, latencyAvgMs: 0, latencyP50Ms: 0,
+  latencyP95Ms: 0, latencyP99Ms: 0, cacheHitRatio: 0, httpResponseBytesTotal: 0,
+  cpuCores: 0.1, goMaxProcs: 2, rssBytes: 100, goHeapAllocBytes: 80,
+  goroutines: 2, openFDs: 5, maxFDs: 100,
+  generationRetirements: { graceful: 2, forced: 1 },
+};
+
+const OVERVIEW_ADMIN_RUNTIME = {
+  generation: "test", console_compiled: true, console_configured: true,
+  console_effective: true, plugins_compiled: false, upload_enabled: false,
+  upload_max_size_mb: 1, upload_directory_health: "ok", pprof_enabled: true,
+  rate_limit_read_per_min: 0, rate_limit_write_per_min: 0, rate_limit_apply_per_min: 0,
+  max_event_conns: 1, tracked_limiter_clients: 0, sse_active_total: 0,
+  sse_active_clients: 0, sse_over_cap_clients: 0, sse_max_per_client: 0,
+  rate_read_rejected: 0, rate_write_rejected: 0, rate_apply_rejected: 0, sse_rejected: 0,
+};
+
 /** Single proxy route used throughout the flow. */
 const ROUTES = [
   {
@@ -180,6 +199,169 @@ function json(route: Route, body: unknown, status = 200): Promise<void> {
   });
 }
 
+test.describe("Overview operator layout", () => {
+  test("keyboard trends, CSV export, and build-tag degradation", async ({ page }) => {
+    await setupApiMocks(page);
+    await page.route("/api/runtime/overview", (route) =>
+      json(route, {
+        ...OVERVIEW,
+        stats: OVERVIEW_STATS,
+        admin_runtime: OVERVIEW_ADMIN_RUNTIME,
+        status: [{ group: "Extensibility", name: "WASM plugins", active: true }],
+        traffic_sources: { preflight_count: 2, hosts: { "client.example": 3 } },
+      }),
+    );
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: {
+          writeText: (text: string) => {
+            (window as Window & { copiedCsv?: string }).copiedCsv = text;
+            return Promise.resolve();
+          },
+        },
+      });
+    });
+    const calls: string[] = [];
+    const assets: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/")) calls.push(request.url());
+      if (request.url().includes("/assets/")) assets.push(new URL(request.url()).pathname);
+    });
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "At a glance" })).toBeVisible();
+    const trends = page.getByText("2-Minute Trends", { exact: true });
+    await trends.focus();
+    await page.keyboard.press("Enter");
+    const trigger = page.getByRole("button", { name: /Request Rate trend/ });
+    await expect(trigger).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /trend\..*samples\. Click to expand/ }),
+    ).toHaveCount(6);
+    await expect(trigger).toHaveAttribute("aria-label", /[2-9] samples/, { timeout: 8000 });
+    expect(assets.some((path) => /\/ChartDetailPanel-/.test(path))).toBe(false);
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Request Rate" });
+    await expect(dialog).toBeVisible();
+    expect(assets.some((path) => /\/ChartDetailPanel-/.test(path))).toBe(true);
+    await expect(dialog.getByText("Hover or use arrow keys to inspect values")).toBeVisible();
+    await dialog.getByRole("img", { name: /Request Rate detail chart/ }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(dialog.locator('[aria-live="polite"]')).toContainText("0.0 req/s");
+    await dialog.getByRole("button", { name: "Export CSV" }).focus();
+    await page.keyboard.press("Enter");
+    expect(
+      await page.evaluate(() => (window as Window & { copiedCsv?: string }).copiedCsv),
+    ).toMatch(/^timestamp_ms,timestamp_local,value\n/);
+    await page.keyboard.press("Escape");
+    await expect(trigger).toBeFocused();
+    await page.getByText("Traffic Sources", { exact: true }).first().focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("client.example")).toBeVisible();
+    await page.getByText("Show capabilities and configuration").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("build unavailable")).toBeVisible();
+    await expect(page.getByText("configured", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(/plugin declarations are rejected by apply preflight/),
+    ).toBeVisible();
+    expect(calls.some((url) => new URL(url).pathname === "/api/stats")).toBe(false);
+    expect(assets.some((path) => /\/WizardPanel-/.test(path))).toBe(false);
+    await page.goto("/wizard");
+    await expect(page.getByRole("heading", { name: "Setup Wizard" })).toBeVisible();
+    expect(assets.some((path) => /\/WizardPanel-/.test(path))).toBe(true);
+  });
+
+  for (const layout of ["top", "side"] as const) {
+    test(`${layout} navigation fits a narrow viewport and retains warnings`, async ({ page }) => {
+      await page.setViewportSize({ width: 375, height: 812 });
+      await page.addInitScript(
+        (value) => localStorage.setItem("jul_pref:nav_layout", JSON.stringify(value)),
+        layout,
+      );
+      await setupApiMocks(page);
+      await page.route("/api/runtime/overview", (route) =>
+        json(route, {
+          ...OVERVIEW,
+          stats: {
+            ...OVERVIEW_STATS,
+            storage: [{ category: "cache", state: "critical", writesFailing: true }],
+          },
+        }),
+      );
+      await page.goto("/");
+      await expect(page.getByText(/Disk cache \(writes failing\)/).first()).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "Hide resource and storage details" }),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Hide resource and storage details" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByText(/Disk cache \(writes failing\)/).first()).toBeVisible();
+      await page.getByRole("button", { name: /Storage: writes failing/ }).focus();
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("heading", { name: "Storage", exact: true, level: 2 }),
+      ).toBeVisible();
+      const sizes = await page.evaluate(() => ({
+        document: document.documentElement.scrollWidth,
+        viewport: document.documentElement.clientWidth,
+        mainOverflow: (() => {
+          const main = document.querySelector("main");
+          return main ? main.scrollWidth - main.clientWidth : 0;
+        })(),
+        trailingSpace: (() => {
+          const main = document.querySelector("main");
+          const content = main?.firstElementChild;
+          if (!main || !content) return Infinity;
+          return (
+            main.scrollHeight -
+            (content.getBoundingClientRect().bottom -
+              main.getBoundingClientRect().top +
+              main.scrollTop)
+          );
+        })(),
+      }));
+      expect(sizes.document).toBeLessThanOrEqual(sizes.viewport);
+      expect(sizes.mainOverflow).toBeLessThanOrEqual(1);
+      expect(sizes.trailingSpace).toBeLessThanOrEqual(32);
+    });
+  }
+
+  for (const scenario of ["disabled", "denied"] as const) {
+    test(`does not offer pprof when ${scenario}`, async ({ page }) => {
+      await setupApiMocks(page);
+      if (scenario === "denied") {
+        await page.route("/api/admin/me", (route) =>
+          json(route, {
+            principal: "viewer",
+            role: "admin",
+            token_id: "synthetic-viewer",
+            legacy: false,
+            permissions: ["status:read"],
+          }),
+        );
+      }
+      await page.route("/api/runtime/overview", (route) =>
+        json(route, {
+          ...OVERVIEW,
+          stats: { ...OVERVIEW_STATS, cpuCores: 2 },
+          admin_runtime: { ...OVERVIEW_ADMIN_RUNTIME, pprof_enabled: scenario !== "disabled" },
+        }),
+      );
+      await page.goto("/");
+      const guidance = page.getByRole("listitem", { name: "CPU guidance" });
+      await expect(guidance.getByText("Elevated now")).toBeVisible();
+      await expect(guidance).toContainText(
+        scenario === "disabled" ? "Profiling is turned off" : "your identity does not have",
+      );
+      await expect(guidance.getByText("/debug/pprof", { exact: false })).toHaveCount(0);
+      await expect(page.getByText("jul support-bundle --config", { exact: false })).toBeVisible();
+      await expect(page.getByRole("button", { name: /support.bundle/i })).toHaveCount(0);
+    });
+  }
+});
+
 /**
  * Registers the baseline API mocks for every test. Only endpoints that the
  * smoke touches need a handler; any unmatched request that the SPA happens to
@@ -194,11 +376,34 @@ async function setupApiMocks(page: Page): Promise<void> {
 
   // Identity is verified before panels mount; these default smoke journeys
   // exercise the privileged comparison workflow. Role tests override it below.
-  await page.route("/api/admin/me", (route) => json(route, {
-    principal: "smoke-admin", role: "admin", token_id: "synthetic-smoke",
-    legacy: false,
-    permissions: ["status:read", "metrics:read", "config:read", "config:raw", "config:write", "config:apply", "config:trust", "config:adopt", "history:read", "history:raw", "history:rollback", "plugins:upload", "observability:read", "audit:read", "audit:export", "cache:purge", "reload:trigger", "admin:manage"],
-  }));
+  await page.route("/api/admin/me", (route) =>
+    json(route, {
+      principal: "smoke-admin",
+      role: "admin",
+      token_id: "synthetic-smoke",
+      legacy: false,
+      permissions: [
+        "status:read",
+        "metrics:read",
+        "config:read",
+        "config:raw",
+        "config:write",
+        "config:apply",
+        "config:trust",
+        "config:adopt",
+        "history:read",
+        "history:raw",
+        "history:rollback",
+        "plugins:upload",
+        "observability:read",
+        "audit:read",
+        "audit:export",
+        "cache:purge",
+        "reload:trigger",
+        "admin:manage",
+      ],
+    }),
+  );
   await page.route("/api/runtime/overview", (route) => json(route, OVERVIEW));
   await page.route("/api/routes", (route) => json(route, ROUTES));
   await page.route("/api/config", (route) => json(route, RAW_CONFIG));

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Sparkline } from "@/components/Sparkline";
 import { Modal } from "@/components/ui.tsx";
@@ -69,6 +69,19 @@ export function ChartDetailPanel({
     value: number;
   } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [onClose]);
 
   const summary = computeMetricSummary(data, meta);
 
@@ -172,20 +185,13 @@ export function ChartDetailPanel({
               className="w-full"
               ariaLabel={`${meta.name} detail chart, ${String(data.length)} data points. Use arrow keys to step through values.`}
               onPointHover={(idx, value) => {
-                setHoverInfo(
-                  idx !== null && value !== null ? { idx, value } : null,
-                );
+                setHoverInfo(idx !== null && value !== null ? { idx, value } : null);
               }}
               thresholds={thresholdLines}
             />
             {/* aria-live region announces the hovered value to screen readers */}
-            <div
-              className="mt-1 h-5 text-xs text-jul-muted"
-              aria-live="polite"
-              aria-atomic="true"
-            >
-              {hoverInfo !== null &&
-              timestamps[hoverInfo.idx] !== undefined
+            <div className="mt-1 h-5 text-xs text-jul-muted" aria-live="polite" aria-atomic="true">
+              {hoverInfo !== null && timestamps[hoverInfo.idx] !== undefined
                 ? `${formatTimestamp(timestamps[hoverInfo.idx] ?? 0)} · ${meta.formatValue(hoverInfo.value)}`
                 : "Hover or use arrow keys to inspect values"}
             </div>
@@ -200,8 +206,8 @@ export function ChartDetailPanel({
 
           {summary.insufficientData ? (
             <p className="text-xs text-jul-muted">
-              Insufficient data for trend analysis ({String(data.length)}{" "}
-              samples — need at least 10).
+              Insufficient data for trend analysis ({String(data.length)} samples — need at least
+              10).
             </p>
           ) : (
             <div className="space-y-3">
@@ -223,9 +229,7 @@ export function ChartDetailPanel({
                 </div>
                 <div>
                   <div className="text-xs text-jul-muted">Trend</div>
-                  <div className="font-semibold text-jul-text">
-                    {TREND_TEXT[summary.trend]}
-                  </div>
+                  <div className="font-semibold text-jul-text">{TREND_TEXT[summary.trend]}</div>
                 </div>
                 <div>
                   <div className="text-xs text-jul-muted">Volatility</div>
@@ -235,9 +239,7 @@ export function ChartDetailPanel({
                 </div>
                 <div>
                   <div className="text-xs text-jul-muted">Status</div>
-                  <div
-                    className={`font-semibold ${HEALTH_CLASS[summary.healthStatus] ?? ""}`}
-                  >
+                  <div className={`font-semibold ${HEALTH_CLASS[summary.healthStatus] ?? ""}`}>
                     {HEALTH_TEXT[summary.healthStatus]}
                   </div>
                 </div>

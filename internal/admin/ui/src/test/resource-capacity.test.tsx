@@ -80,6 +80,19 @@ function baseStats(overrides: Partial<StatsSnapshot> = {}): StatsSnapshot {
 }
 
 describe("useMetricsHistory resource/capacity fields", () => {
+  it("records each poll even when the response is unchanged", () => {
+    const snapshot = baseStats();
+    const { result, rerender } = renderHook(
+      ({ sampledAt }: { sampledAt: number }) => useMetricsHistory(snapshot, 60, sampledAt),
+      { initialProps: { sampledAt: 1 } },
+    );
+    expect(result.current.requestsPerSec).toEqual([0]);
+    rerender({ sampledAt: 2 });
+    expect(result.current.requestsPerSec).toEqual([0, 0]);
+    for (let sampledAt = 3; sampledAt <= 65; sampledAt++) rerender({ sampledAt });
+    expect(result.current.requestsPerSec).toHaveLength(60);
+    expect(result.current.timestamps).toHaveLength(60);
+  });
   it("pushes NaN holes for unavailable resource fields rather than 0", () => {
     const { result } = renderHook(({ stats }: { stats: StatsSnapshot }) => useMetricsHistory(stats), {
       initialProps: { stats: baseStats() }, // no cpuCores/rssBytes/goroutines

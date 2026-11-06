@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -15,7 +15,6 @@ import {
 import { Sparkline } from "@/components/Sparkline";
 import { formatBytes, formatBytesPerSec, formatCores } from "@/lib/formatBytes.ts";
 import type { MetricsHistory } from "@/lib/useMetricsHistory";
-import { ChartDetailPanel } from "@/components/ChartDetailPanel";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
 import { useMetricsHistory } from "@/lib/useMetricsHistory";
@@ -23,7 +22,14 @@ import { METRIC_META_LIST, type MetricKey } from "@/lib/metricMeta";
 import { resolveFeatureRoute } from "@/lib/featureRoutes";
 import { StorageSection } from "./StorageSection.tsx";
 import { DiagnosticsGuidanceSection } from "./DiagnosticsGuidanceSection.tsx";
-import { storageSummary } from "@/lib/storage.ts";
+import { STORAGE_CATEGORY_META, storageLabel, storageSummary } from "@/lib/storage.ts";
+import { buildGuidance } from "@/lib/diagnostics.ts";
+
+const ChartDetailPanel = lazy(() =>
+  import("@/components/ChartDetailPanel").then((module) => ({
+    default: module.ChartDetailPanel,
+  })),
+);
 
 // Compact a large number into human-readable SI form (e.g., 1,234,567 → 1.2 M).
 function compactNumber(n: number): string {
@@ -45,22 +51,30 @@ function groupBy<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
   return m;
 }
 
-function StatusBadge({ active }: { readonly active: boolean }) {
+function StatusBadge({
+  active,
+  buildDependent,
+}: {
+  readonly active: boolean;
+  readonly buildDependent: boolean;
+}) {
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
-        active ? "bg-jul-success/15 text-jul-success" : "bg-jul-border text-jul-muted"
+        active && !buildDependent
+          ? "bg-jul-success/15 text-jul-success"
+          : "bg-jul-border text-jul-muted"
       }`}
     >
       {/* Filled dot for active, empty ring for inactive — dual encoding so
           status is not conveyed by colour alone. */}
       <span
         className={`h-1.5 w-1.5 rounded-full ${
-          active ? "bg-jul-success" : "border border-jul-muted"
+          active && !buildDependent ? "bg-jul-success" : "border border-jul-muted"
         }`}
         aria-hidden="true"
       />
-      {active ? "active" : "inactive"}
+      {buildDependent ? (active ? "configured" : "not configured") : active ? "active" : "inactive"}
     </span>
   );
 }
@@ -121,13 +135,13 @@ function GenerationRetirementCard({ stats }: { readonly stats: StatsSnapshot | u
   return (
     <section
       aria-labelledby="generation-retirement-title"
-      className="w-full max-w-xl rounded-lg border border-jul-border bg-jul-surface p-4"
+      className="rounded-lg border border-jul-border bg-jul-surface p-4"
     >
       <h2 id="generation-retirement-title" className="text-sm font-semibold text-jul-text">
-        Generation retirement
+        Connection lifecycle across reloads
       </h2>
       <p className="mt-1 text-xs text-jul-muted">
-        Totals since process start. Reset on process restart.
+        Generation retirement totals since process start. Reset on process restart.
       </p>
       <dl className="my-3 grid grid-cols-2 gap-4">
         <div className="min-w-0">
@@ -473,9 +487,11 @@ function TrafficSourcesPanel({ sources }: { readonly sources: TrafficSources }) 
 function ActionableStatusGroup({
   name,
   rows,
+  pluginsCompiled,
 }: {
   readonly name: string;
   readonly rows: FeatureStatus[];
+  readonly pluginsCompiled: boolean | undefined;
 }) {
   const navigate = useNavigate();
   return (
@@ -488,13 +504,24 @@ function ActionableStatusGroup({
       <ul>
         {rows.map((row) => {
           const target = resolveFeatureRoute(name, row.name);
+          const buildDependent = [
+            "WASM plugins",
+            "L4 stream proxy",
+            "Web application firewall (WAF)",
+            "Distributed tracing",
+          ].includes(row.name);
           return (
             <li
               key={row.name}
-              className="flex items-center gap-3 border-b border-jul-border px-4 py-3 last:border-b-0"
+              className="flex flex-wrap items-center gap-3 border-b border-jul-border px-4 py-3 last:border-b-0"
             >
-              <StatusBadge active={row.active} />
-              <span className="flex-1 text-sm text-jul-text">{row.name}</span>
+              <StatusBadge active={row.active} buildDependent={buildDependent} />
+              {row.name === "WASM plugins" && pluginsCompiled !== undefined && (
+                <span className="text-xs text-jul-muted">
+                  {pluginsCompiled ? "build available" : "build unavailable"}
+                </span>
+              )}
+              <span className="min-w-0 flex-1 text-sm text-jul-text">{row.name}</span>
               {row.detail !== undefined && (
                 <span className="max-w-[12rem] truncate text-xs text-jul-muted" title={row.detail}>
                   {row.detail}
@@ -523,19 +550,56 @@ function ActionableStatusGroup({
 
 export function OverviewPanel() {
   const navigate = useNavigate();
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, dataUpdatedAt, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["overview"],
     queryFn: fetchOverview,
     refetchInterval: 2000, // Poll every 2 seconds per Milestone 1.1
   });
 
-  const history = useMetricsHistory(data?.stats);
+  const history = useMetricsHistory(data?.stats, 60, dataUpdatedAt);
 
   const [activeMetric, setActiveMetric] = useState<{
     key: MetricKey;
     data: number[];
     timestamps: number[];
   } | null>(null);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+
+  const rawStats = data?.stats;
+  const stats = rawStats && {
+    ...rawStats,
+    storage: rawStats.storage?.filter((item) =>
+      Object.hasOwn(STORAGE_CATEGORY_META, item.category),
+    ),
+  };
+  const resourceWarnings: string[] = [];
+  if (stats?.available) {
+    for (const item of buildGuidance(stats, history)) {
+      if (item.signal === "elevated") resourceWarnings.push(`${item.title}: ${item.observation}`);
+    }
+    for (const tier of stats.cacheTiers ?? []) {
+      if ((tier.occupancyRatio ?? 0) >= 0.9)
+        resourceWarnings.push(`Cache ${tier.tier} is near capacity.`);
+    }
+    if ((stats.upstreamWorstActive?.ratio ?? 0) >= 0.9)
+      resourceWarnings.push("Upstream active pressure is near its configured limit.");
+    if ((stats.upstreamWorstPending?.ratio ?? 0) >= 0.9)
+      resourceWarnings.push("Upstream pending pressure is near its configured limit.");
+    if (stats.upstreamNoEligible?.length)
+      resourceWarnings.push(`No eligible backend: ${stats.upstreamNoEligible.join(", ")}.`);
+    if (stats.upstreamBudgetExhausted?.length)
+      resourceWarnings.push(`Retry budget exhausted: ${stats.upstreamBudgetExhausted.join(", ")}.`);
+    for (const item of stats.storage ?? []) {
+      if (item.state === "error")
+        resourceWarnings.push(`${storageLabel(item.category)} storage: capacity error.`);
+      if (item.writesFailing && (item.state === "critical" || item.state === "low"))
+        resourceWarnings.push(`${storageLabel(item.category)} storage: ${item.state} headroom.`);
+    }
+  }
+  const resourceAttention = resourceWarnings.length > 0;
+  useEffect(() => {
+    if (resourceAttention) setResourcesOpen(true);
+  }, [resourceAttention]);
 
   if (isLoading) {
     return <Loading label="Loading overview…" />;
@@ -545,7 +609,6 @@ export function OverviewPanel() {
   }
 
   const groups = groupBy(data.status, (r) => r.group);
-  const stats = data.stats;
 
   // Derive the coarse health signals for the summary band. Each is intentionally
   // simple and defensive (stats may be unavailable): the band answers "healthy /
@@ -569,7 +632,7 @@ export function OverviewPanel() {
       label: "Errors (5xx)",
       value: `${(errRate * 100).toFixed(1)}%`,
       tone: errRate >= 0.05 ? "down" : errRate > 0 ? "warn" : "ok",
-      tooltip: "Error thresholds: < 0% = OK, > 0% = Warn, ≥ 5% = Down",
+      tooltip: "Error thresholds: 0% = OK, > 0% = Warn, ≥ 5% = Down",
     });
     summary.push({
       label: "Latency p95",
@@ -582,7 +645,10 @@ export function OverviewPanel() {
         label: "Storage",
         ...storageSummary(stats.storage),
         onClick: () => {
-          document.getElementById("storage-heading")?.scrollIntoView({ behavior: "smooth" });
+          setResourcesOpen(true);
+          requestAnimationFrame(() => {
+            document.getElementById("storage-heading")?.scrollIntoView({ behavior: "smooth" });
+          });
         },
       });
     }
@@ -784,274 +850,399 @@ export function OverviewPanel() {
           </div>
         )}
 
-      {/* At-a-glance health summary (P3-14): coarse signals first, raw metric
-          grids below for progressive disclosure. */}
-      {summary.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {summary.map((s) => (
-            <HealthChip
-              key={s.label}
-              label={s.label}
-              value={s.value}
-              tone={s.tone}
-              tooltip={s.tooltip ?? ""}
-              {...(s.onClick ? { onClick: s.onClick } : {})}
-            />
-          ))}
+      <section className="space-y-3" aria-labelledby="at-a-glance-heading">
+        <div>
+          <h2 id="at-a-glance-heading" className="text-base font-semibold">
+            At a glance
+          </h2>
+          <p className="text-sm text-jul-muted">
+            Current health and conditions that need attention. Zero traffic can mean the node is
+            idle.
+          </p>
         </div>
-      )}
-
-      <GenerationRetirementCard stats={stats} />
-
-      {/* Live Traffic Cards */}
-      {stats?.available && (
-        <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-jul-muted">Live Traffic</h2>
-
-          {/* Top Row: Key Metrics */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard
-              label="Uptime"
-              value={uptimeDisplay}
-              subtext={`${(stats.uptimeSeconds || 0).toFixed(0)}s`}
-            />
-            <MetricCard
-              label="Requests/sec"
-              value={(stats.requestsPerSec || 0).toFixed(2)}
-              unit="req/s"
-              subtext={`${(stats.requestsTotal || 0).toLocaleString()} total`}
-            />
-            <MetricCard label="In-flight" value={Math.round(stats.inFlight || 0)} unit="requests" />
-            <MetricCard
-              label="Active Connections"
-              value={Math.round(stats.connections || 0)}
-              unit="conns"
-            />
-          </div>
-
-          {/* Latency Row */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard
-              label="Avg Latency"
-              value={(stats.latencyAvgMs || 0).toFixed(1)}
-              unit="ms"
-            />
-            <MetricCard
-              label="P50 Latency"
-              value={(stats.latencyP50Ms || 0).toFixed(1)}
-              unit="ms"
-            />
-            <MetricCard
-              label="P95 Latency"
-              value={(stats.latencyP95Ms || 0).toFixed(1)}
-              unit="ms"
-            />
-            <MetricCard
-              label="P99 Latency"
-              value={(stats.latencyP99Ms || 0).toFixed(1)}
-              unit="ms"
-            />
-          </div>
-
-          {/* Error Rate and Status Classes */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <MetricCard
-              label="Error Rate (5xx)"
-              value={errorRatePercent}
-              unit="%"
-              subtext={`${Math.round(stats.statusClasses?.["5xx"] || 0).toLocaleString()} errors`}
-            />
-            <MetricCard
-              label="2xx Success"
-              value={Math.round(stats.statusClasses?.["2xx"] || 0).toLocaleString()}
-              unit="responses"
-            />
-            <MetricCard
-              label="4xx Client Errors"
-              value={Math.round(stats.statusClasses?.["4xx"] || 0).toLocaleString()}
-              unit="responses"
-            />
-            <MetricCard
-              label="3xx Redirects"
-              value={Math.round(stats.statusClasses?.["3xx"] || 0).toLocaleString()}
-              unit="responses"
-            />
-          </div>
-
-          {/* Cache Stats */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <MetricCard
-              label="Cache Hit Ratio"
-              value={cacheHitPercent}
-              unit="%"
-              subtext={`${Math.round(stats.cacheEvents?.["HIT"] || 0).toLocaleString()} hits`}
-            />
-            <MetricCard
-              label="Cache Misses"
-              value={Math.round(stats.cacheEvents?.["MISS"] || 0).toLocaleString()}
-              unit="events"
-            />
-            <MetricCard
-              label="Cache Bypasses"
-              value={Math.round(stats.cacheEvents?.["BYPASS"] || 0).toLocaleString()}
-              unit="events"
-            />
-          </div>
-
-          {/* HTTP Method Breakdown */}
-          {stats.methods && Object.keys(stats.methods).length > 0 && (
-            <div className="space-y-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                Requests by HTTP Method
-              </h3>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-                {Object.entries(stats.methods)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([method, count]) => (
-                    <MetricCard
-                      key={method}
-                      label={method}
-                      value={Math.round(count)}
-                      unit="requests"
-                    />
-                  ))}
-              </div>
-            </div>
-          )}
-
-          {/* Runtime Resources (#431) */}
-          <RuntimeResourcesSection stats={stats} history={history} />
-
-          {/* Capacity (#431) */}
-          <CapacitySection stats={stats} history={history} />
-
-          {/* Jul-owned storage headroom (#437) */}
-          <StorageSection storage={stats.storage} hints={stats.storageHints} />
-
-          {/* Resource/storage pressure → existing bounded diagnostics (#445) */}
-          <DiagnosticsGuidanceSection
-            stats={stats}
-            history={history}
-            pprofEnabled={data.admin_runtime?.pprof_enabled}
-          />
-
-          {/* Sparklines - 2 minute trends */}
-          {history.requestsPerSec.length > 0 && (
-            <div className="space-y-4 pt-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                2-Minute Trends (click for detail)
-              </h3>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {METRIC_META_LIST.map((meta) => {
-                  const metricData = history[meta.key];
-                  return (
-                    <button
-                      key={meta.key}
-                      type="button"
-                      className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4 text-left hover:border-jul-accent/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
-                      aria-label={`${meta.name} trend. ${String(metricData.length)} samples. Click to expand.`}
-                      onClick={() => {
-                        setActiveMetric({
-                          key: meta.key,
-                          data: metricData,
-                          timestamps: history.timestamps,
-                        });
-                      }}
-                    >
-                      <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-                        {meta.name} Trend
-                      </div>
-                      <div className="mt-2 h-12">
-                        <Sparkline
-                          data={metricData}
-                          height={48}
-                          width={100}
-                          color={meta.color}
-                          className="w-full"
-                          ariaLabel={`${meta.name} sparkline`}
-                        />
-                      </div>
-                      <div className="mt-1 text-xs text-jul-muted">
-                        {String(metricData.length)} samples
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Traffic Sources (Milestone 1.4) */}
-      {data.traffic_sources && <TrafficSourcesPanel sources={data.traffic_sources} />}
-
-      {/* Feature Status */}
-      {groups.size === 0 ? (
-        <p className="text-jul-muted text-sm">No status rows available.</p>
-      ) : (
-        <div className="space-y-4">
-          <h2 className="text-sm font-semibold text-jul-muted">Capabilities & Configuration</h2>
-          <div className="grid gap-4 lg:grid-cols-2">
-            {Array.from(groups.entries()).map(([group, rows]) => (
-              <ActionableStatusGroup key={group} name={group} rows={rows} />
+        {summary.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {summary.map((s) => (
+              <HealthChip
+                key={s.label}
+                label={s.label}
+                value={s.value}
+                tone={s.tone}
+                tooltip={s.tooltip ?? ""}
+                {...(s.onClick ? { onClick: s.onClick } : {})}
+              />
             ))}
           </div>
+        )}
+        {resourceAttention && (
+          <div
+            className="rounded-lg border border-jul-warning/50 bg-jul-warning/5 px-4 py-3 text-sm text-jul-warning"
+            role="status"
+          >
+            <ul className="list-disc space-y-1 pl-4">
+              {resourceWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="mt-2 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent"
+              onClick={() => {
+                setResourcesOpen(true);
+                document
+                  .getElementById("resources-heading")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
+            >
+              View resource details and diagnostics
+            </button>
+          </div>
+        )}
+        {data.last_managed_apply && (
+          <div className="rounded-lg border border-jul-border bg-jul-surface px-4 py-3 text-sm">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                Last apply
+              </span>
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                  data.last_managed_apply.ok
+                    ? "bg-jul-success/15 text-jul-success"
+                    : data.last_managed_apply.restored
+                      ? "bg-jul-warning/15 text-jul-warning"
+                      : "bg-jul-danger/15 text-jul-danger"
+                }`}
+              >
+                {data.last_managed_apply.ok
+                  ? data.last_managed_apply.outcome
+                  : data.last_managed_apply.restored
+                    ? "failed — restored"
+                    : "failed"}
+              </span>
+              {data.last_managed_apply.final_disk_version && (
+                <span className="break-all font-mono text-xs text-jul-muted">
+                  {data.last_managed_apply.final_disk_version}
+                </span>
+              )}
+              <span className="ml-auto text-xs text-jul-muted">
+                {new Date(data.last_managed_apply.completed_at).toLocaleString()}
+              </span>
+            </div>
+            {data.last_managed_apply.restore_error && (
+              <p className="mt-1 text-xs text-jul-danger">
+                Restore error: {data.last_managed_apply.restore_error}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4" aria-labelledby="traffic-heading">
+        <div>
+          <h2 id="traffic-heading" className="text-base font-semibold">
+            Traffic and connections
+          </h2>
+          <p className="text-sm text-jul-muted">
+            See the live snapshot, recent trends, and connection lifecycle across reloads.
+          </p>
         </div>
+        {stats?.available ? (
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-jul-muted">Live Traffic</h3>
+
+            {/* Top Row: Key Metrics */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                label="Uptime"
+                value={uptimeDisplay}
+                subtext={`${(stats.uptimeSeconds || 0).toFixed(0)}s`}
+              />
+              <MetricCard
+                label="Requests/sec"
+                value={(stats.requestsPerSec || 0).toFixed(2)}
+                unit="req/s"
+                subtext={`${(stats.requestsTotal || 0).toLocaleString()} total`}
+              />
+              <MetricCard
+                label="In-flight"
+                value={Math.round(stats.inFlight || 0)}
+                unit="requests"
+              />
+              <MetricCard
+                label="Active Connections"
+                value={Math.round(stats.connections || 0)}
+                unit="conns"
+              />
+            </div>
+
+            {/* Latency Row */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                label="Avg Latency"
+                value={(stats.latencyAvgMs || 0).toFixed(1)}
+                unit="ms"
+              />
+              <MetricCard
+                label="P50 Latency"
+                value={(stats.latencyP50Ms || 0).toFixed(1)}
+                unit="ms"
+              />
+              <MetricCard
+                label="P95 Latency"
+                value={(stats.latencyP95Ms || 0).toFixed(1)}
+                unit="ms"
+              />
+              <MetricCard
+                label="P99 Latency"
+                value={(stats.latencyP99Ms || 0).toFixed(1)}
+                unit="ms"
+              />
+            </div>
+
+            {/* Error Rate and Status Classes */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                label="Error Rate (5xx)"
+                value={errorRatePercent}
+                unit="%"
+                subtext={`${Math.round(stats.statusClasses?.["5xx"] || 0).toLocaleString()} errors`}
+              />
+              <MetricCard
+                label="2xx Success"
+                value={Math.round(stats.statusClasses?.["2xx"] || 0).toLocaleString()}
+                unit="responses"
+              />
+              <MetricCard
+                label="4xx Client Errors"
+                value={Math.round(stats.statusClasses?.["4xx"] || 0).toLocaleString()}
+                unit="responses"
+              />
+              <MetricCard
+                label="3xx Redirects"
+                value={Math.round(stats.statusClasses?.["3xx"] || 0).toLocaleString()}
+                unit="responses"
+              />
+            </div>
+
+            {/* Cache Stats */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <MetricCard
+                label="Cache Hit Ratio"
+                value={cacheHitPercent}
+                unit="%"
+                subtext={`${Math.round(stats.cacheEvents?.["HIT"] || 0).toLocaleString()} hits`}
+              />
+              <MetricCard
+                label="Cache Misses"
+                value={Math.round(stats.cacheEvents?.["MISS"] || 0).toLocaleString()}
+                unit="events"
+              />
+              <MetricCard
+                label="Cache Bypasses"
+                value={Math.round(stats.cacheEvents?.["BYPASS"] || 0).toLocaleString()}
+                unit="events"
+              />
+            </div>
+
+            {/* HTTP Method Breakdown */}
+            {stats.methods && Object.keys(stats.methods).length > 0 && (
+              <div className="space-y-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                  Requests by HTTP Method
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+                  {Object.entries(stats.methods)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([method, count]) => (
+                      <MetricCard
+                        key={method}
+                        label={method}
+                        value={Math.round(count)}
+                        unit="requests"
+                      />
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {history.requestsPerSec.length > 0 && (
+              <details className="rounded-lg border border-jul-border">
+                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
+                  2-Minute Trends
+                </summary>
+                <div className="space-y-4 border-t border-jul-border p-4">
+                  <p className="text-xs text-jul-muted">
+                    Browser-local history, up to 60 samples. Select a chart for detail and CSV
+                    export.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {METRIC_META_LIST.map((meta) => {
+                      const metricData = history[meta.key];
+                      return (
+                        <button
+                          key={meta.key}
+                          type="button"
+                          className="cursor-pointer rounded-lg border border-jul-border bg-jul-surface p-4 text-left hover:border-jul-accent/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-jul-accent"
+                          aria-label={`${meta.name} trend. ${String(metricData.length)} samples. Click to expand.`}
+                          onClick={() => {
+                            setActiveMetric({
+                              key: meta.key,
+                              data: metricData,
+                              timestamps: history.timestamps,
+                            });
+                          }}
+                        >
+                          <div className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
+                            {meta.name} Trend
+                          </div>
+                          <div className="mt-2 h-12">
+                            <Sparkline
+                              data={metricData}
+                              height={48}
+                              width={100}
+                              color={meta.color}
+                              className="w-full"
+                              ariaLabel={`${meta.name} sparkline`}
+                            />
+                          </div>
+                          <div className="mt-1 text-xs text-jul-muted">
+                            {String(metricData.length)} samples
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </details>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-jul-muted">Live traffic statistics are unavailable.</p>
+        )}
+        <GenerationRetirementCard stats={stats} />
+        {data.traffic_sources && (
+          <details className="rounded-lg border border-jul-border">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
+              Traffic Sources
+            </summary>
+            <div className="border-t border-jul-border p-4">
+              <TrafficSourcesPanel sources={data.traffic_sources} />
+            </div>
+          </details>
+        )}
+      </section>
+
+      <section className="space-y-4" aria-labelledby="resources-heading">
+        <div>
+          <h2 id="resources-heading" className="text-base font-semibold">
+            Resources and storage
+          </h2>
+          <p className="text-sm text-jul-muted">
+            Inspect process resources, capacity, and Jul-owned storage headroom.
+          </p>
+        </div>
+        {stats?.available ? (
+          <>
+            {buildGuidance(stats, history).some((item) => item.signal === "unknown") && (
+              <p className="text-xs text-jul-muted">
+                Some readings are unavailable or cannot be judged; open the details and guidance to
+                review them.
+              </p>
+            )}
+            <button
+              type="button"
+              aria-expanded={resourcesOpen}
+              aria-controls="resource-details"
+              onClick={() => {
+                setResourcesOpen(!resourcesOpen);
+              }}
+              className="rounded-lg border border-jul-border px-4 py-3 text-left text-sm font-semibold hover:bg-jul-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent"
+            >
+              {resourcesOpen ? "Hide" : "Show"} resource and storage details
+            </button>
+            <div id="resource-details" hidden={!resourcesOpen} className="space-y-6">
+              <RuntimeResourcesSection stats={stats} history={history} />
+              <CapacitySection stats={stats} history={history} />
+              <StorageSection storage={stats.storage} hints={stats.storageHints} />
+              {rawStats?.storage && rawStats.storage.length !== (stats.storage?.length ?? 0) && (
+                <p className="text-xs text-jul-muted">
+                  Unrecognized storage categories are not shown.
+                </p>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-jul-muted">Resource and storage statistics are unavailable.</p>
+        )}
+      </section>
+
+      {stats?.available ? (
+        <DiagnosticsGuidanceSection
+          stats={stats}
+          history={history}
+          pprofEnabled={data.admin_runtime?.pprof_enabled}
+        />
+      ) : (
+        <section className="space-y-1" aria-labelledby="diagnostics-unavailable-heading">
+          <h2 id="diagnostics-unavailable-heading" className="text-base font-semibold">
+            Diagnostics and next steps
+          </h2>
+          <p className="text-sm text-jul-muted">
+            Guidance cannot be judged while statistics are unavailable.
+          </p>
+        </section>
       )}
+
+      <section className="space-y-3" aria-labelledby="capabilities-heading">
+        <div>
+          <h2 id="capabilities-heading" className="text-base font-semibold">
+            Capabilities &amp; Configuration
+          </h2>
+          <p className="text-sm text-jul-muted">
+            Review running configuration and open the relevant Console panel.
+          </p>
+        </div>
+        <details className="rounded-lg border border-jul-border">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
+            Show capabilities and configuration
+          </summary>
+          <div className="space-y-4 border-t border-jul-border p-4">
+            <p className="text-xs text-jul-muted">
+              Status reflects configuration, not build support. WASM plugin build availability is
+              shown when reported; without it, plugin declarations are rejected by apply preflight.
+              WASM plugins, L4 streams, WAF and tracing require build tags; check their panels and
+              apply preflight for limitations. Without the otel tag, tracing configuration is
+              accepted but does not export spans. Server-side validation remains authoritative.
+            </p>
+            {groups.size === 0 ? (
+              <p className="text-jul-muted text-sm">No status rows available.</p>
+            ) : (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {Array.from(groups.entries()).map(([group, rows]) => (
+                  <ActionableStatusGroup
+                    key={group}
+                    name={group}
+                    rows={rows}
+                    pluginsCompiled={data.admin_runtime?.plugins_compiled}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+      </section>
 
       {activeMetric !== null && (
-        <ChartDetailPanel
-          metricKey={activeMetric.key}
-          data={activeMetric.data}
-          timestamps={activeMetric.timestamps}
-          onClose={() => {
-            setActiveMetric(null);
-          }}
-        />
-      )}
-
-      {/* Last managed apply (H-06/M-05): terminal outcome of the most recent
-          API-driven configuration apply, including async restoration. Absent
-          until the first managed apply completes after startup. Surfaced here
-          so operators can confirm the final state of a previously timed-out
-          apply without re-polling the config panel. */}
-      {data.last_managed_apply && (
-        <div className="rounded-lg border border-jul-border bg-jul-surface px-4 py-3 text-sm">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
-              Last apply
-            </span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                data.last_managed_apply.ok
-                  ? "bg-jul-success/15 text-jul-success"
-                  : data.last_managed_apply.restored
-                    ? "bg-jul-warning/15 text-jul-warning"
-                    : "bg-jul-danger/15 text-jul-danger"
-              }`}
-            >
-              {data.last_managed_apply.ok
-                ? data.last_managed_apply.outcome
-                : data.last_managed_apply.restored
-                  ? "failed — restored"
-                  : "failed"}
-            </span>
-            {data.last_managed_apply.final_disk_version && (
-              <span className="font-mono text-xs text-jul-muted">
-                {data.last_managed_apply.final_disk_version}
-              </span>
-            )}
-            <span className="ml-auto text-xs text-jul-muted">
-              {new Date(data.last_managed_apply.completed_at).toLocaleString()}
-            </span>
-          </div>
-          {data.last_managed_apply.restore_error && (
-            <p className="mt-1 text-xs text-jul-danger">
-              Restore error: {data.last_managed_apply.restore_error}
-            </p>
-          )}
-        </div>
+        <Suspense fallback={<Loading label="Loading chart detail…" />}>
+          <ChartDetailPanel
+            metricKey={activeMetric.key}
+            data={activeMetric.data}
+            timestamps={activeMetric.timestamps}
+            onClose={() => {
+              setActiveMetric(null);
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

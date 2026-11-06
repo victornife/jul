@@ -56,7 +56,7 @@ function ProfileAction({
     return (
       <p className="text-xs text-jul-muted">
         Capturing a {PROFILE_LABEL[kind]} requires the <code>admin:manage</code> permission, which
-        your role does not have.
+        your identity does not have.
       </p>
     );
   }
@@ -156,22 +156,42 @@ export function DiagnosticsGuidanceSection({
   const perms = usePermission();
   const access = profileAccess(pprofEnabled, perms.ready, perms.has("admin:manage"));
   const items = buildGuidance(stats, history);
+  const elevated = items.filter((item) => item.signal === "elevated");
+  const remaining = items.filter((item) => item.signal !== "elevated");
+  const withinHints = remaining.filter((item) => item.signal === "normal").length;
+  const notJudged = remaining.length - withinHints;
   return (
     <section className="space-y-4" aria-labelledby="diagnostics-guidance-heading">
       <div className="space-y-1">
-        <h2 id="diagnostics-guidance-heading" className="text-sm font-semibold text-jul-muted">
-          Diagnostics guidance
+        <h2 id="diagnostics-guidance-heading" className="text-base font-semibold">
+          Diagnostics and next steps
         </h2>
         <p className="max-w-3xl text-xs text-jul-muted">
           What to collect next, based on the readings above. This is guidance, not a diagnosis: a
           reading can have several causes, and nothing here is collected automatically.
         </p>
       </div>
-      <ul className="grid gap-4 lg:grid-cols-2">
-        {items.map((item) => (
-          <GuidanceCard key={item.id} item={item} access={access} />
-        ))}
-      </ul>
+      {elevated.length > 0 ? (
+        <ul className="grid gap-4 lg:grid-cols-2">
+          {elevated.map((item) => (
+            <GuidanceCard key={item.id} item={item} access={access} />
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-jul-muted">No guidance is elevated now.</p>
+      )}
+      {remaining.length > 0 && (
+        <details className="rounded-lg border border-jul-border">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
+            Other guidance: {withinHints} within hints, {notJudged} not judged
+          </summary>
+          <ul className="grid gap-4 border-t border-jul-border p-4 lg:grid-cols-2">
+            {remaining.map((item) => (
+              <GuidanceCard key={item.id} item={item} access={access} />
+            ))}
+          </ul>
+        </details>
+      )}
       <div className="rounded-lg border border-jul-border bg-jul-surface p-4 text-xs">
         <h3 className="text-sm font-semibold">For any problem</h3>
         <ul className="mt-2 list-disc space-y-1 pl-4 text-jul-muted">
