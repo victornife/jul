@@ -174,8 +174,8 @@ staging. The admin listener's client-auth policy still requires a restart.
    while the process is running either way.
 
 5. **Inherited protocol conformance deviations.** Pinned h3spec v0.1.13
-   reports **42/49** with quic-go **v0.64.0**, qpack v0.6.0 and Go 1.27.2
-   (reverified 2026-10-18 against Jul and a plain upstream server). Seven exact
+   reports **42/49** with quic-go **v0.65.0**, qpack v0.6.0 and Go 1.27.3
+   (reverified 2026-11-08 against Jul in CI). Seven exact
    temporary exceptions cover malformed-peer QUIC frame,
    control-stream, SETTINGS and QPACK error handling. They require review on
    a dependency/tool change or when a case passes, and remain tracked in
