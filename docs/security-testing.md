@@ -198,12 +198,18 @@ HTTP/3 currently has seven exact temporary dependency exceptions under
 [#569](https://github.com/victornife/jul/issues/569). On 2026-10-18, Jul and a
 plain upstream server both reproduce **42/49** with quic-go **v0.64.0**, qpack
 v0.6.0 and Go 1.27.2. The same seven case IDs failed on the previous v0.63.0
-baseline; none was recovered by this upgrade. The guard reads
+baseline; none was recovered by this upgrade. On 2026-11-08, the
+[PR conformance job](https://github.com/victornife/jul/actions/runs/42463413045/job/128677386516)
+reproduced the same seven failures with quic-go **v0.65.0**, qpack v0.6.0,
+Go 1.27.3 and the same h3spec hash (42/49, zero unexpected or stale cases).
+Source review of v0.65.0 confirms the relevant frame parsing, SETTINGS, QPACK
+stream and decompression-error paths remain consistent with the exceptions;
+the earlier native wire probes were not rerun for this version. The guard reads
 those versions from the tested binary and binds the exceptions to the h3spec
 v0.1.13 binary hash. Reports preserve actual passes, allowed failures and the
 tool's skipped 0-RTT warning. An accepted verdict is not a claim of complete
 RFC conformance. See the [quic-go upgrade review](reviews/2026-10-18-quic-go-v0.64.0.md)
-for current evidence and the [Go upgrade review](reviews/2026-10-10-go-1.27.2.md)
+for the earlier wire evidence and the [Go upgrade review](reviews/2026-10-10-go-1.27.2.md)
 for the historical upstream dispositions.
 
 | Suite | Tool | Target |
