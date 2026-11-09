@@ -230,6 +230,16 @@ test.describe("Overview operator layout", () => {
     });
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "At a glance" })).toBeVisible();
+    const resources = page.locator("details").filter({
+      has: page.locator("summary", { hasText: "Show resource and storage details" }),
+    });
+    await expect(resources).not.toHaveAttribute("open", "");
+    await resources.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await expect(resources).toHaveAttribute("open", "");
+    await expect(resources.getByText("Runtime Resources", { exact: true })).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(resources).not.toHaveAttribute("open", "");
     const trends = page.getByText("2-Minute Trends", { exact: true });
     await trends.focus();
     await page.keyboard.press("Enter");
@@ -292,11 +302,13 @@ test.describe("Overview operator layout", () => {
       );
       await page.goto("/");
       await expect(page.getByText(/Disk cache \(writes failing\)/).first()).toBeVisible();
-      await expect(
-        page.getByRole("button", { name: "Hide resource and storage details" }),
-      ).toBeVisible();
-      await page.getByRole("button", { name: "Hide resource and storage details" }).focus();
+      const resourceDetails = page.locator("details").filter({
+        has: page.locator("summary", { hasText: "Show resource and storage details" }),
+      });
+      await expect(resourceDetails).toHaveAttribute("open", "");
+      await resourceDetails.locator("summary").focus();
       await page.keyboard.press("Enter");
+      await expect(resourceDetails).not.toHaveAttribute("open", "");
       await expect(page.getByText(/Disk cache \(writes failing\)/).first()).toBeVisible();
       await page.getByRole("button", { name: /Storage: writes failing/ }).focus();
       await page.keyboard.press("Enter");
@@ -1052,6 +1064,158 @@ for (const inspectionOnly of [false, true]) {
           .getByRole("button", { name: "Preview invalidation scope" }),
       ).toBeDisabled();
     }
+  });
+}
+
+for (const viewport of [
+  { width: 1280, height: 720 },
+  { width: 1440, height: 900 },
+  { width: 768, height: 1024 },
+  { width: 390, height: 844 },
+]) {
+  test(`shared drawers fit ${String(viewport.width)}x${String(viewport.height)}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await setupApiMocks(page);
+    await page.route("/api/admin/me", (route) =>
+      json(route, {
+        principal: "layout-admin",
+        role: "admin",
+        legacy: false,
+        permissions: ["status:read", "metrics:read", "config:read", "config:raw", "config:write", "cache:inspect", "cache:purge"],
+      }),
+    );
+    await page.route("/api/traffic-controls", (route) =>
+      json(route, { ...TRAFFIC_CONTROLS, compression: { enabled: true } }),
+    );
+    await page.route("/api/v1/cache/inspect", (route) =>
+      json(route, {
+        api_version: "v1",
+        expires_at: new Date(Date.now() + 60000).toISOString(),
+        consistency: "bounded_metadata_capture_not_global_snapshot",
+        concurrent_change: "unknown_after_capture",
+        policy_source: "global inherited",
+        route_cache_state: "host scope",
+        inspection: {
+          state: "empty", captured_at: new Date().toISOString(), count_accuracy: "exact",
+          truncated: false, matched_resources: 0, matched_representations: 0,
+          memory_entries: 0, disk_entries: 0, matched_body_bytes: 0,
+          resources: [], decisions: [], evidence_state: "disabled", warnings: [],
+          memory_occupancy: { bytes: 0, max_bytes: 64000000, entries: 0, evictions: 0 },
+          disk_occupancy: null,
+          policy: {
+            default_ttl_seconds: 60, swr_seconds: 10, sie_seconds: 5, max_entry_bytes: 64000000,
+            range_enabled: false, fill_lock_enabled: false, tag_ingestion_enabled: false,
+          },
+        },
+      }),
+    );
+    await page.route("/api/security", (route) =>
+      json(route, {
+        auth_enabled: false,
+        require_cert_count: 0,
+        waf_enabled: true,
+        waf_global_enabled: true,
+        waf_locations: 1,
+        waf_mode: "block",
+        secret_refs: 0,
+        base_version: "v1",
+      }),
+    );
+
+    async function checkDrawer(name: string) {
+      const dialog = page.getByRole("dialog", { name });
+      await expect(dialog).toBeVisible();
+      const result = await dialog.evaluate((element) => {
+        const body = element.querySelector<HTMLElement>(".drawer-body");
+        if (!body) throw new Error("Missing shared drawer body");
+        const bodyRect = body.getBoundingClientRect();
+        const clipped = Array.from(body.querySelectorAll<HTMLElement>("*"))
+          .filter((child) => {
+            const rect = child.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 &&
+              (rect.left < bodyRect.left - 1 || rect.right > bodyRect.right + 1);
+          })
+          .slice(0, 5)
+          .map((child) => `${child.tagName} ${child.className} ${child.textContent?.slice(0, 60)}`);
+        const controls = Array.from(body.querySelectorAll<HTMLElement>("button, input, select, textarea"))
+          .filter((child) => child.getBoundingClientRect().width > 0 && child.getBoundingClientRect().height > 0);
+        const overlapping: string[] = [];
+        controls.forEach((first, index) => {
+          const a = first.getBoundingClientRect();
+          for (const second of controls.slice(index + 1)) {
+            const b = second.getBoundingClientRect();
+            if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+                Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) {
+              overlapping.push(`${first.tagName} ${second.tagName}`);
+            }
+          }
+        });
+        return {
+          viewportOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          bodyOverflow: body.scrollWidth - body.clientWidth,
+          clipped,
+          overlapping,
+          scrollable: body.scrollHeight > body.clientHeight,
+          bodyOverflowY: getComputedStyle(body).overflowY,
+        };
+      });
+      expect(result.viewportOverflow).toBeLessThanOrEqual(1);
+      expect(result.bodyOverflow).toBeLessThanOrEqual(1);
+      expect(result.clipped).toEqual([]);
+      expect(result.overlapping).toEqual([]);
+      if (result.scrollable) expect(result.bodyOverflowY).toBe("auto");
+      return dialog;
+    }
+
+    await page.goto("/traffic");
+    await page.getByText("Cache", { exact: true }).first().locator("..").getByRole("button", { name: "Edit" }).focus();
+    await page.keyboard.press("Enter");
+    const cache = page.getByRole("dialog", { name: "Edit cache" });
+    const inspector = cache.getByRole("region", { name: "Cache inspector" });
+    await expect(inspector.getByLabel("Configured hostname")).toBeVisible();
+    for (const kind of ["exact_url", "prefix", "glob", "tag"]) {
+      await inspector.getByLabel("Filter", { exact: true }).selectOption(kind);
+      await expect(inspector.getByLabel("Filter value")).toBeVisible();
+      await checkDrawer("Edit cache");
+    }
+    await inspector.getByLabel("Filter value").fill("article:42");
+    await inspector.getByRole("button", { name: "Inspect / refresh" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(inspector.getByText(/Current global fallback/)).toBeVisible();
+    await expect(cache.getByLabel("Configured route helper")).toBeVisible();
+    const documentation = inspector.getByRole("link", { name: "Policy, limits and evidence documentation" });
+    await expect(documentation).toHaveAttribute("href", /docs\/cache\.md#bounded-cache-inspection/);
+    await expect(documentation).toHaveCSS("text-decoration-line", /underline/);
+    await checkDrawer("Edit cache");
+    await documentation.focus();
+    expect(await documentation.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const body = element.closest(".drawer-body")?.getBoundingClientRect();
+      return !!body && rect.top >= body.top && rect.bottom <= body.bottom;
+    })).toBe(true);
+    await cache.getByRole("button", { name: "Close", exact: true }).last().focus();
+    await page.keyboard.press("Enter");
+
+    await page.getByText("Compression", { exact: true }).first().locator("..").getByRole("button", { name: "Edit" }).focus();
+    await page.keyboard.press("Enter");
+    const compression = await checkDrawer("Edit compression");
+    await expect(compression.getByText("Enable compression")).toBeVisible();
+    await compression.getByRole("button", { name: "Close", exact: true }).last().focus();
+    await page.keyboard.press("Enter");
+
+    await page.goto("/security");
+    await page.getByText("Web app firewall", { exact: true }).locator("..").getByRole("button", { name: "Edit", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    const waf = page.getByRole("dialog", { name: "Edit web application firewall" });
+    await waf.getByRole("button", { name: "+ Add exception" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(waf.getByLabel("Global exception 1 target")).toBeVisible();
+    await checkDrawer("Edit web application firewall");
+    await waf.getByRole("button", { name: "Review in editor →" }).focus();
+    expect(await waf.getByRole("button", { name: "Review in editor →" }).evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.top >= 0 && rect.bottom <= window.innerHeight;
+    })).toBe(true);
   });
 }
 

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import {
@@ -563,7 +563,7 @@ export function OverviewPanel() {
     data: number[];
     timestamps: number[];
   } | null>(null);
-  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const resourcesRef = useRef<HTMLDetailsElement>(null);
 
   const rawStats = data?.stats;
   const stats = rawStats && {
@@ -598,7 +598,7 @@ export function OverviewPanel() {
   }
   const resourceAttention = resourceWarnings.length > 0;
   useEffect(() => {
-    if (resourceAttention) setResourcesOpen(true);
+    if (resourceAttention && resourcesRef.current) resourcesRef.current.open = true;
   }, [resourceAttention]);
 
   if (isLoading) {
@@ -645,7 +645,7 @@ export function OverviewPanel() {
         label: "Storage",
         ...storageSummary(stats.storage),
         onClick: () => {
-          setResourcesOpen(true);
+          if (resourcesRef.current) resourcesRef.current.open = true;
           requestAnimationFrame(() => {
             document.getElementById("storage-heading")?.scrollIntoView({ behavior: "smooth" });
           });
@@ -888,7 +888,7 @@ export function OverviewPanel() {
               type="button"
               className="mt-2 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent"
               onClick={() => {
-                setResourcesOpen(true);
+                if (resourcesRef.current) resourcesRef.current.open = true;
                 document
                   .getElementById("resources-heading")
                   ?.scrollIntoView({ behavior: "smooth" });
@@ -1149,27 +1149,21 @@ export function OverviewPanel() {
                 review them.
               </p>
             )}
-            <button
-              type="button"
-              aria-expanded={resourcesOpen}
-              aria-controls="resource-details"
-              onClick={() => {
-                setResourcesOpen(!resourcesOpen);
-              }}
-              className="rounded-lg border border-jul-border px-4 py-3 text-left text-sm font-semibold hover:bg-jul-surface focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent"
-            >
-              {resourcesOpen ? "Hide" : "Show"} resource and storage details
-            </button>
-            <div id="resource-details" hidden={!resourcesOpen} className="space-y-6">
-              <RuntimeResourcesSection stats={stats} history={history} />
-              <CapacitySection stats={stats} history={history} />
-              <StorageSection storage={stats.storage} hints={stats.storageHints} />
-              {rawStats?.storage && rawStats.storage.length !== (stats.storage?.length ?? 0) && (
-                <p className="text-xs text-jul-muted">
-                  Unrecognized storage categories are not shown.
-                </p>
-              )}
-            </div>
+            <details ref={resourcesRef} className="rounded-lg border border-jul-border">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
+                Show resource and storage details
+              </summary>
+              <div id="resource-details" className="space-y-6 border-t border-jul-border p-4">
+                <RuntimeResourcesSection stats={stats} history={history} />
+                <CapacitySection stats={stats} history={history} />
+                <StorageSection storage={stats.storage} hints={stats.storageHints} />
+                {rawStats?.storage && rawStats.storage.length !== (stats.storage?.length ?? 0) && (
+                  <p className="text-xs text-jul-muted">
+                    Unrecognized storage categories are not shown.
+                  </p>
+                )}
+              </div>
+            </details>
           </>
         ) : (
           <p className="text-sm text-jul-muted">Resource and storage statistics are unavailable.</p>

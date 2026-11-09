@@ -81,9 +81,13 @@ describe("operator-centred Overview", () => {
     expect(
       within(traffic).getByRole("region", { name: "Connection lifecycle across reloads" }),
     ).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Show resource and storage details" }),
-    ).toHaveAttribute("aria-expanded", "false");
+    const resourceSummary = screen.getByText("Show resource and storage details", { selector: "summary" });
+    expect(resourceSummary.parentElement).not.toHaveAttribute("open");
+    fireEvent.click(resourceSummary);
+    expect(resourceSummary.parentElement).toHaveAttribute("open");
+    expect(screen.getByText("Runtime Resources")).toBeVisible();
+    fireEvent.click(resourceSummary);
+    expect(resourceSummary.parentElement).not.toHaveAttribute("open");
     const trend = await screen.findByText("2-Minute Trends");
     expect(trend.parentElement).not.toHaveAttribute("open");
     expect(screen.queryByText("Traffic Sources")).not.toBeInTheDocument();
@@ -167,20 +171,22 @@ describe("operator-centred Overview", () => {
         },
       }),
     );
-    const toggle = await screen.findByRole("button", { name: "Hide resource and storage details" });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const toggle = screen.getByText("Show resource and storage details", { selector: "summary" });
+    await waitFor(() => {
+      expect(toggle.parentElement).toHaveAttribute("open");
+    });
     expect(screen.getAllByText(/Disk cache \(writes failing\)/)[0]).toBeVisible();
     expect(screen.getByText(/Disk cache storage: critical headroom/)).toBeVisible();
     fireEvent.click(toggle);
-    expect(
-      screen.getByRole("button", { name: "Show resource and storage details" }),
-    ).toHaveAttribute("aria-expanded", "false");
+    expect(toggle.parentElement).not.toHaveAttribute("open");
     expect(screen.getAllByText(/Disk cache \(writes failing\)/)[0]).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /Storage: writes failing/ }));
     await waitFor(() => {
       expect(scroll).toHaveBeenCalled();
     });
-    expect(screen.getByRole("button", { name: "Hide resource and storage details" })).toBeVisible();
+    await waitFor(() => {
+      expect(toggle.parentElement).toHaveAttribute("open");
+    });
   });
 
   it("surfaces capacity warnings at the threshold and reopens their details", async () => {
@@ -202,7 +208,10 @@ describe("operator-centred Overview", () => {
     );
     const heading = screen.getByRole("heading", { name: "Resources and storage" });
     Object.defineProperty(heading, "scrollIntoView", { configurable: true, value: scroll });
-    const toggle = await screen.findByRole("button", { name: "Hide resource and storage details" });
+    const toggle = screen.getByText("Show resource and storage details", { selector: "summary" });
+    await waitFor(() => {
+      expect(toggle.parentElement).toHaveAttribute("open");
+    });
     const warnings = [
       "Cache memory is near capacity.",
       "Upstream active pressure is near its configured limit.",
@@ -216,10 +225,9 @@ describe("operator-centred Overview", () => {
     fireEvent.click(toggle);
     for (const warning of warnings) expect(screen.getByText(warning)).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "View resource details and diagnostics" }));
-    expect(screen.getByRole("button", { name: "Hide resource and storage details" })).toHaveAttribute(
-      "aria-expanded",
-      "true",
-    );
+    await waitFor(() => {
+      expect(toggle.parentElement).toHaveAttribute("open");
+    });
     expect(scroll).toHaveBeenCalledWith({ behavior: "smooth" });
   });
 

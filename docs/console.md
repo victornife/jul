@@ -177,7 +177,8 @@ This area groups **Runtime Resources**, **Capacity**, and Jul-owned **Storage**.
 Details are collapsed by default when nothing is elevated; they open when a
 resource or storage warning appears. Named active warnings remain at the top
 even if the operator closes the details. Unavailable or unjudged readings are
-not treated as healthy.
+not treated as healthy. Use **Show resource and storage details** to expand or
+collapse the entire detail area.
 
 ##### Runtime Resources and Capacity (#431)
 
