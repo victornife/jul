@@ -48,10 +48,10 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0026](0026-application-sharing-contract.md) | Application-sharing contract: derived view, declared intent and complete withdrawal | Accepted | 2026-10-18 |
 | [0027](0027-scoped-cache-invalidation.md) | Scoped cache invalidation, trusted origin tags, and selector fences | Accepted — Beta/unreleased | 2026-10-25 |
 
-| [0028](0028-bounded-cache-inspection.md) | Bounded cache inspection and observed decision evidence | Accepted for implementation; verification pending (#622) | 2026-10-27 |
+| [0028](0028-bounded-cache-inspection.md) | Bounded cache inspection and observed decision evidence | Accepted — #622 merged/verified, Beta/unreleased | 2026-10-27 |
 | [0029](0029-route-scoped-cache-policy-and-vary-guards.md) | Route-scoped cache policy, request-cookie bypass, and Vary transformation guards | Accepted — #623 / #672 | 2026-10-29 |
 | [0030](0030-cache-purge-recovery-latency-and-cutover.md) | Durable incomplete-purge recovery, large-purge latency bounds, purge outcomes, and route/backend cutover | Accepted — Beta/unreleased (#667, #666, #668, #624) | 2026-10-30 |
-| [0031](0031-waf-operations-posture-isolation-and-alerting.md) | WAF operations, trustworthy transaction outcomes, narrow tuning, posture review, isolation matrix, and external security alerting | Accepted — in progress (#629, #630–#634, #628-B) | 2026-11-02 |
+| [0031](0031-waf-operations-posture-isolation-and-alerting.md) | WAF operations, trustworthy transaction outcomes, narrow tuning, posture review, isolation matrix, and external security alerting | Accepted — #629 and #628-B merged/verified, Beta/unreleased; #628-A open | 2026-11-02 |
 
 ## Reading order
 

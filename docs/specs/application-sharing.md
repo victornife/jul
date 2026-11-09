@@ -15,7 +15,11 @@
 > **#581 (`SHARE-02A`, Fixture F1)** standalone restricted/public sharing is
 > verified on merged `main` (`52b09adfbccfc3b14a86ce48a2de06395a7fae70`); see
 > the [F1 runbook](../sharing/f1-standalone-runbook.md) and
-> [qualifying evidence report](../sharing/f1-standalone-evidence.md). Design
+> [qualifying evidence report](../sharing/f1-standalone-evidence.md). Its
+> 39-minute controlled-lab observation is not the ADR 0005 long-running GA
+> soak. The foundation is unreleased and has no independent maturity decision
+> recorded; the next sequential sharing entry is #582, subject to its
+> authorised disposable-tailnet and client prerequisites. Design
 > baseline: `main` at `64e4a8b29230134c5dee37dfd8bfa130a9580a2a`; published
 > package baseline v2.2.0. Evidence, decision log, adversarial review and
 > traceability live in the

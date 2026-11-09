@@ -146,8 +146,9 @@ sharing work and remaining operational candidates are tracked separately in
   Security milestone B is delivered. Operational milestone A, covering core
   availability/certificate/backend/storage alerts, remains open.
 
-The candidate items remain unselected; selection and sequencing for open work
-stay in the programme tracker.
+The agreed pre-release scheduling order is in the programme tracker. Scheduling
+does not start a candidate or turn that order into a technical dependency; each
+item retains its own entry requirements.
 
 **What stays out of scope:** Correctness and security fixes always take priority
 over feature work, and new capabilities earn their own maturity rather than
@@ -183,6 +184,7 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 | **Beta · released in v2.0.0** | Configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
 | **Beta · released in v2.1.0** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase, consistent-hash affinity, client-certificate policy hot reload, and the post-v2.0.0 NGINX translation/E2E evidence |
 | **Beta · released in v2.2.0** | Downstream write-inactivity timeout and bounded per-route metrics/charts; publication does not complete their open GA criteria |
+| **Beta · merged, unreleased** | Cache operations and WAF/security operations; their newer contracts do not inherit the historical cache or WAF GA/soak evidence |
 
 Published stable
 [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)
@@ -278,6 +280,12 @@ two **profiles**: `lean` (the default build, no optional features) and `full`
 WASM plugins, stream proxy, Consul/Kubernetes discovery, WAF). Pick `full` unless
 you specifically want the smaller lean binary.
 
+The latest published archives are **v2.2.0**. A build from current `main` can
+contain later, unreleased capabilities, including cache operations, security
+operations and sharing foundations; the v2.2.0 archives cannot acquire those
+changes from this web documentation. Check the binary version and
+[feature status](docs/status.md) as well as `jul capabilities`.
+
 | Platform | Archive (full profile) |
 | -------- | ------- |
 | Windows (Intel/AMD 64-bit) | [`jul_<version>_windows_amd64_full.zip`](https://github.com/victornife/jul/releases) |
@@ -301,8 +309,13 @@ Not sure which architecture you need?
 
 ## Quick start
 
-From the extracted folder (or the repo root if running from source), create a
-page and serve it on loopback:
+From the verified extracted folder, create a page and serve it on loopback. The
+published v2.2.0 binary does not have or require `version-key init`. A binary
+built from current `main` requires a private key before serving: on first
+installation run `./jul version-key init` (Windows: `.\jul.exe version-key init`)
+as the serving identity. Preserve the key and restore its backup if it is lost;
+do not initialize a replacement for an established installation. See
+[provisioning and recovery](docs/effective-versions.md).
 
 **Windows (PowerShell):**
 

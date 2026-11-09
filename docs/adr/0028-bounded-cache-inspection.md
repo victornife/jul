@@ -1,6 +1,7 @@
 # ADR 0028 — Bounded cache inspection and observed decision evidence
 
-- Status: accepted for implementation; verification pending (#622).
+- Status: accepted; #622 merged via PR #669 and verified on its reviewed head
+  (Beta/unreleased). PR #670 merged the Windows timing-test follow-up.
 - Date: 2026-10-27.
 - Decision authority: maintainer approval of the implementation proposal and explicit-grant recommendation.
 - Parent: #620; programme selection: #62; delivered foundation: #621 / ADR 0027.
@@ -47,13 +48,15 @@ residency, and charged to the memory-tier footprint estimate. Corrected origin a
 is separate from insertion/validation time. Freshness provenance comes from the
 actual freshness owner; current SIE is projected by the current stale-error owner.
 Older disk entries explicitly lack this evidence. Normal reload can retain older
-entry freshness; this does not implement #623 route policy or #624 cutover.
+entry freshness; this decision did not implement #623 route policy or #624
+cutover. Those separate successors subsequently merged via #673 and #675.
 
 The [cache guide](../cache.md#bounded-cache-inspection) owns operational limits,
 errors, examples and inherited #666/#667/#668 boundaries. NGINX migration impact
-is not applicable while request semantics remain unchanged. Final maturity,
-coverage, platform/browser and independent review evidence remain separate gates;
-this ADR does not declare release, GA, soak or issue completion.
+is not applicable while request semantics remain unchanged. The
+[#622 completion record](https://github.com/victornife/jul/issues/622#issuecomment-6457246085)
+links reviewed-head, platform/browser and independent review evidence. This
+decision does not declare release, GA or a qualifying soak.
 
 Review clarification: stale-deadline provenance distinguishes original SWR from
 an SIE extension using the existing immutable provenance allocation; older

@@ -41,6 +41,12 @@ discovered correctness/security findings still pre-empt the roadmap.
   not promote them to GA. Bounded NGINX translation and migration E2E
   improvements shipped in v2.1.0 and remain approximated or blocking
   where the importer guide says so.
+- **Merged after `v2.2.0`, not in a published package:** the cache operations
+  and WAF/security-operations additions have separate Beta records in
+  [feature status](status.md). Sharing intent and withdrawal are also merged
+  and unreleased; their independent maturity has not been decided. The #581
+  standalone fixture is bounded development-source evidence, not a released
+  package or a qualifying long-running GA soak.
 - **Remaining operational boundaries:** Unix-domain upstreams support named
   plaintext HTTP/1.1 pools, not TLS, HTTP/2 or direct Unix `proxy_pass`.
   Resilience keeps client/Jul-owned cancellation neutral while backend
@@ -330,10 +336,12 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
 
 ## Response cache ([cache.md](cache.md))
 
-- **No tag or pattern purge.** The admin API purges a single exact key or the
-  entire cache. There is no prefix, host, or tag-based purge (e.g. all
-  `/api/v1/*`). Use short TTLs or application-layer cache busting for
-  selective invalidation.
+- **Scoped purge is local and bounded.** On current `main`, #621 supports
+  exact URL, segment-bounded prefix, anchored glob, trusted origin tag and host
+  selectors through preview/confirmation in the API, CLI and Console.
+  Published v2.2.0 does not contain these additions. There is no arbitrary
+  regex or unauthenticated data-plane `PURGE`, and admitted readers may finish.
+  See [scoped cache invalidation](cache.md#scoped-cache-invalidation-and-origin-grouping-tags).
 - **Range-aware caching is opt-in, complete-object only, and single-range.**
   By default (`[cache].range_enabled = false`), every request carrying `Range`
   or `If-Range` bypasses the cache and reaches the origin (`X-Cache: BYPASS`,

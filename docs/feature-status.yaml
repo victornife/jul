@@ -28,7 +28,7 @@
 # docs/soak-evidence.md and #480 record the post-fix impact review and limits.
 
 version: 2
-updated: '2026-10-09'
+updated: '2026-11-09'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
@@ -308,6 +308,7 @@ features:
     7: true
     8: null
     9: true
+  notes: 'Historical released WAF contract and its source-bound soak only. The post-v2.2.0 policy evaluation, tuning, outcome investigation, posture and alerting additions are separately recorded under WAF-OPS and SEC-OPS; they do not inherit this GA/soaked evidence.'
   delivery: soaked
 - id: Y2-07
   name: mTLS client auth
@@ -364,8 +365,9 @@ features:
     directives, mandatory validation, authenticated reuse, invalidation, Vary membership, 304 merge and Range bypass. #134
     published the executable matrix, refreshed six benchmarks, added a zero-error focused correctness soak and found no unresolved
     P0/P1 cache defect. Criterion 8 is satisfied by adversarial Cache-Control parser coverage. Additive post-v2.2.0 cold-miss fill
-    locking (#525 Part 1), disk-streamed large-object capture (#525 Part 2), and Option A range-aware caching (#442) are unreleased
-    and do not inherit this GA/soaked certification. See docs/cache.md and the 2026-08-07
+    locking (#525 Part 1), disk-streamed large-object capture (#525 Part 2), Option A range-aware caching (#442), and cache operations
+    #621-#624 with #666-#668 are unreleased and do not inherit this GA/soaked certification. See their separate entries,
+    docs/cache.md and the 2026-08-07
     audit record.
 
     '
@@ -386,7 +388,7 @@ features:
     7: true
     8: true
     9: true
-  notes: 'Relationships (#512): per-status error pages (internal/handler/errorpages.go), the always-on Request ID middleware and the worker_threads process setting (GOMAXPROCS) are part of this row: they are in docs/core-http.md and docs/configuration.md and on the path of every soaked request. Deployment packaging is the separate DEPLOY-PKG row.'
+  notes: 'Relationships (#512): per-status error pages (internal/handler/errorpages.go), the always-on Request ID middleware and the worker_threads process setting (GOMAXPROCS) are part of this row: they are in docs/core-http.md and docs/configuration.md and on the path of every soaked request. Deployment packaging is the separate DEPLOY-PKG row. The separately merged, unreleased #641 intent and #642 withdrawal foundation has no independent maturity decision recorded and does not inherit this GA/soaked row. #581 verifies one bounded development-source fixture, not a released package or qualifying GA soak.'
   delivery: soaked
 - id: SEND-TIMEOUT
   name: Downstream write-inactivity timeout
@@ -973,7 +975,7 @@ features:
   - core
   - console
   maturity: Beta
-  delivery: implemented
+  delivery: merged
   doc: cache.md
   criteria:
     1: true
@@ -985,7 +987,108 @@ features:
     7: true
     8: true
     9: true
-  notes: 'Implemented on PR for #621 (ADR 0027): preview-confirmed scoped invalidation across memory and disk by exact URL, segment-bounded path prefix, bounded anchored glob, trusted origin grouping tag ([cache].tag_headers / [cache].strip_tag_headers), and hostname via /api/v1/cache/purge*, jul cache purge, and the Full Console. Separate from the historical core-cache GA/soaked record; awaiting merge, release, and long-running GA soak.'
+  notes: 'Merged #621 via PR #665 (78b458b8; ADR 0027): preview-confirmed scoped invalidation across memory and disk by exact URL, segment-bounded path prefix, bounded anchored glob, trusted origin grouping tag ([cache].tag_headers / [cache].strip_tag_headers), and hostname via /api/v1/cache/purge*, jul cache purge, and the Full Console. Separate from the historical core-cache GA/soaked record; unreleased with no qualifying long-running GA soak recorded.'
+
+- id: CACHE-OPS-02
+  name: Bounded cache inspection and observed decisions
+  tags:
+  - core
+  - console
+  maturity: Beta
+  delivery: merged
+  doc: cache.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: false
+    9: true
+  notes: 'Unreleased #622, merged via PR #669 (bc99eca6), with Windows timing-test follow-up #670. API, CLI and Console expose bounded metadata and opt-in, lossy observed decisions under a separate cache:inspect grant. The reviewed-head benchmark and platform limits are in reviews/2026-10-27-622-implementation.md and #622; no independent GA or qualifying soak decision is recorded.'
+
+- id: CACHE-OPS-03
+  name: Route-scoped cache policy and conservative reuse guards
+  tags:
+  - core
+  - console
+  maturity: Beta
+  delivery: merged
+  doc: cache.md
+  criteria:
+    1: true
+    2: false
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: false
+    9: true
+  notes: 'Unreleased #623 and #672, merged via PR #673 (fddc3456; ADR 0029): route freshness policy, cookie bypass, route isolation and sensitive/transformed Vary guards. This is separate from the historical core-cache GA/soak; no independent GA or qualifying soak decision is recorded.'
+
+- id: CACHE-OPS-04
+  name: Cache purge recovery and route/backend cutover
+  tags:
+  - core
+  - console
+  maturity: Beta
+  delivery: merged
+  doc: cache.md
+  criteria:
+    1: true
+    2: true
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: false
+    9: true
+  notes: 'Unreleased #666-#668 via PR #674 (abe70dfc) and #624 via PR #675 (70277d98; ADR 0030): durable incomplete-purge recovery, measured local purge bounds, truthful outcomes and explicit publication-aligned cutover. Already-admitted readers may finish; local measurements are not a production latency guarantee. No independent GA or qualifying soak decision is recorded.'
+
+- id: WAF-OPS
+  name: WAF policy evaluation, tuning, and outcome investigation
+  tags:
+  - waf
+  - console
+  maturity: Beta
+  delivery: merged
+  doc: waf.md
+  criteria:
+    1: true
+    2: false
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: false
+    9: true
+  notes: 'Unreleased #630-#632, merged through PRs #679-#683 (ADR 0031): synthetic policy fixtures, external-asset manifests, narrow exceptions, actual transaction outcomes and bounded investigation. The #629 ledger records reviewed-source and environment limits. This does not inherit Y2-06 GA/soak; a manifest verifies assets but is not their backup.'
+
+- id: SEC-OPS
+  name: Security posture review, isolation evidence, and security alerting
+  tags:
+  - core
+  - console
+  - waf
+  maturity: Beta
+  delivery: merged
+  doc: security-posture.md
+  criteria:
+    1: true
+    2: false
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: false
+    9: true
+  notes: 'Unreleased #633 and #634 plus #628 Milestone B, merged through PRs #678 and #682-#683 under #629. Posture and the local security-alert recipe use bounded producer evidence; the isolation matrix and local notification tests do not certify every deployment or provider. General operational alert recipes remain open in #628 Milestone A. No inherited GA or qualifying soak is claimed.'
 
 - id: L4-ALPN
   name: Offered-ALPN TCP passthrough routing

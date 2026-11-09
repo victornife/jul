@@ -1,6 +1,8 @@
 # ADR 0031 — WAF operations, trustworthy transaction outcomes, narrow tuning, posture review, isolation matrix, and external security alerting
 
-- **Status:** Accepted — in progress (`#629`, `#630`, `#631`, `#632`, `#633`, `#634`, `#628` Milestone B)
+- **Status:** Accepted — #629, #630–#634 and #628 Milestone B merged and
+  verified within the [programme ledger](../reviews/2026-11-02-629-waf-programme-ledger.md)
+  (Beta/unreleased); #628 Milestone A remains open.
 - **Date:** 2026-11-02
 - **Deciders:** Victor Niharra (`@victornife`)
 - **Applies to:** `internal/waf`, `internal/config`, `internal/lifecycle`, `internal/configcontract`, `internal/apicontract`, `internal/observability`, `internal/doctor`, `internal/diagnostics`, `internal/admin`, `internal/adminapi`, `internal/adminclient`, `internal/app`, `cmd/jul`, Console v2 (`internal/admin/ui`), `examples/waf-policy/`, and `examples/alerting/security/`
@@ -11,7 +13,8 @@
 
 Jul.IA ships a Coraza (`v3.8.1`) and embedded OWASP Core Rule Set (`v4.25.0`) WAF behind the `waf` build tag, with serving provenance (`#440`), path-only redacted match logging (`#127`), confidential external-source digests (`#649`, [ADR 0025](0025-effective-version-confidentiality.md)), and standalone application-sharing intent and withdrawal contracts (`#580`, `#641`, `#642`, `#581`, [ADR 0026](0026-application-sharing-contract.md)).
 
-Six coordinated operational-security gaps remain across `#629`:
+At the decision baseline, six coordinated operational-security gaps remained
+across `#629`:
 
 1. **Logged matches vs. actual transaction outcomes (`#632`):**
    - `errorCallback` fires only for matched rules with `log` enabled and labels `jul_waf_events_total` with the configured policy `mode` (`block` or `detect`).
