@@ -18,7 +18,7 @@ This is a bounded characterisation on a single host. It is not a capacity claim,
 | Engines | Coraza `v3.8.1`, coraza-coreruleset `v4.25.0`, wazero `v1.12.0`, quic-go `v0.65.0`, `x/net v0.62.0` |
 | Host | WSL2 `6.18.54.1-microsoft-standard-WSL2`, 12-core Qualcomm Oryon, 15.7 GiB RAM, `/tmp` tmpfs |
 | Envelope | Jul runs in its own systemd user scope: `CPUQuota=200%`, `MemoryMax=768M`, `MemorySwapMax=0`, CPUs 0–1, `GOMAXPROCS=2`, private tmpfs `TMPDIR` (spill counts as cgroup shmem). The load generator (CPUs 4–9) and the origin (CPUs 10–11) run outside the scope. |
-| Artefacts | Plugin `inspect-load.wasm` sha256 `2526ed82…8127`, built from `examples/plugins/inspect-load` (`GOOS=wasip1 -buildmode=c-shared`, 4.4 MB Go guest). Harness binary sha256 `a8505b2b…84eb`, built from `scripts/waf-wasm-assessment.go` sha256 `ca3f0c46…2f60`. The `results.jsonl` sha256 is `5af32afa…f173`, which matches `manifest.json`. |
+| Artefacts | Plugin `inspect-load.wasm` sha256 `2526ed82…8127`, built from `examples/plugins/inspect-load` (archived as [`tooling/inspect-load.go.txt`](evidence/2026-11-09-695/tooling/inspect-load.go.txt); `GOOS=wasip1 -buildmode=c-shared`, 4.4 MB Go guest). Harness binary sha256 `a8505b2b…84eb`, built from `scripts/waf-wasm-assessment.go` sha256 `ca3f0c46…2f60` (archived byte-identical as [`tooling/waf-wasm-assessment.go.txt`](evidence/2026-11-09-695/tooling/waf-wasm-assessment.go.txt)). The `results.jsonl` sha256 is `5af32afa…f173`, which matches `manifest.json`. |
 | Run | 2026-11-09 14:55–15:32 UTC, exit 0, 53 result rows. The whole matrix ran once and nothing was re-run selectively. |
 
 ## 2. Request and response ordering (traced)
@@ -175,7 +175,7 @@ These do not gain inspection guarantees or bounds from these results.
 
 ## 6. Reproduction and supplemental evidence
 
-The full reproduction steps are in plan §7. In short:
+The full reproduction steps are in plan §7. The harness and guest are archived as uncompiled source in [`evidence/2026-11-09-695/tooling/`](evidence/2026-11-09-695/tooling/README.md); first restore them to their original paths as described there. Then:
 
 ```sh
 make build-full
