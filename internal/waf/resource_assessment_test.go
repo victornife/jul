@@ -65,7 +65,10 @@ func TestAssessmentRequestBodySpill(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tmp := t.TempDir()
+			// Coraza spills to os.TempDir(): TMPDIR on Unix, TMP/TEMP on Windows.
 			t.Setenv("TMPDIR", tmp)
+			t.Setenv("TMP", tmp)
+			t.Setenv("TEMP", tmp)
 			cfg := config.WAFConfig{CRSEnabled: tc.crs}
 			if tc.limit != "" {
 				if err := cfg.RequestBodyLimit.UnmarshalText([]byte(tc.limit)); err != nil {

@@ -320,8 +320,9 @@ over static directives, not per-transaction `ctl:ruleEngine` actions.
   ```
 
 - **Bodies above 128 KiB spill to temporary files.** With CRS and a larger
-  `request_body_limit`, Coraza writes the part above 128 KiB to `$TMPDIR` for
-  the duration of the request. On `tmpfs` this counts as memory.
+  `request_body_limit`, Coraza writes the part above 128 KiB to the OS
+  temporary directory (`TMPDIR` on Unix, `TMP`/`TEMP` on Windows) for the
+  duration of the request. On `tmpfs` this counts as memory.
 
 ### Sizing and concurrency
 
