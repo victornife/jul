@@ -19,6 +19,66 @@
   --font-family-mono: ui-monospace, Menlo, Consolas, monospace;
 }
 
+@layer base {
+  .drawer-body {
+    container: drawer / inline-size;
+    overflow-wrap: anywhere;
+  }
+
+  .drawer-body :where(*) {
+    min-width: 0;
+  }
+
+  .drawer-body :where(label:not([class])) {
+    display: block;
+    color: var(--color-jul-text);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .drawer-body :where(input:not([class]):not([type="checkbox"]):not([type="radio"]), select:not([class]), textarea:not([class])) {
+    display: block;
+    width: 100%;
+    border: 1px solid var(--color-jul-border);
+    border-radius: 0.375rem;
+    background: var(--color-jul-surface);
+    padding: 0.375rem 0.75rem;
+    color: var(--color-jul-text);
+    font-size: 0.875rem;
+  }
+
+  .drawer-body :where(button:not([class])) {
+    border: 1px solid var(--color-jul-border);
+    border-radius: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+  }
+
+  .drawer-body :where(p:not([class])) {
+    font-size: 0.875rem;
+  }
+
+  a[href]:not([class]) {
+    color: var(--color-jul-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.125em;
+  }
+}
+
+@container drawer (max-width: 40rem) {
+  .drawer-body :where(.sm\:grid-cols-2, .sm\:grid-cols-3, .lg\:grid-cols-2, .lg\:grid-cols-3) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .drawer-body :where(.sm\:col-span-2, .lg\:col-span-2) {
+    grid-column: auto;
+  }
+
+  .drawer-body :where(.flex.items-center.justify-between) {
+    flex-wrap: wrap;
+  }
+}
+
 /*
  * Theme tokens. The @theme block above defines the dark defaults (the historic
  * Console look). The light palette is applied by overriding the same CSS custom

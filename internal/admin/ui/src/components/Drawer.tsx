@@ -47,12 +47,12 @@ export function Drawer({ title, subtitle, onClose, closeLabel, children, footer 
       <div
         ref={panelRef}
         tabIndex={-1}
-        className="relative flex h-full w-full max-w-xl flex-col border-l border-jul-border bg-jul-bg shadow-2xl outline-none"
+        className="relative flex h-full w-full max-w-3xl flex-col overflow-hidden border-l border-jul-border bg-jul-bg shadow-2xl outline-none"
       >
-        <div className="flex items-start justify-between gap-4 border-b border-jul-border px-6 py-4">
+        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-jul-border px-4 py-4 sm:px-6">
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold text-jul-text">{title}</h2>
-            {subtitle && <p className="truncate text-xs text-jul-muted">{subtitle}</p>}
+            <h2 className="break-words text-lg font-semibold text-jul-text">{title}</h2>
+            {subtitle && <p className="break-words text-xs text-jul-muted">{subtitle}</p>}
           </div>
           <button
             type="button"
@@ -62,9 +62,9 @@ export function Drawer({ title, subtitle, onClose, closeLabel, children, footer 
             {closeLabel ?? "Close"}
           </button>
         </div>
-        <div className="flex-1 overflow-auto px-6 py-5">{children}</div>
+        <div className="drawer-body min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-4 py-5 sm:px-6">{children}</div>
         {footer && (
-          <div className="border-t border-jul-border px-6 py-4">{footer}</div>
+          <div className="max-h-[35%] shrink-0 overflow-y-auto border-t border-jul-border px-4 py-4 sm:px-6">{footer}</div>
         )}
       </div>
     </div>
