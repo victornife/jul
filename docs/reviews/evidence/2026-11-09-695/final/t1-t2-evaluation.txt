@@ -1,0 +1,54 @@
+T1 (whole-run cgroup memory.peak < 576 MiB and no OOM kill) and T2 (s1,s2,s3,s6,s7,s10: 0 unverified 2xx and 0 non-200)
+s1-normal-h1 none r1: peak 24 MiB T1 PASS T2 PASS
+s1-normal-h1 none r2: peak 24 MiB T1 PASS T2 PASS
+s1-normal-h1 none r3: peak 24 MiB T1 PASS T2 PASS
+s1-normal-h1 waf r1: peak 148 MiB T1 PASS T2 PASS
+s1-normal-h1 waf r2: peak 148 MiB T1 PASS T2 PASS
+s1-normal-h1 waf r3: peak 150 MiB T1 PASS T2 PASS
+s1-normal-h1 wasm r1: peak 362 MiB T1 PASS T2 PASS
+s1-normal-h1 wasm r2: peak 339 MiB T1 PASS T2 PASS
+s1-normal-h1 wasm r3: peak 301 MiB T1 PASS T2 PASS
+s1-normal-h1 both r1: peak 320 MiB T1 PASS T2 FAIL (1 non-200/unverified)
+s1-normal-h1 both r2: peak 346 MiB T1 PASS T2 FAIL (1 non-200/unverified)
+s1-normal-h1 both r3: peak 315 MiB T1 PASS T2 FAIL (1 non-200/unverified)
+s2-normal-h2 none r1: peak 25 MiB T1 PASS T2 PASS
+s2-normal-h2 none r2: peak 26 MiB T1 PASS T2 PASS
+s2-normal-h2 none r3: peak 25 MiB T1 PASS T2 PASS
+s2-normal-h2 waf r1: peak 140 MiB T1 PASS T2 PASS
+s2-normal-h2 waf r2: peak 142 MiB T1 PASS T2 PASS
+s2-normal-h2 waf r3: peak 140 MiB T1 PASS T2 PASS
+s2-normal-h2 wasm r1: peak 608 MiB T1 FAIL T2 PASS
+s2-normal-h2 wasm r2: peak 516 MiB T1 PASS T2 PASS
+s2-normal-h2 wasm r3: peak 540 MiB T1 PASS T2 PASS
+s2-normal-h2 both r1: peak 360 MiB T1 PASS T2 FAIL (1 non-200/unverified)
+s2-normal-h2 both r2: peak 427 MiB T1 PASS T2 FAIL (5 non-200/unverified)
+s2-normal-h2 both r3: peak 441 MiB T1 PASS T2 PASS
+s3-large-h2 none r1: peak 42 MiB T1 PASS T2 PASS
+s3-large-h2 none r2: peak 43 MiB T1 PASS T2 PASS
+s3-large-h2 none r3: peak 46 MiB T1 PASS T2 PASS
+s3-large-h2 waf r1: peak 706 MiB T1 FAIL T2 FAIL (0 verified completions)
+s3-large-h2 waf r2: peak 685 MiB T1 FAIL T2 FAIL (0 verified completions)
+s3-large-h2 waf r3: peak 672 MiB T1 FAIL T2 FAIL (0 verified completions)
+s3-large-h2 wasm r1: peak 736 MiB T1 FAIL T2 FAIL (1711 non-200/unverified)
+s3-large-h2 wasm r2: peak 741 MiB T1 FAIL T2 FAIL (1693 non-200/unverified)
+s3-large-h2 wasm r3: peak 704 MiB T1 FAIL T2 FAIL (1670 non-200/unverified)
+s3-large-h2 both r1: peak 680 MiB T1 FAIL T2 FAIL (423 non-200/unverified)
+s3-large-h2 both r2: peak 671 MiB T1 FAIL T2 FAIL (478 non-200/unverified)
+s3-large-h2 both r3: peak 680 MiB T1 FAIL T2 FAIL (448 non-200/unverified)
+s4-ramp-large-h2 none r1: peak 85 MiB T1 PASS
+s4-ramp-large-h2 both r1: peak n/a MiB T1 FAIL (kernel OOM kill)
+s5-admission-h2 none r1: peak 28 MiB T1 PASS
+s5-admission-h2 both r1: peak n/a MiB T1 FAIL (kernel OOM kill)
+s6-static-h2 none r1: peak 42 MiB T1 PASS T2 PASS
+s6-static-h2 both r1: peak n/a MiB T1 FAIL (kernel OOM kill) T2 FAIL (process killed)
+s7-cache-h1 none r1: peak 207 MiB T1 PASS T2 PASS
+s7-cache-h1 both r1: peak 465 MiB T1 PASS T2 FAIL (12 non-200/unverified)
+s8-slow-clients-h1 none r1: peak 51 MiB T1 PASS
+s8-slow-clients-h1 waf r1: peak 514 MiB T1 PASS
+s8-slow-clients-h1 wasm r1: peak n/a MiB T1 FAIL (kernel OOM kill)
+s8-slow-clients-h1 both r1: peak n/a MiB T1 FAIL (kernel OOM kill)
+s9-reload-churn both r1: peak n/a MiB T1 FAIL (kernel OOM kill)
+s11-arg-amplification-h1 none r1: peak 26 MiB T1 PASS
+s11-arg-amplification-h1 waf r1: peak n/a MiB T1 FAIL (kernel OOM kill)
+s10-normal-h3 none r1: peak 26 MiB T1 PASS T2 PASS
+s10-normal-h3 both r1: peak 334 MiB T1 PASS T2 PASS

@@ -15,6 +15,20 @@ This page is not an audit authority and does not waive a current finding. The
 race, fuzz, cross-platform, security and documentation gates pass; newly
 discovered correctness/security findings still pre-empt the roadmap.
 
+Open defects from the
+[#695 resource assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
+(each blocks the forthcoming release unless fixed or explicitly accepted):
+
+- [#697](https://github.com/victornife/jul/issues/697) (security): WAF
+  arguments beyond `SecArgumentsLimit` (1000) are not inspected and block mode
+  forwards them. Interim guard: [waf.md](waf.md#request-and-response-bodies).
+- [#698](https://github.com/victornife/jul/issues/698): with `crs = true`,
+  `response_body_check = false` does not disable CRS response-body inspection,
+  and posture misreports it.
+- [#699](https://github.com/victornife/jul/issues/699): a `jul-abi/v2`
+  `read_body` call reads the client body inside the guest-call timeout, so slow
+  legitimate uploads fail with `500`.
+
 ## Publication and maturity boundaries
 
 - **Published in stable `v2.0.0`, still Beta:** admin TLS/mTLS, external API and
@@ -639,6 +653,10 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
 - **SecLang parser errors fail closed at startup.** A malformed directive file
   prevents the WAF engine from building, and the server refuses to start so the
   misconfigured location cannot be exposed without protection.
+- **No aggregate inspection bound.** WAF and plugin inspection run before
+  upstream admission, on cache hits and on no-upstream routes, and continue
+  after client disconnect; no process-wide concurrency or memory budget
+  covers them (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
 
 ---
 
@@ -659,7 +677,8 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   instances (default 64) exist per plugin; a call that finds them all busy
   waits one `timeout`, then its request fails with `503` and `Retry-After: 1`
   (#506). Guest memory is bounded by `max_instances × memory_limit`; host body
-  buffers still follow request concurrency.
+  buffers still follow request concurrency, waiters are not counted, and caps
+  are per plugin name rather than process-wide (#700).
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,

@@ -300,9 +300,56 @@ over static directives, not per-transaction `ctl:ruleEngine` actions.
   (`[servers.locations.waf] enabled = false`) or expose the service through
   `grpc_transcode`, whose JSON the WAF can inspect; `jul lint` warns otherwise.
   WebSocket upgrades and streamed (e.g. SSE) responses pass through normally.
-- **Response bodies** are inspected only when `response_body_check = true`. This
+- **Response bodies** are inspected when `response_body_check = true`. This
   enables CRS phase-4 outbound rules (e.g. data-leakage detection) but buffers
-  responses and adds latency and memory — leave it off unless you need it.
+  responses and adds latency and memory. **Known defect
+  ([#698](https://github.com/victornife/jul/issues/698)):** with `crs = true`,
+  the embedded recommended configuration already buffers and inspects
+  `text/plain`, `text/html` and `text/xml` responses even when
+  `response_body_check = false`, and posture reports `false`. To turn it off,
+  add `SecResponseBodyAccess Off` to `inline_rules`.
+- **Arguments beyond 1,000 are not inspected
+  ([#697](https://github.com/victornife/jul/issues/697), security).** The
+  engine stops collecting form/JSON arguments at `SecArgumentsLimit` (1000), and
+  block mode forwards a request whose payload sits after that point. Until the
+  default fails closed, add this guard to every CRS location:
+
+  ```toml
+  [servers.locations.waf]
+  inline_rules = 'SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" "id:1695190,phase:2,deny,status:413,log"'
+  ```
+
+- **Bodies above 128 KiB spill to temporary files.** With CRS and a larger
+  `request_body_limit`, Coraza writes the part above 128 KiB to `$TMPDIR` for
+  the duration of the request. On `tmpfs` this counts as memory.
+
+### Sizing and concurrency
+
+WAF inspection has no concurrency or aggregate memory bound of its own
+([#700](https://github.com/victornife/jul/issues/700)). It runs before upstream
+admission, on cache hits and on routes without an upstream, and Coraza keeps
+evaluating a request after its client disconnects. The
+[#695 assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
+measured one 2 vCPU / 768 MiB envelope (CRS 4.25, block mode). It recorded:
+
+- an idle baseline of about 90 MiB;
+- about 3–4 MiB per concurrent 16 KiB string-field JSON request, and about
+  106–114 ms of CPU per request (about 18 requests/s on 2 vCPUs);
+- about 18–19 MiB per concurrent 256 KiB request;
+- about 90 MiB per concurrent many-field JSON request (about 742 arguments).
+  Eight concurrent requests exceeded 768 MiB, and the kernel OOM-killed the process.
+
+These are observations for that envelope, not capacity guarantees. Size memory
+as **peak concurrent inspected requests × per-request working set**, plus the
+baseline. Then bound concurrency where you can:
+
+- `[rate_limit] max_conns`: per listener, counting H1 and QUIC connections;
+  it does not cap H2/H3 streams.
+- Rate limits.
+- A small `request_body_limit`.
+- An external connection or stream limit in front of Jul for H2/H3 fan-out.
+
+Upstream admission protects origins, not inspection.
 
 These limits interact with the global request body limit (Y1-03) and with
 compression: the WAF runs **before** response compression so it inspects the

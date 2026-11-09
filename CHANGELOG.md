@@ -11,6 +11,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Document the #695 WAF/WASM resource assessment: WAF sizing observations,
+  an interim `SecArgumentsLimit` fail-closed guard (#697), the CRS
+  response-body inspection defect (#698), the plugin `read_body` timeout
+  caveat (#699) and the missing aggregate inspection bound (#700).
+
 - Refresh bounded security posture findings on authenticated metrics scrapes,
   including certificate changes and persisted drift, and expose verified versus
   untested WAF policy scopes separately in the Console (#629, #630, #633, #628-B).
