@@ -10,6 +10,7 @@ import { MemoryRouter } from "react-router-dom";
 import type { Overview, StatsSnapshot } from "@/api/client.ts";
 import { App } from "@/app/App.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
+import { openResourceDisclosure } from "@/features/overview/resourceDisclosure.ts";
 import { PermissionContext, type PermissionState } from "@/auth/usePermission.ts";
 
 const stats: StatsSnapshot = {
@@ -71,6 +72,18 @@ describe("operator-centred Overview", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("opens an available resource disclosure and tolerates an absent one", () => {
+    const details = document.createElement("details");
+    expect(details.open).toBe(false);
+    openResourceDisclosure(details);
+    expect(details.open).toBe(true);
+    openResourceDisclosure(details);
+    expect(details.open).toBe(true);
+    expect(() => {
+      openResourceDisclosure(null);
+    }).not.toThrow();
   });
 
   it("shows idle traffic and snapshot while secondary details start closed", async () => {

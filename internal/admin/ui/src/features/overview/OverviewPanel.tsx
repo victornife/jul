@@ -24,6 +24,7 @@ import { StorageSection } from "./StorageSection.tsx";
 import { DiagnosticsGuidanceSection } from "./DiagnosticsGuidanceSection.tsx";
 import { STORAGE_CATEGORY_META, storageLabel, storageSummary } from "@/lib/storage.ts";
 import { buildGuidance } from "@/lib/diagnostics.ts";
+import { openResourceDisclosure } from "./resourceDisclosure.ts";
 
 const ChartDetailPanel = lazy(() =>
   import("@/components/ChartDetailPanel").then((module) => ({
@@ -598,7 +599,7 @@ export function OverviewPanel() {
   }
   const resourceAttention = resourceWarnings.length > 0;
   useEffect(() => {
-    if (resourceAttention && resourcesRef.current) resourcesRef.current.open = true;
+    if (resourceAttention) openResourceDisclosure(resourcesRef.current);
   }, [resourceAttention]);
 
   if (isLoading) {
@@ -645,7 +646,7 @@ export function OverviewPanel() {
         label: "Storage",
         ...storageSummary(stats.storage),
         onClick: () => {
-          if (resourcesRef.current) resourcesRef.current.open = true;
+          openResourceDisclosure(resourcesRef.current);
           requestAnimationFrame(() => {
             document.getElementById("storage-heading")?.scrollIntoView({ behavior: "smooth" });
           });
@@ -888,7 +889,7 @@ export function OverviewPanel() {
               type="button"
               className="mt-2 underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent"
               onClick={() => {
-                if (resourcesRef.current) resourcesRef.current.open = true;
+                openResourceDisclosure(resourcesRef.current);
                 document
                   .getElementById("resources-heading")
                   ?.scrollIntoView({ behavior: "smooth" });
