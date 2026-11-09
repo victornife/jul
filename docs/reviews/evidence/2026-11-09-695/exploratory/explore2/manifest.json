@@ -1,0 +1,24 @@
+{
+  "args": [
+    "/tmp/a695/harness",
+    "run",
+    "-jul",
+    "./jul",
+    "-plugin",
+    "/tmp/a695/inspect-load.wasm",
+    "-out",
+    "/tmp/a695/explore2",
+    "-quick"
+  ],
+  "cpu_quota": "200%",
+  "finished": "2026-11-09T14:43:03Z",
+  "jul_cpus": "0,1",
+  "jul_sha256": "9d39b37178b3f78feaa073e2c7d462aad23037f22031834126eea130dfe82130",
+  "load_cpus": "4-9",
+  "mem_max": "768M",
+  "origin_cpus": "10,11",
+  "plugin_sha256": "2526ed827923406126589f3ba8b530f7ef1b2e20f6cb0cc6dde9509a9ec08127",
+  "quick": true,
+  "results_sha256": "9d991ea6e1e37785e9afd81de14baea8590eb32650ec0d5608298b666594b5c0",
+  "started": "2026-11-09T14:36:17Z"
+}
