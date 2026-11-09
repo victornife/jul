@@ -472,6 +472,10 @@ max_instances × memory_limit          (default 64 × 16 MiB = 1 GiB)
 Host-side buffers are separate and follow request concurrency: up to
 `max_request_body` per request in the request phase and, for a `jul-abi/v2`
 body subscription, up to `max_response_body` per subscribed response.
+These are not an aggregate server budget. Upstream admission occurs after
+request plugins and WAF on proxy routes and does not cap earlier inspection or
+routes without an upstream. Account for all enabled layers and overlapping
+generations when sizing the host.
 
 Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`

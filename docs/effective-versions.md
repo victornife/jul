@@ -43,10 +43,12 @@ protected key grants limited to the service identity, SYSTEM and Administrators;
 ancestors may allow reads/sibling creation, but no replacement or metadata/ACL
 writes. Windows TrustedInstaller is accepted only as an ancestor owner, never
 as a key-reader grant. An explicit ancestor grant to that already-trusted
-owner has the same authority as its implicit ability to change the DACL. Unsupported ACEs fail
-closed. Native Windows ACL and virtual-service-account tests remain a merge
-blocker for this change; cross-compilation is not runtime evidence. Do not deploy
-this proposal to Windows services until that gate passes.
+owner has the same authority as its implicit ability to change the DACL.
+Unsupported ACEs fail closed. Native Windows ACL, key lifecycle and
+virtual-service-account journeys passed for the reviewed #647 source, as
+recorded in [#644's closure](https://github.com/victornife/jul/issues/644).
+That evidence does not certify an as-yet-unpublished package or substitute for
+testing a later release.
 
 ## Startup path selection
 
@@ -105,8 +107,8 @@ SYSTEM/Administrators and read access for the virtual service identity. Existing
 bytes are retained; unsafe prior grants/reparse points are refused. The service
 validates the key under its actual identity. On installer reruns omit the opt-in
 and reuse the same path. Missing established state requires backup restoration,
-not another initialization. Native service CI must verify this boundary before
-merge; a syntactically valid installer is insufficient evidence.
+not another initialization. Repeat native service verification for the release
+being qualified; a syntactically valid installer is insufficient evidence.
 
 ## Meaning and exposure
 

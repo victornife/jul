@@ -6,20 +6,26 @@ console.
 
 ## Prerequisites
 
-- A downloaded Jul.IA binary in your working directory, or Go 1.27.2+ to
+- A verified Jul.IA release binary in your working directory, or Go 1.27.2+ to
   build it from source (`go build -o jul ./cmd/jul` from the repository root).
+  That source command builds the lean profile without Console, WAF or other
+  opt-in tags; use a full package or select the needed build tags. The current
+  published v2.2.0 packages predate the later capabilities on `main`.
 - A terminal (PowerShell on Windows, bash/zsh on Linux/macOS).
 - Ports 8080 and 9090 free on your machine.
 
 Current macOS builds require macOS 13 Ventura or later; see
 [supported platforms](compatibility.md#supported-build-toolchain-and-platforms).
 
-## Provision the private version key
+## Provision the private version key for current-source builds
 
-Before serving, run `./jul version-key init` (`./jul.exe version-key init` in
-PowerShell). Keep that protected key across restarts and in restricted backups.
-Startup never replaces a missing or corrupt key. A configuration file is not
-required for this step. See [provisioning, upgrade and recovery](effective-versions.md).
+The published v2.2.0 binary does not have or require this command. For a build
+from current `main`, run `./jul version-key init` (`./jul.exe version-key init`
+in PowerShell) once as the serving identity before its first start. Keep that
+protected key across restarts and in restricted backups; restore the backup,
+rather than initializing a replacement, if an established key is lost. Startup
+never replaces a missing or corrupt key. A configuration file is not required
+for this step. See [provisioning, upgrade and recovery](effective-versions.md).
 
 ## Zero-config mode
 
@@ -162,11 +168,13 @@ ACME (see [Configuration reference](configuration.md#automatic-https-acme)).
 
 In the existing `[global]` block of your writable, non-symlinked
 `server.toml`, add `config_authority = "managed"`. Append the `[admin]` block
-below and rebuild with the `console` build tag. Managed authority is required
-for Console configuration apply, history and rollback; the default
-`file_owned` authority allows read-only Console operation but rejects those
-mutations.
+below. Managed authority is required for Console configuration apply, history
+and rollback; the default `file_owned` authority allows read-only Console
+operation but rejects those mutations.
 
+Use a `full` release package, which already includes Console, or build from
+source with the `console` tag. The following source build includes Console but
+not other optional tags such as `waf`:
 ```bash
 go build -tags console -o jul ./cmd/jul
 ```

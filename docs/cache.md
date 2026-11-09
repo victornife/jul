@@ -12,7 +12,10 @@ choice, is written out in [Shared-cache contract](#shared-cache-contract). The
 cache was recertified by #134 after the #131/#132/#133 correction programme.
 The final decision is to retain GA: no unresolved cache P0/P1 correctness defect
 was found, and the executable matrix, race/protocol suites, focused soak and
-benchmarks below were refreshed against the corrected implementation.
+benchmarks below were refreshed against the corrected implementation. That
+historical record does not certify the later, merged but unreleased
+large-object/range and cache-operations additions; see their separate
+[maturity and delivery entries](status.md#beta).
 
 ## Contents
 

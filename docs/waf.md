@@ -12,8 +12,11 @@ location, and run in **block** or **detect** mode.
 The WAF lives behind the `waf` build tag, so lean builds carry none of the
 engine or rule-set weight.
 
-> **Maturity:** GA (see [ADR 0003](adr/0003-maturity-and-ga.md)). It is off by
-> default; turn it on per scope. The recommended rollout is **detect → block**.
+> **Maturity:** The historical released WAF contract is GA/soaked. The later
+> #630–#632 WAF operations and #633/#634 security-operations additions are
+> separately Beta/merged and unreleased; they do not inherit that evidence.
+> See [feature status](status.md). The WAF is off by default; turn it on per
+> scope. The recommended rollout is **detect → block**.
 
 > **Logging privacy contract:** matched-rule logs retain the rule ID, mode,
 > phase, severity, and a bounded/redacted request **path**. Raw query strings and
@@ -71,8 +74,8 @@ to run it. The check is performed once at startup by `waf.Check`.
    up to `request_body_limit` for inspection.
 3. If a rule **interrupts** the transaction in **block** mode, the request is
    short-circuited with the configured status (default **403**) and never
-   reaches the upstream. In **detect** mode the same match is recorded but the
-   request proceeds.
+   reaches the upstream. In ordinary **detect** mode the same match is recorded
+   but the request proceeds; custom runtime engine controls can change this.
 4. Rules see Jul's **canonical client address** in `REMOTE_ADDR`: the transport
    peer unless the listener's
    [`client_address`](configuration.md#client-address-and-trusted-proxies)
@@ -116,13 +119,16 @@ override):
 | Key | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
 | `enabled` | bool | `false` | Turn the firewall on for the scope it appears in |
-| `mode` | string | `block` | `block` (a rule interruption returns `block_status`) or `detect` (record + log only, request proceeds) |
+| `mode` | string | `block` | `block` or normally non-blocking `detect`; runtime rule-engine controls can override it |
 | `block_status` | int | `403` | HTTP status returned when a request is blocked in `block` mode. A rule may still set its own status |
 | `crs_enabled` | bool | `false` | Load the embedded OWASP Core Rule Set (no external files needed) |
 | `paranoia` | int | `1` | CRS paranoia level `1`–`4` (only with `crs_enabled`). Higher catches more, with more false positives |
+| `blocking_paranoia` | int | `paranoia`, otherwise CRS default | CRS blocking level `1`–`4`; cannot conflict with legacy `paranoia` |
+| `detection_paranoia` | int | effective blocking level | CRS detection level `1`–`4`, at least the blocking level |
+| `exceptions` | array | empty | Structured, reviewable narrow rule or target exceptions |
 | `directives_files` | string list | — | SecLang rule files to `Include`, in order, before the inline rules |
 | `inline_rules` | string | — | A SecLang snippet appended last — handy for small tuning/allow-list rules |
-| `request_body_limit` | size | `128kb` | Request-body buffering threshold (e.g. `1mb`); with the pinned engine's default Reject action, a body reaching or exceeding this threshold is rejected with `413` |
+| `request_body_limit` | size | `128kb` | Request-body inspection threshold (e.g. `1mb`); in block mode with the default Reject action, a body reaching or exceeding it is rejected with `413` |
 | `response_body_check` | bool | `false` | Also inspect response bodies (CRS phase 4). Adds latency + memory |
 
 At least one rule source — `crs_enabled`, a `directives_files` entry, or
@@ -134,13 +140,16 @@ rejected at validation.
 - **`block`** (default) — when a rule interrupts the transaction, Jul.IA returns
   `block_status` (403 unless a rule sets its own status) and the request never
   reaches the upstream. Compiles to `SecRuleEngine On`.
-- **`detect`** — rules still evaluate and matches are still counted and logged,
-  but the request is allowed through. Compiles to `SecRuleEngine DetectionOnly`.
-  Use it to measure the false-positive rate against real traffic before
-  switching a location to `block`.
+- **`detect`** — compiles to `SecRuleEngine DetectionOnly`: ordinarily rules
+  evaluate and matches are recorded without blocking. Use it to measure false
+  positives before switching to `block`, but review custom runtime controls
+  and body-read failures as described below.
 
 The mode line is always written **last** in the assembled program, so it wins
-over any `SecRuleEngine` directive an included rule file might set.
+over any static `SecRuleEngine` directive an included rule file might set.
+A rule's per-transaction `ctl:ruleEngine=On` can still enable blocking in
+`detect` mode; review inline and external rules before relying on observation
+only. Read or processing failures can also reject a request in either mode.
 
 ## The OWASP Core Rule Set
 
@@ -271,21 +280,23 @@ The SecLang program is assembled deterministically:
 4. the enforcement-mode line (`SecRuleEngine On`/`DetectionOnly`), last.
 
 Because your files and inline rules come **after** the CRS, they can tune or
-disable specific CRS rules (e.g. `SecRuleRemoveById`), and because the mode line
-comes last, `mode` always wins.
+disable specific CRS rules (e.g. `SecRuleRemoveById`). The final mode line wins
+over static directives, not per-transaction `ctl:ruleEngine` actions.
 
 ## Request and response bodies
 
-- **Request bodies** are buffered up to `request_body_limit` (128 KiB by
-  default) so body-based rules can inspect them, and the whole body is read
-  before the request is forwarded. A body **larger** than the limit is
-  **rejected with `413`**; it is never forwarded uninspected. Set the limit to
-  the largest body the route must accept (uploads included), balancing memory
-  use; `jul lint` warns when it is below the route's `client_max_body_size`.
-- **Native gRPC does not fit behind the WAF.** Because the request body is read
-  completely first, client and bidirectional gRPC streams never reach the
-  backend, and the Core Rule Set rejects the `application/grpc` content type
-  (rule 920420). Turn the WAF off for `grpc = true` routes
+- **Request bodies** are read and inspected up to `request_body_limit` (128 KiB
+  by default) before the action. In block mode with the default Reject action,
+  a body **reaching or exceeding** the threshold is **rejected with `413`**.
+  Set that threshold strictly above the largest body the route must accept
+  (uploads included), balancing memory use; `jul lint` warns when it is below
+  the route's `client_max_body_size`. Ordinary detect mode forwards an oversized
+  body after partial inspection; a custom `SecRequestBodyLimitAction
+  ProcessPartial` can also permit this in block mode.
+- **Native gRPC does not fit behind the WAF.** Buffering before the action can
+  stall client and bidirectional gRPC streams or hit the body limit, and CRS
+  rule 920420 rejects the `application/grpc` content type in block mode. Turn
+  the WAF off for `grpc = true` routes
   (`[servers.locations.waf] enabled = false`) or expose the service through
   `grpc_transcode`, whose JSON the WAF can inspect; `jul lint` warns otherwise.
   WebSocket upgrades and streamed (e.g. SSE) responses pass through normally.
@@ -468,6 +479,14 @@ reproducible policy manifest (`jul-waf-manifest-v1`):
   `asset_changed`, `policy_mismatch`, or `compile_failed`), proving exact policy
   recovery after same-path external file edits or restarts.
 
+Managed configuration history/`jul rollback` restores configuration, not the
+contents of external rule or data files. Before changing policy, keep a
+protected, versioned backup of those files and the manifest. For recovery,
+restore the matching files as well as the configuration, then run
+`jul waf verify-assets` against the saved manifest before serving or promoting
+the policy. A manifest records identities; it is not an asset backup. See the
+[runnable recovery example](../examples/waf-policy/README.md).
+
 ### Narrow tuning, reviewable exceptions and separate paranoia (#631)
 
 When legitimate requests trigger a specific CRS or custom rule on a single
@@ -564,11 +583,11 @@ switching modes or rule sources.
 | Structured narrow exceptions (`[[waf.exceptions]]`) | ✅ | ✅ | Pre-CRS `phase:1` `ctl:ruleRemoveTargetById` / `ctl:ruleRemoveById` (`890001..890064`) |
 | Custom directive files (`directives_files`) | ✅ | ✅ | Include order respected |
 | Inline rules (`inline_rules`) | ✅ | ✅ | Useful for allow-lists / tuning |
-| Empty / no rules | ✅ | ✅ | Firewall compiles but never matches (awaiting rules) |
+| Enabled with no rule source | ☐ | ☐ | Configuration validation rejects it |
 | **Match actions** ||||
-| Block on rule match | ✅ | ☐ | `detect` records but allows |
-| Record in metrics + logs | ✅ | ✅ | Both modes fire `jul_waf_events_total` and log hooks |
-| Rule-set specific status codes | ✅ | ☐ | Rule-level `status:` or CRS default; detect mode returns 200 |
+| Block on rule interruption | ✅ | ☐ | Ordinary `detect` records but allows; runtime `ctl:ruleEngine` can enable blocking |
+| Record log-enabled matches in metrics + logs | ✅ | ✅ | Both modes use `jul_waf_events_total`; `nolog` matches do not fire the match-log callback |
+| Rule-set specific status codes | ✅ | ☐ | Rule-level `status:` or CRS default; ordinary detect mode forwards the origin response |
 | **Scope control** ||||
 | Global default (`[waf]`) | ✅ | ✅ | Applies to all locations without override |
 | Per-location override (`[servers.locations.waf]`) | ✅ | ✅ | Wholesale replacement; not merged |
@@ -584,11 +603,11 @@ switching modes or rule sources.
 | Prometheus `jul_waf_transactions_total` | ✅ | ✅ | Labeled by `mode` and final transaction `outcome` |
 | Prometheus `jul_waf_investigation_events_total` | ✅ | ✅ | Labeled by bounded buffer `result` |
 | Prometheus `jul_waf_serving_routes` | ✅ | ✅ | Gauge of serving routes by effective WAF `state` |
-| Prometheus `jul_waf_protection_changes_total` | ✅ | ✅ | Counter of committed serving WAF `change` transitions |
-| Rejection support header `X-Jul-WAF-Event` | ✅ | ☐ | Opaque `wev_...` reference on WAF-interrupted responses; never cached |
+| Prometheus `jul_waf_protection_changes_total` | ✅ | ✅ | Counter of committed serving WAF `transition` values |
+| Rejection support header `X-Jul-WAF-Event` | ✅ | ✅ | Opaque `wev_...` reference on WAF-rejected responses, including detect-mode read errors; never cached |
 | Structured log `waf rule matched` | ✅ | ✅ | Path-only, bounded/redacted; raw query and macro-expanded message omitted |
 | Flapping / health history | ☐ | ☐ | Not yet integrated (future) |
-| Access-log / audit sink integration | ☐ | ☐ | Future — events are metric+log only today |
+| Durable WAF audit sink | ☐ | ☐ | The bounded investigation buffer is not a durable audit trail |
 | **Build-time** ||||
 | Opt-in via `waf` build tag | ✅ | ✅ | Lean builds reject WAF config |
 | Reload-safe compilation | ✅ | ✅ | Bad rule fails reload; old config keeps serving |
@@ -628,9 +647,10 @@ especially at higher paranoia levels (`paranoia ≥ 2`). Recommended mitigation:
 1. **Deploy in `detect` mode first** for every new rule source or paranoia bump.
 2. **Monitor `jul_waf_events_total`** and the `waf rule matched` logs for 24–48
    hours of representative traffic.
-3. **Tune with `SecRuleRemoveById`** or allow-list `inline_rules` before
-   switching to `block`. The Jul.IA rule ordering (user files/snippets come
-   after the CRS) makes this straightforward.
+3. Use a reviewed [narrow exception](#narrow-tuning-reviewable-exceptions-and-separate-paranoia-631)
+   and evaluate its synthetic fixtures before switching to `block`. Inline
+   rules run after the CRS and cannot express every request-time phase-1
+   exclusion safely.
 
 ### Bypass scenarios
 
@@ -639,11 +659,11 @@ especially at higher paranoia levels (`paranoia ≥ 2`). Recommended mitigation:
   client address to the rule engine. Keep the trusted set to the proxies you
   operate; `jul lint` warns when an entry covers everything. With no policy
   configured — the default — rules always see the transport peer.
-- **Request-size evasion is closed, at a cost:** a body larger than
-  `request_body_limit` is rejected with `413` rather than passed on partially
-  inspected, so padding a payload past the limit does not evade body rules. The
-  cost is that legitimate bodies over the limit are refused too; size the
-  limit accordingly.
+- **Request-size evasion:** In block mode with the default Reject action, a
+  body reaching or exceeding `request_body_limit` receives `413`, preventing
+  padding past the inspected portion. Ordinary detect mode, or a custom
+  `ProcessPartial` action, can forward an oversized body after partial
+  inspection. Size the blocking threshold above legitimate bodies.
 - **Response-body evasion:** When `response_body_check = false`, outbound data
   leakage evades phase-4 inspection. Enable only when your threat model requires
   it (adds latency/memory).
@@ -657,12 +677,14 @@ especially at higher paranoia levels (`paranoia ≥ 2`). Recommended mitigation:
 
 ### Replay and detection gaps
 
-- **No dedicated audit sink yet.** Matched rules are metric + log only. If you
-  need tamper-evident WAF audit trails, forward the structured logs to a SIEM or
-  wait for the Y1-10 access-log / audit integration (future roadmap item).
-- **Detect mode does not block.** A request in `detect` mode reaches the upstream
-  even when rules match. Use this mode only for observation, never as a
-  production control.
+- **No dedicated durable WAF audit sink.** Non-clean outcomes can also appear in
+  the bounded, temporary investigation buffer, which is not a complete or
+  tamper-evident audit trail. Forward structured logs to an appropriate external
+  system when durable retention is required.
+- **Detect mode is not a blocking control.** Without runtime engine controls,
+  matched requests normally reach the upstream, including oversized bodies
+  inspected only in part. Custom `ctl:ruleEngine` actions and body-read errors
+  can still cause rejection.
 
 ### Configuration trust
 
@@ -674,8 +696,12 @@ operator with config-write access could:
 - Remove rules with `SecRuleRemoveById` in `inline_rules`.
 
 These are operator-error / insider-threat vectors, not request-driven exploits.
-Use the Console’s diff-and-apply flow and the config-history rollback feature
-(GA) to catch accidental changes.
+Use the Console’s diff-and-apply flow and, in managed mode, configuration
+history to catch accidental changes. Configuration rollback alone does not
+restore external WAF assets; follow the recovery procedure above.
+
+The following GA matrix is historical evidence for the original WAF contract,
+not a certification of the later WAF/security-operations additions.
 
 | # | GA criterion | Status |
 | --- | --- | --- |
@@ -689,7 +715,8 @@ Use the Console’s diff-and-apply flow and the config-history rollback feature
 | 8 | Fuzzing where parsing is involved | n/a — SecLang parsing is owned by Coraza (no custom parser) |
 | 9 | Self-explanatory Console surface | ✅ Console **Status**/**Security** report *Web application firewall (WAF)* with mode + location count |
 
-The WAF is now **GA**.
+The original released WAF contract remains **GA**; later additions keep their
+separate [Beta/unreleased records](status.md#beta).
 
 
 ### Reading scoped fixture evidence in Console

@@ -1,4 +1,9 @@
-> **Readiness superseded after review of4cc4e46e:** see [review corrections](2026-10-27-622-review-corrections.md). Earlier check results remain historical; the four new findings require fixes and new-head verification.
+> **Historical checkpoint, later superseded:** #622 subsequently merged in
+> [PR #669](https://github.com/victornife/jul/pull/669) and was closed after
+> [final verification](https://github.com/victornife/jul/issues/622#issuecomment-6457246085).
+> Pending-merge and pending-verification statements below describe this
+> checkpoint, not current delivery. Earlier readiness at `4cc4e46e` was
+> superseded by the [review corrections](2026-10-27-622-review-corrections.md).
 
 # CACHE-OPS-02 implementation and verification checkpoint
 

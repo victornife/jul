@@ -1,5 +1,11 @@
 # #622 corrections after review of 4cc4e46e
 
+> **Historical checkpoint:** #622 subsequently merged in
+> [PR #669](https://github.com/victornife/jul/pull/669) and was closed after
+> [final verification](https://github.com/victornife/jul/issues/622#issuecomment-6457246085).
+> The pending review, readiness and merge statements below apply to this
+> earlier checkpoint only.
+
 Refs [PR #669](https://github.com/victornife/jul/pull/669) and
 [#622](https://github.com/victornife/jul/issues/622).
 

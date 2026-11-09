@@ -263,9 +263,10 @@ action so an upstream stop reading promptly; the resulting reverse-proxy abort
   subscription and the replacement body. Same meaning — the largest response body a plugin handles —
   same default (8 MiB). No new limit leaf exists.
 - Host buffering: at most `max_response_body` per `BODY`-subscribed response per plugin layer,
-  released when the response is written. Aggregate pressure is bounded by request concurrency and
-  upstream admission, exactly like request-body buffering (`max_request_body`); operators size the
-  two together.
+  released when the response is written. Aggregate pressure depends on request concurrency.
+  Upstream admission bounds backend work, not request-body inspection before admission or routes
+  without an upstream; it is not an aggregate host-memory budget. Operators size both body limits
+  together and account for all enabled layers.
 - Guest memory: reading a body copies it into guest linear memory and a replacement copies it out, so
   a body transform needs roughly `2 × max_response_body` of headroom inside `memory_limit`. A guest
   that exceeds `memory_limit` traps and the §8 rule applies. The docs state the sizing rule.

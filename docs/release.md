@@ -288,16 +288,44 @@ if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) {
 }
 ```
 
-**Build provenance + SBOM** (needs the [GitHub CLI](https://cli.github.com/)):
+The checksum files are published alongside the archive and are not signed:
+matching them detects corruption but does not independently authenticate the
+archive. The current workflow attests the **binary**, not the archive, so
+provenance cannot yet be verified before extraction (#526). Until an
+archive-level solution is delivered, extract only in a disposable, isolated
+environment as an unprivileged user and do not execute the binary before
+verifying it. Isolation does not itself authenticate the archive.
+
+**Extract for binary verification:** after the checksum check, replace
+`<file>` and the directory placeholders with the actual archive and its name:
 
 ```bash
-# Extract the binary first, then verify SLSA provenance:
+mkdir -p jul-inspection
+tar -xzf "<file>" -C jul-inspection
+cd jul-inspection/jul_<ver>_<os>_<arch>_<profile>
+```
+
+For Windows (PowerShell):
+
+```powershell
+New-Item -ItemType Directory -Force jul-inspection | Out-Null
+Expand-Archive -Path '<file>' -DestinationPath jul-inspection
+Set-Location 'jul-inspection\jul_<ver>_windows_<arch>_<profile>'
+```
+
+**Build provenance + SBOM** from that directory (needs the
+[GitHub CLI](https://cli.github.com/)):
+
+```bash
+# Verify SLSA provenance:
 gh attestation verify ./jul --repo victornife/jul
 
 # Verify the separately signed SPDX SBOM attestation:
 gh attestation verify ./jul --repo victornife/jul \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
+
+On Windows, use `.\jul.exe` in place of `./jul` in both commands.
 
 For a reviewed candidate or stable release, also constrain the signer workflow,
 source ref, and source digest as shown in its evidence document. This confirms
@@ -306,10 +334,9 @@ source, with no local signing keys involved.
 
 ## Installing
 
-Extract the archive. It expands into a
-`jul_<ver>_<os>_<arch>_<profile>/` folder. Create a page for a first run with
-zero-config mode; the bundled `server.toml` is a multi-service example, not a
-standalone site. It expects `/srv/www/example` and two backends at
+Use the extracted directory whose binary passed verification above. Create a
+page for a first run with zero-config mode; the bundled `server.toml` is a
+multi-service example, not a standalone site. It expects `/srv/www/example` and two backends at
 `127.0.0.1:3000` and `127.0.0.1:3001`, so adapt those dependencies before
 starting it.
 The published v2.0.0 `jul check` does **not** inspect static roots; create the
@@ -318,11 +345,16 @@ post-v2.0.0 root-check change open and immediately close each configured static
 root, but cannot prove it will remain readable at startup or that the example
 backends respond.
 
+The published v2.2.0 binary does not have or require a private effective-version
+key. A binary built from current `main` requires one before serving: provision
+it once as the serving identity with `jul version-key init`, then preserve it
+across restarts and in a restricted backup. See
+[effective-version provisioning and recovery](effective-versions.md); do not
+initialize a replacement for an established lost key.
+
 **Linux / macOS:**
 
 ```bash
-tar -xzf jul_<ver>_<os>_<arch>_<profile>.tar.gz
-cd jul_<ver>_<os>_<arch>_<profile>
 chmod +x ./jul
 mkdir -p public
 printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
@@ -332,8 +364,6 @@ printf '<h1>Hello from Jul.IA</h1>\n' > public/index.html
 **Windows (PowerShell):**
 
 ```powershell
-Expand-Archive jul_<ver>_windows_<arch>_<profile>.zip -DestinationPath jul
-Set-Location jul\jul_<ver>_windows_<arch>_<profile>
 New-Item -ItemType Directory -Force public | Out-Null
 Set-Content public\index.html '<h1>Hello from Jul.IA</h1>'
 .\jul.exe run --serve .\public --listen 127.0.0.1:8080

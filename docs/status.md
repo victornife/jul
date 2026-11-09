@@ -1,11 +1,11 @@
 # Jul.IA — Feature status & GA matrix
 
-> Version 2.23 · Updated 2026-10-15
+> Version 2.24 · Updated 2026-11-09
 >
-> Stable v2.2.0 is published. The two newly shipped Beta rows now have `released`
-> delivery; their maturity and GA criteria remain unchanged. The separately
-> approved #527 contracts are GA/soaked after the source-bound #590 review. This is a post-tag status
-> update, not a change to immutable packages or historical soak evidence.
+> Stable v2.2.0 is published. The cache and security-operations additions below
+> are merged on `main`, not in that release. The separately approved #527
+> contracts remain GA/soaked after the source-bound #590 review. This post-tag
+> reconciliation does not change immutable packages or historical soak evidence.
 
 The current published source is `b12e051139f652b400cff37d9f063f5637a7d550`, with
 [exact-source package/native verification](release.md#published-v220-verification).
@@ -22,7 +22,7 @@ by publication alone.
 > data. When maturity or any GA criterion changes, update `feature-status.yaml`
 > first, then keep this table in sync.
 
-The at-a-glance view of **every shipped feature**, its **maturity**, and how
+The at-a-glance view of **every recorded feature**, its **maturity**, and how
 it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.md)).
 
 > Current maturity and delivery live in this page and
@@ -99,9 +99,18 @@ not inherit an older GA row merely because it lives in the same package or guide
 - **Response cache:** #134 completed integrated recertification; the released
   cache record retains GA. Additive post-v2.2.0 cold-miss fill locking (#525
   Part 1), disk-streamed large-object capture (#525 Part 2), Option A
-  range-aware caching (#442), and scoped URL/prefix/glob/tag/hostname cache
-  invalidation (#621, `CACHE-OPS-01`, `implemented` on PR) are unreleased and
-  do not inherit that GA/soaked certification.
+  range-aware caching (#442), and cache operations #621–#624 and #666–#668
+  are merged, Beta and unreleased. Their separate rows do not inherit that
+  GA/soaked certification.
+- **WAF and security operations:** #630–#634 and #628 Milestone B are merged,
+  Beta and unreleased under #629. The original WAF GA/soak record does not
+  certify them; #628 Milestone A remains open. See the
+  [source-bound programme ledger](reviews/2026-11-02-629-waf-programme-ledger.md).
+- **Sharing foundation:** #641 intent and #642 withdrawal are merged and
+  unreleased; no independent maturity decision is recorded for them. #581
+  verified one development-source standalone fixture, not a released package
+  or a qualifying long-running GA soak. The existing Core HTTP and Console GA
+  records do not certify the additions.
 - **Routing, resilience and auxiliary egress:** the bounded CGC-ROUTE,
   CGC-RES and SEC-EGRESS contracts are independently GA/soaked under
   #527/#590, with eight-hour evidence on unchanged full v2.2.0 source.
@@ -217,8 +226,8 @@ limits and live pressure/budget state through the existing readback API.
 ## Beta
 
 Usable capabilities whose contract, release, soak, or integrated evidence is
-not yet at the GA bar. Rows marked `released` shipped as Beta in published
-v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
+not yet at the GA bar. Rows marked `released` shipped as Beta in a published
+stable release. Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
@@ -230,7 +239,12 @@ v2.0.0 or v2.1.0. Publication does not complete the unchecked GA criteria.
 | Local diagnostics and support bundles | OPS-DIAG | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [diagnostics.md](diagnostics.md) |
 | External admin Console OIDC | ADMIN-OIDC | core · `console` | `merged` | ✅ | ☐ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [admin-oidc.md](admin-oidc.md) |
 | Large-object fill lock, disk streaming, and Option A range caching | CACHE-LARGE-RANGE | core | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
-| Scoped URL, prefix, pattern, tag, and hostname cache invalidation | CACHE-OPS-01 | core · `console` | `implemented` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
+| Scoped URL, prefix, pattern, tag, and hostname cache invalidation | CACHE-OPS-01 | core · `console` | `merged` | ✅ | ✅ | ✅ | ✅ | ☐ | ✅ | ✅ | ✅ | ✅ | [cache.md](cache.md) |
+| Bounded cache inspection and observed decisions | CACHE-OPS-02 | core · `console` | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ☐ | ✅ | [cache.md](cache.md) |
+| Route-scoped cache policy and conservative reuse guards | CACHE-OPS-03 | core · `console` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ☐ | ✅ | [cache.md](cache.md) |
+| Cache purge recovery and route/backend cutover | CACHE-OPS-04 | core · `console` | `merged` | ✅ | ✅ | ✅ | ☐ | ☐ | ✅ | ✅ | ☐ | ✅ | [cache.md](cache.md) |
+| WAF policy evaluation, tuning, and outcome investigation | WAF-OPS | `waf` · `console` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ☐ | ✅ | [waf.md](waf.md) |
+| Security posture review, isolation evidence, and security alerting | SEC-OPS | core · `console` · `waf` | `merged` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | ☐ | ✅ | [security-posture.md](security-posture.md) |
 | Admin listener TLS and client authentication | ADMIN-TLS | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [deployment.md](deployment.md) |
 | Versioned external admin API | AUTO-API | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | ✅ | [admin-api.md](admin-api.md) |
 | Remote automation CLI | AUTO-CLI | core | `released` | ✅ | n/a | ✅ | ✅ | ☐ | ✅ | ✅ | n/a | n/a | [remote-cli.md](remote-cli.md) |
@@ -298,6 +312,7 @@ the [soak evidence log](soak-evidence.md).
 
 | Date | Ver | What changed | Source |
 | --- | --- | --- | --- |
+| 2026-11-09 | 2.24 | Reconciled merged cache and security-operations delivery as separate Beta entries and recorded the sharing foundation's undecided maturity. No historical GA/soak or package claim is extended. | [feature-status.yaml](feature-status.yaml); [#620](https://github.com/victornife/jul/issues/620); [#629](https://github.com/victornife/jul/issues/629) |
 | 2026-10-14 | 2.22 | Completed criterion 5 for exactly routing, resilience and auxiliary egress after eight continuous hours on full v2.2.0; retain the primary count failure and reviewed, authorised supplemental collection. Other rows and immutable packages are unchanged. | [feature-status.yaml](feature-status.yaml); [#590 decision](reviews/2026-10-14-ga-soak-590-results.md) |
 | 2026-10-13 | 2.21 | Reconciled current release references and routing/resilience/egress notices with the existing manifest; linked the pending post-GA stability work. No maturity, delivery or criterion changed. | [feature-status.yaml](feature-status.yaml); [#527](https://github.com/victornife/jul/issues/527); [#590](https://github.com/victornife/jul/issues/590) |
 | 2026-09-30 | 2.19 | Manifest reconciliation (#512): every n/a criterion on a GA row is explained (criterion 8 = no custom parser; others in row notes); Y1-09 criterion 8 and Y1-10 criterion 9 corrected from n/a to met with their fuzz and Console evidence; shipped surfaces without a row get explicit relationships (PROXY-protocol ingest on CGC-IN; error pages, Request ID and `worker_threads` on core-http; audit log, history and rollback on Y1-07) or the new Beta DEPLOY-PKG row (systemd, Windows service, Docker image, `jul healthcheck`); the Y1-06 gap is explained. No maturity changes. | [feature-status.yaml](feature-status.yaml); [#512](https://github.com/victornife/jul/issues/512) |
