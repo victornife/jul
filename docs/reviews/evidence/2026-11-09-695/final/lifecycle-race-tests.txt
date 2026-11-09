@@ -1,0 +1,3 @@
+ok  	jul/internal/waf	119.404s
+ok  	jul/internal/plugins	15.100s
+ok  	jul/internal/server	1.090s

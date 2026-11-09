@@ -461,9 +461,13 @@ Guest `log` output is emitted on the server log with the plugin name attached.
 ### Sizing instances and memory
 
 A plugin holds at most `max_instances` module instances. Each can grow to
-`memory_limit` of linear memory, and a request holds one only for the duration
-of a guest call, not the whole request. Worst-case guest memory per plugin is
-therefore:
+`memory_limit` of linear memory. A request holds one only for the duration
+of a guest call, not the whole request. However, a `jul-abi/v2` `read_body` call
+reads the client body **inside** that guest call. A slow upload therefore
+holds the instance, and if it outlasts `timeout` the request fails with `500`
+([#699](https://github.com/victornife/jul/issues/699)). Until that is fixed,
+set `timeout` above the slowest legitimate upload for body-reading plugins and
+set a finite server `read_timeout`. Worst-case guest memory per plugin is:
 
 ```text
 max_instances × memory_limit          (default 64 × 16 MiB = 1 GiB)
@@ -481,6 +485,17 @@ Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`
 rising means the cap is too low for the traffic; lower it (or `memory_limit`)
 when the memory product above is more than the host can spare.
+
+Callers waiting for an instance are not limited in number. Each waits one
+`timeout` while holding its request. In the
+[#695 assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
+(2 vCPU / 768 MiB), a 4.4 MB Go (`wasip1`) guest used up to 10–33 MiB of process
+memory per live instance, including host buffers. Two subscribing plugins at
+16–32 concurrent H2 requests peaked at 516–741 MiB, and 64 slow-uploading
+instances led to an OOM kill. Under CPU saturation, guest calls that exceed
+`timeout` fail with `500`. Smaller guests (TinyGo, Rust) need less memory. An
+aggregate inspection bound is tracked in
+[#700](https://github.com/victornife/jul/issues/700).
 
 ## Uploading modules (Console API)
 

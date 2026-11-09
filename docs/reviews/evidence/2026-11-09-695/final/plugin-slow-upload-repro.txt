@@ -1,0 +1,9 @@
+# Supplemental single-request reproducer (post-plan, not part of the threshold matrix)
+# config: configs/s8-slow-clients-h1--wasm.toml, unconstrained (no cgroup), one client, no other load
+# body: 64,342-byte wide JSON; curl --limit-rate <rate> --data-binary @body.json http://127.0.0.1:18470/proxy/echo?resp=4096
+rate=0 status=200 time=0.012811s
+rate=16k status=500 time=3.003951s
+rate=1M status=200 time=0.012159s
+jul_plugin_invocations_total{plugin="inspect-a",result="continue"} 2
+jul_plugin_invocations_total{plugin="inspect-a",result="error"} 1
+jul_plugin_invocations_total{plugin="inspect-b",result="continue"} 2
