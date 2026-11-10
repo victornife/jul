@@ -1,0 +1,76 @@
+goroutine 45 [IO wait]:
+internal/poll.runtime_pollWait(0xfef239a87000, 0x72)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/runtime/netpoll.go:351 +0xa0
+internal/poll.(*pollDesc).wait(0x73389d948900?, 0x73389d5d6000?, 0x0)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/internal/poll/fd_poll_runtime.go:84 +0x28
+internal/poll.(*pollDesc).waitRead(...)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0x73389d948900, {0x73389d5d6000, 0x3b4a, 0x3b4b})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/internal/poll/fd_unix.go:170 +0x22c
+net.(*netFD).Read(0x73389d948900, {0x73389d5d6000?, 0x73389d2e2888?, 0x55fa0?})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/fd_posix.go:68 +0x28
+net.(*conn).Read(0x73389bf8a2f8, {0x73389d5d6000?, 0x73389d2e28e8?, 0x5650c?})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/net.go:196 +0x34
+net/http.(*connReader).Read(0x73389c1ed640, {0x73389d5d6000, 0x3b4a, 0x3b4b})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:856 +0x228
+bufio.(*Reader).Read(0x73389c1e70e0, {0x73389d5d6000, 0x3b4a, 0x30a18?})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/bufio/bufio.go:231 +0xec
+io.(*LimitedReader).Read(0x73389d2ec4e0, {0x73389d5d6000?, 0x73389d2e2998?, 0x30b00?})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/io/io.go:479 +0x48
+net/http.(*body).readLocked(0x73389d2d4690, {0x73389d5d6000?, 0xfef239d26ce8?, 0x10000?})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/transfer.go:864 +0x34
+net/http.(*body).Read(0xfb4b?, {0x73389d5d6000?, 0x1?, 0x47486bfd936b295d?})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/transfer.go:856 +0x108
+io.(*LimitedReader).Read(0x73389d2e2ad0, {0x73389d5d6000?, 0x73389d2e2ae8?, 0x5c3014?})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/io/io.go:479 +0x48
+jul/internal/plugins.readBounded({0x29f6680, 0x73389d2d4690}, 0xfb4a, 0x100000)
+	/home/victornf/jul-699/internal/plugins/body.go:91 +0x1bc
+jul/internal/plugins.(*plugin).prepareRequestBody(0x73389c496ea0, {0x2a01d00?, 0x73389bf7d060?}, 0x73389c269cc0)
+	/home/victornf/jul-699/internal/plugins/body.go:128 +0x1cc
+jul/internal/plugins.(*plugin).prepare(0x73389c496ea0, {0x2a04380, 0x73389c135200}, {0x2a01d00?, 0x73389bf7d060?}, 0x73389d2f09c0)
+	/home/victornf/jul-699/internal/plugins/body.go:145 +0x44
+jul/internal/plugins.(*plugin).invoke(0x73389c496ea0, {0x2a04380, 0x73389c135200}, {0x2a01d00, 0x73389bf7d060}, 0x73389c269cc0)
+	/home/victornf/jul-699/internal/plugins/runtime.go:722 +0xc0
+jul/internal/plugins.(*Set).Middleware.1.1({0x2a01d00, 0x73389bf7d060}, 0x73389c269cc0)
+	/home/victornf/jul-699/internal/plugins/set.go:63 +0x5c
+net/http.HandlerFunc.ServeHTTP(0x2b8b3c0?, {0x2a01d00?, 0x73389bf7d060?}, 0x2a01d00?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/router.(*Router).For.func1({0x2a01d00, 0x73389bf7d040}, 0x73389c269b80)
+	/home/victornf/jul-699/internal/router/router.go:375 +0x374
+net/http.HandlerFunc.ServeHTTP(0x2a01d00?, {0x2a01d00?, 0x73389bf7d040?}, 0x5bff6c?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/middleware.Recover.func1.1({0x2a01d00?, 0x73389bf7d040?}, 0x2a01d00?)
+	/home/victornf/jul-699/internal/middleware/recover.go:36 +0x6c
+net/http.HandlerFunc.ServeHTTP(0x73389c269b80?, {0x2a01d00?, 0x73389bf7d040?}, 0x10f770?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/middleware.AccessLog.func1.1({0x2a01d00, 0x73389bf7d020}, 0x73389c269b80)
+	/home/victornf/jul-699/internal/middleware/logging.go:125 +0xa0
+net/http.HandlerFunc.ServeHTTP(0x2a01100?, {0x2a01d00?, 0x73389bf7d020?}, 0x0?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/observability.(*Metrics).Middleware.func1({0x2a01100, 0x73389d2e81e0}, 0x73389c269b80)
+	/home/victornf/jul-699/internal/observability/metrics.go:780 +0x118
+net/http.HandlerFunc.ServeHTTP(0x0?, {0x2a01100?, 0x73389d2e81e0?}, 0x34519c?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/middleware.FramingGuard.func1.1({0x2a01100?, 0x73389d2e81e0?}, 0x73389c269b80?)
+	/home/victornf/jul-699/internal/middleware/framing.go:33 +0xc0
+net/http.HandlerFunc.ServeHTTP(0x73389c269a40?, {0x2a01100?, 0x73389d2e81e0?}, 0xffff7f000001?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/middleware.ClientAddress.func1.1({0x2a01100, 0x73389d2e81e0}, 0x73389c269a40)
+	/home/victornf/jul-699/internal/middleware/clientaddr.go:53 +0x224
+net/http.HandlerFunc.ServeHTTP(0x73389c269900?, {0x2a01100?, 0x73389d2e81e0?}, 0x2b8b3c0?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/middleware.RequestID.func1.1({0x2a01100, 0x73389d2e81e0}, 0x73389c269900)
+	/home/victornf/jul-699/internal/middleware/requestid.go:76 +0x180
+net/http.HandlerFunc.ServeHTTP(0x73389c2697c0?, {0x2a01100?, 0x73389d2e81e0?}, 0x1?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+jul/internal/server.(*Server).dynamicHandler.func1({0x2a01100, 0x73389d2e81e0}, 0x73389c2697c0)
+	/home/victornf/jul-699/internal/server/server.go:1215 +0x230
+net/http.HandlerFunc.ServeHTTP(0x1000000000000?, {0x2a01100?, 0x73389d2e81e0?}, 0x73389c2e3ae0?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2358 +0x38
+net/http.serverHandler.ServeHTTP({0x10?}, {0x2a01100?, 0x73389d2e81e0?}, 0x1?)
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:3436 +0xb0
+net/http.(*conn).serve(0x73389ff6fd40, {0x2a04380, 0x73389f5fd770})
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:2157 +0x5a0
+created by net/http.(*Server).Serve in goroutine 38
+	/home/linuxbrew/.linuxbrew/Cellar/go/1.27.3/libexec/src/net/http/server.go:3604 +0x3e8
+

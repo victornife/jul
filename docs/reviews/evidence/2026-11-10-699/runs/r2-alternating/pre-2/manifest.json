@@ -1,0 +1,29 @@
+{
+  "args": [
+    "/tmp/rv699/harness",
+    "run",
+    "-jul",
+    "/tmp/rv699/jul-pre",
+    "-plugin",
+    "/tmp/rv699/inspect-load.wasm",
+    "-out",
+    "/tmp/rv699/out/r2-alt-pre-2",
+    "-only",
+    "r2-",
+    "-variants",
+    "wasm",
+    "-watchdog",
+    "10m"
+  ],
+  "cpu_quota": "200%",
+  "finished": "2026-11-10T12:49:45Z",
+  "jul_cpus": "0,1",
+  "jul_sha256": "59ab41113ae23f06b5a67477eeb086fa7b1925cb401caacca6f4a69b6288cac2",
+  "load_cpus": "4-9",
+  "mem_max": "768M",
+  "origin_cpus": "10,11",
+  "plugin_sha256": "2526ed827923406126589f3ba8b530f7ef1b2e20f6cb0cc6dde9509a9ec08127",
+  "quick": false,
+  "results_sha256": "b42de8b022e9efc4815a8f7130ac5d8b57d0d1d62ed057b52d0194e13c8dd83b",
+  "started": "2026-11-10T12:49:05Z"
+}
