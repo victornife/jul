@@ -61,20 +61,32 @@ func (b *preparedBody) Close() error { return b.orig.Close() }
 // in the chain can use data as the complete body without copying it.
 func (b *preparedBody) unread() bool { return b.rd.Len() == len(b.data) }
 
+// initialBodyBuffer caps the allocation made before any body byte arrives,
+// so a client declaring a large Content-Length and then stalling pins at
+// most this much rather than its declared length.
+const initialBodyBuffer = 32 << 10
+
 // readBounded reads r to EOF, failing with errBodyTooLarge once more than
-// limit bytes arrive regardless of any declared length. A trusted sizeHint
-// (Content-Length within the limit) sizes the buffer exactly; otherwise it
-// grows as data arrives.
+// limit bytes arrive regardless of any declared length. The buffer grows only
+// as data arrives; an unverified sizeHint (Content-Length within the limit)
+// just stops growth from overshooting the declared length.
 func readBounded(r io.Reader, sizeHint int64, limit int) ([]byte, error) {
-	n := min(512, limit+1)
+	want := limit + 1
 	if sizeHint >= 0 && sizeHint <= int64(limit) {
-		n = int(sizeHint) + 1
+		want = int(sizeHint) + 1
 	}
-	buf := make([]byte, 0, n)
+	buf := make([]byte, 0, min(512, want))
+	if sizeHint >= 0 && sizeHint <= int64(limit) {
+		buf = make([]byte, 0, min(initialBodyBuffer, want))
+	}
 	lr := &io.LimitedReader{R: r, N: int64(limit) + 1}
 	for {
 		if len(buf) == cap(buf) {
-			buf = append(buf, 0)[:len(buf)]
+			n := 2 * cap(buf)
+			if cap(buf) < want && n > want {
+				n = want
+			}
+			buf = append(make([]byte, 0, min(n, limit+1)), buf...)
 		}
 		k, err := lr.Read(buf[len(buf):cap(buf)])
 		buf = buf[:len(buf)+k]
@@ -186,7 +198,16 @@ func (p *plugin) abortPreparations() {
 	p.prepMu.Lock()
 	defer p.prepMu.Unlock()
 	p.closed.Store(true)
+	unsupported := 0
 	for rc := range p.preparing {
-		_ = rc.SetReadDeadline(pastDeadline)
+		if rc.SetReadDeadline(pastDeadline) != nil {
+			unsupported++
+		}
+	}
+	if unsupported > 0 && p.log != nil {
+		// The read then ends only with its client or a server read_timeout;
+		// the request still fails as retired and never reaches a guest.
+		p.log.Warn("plugin retired while request bodies were arriving; read deadline unsupported by the response writer",
+			"plugin", p.name, "requests", unsupported)
 	}
 }

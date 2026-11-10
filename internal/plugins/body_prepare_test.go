@@ -753,6 +753,16 @@ func TestReadBoundedSizingAndPreparedBody(t *testing.T) {
 	if _, err = readBounded(strings.NewReader(big), -1, 2999); !errors.Is(err, errBodyTooLarge) {
 		t.Fatalf("limit+1: %v", err)
 	}
+	// A declared length is not trusted for allocation: before any byte
+	// arrives the buffer offered to the body is at most initialBodyBuffer.
+	probe := &firstReadCap{}
+	if _, err = readBounded(probe, 1<<20, 1<<20); err != nil || probe.n > initialBodyBuffer {
+		t.Fatalf("declared 1 MiB: first read offered %d bytes (err %v), want <= %d", probe.n, err, initialBodyBuffer)
+	}
+	known := strings.Repeat("k", 100<<10)
+	if b, err = readBounded(strings.NewReader(known), int64(len(known)), 1<<20); err != nil || string(b) != known || cap(b) != len(known)+1 {
+		t.Fatalf("known 100 KiB: len=%d cap=%d %v, want growth to stop at the declared length", len(b), cap(b), err)
+	}
 	orig := &countingBody{r: strings.NewReader("")}
 	pb := newPreparedBody([]byte("replay"), orig)
 	var out bytes.Buffer
@@ -762,6 +772,16 @@ func TestReadBoundedSizingAndPreparedBody(t *testing.T) {
 	if err := pb.Close(); err != nil || orig.closed.Load() != 1 {
 		t.Fatal("Close did not close the original body")
 	}
+}
+
+// firstReadCap records the buffer size of its first Read and then ends.
+type firstReadCap struct{ n int }
+
+func (f *firstReadCap) Read(p []byte) (int, error) {
+	if f.n == 0 {
+		f.n = len(p)
+	}
+	return 0, io.EOF
 }
 
 // netServer serves h over HTTP/1.1, or HTTP/2 over TLS, with a finite read
@@ -941,4 +961,50 @@ func TestPreparationPreservesTrailers(t *testing.T) {
 	if resp.StatusCode != 200 || string(b) != "with-trailer" || resp.Header.Get("X-Next-Trailer-X-Sum") != "abc" {
 		t.Fatalf("status=%d body=%q trailer=%q", resp.StatusCode, b, resp.Header.Get("X-Next-Trailer-X-Sum"))
 	}
+}
+
+// A response writer without read-deadline support cannot have its body read
+// ended by retirement: the warning is logged, and the request still fails as
+// retired, without a guest call, once its client finishes.
+func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
+	m, hooks := bodyManager(t)
+	s := buildSet(t, m, map[string]config.PluginConfig{"g": bodyGuestConfig(ABIJulV1, guestEcho)})
+	var logs lockedBuffer
+	s.plugins["g"].log = slog.New(slog.NewTextHandler(&logs, nil))
+	pr, pw := io.Pipe()
+	req := httptest.NewRequest(http.MethodPost, "/p", pr)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { s.Handler("g").ServeHTTP(rec, req); close(done) }()
+	_, _ = pw.Write([]byte("partial"))
+	waitFor(t, "upload preparing", func() bool { return preparing(s.plugins["g"]) == 1 })
+	_ = s.Close()
+	if !strings.Contains(logs.String(), "read deadline unsupported") {
+		t.Fatalf("missing warning; log: %s", logs.String())
+	}
+	_ = pw.Close()
+	<-done
+	if reason := hooks.awaitFail(t); reason != bodyFailRetired || rec.Code != 500 {
+		t.Fatalf("reason=%s status=%d", reason, rec.Code)
+	}
+	if n, _, _, panics, _ := hooks.snapshot(); n != 0 || panics != 0 {
+		t.Fatalf("invocations=%d panics=%d", n, panics)
+	}
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }

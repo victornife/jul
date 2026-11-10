@@ -416,7 +416,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   unchanged. Preparation failures answer `500 plugin error` without a guest
   call and are counted in the new
   `jul_plugin_request_body_failures_total{plugin,reason}`. Retiring a plugin
-  aborts body reads in progress per request or stream, and a request no longer
+  aborts body reads in progress per request or stream (the WAF response
+  interceptor now forwards read deadlines), and a request no longer
   acquires from a closed plugin (previously counted as a panic).
   **Behaviour change:** a module that reads the body only on some branch is
   prepared on every request. Its early rejections wait for the body, and a body

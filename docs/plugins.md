@@ -474,6 +474,8 @@ Preparation works as follows
 1. Jul reads the whole body, up to the plugin's `max_request_body`. A declared
    `Content-Length` above the limit is rejected without reading; otherwise at
    most `max_request_body + 1` bytes are read, whatever the declared length.
+   The buffer grows as bytes arrive (at most 32 KiB before the first byte), so
+   a declared length alone does not reserve memory.
 2. Only then is an instance acquired and `handle_request` called with its
    normal `timeout`. `read_request_body` returns the prepared bytes, as often
    as the guest calls it.
@@ -711,7 +713,7 @@ are addressed by design, configuration, or runtime containment:
 | ------ | ------ | ---------- | ------------- |
 | Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
-| Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699) | With `read_timeout = 0` (default) or on HTTP/3, a stalled upload holds its prepared buffer until the client gives up; no aggregate byte budget (#700) |
+| Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699) | With `read_timeout = 0` (default) or on HTTP/3, a stalled upload keeps the bytes it has sent (and its request) until the client gives up; no aggregate byte budget (#700) |
 | Memory or CPU exhaustion by concurrency | Many concurrent requests on a plugin route, each instantiating a module | `max_instances` (default 64) caps live instances per plugin; excess calls wait one `timeout`, then get `503` and are counted in `jul_plugin_instance_waits_total` (#506) | Operator sets `max_instances × memory_limit` above what the host can hold |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |
