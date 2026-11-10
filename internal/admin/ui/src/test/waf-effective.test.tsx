@@ -206,6 +206,29 @@ describe("WAFEffectiveCard (#440)", () => {
     expect(screen.queryByText("Request arguments")).not.toBeInTheDocument();
   });
 
+  it("does not claim detect-mode rejection or unreported content types", () => {
+    renderCard({
+      ...serving,
+      overrides: [],
+      global: {
+        ...crsGlobal,
+        mode: "detect",
+        response_body_inspection: true,
+        response_body_mime_types: undefined,
+      },
+    });
+    expect(
+      screen.getByText(
+        "up to 1000 per collection inspected · reaching the limit is recorded by guard rule 900001, not rejected (detect mode)",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "inspected for content types not reported by this server; limit set by the engine and rule directives, not reported",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("states when the build has no engine", () => {
     renderCard({
       ...serving,

@@ -23,6 +23,9 @@ function argumentLimitLabel(p: WAFPolicySummary): string {
   if (!p.crs_enabled) {
     return `${limit} · no argument-limit guard (CRS not loaded)`;
   }
+  if (p.argument_limit_guard && p.mode === "detect") {
+    return `${limit} · reaching the limit is recorded by guard rule 900001, not rejected (detect mode)`;
+  }
   return p.argument_limit_guard
     ? `${limit} · more rejected with 413 by guard rule 900001`
     : `${limit} · guard rule 900001 removed by operator directives — further arguments are not inspected`;
@@ -34,10 +37,13 @@ function responseBodyLabel(p: WAFPolicySummary): string {
       ? "not inspected (disabled by operator directives)"
       : "not inspected";
   }
+  const mimes = p.response_body_mime_types;
   const types =
-    p.response_body_mime_types && p.response_body_mime_types.length > 0
-      ? `only ${p.response_body_mime_types.join(", ")}`
-      : "no content types selected";
+    mimes === undefined
+      ? "content types not reported by this server"
+      : mimes.length > 0
+        ? `only ${mimes.join(", ")}`
+        : "no content types selected";
   return `inspected for ${types}${
     p.response_body_operator_override ? " (set by operator directives)" : ""
   }; limit set by the engine and rule directives, not reported`;
