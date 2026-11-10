@@ -2,6 +2,8 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-10
+- **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
+  maintainer's decisions are recorded in §Maintainer decisions.
 - **Deciders:** Jul.IA maintainer
 - **Applies to:**
   - the WAF (Coraza) request and response inspection;
@@ -215,6 +217,11 @@ unconditional bound on total process memory, and no verdict below claims one.
      | 1 MB wide JSON | 47 MiB | 39.3 MiB |
 
    - **Base charge.** 16 KiB per lease is **inferred**. It must be measured in slice 1.
+   - **Scope of the constants.** They cover only the measured shapes, so the WAF term is a
+     *calibrated estimate* of retained memory, not a proven bound. The 1 MB JSON row ran with CRS,
+     whose `@coraza.conf-recommended` sets a 128 KiB in-memory limit, so most of that body was
+     spilled to a temporary file. Its retention still scaled with the whole body. The per-byte term
+     therefore applies to all body bytes processed, not to the buffered bytes (Decision §4).
 6. **Verdict: ACCEPT WITH CHANGES.** The model is bytes, plus a calibrated WAF retained-state
    estimate, plus a base charge per lease, with evaluation slots as a co-equal limit rather than a
    secondary one. Input bytes alone are never treated as inspection memory.
@@ -265,17 +272,18 @@ unconditional bound on total process memory, and no verdict below claims one.
    | Step | Charge |
    | --- | --- |
    | Plugin layer is the first inspection layer | Lease: base charge (fail-fast) |
-   | Prepare body | `buffer` += B, grow-before-allocate |
+   | Prepare body | `buffer` += live capacity (both arrays during growth), charged before each allocation |
    | Guest call | Plugin instance (existing bounded wait; guest memory is a static baseline); host fetch, state and copies charged as `buffer` before allocation |
    | Instance released | Bytes stay charged |
    | WAF finds the lease | No new admission |
-   | Phase 1 | Slot (bounded wait here, because the plugin has already consumed the body; otherwise try-acquire), then reserve `waf_state` for the counted query pairs; release the slot and true down |
-   | Body read into Coraza | `buffer` += 2×B, grow-before-read |
-   | Phase 2 | Slot (bounded wait), then reserve worst-case `waf_state` (fail-fast); release the slot and true down to the held arguments |
+   | `ProcessURI` and phase 1 | Slot (bounded wait here, because the plugin has already consumed the body; otherwise try-acquire), then reserve R1 for the counted query pairs (Decision §4); release the slot and true down |
+   | Body written to Coraza | `buffer` += 2 × `B_buf`, before each write |
+   | Phase 2 | Slot (bounded wait), then reserve R2 in addition to R1 (fail-fast); release the slot and true down to the held `ARGS_POST` and `B_total` |
    | `next.ServeHTTP` | No new charge |
-   | Plugin response layer buffers | `buffer` += R, before append |
-   | WAF response buffer | `buffer` += R2, before write |
-   | Phases 3 and 4 | Slot; phase 4 reserves response state, then trues down |
+   | Plugin response layer buffers | `buffer` += response bytes, before append |
+   | WAF response buffer | `buffer` += 2 × `B_resp`, before each write |
+   | Phases 3 and 4 | Slot; reserve R3, then R4, then true down R4 |
+   | Phase 5 | Slot (bounded wait; if none, runs unslotted and is counted); no new reservation |
    | `tx.Close` | `waf_state` and the WAF buffer released |
    | Request completion | Lease closed; everything remaining released |
 
@@ -313,9 +321,11 @@ unconditional bound on total process memory, and no verdict below claims one.
      and its memory is already accounted for.
    - Therefore:
      - **initial admission** (base plus first byte reservation) is fail-fast;
-     - the only wait is a short, bounded, FIFO **evaluation-slot wait**, entered only when the
-       request has no unread body: either the body is complete and charged, or there is no body.
-       Phase 1 for a request whose body is still unread try-acquires its slot and fails fast
+     - the only wait is a short, bounded, FIFO **evaluation-slot wait**, entered only when no
+       unread request-body data remains on the network: there is no body, the body has reached
+       EOF, or Jul has closed it. Any evaluation while unread data remains try-acquires its slot
+       and fails fast, whatever its phase. That includes phase 1 before the body, phase 2 under
+       partial processing, and response phases for a response produced before the upload completed
        (Decision §3).
 4. **Counterexamples investigated.**
    - **Retry storms.** At 5,062 rejections per second, goodput did not fall (F3), because
@@ -334,7 +344,7 @@ unconditional bound on total process memory, and no verdict below claims one.
    is not the caller's fault.
 6. **Verdict: ACCEPT WITH CHANGES.**
    - Fail-fast at initial admission.
-   - A bounded wait only for evaluation slots, after the body is charged.
+   - A bounded wait only for evaluation slots, and only when no unread request-body data remains.
    - `503`, never `429`.
    - The s5 cause is established, and it is not retries.
 7. **Consequence.**
@@ -407,13 +417,26 @@ unconditional bound on total process memory, and no verdict below claims one.
 
    Uploads larger or slower than that on inspected routes need a raised `body_timeout`. Uninspected
    routes, meaning those with no WAF body access and no body-reading plugin, are never affected.
-5. **Restoring the deadline.** `ResponseController` can set a deadline but cannot read the current
-   one. The server entry point therefore stores the absolute read deadline it applied in the request
-   context (`internal/server`). The inspection layer sets `min(stored, now + body_timeout)` and
-   restores exactly the stored value afterwards. It never extends a stricter server deadline.
-   - If a writer returns `http.ErrNotSupported` while `body_timeout > 0`, the request fails closed
-     with `500` and the metric `jul_inspection_body_timeouts_total{protocol, result="unsupported"}`.
-   - Tests (A10) must show that no shipped protocol path reaches that branch.
+5. **Applying and restoring the deadline.** `ResponseController` can set a deadline but cannot read
+   the current one. Two owners can also set it concurrently: the inspection layer, and plugin
+   retirement, which aborts preparations by setting a past deadline (`body.go:197-206`).
+   - **One deadline owner per request.** The server entry point records the absolute read deadline
+     it applied in a per-request deadline owner in the request context (`internal/server`). Every
+     setter goes through that owner, including the retirement abort (I2). The deadline applied is
+     the earliest of the server deadline, the active `body_timeout` deadline and any abort.
+   - **An abort cannot be undone.** An abort is sticky. Restoring after the body phase, or setting
+     any later deadline, never replaces it. Restore re-applies exactly the recorded server deadline,
+     and only when no abort is recorded. A stricter server deadline is never extended.
+   - **Narrow forwarding only.** Every response-writer wrapper between the server and the
+     inspection layer forwards `SetReadDeadline` and nothing more, as the WAF interceptor already
+     does (`outcomes.go:676-683`). Wrappers do not gain `Unwrap` or any other general path to the
+     underlying writer, because that would let callers write or flush around response inspection.
+   - If a writer returns `http.ErrNotSupported` while `body_timeout > 0` in `enforce` mode, the
+     request fails closed with `500` and the metric
+     `jul_inspection_body_timeouts_total{protocol, result="unsupported"}`. Observe mode records the
+     metric and continues (Decision §7).
+   - Tests (A10) must show that no shipped protocol path reaches that branch. Proving every H1, H2
+     and H3 wrapper path remains implementation acceptance work.
 6. **Verdict: ACCEPT WITH CHANGES.**
    - An absolute **body-arrival** deadline, scoped to inspection, applied per stream on H1, H2 and
      H3.
@@ -426,8 +449,8 @@ unconditional bound on total process memory, and no verdict below claims one.
    - A new outcome, `body_timeout`, returning `408`. On H1 the response also carries
      `Connection: close`.
    - It is distinct from overload.
-   - Whether Jul's wrapper chain unwraps to the quic-go writer is **unverified**. It is acceptance
-     item A10.
+   - Whether every wrapper in Jul's chain forwards `SetReadDeadline` to the quic-go writer is
+     **unverified**. It is acceptance item A10.
 
 ### 7. H7 — re-run the complete affected matrix
 
@@ -481,11 +504,14 @@ unconditional bound on total process memory, and no verdict below claims one.
 - **Reuse.** Inner layers call `inspection.LeaseFrom(ctx)` and reuse the lease.
 - **Lifetime.** The creating layer closes the lease in a `defer` when the handler returns. By then
   every buffer and transaction it represents has been released or closed.
-- **Cost-free paths.** Requests that reach no inspection layer pay nothing:
-  - static files;
-  - cache hits served before the WAF in the route chain;
-  - routes without the WAF and without plugins.
-  The chain order is unchanged.
+- **Cost-free paths.** Only requests that reach no inspection layer pay nothing. Those are requests
+  on routes with neither the WAF nor a plugin, including static and cached routes.
+  - The WAF and plugins wrap the route handler, including the static handler and the response cache
+    (`factory.go` ~907–925). On an inspected route, static responses and cache hits therefore still
+    run the WAF and plugins, and are governed like any other inspected request (A5b).
+  - These paths were part of #695's exposure because upstream admission (ADR 0017) does not
+    protect them.
+  - The chain order is unchanged.
 
 ### 3. Counter classes and acquisition order
 
@@ -493,7 +519,7 @@ unconditional bound on total process memory, and no verdict below claims one.
 | --- | --- | --- | --- | --- |
 | 1 | `base` | bytes (16 KiB per lease, to be calibrated in slice 1) | conservative estimate | **none** — fail-fast |
 | 2 | `buffer` | bytes | exact capacity charged before allocation | **none** — fail-fast |
-| 3 | `slots` | count | exact | bounded FIFO wait (`evaluation_queue_timeout`) **only when the request has no unread body**; otherwise try-acquire, fail-fast |
+| 3 | `slots` | count | exact | bounded FIFO wait (`evaluation_queue_timeout`) **only when no unread request-body data remains on the network**; otherwise try-acquire, fail-fast. Phase 5 has its own rule (below) |
 | 4 | `waf_state` | bytes | worst-case **reservation** taken while holding the slot, trued down after the phase | **none** — fail-fast; on failure the slot is released |
 
 `base`, `buffer` and `waf_state` draw from the single ceiling `max_buffered_bytes`. `slots` have
@@ -506,58 +532,152 @@ their own ceiling, `max_concurrent_evaluations`.
 - **Why the slot is taken before the reservation.** Reserving worst-case state first and then
   waiting for a slot would let every waiter hold about 55 MiB. Taking the slot first means at most
   `slots` worst-case reservations exist at once.
-- **No queue before the body.** Phase 1 runs before the request body is read. A request that still
-  has an unread body therefore never queues for a phase-1 slot: it try-acquires and receives a fail-fast
-  503 when none is free. Queueing there would recreate the H2 flow-control starvation of F3. Requests
-  with no body, or whose body a plugin has already prepared and charged, may queue. Phases 2, 3 and 4
-  run after the request body is complete, so they may queue.
+- **Queue eligibility follows unread network data, not the phase number.** A request may wait for
+  a slot only when no unread request-body data remains on the network: there is no body, the body
+  has reached EOF, or Jul has closed it. Otherwise it try-acquires and receives a fail-fast 503 when
+  no slot is free. Waiting while a stream holds unread data would recreate the H2 flow-control
+  starvation of F3. Eligibility is evaluated at each acquisition. Later phases can still have unread
+  data:
+  - phase 2 under `SecRequestBodyLimitAction ProcessPartial`, where the body beyond the limit stays
+    on the network and is forwarded afterwards (`outcomes.go` forwards
+    `io.MultiReader(rbr, origBody)`);
+  - phases 3 and 4 for a response produced before the upload completed, such as an early error or
+    a handler that responds without reading the whole body;
+  - a request whose body a plugin replaced or rejected before EOF.
+
+**Every engine call that can evaluate rules is covered.** Slots placed only around Jul's explicit
+phase calls would leave implicit evaluations outside the limit. In Coraza v3.8.1 these entry points
+can evaluate rules. Jul's call sites are in `internal/waf/outcomes.go`.
+
+| Entry point (Jul call site) | Rules it can evaluate | Slot | `waf_state` reservation (§4) |
+| --- | --- | --- | --- |
+| `ProcessConnection`, `ProcessURI` (346–347) | None, but `ProcessURI` parses `ARGS_GET` | Acquired before `ProcessURI`; held through `ProcessRequestHeaders` | R1, before `ProcessURI` |
+| `ProcessRequestHeaders` (361) | Phase 1 | The same slot | R1 |
+| `ReadRequestBodyFrom` (373) | Phase 2, implicitly, under `SecRequestBodyLimitAction ProcessPartial` once the limit is reached, *after* reading the network inside the same call | Not used after I3 (see below) | — |
+| `ReadResponseBodyFrom` (not called by Jul) | Phase 4, implicitly, under response `ProcessPartial` | Any future call site is treated like `WriteResponseBody` | R4 |
+| `WriteRequestBody` | Phase 2, implicitly, under `ProcessPartial`, on the write that reaches the limit | Acquired for any write that can reach the request body limit | R2, for that write |
+| `ProcessRequestBody` (416) | Phase 2; returns early if phase 2 already ran implicitly | Acquired unless phase 2 already ran | R2, unless already held |
+| `ProcessResponseHeaders` (602) | Phase 3 | Acquired | R3 |
+| `WriteResponseBody` (635) | Phase 4, implicitly, under `SecResponseBodyLimitAction ProcessPartial` (the `@coraza.conf-recommended` default), on the write that reaches the response limit | Acquired for any write that can reach the response body limit | R4, for that write |
+| `ProcessResponseBody` (712) | Phase 4; returns early if phase 4 already ran implicitly | Acquired unless phase 4 already ran | R4, unless already held |
+| `ProcessLogging` (247, deferred) | Phase 5 | Phase-5 rule below | None beyond state already held |
+| `Close` (208, 335) | None; returns the transaction to the pool | — | Releases all `waf_state` |
+
+- **Rule.** Jul holds a slot and the phase's reservation around *every* call that may evaluate
+  rules, including body writes that can trigger implicit evaluation. A body write that cannot reach
+  the limit evaluates no rules: it takes no slot and is charged as `buffer` only.
+- **No network read inside a slotted call.** `ReadRequestBodyFrom` reads the network and may then
+  evaluate phase 2 within one call, so no slot boundary around it is correct. I3 replaces it with a
+  Jul loop that has the same semantics: read a chunk from the network without a slot, under
+  `body_timeout`, then pass it to `WriteRequestBody`, taking a slot only for a write that can reach
+  the limit. Response writes come from the handler, not the network, but follow the same
+  eligibility rule, because the request body may still be unread.
+- **Phase 5 runs rules and is slotted deliberately.** `ProcessLogging` evaluates phase-5 rules and
+  then writes the audit log in the same call (`transaction.go:1431-1480`). It acquires a slot under
+  the same eligibility rule as phases 1–4: a bounded FIFO wait, inside the waiter cap, only when no
+  unread request-body data remains, and otherwise a try-acquire. It differs in one respect: it is
+  never refused or skipped. The response is already committed, and logging rules must still run.
+  - **Overflow.** If no slot is obtained, phase 5 runs without one and is counted in
+    `jul_inspection_unslotted_logging_total`. Unslotted phase-5 evaluations are bounded by the number
+    of leases, and the counter makes them visible for sizing.
+  - **Audit output.** The slot also covers the audit-log write inside `ProcessLogging`. An audit
+    sink that blocks therefore holds slots. Phases 1–4 then try-acquire, or wait and time out, per the
+    rule above, ending in `evaluation` rejections, and phase 5 overflows. Nothing deadlocks, because no slot holder waits on the governor
+    (A18 includes a blocked audit writer).
+  - **No reservation.** Phase 5 parses no new collection and takes no new reservation. Its transient
+    working set is bounded through the slot, or by leases when it overflows.
 
 ### 4. Byte accounting rules
 
-- **Grow before allocate.**
-  - A buffer is charged for its *capacity* before `make` or `append` grows it.
-  - When `Content-Length` is known and within the layer limit, that length is pre-charged once, so
-    the buffer never needs to grow.
-  - Unknown lengths grow in doubling steps, each charged before growing.
-  - The transient peak during growth, when the old and new arrays coexist, is at most 2× the
-    capacity (F2 measured 1.92×). It is documented as overshoot.
-  - When capacity is reached, it is trimmed to the final length.
+- **Charge live capacity, including growth copies.** A buffer is charged for every backing array the
+  request can still reach, as in the archived prototype's `ReadBounded`:
+  - Before allocating a larger array, Jul charges its full capacity. While the copy runs, the old
+    and new arrays are both charged.
+  - The old array's capacity is refunded only after the copy, once no reference to it remains.
+  - Growth therefore stays inside the budget. There is no overshoot allowance, and concurrent growth
+    in many requests cannot exceed `max_buffered_bytes`. Only allocator size-class rounding falls
+    outside the charge (§10).
+  - #703's initial allocation is kept (`body.go:67-80`). It is `min(32 KiB, Content-Length + 1)`
+    when the declared length is within the layer limit, and `min(512 B, limit + 1)` otherwise. A
+    stalled upload therefore holds only a small charged buffer, and later doublings are charged one
+    step at a time.
+- **Capacity stays charged until the array is released.** Shortening a slice does not free its
+  backing array, so a body shorter than its capacity keeps the full capacity charged. A refund
+  happens only when the array becomes unreachable, or when a separately charged compact copy
+  replaces it: the copy is charged first, and the original is refunded after it is dropped.
 - **Dishonest or unknown lengths.**
-  - A `Content-Length` larger than the layer limit is rejected by the existing 413 path before any
-    charge.
-  - A body shorter than its declared length gets a refund of the unused capacity at end of body.
-  - A body longer than its declared length is rejected with `413`, which is existing behaviour.
-  - A chunked or unknown-length body starts with a 32 KiB pre-charge.
+  - A plugin body whose `Content-Length` exceeds the plugin's `max_request_body` is refused before
+    any charge. A body that grows beyond the limit is refused when it crosses it. Both keep #703's
+    existing plugin outcome: a `500` with preparation-failure reason `too_large`. This ADR does not
+    change that status.
+  - The WAF request body limit keeps its existing `413` (`OutcomeRejectedBodyLimit`).
+  - A body shorter than its declared length simply ends, and its capacity stays charged as above.
 - **Arithmetic.** It is saturating and overflow-checked in `int64`: a charge whose addition would
   overflow fails as over-budget. Refunds never take a class below zero, and an attempt to do so is
   a bug that panics in tests.
-- **Coraza request buffer.** Bytes passed to `ReadRequestBodyFrom` are charged as `buffer`, at 2×
-  per byte up to the in-memory limit. That allows for the buffer's own growth. Spill to a temporary
-  file beyond the in-memory limit is disk, not memory, and is excluded.
-- **WAF state.** The estimate is `64 KiB + 56 KiB × A + 48 × B_mem + 48 × H`, where:
-  - `A` is the number of arguments Coraza holds;
-  - `B_mem` is the in-memory body;
-  - `H` is the total request header and cookie bytes. Its factor of 48 is **inferred** and must
-    be calibrated in I3.
+- **Buffered bytes (`B_buf`).** Every byte Jul passes to `WriteRequestBody` is charged as `buffer`
+  at 2×, to allow for the buffer's own growth, up to the compiled in-memory limit. With CRS,
+  `@coraza.conf-recommended` sets that limit to 128 KiB. Without CRS, Coraza defaults it to the
+  request body limit, which Jul lowers only for limits below 128 KiB (`firewall.go:91-95`). If Jul
+  cannot read the compiled value, every written byte is charged as buffered. Bytes spilled to a
+  temporary file are disk and are not charged as `buffer`.
+- **Total processed bytes (`B_total`).** Spill does not remove parsing cost. `B_total` is every
+  request body byte written to Coraza, including spill, and is at most the request body limit.
+  - The urlencoded, JSON and raw body processors copy the *whole* body, spill included, into a
+    `strings.Builder` (`bodyprocessors/json.go:27-28`). Extracted values may reference that copy
+    until `tx.Close`.
+  - Multipart reads non-file parts fully and streams file parts to temporary files. XML is decoded
+    as a stream.
+  - F1b's 1 MB JSON row mostly spilled and still retained about 39× its whole size (H2).
 
-  Amplification happens *during* a phase, so a post-phase check would come too late. The rule is
-  therefore **reserve, then true down**:
-  - **Before each request phase**, while holding the slot, Jul reserves the worst case the phase
-    can reach:
-    - phase 1 uses `A = min(ArgumentLimit, query pairs counted from the URL)`;
-    - phase 2 uses `A = ArgumentLimit` (default 1000) and the actual `B_mem`.
-  - **After the phase returns**, the reservation is trued down to the estimate for the arguments
-    actually held. That count is `Variables().Args().FindAll()`, which covers `ARGS_GET`,
-    `ARGS_POST` and `ARGS_PATH`, through Coraza's experimental `plugintypes.TransactionState`. If
-    the type assertion fails, the reservation stays at the worst case.
-  - **Before phase 4**, when response body inspection is active, Jul reserves response state of
-    `48 × response limit + 56 KiB × ArgumentLimit` for `ResponseArgs` and `TX.json_response_body`.
-    It trues it down afterwards, counting `Variables().ResponseArgs().FindAll()` rather than
-    request `Args()`.
-  - **Before phase 3**, Jul reserves response-header state of `48 × response header bytes` for the
-    response header collections, then trues it down.
-  - The calibration test (I3) pins the API and every constant. It covers request query, form,
-    JSON, XML and multipart bodies, large headers and cookies, and JSON and XML responses.
+  Every per-byte WAF term therefore uses `B_total`, not `B_buf`.
+- **WAF state is a calibrated estimate, not a proven bound.** The estimate is fitted to the F1b
+  shapes and checked against them. It is a conservative engineering estimate of retained memory,
+  not a derived upper bound on what Coraza can retain. The I3 calibration test makes it a
+  maintained contract for the pinned Coraza and CRS. §10 states its guarantee for governed
+  (charged) bytes, with WAF state counted at the estimate.
+
+  The per-term estimate is `64 KiB + 56 KiB × A + 48 × B + 48 × H`, where `A` is the arguments
+  held, `B` the body bytes processed and `H` the request header and cookie bytes. The header factor
+  of 48 is **inferred** and must be calibrated in I3.
+- **Cumulative reservations.** Amplification happens *during* a phase, so a post-phase check would
+  come too late. Jul reserves the worst case before each rule-evaluating call (§3), while holding
+  the slot, and trues it down after the call. Coraza limits each argument collection separately
+  (`checkArgumentLimit`, `transaction.go:802-845`): `ARGS_GET`, `ARGS_POST` and `ARGS_PATH` can each
+  reach `ArgumentLimit`, and `ResponseArgs` has its own limit. Reservations therefore accumulate per
+  transaction. A later phase adds to what earlier phases hold, and nothing is released before
+  `tx.Close` except by the true-down of that phase's own reservation.
+
+  | Reservation | Taken before | Worst case reserved | Trued down to |
+  | --- | --- | --- | --- |
+  | R1 | `ProcessURI` (phase 1) | `64 KiB + 56 KiB × min(ArgumentLimit, URL query pairs) + 48 × H` | `64 KiB + 56 KiB × A_get + 48 × H` |
+  | R2 | The first call that can evaluate phase 2 | `56 KiB × ArgumentLimit` for `ARGS_POST`, plus `48 × B_total` | `56 KiB × A_post + 48 × B_total` |
+  | R3 | `ProcessResponseHeaders` (phase 3) | `48 × response header bytes` | Unchanged: the headers are known before the phase |
+  | R4 | The first call that can evaluate phase 4 | `56 KiB × ArgumentLimit` for `ResponseArgs`, plus `48 × B_resp`, where `B_resp` is the response bytes written to Coraza (at most the response body limit) | `56 KiB × A_resp + 48 × B_resp` |
+
+  - **`ARGS_PATH` is an asserted invariant.** Only `AddPathRequestArgument` populates `ARGS_PATH`,
+    and Jul never calls it, so R2 reserves no `ARGS_PATH` term. The calibration test asserts that
+    `ARGS_PATH` stays empty, so a change that populates it fails CI until R2 gains its own
+    `56 KiB × ArgumentLimit` term and the minimum-budget rule includes it.
+  - **Counts.** The held counts are `Variables().ArgsGet()`, `ArgsPost()` and `ResponseArgs()`
+    `.FindAll()`, read through Coraza's experimental `plugintypes.TransactionState`. If the type
+    assertion fails, every reservation stays at its worst case.
+  - **Size.** At the default `ArgumentLimit` of 1000, a transaction with both query and body
+    arguments can reserve about 112 MiB at phase 2 (R1 + R2), plus its body and header terms. The
+    minimum-budget rule (§7) uses this figure.
+  - **No later lowering.** F1b shows retention falls after response headers, because Coraza clears
+    its transformation cache at each phase. R2 is still not lowered after phase 3: the estimate is
+    calibrated at the phase-2 peak, and a lower post-phase-3 factor would need its own calibration
+    and review.
+- **Calibration (I3).** The test pins the API and every constant, and fails when measured
+  retention exceeds the estimate. It covers:
+  - query, urlencoded, JSON, XML, multipart and raw bodies;
+  - bodies below, at and above the in-memory limit, including spill;
+  - mixed query and body arguments, with `ARGS_GET` and `ARGS_POST` each at `ArgumentLimit`, and
+    `ARGS_PATH` asserted empty;
+  - partial processing on request and response;
+  - large headers and cookies;
+  - JSON and XML responses.
 - **Plugin host allocations.**
   - Fetch responses are charged before reading. When the length is unknown, the full
     `maxFetchResp` is pre-charged.
@@ -582,9 +702,9 @@ their own ceiling, `max_concurrent_evaluations`.
 | Admission (`base` or first `buffer` charge) fails | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (metric reason `bytes`) | Not read. H1: Go discards up to 256 KiB, then closes the connection. H2/H3: stream reset; siblings unaffected |
 | A growth charge fails mid-body | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`bytes`) | Partial body dropped; charge released |
 | Worst-case `waf_state` reservation fails before a phase | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`waf_state`) | Slot released first. The phase does not run, so its amplification never happens. The transaction is closed on its owning goroutine. The request is not forwarded, so no verdict is skipped |
-| Slot wait times out, the queue is full, or phase 1 finds no free slot while the body is still unread | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`evaluation`) | Any charged body is released. An unread body is handled as for admission failure |
+| Slot wait times out, the queue is full, or no slot is free while unread request-body data remains (phases 1–4) | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`evaluation`) | Any charged body is released. An unread body is handled as for admission failure |
 | Plugin response buffer charge fails | Existing subscription policy for `bodyTooLarge` (ADR 0020) | — | `jul_plugin_response_body_unavailable_total{reason="budget"}` | Passthrough or fail-closed per subscription |
-| WAF response buffer or slot unavailable | `503` (headers not yet sent while buffering) | `UNAVAILABLE` | `inspection_overloaded` | Fails closed: overload never skips response inspection |
+| WAF response buffer or slot unavailable (phases 3–4) | `503` (headers not yet sent while buffering) | `UNAVAILABLE` | `inspection_overloaded` | Fails closed: overload never skips response inspection. Phase 5 is never refused (§3) |
 | Body-arrival deadline | `408` (H1 adds `Connection: close`) | `DEADLINE_EXCEEDED` | `body_timeout` | Read stopped per stream |
 
 **Kept distinct from these events:**
@@ -625,7 +745,7 @@ Overload never weakens a security decision.
   Operators see it as `waf_state` in status.
   - F1b shows retained state falls after response headers (wide JSON drops from 39× to 22×), because
     Coraza clears its transformation cache at the start of the next phase.
-  - The phase-3 true-down (Decision §4) lets the charge follow that reduction.
+  - The charge does not follow that reduction: R2 is not lowered after phase 3 (§4).
 - **A prepared plugin body** stays charged until the lease closes. The request may still replay it,
   so an early refund would be unsafe.
 
@@ -634,7 +754,7 @@ Overload never weakens a security decision.
 ```toml
 [global.inspection]
 mode = "enforce"                 # "enforce" (default) | "observe"
-max_buffered_bytes = "256MiB"    # Size, > 0; default 256 MiB
+max_buffered_bytes = "256m"      # Size, > 0; default 256 MiB (suffixes b, k, m, g)
 max_concurrent_evaluations = 0   # int, 0 = auto (GOMAXPROCS); 1..1024 otherwise
 evaluation_queue_timeout = "1s"  # Duration, 0s..10s; 0s = no wait (pure fail-fast)
 body_timeout = "60s"             # Duration; omitted = 60s; explicit "0s" disables
@@ -644,7 +764,7 @@ Example for the 2 vCPU / 768 MiB envelope (inferred sizing; it must be validated
 
 ```toml
 [global.inspection]
-max_buffered_bytes = "192MiB"
+max_buffered_bytes = "192m"
 max_concurrent_evaluations = 2
 ```
 
@@ -652,27 +772,47 @@ max_concurrent_evaluations = 2
 
 | Field | Semantics |
 | --- | --- |
-| `mode` | `observe` charges and reports exactly as `enforce` does but never rejects, so operators can size before enforcing. There is no `off`: accounting is cheap, and an unmeasured process cannot be sized. |
-| `max_buffered_bytes` | Required to be at least the largest single-request worst-case charge. Validation computes it from the effective configuration, for the worst route chain, as the sum of: `base`; the largest plugin `max_request_body`; 2 × the WAF in-memory body limit; the worst-case request `waf_state`; the request-phase fetch and state allocations of every plugin on the chain; and the response-phase allocations that can coexist — every subscribed plugin's `max_response_body`, its replacements, 2 × the WAF response limit and the worst-case response state. If the budget is smaller, validation fails with an error naming both fields, because some requests could never be admitted. |
+| `mode` | `enforce` (default) or `observe`. Observe charges and reports so that operators can size before enforcing; its behaviour for each control is defined below. There is no `off`: accounting is cheap, and an unmeasured process cannot be sized. |
+| `max_buffered_bytes` | Required to be at least the largest single-request worst-case charge. Validation computes it from the effective configuration, for the worst route chain, as the sum of: `base`; 2 × the largest plugin `max_request_body`, because old and new arrays are both charged during growth; 2 × the WAF in-memory body limit; the worst-case request `waf_state`; the request-phase fetch and state allocations of every plugin on the chain; and the response-phase allocations that can coexist — 2 × every subscribed plugin's `max_response_body` (growth copies), its replacements, 2 × the WAF response limit and the worst-case response state. The WAF terms are R1 + R2 + R3 + R4 at their worst case (§4). If the budget is smaller, validation fails in `enforce` mode with an error naming both fields, because some requests could never be admitted. In `observe` mode it is a warning. |
 | `max_concurrent_evaluations` | `0` resolves to `GOMAXPROCS` at Prepare. The effective value is reported. |
 | `evaluation_queue_timeout` | Waiters are also capped internally at `16 × slots`. That count is a constant, not a field. |
 | `body_timeout` | Applies only while an inspection layer reads a request body. Downloads, streaming responses and post-inspection reads are never affected. |
 | All | Process-wide. Not overridable per listener or route. |
 
-**Defaults are default-on.** Without them, #700's protection is opt-in and the shipped default stays
-exposed.
+**`mode = "observe"` for each control.** Observe introduces no governor-driven `503`, `408` or
+`500`. It preserves every existing security decision, WAF and plugin limit, and server timeout.
+
+| Control | `enforce` | `observe` |
+| --- | --- | --- |
+| Byte admission and growth (`base`, `buffer`) | Fail-fast `503` | Always charged, never refused. A charge that would exceed the limit counts `jul_inspection_rejections_total{reason="bytes", mode="observe"}` |
+| `waf_state` reservation | Fail-fast `503` before the phase | Always charged, never refused; counted with `reason="waf_state"` |
+| Evaluation slots, phases 1–4 | Bounded wait or try-acquire, then `503` | Not enforced: no wait and no limit. Active evaluations are still counted. An acquisition that enforce would have refused, or made wait, counts `reason="evaluation"` |
+| Phase-5 slot | Bounded wait or try-acquire; on failure runs unslotted and is counted, never refused | Not enforced: no wait and no limit |
+| `body_timeout` | Deadline applied; `408` on expiry | Not applied. A body read that outlasts `body_timeout` counts `jul_inspection_body_timeouts_total{result="would_timeout"}` once per request |
+| Unsupported read deadline | Fails closed with `500` | Counted as `result="unsupported"`; the request continues |
+| Minimum-budget validation | Configuration error | Warning |
+| Existing outcomes: WAF interruptions, WAF `413`, plugin `500`s, `read_timeout`, ADR 0017 admission | Unchanged | Unchanged |
+
+**Enforcement is the default.** Without it, #700's protection is opt-in and the shipped default stays
+exposed. The default applies once implementation acceptance (A1–A18) passes, and the 256 MiB value
+itself must be validated by A1–A4.
 
 **Compatibility:**
 
 - **New 503s.** Upgrading can add overload 503s on saturation that previously risked out-of-memory
   kills.
 - **New 408s.** Upgrading can add 408s for inspected uploads slower than 60 s.
+- **New configuration validation failures.** In `enforce` mode, the minimum-budget rule can reject
+  an existing configuration on upgrade, for example when a large plugin `max_request_body` or WAF
+  limit makes the worst-case chain exceed the 256 MiB default. The error names both fields.
+  Operators raise `max_buffered_bytes`, lower the per-route limits, or select `observe` while
+  sizing.
 - **Migration path.** Run `mode = "observe"` and watch peak usage and the would-reject counters, then
   enforce.
-- **Release notes** must say all three.
+- **Release notes** must say all four.
 
-Defaults, field placement and names, `mode` values and `body_timeout` semantics are public-contract
-decisions (§Maintainer decisions).
+The maintainer recorded the default, `body_timeout` and placement decisions on 2026-11-10
+(§Maintainer decisions).
 
 ### 8. Lifecycle under reload (ADR 0011)
 
@@ -681,8 +821,10 @@ decisions (§Maintainer decisions).
 - **Publish.** Atomically swap the `Limits` pointer.
   - Existing leases, charges and slot holders are untouched.
   - **Increase:** new admissions see more capacity immediately, and waiters are woken.
-  - **Decrease below current usage:** existing work is never revoked. New admissions fail (bytes) or
-    wait (slots) until usage drains below the new limit. Status reports `draining = true`.
+  - **Decrease below current usage:** existing work is never revoked. Charges and slots already
+    held may drain above the new limit. No acquisition that would exceed the new limit succeeds:
+    byte charges, including growth of an in-flight buffer, fail fast, and slot acquisitions wait or
+    fail per §3. Status reports `draining = true`.
   - **Changing `mode`:** takes effect for new decisions only.
 - **Abort.** No effect, because Prepare constructed no state.
 - **Rollback.** An ordinary Publish of the previous limits.
@@ -710,8 +852,9 @@ decisions (§Maintainer decisions).
 | `jul_inspection_leases` | gauge | — |
 | `jul_inspection_evaluations` | gauge | `state` = `active`, `waiting` |
 | `jul_inspection_evaluations_limit` | gauge | — |
-| `jul_inspection_rejections_total` | counter | `reason` = `bytes`, `waf_state`, `evaluation`; `mode` = `enforce`, `observe` |
-| `jul_inspection_body_timeouts_total` | counter | `protocol` = `h1`, `h2`, `h3`; `result` = `timeout`, `unsupported` |
+| `jul_inspection_rejections_total` | counter | `reason` = `bytes`, `waf_state`, `evaluation`; `mode` = `enforce` (rejected), `observe` (would reject) |
+| `jul_inspection_body_timeouts_total` | counter | `protocol` = `h1`, `h2`, `h3`; `result` = `timeout`, `would_timeout`, `unsupported` |
+| `jul_inspection_unslotted_logging_total` | counter | — (phase-5 evaluations that ran without a slot, §3) |
 | `jul_inspection_abandoned_evaluations` | gauge | — (counts evaluations still running whose request context is done) |
 
 Existing metrics gain at most new closed values:
@@ -745,22 +888,28 @@ never contains paths, hosts or bodies.
 
 ### 10. Guarantee and exclusions
 
-**Guaranteed in `mode = "enforce"`**, once implemented and verified by A1–A17:
+**Guaranteed in `mode = "enforce"`**, once implemented and verified by A1–A18:
 
-1. Governed (logical) bytes stay at or below `max_buffered_bytes`, plus a transient growth
-   overshoot of at most 2× the single largest growing buffer. Governed bytes are:
-   - every prepared plugin body;
-   - every Coraza in-memory request body, charged at 2×;
+1. Governed (logical) bytes stay at or below `max_buffered_bytes`. The only exception is work
+   already charged when the limit is lowered, which may drain above the new limit (§8). Growth
+   copies are charged, so there is no growth overshoot. Only allocator size-class rounding is
+   outside the charge. Governed bytes are:
+   - every prepared plugin body, at its live capacity;
+   - every Coraza in-memory request body (`B_buf`), charged at 2×;
    - every plugin and WAF response buffer;
    - guest replacement bytes;
    - per-lease base charges;
    - plugin fetch responses, request state, generated bodies and temporary host copies;
-   - worst-case WAF transaction state reserved for each phase, trued down after it.
-2. Concurrent synchronous Coraza evaluations of phases 1–4 stay at or below
-   `max_concurrent_evaluations`. Phase 5 (logging, which runs inside `tx.Close`) is not slotted; the
-   number of leases bounds it.
-3. Evaluation waiters stay at or below `16 × slots`, each waiting at most `evaluation_queue_timeout`.
-   Plugin-instance waiters are bounded by leases and each waits at most one call timeout.
+   - the WAF transaction-state estimate, reserved cumulatively before each rule-evaluating call and
+     trued down after it (§4). It is counted at its calibrated estimate; actual retained memory can
+     differ (see below).
+2. Concurrent synchronous Coraza evaluations of phases 1–4, and slotted phase-5 evaluations, stay at
+   or below `max_concurrent_evaluations`. This includes implicit evaluations inside body writes (§3).
+   Phase-5 evaluations that find no slot run unslotted; they are bounded by leases and counted in
+   `jul_inspection_unslotted_logging_total`.
+3. Evaluation waiters stay at or below `16 × slots`, each waiting at most
+   `evaluation_queue_timeout`. Plugin-instance waiters are bounded by leases and each waits at most
+   one call timeout.
 4. With `body_timeout > 0`, every inspection body-arrival phase ends within `body_timeout`, per
    stream, on H1, H2 and H3.
 5. A charge is released only when the request can no longer reach the represented memory and
@@ -777,10 +926,10 @@ never contains paths, hosts or bodies.
   - net/http and quic-go connection and stream buffers (bounded by protocol settings and
     connection limits);
   - reload preparation, which briefly holds a second compiled generation;
-  - Coraza temporary-file spill, which is disk;
+  - Coraza temporary-file spill, which is disk (its parsing cost is charged through `B_total`);
   - transient evaluation working set beyond retained state, which is bounded only through slots.
-- **WAF state is an estimate.** It is calibrated per pinned Coraza and CRS. A future engine or rule
-  set can exceed it until recalibrated.
+- **WAF state is an estimate.** It is calibrated per pinned Coraza and CRS. A future engine, a rule
+  set or a request shape outside the calibration set can exceed it until recalibrated.
 - **Holding time is unbounded with `body_timeout = 0s`.** Held bytes remain bounded.
 - **Uninterruptible evaluation** continues after cancellation, bounded by slot count × the
   per-evaluation duration.
@@ -792,13 +941,13 @@ never contains paths, hosts or bodies.
 |---|---|---|---|---|---|
 | Governor | Process; lifecycle registry | — (holds limits and counters) | Process start | Process exit | Survives every reload; limits swapped at Publish |
 | Lease base | Request; first inspection layer | `base`, 16 KiB (to be calibrated) | Before any plugin invocation (`p.prepare` or `p.call`), or before `newTransaction` | `defer` in the creating layer after the inner handler returns | Released only on handler return; cancellation does not shorten it |
-| Plugin prepared body | Request; plugin layer | `buffer`: exact capacity | Before each growth in `readBounded` | Lease close: request completion, since the body survives instance release | Read aborted by deadline, reset or retirement; charge released when the read returns |
+| Plugin prepared body | Request; plugin layer | `buffer`: live capacity, with old and new arrays both charged during growth | Before each growth in `readBounded` | Lease close: request completion, since the body survives instance release | Read aborted by deadline, reset or retirement; charge released when the read returns |
 | Plugin instance wait | Plugin, per generation | Nothing new (holds lease and bytes) | `acquire` | Instance obtained or call timeout | Context done ends the wait; bytes stay with the lease |
 | Guest call and linear memory | Plugin pool, per generation | Static baseline (reported) | — | Pool retirement | Interruptible; instance discarded |
 | Guest replacement bytes, fetch responses, request state, temporary copies | Request; invocation | `buffer` | Host function, before allocation or copy | Temporary copies when they are dropped; the rest at lease close | Released with the lease |
-| WAF transaction state | Request; WAF layer | `waf_state`: worst-case reservation per phase, trued down to the held-argument estimate | Before each phase, while holding the slot | `tx.Close` | `tx.Close` only on the owning goroutine after the synchronous call returns |
-| WAF request buffer | Request; WAF layer | `buffer`: 2× bytes up to the in-memory limit | Before each chunk read by `ReadRequestBodyFrom` | `tx.Close` | Read stopped by deadline; charge held until `tx.Close` |
-| WAF evaluation (phases 1–4) | Process; slots | `slots` plus a worst-case `waf_state` reservation | Phase 1 with an unread body: try-acquire, fail-fast. Otherwise a bounded FIFO wait | The synchronous call returns; the reservation is then trued down | Not interruptible; stays charged until return |
+| WAF transaction state | Request; WAF layer | `waf_state`: cumulative R1–R4 reservations, each trued down to the held-argument estimate (§4) | Before each rule-evaluating call, while holding the slot | `tx.Close` | `tx.Close` only on the owning goroutine after the synchronous call returns |
+| WAF request buffer | Request; WAF layer | `buffer`: 2× `B_buf`, up to the in-memory limit | Before each `WriteRequestBody` chunk in Jul's read loop | `tx.Close` | Read stopped by deadline; charge held until `tx.Close` |
+| WAF evaluation (phases 1–5) | Process; slots | `slots` plus the phase's `waf_state` reservation | Every rule-evaluating call (§3). Try-acquire while unread request-body data remains; otherwise a bounded FIFO wait. Phase 5 is never refused: without a slot it runs unslotted and is counted | The synchronous call returns; the reservation is then trued down | Not interruptible; stays charged until return |
 | Plugin response buffer | Request; response layer | `buffer` | Before `make` or `append` | Decision made and buffer dropped, or lease close | Released at lease close |
 | WAF response buffer | Request; WAF interceptor | `buffer` | Before `WriteResponseBody` | `tx.Close` | Held until `tx.Close` |
 | Long-lived exchange after inspection | Request | Retained `waf_state` and prepared body | — | `tx.Close` and lease close | Charged for the exchange lifetime |
@@ -822,7 +971,8 @@ never contains paths, hosts or bodies.
    - Bodiless and uninspected requests are unaffected.
 3. **Operator lowers `max_buffered_bytes` from 256 to 96 MiB while 200 MiB is in use.**
    - Status shows `draining = true`.
-   - New admissions receive 503 until usage falls below 96 MiB. No in-flight request is cut.
+   - New admissions receive 503 until usage falls below 96 MiB. In-flight requests keep what they
+     hold, but a growth charge that would exceed 96 MiB fails like any new acquisition.
    - Rolling back restores 256 MiB at once.
 4. **Client cancels during a 6 s phase-2 evaluation of 1 MB JSON** (raised limit).
    - The slot stays held for the remaining evaluation.
@@ -839,6 +989,7 @@ never contains paths, hosts or bodies.
   mutex operations per charge. Uninspected paths pay nothing.
 - Overload becomes fast 503s instead of out-of-memory kills.
 - Throughput on unsaturated traffic must stay within 10% of `858590dc` (A13).
+- Every inspected request also acquires a phase-5 slot, and a blocking audit sink now holds slots.
 - A new maintenance obligation: recalibrate the WAF state constants on every Coraza or CRS bump. The
   CI calibration test enforces it.
 - The ADR 0017 guide gains the `max_pending_requests` H2 body caution.
@@ -874,13 +1025,15 @@ never contains paths, hosts or bodies.
   amd64, other rule sets and `SecArgumentsLimit` above 1000 need recalibration.
 - **Experimental Coraza API.** The argument count depends on the experimental
   `plugintypes.TransactionState`. The fallback is the worst case.
-- **H3 deadline reach.** Whether Jul's writer chain unwraps to quic-go's `SetReadDeadline` is
-  unverified (A10). If it does not, the wrappers must implement `SetReadDeadline` and `Unwrap`.
+- **H3 deadline reach.** Whether every wrapper in Jul's writer chain forwards `SetReadDeadline` to
+  quic-go's writer is unverified (A10). A wrapper that does not must gain narrow `SetReadDeadline`
+  forwarding, never `Unwrap` (H6 item 5).
 - **H3 sibling isolation after a rejection without reading the body** is inferred.
 - **Base charge.** 16 KiB per lease is inferred.
 - **Header factor.** The header and cookie factor (48 × H) is inferred.
 - **Cost of the reservation.** At the default `ArgumentLimit` of 1000, one phase-2 reservation costs
-  about 56 MiB, so `slots` × 56 MiB of the budget can be transiently reserved. Validated sizing for
+  about 56 MiB, and a transaction holding both query and body arguments about 112 MiB. Up to
+  `slots` such reservations can be transiently held. Validated sizing for
   small budgets (A1–A4) may require a larger budget or a lower `SecArgumentsLimit`.
 - **Phase-1 fail-fast** for requests with unread bodies may reduce goodput under saturation compared
   with queueing (A17). The deferred alternative is to receive the body into the charged buffer
@@ -889,6 +1042,10 @@ never contains paths, hosts or bodies.
   arguments) is bounded only through slots. Its live peak per slot in the envelope is unmeasured
   (A1).
 - **Combined plugin and WAF behaviour in the envelope** is unmeasured (A4).
+- **Uncalibrated shapes.** Spill, mixed query and body arguments, and partial processing are not
+  yet calibrated (I3).
+- **Phase-5 slotting cost.** Its contention under unsaturated load, and how often phase 5 overflows
+  under saturation, are unmeasured (A13, A18).
 - **Feasibility measurements** are single or double repetitions, with c1 noise of 2.3–4.6/s.
 
 ## Implementation slices
@@ -896,11 +1053,11 @@ never contains paths, hosts or bodies.
 | Slice | Content | Depends on |
 | --- | --- | --- |
 | I1 | `internal/inspection` governor, which supersedes the prototype: counters, lease, slots, FIFO waits, overflow-safe arithmetic, `SetLimits`. Config schema, defaults and validation (including the minimum-budget rule). Lifecycle registry ownership and Publish wiring. Metrics and the status object (observe-capable, with no enforcement points yet). Measure the base charge. | ADR accepted |
-| I2 | Plugin request path: lease creation before `p.prepare`, grow-before-allocate in `readBounded`, fail-fast 503, `body_timeout` through `ResponseController` with restore, the H3 unwrap fix if needed, and guest replacement charging. | I1 |
-| I3 | WAF request path: lease reuse or creation, slots around phases 1 and 2 (phase 1 try-acquire while the body is unread), Coraza body charging, worst-case `waf_state` reservation and true-down, the server-stored read deadline, the calibration test (`-tags waf`) covering query, form, JSON, XML, multipart, headers and cookies, and outcome taxonomy additions. | I1 |
-| I4 | Response paths: nested plugin subscription buffers (`reason="budget"`), WAF response buffer (2×), phase-3 and phase-4 slots, response-state reservation (fail-closed), and the JSON/XML response calibration. | I2, I3 |
+| I2 | Plugin request path: lease creation before `p.prepare`, grow-before-allocate in `readBounded`, fail-fast 503, `body_timeout` through the per-request deadline owner (sticky retirement abort), narrow `SetReadDeadline` forwarding where a wrapper lacks it, and guest replacement charging. | I1 |
+| I3 | WAF request path: lease reuse or creation; a Jul read loop that replaces `ReadRequestBodyFrom`; slots and reservations around every rule-evaluating request call, including implicit phase 2 and phase 5 (§3); queue eligibility by unread data; `B_buf` and `B_total` charging; cumulative R1 and R2 with true-down; the deadline owner; the calibration test (`-tags waf`) covering the §4 list; and outcome taxonomy additions. | I1 |
+| I4 | Response paths: nested plugin subscription buffers (`reason="budget"`), WAF response buffer (2×), phase-3 and phase-4 slots including implicit phase 4 in `WriteResponseBody`, R3 and R4 (fail-closed), and the JSON/XML response calibration. | I2, I3 |
 | I5 | Maintained measurement tooling: promote the #695 harness, the #699 patch and the F2/F3/F4 clients into `scripts/inspection-assessment/` with unit tests for scenario definitions, summarisation and manifest checksums. | none (parallel) |
-| I6 | Acceptance: run A1–A17 and publish a dated review with raw evidence and checksums. Docs: operator guide and sizing, the ADR 0017 caution, release notes and a `feature-status.yaml` entry (Beta/unreleased). | I4, I5 |
+| I6 | Acceptance: run A1–A18 and publish a dated review with raw evidence and checksums. Docs: operator guide and sizing, the ADR 0017 caution, release notes and a `feature-status.yaml` entry (Beta/unreleased). | I4, I5 |
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.
@@ -913,9 +1070,13 @@ Console gates that apply to its diff.
   "peak below 576 MiB and no OOM".
 - **Comparison baseline.** The **corrected** runtime `858590dc`, running the same mode and the same
   intended security behaviour. Workloads whose security outcome differs are never compared.
-- **Repetitions.** At least 3 per cell; report the median and the spread. A throughput cell fails
-  only when the median regresses by more than 10% *and* the ranges do not overlap. Failing runs are
-  preserved, not re-rolled.
+- **Repetitions.** At least 3 per cell; report the median and the spread.
+  - A throughput cell passes only when its median regression is at most 10%.
+  - A median regression above 10% fails, whether or not the ranges overlap.
+  - A cell whose spread is too wide to decide, such as a baseline spread above 10%, is
+    **inconclusive**. It is investigated and given more repetitions, and never counts as a pass.
+  - Failing and inconclusive runs are preserved. Added repetitions supplement them and never
+    replace them.
 - **Identities.** Every run records source, binary, configuration, module and harness hashes.
 - **Evidence.** Raw JSONL, manifests and `SHA256SUMS` are committed under `docs/reviews/evidence/`.
 - **Reporting.** Legitimate goodput is reported separately from rejection throughput.
@@ -926,24 +1087,30 @@ Console gates that apply to its diff.
 | A2 | s3, s4 (`none`, `both`) | No OOM, peak below 576 MiB, goodput within 10% of `858590dc` wherever it was not OOM |
 | A3 | s5 (`none`, `both`) with `max_pending_requests` at 0 and at 16 | No OOM; goodput at least 90% of the theoretical maximum with pending 0; the pending-16 result documented under the caution |
 | A4 | Combined WAF + body plugin + s11 bodies | No OOM, peak below 576 MiB, per-class usage at or below the limit |
-| A5 | s6 static, s7 cache hit, r2 no-body | No lease created (`jul_inspection_leases` = 0); throughput within 10% |
+| A5a | s6 static, s7 cache hit and r2 no-body on routes with neither the WAF nor a plugin | No lease created (`jul_inspection_leases` = 0); throughput within 10% |
+| A5b | The same s6, s7 and r2 shapes on inspected routes (WAF and a plugin) | A lease per request; WAF evaluations and plugin invocations are slotted and charged; under saturation they are rejected or queued per §3; no OOM, peak below 576 MiB |
 | A6 | s8 and r1 slow and cancelling uploads, H1/H2/H3 | Stalls end at `body_timeout`; probes p99 below 50 ms; charges return to 0 after drain |
 | A7 | A legitimate slow upload under `body_timeout` | Succeeds |
 | A8 | Two listeners saturated together | Combined usage at or below one ceiling |
-| A9 | Reload churn (s9) with overlap, limit decrease, rollback, mode toggle and listener removal | Usage never exceeds the published limit; no counter reset; drain to 0 |
+| A9 | Reload churn (s9) with overlap, limit decrease, rollback, mode toggle and listener removal | No acquisition succeeds that takes usage above the limit in force when it is made; usage already held may drain above a lowered limit; no counter reset; drain to 0 |
 | A10 | Real H3: stalled stream plus sibling on one connection; H3 rejection | Deadline fires per stream; sibling unaffected |
 | A11 | Cancellation during evaluation | Slot held until return; abandoned gauge rises and returns to 0; no early release (unit and race tests) |
 | A12 | Response retention: plugin 8 MiB subscription and WAF response inspection | Charged and released at `tx.Close` or lease close; fail-closed on WAF budget |
 | A13 | s1, s2, r3 (normal) and s10 (H3) | Throughput within 10% of `858590dc`, enforce mode, unsaturated |
-| A14 | `mode = "observe"` | No rejections; would-reject counters match the enforce run |
+| A14 | `mode = "observe"`, deterministic inputs: a fixed budget, fixed body sizes and requests held at known points by a gated backend | For each control in the §7 table, observe records exactly the would-reject decision that enforce returns for the same governor state. No governor-driven `503`, `408` or `500`. Existing WAF, plugin and timeout outcomes unchanged. Not compared with a separate enforce load run, because rejections change later load |
 | A15 | Post-burst retention: A1 and A4 bursts, then idle | Governed usage returns to 0; live heap after two GCs returns within the static baseline plus documented pool retention |
 | A16 | Non-body plugins: fetch at `maxFetchResp`, request state, generated body, and several nested response subscriptions | Each is charged before allocation; the minimum-budget validation rejects a budget below the chain's worst case |
 | A17 | H2 body requests while every slot is busy | Phase 1 is rejected fail-fast without queueing; admitted streams on the same connection keep making progress (no F3 starvation) |
+| A18 | Implicit evaluation while every slot is busy: request `ProcessPartial` with a body above the limit, the default response `ProcessPartial` with a response above the limit, and an early response before upload completion | Each implicit phase-2 or phase-4 evaluation holds a slot and its reservation; calls with unread request data try-acquire and fail fast; phase 5 runs for every inspected request and never returns `503`, running unslotted and counted when no slot is free; with a blocked audit writer, phases 1–4 are rejected per §3 (try-acquire, or a bounded wait and timeout) and nothing deadlocks |
 
 Unit and race tests cover:
 
 - overflow and refund arithmetic;
-- grow-before-allocate;
+- growth charging of old and new arrays, and no refund on slice shortening;
+- cumulative R1–R4 reservations with `ARGS_GET`, `ARGS_POST` and `ResponseArgs` each at
+  `ArgumentLimit`;
+- the deadline owner, where a retirement abort wins over a concurrent restore (race test);
+- observe decisions for each control;
 - nested leases;
 - FIFO waits with abandonment;
 - limit decrease and rollback;
@@ -975,13 +1142,31 @@ suppressed.
 
 ## Maintainer decisions
 
-These are public-contract choices that remain open after the design work:
+Recorded 2026-11-10 from the maintainer's review of #704. They form part of the proposed contract.
+The ADR stays **Proposed** until the maintainer accepts this revision.
 
-1. **Default-on enforcement.** Proposed: `mode = "enforce"` by default with 256 MiB and auto slots.
-   The alternative is an `observe` default for one release.
-2. **`body_timeout`.** Proposed: absolute, 60 s default, explicit `0s` disables it.
-3. **Placement and names.** Proposed: `[global.inspection]` with the five fields above. The
-   alternative is a top-level `[inspection]`.
+1. **Default mode: `enforce`**, once implementation acceptance (A1–A18) passes. `observe` is an
+   explicit migration option, not a default for a release. The architecture is accepted; the exact
+   256 MiB default still needs validation (A1–A4).
+2. **`body_timeout`: absolute, 60 s default, explicit `0s` disables it.** It is an initial safety
+   policy for receiving inspected bodies, not an experimentally proven optimum. Stricter existing
+   deadlines and later response streaming are preserved.
+3. **Placement: `[global.inspection]`.** The authority belongs to the process and survives
+   generations, which matches the existing `GlobalConfig` scope.
+
+The review also required these contracts to be settled in the ADR. This revision settles them:
+
+4. **Reservation semantics.** Buffered bytes are distinct from total processed bytes. Reservations
+   R1–R4 are cumulative across per-collection limits, and WAF state is a calibrated estimate (§4).
+5. **Acquisition coverage.** Every rule-evaluating entry point is covered, including implicit
+   evaluation inside body writes. Phase 5 is slotted but never refused, overflowing visibly. Queue
+   eligibility follows unread network data (§3).
+6. **Buffer capacity.** Live capacity is charged, including both arrays during growth. Shortening a
+   slice earns no refund, and #703's initial allocation is kept (§4).
+7. **Observe behaviour** is defined for each control, with no governor-driven `503`, `408` or `500`
+   (§7).
+8. **Deadline ownership.** Wrappers forward `SetReadDeadline` narrowly, without `Unwrap`, and a
+   retirement abort cannot be undone by a restore (H6).
 
 ## Related
 
