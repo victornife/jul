@@ -1,0 +1,144 @@
+//go:build ignore
+
+// F3 feasibility instrument for ADR 0032 (#700): s5-like H2 admission overload.
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"flag"
+	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"strconv"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"golang.org/x/net/http2"
+)
+
+type countReader struct {
+	r io.Reader
+	n *atomic.Int64
+}
+
+func (c *countReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n.Add(int64(n))
+	return n, err
+}
+
+func main() {
+	base := flag.String("url", "https://127.0.0.1:18391", "")
+	workers := flag.Int("workers", 128, "")
+	conns := flag.Int("conns", 1, "")
+	honor := flag.Bool("honor-retry-after", false, "")
+	dur := flag.Duration("dur", 20*time.Second, "")
+	flag.Parse()
+	body := bytes.Repeat([]byte("x"), 256<<10)
+	var trs []*http2.Transport
+	for i := 0; i < *conns; i++ {
+		trs = append(trs, &http2.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, DisableCompression: true})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *dur)
+	defer cancel()
+	var ok, rej, other, okBytes, rejBytes atomic.Int64
+	var mu sync.Mutex
+	var okLat []time.Duration
+	var wg sync.WaitGroup
+	for w := 0; w < *workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			c := &http.Client{Transport: trs[w%len(trs)], Timeout: 30 * time.Second}
+			for ctx.Err() == nil {
+				var sent atomic.Int64
+				req, _ := http.NewRequestWithContext(ctx, "POST", *base+"/admitted/echo?resp=65536&delay=500", &countReader{bytes.NewReader(body), &sent})
+				req.ContentLength = int64(len(body))
+				st := time.Now()
+				resp, err := c.Do(req)
+				if err != nil {
+					if ctx.Err() == nil {
+						other.Add(1)
+					}
+					continue
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				resp.Body.Close()
+				switch resp.StatusCode {
+				case 200:
+					ok.Add(1)
+					okBytes.Add(sent.Load())
+					mu.Lock()
+					okLat = append(okLat, time.Since(st))
+					mu.Unlock()
+				case 503:
+					rej.Add(1)
+					rejBytes.Add(sent.Load())
+					if *honor {
+						ra, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
+						if ra <= 0 {
+							ra = 1
+						}
+						d := time.Duration(ra)*time.Second/2 + time.Duration(rand.Int63n(int64(time.Duration(ra)*time.Second)))
+						select {
+						case <-time.After(d):
+						case <-ctx.Done():
+						}
+					}
+				default:
+					other.Add(1)
+				}
+			}
+		}(w)
+	}
+	// legitimate probe: separate connection, unrelated proxied route, 2 KiB body
+	ptr := &http2.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	pc := &http.Client{Transport: ptr, Timeout: 5 * time.Second}
+	var pOK, pFail int
+	var pLat []time.Duration
+	pbody := bytes.Repeat([]byte("p"), 2<<10)
+	for ctx.Err() == nil {
+		st := time.Now()
+		resp, err := pc.Post(*base+"/proxy/echo?resp=4096", "application/octet-stream", bytes.NewReader(pbody))
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		if err == nil && resp.StatusCode == 200 {
+			pOK++
+			pLat = append(pLat, time.Since(st))
+		} else if ctx.Err() == nil {
+			pFail++
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	wg.Wait()
+	med := func(d []time.Duration) time.Duration {
+		if len(d) == 0 {
+			return 0
+		}
+		// simple selection
+		s := append([]time.Duration(nil), d...)
+		for i := range s {
+			for j := i + 1; j < len(s); j++ {
+				if s[j] < s[i] {
+					s[i], s[j] = s[j], s[i]
+				}
+			}
+		}
+		return s[len(s)/2]
+	}
+	avg := func(b, n int64) int64 {
+		if n == 0 {
+			return 0
+		}
+		return b / n
+	}
+	fmt.Printf("workers=%d conns=%d honor=%v dur=%s ok=%d goodput=%.1f/s ok_p50=%s rejected=%d reject_rate=%.0f/s other=%d upload_per_ok=%dKiB upload_per_reject=%dKiB wasted_reject_MiB=%d probe_ok=%d probe_fail=%d probe_p50=%s\n",
+		*workers, *conns, *honor, *dur, ok.Load(), float64(ok.Load())/dur.Seconds(), med(okLat).Round(time.Millisecond), rej.Load(), float64(rej.Load())/dur.Seconds(), other.Load(),
+		avg(okBytes.Load(), ok.Load())>>10, avg(rejBytes.Load(), rej.Load())>>10, rejBytes.Load()>>20, pOK, pFail, med(pLat).Round(time.Millisecond))
+}

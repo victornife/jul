@@ -1,0 +1,27 @@
+{
+  "args": [
+    "/tmp/adr700/harness",
+    "run",
+    "-jul",
+    "./jul",
+    "-plugin",
+    "/tmp/adr700/inspect-load.wasm",
+    "-out",
+    "/tmp/adr700/f2-s11-slots2b",
+    "-only",
+    "s11",
+    "-variants",
+    "waf"
+  ],
+  "cpu_quota": "200%",
+  "finished": "2026-11-10T16:52:05Z",
+  "jul_cpus": "0,1",
+  "jul_sha256": "ddc99fffcbb81a3cb579b846c04258e33b27931fb852d4284a9464ff6b1fdf8b",
+  "load_cpus": "4-9",
+  "mem_max": "768M",
+  "origin_cpus": "10,11",
+  "plugin_sha256": "2526ed827923406126589f3ba8b530f7ef1b2e20f6cb0cc6dde9509a9ec08127",
+  "quick": false,
+  "results_sha256": "94bc75a527ade848d1c76fab9600f5364c2e5f1641bd78db66db09e74b7a91c9",
+  "started": "2026-11-10T16:50:51Z"
+}

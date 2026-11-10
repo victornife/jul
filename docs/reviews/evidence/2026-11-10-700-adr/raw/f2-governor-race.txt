@@ -1,0 +1,47 @@
+=== RUN   TestSharedCeilingAcrossListenersAndGenerations
+    gov_test.go:51: admitted=1357 rejected=8643 peak=1048576/1048576
+--- PASS: TestSharedCeilingAcrossListenersAndGenerations (0.04s)
+=== RUN   TestLimitDecreaseDrainAndRollback
+--- PASS: TestLimitDecreaseDrainAndRollback (0.00s)
+=== RUN   TestCancelledUninterruptibleWorkStaysCharged
+--- PASS: TestCancelledUninterruptibleWorkStaysCharged (0.10s)
+=== RUN   TestNestedLayersShareLeaseNoDeadlock
+    gov_test.go:157: evaluated=91 overloaded=109
+--- PASS: TestNestedLayersShareLeaseNoDeadlock (0.06s)
+=== RUN   TestSlotWaitBoundedFIFOAndAbandonedWaiters
+--- PASS: TestSlotWaitBoundedFIFOAndAbandonedWaiters (0.06s)
+=== RUN   TestGrowBeforeAllocateAccounting
+    gov_test.go:247: data=102400 final cap=131072 charge=131072 transient peak=196608 (1.92x data)
+--- PASS: TestGrowBeforeAllocateAccounting (0.00s)
+=== RUN   TestSharedCeilingAcrossListenersAndGenerations
+    gov_test.go:51: admitted=982 rejected=9018 peak=1048576/1048576
+--- PASS: TestSharedCeilingAcrossListenersAndGenerations (0.03s)
+=== RUN   TestLimitDecreaseDrainAndRollback
+--- PASS: TestLimitDecreaseDrainAndRollback (0.00s)
+=== RUN   TestCancelledUninterruptibleWorkStaysCharged
+--- PASS: TestCancelledUninterruptibleWorkStaysCharged (0.10s)
+=== RUN   TestNestedLayersShareLeaseNoDeadlock
+    gov_test.go:157: evaluated=88 overloaded=112
+--- PASS: TestNestedLayersShareLeaseNoDeadlock (0.05s)
+=== RUN   TestSlotWaitBoundedFIFOAndAbandonedWaiters
+--- PASS: TestSlotWaitBoundedFIFOAndAbandonedWaiters (0.06s)
+=== RUN   TestGrowBeforeAllocateAccounting
+    gov_test.go:247: data=102400 final cap=131072 charge=131072 transient peak=196608 (1.92x data)
+--- PASS: TestGrowBeforeAllocateAccounting (0.00s)
+=== RUN   TestSharedCeilingAcrossListenersAndGenerations
+    gov_test.go:51: admitted=1447 rejected=8553 peak=1048576/1048576
+--- PASS: TestSharedCeilingAcrossListenersAndGenerations (0.04s)
+=== RUN   TestLimitDecreaseDrainAndRollback
+--- PASS: TestLimitDecreaseDrainAndRollback (0.00s)
+=== RUN   TestCancelledUninterruptibleWorkStaysCharged
+--- PASS: TestCancelledUninterruptibleWorkStaysCharged (0.10s)
+=== RUN   TestNestedLayersShareLeaseNoDeadlock
+    gov_test.go:157: evaluated=91 overloaded=109
+--- PASS: TestNestedLayersShareLeaseNoDeadlock (0.06s)
+=== RUN   TestSlotWaitBoundedFIFOAndAbandonedWaiters
+--- PASS: TestSlotWaitBoundedFIFOAndAbandonedWaiters (0.06s)
+=== RUN   TestGrowBeforeAllocateAccounting
+    gov_test.go:247: data=102400 final cap=131072 charge=131072 transient peak=196608 (1.92x data)
+--- PASS: TestGrowBeforeAllocateAccounting (0.00s)
+PASS
+ok  	jul/scratch/f2gov	1.789s

@@ -1,0 +1,95 @@
+//go:build ignore
+
+// F4 feasibility instrument for ADR 0032 (#700): stalled and slow request
+// bodies over H1/H2/H3 with a sibling request, against a running Jul.
+package main
+
+import (
+	"bytes"
+	"crypto/tls"
+	"flag"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
+
+	"github.com/quic-go/quic-go/http3"
+	"golang.org/x/net/http2"
+)
+
+func client(proto string) *http.Client {
+	tc := &tls.Config{InsecureSkipVerify: true}
+	switch proto {
+	case "h2":
+		return &http.Client{Transport: &http2.Transport{TLSClientConfig: tc}}
+	case "h3":
+		return &http.Client{Transport: &http3.Transport{TLSClientConfig: tc}}
+	}
+	return &http.Client{Transport: &http.Transport{}}
+}
+
+func base(proto string) string {
+	if proto == "h1" {
+		return "http://127.0.0.1:18390"
+	}
+	return "https://127.0.0.1:18391"
+}
+
+func main() {
+	proto := flag.String("proto", "h1", "")
+	mode := flag.String("mode", "stall", "stall|slow")
+	limit := flag.Duration("client-limit", 20*time.Second, "")
+	flag.Parse()
+	go func() {
+		for {
+			time.Sleep(time.Second)
+		}
+	}()
+	c := client(*proto)
+	c.Timeout = *limit
+	// warm the connection so the sibling shares it on h2/h3
+	if r, err := c.Get(base(*proto) + "/proxy/echo?resp=16"); err == nil {
+		io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+	}
+	pr, pw := io.Pipe()
+	total := 16 << 10
+	go func() {
+		if *mode == "stall" {
+			pw.Write(bytes.Repeat([]byte("s"), 1024)) // then stall forever
+			return
+		}
+		for sent := 0; sent < total; sent += 1024 { // 1 KiB every 500 ms = 2 KiB/s, ~8 s
+			if _, err := pw.Write(bytes.Repeat([]byte("s"), 1024)); err != nil {
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		pw.Close()
+	}()
+	req, _ := http.NewRequest("POST", base(*proto)+"/proxy/echo?resp=16", pr)
+	req.ContentLength = int64(total)
+	done := make(chan string, 1)
+	st := time.Now()
+	go func() {
+		resp, err := c.Do(req)
+		if err != nil {
+			done <- fmt.Sprintf("error after %s: %v", time.Since(st).Round(100*time.Millisecond), err)
+			return
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		done <- fmt.Sprintf("status %d after %s", resp.StatusCode, time.Since(st).Round(100*time.Millisecond))
+	}()
+	time.Sleep(time.Second)
+	sib := ""
+	ss := time.Now()
+	if r, err := c.Get(base(*proto) + "/proxy/echo?resp=4096"); err == nil {
+		io.Copy(io.Discard, r.Body)
+		r.Body.Close()
+		sib = fmt.Sprintf("sibling(same client%s) status %d in %s", map[bool]string{true: ", same connection", false: ", separate H1 connection"}[*proto != "h1"], r.StatusCode, time.Since(ss).Round(time.Millisecond))
+	} else {
+		sib = "sibling error: " + err.Error()
+	}
+	fmt.Printf("proto=%s mode=%s %s | %s\n", *proto, *mode, <-done, sib)
+}

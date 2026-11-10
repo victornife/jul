@@ -1,0 +1,6 @@
+runtime_commit=858590dc7c430d24cd33b096a81ca6051591b427
+jul_binary_sha256=ddc99fffcbb81a3cb579b846c04258e33b27931fb852d4284a9464ff6b1fdf8b (858590dc + inert f2-waf-slot-scratch.patch; active only with JUL_F2_WAF_SLOTS>0)
+harness_sha256=fbb16f491fee71415edb4d75a6f84f2475305e67443be6165a344ed5f79a6519 (#695 archive + 2026-11-10-699 harness-revalidation.patch)
+go=go version go1.27.3 linux/arm64
+host=Linux 6.18.54.1-microsoft-standard-WSL2 aarch64 nproc=12
+envelope: systemd --user scope CPUQuota=200% MemoryMax=768M MemorySwapMax=0, taskset 0,1, GOMAXPROCS=2; origin taskset 2,3; client taskset 4-9

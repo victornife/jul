@@ -1,0 +1,57 @@
+diff --git a/internal/waf/outcomes.go b/internal/waf/outcomes.go
+index 09ed63d9..fe395a7f 100644
+--- a/internal/waf/outcomes.go
++++ b/internal/waf/outcomes.go
+@@ -12,9 +12,11 @@ import (
+ 	"io"
+ 	"net"
+ 	"net/http"
++	"os"
+ 	"slices"
+ 	"strconv"
+ 	"strings"
++	"sync"
+ 	"time"
+ 
+ 	"github.com/corazawaf/coraza/v3/experimental"
+@@ -203,6 +205,19 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
+ 	r.Header.Del(HeaderWAFEvent)
+ 	w.Header().Del(HeaderWAFEvent)
+ 
++	f2Release := func() {}
++	if f2Slots != nil {
++		select {
++		case f2Slots <- struct{}{}:
++			var once sync.Once
++			f2Release = func() { once.Do(func() { <-f2Slots }) }
++			defer f2Release()
++		default:
++			w.Header().Set("Retry-After", "1")
++			http.Error(w, "inspection overloaded", http.StatusServiceUnavailable)
++			return
++		}
++	}
+ 	tx := f.newTransaction(r)
+ 	if tx.IsRuleEngineOff() {
+ 		_ = tx.Close()
+@@ -441,6 +456,7 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
+ 	// Request passed WAF phases 1 & 2; invoke the inner handler / origin.
+ 	originReached = true
+ 	ic, wrappedWriter := newWAFResponseInterceptor(w, r, tx, f.info.BlockStatus, addPhase, mintSupportHeader)
++	f2Release()
+ 	next.ServeHTTP(wrappedWriter, r)
+ 	_ = ic.finishResponse()
+ 
+@@ -778,3 +794,12 @@ func (i *wafResponseInterceptor) cleanHeaders() {
+ 		i.w.Header().Del(k)
+ 	}
+ }
++
++// F2 scratch feasibility patch (ADR 0032). Not for commit.
++var f2Slots = func() chan struct{} {
++	n, _ := strconv.Atoi(os.Getenv("JUL_F2_WAF_SLOTS"))
++	if n <= 0 {
++		return nil
++	}
++	return make(chan struct{}, n)
++}()

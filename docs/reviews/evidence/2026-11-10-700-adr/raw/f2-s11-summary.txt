@@ -1,0 +1,24 @@
+f2-s11-slots0          s11-arg-amplificatio waf   c1     wl0 c=  1 ok=   46 rps=     4.6 st={'200': 46} err={'unfinished-at-phase-end': 1} p50=204.658 p99=294.938 peakMiB=266 cpu=10.3
+f2-s11-slots0          s11-arg-amplificatio waf   c2     wl0 c=  2 ok=   90 rps=       9 st={'200': 90} err={'unfinished-at-phase-end': 2} p50=208.565 p99=288.836 peakMiB=340 cpu=19.7
+f2-s11-slots0          s11-arg-amplificatio waf   c4     wl0 c=  4 ok=   72 rps=     7.2 st={'200': 72} err={'unfinished-at-phase-end': 4} p50=534.357 p99=692.74 peakMiB=502 cpu=19.9
+f2-s11-slots0          s11-arg-amplificatio waf   c8     wl0 c=  8 ok=   47 rps=     4.7 st={'200': 47} err={'unfinished-at-phase-end': 8} p50=1384.883 p99=1598.44 peakMiB=762 cpu=19.9
+f2-s11-slots0          s11-arg-amplificatio waf   c16    wl0 c= 16 ok=    0 rps=       0 st={} err={'refused': 667565, 'unfinished-at-phase-end': 16} p50=0 p99=0 peakMiB=0 cpu=0.0
+f2-s11-slots4          s11-arg-amplificatio waf   c1     wl0 c=  1 ok=   23 rps=     2.3 st={'200': 23} err={'unfinished-at-phase-end': 1} p50=391.304 p99=535.938 peakMiB=247 cpu=10.5
+f2-s11-slots4          s11-arg-amplificatio waf   c2     wl0 c=  2 ok=   52 rps=     5.2 st={'200': 52} err={'unfinished-at-phase-end': 2} p50=360.736 p99=493.951 peakMiB=350 cpu=19.9
+f2-s11-slots4          s11-arg-amplificatio waf   c4     wl0 c=  4 ok=   62 rps=     6.2 st={'200': 62} err={'unfinished-at-phase-end': 4} p50=590.848 p99=857.722 peakMiB=523 cpu=19.9
+f2-s11-slots4          s11-arg-amplificatio waf   c8     wl0 c=  8 ok=   74 rps=     7.4 st={'200': 74, '503': 1139} err={'unfinished-at-phase-end': 8} p50=554.51 p99=722.895 peakMiB=624 cpu=19.9
+f2-s11-slots4          s11-arg-amplificatio waf   c16    wl0 c= 16 ok=   73 rps=     7.3 st={'200': 73, '503': 3114} err={'unfinished-at-phase-end': 16} p50=567.61 p99=818.004 peakMiB=648 cpu=19.9
+f2-s11-slots2          s11-arg-amplificatio waf   c1     wl0 c=  1 ok=   43 rps=     4.3 st={'200': 43} err={'unfinished-at-phase-end': 1} p50=221.415 p99=289.027 peakMiB=260 cpu=10.5
+f2-s11-slots2          s11-arg-amplificatio waf   c2     wl0 c=  2 ok=   81 rps=     8.1 st={'200': 81} err={'unfinished-at-phase-end': 2} p50=236.576 p99=320.262 peakMiB=272 cpu=19.8
+f2-s11-slots2          s11-arg-amplificatio waf   c4     wl0 c=  4 ok=   75 rps=     7.5 st={'200': 75, '503': 993} err={'unfinished-at-phase-end': 4} p50=281.974 p99=374.697 peakMiB=435 cpu=19.7
+f2-s11-slots2          s11-arg-amplificatio waf   c8     wl0 c=  8 ok=   63 rps=     6.3 st={'200': 63, '503': 4260} err={'unfinished-at-phase-end': 8} p50=333.062 p99=468.83 peakMiB=442 cpu=19.6
+f2-s11-slots2          s11-arg-amplificatio waf   c16    wl0 c= 16 ok=   56 rps=     5.6 st={'200': 56, '503': 13545} err={'unfinished-at-phase-end': 16} p50=355.83 p99=546.422 peakMiB=444 cpu=19.5
+f2-s11-slots2b         s11-arg-amplificatio waf   c1     wl0 c=  1 ok=   35 rps=     3.5 st={'200': 35} err={'unfinished-at-phase-end': 1} p50=275.018 p99=386.164 peakMiB=251 cpu=10.5
+f2-s11-slots2b         s11-arg-amplificatio waf   c2     wl0 c=  2 ok=   74 rps=     7.4 st={'200': 74} err={'unfinished-at-phase-end': 2} p50=254.222 p99=349.416 peakMiB=330 cpu=19.9
+f2-s11-slots2b         s11-arg-amplificatio waf   c4     wl0 c=  4 ok=   79 rps=     7.9 st={'200': 79, '503': 1035} err={'unfinished-at-phase-end': 4} p50=268.47 p99=346.253 peakMiB=439 cpu=19.9
+f2-s11-slots2b         s11-arg-amplificatio waf   c8     wl0 c=  8 ok=   79 rps=     7.9 st={'200': 79, '503': 4494} err={'unfinished-at-phase-end': 8} p50=270.405 p99=374.442 peakMiB=439 cpu=19.9
+f2-s11-slots2b         s11-arg-amplificatio waf   c16    wl0 c= 16 ok=   74 rps=     7.4 st={'200': 74, '503': 13529} err={'unfinished-at-phase-end': 11} p50=281.218 p99=387.099 peakMiB=442 cpu=19.7
+cgPeak=-1MiB oom=false postGC=0MiB final{mem=766MiB gor=0 fds=50 inst=0} exited="signal: killed" notes=[]
+cgPeak=444MiB oom=false postGC=182MiB final{mem=416MiB gor=31 fds=22 inst=0} exited="" notes=[]
+cgPeak=443MiB oom=false postGC=182MiB final{mem=383MiB gor=32 fds=22 inst=0} exited="" notes=[]
+cgPeak=648MiB oom=false postGC=304MiB final{mem=568MiB gor=33 fds=23 inst=0} exited="" notes=[]

@@ -1,0 +1,277 @@
+// Package f2gov is the F2 feasibility prototype for ADR 0032 (#700). It is
+// archived as evidence and is not production code.
+package f2gov
+
+import (
+	"context"
+	"errors"
+	"math"
+	"sync"
+	"time"
+)
+
+// ErrOverloaded is returned when admission, growth or a slot wait cannot be
+// satisfied. Callers map it to 503 + Retry-After.
+var ErrOverloaded = errors.New("inspection overloaded")
+
+// Governor is the single process-owned authority. It survives reloads: a
+// reload only calls SetLimits; it never replaces the Governor or its usage.
+type Governor struct {
+	mu        sync.Mutex
+	maxBytes  int64 // 0 = unlimited
+	usedBytes int64
+	maxSlots  int
+	usedSlots int
+	waiters   []*waiter // FIFO
+	peakBytes int64
+	peakSlots int
+}
+
+type waiter struct {
+	ch    chan struct{} // closed on grant
+	gone  bool
+	given bool
+}
+
+func New(maxBytes int64, maxSlots int) *Governor {
+	return &Governor{maxBytes: maxBytes, maxSlots: maxSlots}
+}
+
+// SetLimits publishes new limits. Usage is preserved; a decrease admits nothing
+// new until usage drains below it; an increase wakes slot waiters.
+func (g *Governor) SetLimits(maxBytes int64, maxSlots int) {
+	g.mu.Lock()
+	g.maxBytes, g.maxSlots = maxBytes, maxSlots
+	g.grantLocked()
+	g.mu.Unlock()
+}
+
+func (g *Governor) Usage() (bytes int64, slots int, waiting int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	n := 0
+	for _, w := range g.waiters {
+		if !w.gone && !w.given {
+			n++
+		}
+	}
+	return g.usedBytes, g.usedSlots, n
+}
+
+func (g *Governor) Peaks() (int64, int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.peakBytes, g.peakSlots
+}
+
+// reserveLocked charges n bytes if they fit; overflow-safe.
+func (g *Governor) reserveLocked(n int64) bool {
+	if n < 0 {
+		return false
+	}
+	if n > math.MaxInt64-g.usedBytes {
+		return false
+	}
+	if g.maxBytes > 0 && g.usedBytes+n > g.maxBytes {
+		return false
+	}
+	g.usedBytes += n
+	g.peakBytes = max(g.peakBytes, g.usedBytes)
+	return true
+}
+
+func (g *Governor) grantLocked() {
+	for len(g.waiters) > 0 && g.waiters[0].gone {
+		g.waiters = g.waiters[1:]
+	}
+	for len(g.waiters) > 0 && g.usedSlots < g.maxSlots {
+		w := g.waiters[0]
+		g.waiters = g.waiters[1:]
+		if w.gone {
+			continue
+		}
+		w.given = true
+		g.usedSlots++
+		g.peakSlots = max(g.peakSlots, g.usedSlots)
+		close(w.ch)
+	}
+}
+
+// Lease is one request's charge. It is shared by every inspection layer of the
+// exchange (plugins and WAF) through the request context.
+type Lease struct {
+	g     *Governor
+	mu    sync.Mutex
+	bytes int64
+	slots int
+	done  bool
+}
+
+type ctxKey struct{}
+
+// Admit charges the base per-exchange reservation, failing fast. A request that
+// already carries a lease reuses it (no double charge for nested layers).
+func (g *Governor) Admit(ctx context.Context, base int64) (context.Context, *Lease, bool, error) {
+	if l, ok := ctx.Value(ctxKey{}).(*Lease); ok && l.g == g {
+		return ctx, l, false, nil
+	}
+	g.mu.Lock()
+	ok := g.reserveLocked(base)
+	g.mu.Unlock()
+	if !ok {
+		return ctx, nil, false, ErrOverloaded
+	}
+	l := &Lease{g: g, bytes: base}
+	return context.WithValue(ctx, ctxKey{}, l), l, true, nil
+}
+
+// Grow reserves n more bytes before the caller allocates them.
+func (l *Lease) Grow(n int64) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.done {
+		return ErrOverloaded
+	}
+	l.g.mu.Lock()
+	ok := l.g.reserveLocked(n)
+	l.g.mu.Unlock()
+	if !ok {
+		return ErrOverloaded
+	}
+	l.bytes += n
+	return nil
+}
+
+// Shrink refunds n bytes after the caller has dropped them.
+func (l *Lease) Shrink(n int64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n = min(n, l.bytes)
+	l.bytes -= n
+	l.g.mu.Lock()
+	l.g.usedBytes -= n
+	l.g.mu.Unlock()
+}
+
+// AcquireSlot waits FIFO for an evaluation slot for at most wait. The returned
+// release must be called when the synchronous evaluation has actually
+// finished, not when ctx is cancelled.
+func (l *Lease) AcquireSlot(ctx context.Context, wait time.Duration) (func(), error) {
+	g := l.g
+	g.mu.Lock()
+	g.grantLocked() // drops abandoned waiters and serves live ones first (FIFO)
+	if len(g.waiters) == 0 && g.usedSlots < g.maxSlots {
+		g.usedSlots++
+		g.peakSlots = max(g.peakSlots, g.usedSlots)
+		g.mu.Unlock()
+		return l.slotRelease(), nil
+	}
+	if wait <= 0 {
+		g.mu.Unlock()
+		return nil, ErrOverloaded
+	}
+	w := &waiter{ch: make(chan struct{})}
+	g.waiters = append(g.waiters, w)
+	g.mu.Unlock()
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-w.ch:
+		return l.slotRelease(), nil
+	case <-t.C:
+	case <-ctx.Done():
+	}
+	g.mu.Lock()
+	if w.given { // granted concurrently with timeout: keep it
+		g.mu.Unlock()
+		return l.slotRelease(), nil
+	}
+	w.gone = true
+	g.grantLocked()
+	g.mu.Unlock()
+	return nil, ErrOverloaded
+}
+
+func (l *Lease) slotRelease() func() {
+	l.mu.Lock()
+	l.slots++
+	l.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			l.slots--
+			l.mu.Unlock()
+			l.g.mu.Lock()
+			l.g.usedSlots--
+			l.g.grantLocked()
+			l.g.mu.Unlock()
+		})
+	}
+}
+
+// Release returns every byte. It is called once by the owner when the
+// exchange's retained resources are gone. Slots must already be released.
+func (l *Lease) Release() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.done {
+		return
+	}
+	if l.slots != 0 {
+		panic("f2gov: lease released while an evaluation slot is held")
+	}
+	l.done = true
+	l.g.mu.Lock()
+	l.g.usedBytes -= l.bytes
+	l.g.mu.Unlock()
+	l.bytes = 0
+}
+
+// ReadBounded mirrors plugins.readBounded with grow-before-allocate: the new
+// capacity is reserved before make, the old capacity refunded after the copy.
+// The charge always equals the live buffer capacity, including the transient
+// old+new overlap during growth.
+func ReadBounded(l *Lease, src func(p []byte) (int, error), limit int, hint int64) ([]byte, error) {
+	capFor := func(n int) int { return min(n, limit+1) }
+	initial := 512
+	if hint > 0 && hint < 32<<10 {
+		initial = int(hint) + 1
+	} else if hint >= 32<<10 {
+		initial = 32 << 10
+	}
+	initial = capFor(initial)
+	if err := l.Grow(int64(initial)); err != nil {
+		return nil, err
+	}
+	buf := make([]byte, 0, initial)
+	for {
+		if len(buf) == cap(buf) {
+			if len(buf) > limit {
+				l.Shrink(int64(cap(buf)))
+				return nil, errors.New("too_large")
+			}
+			nc := capFor(2 * cap(buf))
+			if err := l.Grow(int64(nc)); err != nil {
+				l.Shrink(int64(cap(buf)))
+				return nil, err
+			}
+			nb := append(make([]byte, 0, nc), buf...)
+			l.Shrink(int64(cap(buf)))
+			buf = nb
+		}
+		n, err := src(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if len(buf) > limit {
+				l.Shrink(int64(cap(buf)))
+				return nil, errors.New("too_large")
+			}
+			if err.Error() == "EOF" {
+				return buf, nil
+			}
+			l.Shrink(int64(cap(buf)))
+			return nil, err
+		}
+	}
+}

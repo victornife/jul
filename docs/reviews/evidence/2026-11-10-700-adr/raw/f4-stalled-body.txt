@@ -1,0 +1,17 @@
+## f4-rt5
+proto=h1 mode=stall status 499 after 5s | sibling(same client, separate H1 connection) status 200 in 3ms
+proto=h1 mode=slow status 499 after 5s | sibling(same client, separate H1 connection) status 200 in 2ms
+proto=h2 mode=stall status 400 after 5s | sibling(same client, same connection) status 200 in 2ms
+proto=h2 mode=slow status 400 after 5s | sibling(same client, same connection) status 200 in 2ms
+proto=h3 mode=stall error after 20s: Post "https://127.0.0.1:18391/proxy/echo?resp=16": context deadline exceeded (Client.Timeout exceeded while awaiting headers) | sibling(same client, same connection) status 200 in 2ms
+proto=h3 mode=slow status 200 after 7.6s | sibling(same client, same connection) status 200 in 2ms
+cgroup_peak_MiB=9 oom_kill=oom_kill 0
+## f4-rt0
+proto=h1 mode=slow status 200 after 7.6s | sibling(same client, separate H1 connection) status 200 in 2ms
+proto=h2 mode=stall error after 20s: Post "https://127.0.0.1:18391/proxy/echo?resp=16": context deadline exceeded (Client.Timeout exceeded while awaiting headers) | sibling(same client, same connection) status 200 in 2ms
+proto=h2 mode=slow status 200 after 8s | sibling(same client, same connection) status 200 in 2ms
+proto=h3 mode=stall error after 20s: Post "https://127.0.0.1:18391/proxy/echo?resp=16": context deadline exceeded | sibling(same client, same connection) status 200 in 2ms
+proto=h3 mode=slow status 200 after 7.6s | sibling(same client, same connection) status 200 in 3ms
+cgroup_peak_MiB=18 oom_kill=oom_kill 0
+## f4-rt0-h1stall
+time=2026-11-10T18:04:45.621+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="read inbound request body: unexpected EOF" request_id=8e4574878120fda2
