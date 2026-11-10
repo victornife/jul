@@ -1,0 +1,2 @@
+jul_plugin_instances{plugin="inspect-a"} 1
+jul_plugin_instances{plugin="inspect-b"} 1

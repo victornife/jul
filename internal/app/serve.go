@@ -273,6 +273,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		OnResponseInvocation:      metrics.ObservePluginResponseInvocation,
 		OnResponseBodyUnavailable: metrics.ObservePluginResponseBodyUnavailable,
 		OnInstanceWait:            metrics.ObservePluginInstanceWait,
+		OnRequestBodyFailure:      metrics.ObservePluginRequestBodyFailure,
 	})
 	if err != nil {
 		log.Error("failed to initialize plugin manager", "error", err)

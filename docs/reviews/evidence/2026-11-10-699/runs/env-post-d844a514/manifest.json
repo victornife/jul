@@ -1,0 +1,29 @@
+{
+  "args": [
+    "/tmp/rv699/harness",
+    "run",
+    "-jul",
+    "/tmp/rv699/jul-post",
+    "-plugin",
+    "/tmp/rv699/inspect-load.wasm",
+    "-out",
+    "/tmp/rv699/out/env-post",
+    "-only",
+    "s8-slow-clients-h1,r1-,r2-,r3-",
+    "-variants",
+    "none,wasm",
+    "-watchdog",
+    "30m"
+  ],
+  "cpu_quota": "200%",
+  "finished": "2026-11-10T12:31:16Z",
+  "jul_cpus": "0,1",
+  "jul_sha256": "901edf13205368bbe2a94cc275c32212410a290a50507e01d7ad3c28984cd6c0",
+  "load_cpus": "4-9",
+  "mem_max": "768M",
+  "origin_cpus": "10,11",
+  "plugin_sha256": "2526ed827923406126589f3ba8b530f7ef1b2e20f6cb0cc6dde9509a9ec08127",
+  "quick": false,
+  "results_sha256": "f962a878eac80d89a88a82b9283216be7688cf2cfebb04fada382c837af4c148",
+  "started": "2026-11-10T12:27:19Z"
+}

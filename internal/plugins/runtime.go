@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tetratelabs/wazero"
@@ -100,6 +101,10 @@ type Options struct {
 	// instance max_instances allows in use, with result "acquired" or
 	// "rejected" (#506).
 	OnInstanceWait func(plugin, result string)
+	// OnRequestBodyFailure, when set, is called when preparing a request body
+	// for a body-reading plugin fails before any guest invocation, with reason
+	// "too_large", "read_error", "canceled" or "retired" (#699).
+	OnRequestBodyFailure func(plugin, reason string)
 	// KV overrides the key/value backing store. Defaults to an in-memory store.
 	KV KVStore
 	// EgressWrap, when set, wraps a plugin fetch dialer with the global egress
@@ -130,6 +135,7 @@ type Manager struct {
 	onRespInv func(string, string, time.Duration)
 	onNoBody  func(string, string)
 	onWait    func(string, string)
+	onBodyErr func(string, string)
 	// live holds every compiled plugin not yet closed, across generations, so
 	// InstanceStats can report live instances at scrape time.
 	liveMu sync.Mutex
@@ -169,6 +175,10 @@ func NewManager(opts Options) (*Manager, error) {
 	if onWait == nil {
 		onWait = func(string, string) {}
 	}
+	onBodyErr := opts.OnRequestBodyFailure
+	if onBodyErr == nil {
+		onBodyErr = func(string, string) {}
+	}
 	return &Manager{
 		log:        opts.Logger,
 		cache:      wazero.NewCompilationCache(),
@@ -179,6 +189,7 @@ func NewManager(opts Options) (*Manager, error) {
 		onRespInv:  onRespInv,
 		onNoBody:   onNoBody,
 		onWait:     onWait,
+		onBodyErr:  onBodyErr,
 		live:       make(map[*plugin]struct{}),
 		egressWrap: opts.EgressWrap,
 	}, nil
@@ -307,6 +318,9 @@ type plugin struct {
 	// jul-abi/v2 module exports handle_response.
 	abi         string
 	hasResponse bool
+	// readsBody reports that the module imports read_request_body, so each
+	// request's body is prepared before an instance is acquired (#699).
+	readsBody bool
 
 	capKV        bool
 	capFetch     bool
@@ -348,10 +362,19 @@ type plugin struct {
 	onRespInv func(string, string, time.Duration)
 	onNoBody  func(string, string)
 	onWait    func(string, string)
+	// onBodyFail counts request-body preparations that failed before any
+	// guest invocation (#699).
+	onBodyFail func(string, string)
 	// limitLog throttles the instance-cap warning.
 	limitLog logthrottle.Limiter
 	// mgr tracks this plugin for InstanceStats until close.
 	mgr *Manager
+
+	// closed is set when the plugin's generation is torn down; preparing
+	// holds the requests reading their body for it, so close can abort them.
+	closed    atomic.Bool
+	prepMu    sync.Mutex
+	preparing map[*http.ResponseController]struct{}
 }
 
 // afterModuleRead is a test seam between the single module read and
@@ -405,6 +428,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		onRespInv:    m.onRespInv,
 		onNoBody:     m.onNoBody,
 		onWait:       m.onWait,
+		onBodyFail:   m.onBodyErr,
 		egressWrap:   egressWrap,
 	}
 	maxInstances := pc.MaxInstances
@@ -482,6 +506,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		return closeOnErr(err)
 	}
 	p.hasResponse = decl.hasResponse
+	p.readsBody = decl.readsBody
 
 	p.runtime = r
 	p.compiled = compiled
@@ -527,6 +552,9 @@ func (p *plugin) instantiate(ctx context.Context) (api.Module, error) {
 // ctx ends) for an instance to come back or be retired, then fails with
 // errInstanceLimit (#506).
 func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
+	if p.closed.Load() {
+		return nil, errPluginClosed
+	}
 	select {
 	case pm := <-p.pool:
 		return pm, nil
@@ -689,7 +717,12 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 // caller turns into a 500). On error the instance is discarded, not pooled,
 // because a trapped module may be in an undefined state.
 func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.Request) (action uint32, inv *invocation, err error) {
-	inv = &invocation{r: r, w: w, log: p.log, maxReqBody: p.maxReqBody, maxRespBody: p.maxRespBody, sub: -1}
+	inv = &invocation{r: r, w: w, log: p.log, maxRespBody: p.maxRespBody, sub: -1}
+	if p.readsBody {
+		if err := p.prepare(parent, w, inv); err != nil {
+			return 0, nil, err
+		}
+	}
 	var valid func(uint32) bool
 	if p.abi == ABIJulV2 {
 		valid = func(v uint32) bool { return v == actionStop || v == actionContinue }
@@ -697,7 +730,7 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 	action, dur, outcome, err := p.call(parent, exportHandleRequest, inv, valid)
 	switch outcome {
 	case callAcquireFailed:
-		if !errors.Is(err, errInstanceLimit) {
+		if !errors.Is(err, errInstanceLimit) && !errors.Is(err, errPluginClosed) {
 			p.onPanic(p.name)
 		}
 		return 0, nil, err
@@ -721,7 +754,7 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 // committed view (a protocol switch) only accepts CONTINUE and runs detached
 // from the request's cancellation, since the request is already over.
 func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *responseView, state []byte) (uint32, error) {
-	inv := &invocation{r: r, log: p.log, maxReqBody: p.maxReqBody, maxRespBody: p.maxRespBody,
+	inv := &invocation{r: r, log: p.log, maxRespBody: p.maxRespBody,
 		phase: phaseResponse, sub: -1, state: state, resp: view}
 	valid := func(v uint32) bool { return v == responseContinue || (v == responseReject && !view.committed) }
 	if view.committed {
@@ -730,7 +763,7 @@ func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *r
 	res, dur, outcome, err := p.call(parent, exportHandleResponse, inv, valid)
 	switch outcome {
 	case callAcquireFailed:
-		if !errors.Is(err, errInstanceLimit) {
+		if !errors.Is(err, errInstanceLimit) && !errors.Is(err, errPluginClosed) {
 			p.onPanic(p.name)
 		}
 		p.onRespInv(p.name, "error", 0)
@@ -757,6 +790,7 @@ func (p *plugin) close() {
 	if p == nil {
 		return
 	}
+	p.abortPreparations()
 	if p.mgr != nil {
 		p.mgr.forget(p)
 	}

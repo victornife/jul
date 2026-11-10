@@ -1,0 +1,19 @@
+# build=pre sha256=59ab41113ae23f06b5a67477eeb086fa7b1925cb401caacca6f4a69b6288cac2 plugin=2526ed827923
+# body bytes=64330; curl --limit-rate <rate> --data-binary @body.json http://127.0.0.1:18470/proxy/echo?resp=4096
+rate=0 status=200 time=0.006247s origin_len=64330 guest_a_len=64330 guest_b_len=64330
+rate=16k status=500 time=3.004811s origin_len= guest_a_len= guest_b_len=
+rate=1M status=200 time=0.008779s origin_len=64330 guest_a_len=64330 guest_b_len=64330
+# mid-upload (t=2s at 16k):
+  jul_plugin_instances{plugin="inspect-a"} 1
+  jul_plugin_instances{plugin="inspect-b"} 1
+  goroutines in readBounded (preparation): 0
+  goroutines reading the body inside a guest call (wazero Call + read_request_body): 1
+# metrics after:
+  jul_plugin_duration_seconds_sum{plugin="inspect-a"} 3.007648357
+  jul_plugin_duration_seconds_count{plugin="inspect-a"} 3
+  jul_plugin_duration_seconds_sum{plugin="inspect-b"} 0.0021085
+  jul_plugin_duration_seconds_count{plugin="inspect-b"} 2
+  jul_plugin_invocations_total{plugin="inspect-a",result="continue"} 2
+  jul_plugin_invocations_total{plugin="inspect-a",result="error"} 1
+  jul_plugin_invocations_total{plugin="inspect-b",result="continue"} 2
+  jul_plugin_panics_total{plugin="inspect-a"} 1

@@ -519,6 +519,7 @@ type wafWrappedResponseWriter interface {
 	http.ResponseWriter
 	io.ReaderFrom
 	http.Flusher
+	SetReadDeadline(time.Time) error
 }
 
 var _ wafWrappedResponseWriter = (*wafResponseInterceptor)(nil)
@@ -670,6 +671,14 @@ func (i *wafResponseInterceptor) Write(b []byte) (int, error) {
 
 func (i *wafResponseInterceptor) ReadFrom(r io.Reader) (int64, error) {
 	return io.Copy(struct{ io.Writer }{i}, r)
+}
+
+// SetReadDeadline forwards a request-body read deadline to the underlying
+// writer so http.ResponseController can bound an inner body read (for example
+// plugin body preparation, #699). Only the read side is exposed: Unwrap would
+// also let callers flush or write around response inspection.
+func (i *wafResponseInterceptor) SetReadDeadline(t time.Time) error {
+	return http.NewResponseController(i.w).SetReadDeadline(t)
 }
 
 func (i *wafResponseInterceptor) Flush() {

@@ -109,7 +109,7 @@ plugins = ["header-inject"]             # middleware for every location here
 | `kv_max_entries` / `kv_max_bytes` | Per-plugin KV quota (defaults 1024 keys / 1 MiB); a `kv_set` past either is rejected |
 | `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the allow-listed hosts (SSRF-guarded) |
 | `fetch_timeout` / `max_fetch_response` | Per-call deadline and response-size cap for `fetch` (defaults 5s / 1 MiB) |
-| `max_request_body` / `max_response_body` | Body buffering caps (defaults 1 MiB / 8 MiB); overflow fails the call, never truncates. For v2, `max_response_body` also bounds the response-phase body and its replacement (at most `1g`) |
+| `max_request_body` / `max_response_body` | Body buffering caps (defaults 1 MiB / 8 MiB); overflow fails the request, never truncates. See [Request bodies](#request-bodies). For v2, `max_response_body` also bounds the response-phase body and its replacement (at most `1g`) |
 | `max_invocations` | Retire a pooled instance after this many calls (default 1000) |
 | `max_instances` | Cap on live module instances, idle and in use (default 64). A call that finds them all busy waits up to one `timeout`, then the request fails with `503` and `Retry-After: 1`. See [Sizing](#sizing-instances-and-memory) |
 | `sha256` | Optional pin: the exact module bytes' SHA-256 (64 hex digits; a `sha256:` prefix is accepted). See [Module content identity](#module-content-identity-and-pinning) |
@@ -360,7 +360,7 @@ v1, golden-pinned, prebuilt-guest tested) are documented in
   | `get_request_header` | `(namePtr, nameLen, buf, limit u32) -> i32` | `-1` if absent |
   | `set_request_header` | `(namePtr, nameLen, valPtr, valLen u32)` | |
   | `set_response_header` | `(namePtr, nameLen, valPtr, valLen u32)` | |
-  | `read_request_body` | `(buf, limit u32) -> u32` | Caller-allocates; body buffered lazily up to `max_request_body`; oversize fails the call |
+  | `read_request_body` | `(buf, limit u32) -> u32` | Caller-allocates; returns the complete body prepared before the call (see [Request bodies](#request-bodies)) |
   | `write_response_body` | `(ptr, n u32)` | Appends to the response body; overflow past `max_response_body` fails the call |
   | `set_response_status` | `(code u32)` | A code outside `100–599` is replaced with `500` |
   | `get_config` | `(buf, limit u32) -> u32` | Caller-allocates; JSON object |
@@ -454,27 +454,75 @@ Every invocation updates Prometheus metrics:
 - `jul_plugin_instances{plugin}` — live module instances (idle and in use),
   read at scrape time;
 - `jul_plugin_instance_waits_total{plugin,result}` — calls that found every
-  allowed instance busy: `acquired` after waiting, or `rejected` with `503`.
+  allowed instance busy: `acquired` after waiting, or `rejected` with `503`;
+- `jul_plugin_request_body_failures_total{plugin,reason}` — request bodies a
+  body-reading plugin could not prepare, so the guest never ran: `too_large`,
+  `read_error` (including an expired `read_timeout`), `canceled` or `retired`.
+  These requests are not in `jul_plugin_invocations_total`.
 
 Guest `log` output is emitted on the server log with the plugin name attached.
+
+### Request bodies
+
+A module that imports `read_request_body` (either ABI) has each request body
+**prepared** before the guest runs. A Go SDK plugin carries the import only
+when its code can reach `Request.Body()`; the linker drops it otherwise, as in
+the shipped non-reading examples (check with `wasm-objdump -j Import -x`).
+Preparation works as follows
+([#699](https://github.com/victornife/jul/issues/699)):
+
+1. Jul reads the whole body, up to the plugin's `max_request_body`. A declared
+   `Content-Length` above the limit is rejected without reading; otherwise at
+   most `max_request_body + 1` bytes are read, whatever the declared length.
+   The buffer grows as bytes arrive (at most 32 KiB before the first byte), so
+   a declared length alone does not reserve memory.
+2. Only then is an instance acquired and `handle_request` called with its
+   normal `timeout`. `read_request_body` returns the prepared bytes, as often
+   as the guest calls it.
+3. The next handler receives the exact same bytes, with `Content-Length` set
+   to their length. Trailers are kept.
+
+Upload time is therefore bounded by the transport, not by `timeout`: a client
+disconnect, an explicitly configured server `read_timeout` (HTTP/1.1 and
+HTTP/2; HTTP/3 does not apply it, see [http3.md](http3.md)) or a reload that
+retires the plugin. With the default `read_timeout = 0` a stalled upload waits
+for its client. No instance is held while the body arrives.
+
+A body over the limit, a read error, a client cancel or a retired plugin
+answers `500 plugin error`. The guest and the next handler do not run, and no
+instance is acquired. These requests are counted in
+`jul_plugin_request_body_failures_total`, not in the invocation metrics.
+
+In a chain, the first body-reading plugin prepares the body and later ones
+reuse it without copying, each still enforcing its own `max_request_body`.
+
+Eligibility is the module's static import, not what a request actually does.
+A module that reads the body only on some branch is prepared on every request.
+For such a *conditional reader*:
+
+- its early rejection (for example a `403` on a header) is sent only after the
+  body has arrived;
+- a body over its `max_request_body` answers `500` even when the guest would
+  not have read it.
+
+Raise `max_request_body`, or split the header check into its own plugin that
+does not import `read_request_body`. Modules without the import are unchanged:
+they never read or buffer the body, and it streams to the next handler.
 
 ### Sizing instances and memory
 
 A plugin holds at most `max_instances` module instances. Each can grow to
 `memory_limit` of linear memory. A request holds one only for the duration
-of a guest call, not the whole request. However, a `jul-abi/v2` `read_body` call
-reads the client body **inside** that guest call. A slow upload therefore
-holds the instance, and if it outlasts `timeout` the request fails with `500`
-([#699](https://github.com/victornife/jul/issues/699)). Until that is fixed,
-set `timeout` above the slowest legitimate upload for body-reading plugins and
-set a finite server `read_timeout`. Worst-case guest memory per plugin is:
+of a guest call, not the whole request, and never while its body arrives (see
+[Request bodies](#request-bodies)). Worst-case guest memory per plugin is:
 
 ```text
 max_instances × memory_limit          (default 64 × 16 MiB = 1 GiB)
 ```
 
 Host-side buffers are separate and follow request concurrency: up to
-`max_request_body` per request in the request phase and, for a `jul-abi/v2`
+`max_request_body` per request with a body-reading plugin (one copy, shared by
+the chain and kept until the request ends) and, for a `jul-abi/v2`
 body subscription, up to `max_response_body` per subscribed response.
 These are not an aggregate server budget. Upstream admission occurs after
 request plugins and WAF on proxy routes and does not cap earlier inspection or
@@ -493,9 +541,13 @@ Callers waiting for an instance are not limited in number. Each waits one
 memory per live instance, including host buffers. Two subscribing plugins at
 16–32 concurrent H2 requests peaked at 516–741 MiB, and 64 slow-uploading
 instances led to an OOM kill. Under CPU saturation, guest calls that exceed
-`timeout` fail with `500`. Smaller guests (TinyGo, Rust) need less memory. An
-aggregate inspection bound is tracked in
-[#700](https://github.com/victornife/jul/issues/700).
+`timeout` fail with `500`. Smaller guests (TinyGo, Rust) need less memory.
+
+Since #699, slow uploads no longer hold instances, so `max_instances` no longer
+limits how many requests prepare bodies at once. Concurrent body-reading
+requests × `max_request_body` is now the request-body bound, alongside the
+instance product above. Jul has no aggregate inspection or byte budget yet;
+that is tracked in [#700](https://github.com/victornife/jul/issues/700).
 
 ## Uploading modules (Console API)
 
@@ -556,6 +608,8 @@ The `jul-abi/v1` ABI is request-phase only:
 | Handler plugin blocks | `request-block.wasm` as handler, `X-Block: 1` | `403` | TestHandlerPluginBlocks |
 | Guest panic contained | `testguest-panic.wasm` | `500`, next **not** called, server stable | TestPanicIsContained |
 | Guest timeout contained | `testguest-loop.wasm`, 150 ms timeout | `500`, next **not** called | TestTimeoutIsContained |
+| Slow upload to a body reader | 64 KiB paced over ~400 ms, 100 ms timeout, v1/v2, middleware/handler | `200`, exact body to guest and next, no instance held while it arrives | TestSlowUploadDoesNotConsumeGuestTimeout, TestBodyPreparationHoldsNoInstance |
+| Body preparation failures | over limit, read error, cancel, `read_timeout`, retirement (H1/H2/H3) | `500`, guest and next **not** called, reason counted | TestPreparedBodyLimits, TestPreparationFailuresSkipGuestAndOrigin, TestPreparationEndsOnTransportControls, TestForcedRetirementAbortsPreparation |
 | KV capability granted | `kv-counter.wasm`, `kv = true` | Counter increments across requests, `X-Count` grows | TestKVCounterWithCapability |
 | KV capability denied | `kv-counter.wasm`, `kv = false` | Counter resets every request, `X-Count = 1` | TestKVDeniedWithoutCapability |
 | Reload reuses compilation cache | Same module, two generations | Second generation works, first can be closed | TestReloadReusesManager |
@@ -636,8 +690,9 @@ paths where every microsecond counts.
 2. **No shared plugin state across names.** Each plugin name gets its own wazero
    runtime and KV namespace. Two plugins cannot share memory or KV keys even if
    they load the same `.wasm` file.
-3. **No streaming request/response bodies.** The host buffers the full request
-   body (up to `max_request_body`) and the guest accumulates the full response
+3. **No streaming request/response bodies.** For a module importing
+   `read_request_body`, the host buffers the full request body (up to
+   `max_request_body`) before the call; the guest accumulates the full response
    body (up to `max_response_body`) before anything is written to the HTTP
    response writer. Large uploads/downloads should bypass the plugin (use a
    handler route without plugins).
@@ -658,6 +713,7 @@ are addressed by design, configuration, or runtime containment:
 | ------ | ------ | ---------- | ------------- |
 | Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
+| Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699) | With `read_timeout = 0` (default) or on HTTP/3, a stalled upload keeps the bytes it has sent (and its request) until the client gives up; no aggregate byte budget (#700) |
 | Memory or CPU exhaustion by concurrency | Many concurrent requests on a plugin route, each instantiating a module | `max_instances` (default 64) caps live instances per plugin; excess calls wait one `timeout`, then get `503` and are counted in `jul_plugin_instance_waits_total` (#506) | Operator sets `max_instances × memory_limit` above what the host can hold |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |

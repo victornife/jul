@@ -1,0 +1,6 @@
+pre 1 rps=4377.4 p99=13ms
+post 1 rps=4098.9 p99=15ms
+pre 2 rps=3640.2 p99=16ms
+post 2 rps=4253.8 p99=14ms
+pre 3 rps=3784.3 p99=15ms
+post 3 rps=4078.9 p99=14ms

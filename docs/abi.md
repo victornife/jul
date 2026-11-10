@@ -79,7 +79,8 @@ costs) the same as its v1 equivalent.
 
 **Identical in both:** every v1 request-phase host function exists in v2 with
 the same name, signature and semantics (v2 imports them from host module
-`jul-abi/v2` instead of `jul`); request-phase `timeout`, `max_request_body`,
+`jul-abi/v2` instead of `jul`); request-body preparation before the call
+([plugins.md](plugins.md#request-bodies), #699); request-phase `timeout`, `max_request_body`,
 `max_response_body` (for Stop responses), KV, fetch, capability grants,
 `max_invocations`, trap containment (`500 plugin error`) and the released
 metric families.
@@ -263,6 +264,7 @@ touches the response. Return codes (i32): `0 OK`, `-1 NOT_FOUND`, `-2 INVALID`,
 | `handle_response` trap, panic, timeout, out-of-bounds pointer, request-mutating call, reserved result — before commitment | the whole action response is discarded and the client receives `500 plugin error`; nothing partially mutated is ever sent |
 | The same after a protocol switch | recorded as an error; the connection is untouched |
 | Client cancelled the request | the invocation fails like a timeout |
+| Request body over `max_request_body`, unreadable, cancelled or retired while being prepared (modules importing `read_request_body`, #699) | `500 plugin error` before any instance is acquired; the guest and next handler do not run; counted in `jul_plugin_request_body_failures_total{reason}`, not as an invocation |
 
 In every failure the instance is discarded, never returned to the pool, and the
 failure is counted (`jul_plugin_panics_total` for traps/timeouts,
@@ -273,7 +275,8 @@ failure is counted (`jul_plugin_panics_total` for traps/timeouts,
 | Bound | Value |
 | --- | --- |
 | Buffered response body / replacement | `max_response_body` (default 8 MiB; at most 1 GiB for v2) — the same limit v1 applies to Stop bodies |
-| Per-phase deadline | `timeout` per invocation (default 100 ms) |
+| Per-phase deadline | `timeout` per invocation (default 100 ms); request-body arrival is not part of it (#699) |
+| Prepared request body | `max_request_body` per request for a module importing `read_request_body`, read before an instance is acquired; one copy shared by a plugin chain |
 | Request state | 4096 bytes |
 | Added header bytes | 64 KiB per invocation |
 | Instances | at most `max_instances` live per plugin (default 64, idle and in use); a call that finds them all busy waits one `timeout`, then fails with `503` (#506). None held between phases |
@@ -291,7 +294,9 @@ Metrics (closed labels): the released `jul_plugin_invocations_total`,
 `jul_plugin_response_invocations_total{plugin,result=continue|reject|error}`,
 `jul_plugin_response_duration_seconds{plugin}`,
 `jul_plugin_response_body_unavailable_total{plugin,reason}` (body subscriptions
-only; `reason` is the lower-case state name).
+only; `reason` is the lower-case state name). Both ABIs:
+`jul_plugin_request_body_failures_total{plugin,reason=too_large|read_error|canceled|retired}`
+(#699).
 
 ## The `jul-abi/v2` host surface
 

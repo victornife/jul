@@ -1,0 +1,33 @@
+--- harness.orig.go	2026-11-10 13:17:38.269864895 +0100
++++ waf-wasm-assessment.go	2026-11-10 13:17:38.281959095 +0100
+@@ -1362,6 +1362,13 @@
+ 	slowCancel.Conc, slowCancel.CancelAt = 32, 2*time.Second
+ 	probe := workload{Proto: "h1", Method: "POST", Path: "/proxy/echo?resp=4096", Body: 2 << 10, Resp: 4096, Conc: 4, Timeout: 30 * time.Second, WantEcho: true}
+ 	out = append(out, entry{scenario{name: "s8-slow-clients-h1", phases: []phaseSpec{{Name: "load", Warmup: warm, Measure: meas, Load: []workload{slow, slowCancel, probe}}}}, all, 1, rec})
++	// 699 revalidation: controlled slow uploads below the instance cap, and fast baselines.
++	slow16 := slow
++	slow16.Conc = 16
++	out = append(out, entry{scenario{name: "r1-slow-upload-c16-h1", phases: []phaseSpec{{Name: "load", Warmup: warm, Measure: meas, Load: []workload{slow16, probe}}}}, pick("wasm"), 1, rec})
++	nobody := workload{Proto: "h1", Method: "GET", Path: "/proxy/echo?resp=4096", Resp: 4096, Conc: 16, Timeout: 30 * time.Second}
++	out = append(out, entry{scenario{name: "r2-fast-nobody-h1", phases: []phaseSpec{{Name: "load", Warmup: warm, Measure: meas, Load: []workload{nobody}}}}, pick("none", "wasm"), 1, rec})
++	out = append(out, entry{scenario{name: "r3-fast-body-h1", phases: []phaseSpec{{Name: "load", Warmup: warm, Measure: meas, Load: []workload{norm("h1")}}}}, pick("wasm"), 1, rec})
+ 	// Lifecycle: real policy reloads, one failed preparation, slow in-flight work.
+ 	life := norm("h1")
+ 	life.Conc = 16
+@@ -1423,6 +1430,7 @@
+ 	fs.StringVar(&e.cpuQuota, "cpu-quota", "200%", "Jul scope CPUQuota")
+ 	fs.StringVar(&e.memMax, "mem-max", "768M", "Jul scope MemoryMax")
+ 	only := fs.String("only", "", "comma-separated scenario name prefixes")
++	variants := fs.String("variants", "", "699 revalidation: comma-separated config variants (default all)")
+ 	quick := fs.Bool("quick", false, "short exploratory windows, one repetition")
+ 	watchdog := fs.Duration("watchdog", 90*time.Minute, "abort the whole run after this long")
+ 	_ = fs.Parse(args)
+@@ -1475,7 +1483,7 @@
+ 			continue
+ 		}
+ 		for _, c := range configs() {
+-			if !ent.cfgs(c.name) {
++			if !ent.cfgs(c.name) || (*variants != "" && !pick(strings.Split(*variants, ",")...)(c.name)) {
+ 				continue
+ 			}
+ 			for rep := 1; rep <= ent.reps; rep++ {

@@ -58,6 +58,8 @@ type Options struct {
 	OnResponseBodyUnavailable func(plugin, reason string)
 	// OnInstanceWait mirrors the compiled build's instance-cap hook.
 	OnInstanceWait func(plugin, result string)
+	// OnRequestBodyFailure mirrors the compiled build's body-preparation hook.
+	OnRequestBodyFailure func(plugin, reason string)
 }
 
 // InstanceStats mirrors the compiled build's live-instance report.

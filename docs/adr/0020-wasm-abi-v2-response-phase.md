@@ -91,6 +91,16 @@ fail-closed:
 | Request-mutating calls (`set_uri`, `set_request_header`, `set_response_header`, `read_request_body`, `write_response_body`, `set_response_status`) from `handle_response` | n/a | the invocation fails (contract violation) |
 | Response-phase calls from `handle_request` | n/a | return `WRONG_PHASE` (`-7`) |
 
+**Request-body preparation (#699, 2026-11-10; both ABIs).** `read_request_body` keeps its name,
+signature and return convention. Its body is now prepared *before* the instance is acquired, for every
+module that statically imports the function: the host reads it to EOF bounded by `max_request_body`,
+then the timed call reads those bytes. Upload arrival is outside the guest deadline and instance
+ownership. A preparation failure (`too_large`, `read_error`, `canceled`, `retired`) answers `500 plugin error`
+without a guest call and is counted in `jul_plugin_request_body_failures_total`, not in the invocation
+families. Static import is capability, not per-request demand. A conditional reader is prepared on
+every request, so it can reject early only after the body arrives, and an oversized body answers `500`
+on its no-read branch too ([plugins.md](../plugins.md#request-bodies)).
+
 ### 3. Response hook and export model
 
 The response phase is **subscribed per request**, not implied by an export:
@@ -235,7 +245,7 @@ Return codes (closed, i32): `0 OK`, `-1 NOT_FOUND`, `-2 INVALID`, `-3 FORBIDDEN`
 | The same, **after commitment** (`UPGRADED`) | Recorded (`result="error"`, panic counter) and the instance discarded; the connection is already owned by the upgraded protocol and is not touched. |
 | REJECT | As §7. Not an error. |
 | Request cancelled by the client | The invocation runs under the request context; a cancelled context fails it like a timeout (v1 behaviour). |
-| Instance acquisition failure | Counted as a contained failure; before commitment the client receives `500 plugin error`. |
+| Instance acquisition failure | Counted as a contained failure; before commitment the client receives `500 plugin error`. Since #699, acquisition on a closed (retired) plugin is answered `500` and not counted as a panic. |
 
 When Jul discards an in-progress response (REJECT or failure), it cancels the context handed to the
 action so an upstream stop reading promptly; the resulting reverse-proxy abort
