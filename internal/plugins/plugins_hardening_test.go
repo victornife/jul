@@ -500,17 +500,17 @@ func TestV1HostFetchAndRequestBodyFailures(t *testing.T) {
 	if !strings.Contains(output.String(), "reason=ssrf") {
 		t.Fatalf("v1 fetch failure did not use bounded reason: %q", output.String())
 	}
-	r := httptest.NewRequest(http.MethodPost, "/", nil)
-	r.Body = io.NopCloser(io.MultiReader(strings.NewReader("abc"), errorReader{}))
-	inv := &invocation{r: r, log: logger, maxReqBody: 8}
-	call("read_request_body", inv)
-	if inv.err == nil || !strings.Contains(inv.err.Error(), "read request body") {
-		t.Fatalf("v1 partial body read did not fail: %v", inv.err)
+	// The host serves only a prepared body (#699); read failures happen during
+	// preparation and never reach the guest (see body_prepare_test.go).
+	unprepared := &invocation{r: httptest.NewRequest(http.MethodPost, "/", strings.NewReader("abc")), log: logger}
+	call("read_request_body", unprepared)
+	if !errors.Is(unprepared.err, errBodyNotPrepared) {
+		t.Fatalf("unprepared body read = %v, want errBodyNotPrepared", unprepared.err)
 	}
-	nilBody := &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil)}
-	nilBody.r.Body = nil
-	if !nilBody.bufferRequestBody() || nilBody.err != nil {
-		t.Fatalf("nil body rejected: %v", nilBody.err)
+	prepared := &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil), bodyPrepared: true}
+	call("read_request_body", prepared)
+	if prepared.err != nil {
+		t.Fatalf("prepared empty body rejected: %v", prepared.err)
 	}
 }
 func TestPluginCloseClosesIdleConnections(t *testing.T) {

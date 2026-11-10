@@ -408,6 +408,22 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Fixed
 
+- WASM plugins: slow but valid uploads no longer fail with `500` on a
+  body-reading plugin (#699). For a module that imports `read_request_body`
+  (either ABI), Jul now reads the body, bounded by `max_request_body`, before
+  acquiring an instance, so upload time no longer counts against `timeout` and
+  no instance is held while the body arrives. Host function signatures are
+  unchanged. Preparation failures answer `500 plugin error` without a guest
+  call and are counted in the new
+  `jul_plugin_request_body_failures_total{plugin,reason}`. Retiring a plugin
+  aborts body reads in progress per request or stream, and a request no longer
+  acquires from a closed plugin (previously counted as a panic).
+  **Behaviour change:** a module that reads the body only on some branch is
+  prepared on every request. Its early rejections wait for the body, and a body
+  over its `max_request_body` answers `500` even on a branch that would not have
+  read it. Concurrent body-reading requests × `max_request_body` is no longer
+  limited by `max_instances`; an aggregate bound remains #700.
+
 - Route selectors now count declaration order across matching server blocks
   (#643). Console edits use the projection revision. Old cross-block selectors
   and batches that could shift later ordinal targets are refused before writes;

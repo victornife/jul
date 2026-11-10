@@ -15,13 +15,15 @@ This page is not an audit authority and does not waive a current finding. The
 race, fuzz, cross-platform, security and documentation gates pass; newly
 discovered correctness/security findings still pre-empt the roadmap.
 
-Open defects from the
-[#695 resource assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
-(each blocks the forthcoming release unless fixed or explicitly accepted):
-
-- [#699](https://github.com/victornife/jul/issues/699): a `jul-abi/v2`
-  `read_body` call reads the client body inside the guest-call timeout, so slow
-  legitimate uploads fail with `500`.
+The [#695 resource assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
+plugin defect [#699](https://github.com/victornife/jul/issues/699) (a
+body-reading plugin read the client body inside its guest-call timeout, so slow
+legitimate uploads failed with `500`) is fixed on `main` and unreleased: bodies
+are prepared before the guest call ([plugins.md](plugins.md#request-bodies)).
+On a published package, set `timeout` above the slowest legitimate upload for
+body-reading plugins and set a finite server `read_timeout`. The missing
+aggregate inspection bound remains
+[#700](https://github.com/victornife/jul/issues/700).
 
 The assessment's argument-limit bypass
 ([#697](https://github.com/victornife/jul/issues/697), security) and CRS

@@ -215,6 +215,7 @@ func exerciseAllMetrics(m *Metrics) {
 		}
 	})
 	m.ObservePluginInstanceWait("hi", "rejected")
+	m.ObservePluginRequestBodyFailure("hi", "too_large")
 	m.SetPluginInstanceSource(func() []PluginInstanceStats {
 		return []PluginInstanceStats{{Plugin: "hi", Live: 2}}
 	})

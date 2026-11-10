@@ -26,7 +26,15 @@ const (
 type abiDecl struct {
 	// hasResponse reports that a v2 module exports handle_response.
 	hasResponse bool
+	// readsBody reports that the module imports read_request_body from its
+	// ABI's host module. It is static capability, not per-request demand: a
+	// module that imports the function may still not call it (#699).
+	readsBody bool
 }
+
+// importRequestBody is the host import whose presence makes a module's
+// request body prepared before each handle_request (#699).
+const importRequestBody = "read_request_body"
 
 // negotiateABI verifies, statically and before instantiation, that the
 // compiled module declares the configured ABI (ADR 0020 §1). No guest code
@@ -34,13 +42,16 @@ type abiDecl struct {
 func negotiateABI(abi string, compiled wazero.CompiledModule) (abiDecl, error) {
 	exports := compiled.ExportedFunctions()
 	importsV1, importsV2 := false, false
+	readsV1, readsV2 := false, false
 	for _, def := range compiled.ImportedFunctions() {
-		mod, _, _ := def.Import()
+		mod, name, _ := def.Import()
 		switch mod {
 		case hostModuleV1:
 			importsV1 = true
+			readsV1 = readsV1 || name == importRequestBody
 		case hostModuleV2:
 			importsV2 = true
+			readsV2 = readsV2 || name == importRequestBody
 		}
 	}
 	_, marker := exports[exportABIV2Marker]
@@ -52,7 +63,7 @@ func negotiateABI(abi string, compiled wazero.CompiledModule) (abiDecl, error) {
 		if _, ok := exports[exportHandleRequest]; !ok {
 			return abiDecl{}, errors.New("module does not export handle_request (build it against the Jul.IA plugin SDK)")
 		}
-		return abiDecl{}, nil
+		return abiDecl{readsBody: readsV1}, nil
 	case ABIJulV2:
 		if !marker {
 			return abiDecl{}, fmt.Errorf("module does not declare %s (no %s export); it is a %s module or was not built against the v2 SDK", ABIJulV2, exportABIV2Marker, ABIJulV1)
@@ -72,7 +83,7 @@ func negotiateABI(abi string, compiled wazero.CompiledModule) (abiDecl, error) {
 				return abiDecl{}, err
 			}
 		}
-		return abiDecl{hasResponse: hasResponse}, nil
+		return abiDecl{hasResponse: hasResponse, readsBody: readsV2}, nil
 	default:
 		return abiDecl{}, fmt.Errorf("unknown ABI %q", abi)
 	}

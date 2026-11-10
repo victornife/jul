@@ -6,11 +6,8 @@
 package plugins
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -44,8 +41,9 @@ type invocation struct {
 	w   http.ResponseWriter
 	log *slog.Logger
 
-	// bodyBuffered records whether the request body has been read into body.
-	bodyBuffered bool
+	// bodyPrepared records that body holds the complete request body,
+	// prepared before the instance was acquired (#699).
+	bodyPrepared bool
 	body         []byte
 
 	// status and respBody accumulate the response the guest wants to send. They
@@ -54,11 +52,10 @@ type invocation struct {
 	status   int
 	respBody []byte
 
-	// maxReqBody / maxRespBody bound how much request body is buffered and how
-	// much response body is accumulated. err records the first host-side failure
-	// (oversize body, response overflow) so invoke turns it into a 500 instead of
-	// serving truncated data.
-	maxReqBody  int
+	// maxRespBody bounds how much response body is accumulated; the request
+	// body was bounded when it was prepared. err records the first host-side
+	// failure (response overflow, guest memory fault) so invoke turns it into a
+	// 500 instead of serving truncated data.
 	maxRespBody int
 	err         error
 
@@ -89,30 +86,15 @@ func withInvocation(ctx context.Context, inv *invocation) context.Context {
 	return context.WithValue(ctx, invCtxKey{}, inv)
 }
 
-// bufferRequestBody preserves an all-or-nothing view for both ABIs. An I/O
-// error must fail the invocation; otherwise a partially read body could be
-// replayed downstream as a complete request.
-func (inv *invocation) bufferRequestBody() bool {
-	if inv.bodyBuffered {
-		return inv.err == nil
+// requestBody returns the body prepared before the call. Preparation has
+// already enforced the all-or-nothing contract, so a guest never sees a
+// truncated or partially failed read as complete.
+func (inv *invocation) requestBody() ([]byte, bool) {
+	if !inv.bodyPrepared {
+		inv.fail(errBodyNotPrepared)
+		return nil, false
 	}
-	inv.bodyBuffered = true
-	if inv.r.Body == nil {
-		return true
-	}
-	data, err := io.ReadAll(io.LimitReader(inv.r.Body, int64(inv.maxReqBody)+1))
-	if err != nil {
-		inv.fail(fmt.Errorf("plugin: read request body: %w", err))
-		return false
-	}
-	if len(data) > inv.maxReqBody {
-		inv.fail(errBodyTooLarge)
-		return false
-	}
-	inv.body = data
-	inv.r.Body = io.NopCloser(bytes.NewReader(data))
-	inv.r.ContentLength = int64(len(data))
-	return true
+	return inv.body, true
 }
 
 func invocationFrom(ctx context.Context) *invocation {
@@ -266,10 +248,11 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if inv == nil {
 			return 0
 		}
-		if !inv.bufferRequestBody() {
+		body, ok := inv.requestBody()
+		if !ok {
 			return 0
 		}
-		return writeInto(m, buf, limit, inv.body)
+		return writeInto(m, buf, limit, body)
 	})
 
 	exp("write_response_body", func(ctx context.Context, m api.Module, ptr, n uint32) {

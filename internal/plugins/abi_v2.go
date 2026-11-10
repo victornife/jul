@@ -316,10 +316,11 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		if inv == nil || !requestOnly(inv) {
 			return 0
 		}
-		if !inv.bufferRequestBody() {
+		body, ok := inv.requestBody()
+		if !ok {
 			return 0
 		}
-		return v2write(inv, m, buf, limit, inv.body)
+		return v2write(inv, m, buf, limit, body)
 	})
 
 	exp("write_response_body", func(ctx context.Context, m api.Module, ptr, n uint32) {

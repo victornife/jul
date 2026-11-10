@@ -110,9 +110,12 @@ type Metrics struct {
 	// max_instances allows in use (#506); pluginInstances is the scrape-time
 	// live-instance gauge.
 	pluginInstanceWaits *prometheus.CounterVec
-	pluginInstances     *pluginInstanceCollector
-	listenerConns       prometheus.Gauge
-	http3Conns          prometheus.Gauge
+	// pluginReqBodyFail counts request-body preparations for body-reading
+	// plugins that failed before any guest invocation (#699).
+	pluginReqBodyFail *prometheus.CounterVec
+	pluginInstances   *pluginInstanceCollector
+	listenerConns     prometheus.Gauge
+	http3Conns        prometheus.Gauge
 	// http3AltSvcTransitions counts HTTP/3 Alt-Svc advertisement changes,
 	// labeled by the bounded destination state ("advertise"/"clear"). No
 	// address, port, or max-age value is ever a label (#161).
@@ -497,6 +500,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_plugin_instance_waits_total",
 			Help: "WASM plugin calls that found every instance max_instances allows in use, labeled by plugin name and result (acquired/rejected). A rejected call answers 503.",
 		}, []string{"plugin", "result"}),
+		pluginReqBodyFail: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_plugin_request_body_failures_total",
+			Help: "Request bodies a body-reading WASM plugin could not prepare before invoking the guest, labeled by plugin name and reason (too_large/read_error/canceled/retired). The request answers 500 without a guest call.",
+		}, []string{"plugin", "reason"}),
 		pluginInstances: newPluginInstanceCollector(),
 		listenerConns: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_listener_conns",
@@ -674,6 +681,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.pluginRespDuration,
 		m.pluginRespNoBody,
 		m.pluginInstanceWaits,
+		m.pluginReqBodyFail,
 		m.pluginInstances,
 		m.listenerConns,
 		m.http3Conns,
@@ -1294,6 +1302,12 @@ func (m *Metrics) ObservePluginResponseBodyUnavailable(plugin, reason string) {
 // max_instances cap; result is "acquired" or "rejected" (#506).
 func (m *Metrics) ObservePluginInstanceWait(plugin, result string) {
 	m.pluginInstanceWaits.WithLabelValues(plugin, result).Inc()
+}
+
+// ObservePluginRequestBodyFailure counts a request body a body-reading plugin
+// could not prepare before invoking the guest, by closed reason (#699).
+func (m *Metrics) ObservePluginRequestBodyFailure(plugin, reason string) {
+	m.pluginReqBodyFail.WithLabelValues(plugin, reason).Inc()
 }
 
 // ObserveCertExpiry records a certificate's leaf expiry for domain and counts a
