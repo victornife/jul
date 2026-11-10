@@ -1175,7 +1175,7 @@
       "claims": [
         "Full frozen CLI/help wildcard substantiates local commands and AUTO04 stable /api/v1 remote automation; no private Console fallback",
         "Credential/profile precedence, normal TLS/mTLS, loopback-only plaintext/no redirects and no raw --token preserve transport/secret boundaries",
-        "Actual process tests enforce exit0–9, terminal polling/Ctrl-C distinction and idempotency/base fences"
+        "Actual process tests enforce exit0\u20139, terminal polling/Ctrl-C distinction and idempotency/base fences"
       ],
       "implementation_and_authority": [
         "cmd/jul/main.go",
