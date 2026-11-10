@@ -5,6 +5,7 @@
 - **Assessed runtime:** `main` at `453e62375bdce0302756ff386637832d5fa35bad` (the Step 1 / #694 merge). This was still `origin/main` when the assessment ran. It was built with `make build-full`; `jul` sha256 is `9d39b371…2130`.
 - **Plan:** [pre-run plan](2026-11-09-695-waf-wasm-assessment-plan.md), frozen in commit `70c7b4cea67eb8ee0cffcd2623d49b074f66f190` before the final runs.
 - **Evidence:** [`evidence/2026-11-09-695/`](evidence/2026-11-09-695/). The `exploratory/` directory holds pre-plan runs and probes. The `final/` directory holds the matrix: raw `results.jsonl`, 500 ms samples, rendered configurations, threshold evaluations, the kernel OOM journal and a supplemental reproducer. Each directory has a `SHA256SUMS` file.
+- **Later record:** the #697/#698 fixes were revalidated separately in [2026-11-10-697-698-waf-fix-revalidation.md](2026-11-10-697-698-waf-fix-revalidation.md); the measurements and findings below are unchanged.
 - **Disposition:** **B — material resource-control gaps require follow-up**: [#700](https://github.com/victornife/jul/issues/700), [#697](https://github.com/victornife/jul/issues/697), [#698](https://github.com/victornife/jul/issues/698) and [#699](https://github.com/victornife/jul/issues/699).
 
 This is a bounded characterisation on a single host. It is not a capacity claim, SLA, soak, maturity decision or release qualification. Throughput figures describe one 2 vCPU / 768 MiB envelope with these fixtures. They are not portable sizing constants.
