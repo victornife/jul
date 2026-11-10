@@ -1,0 +1,232 @@
+//go:build waf
+
+package waf
+
+// F1 feasibility instrument for ADR 0032 (#700). Scratch: archived as
+// evidence, not committed as a test.
+
+import (
+	"strconv"
+	"bytes"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"jul/internal/config"
+)
+
+func f1Wide(n int) []byte {
+	var b bytes.Buffer
+	b.WriteString(`{"marker":"","fields":[`)
+	field := strings.Repeat("synthetic assessment text ", 79)[:2000]
+	for b.Len()+len(field)+8 < n {
+		if b.Bytes()[b.Len()-1] == '"' {
+			b.WriteByte(',')
+		}
+		b.WriteString(`"` + field + `"`)
+	}
+	b.WriteString("]}")
+	return b.Bytes()
+}
+
+func f1Query(n int) string {
+	v := url.Values{}
+	for i := 0; i < n; i++ {
+		v.Set(fmt.Sprintf("k%d", i), fmt.Sprintf("value-%d", i))
+	}
+	return v.Encode()
+}
+
+func TestF1WAFAmplification(t *testing.T) {
+	if os.Getenv("F1") == "" {
+		t.Skip("set F1=1")
+	}
+	cfg := config.WAFConfig{CRSEnabled: true}
+	if err := cfg.RequestBodyLimit.UnmarshalText([]byte("1mb")); err != nil {
+		t.Fatal(err)
+	}
+	fw := assessmentFirewall(t, cfg)
+	type tc struct {
+		name  string
+		query string
+		body  []byte
+	}
+	var cases []tc
+	cases = append(cases, tc{"get-noargs", "", nil})
+	for _, n := range []int{10, 100, 300} {
+		cases = append(cases, tc{fmt.Sprintf("query-%dargs", n), f1Query(n), nil})
+	}
+	for _, items := range []int{10, 50, 100, 200, 300, 330} {
+		cases = append(cases, tc{fmt.Sprintf("items-%dargs", 3*items+1), "", itemsBody(items, false)})
+	}
+	for _, kb := range []int{16, 64, 256, 1000} {
+		cases = append(cases, tc{fmt.Sprintf("wide-%dKiB", kb), "", f1Wide(kb << 10)})
+	}
+	fmt.Printf("%-18s %8s %8s %12s %12s %10s %7s\n", "case", "bodyB", "status", "allocKiB/req", "liveKiB", "cpu_ms", "ratio")
+	for _, c := range cases {
+		var live uint64
+		var base runtime.MemStats
+		h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var m runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&m)
+			if m.HeapAlloc > base.HeapAlloc {
+				live = m.HeapAlloc - base.HeapAlloc
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		do := func() int {
+			target := "http://app.example.test/api"
+			if c.query != "" {
+				target += "?" + c.query
+			}
+			method := http.MethodGet
+			var rd *bytes.Reader
+			if c.body != nil {
+				method = http.MethodPost
+				rd = bytes.NewReader(c.body)
+			}
+			var req *http.Request
+			if rd != nil {
+				req = httptest.NewRequest(method, target, rd)
+				req.Header.Set("Content-Type", "application/json")
+			} else {
+				req = httptest.NewRequest(method, target, nil)
+			}
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, req)
+			return rr.Code
+		}
+		do() // warm
+		// live-set measurement (single request, GC inside handler)
+		runtime.GC()
+		runtime.ReadMemStats(&base)
+		live = 0
+		status := do()
+		// allocation volume and CPU (no GC inside the handler measurement)
+		h2 := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+		const reps = 5
+		var m0, m1 runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&m0)
+		st := time.Now()
+		for i := 0; i < reps; i++ {
+			target := "http://app.example.test/api"
+			if c.query != "" {
+				target += "?" + c.query
+			}
+			var req *http.Request
+			if c.body != nil {
+				req = httptest.NewRequest(http.MethodPost, target, bytes.NewReader(c.body))
+				req.Header.Set("Content-Type", "application/json")
+			} else {
+				req = httptest.NewRequest(http.MethodGet, target, nil)
+			}
+			h2.ServeHTTP(httptest.NewRecorder(), req)
+		}
+		el := time.Since(st) / reps
+		runtime.ReadMemStats(&m1)
+		alloc := (m1.TotalAlloc - m0.TotalAlloc) / reps
+		ratio := 0.0
+		if len(c.body) > 0 {
+			ratio = float64(alloc) / float64(len(c.body))
+		}
+		fmt.Printf("%-18s %8d %8d %12d %12d %10.1f %7.0f\n", c.name, len(c.body), status, alloc>>10, live>>10, float64(el.Microseconds())/1000, ratio)
+	}
+}
+
+// F1b: retained heap per concurrently open transaction while the downstream
+// handler runs (K transactions held open at once to average out pool noise).
+func TestF1bRetainedPerOpenTransaction(t *testing.T) {
+	if os.Getenv("F1") == "" {
+		t.Skip("set F1=1")
+	}
+	cfg := config.WAFConfig{CRSEnabled: true}
+	if err := cfg.RequestBodyLimit.UnmarshalText([]byte("1mb")); err != nil {
+		t.Fatal(err)
+	}
+	fw := assessmentFirewall(t, cfg)
+	K, _ := strconv.Atoi(os.Getenv("K"))
+	if K == 0 {
+		K = 32
+	}
+	type tc struct {
+		name  string
+		query string
+		body  []byte
+	}
+	cases := []tc{{"get-noargs", "", nil}}
+	if os.Getenv("SHORT") == "" {
+		cases = append(cases, tc{"query-300args", f1Query(300), nil})
+	}
+	for _, items := range []int{50, 100, 200, 330} {
+		cases = append(cases, tc{fmt.Sprintf("items-%dargs", 3*items+1), "", itemsBody(items, false)})
+	}
+	for _, kb := range []int{16, 64, 128, 256, 1000} {
+		cases = append(cases, tc{fmt.Sprintf("wide-%dKiB", kb), "", f1Wide(kb << 10)})
+	}
+	fmt.Printf("%-18s %8s %14s %10s\n", "case", "bodyB", "retainedKiB/tx", "per-bodyB")
+	for _, c := range cases {
+		inside := make(chan struct{}, K)
+		release := make(chan struct{})
+		h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if os.Getenv("PHASE3") != "" {
+				w.Header().Set("Content-Type", "text/event-stream")
+				w.WriteHeader(http.StatusOK)
+				w.(http.Flusher).Flush()
+			}
+			inside <- struct{}{}
+			<-release
+			if os.Getenv("PHASE3") == "" {
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		mk := func() *http.Request {
+			target := "http://app.example.test/api"
+			if c.query != "" {
+				target += "?" + c.query
+			}
+			if c.body != nil {
+				r := httptest.NewRequest(http.MethodPost, target, bytes.NewReader(c.body))
+				r.Header.Set("Content-Type", "application/json")
+				return r
+			}
+			return httptest.NewRequest(http.MethodGet, target, nil)
+		}
+		// warm pools
+		go func() { inside2 := h; inside2.ServeHTTP(httptest.NewRecorder(), mk()) }()
+		<-inside
+		release <- struct{}{}
+		time.Sleep(50 * time.Millisecond)
+		var base, m runtime.MemStats
+		runtime.GC()
+		runtime.GC()
+		runtime.ReadMemStats(&base)
+		done := make(chan struct{}, K)
+		for i := 0; i < K; i++ {
+			go func() { h.ServeHTTP(httptest.NewRecorder(), mk()); done <- struct{}{} }()
+		}
+		for i := 0; i < K; i++ {
+			<-inside
+		}
+		runtime.GC()
+		runtime.GC()
+		runtime.ReadMemStats(&m)
+		close(release)
+		for i := 0; i < K; i++ {
+			<-done
+		}
+		per := (int64(m.HeapAlloc) - int64(base.HeapAlloc)) / int64(K)
+		ratio := 0.0
+		if len(c.body) > 0 {
+			ratio = float64(per) / float64(len(c.body))
+		}
+		fmt.Printf("%-18s %8d %14d %10.1f  K=%d base=%dMiB open=%dMiB\n", c.name, len(c.body), per>>10, ratio, K, base.HeapAlloc>>20, m.HeapAlloc>>20)
+	}
+}

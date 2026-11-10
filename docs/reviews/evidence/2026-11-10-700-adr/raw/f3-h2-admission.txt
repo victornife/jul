@@ -1,0 +1,21 @@
+## f3-c1-hfalse
+workers=128 conns=1 honor=false dur=20s ok=40 goodput=2.0/s ok_p50=3.987s rejected=265484 reject_rate=13274/s other=0 upload_per_ok=256KiB upload_per_reject=256KiB wasted_reject_MiB=66371 probe_ok=196 probe_fail=0 probe_p50=1ms
+cgroup_peak_MiB=71 oom_kill=oom_kill 0
+## f3-c1-htrue
+workers=128 conns=1 honor=true dur=20s ok=57 goodput=2.9/s ok_p50=3.021s rejected=2126 reject_rate=106/s other=0 upload_per_ok=256KiB upload_per_reject=256KiB wasted_reject_MiB=531 probe_ok=195 probe_fail=0 probe_p50=2ms
+cgroup_peak_MiB=20 oom_kill=oom_kill 0
+## f3-c16-hfalse
+workers=128 conns=16 honor=false dur=20s ok=304 goodput=15.2/s ok_p50=1.563s rejected=149693 reject_rate=7485/s other=0 upload_per_ok=256KiB upload_per_reject=255KiB wasted_reject_MiB=37410 probe_ok=165 probe_fail=0 probe_p50=21ms
+cgroup_peak_MiB=67 oom_kill=oom_kill 0
+## f3-nopend-c1-htrue
+workers=128 conns=1 honor=true dur=20s ok=312 goodput=15.6/s ok_p50=502ms rejected=2450 reject_rate=122/s other=0 upload_per_ok=256KiB upload_per_reject=256KiB wasted_reject_MiB=612 probe_ok=197 probe_fail=0 probe_p50=1ms
+cgroup_peak_MiB=18 oom_kill=oom_kill 0
+## f3-nopend-c1-hfalse
+workers=128 conns=1 honor=false dur=20s ok=312 goodput=15.6/s ok_p50=524ms rejected=101230 reject_rate=5062/s other=0 upload_per_ok=256KiB upload_per_reject=255KiB wasted_reject_MiB=25305 probe_ok=197 probe_fail=0 probe_p50=1ms
+cgroup_peak_MiB=26 oom_kill=oom_kill 0
+## f3-c1-htrue-r2
+workers=128 conns=1 honor=true dur=20s ok=50 goodput=2.5/s ok_p50=2.911s rejected=2138 reject_rate=107/s other=0 upload_per_ok=256KiB upload_per_reject=255KiB wasted_reject_MiB=533 probe_ok=197 probe_fail=0 probe_p50=1ms
+cgroup_peak_MiB=19 oom_kill=oom_kill 0
+## f3-nopend-c1-htrue-r2
+workers=128 conns=1 honor=true dur=20s ok=312 goodput=15.6/s ok_p50=502ms rejected=2456 reject_rate=123/s other=0 upload_per_ok=256KiB upload_per_reject=255KiB wasted_reject_MiB=613 probe_ok=197 probe_fail=0 probe_p50=1ms
+cgroup_peak_MiB=18 oom_kill=oom_kill 0

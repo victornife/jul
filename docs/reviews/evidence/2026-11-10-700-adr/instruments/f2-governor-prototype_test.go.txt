@@ -1,0 +1,262 @@
+package f2gov
+
+import (
+	"context"
+	"errors"
+	"io"
+	"math"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// Two listeners and two overlapping generations share one Governor; the
+// combined charge never exceeds the single process ceiling.
+func TestSharedCeilingAcrossListenersAndGenerations(t *testing.T) {
+	const limit = 1 << 20
+	g := New(limit, 2)
+	var admitted, rejected atomic.Int64
+	var wg sync.WaitGroup
+	for listener := 0; listener < 2; listener++ {
+		for gen := 0; gen < 2; gen++ {
+			for i := 0; i < 50; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for k := 0; k < 50; k++ {
+						_, l, _, err := g.Admit(context.Background(), 64<<10)
+						if err != nil {
+							rejected.Add(1)
+							continue
+						}
+						admitted.Add(1)
+						if l.Grow(64<<10) == nil {
+							time.Sleep(50 * time.Microsecond)
+						}
+						l.Release()
+					}
+				}()
+			}
+		}
+	}
+	wg.Wait()
+	pb, _ := g.Peaks()
+	if pb > limit {
+		t.Fatalf("peak %d > ceiling %d", pb, limit)
+	}
+	if b, s, w := g.Usage(); b != 0 || s != 0 || w != 0 {
+		t.Fatalf("leak bytes=%d slots=%d waiters=%d", b, s, w)
+	}
+	t.Logf("admitted=%d rejected=%d peak=%d/%d", admitted.Load(), rejected.Load(), pb, limit)
+}
+
+// A limit decrease keeps existing charges, admits nothing new until usage
+// drains, and a rollback restores the old limit without resetting usage.
+func TestLimitDecreaseDrainAndRollback(t *testing.T) {
+	g := New(1000, 1)
+	_, old1, _, _ := g.Admit(context.Background(), 400)
+	_, old2, _, _ := g.Admit(context.Background(), 400)
+	g.SetLimits(500, 1) // new generation publishes a lower limit
+	if _, _, _, err := g.Admit(context.Background(), 10); !errors.Is(err, ErrOverloaded) {
+		t.Fatal("admitted above lowered limit")
+	}
+	if b, _, _ := g.Usage(); b != 800 {
+		t.Fatalf("usage reset by publish: %d", b)
+	}
+	g.SetLimits(1000, 1) // rollback
+	if b, _, _ := g.Usage(); b != 800 {
+		t.Fatalf("usage reset by rollback: %d", b)
+	}
+	old1.Release()
+	old2.Release()
+	g.SetLimits(500, 1)
+	if _, l, _, err := g.Admit(context.Background(), 400); err != nil {
+		t.Fatal("drained governor rejected", err)
+	} else {
+		l.Release()
+	}
+}
+
+// Cancellation must not release capacity while uninterruptible work still runs.
+func TestCancelledUninterruptibleWorkStaysCharged(t *testing.T) {
+	g := New(0, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx, l, _, _ := g.Admit(ctx, 100)
+	rel, err := l.AcquireSlot(ctx, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan struct{})
+	go func() { // stands in for Coraza ProcessRequestBody: ignores ctx
+		time.Sleep(100 * time.Millisecond)
+		rel()
+		l.Release()
+		close(finished)
+	}()
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+	if b, s, _ := g.Usage(); b != 100 || s != 1 {
+		t.Fatalf("released on cancel: bytes=%d slots=%d", b, s)
+	}
+	_, l2, _, _ := g.Admit(context.Background(), 1)
+	if _, err := l2.AcquireSlot(context.Background(), 0); !errors.Is(err, ErrOverloaded) {
+		t.Fatal("slot granted while uninterruptible work holds it")
+	}
+	l2.Release()
+	<-finished
+	if b, s, _ := g.Usage(); b != 0 || s != 0 {
+		t.Fatalf("not released after completion: %d %d", b, s)
+	}
+}
+
+// Nested layers reuse one lease: no double base charge, and a slot waiter that
+// holds bytes cannot deadlock because slot holders never wait for bytes.
+func TestNestedLayersShareLeaseNoDeadlock(t *testing.T) {
+	g := New(64<<20, 2)
+	var wg sync.WaitGroup
+	var ok, over atomic.Int64
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, l, owner, err := g.Admit(context.Background(), 64<<10) // plugin layer
+			if err != nil {
+				over.Add(1)
+				return
+			}
+			if !owner {
+				t.Error("first layer not owner")
+			}
+			ctx2, l2, owner2, _ := g.Admit(ctx, 64<<10) // WAF layer
+			if l2 != l || owner2 || ctx2 != ctx {
+				t.Error("nested layer did not reuse the lease")
+			}
+			_ = l.Grow(128 << 10) // prepared body
+			rel, err := l.AcquireSlot(ctx, 50*time.Millisecond)
+			if err == nil {
+				time.Sleep(time.Millisecond)
+				rel()
+				ok.Add(1)
+			} else {
+				over.Add(1)
+			}
+			l.Release()
+		}()
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock")
+	}
+	if b, s, w := g.Usage(); b != 0 || s != 0 || w != 0 {
+		t.Fatalf("leak %d %d %d", b, s, w)
+	}
+	t.Logf("evaluated=%d overloaded=%d", ok.Load(), over.Load())
+}
+
+// Slot waits are FIFO, bounded in duration, and abandoned waiters do not
+// block later requests when capacity is free.
+func TestSlotWaitBoundedFIFOAndAbandonedWaiters(t *testing.T) {
+	g := New(0, 1)
+	_, holder, _, _ := g.Admit(context.Background(), 0)
+	rel, _ := holder.AcquireSlot(context.Background(), 0)
+	_, w1, _, _ := g.Admit(context.Background(), 0)
+	st := time.Now()
+	if _, err := w1.AcquireSlot(context.Background(), 30*time.Millisecond); !errors.Is(err, ErrOverloaded) {
+		t.Fatal("expected timeout")
+	}
+	if d := time.Since(st); d > 200*time.Millisecond {
+		t.Fatalf("wait not bounded: %s", d)
+	}
+	order := make(chan int, 3)
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		_, l, _, _ := g.Admit(context.Background(), 0)
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r, err := l.AcquireSlot(context.Background(), time.Second)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			order <- i
+			r()
+		}(i)
+		time.Sleep(10 * time.Millisecond)
+	}
+	rel()
+	wg.Wait()
+	close(order)
+	want := 0
+	for got := range order {
+		if got != want {
+			t.Fatalf("not FIFO: got %d want %d", got, want)
+		}
+		want++
+	}
+	_, l, _, _ := g.Admit(context.Background(), 0)
+	if r, err := l.AcquireSlot(context.Background(), 0); err != nil {
+		t.Fatal("abandoned waiter blocked free capacity")
+	} else {
+		r()
+	}
+}
+
+// Grow-before-allocate: overflow and negative requests are refused, and the
+// charge equals live buffer capacity at every step of a bounded read.
+func TestGrowBeforeAllocateAccounting(t *testing.T) {
+	g := New(0, 1)
+	_, l, _, _ := g.Admit(context.Background(), 0)
+	if err := l.Grow(math.MaxInt64); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Grow(1); err == nil {
+		t.Fatal("overflow accepted")
+	}
+	if err := l.Grow(-5); err == nil {
+		t.Fatal("negative accepted")
+	}
+	l.Shrink(math.MaxInt64)
+	l.Release()
+
+	g = New(300<<10, 1)
+	_, l, _, _ = g.Admit(context.Background(), 0)
+	data := make([]byte, 100<<10)
+	off := 0
+	src := func(p []byte) (int, error) {
+		if off >= len(data) {
+			return 0, io.EOF
+		}
+		n := copy(p, data[off:])
+		off += n
+		return n, nil
+	}
+	buf, err := ReadBounded(l, src, 128<<10, -1) // unknown length
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, _ := g.Usage()
+	if b != int64(cap(buf)) {
+		t.Fatalf("charge %d != live cap %d", b, cap(buf))
+	}
+	pb, _ := g.Peaks()
+	t.Logf("data=%d final cap=%d charge=%d transient peak=%d (%.2fx data)", len(buf), cap(buf), b, pb, float64(pb)/float64(len(buf)))
+	l.Release()
+
+	// A dishonest Content-Length hint cannot pre-charge beyond the 32 KiB cap,
+	// and a too-small budget fails before allocation.
+	g = New(48<<10, 1)
+	_, l, _, _ = g.Admit(context.Background(), 0)
+	off = 0
+	if _, err := ReadBounded(l, src, 128<<10, 1<<40); !errors.Is(err, ErrOverloaded) {
+		t.Fatalf("expected overload before allocation, got %v", err)
+	}
+	if b, _, _ := g.Usage(); b != 0 {
+		t.Fatalf("failed read left charge %d", b)
+	}
+	l.Release()
+}

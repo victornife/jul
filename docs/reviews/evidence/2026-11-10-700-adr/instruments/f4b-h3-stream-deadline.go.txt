@@ -1,0 +1,104 @@
+//go:build ignore
+
+// F4b feasibility instrument for ADR 0032 (#700): a per-stream HTTP/3 body
+// deadline set through http.ResponseController ends one stalled upload while a
+// sibling stream on the same QUIC connection completes, and a restored (zero)
+// deadline lets a slow upload finish.
+package main
+
+import (
+	"bytes"
+	"crypto/tls"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"time"
+
+	"github.com/quic-go/quic-go/http3"
+)
+
+func main() {
+	go func() {
+		for {
+			time.Sleep(time.Second)
+		}
+	}()
+	cert, err := tls.LoadX509KeyPair("testdata/tls/localhost.crt", "testdata/tls/localhost.key")
+	if err != nil {
+		panic(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/upload", func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		st := time.Now()
+		dl := 2 * time.Second
+		if r.URL.Query().Get("deadline") == "off" {
+			dl = 0
+		}
+		if dl > 0 {
+			if err := rc.SetReadDeadline(time.Now().Add(dl)); err != nil {
+				http.Error(w, "SetReadDeadline unsupported: "+err.Error(), 500)
+				return
+			}
+		}
+		n, err := io.Copy(io.Discard, r.Body)
+		_ = rc.SetReadDeadline(time.Time{}) // restore after the body phase
+		if err != nil {
+			w.Header().Set("X-Read-Error", err.Error())
+			http.Error(w, fmt.Sprintf("body read ended after %s with %d bytes: %v", time.Since(st).Round(100*time.Millisecond), n, err), http.StatusRequestTimeout)
+			return
+		}
+		fmt.Fprintf(w, "read %d bytes in %s", n, time.Since(st).Round(100*time.Millisecond))
+	})
+	mux.HandleFunc("/sibling", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") })
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	srv := &http3.Server{Handler: mux, TLSConfig: http3.ConfigureTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}})}
+	go srv.Serve(pc)
+	base := "https://" + pc.LocalAddr().String()
+	c := &http.Client{Transport: &http3.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}, Timeout: 20 * time.Second}
+	run := func(name, q string, slow bool) {
+		pr, pw := io.Pipe()
+		go func() {
+			if !slow {
+				pw.Write(bytes.Repeat([]byte("s"), 1024))
+				return // stall
+			}
+			for i := 0; i < 8; i++ {
+				pw.Write(bytes.Repeat([]byte("s"), 1024))
+				time.Sleep(500 * time.Millisecond)
+			}
+			pw.Close()
+		}()
+		st := time.Now()
+		done := make(chan string, 1)
+		go func() {
+			resp, err := c.Post(base+"/upload"+q, "application/octet-stream", pr)
+			if err != nil {
+				done <- "client error: " + err.Error()
+				return
+			}
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			done <- fmt.Sprintf("status %d after %s: %s", resp.StatusCode, time.Since(st).Round(100*time.Millisecond), bytes.TrimSpace(b))
+		}()
+		time.Sleep(500 * time.Millisecond)
+		ss := time.Now()
+		resp, err := c.Get(base + "/sibling")
+		sib := ""
+		if err != nil {
+			sib = "sibling error " + err.Error()
+		} else {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			sib = fmt.Sprintf("sibling %d in %s (proto %s)", resp.StatusCode, time.Since(ss).Round(time.Millisecond), resp.Proto)
+		}
+		fmt.Printf("%-28s %s | %s\n", name, <-done, sib)
+	}
+	run("stalled, 2s deadline", "", false)
+	run("slow 4s, deadline off", "?deadline=off", true)
+	run("slow 4s, 2s deadline", "", true)
+}

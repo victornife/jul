@@ -1,0 +1,17 @@
+case                  bodyB   status allocKiB/req      liveKiB     cpu_ms   ratio
+get-noargs                0      200          130          153        0.3       0
+query-10args              0      200          509          799        1.1       0
+query-100args             0      200         2714          838       13.3       0
+query-300args             0      200        10086          971       52.4       0
+items-31args            654      200         1132          809        7.6    1773
+items-151args          3254      200         4140          857       38.7    1303
+items-301args          6504      200         8516         1957       80.7    1341
+items-601args         13204      200        17405         3043      179.6    1350
+items-901args         19904      200        23370         1169      259.5    1202
+items-991args         21914      200        25197         1209      288.9    1177
+wide-16KiB            16048      200         1257         1094       75.0      80
+wide-64KiB            64120      200         3959         1758      293.8      63
+wide-256KiB          260414      200        16002         5584     1215.9      63
+wide-1000KiB        1023557      200        64299        18790     6506.1      64
+PASS
+ok  	jul/internal/waf	61.435s

@@ -1,0 +1,14 @@
+case                  bodyB retainedKiB/tx  per-bodyB
+get-noargs                0             37        0.0  K=1 base=22MiB open=22MiB
+query-300args             0          13573        0.0  K=1 base=22MiB open=35MiB
+items-151args          3254           5793     1823.0  K=1 base=22MiB open=28MiB
+items-301args          6504          12192     1919.6  K=1 base=22MiB open=34MiB
+items-601args         13204          30835     2391.4  K=1 base=22MiB open=52MiB
+items-991args         21914          41550     1941.6  K=1 base=22MiB open=63MiB
+wide-16KiB            16048            520       33.2  K=1 base=22MiB open=23MiB
+wide-64KiB            64120           2477       39.6  K=1 base=22MiB open=25MiB
+wide-128KiB          130219           4958       39.0  K=1 base=22MiB open=27MiB
+wide-256KiB          260414           9766       38.4  K=1 base=22MiB open=32MiB
+wide-1000KiB        1023557          38297       38.3  K=1 base=22MiB open=60MiB
+PASS
+ok  	jul/internal/waf	20.879s
