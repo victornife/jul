@@ -1,0 +1,28 @@
+=== RUN   TestAssessmentCRSResponseBodyAccess
+=== RUN   TestAssessmentCRSResponseBodyAccess/no-crs_check=false
+=== RUN   TestAssessmentCRSResponseBodyAccess/no-crs_check=true_no_mime_directive
+=== RUN   TestAssessmentCRSResponseBodyAccess/crs_check=false_text/plain
+=== RUN   TestAssessmentCRSResponseBodyAccess/crs_check=true_text/plain
+=== RUN   TestAssessmentCRSResponseBodyAccess/crs_check=false_application/json
+--- PASS: TestAssessmentCRSResponseBodyAccess (0.20s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/no-crs_check=false (0.00s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/no-crs_check=true_no_mime_directive (0.00s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/crs_check=false_text/plain (0.07s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/crs_check=true_text/plain (0.06s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/crs_check=false_application/json (0.06s)
+=== RUN   TestAssessmentArgumentLimitPartialInspection
+=== RUN   TestAssessmentArgumentLimitPartialInspection/301_args_clean
+=== RUN   TestAssessmentArgumentLimitPartialInspection/301_args_attack_last
+=== RUN   TestAssessmentArgumentLimitPartialInspection/1201_args_attack_last_passes_uninspected
+=== RUN   TestAssessmentArgumentLimitPartialInspection/guard_301_args_clean
+=== RUN   TestAssessmentArgumentLimitPartialInspection/guard_1003_args_clean_rejected
+=== RUN   TestAssessmentArgumentLimitPartialInspection/guard_1201_args_attack_last
+--- PASS: TestAssessmentArgumentLimitPartialInspection (1.57s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/301_args_clean (0.14s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/301_args_attack_last (0.15s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/1201_args_attack_last_passes_uninspected (0.40s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/guard_301_args_clean (0.14s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/guard_1003_args_clean_rejected (0.38s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/guard_1201_args_attack_last (0.37s)
+PASS
+ok  	jul/internal/waf	1.790s

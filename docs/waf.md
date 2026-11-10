@@ -64,8 +64,9 @@ to run it. The check is performed once at startup by `waf.Check`.
 ## How it works
 
 1. At startup (and on each reload that reaches `Prepare`) Jul.IA assembles a SecLang directive program
-   from your policy — the embedded CRS, your directive files, your inline rules,
-   and finally the enforcement-mode line — and compiles it into a Coraza engine.
+   from your policy — the embedded CRS, Jul's generated guards and defaults,
+   your directive files, your inline rules, and finally the enforcement-mode
+   line — and compiles it into a Coraza engine.
    A rule that fails to compile fails the reload, so a typo never leaves a
    location unprotected.
 2. Each request to a location with the WAF enabled is run through the engine
@@ -129,7 +130,7 @@ override):
 | `directives_files` | string list | — | SecLang rule files to `Include`, in order, before the inline rules |
 | `inline_rules` | string | — | A SecLang snippet appended last — handy for small tuning/allow-list rules |
 | `request_body_limit` | size | `128kb` | Request-body inspection threshold (e.g. `1mb`); in block mode with the default Reject action, a body reaching or exceeding it is rejected with `413` |
-| `response_body_check` | bool | `false` | Also inspect response bodies (CRS phase 4). Adds latency + memory |
+| `response_body_check` | bool | `false` | Inspect `text/plain`, `text/html` and `text/xml` response bodies (phase 4), with or without CRS. `false` turns response-body inspection off, including the CRS recommended default. Rule directives can override either way. Adds latency + memory |
 
 At least one rule source — `crs_enabled`, a `directives_files` entry, or
 `inline_rules` — must be present when `enabled` is set; otherwise the config is
@@ -163,7 +164,11 @@ Include @coraza.conf-recommended
 Include @crs-setup.conf.example
 SecAction "id:900000,phase:1,nolog,pass,t:none,setvar:tx.blocking_paranoia_level=N,setvar:tx.detection_paranoia_level=N"
 Include @owasp_crs/*.conf
+SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" "id:900001,phase:2,deny,status:413,log,…"
 ```
+
+The last line is Jul's **argument-limit guard** (see
+[Request and response bodies](#request-and-response-bodies)).
 
 `paranoia` (1–4) sets both the blocking and detection paranoia levels. Level 1
 is the default and the most production-safe; raising it catches more subtle
@@ -274,13 +279,20 @@ WAF override**. Use the raw TOML editor for the advanced fields above. See
 The SecLang program is assembled deterministically:
 
 1. the embedded CRS (recommended base → setup → optional paranoia → rules), when
-   `crs_enabled`;
-2. each `directives_files` entry, in order;
-3. the `inline_rules` snippet;
-4. the enforcement-mode line (`SecRuleEngine On`/`DetectionOnly`), last.
+   `crs_enabled`, followed by the generated argument-limit guard (rule
+   `900001`);
+2. Jul's response-inspection default from `response_body_check`
+   (`SecResponseBodyAccess On|Off` and
+   `SecResponseBodyMimeType text/plain text/html text/xml`);
+3. each `directives_files` entry, in order;
+4. the `inline_rules` snippet;
+5. the enforcement-mode line (`SecRuleEngine On`/`DetectionOnly`), last.
 
-Because your files and inline rules come **after** the CRS, they can tune or
-disable specific CRS rules (e.g. `SecRuleRemoveById`). The final mode line wins
+Because your files and inline rules come **after** the CRS and Jul's defaults,
+they can tune or disable specific CRS rules (e.g. `SecRuleRemoveById`) and
+deliberately override response inspection. Jul sets response inspection with
+directives, not Coraza's Go configuration options, because those options are
+applied after every directive and would silently override yours. The final mode line wins
 over static directives, not per-transaction `ctl:ruleEngine` actions.
 
 ## Request and response bodies
@@ -300,25 +312,59 @@ over static directives, not per-transaction `ctl:ruleEngine` actions.
   (`[servers.locations.waf] enabled = false`) or expose the service through
   `grpc_transcode`, whose JSON the WAF can inspect; `jul lint` warns otherwise.
   WebSocket upgrades and streamed (e.g. SSE) responses pass through normally.
-- **Response bodies** are inspected when `response_body_check = true`. This
-  enables CRS phase-4 outbound rules (e.g. data-leakage detection) but buffers
-  responses and adds latency and memory. **Known defect
-  ([#698](https://github.com/victornife/jul/issues/698)):** with `crs = true`,
-  the embedded recommended configuration already buffers and inspects
-  `text/plain`, `text/html` and `text/xml` responses even when
-  `response_body_check = false`, and posture reports `false`. To turn it off,
-  add `SecResponseBodyAccess Off` to `inline_rules`.
-- **Arguments beyond 1,000 are not inspected
-  ([#697](https://github.com/victornife/jul/issues/697), security).** The
-  engine stops collecting form/JSON arguments at `SecArgumentsLimit` (1000), and
-  block mode forwards a request whose payload sits after that point. Until the
-  default fails closed, add this guard to every CRS location:
+- **Response bodies** are inspected when `response_body_check = true`, with or
+  without CRS, for `text/plain`, `text/html` and `text/xml` only. This is the
+  engine's recommended selection: the text documents CRS outbound rules (for
+  example data-leakage detection) target. JSON, binary, streamed types such as
+  `text/event-stream`, and every other type pass through uninspected.
+  Inspection buffers an eligible response up to the engine's 512 KiB response
+  limit and then processes the rest partially, so it adds latency and memory.
+  With `response_body_check = false` (the default) response bodies are not
+  buffered or inspected, including with CRS; response headers (phase 3) and
+  all request phases still are. Rule directives override the field
+  deliberately, because they come later:
 
   ```toml
-  [servers.locations.waf]
-  inline_rules = 'SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" "id:1695190,phase:2,deny,status:413,log"'
+  [waf]
+  response_body_check = true
+  # Inspect JSON instead of the default text types:
+  inline_rules = "SecResponseBodyMimeType application/json"
+  # Or keep the field but turn access off: "SecResponseBodyAccess Off"
+  # Or select nothing: "SecResponseBodyMimeTypesClear"
   ```
 
+  The effective policy reports the compiled result, not the field
+  ([Effective policy](#effective-policy-and-provenance)). A request-specific
+  `ctl:responseBodyAccess` action can still change one transaction and is not
+  reported.
+- **Arguments beyond `SecArgumentsLimit` fail closed with CRS.** The engine
+  stops collecting arguments at `SecArgumentsLimit` (1000 by default, counted
+  separately for query, body and path arguments), and CRS would not see an
+  argument after that point. With `crs_enabled = true` Jul adds rule `900001`
+  after the CRS: a request whose argument collection reached the limit
+  (1,001 or more body arguments with the default) is **rejected with `413`**
+  in block mode before it reaches the upstream or the cache, and recorded
+  without blocking in detect mode. This is separate from the
+  `request_body_limit` byte threshold; the investigation outcome is
+  `interrupted_request` attributed to generated rule `900001`, not
+  `rejected_body_limit`. The guard follows a `SecArgumentsLimit` you set in
+  your rules. Raise that limit, rather than removing the guard, when a route
+  legitimately needs more arguments. Removing the guard deliberately
+  (`SecRuleRemoveById 900001`) restores partial inspection of large requests
+  and is shown in the effective policy. Without CRS, policies are entirely
+  your own rules and Jul adds no guard.
+
+  **Retiring the interim guard.** Before this fix, `docs/waf.md` told operators
+  to add `SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" "id:1695190,…"` to CRS
+  locations ([#697](https://github.com/victornife/jul/issues/697)). It still
+  compiles alongside rule `900001`, which runs first and is the rule that
+  rejects. Delete the interim rule from `inline_rules` or your rule file when
+  you upgrade; keep it only if you also remove `900001`.
+
+  **Published packages.** Released packages up to and including the current
+  release predate both fixes. On them, add the interim `1695190` guard to every
+  CRS location and, where `response_body_check = false` must hold with CRS, add
+  `SecResponseBodyAccess Off` to `inline_rules`.
 - **Bodies above 128 KiB spill to temporary files.** With CRS and a larger
   `request_body_limit`, Coraza writes the part above 128 KiB to the OS
   temporary directory (`TMPDIR` on Unix, `TMP`/`TEMP` on Windows) for the
@@ -447,7 +493,7 @@ not-yet-reloaded candidate never appears active.
 | route coverage | routes inheriting the global policy, with their own override, turned off by an override, and not inspected at all |
 | `policy_digest` | context-keyed `ev1:<128-bit context id>:<256-bit tag>` HMAC-SHA-256 digest (`waf-compiled-policy-v1`) over the complete compiled policy inputs |
 | `evaluation` | serving policy fixture evaluation state (`unrun`, `verified`, `stale`, `failed`, `unknown`), fixtures passed/total, false positives, false negatives, evaluated timestamp, and staleness reason |
-| `global`, `overrides[].policy` | one summary per compiled policy: mode, block status, CRS version, paranoia (flagged when it is the CRS default), request-body limit, response-body inspection, rule-file and rule counts, content identity |
+| `global`, `overrides[].policy` | one summary per compiled policy: mode, block status, CRS version, paranoia (flagged when it is the CRS default), request-body limit, compiled argument limit and whether the argument-limit guard is active, compiled response-body access and MIME selection (and whether rule directives overrode `response_body_check`), rule-file and rule counts, content identity |
 
 **Resolved server-side.** Inheritance is resolved before the Console sees it:
 an override replaces the global policy for its route, a disabled override is
@@ -461,7 +507,20 @@ rule file can still change the CRS variables.
 **Source classes.** Compiled rules (`SecRule`, `SecAction`, `SecMarker`) are
 counted by where the parser read them: `embedded` (the CRS and Coraza
 configuration shipped in the binary), `external` (files on disk), `inline`
-(`inline_rules`), and `generated` (Jul's own paranoia `SecAction`).
+(`inline_rules`), and `generated` (Jul's own paranoia `SecAction`, structured
+exceptions and argument-limit guard `900001`). The guard is counted as
+generated even after `SecRuleRemoveById 900001`; `argument_limit_guard` reports
+whether it is active.
+
+**Compiled response and argument settings.** `response_body_inspection`,
+`response_body_mime_types` and `argument_limit` are read from the compiled
+engine after every directive, so a `SecResponseBodyAccess`,
+`SecResponseBodyMimeType` or `SecArgumentsLimit` in your rules is reflected.
+`response_body_operator_override` is true when your directives changed the
+result of `response_body_check`. Access applies only to the listed MIME types;
+the MIME list is bounded to 16 entries in the report. A Jul upgrade that
+changes generated directives changes `policy_digest`, so an earlier
+evaluation becomes stale.
 
 **Content identity.** Rule files, the files they include and operator data
 files (`@pmFromFile`, `@ipMatchFromFile`, …) are read through a recording
@@ -644,7 +703,8 @@ switching modes or rule sources.
 | **Request / response handling** ||||
 | Request line + headers (phases 1–2) | ✅ | ✅ | Always inspected |
 | Request body (phase 2 cont.) | ✅ | ✅ | Up to `request_body_limit` |
-| Response body (phase 4) | ✅ | ✅ | Opt-in via `response_body_check` |
+| Arguments beyond `SecArgumentsLimit` (CRS) | ✅ `413` | ☐ recorded | Generated rule `900001`; removable with `SecRuleRemoveById 900001` |
+| Response body (phase 4) | ✅ | ✅ | Opt-in via `response_body_check`, text MIME types only; rule directives can override |
 | Uncompressed body inspection | ✅ | ✅ | WAF runs before compression middleware |
 | **Integration** ||||
 | Prometheus `jul_waf_events_total` | ✅ | ✅ | Labeled by `action` and `rule` (logged rule matches) |
@@ -713,8 +773,13 @@ especially at higher paranoia levels (`paranoia ≥ 2`). Recommended mitigation:
   `ProcessPartial` action, can forward an oversized body after partial
   inspection. Size the blocking threshold above legitimate bodies.
 - **Response-body evasion:** When `response_body_check = false`, outbound data
-  leakage evades phase-4 inspection. Enable only when your threat model requires
-  it (adds latency/memory).
+  leakage evades phase-4 inspection; with `true`, response types outside the
+  selected MIME types do. Enable only when your threat model requires it (adds
+  latency/memory).
+- **Argument-count evasion:** With CRS, a request whose arguments exceed
+  `SecArgumentsLimit` is rejected (`413`) by rule `900001` unless you remove it.
+  Without CRS, add your own `ARGUMENTS_LIMIT_REACHED` rule if your rules depend
+  on seeing every argument.
 - **Coraza engine bugs:** The rule engine is Coraza, not Jul.IA code. Follow
   Coraza security advisories and rebuild when the upstream publishes fixes. The
   CRS version is pinned at build time (`go.mod`); there is no live update

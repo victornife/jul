@@ -20,6 +20,7 @@ import (
 	"github.com/corazawaf/coraza/v3/experimental"
 	"github.com/corazawaf/coraza/v3/types"
 
+	"jul/internal/config"
 	"jul/internal/middleware"
 )
 
@@ -80,7 +81,7 @@ func isBodyLimitInterruption(it *types.Interruption) bool {
 }
 
 func classifyRuleSource(id int, file string) string {
-	if id == 900000 || (id >= 890001 && id <= 899999) {
+	if id == 900000 || id == config.WAFArgumentLimitGuardRuleID || (id >= 890001 && id <= 899999) {
 		return "generated"
 	}
 	switch {

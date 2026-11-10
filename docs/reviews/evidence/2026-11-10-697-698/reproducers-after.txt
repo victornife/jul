@@ -1,0 +1,32 @@
+=== RUN   TestAssessmentCRSResponseBodyAccess
+=== RUN   TestAssessmentCRSResponseBodyAccess/no-crs_check=false
+=== RUN   TestAssessmentCRSResponseBodyAccess/no-crs_check=true_text/plain
+=== RUN   TestAssessmentCRSResponseBodyAccess/crs_check=false_text/plain
+=== RUN   TestAssessmentCRSResponseBodyAccess/crs_check=true_text/plain
+=== RUN   TestAssessmentCRSResponseBodyAccess/crs_check=true_application/json_out_of_scope
+=== RUN   TestAssessmentCRSResponseBodyAccess/crs_check=false_application/json
+--- PASS: TestAssessmentCRSResponseBodyAccess (0.31s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/no-crs_check=false (0.00s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/no-crs_check=true_text/plain (0.00s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/crs_check=false_text/plain (0.08s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/crs_check=true_text/plain (0.08s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/crs_check=true_application/json_out_of_scope (0.07s)
+    --- PASS: TestAssessmentCRSResponseBodyAccess/crs_check=false_application/json (0.08s)
+=== RUN   TestAssessmentArgumentLimitPartialInspection
+=== RUN   TestAssessmentArgumentLimitPartialInspection/301_args_clean
+=== RUN   TestAssessmentArgumentLimitPartialInspection/301_args_attack_last
+=== RUN   TestAssessmentArgumentLimitPartialInspection/1201_args_attack_last_rejected
+=== RUN   TestAssessmentArgumentLimitPartialInspection/1003_args_clean_rejected
+=== RUN   TestAssessmentArgumentLimitPartialInspection/interim_guard_301_args_clean
+=== RUN   TestAssessmentArgumentLimitPartialInspection/interim_guard_1003_args_clean_rejected
+=== RUN   TestAssessmentArgumentLimitPartialInspection/interim_guard_1201_args_attack_last
+--- PASS: TestAssessmentArgumentLimitPartialInspection (2.07s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/301_args_clean (0.16s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/301_args_attack_last (0.16s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/1201_args_attack_last_rejected (0.42s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/1003_args_clean_rejected (0.39s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/interim_guard_301_args_clean (0.15s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/interim_guard_1003_args_clean_rejected (0.40s)
+    --- PASS: TestAssessmentArgumentLimitPartialInspection/interim_guard_1201_args_attack_last (0.40s)
+PASS
+ok  	jul/internal/waf	2.411s

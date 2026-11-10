@@ -1,0 +1,25 @@
+{
+  "args": [
+    "/tmp/w698/bin/harness",
+    "run",
+    "-jul",
+    "/tmp/w698/bin/jul-old",
+    "-plugin",
+    "/tmp/w698/bin/inspect-load.wasm",
+    "-only",
+    "r1,r2",
+    "-out",
+    "/tmp/w698/reval-old"
+  ],
+  "cpu_quota": "200%",
+  "finished": "2026-11-10T09:32:32Z",
+  "jul_cpus": "0,1",
+  "jul_sha256": "97f08b2aa76f5f5e0feda4109ae12086b46d80910dc4ebd04d416ec6d69b11cf",
+  "load_cpus": "4-9",
+  "mem_max": "768M",
+  "origin_cpus": "10,11",
+  "plugin_sha256": "2526ed827923406126589f3ba8b530f7ef1b2e20f6cb0cc6dde9509a9ec08127",
+  "quick": false,
+  "results_sha256": "1fb8e2bc8919f50cbd1b66c5d57f7e4253f47e818ec97bafd37e7a5651f0dbff",
+  "started": "2026-11-10T09:27:20Z"
+}

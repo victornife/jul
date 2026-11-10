@@ -219,9 +219,11 @@ type WAFConfig struct {
 	// RequestBodyLimit caps how many request-body bytes are buffered for
 	// inspection. Zero applies a 128 KiB default.
 	RequestBodyLimit Size `toml:"request_body_limit"`
-	// ResponseBodyCheck enables inspection of response bodies (CRS phase 4).
-	// It buffers the response up to Coraza's response-body limit and so adds
-	// latency and memory; leave it off unless outbound rules are needed.
+	// ResponseBodyCheck enables inspection of text/plain, text/html and
+	// text/xml response bodies (phase 4) with or without CRS; false disables it.
+	// Operator SecResponseBodyAccess/SecResponseBodyMimeType directives override
+	// it. It buffers in-scope responses up to Coraza's response-body limit and so
+	// adds latency and memory; leave it off unless outbound rules are needed.
 	ResponseBodyCheck bool `toml:"response_body_check"`
 }
 

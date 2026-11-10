@@ -1,0 +1,57 @@
+--- /tmp/w698/harness.orig.go	2026-11-10 10:21:18.552387665 +0100
++++ scripts/waf-wasm-assessment.go	2026-11-10 10:32:52.148353090 +0100
+@@ -167,6 +167,7 @@
+ 	WAFRuleID         int    // request canary rule id; changing it is a real WAF policy change
+ 	BrokenWAF         bool   // an invalid directive: preparation must fail
+ 	ReadTimeout       string // listener read_timeout ("" = default 0/unbounded)
++	RespOff           bool   // 697-698 revalidation: response_body_check = false
+ }
+ 
+ const cfgTemplate = `[global]
+@@ -227,7 +228,7 @@
+   mode = "block"
+   crs_enabled = true
+   request_body_limit = "1mb"
+-  response_body_check = true
++  response_body_check = {{if $.P.RespOff}}false{{else}}true{{end}}
+   inline_rules = '''
+ SecRule REQUEST_BODY|ARGS_POST "@contains ` + wafReqMark + `" "id:{{$.P.WAFRuleID}},phase:2,deny,status:403,log,msg:'assessment request canary'"
+ SecRule RESPONSE_BODY "@contains ` + wafRespMark + `" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+@@ -1145,7 +1146,11 @@
+ 	out = append(out, do("clean-proxy", "POST", "/proxy/echo?resp=4096", jsonBody(2048, ""), clean))
+ 	if p.WAF {
+ 		out = append(out, do("waf-request-body", "POST", "/proxy/echo?resp=4096", jsonBody(2048, wafReqMark), 403))
+-		out = append(out, do("waf-response-body", "GET", "/proxy/echo?resp=4096&canary=waf", nil, 403))
++		want := 403
++		if p.RespOff {
++			want = 200 // 697-698 revalidation: inspection must be off
++		}
++		out = append(out, do("waf-response-body", "GET", "/proxy/echo?resp=4096&canary=waf", nil, want))
+ 		out = append(out, do("waf-static-response-clean", "GET", "/static/page.html", nil, 200))
+ 	}
+ 	if p.WASM {
+@@ -1288,6 +1293,7 @@
+ 		{"waf", cfgParams{WAF: true}},
+ 		{"wasm", cfgParams{WASM: true}},
+ 		{"both", cfgParams{WAF: true, WASM: true}},
++		{"waf-respoff", cfgParams{WAF: true, RespOff: true}},
+ 	}
+ }
+ 
+@@ -1380,6 +1386,16 @@
+ 	}
+ 	out = append(out, entry{scenario{name: "s11-arg-amplification-h1", phases: amp}, pick("none", "waf"), 1, rec})
+ 	// HTTP/3, reported separately.
++	// 697-698 revalidation scenarios.
++	out = append(out, entry{scenario{name: "r1-text-response-h1", phases: []phaseSpec{{Name: "load", Warmup: warm, Measure: meas, Load: []workload{norm("h1")}}}}, pick("waf", "waf-respoff"), reps, rec})
++	legit := norm("h1")
++	legit.Shape, legit.Conc, legit.Resp, legit.Path = "items", 4, 4096, "/proxy/echo?resp=4096"
++	over := legit
++	over.Body, over.Conc = 32<<10, 8
++	legit3, over3 := legit, over
++	legit3.Conc, over3.Conc = 1, 2
++	out = append(out, entry{scenario{name: "r3-arg-overflow-c3-h1", phases: []phaseSpec{{Name: "load", Warmup: 2 * time.Second, Measure: meas, Load: []workload{legit3, over3}}}}, pick("waf"), reps, rec})
++	out = append(out, entry{scenario{name: "r2-arg-overflow-h1", phases: []phaseSpec{{Name: "load", Warmup: 2 * time.Second, Measure: meas, Load: []workload{legit, over}}}}, pick("waf"), reps, rec})
+ 	out = append(out, entry{scenario{name: "s10-normal-h3", phases: []phaseSpec{{Name: "load", Warmup: warm, Measure: meas, Load: []workload{norm("h3")}}}}, pick("none", "both"), 1, rec})
+ 	return out
+ }

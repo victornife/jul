@@ -1,0 +1,13 @@
+--- FAIL: TestAssessmentCRSResponseBodyAccess (0.30s)
+    --- FAIL: TestAssessmentCRSResponseBodyAccess/no-crs_check=true_text/plain (0.00s)
+        resource_assessment_test.go:141: status = 200, want 403
+    --- FAIL: TestAssessmentCRSResponseBodyAccess/crs_check=false_text/plain (0.09s)
+        resource_assessment_test.go:141: status = 403, want 200
+--- FAIL: TestAssessmentArgumentLimitPartialInspection (2.03s)
+    --- FAIL: TestAssessmentArgumentLimitPartialInspection/1201_args_attack_last_rejected (0.38s)
+        resource_assessment_test.go:185: status = 200, want 413
+    --- FAIL: TestAssessmentArgumentLimitPartialInspection/1003_args_clean_rejected (0.37s)
+        resource_assessment_test.go:185: status = 200, want 413
+FAIL
+FAIL	jul/internal/waf	2.353s
+FAIL

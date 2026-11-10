@@ -2032,7 +2032,7 @@
                       "x-jul-constraint": "non-negative"
                     },
                     "response_body_check": {
-                      "description": "ResponseBodyCheck enables inspection of response bodies (CRS phase 4)",
+                      "description": "ResponseBodyCheck enables inspection of text/plain, text/html and text/xml response bodies (phase 4) with or without CRS; false disables it",
                       "type": "boolean",
                       "x-jul-capability": [
                         "waf"
@@ -3202,7 +3202,7 @@
           "x-jul-constraint": "non-negative"
         },
         "response_body_check": {
-          "description": "ResponseBodyCheck enables inspection of response bodies (CRS phase 4)",
+          "description": "ResponseBodyCheck enables inspection of text/plain, text/html and text/xml response bodies (phase 4) with or without CRS; false disables it",
           "type": "boolean",
           "x-jul-capability": [
             "waf"

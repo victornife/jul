@@ -468,6 +468,10 @@ const (
 	// WAFGeneratedRuleIDMax is the highest rule ID reserved by Jul for its own
 	// generated SecAction/SecRule directives (890001..900001).
 	WAFGeneratedRuleIDMax = 900001
+	// WAFArgumentLimitGuardRuleID is the generated CRS-policy rule that denies
+	// (block mode) or records (detect mode) a request whose argument
+	// collection stopped at the engine's SecArgumentsLimit (#697).
+	WAFArgumentLimitGuardRuleID = 900001
 )
 
 // ValidateWAFExceptionTarget validates and canonicalizes a narrow WAF exception

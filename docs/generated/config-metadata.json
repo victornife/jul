@@ -4078,7 +4078,7 @@
       "capabilities": [
         "waf"
       ],
-      "description": "ResponseBodyCheck enables inspection of response bodies (CRS phase 4)",
+      "description": "ResponseBodyCheck enables inspection of text/plain, text/html and text/xml response bodies (phase 4) with or without CRS; false disables it",
       "anchor": "servers-x-locations-x-waf-response_body_check"
     },
     "servers.*.locations.*.withdrawn": {
@@ -6273,7 +6273,7 @@
       "capabilities": [
         "waf"
       ],
-      "description": "ResponseBodyCheck enables inspection of response bodies (CRS phase 4)",
+      "description": "ResponseBodyCheck enables inspection of text/plain, text/html and text/xml response bodies (phase 4) with or without CRS; false disables it",
       "anchor": "waf-response_body_check"
     }
   },

@@ -93,8 +93,18 @@ type WAFPolicySummary struct {
 	ExceptionsReviewDue       int    `json:"exceptions_review_due,omitempty"`
 	HasCustomTuningDirectives bool   `json:"has_custom_tuning_directives,omitempty"`
 	RequestBodyLimitBytes     int64  `json:"request_body_limit_bytes,omitempty"`
-	ResponseBodyInspection    bool   `json:"response_body_inspection"`
-	RuleFilesConfigured       int    `json:"rule_files_configured"`
+	// ResponseBodyInspection is the compiled response-body access after static
+	// operator directives (#698). Only ResponseBodyMimeTypes are eligible; a
+	// request-specific ctl: action can still change one transaction.
+	ResponseBodyInspection       bool     `json:"response_body_inspection"`
+	ResponseBodyMimeTypes        []string `json:"response_body_mime_types,omitempty"`
+	ResponseBodyOperatorOverride bool     `json:"response_body_operator_override,omitempty"`
+	// ArgumentLimit is the compiled per-collection SecArgumentsLimit;
+	// ArgumentLimitGuard reports the generated guard rule 900001 (#697) is
+	// active (false without CRS or after deliberate removal).
+	ArgumentLimit       int  `json:"argument_limit,omitempty"`
+	ArgumentLimitGuard  bool `json:"argument_limit_guard"`
+	RuleFilesConfigured int  `json:"rule_files_configured"`
 	// ExternalFiles/ExternalDigest identify the exact bytes read from disk at
 	// compile time under the server's private version context ("ev1:<ctx>:<tag>",
 	// #649): same path with changed content yields a new digest without exposing

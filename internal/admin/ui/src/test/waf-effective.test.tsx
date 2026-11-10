@@ -55,6 +55,8 @@ const crsGlobal: WAFPolicySummary = {
   paranoia_default: true,
   request_body_limit_bytes: 131072,
   response_body_inspection: false,
+  argument_limit: 1000,
+  argument_limit_guard: true,
   rule_files_configured: 0,
   external_files: 0,
   inline_rules: false,
@@ -67,6 +69,9 @@ const detectOverride: WAFPolicySummary = {
   crs_enabled: false,
   request_body_limit_bytes: 65536,
   response_body_inspection: true,
+  response_body_mime_types: ["text/plain", "text/html", "text/xml"],
+  argument_limit: 1000,
+  argument_limit_guard: false,
   rule_files_configured: 1,
   external_files: 2,
   external_digest:
@@ -139,9 +144,89 @@ describe("WAFEffectiveCard (#440)", () => {
     expect(screen.getByText(/2 files read at compile/)).toBeInTheDocument();
     const digest = screen.getByText("ev1:01234567:fedcba987654…");
     expect(digest).toHaveAttribute("title", detectOverride.external_digest);
-    expect(screen.getByText(/inspected \(limit set by the engine/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "inspected for only text/plain, text/html, text/xml; limit set by the engine and rule directives, not reported",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "up to 1000 per collection inspected · no argument-limit guard (CRS not loaded)",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("WAF turned off for this route by its override.")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\.conf|\.data|\/etc\//);
+  });
+
+  it("reports the argument-limit guard and compiled response inspection (#697, #698)", () => {
+    renderCard({ ...serving, overrides: [] });
+    expect(
+      screen.getByText(
+        "up to 1000 per collection inspected · more rejected with 413 by guard rule 900001",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("not inspected")).toBeInTheDocument();
+  });
+
+  it("names deliberate operator overrides of the guard and response inspection", () => {
+    const { unmount } = renderCard({
+      ...serving,
+      overrides: [],
+      global: {
+        ...crsGlobal,
+        argument_limit: 2000,
+        argument_limit_guard: false,
+        response_body_inspection: false,
+        response_body_operator_override: true,
+      },
+    });
+    expect(
+      screen.getByText(
+        "up to 2000 per collection inspected · guard rule 900001 removed by operator directives — further arguments are not inspected",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("not inspected (disabled by operator directives)")).toBeInTheDocument();
+    unmount();
+    renderCard({
+      ...serving,
+      overrides: [],
+      global: {
+        ...crsGlobal,
+        argument_limit: undefined,
+        response_body_inspection: true,
+        response_body_mime_types: [],
+        response_body_operator_override: true,
+      },
+    });
+    expect(
+      screen.getByText(
+        "inspected for no content types selected (set by operator directives); limit set by the engine and rule directives, not reported",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Request arguments")).not.toBeInTheDocument();
+  });
+
+  it("does not claim detect-mode rejection or unreported content types", () => {
+    renderCard({
+      ...serving,
+      overrides: [],
+      global: {
+        ...crsGlobal,
+        mode: "detect",
+        response_body_inspection: true,
+        response_body_mime_types: undefined,
+      },
+    });
+    expect(
+      screen.getByText(
+        "up to 1000 per collection inspected · reaching the limit is recorded by guard rule 900001, not rejected (detect mode)",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "inspected for content types not reported by this server; limit set by the engine and rule directives, not reported",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("states when the build has no engine", () => {

@@ -18,6 +18,37 @@ import {
   shortDigest,
 } from "@/lib/wafEffective.ts";
 
+function argumentLimitLabel(p: WAFPolicySummary): string {
+  const limit = `up to ${String(p.argument_limit)} per collection inspected`;
+  if (!p.crs_enabled) {
+    return `${limit} · no argument-limit guard (CRS not loaded)`;
+  }
+  if (p.argument_limit_guard && p.mode === "detect") {
+    return `${limit} · reaching the limit is recorded by guard rule 900001, not rejected (detect mode)`;
+  }
+  return p.argument_limit_guard
+    ? `${limit} · more rejected with 413 by guard rule 900001`
+    : `${limit} · guard rule 900001 removed by operator directives — further arguments are not inspected`;
+}
+
+function responseBodyLabel(p: WAFPolicySummary): string {
+  if (!p.response_body_inspection) {
+    return p.response_body_operator_override
+      ? "not inspected (disabled by operator directives)"
+      : "not inspected";
+  }
+  const mimes = p.response_body_mime_types;
+  const types =
+    mimes === undefined
+      ? "content types not reported by this server"
+      : mimes.length > 0
+        ? `only ${mimes.join(", ")}`
+        : "no content types selected";
+  return `inspected for ${types}${
+    p.response_body_operator_override ? " (set by operator directives)" : ""
+  }; limit set by the engine and rule directives, not reported`;
+}
+
 function PolicySummary({ p }: { readonly p: WAFPolicySummary }) {
   return (
     <dl className="grid grid-cols-[10rem_1fr] gap-x-3 gap-y-1 text-xs">
@@ -69,12 +100,14 @@ function PolicySummary({ p }: { readonly p: WAFPolicySummary }) {
           ? `inspected up to ${formatBytes(p.request_body_limit_bytes)}`
           : "limit not reported"}
       </dd>
+      {p.argument_limit !== undefined && (
+        <>
+          <dt className="text-jul-muted">Request arguments</dt>
+          <dd>{argumentLimitLabel(p)}</dd>
+        </>
+      )}
       <dt className="text-jul-muted">Response body</dt>
-      <dd>
-        {p.response_body_inspection
-          ? "inspected (limit set by the engine and rule directives; not reported)"
-          : "not inspected"}
-      </dd>
+      <dd>{responseBodyLabel(p)}</dd>
       <dt className="text-jul-muted">Compiled rules</dt>
       <dd>{ruleSources(p)}</dd>
       <dt className="text-jul-muted">Rule sources</dt>

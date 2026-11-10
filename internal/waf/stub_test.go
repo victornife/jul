@@ -7,6 +7,7 @@ package waf
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -53,7 +54,7 @@ func TestLeanFirewallSurfaceIsNoOp(t *testing.T) {
 }
 
 func TestStubReportsNoPolicyOrEmbeddedRuleSet(t *testing.T) {
-	if (&Firewall{}).Info() != (PolicyInfo{}) {
+	if !reflect.DeepEqual((&Firewall{}).Info(), PolicyInfo{}) {
 		t.Fatal("stub Info must be empty")
 	}
 	if EmbeddedCRSVersion() != "" || EngineVersion() != "" {
