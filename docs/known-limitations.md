@@ -18,8 +18,10 @@ discovered correctness/security findings still pre-empt the roadmap.
 The plugin defect [#699](https://github.com/victornife/jul/issues/699) found by
 the [#695 resource assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
 (a body-reading plugin read the client body inside its guest-call timeout, so
-slow legitimate uploads failed with `500`) is fixed on `main` and unreleased:
-bodies are prepared before the guest call ([plugins.md](plugins.md#request-bodies);
+slow legitimate uploads failed with `500`) is fixed by
+[PR #703](https://github.com/victornife/jul/pull/703), which is unreleased; no
+published package contains the fix. Bodies are prepared before the guest call
+([plugins.md](plugins.md#request-bodies);
 [revalidation](reviews/2026-11-10-699-plugin-body-preparation-revalidation.md)).
 On a published package, set `timeout` above the slowest legitimate upload for
 body-reading plugins and set a finite server `read_timeout`. The missing
