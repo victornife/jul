@@ -3493,7 +3493,7 @@ RequestBodyLimit caps how many request-body bytes are buffered for inspection.
 
 ## `servers.*.locations.*.waf.response_body_check` {#servers-x-locations-x-waf-response_body_check}
 
-ResponseBodyCheck enables inspection of response bodies (CRS phase 4).
+ResponseBodyCheck enables inspection of text/plain, text/html and text/xml response bodies (phase 4) with or without CRS; false disables it.
 
 | | |
 | --- | --- |
@@ -5292,7 +5292,7 @@ RequestBodyLimit caps how many request-body bytes are buffered for inspection.
 
 ## `waf.response_body_check` {#waf-response_body_check}
 
-ResponseBodyCheck enables inspection of response bodies (CRS phase 4).
+ResponseBodyCheck enables inspection of text/plain, text/html and text/xml response bodies (phase 4) with or without CRS; false disables it.
 
 | | |
 | --- | --- |

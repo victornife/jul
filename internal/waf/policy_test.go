@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -89,8 +90,17 @@ func TestPolicyInfoCRSDefaults(t *testing.T) {
 		t.Fatalf("request body limit = %d", info.RequestBodyLimitBytes)
 	}
 	r := info.Rules
-	if r.Embedded < 100 || r.External != 0 || r.Inline != 0 || r.Generated != 0 || r.Total != r.Embedded {
+	// The only non-embedded rule is the generated argument-limit guard (#697).
+	if r.Embedded < 100 || r.External != 0 || r.Inline != 0 || r.Generated != 1 || r.Total != r.Embedded+1 {
 		t.Fatalf("CRS rule counts = %+v", r)
+	}
+	if !info.ArgumentLimitGuard || info.ArgumentLimit != 1000 {
+		t.Fatalf("argument limit = %d guard %v, want 1000 and active", info.ArgumentLimit, info.ArgumentLimitGuard)
+	}
+	// response_body_check defaults to false: the embedded recommended
+	// configuration's SecResponseBodyAccess On must not survive (#698).
+	if info.ResponseBodyInspection || info.ResponseBodyMimeTypes != nil || info.ResponseBodyOperatorOverride {
+		t.Fatalf("response body = %v %v override %v, want off", info.ResponseBodyInspection, info.ResponseBodyMimeTypes, info.ResponseBodyOperatorOverride)
 	}
 	if info.ExternalFiles != 0 || info.ExternalDigest != "" {
 		t.Fatalf("CRS-only policy read external files: %d %q", info.ExternalFiles, info.ExternalDigest)
@@ -102,7 +112,7 @@ func TestPolicyInfoParanoiaIsJulGenerated(t *testing.T) {
 	if info.Paranoia != 3 || info.ParanoiaDefault || info.Mode != "detect" {
 		t.Fatalf("info = %+v", info)
 	}
-	if info.Rules.Generated != 1 || info.Rules.Inline != 1 || !info.InlineRules {
+	if info.Rules.Generated != 2 || info.Rules.Inline != 1 || !info.InlineRules {
 		t.Fatalf("rule counts = %+v", info.Rules)
 	}
 	if got := info.Rules.Embedded + info.Rules.External + info.Rules.Inline + info.Rules.Generated; got != info.Rules.Total {
@@ -123,6 +133,14 @@ SecAction "id:10002,phase:1,pass,nolog"`,
 	}
 	if info.Rules != (RuleCounts{Total: 2, Inline: 2}) {
 		t.Fatalf("rule counts = %+v", info.Rules)
+	}
+	// Without CRS there is no generated guard, but response_body_check = true
+	// still compiles a usable MIME selection (#698).
+	if info.ArgumentLimitGuard || info.ArgumentLimit != 1000 {
+		t.Fatalf("argument limit = %d guard %v", info.ArgumentLimit, info.ArgumentLimitGuard)
+	}
+	if !slices.Equal(info.ResponseBodyMimeTypes, DefaultResponseBodyMimeTypes) || info.ResponseBodyOperatorOverride {
+		t.Fatalf("response MIME = %v override %v", info.ResponseBodyMimeTypes, info.ResponseBodyOperatorOverride)
 	}
 }
 

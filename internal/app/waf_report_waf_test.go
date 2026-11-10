@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -888,5 +889,155 @@ func TestWAFEvidenceMetricsTransitionOnScrapeWithoutAdminReads(t *testing.T) {
 	bodySecret := scrapeMetrics()
 	if !strings.Contains(bodySecret, `jul_security_posture_findings{area="certificates",severity="warning"} 0`) {
 		t.Fatalf("secret-backed config published false certificates warning on /metrics after >64 candidates:\n%s", bodySecret)
+	}
+}
+
+// #697/#698 through the real preparation/publication path: global
+// inheritance, per-location overrides and an unaffected sibling, the
+// projected compiled state, a response-inspection change and its rollback,
+// and a failed compile that leaves the previous policy serving.
+func TestWAFArgumentGuardAndResponseInspectionAcrossRoutes(t *testing.T) {
+	ctx := context.Background()
+	const marker = "ROUTE-LEAK-MARKER"
+	var hits sync.Map
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := hits.LoadOrStore(r.URL.Path, new(atomic.Int64))
+		n.(*atomic.Int64).Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "payload "+marker)
+	}))
+	defer origin.Close()
+	hitCount := func(p string) int64 {
+		if n, ok := hits.Load(p); ok {
+			return n.(*atomic.Int64).Load()
+		}
+		return 0
+	}
+	leak := `SecRule RESPONSE_BODY "@contains ` + marker + `" "id:1698101,phase:4,deny,status:403,log"`
+	build := func(responseCheck bool, raisedRules string) *config.Config {
+		loc := func(path string, w *config.WAFConfig) config.LocationConfig {
+			return config.LocationConfig{Match: config.MatchConfig{Type: "prefix", Path: path}, ProxyPass: "http://origin_up", WAF: w}
+		}
+		return &config.Config{
+			WAF:       config.WAFConfig{Enabled: true, Mode: "block", BlockStatus: 403, CRSEnabled: true, ResponseBodyCheck: responseCheck, InlineRules: leak, RequestBodyLimit: config.Size(128 << 10)},
+			Upstreams: []config.UpstreamConfig{{Name: "origin_up", Strategy: "round_robin", Servers: []config.UpstreamServer{{Address: origin.Listener.Addr().String(), Weight: 1}}}},
+			Servers: []config.ServerConfig{{Name: "s", Listen: ":8080", ServerNames: []string{"app.example.test"}, Locations: []config.LocationConfig{
+				loc("/inherit", nil),
+				loc("/raised", &config.WAFConfig{Enabled: true, Mode: "block", BlockStatus: 403, CRSEnabled: true, InlineRules: raisedRules, RequestBodyLimit: config.Size(128 << 10)}),
+				loc("/detect", &config.WAFConfig{Enabled: true, Mode: "detect", BlockStatus: 403, CRSEnabled: true, RequestBodyLimit: config.Size(128 << 10)}),
+				loc("/sibling", &config.WAFConfig{Enabled: true, Mode: "block", BlockStatus: 403, InlineRules: `SecRule ARGS:probe "@streq 1" "id:1698102,phase:2,deny,status:403"`, RequestBodyLimit: config.Size(128 << 10)}),
+			}}},
+		}
+	}
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+	serve := func(cfg *config.Config) (http.Handler, func()) {
+		t.Helper()
+		hMap, _, commit, _, err := f.Prepare(ctx, cfg)
+		if err != nil {
+			t.Fatalf("Prepare: %v", err)
+		}
+		_, retire := commit()
+		return hMap[":8080"], retire
+	}
+	form := func(n int) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = fmt.Sprintf("a%d=v", i)
+		}
+		return strings.Join(parts, "&")
+	}
+	post := func(h http.Handler, path string, n int) int {
+		body := form(n)
+		req := httptest.NewRequest(http.MethodPost, "http://app.example.test"+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Content-Length", fmt.Sprint(len(body)))
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	get := func(h http.Handler, path string) int {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "http://app.example.test"+path, nil))
+		return rr.Code
+	}
+
+	h, retire := serve(build(false, "SecArgumentsLimit 2000"))
+	eff := f.WAFEffective()
+	if g := eff.Global; g == nil || !g.ArgumentLimitGuard || g.ArgumentLimit != 1000 || g.ResponseBodyInspection || g.ResponseBodyMimeTypes != nil {
+		t.Fatalf("global summary = %+v", eff.Global)
+	}
+	byPath := map[string]*admin.WAFPolicySummary{}
+	for _, o := range eff.Overrides {
+		byPath[o.Path] = o.Policy
+	}
+	if p := byPath["/raised"]; p == nil || p.ArgumentLimit != 2000 || !p.ArgumentLimitGuard {
+		t.Fatalf("/raised summary = %+v", p)
+	}
+	if p := byPath["/sibling"]; p == nil || p.ArgumentLimitGuard || p.CRSEnabled {
+		t.Fatalf("/sibling summary = %+v", p)
+	}
+
+	for path, tc := range map[string]struct {
+		n, status int
+		forwarded bool
+	}{
+		"/inherit": {1001, 413, false},
+		"/raised":  {1500, 200, true},
+		"/detect":  {1001, 200, true},
+		"/sibling": {1001, 200, true},
+	} {
+		before := hitCount(path)
+		if got := post(h, path, tc.n); got != tc.status || (hitCount(path) > before) != tc.forwarded {
+			t.Fatalf("%s with %d args: status %d forwarded %v, want %d %v", path, tc.n, got, hitCount(path) > before, tc.status, tc.forwarded)
+		}
+	}
+	if got := post(h, "/raised", 2001); got != 413 {
+		t.Fatalf("/raised over its own limit: %d", got)
+	}
+	if got := get(h, "/inherit/page"); got != 200 {
+		t.Fatalf("response inspection off: %d", got)
+	}
+	gen1 := eff.Generation
+	digest1 := eff.Global.PolicyDigest
+
+	// Enabling response inspection is a new, published policy.
+	h2, retire2 := serve(build(true, "SecArgumentsLimit 2000"))
+	eff2 := f.WAFEffective()
+	if !eff2.Global.ResponseBodyInspection || len(eff2.Global.ResponseBodyMimeTypes) != 3 || eff2.Global.PolicyDigest == digest1 {
+		t.Fatalf("after enabling response inspection: %+v", eff2.Global)
+	}
+	if got := get(h2, "/inherit/page"); got != 403 {
+		t.Fatalf("response inspection on: %d", got)
+	}
+	if got := get(h2, "/sibling/page"); got != 200 {
+		t.Fatalf("sibling route inspected the global response rule: %d", got)
+	}
+
+	// A candidate that fails to compile leaves the previous policy serving.
+	if _, _, _, _, err := f.Prepare(ctx, build(false, "SecRule ARGS \"@notAnOperator x\" \"id:1698103,phase:2,deny\"")); err == nil {
+		t.Fatal("broken override compiled")
+	}
+	if after := f.WAFEffective(); after.Generation != eff2.Generation || !after.Global.ResponseBodyInspection {
+		t.Fatalf("failed candidate changed the serving projection: gen %d", after.Generation)
+	}
+	if got := get(h2, "/inherit/page"); got != 403 {
+		t.Fatalf("serving handler after failed candidate: %d", got)
+	}
+
+	// Rolling back the field restores the original compiled policy identity.
+	h3, retire3 := serve(build(false, "SecArgumentsLimit 2000"))
+	eff3 := f.WAFEffective()
+	if eff3.Global.ResponseBodyInspection || eff3.Global.PolicyDigest != digest1 || eff3.Generation == gen1 {
+		t.Fatalf("rollback: %+v gen %d", eff3.Global, eff3.Generation)
+	}
+	if got := get(h3, "/inherit/page"); got != 200 {
+		t.Fatalf("after rollback: %d", got)
+	}
+	for _, r := range []func(){retire, retire2, retire3} {
+		if r != nil {
+			r()
+		}
 	}
 }

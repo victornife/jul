@@ -39,6 +39,16 @@ import (
 // OWASP Core Rule Set.
 const Compiled = true
 
+// argumentLimitGuardRule is the generated CRS-policy rule placed after the
+// embedded CRS and before operator rules (#697). It acts on the engine's own
+// ARGUMENTS_LIMIT_REACHED flag, so it follows any SecArgumentsLimit an operator
+// sets. Block mode denies with 413; the final SecRuleEngine DetectionOnly turns
+// it into a recorded detect-mode finding. Operators remove it deliberately with
+// SecRuleRemoveById 900001.
+var argumentLimitGuardRule = fmt.Sprintf(
+	`SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" "id:%d,phase:2,deny,status:413,log,t:none,msg:'Request argument limit reached; arguments beyond SecArgumentsLimit were not inspected',tag:'jul/argument-limit'"`,
+	config.WAFArgumentLimitGuardRuleID)
+
 // Firewall wraps a configured Coraza engine and exposes it as a middleware.
 type Firewall struct {
 	waf         coraza.WAF
@@ -84,9 +94,6 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 			wcfg = wcfg.WithRequestBodyInMemoryLimit(int(limit))
 		}
 	}
-	if cfg.ResponseBodyCheck {
-		wcfg = wcfg.WithResponseBodyAccess()
-	}
 
 	w, err := coraza.NewWAF(wcfg)
 	if err != nil {
@@ -98,6 +105,11 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 			counter.collisionID, config.WAFGeneratedExceptionIDBase-1, config.WAFGeneratedRuleIDMax)
 	}
 	activeRuleIDs, err := compiledRuleIDs(w)
+	if err != nil {
+		_ = closeWAF(w)
+		return nil, err
+	}
+	state, err := compiledEngineState(w)
 	if err != nil {
 		_ = closeWAF(w)
 		return nil, err
@@ -115,7 +127,8 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	}
 	// Wrap the engine so rules see Jul's canonical client address rather than
 	// Coraza's own parse of RemoteAddr (see clientaddr.go).
-	info, rawSum, polSum := policyInfo(cfg, counter.counts, rec, opts.Versions)
+	state.argumentLimitGuard = cfg.CRSEnabled && activeRuleIDs[config.WAFArgumentLimitGuardRuleID]
+	info, rawSum, polSum := policyInfo(cfg, counter.counts, rec, opts.Versions, state)
 	return &Firewall{
 		waf:         &clientAddrWAF{WAF: w},
 		info:        info,
@@ -170,16 +183,22 @@ func (f *Firewall) ExternalAssets() []ExternalAssetRecord {
 	return append([]ExternalAssetRecord(nil), f.assets...)
 }
 
-func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, versions *versionid.Context) (PolicyInfo, [32]byte, [32]byte) {
+func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, versions *versionid.Context, state engineState) (PolicyInfo, [32]byte, [32]byte) {
 	info := PolicyInfo{
 		Mode:                   "block",
 		BlockStatus:            cfg.BlockStatus,
 		CRSEnabled:             cfg.CRSEnabled,
 		RequestBodyLimitBytes:  cfg.RequestBodyLimit.Bytes(),
-		ResponseBodyInspection: cfg.ResponseBodyCheck,
+		ResponseBodyInspection: state.responseBodyAccess,
+		ArgumentLimit:          state.argumentLimit,
+		ArgumentLimitGuard:     state.argumentLimitGuard,
 		InlineRules:            strings.TrimSpace(cfg.InlineRules) != "",
 		Rules:                  counts,
 	}
+	if state.responseBodyAccess {
+		info.ResponseBodyMimeTypes = boundedMimeTypes(state.responseBodyMimeTypes)
+	}
+	info.ResponseBodyOperatorOverride = responseBodyOverridden(cfg.ResponseBodyCheck, state)
 	if cfg.Mode == "detect" {
 		info.Mode = "detect"
 	}
@@ -203,6 +222,13 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 		info.ParanoiaDefault = isDefault
 		if !isDefault && info.Rules.Inline > 0 {
 			// buildDirectives emitted the paranoia SecAction (id 900000).
+			info.Rules.Inline--
+			info.Rules.Generated++
+		}
+		if info.Rules.Inline > 0 {
+			// buildDirectives emitted the argument-limit guard (id 900001); it is
+			// counted as generated even when an operator later removes it, which
+			// ArgumentLimitGuard reports separately.
 			info.Rules.Inline--
 			info.Rules.Generated++
 		}
@@ -253,6 +279,13 @@ func canonicalPolicyBytes(cfg config.WAFConfig, info PolicyInfo, rawExternalSum 
 	writeFramed("detection_paranoia", strconv.Itoa(info.DetectionParanoia))
 	writeFramed("request_body_limit", strconv.FormatInt(info.RequestBodyLimitBytes, 10))
 	writeFramed("response_body_inspection", strconv.FormatBool(info.ResponseBodyInspection))
+	// Version 2 of Jul's generated directives adds the argument-limit guard and
+	// the response-inspection default (#697, #698), so an evaluation of a
+	// version-1 policy is stale even when the TOML and engine are unchanged.
+	writeFramed("generated_directives", "2")
+	writeFramed("response_body_mime_types", strings.Join(info.ResponseBodyMimeTypes, " "))
+	writeFramed("argument_limit", strconv.Itoa(info.ArgumentLimit))
+	writeFramed("argument_limit_guard", strconv.FormatBool(info.ArgumentLimitGuard))
 	writeFramed("external_raw_sha256", hex.EncodeToString(rawExternalSum[:]))
 	inlineSum := sha256.Sum256([]byte(strings.TrimSpace(cfg.InlineRules)))
 	writeFramed("inline_sha256", hex.EncodeToString(inlineSum[:]))
@@ -341,10 +374,12 @@ func rootFS(cfg config.WAFConfig, rec *sourceRecorder) fs.FS {
 //     duplicate, so CRS-scored anomaly blocks use the CRS setup's default
 //     status (403) rather than block_status. See docs/waf.md for the overrides
 //     (inline_rule / directives_files) that recover block_status under CRS.
-//  2. the embedded CRS when crs_enabled;
-//  3. each user directive file;
-//  4. the inline rules snippet;
-//  5. the enforcement-mode override last, so "block"/"detect" always wins.
+//  2. the embedded CRS when crs_enabled, followed by the generated
+//     argument-limit guard (id 900001, #697);
+//  3. Jul's response-body inspection default from response_body_check (#698);
+//  4. each user directive file;
+//  5. the inline rules snippet;
+//  6. the enforcement-mode override last, so "block"/"detect" always wins.
 func buildDirectives(cfg config.WAFConfig) (string, error) {
 	var b strings.Builder
 
@@ -386,12 +421,27 @@ func buildDirectives(cfg config.WAFConfig) (string, error) {
 			b.WriteByte('\n')
 		}
 		b.WriteString("Include @owasp_crs/*.conf\n")
+		fmt.Fprintf(&b, "%s\n", argumentLimitGuardRule)
 	} else {
 		for _, line := range excLines {
 			b.WriteString(line)
 			b.WriteByte('\n')
 		}
 	}
+
+	// Jul's response-inspection default follows the embedded configuration and
+	// precedes operator files and inline rules, so a deliberate operator
+	// SecResponseBodyAccess / SecResponseBodyMimeType still wins (#698). It is
+	// a directive rather than a coraza.WAFConfig option because Coraza applies
+	// those options after every directive, overriding the operator.
+	// The MIME selection is set either way, so an operator who only turns
+	// access On gets the same bounded set with and without CRS.
+	if cfg.ResponseBodyCheck {
+		b.WriteString("SecResponseBodyAccess On\n")
+	} else {
+		b.WriteString("SecResponseBodyAccess Off\n")
+	}
+	fmt.Fprintf(&b, "SecResponseBodyMimeType %s\n", strings.Join(DefaultResponseBodyMimeTypes, " "))
 
 	for _, path := range cfg.DirectivesFiles {
 		p := strings.TrimSpace(path)
@@ -457,21 +507,11 @@ func errorCallback(cfg config.WAFConfig, opts Options) func(types.MatchedRule) {
 // layout, it fails closed with an explicit compatibility error distinct from a
 // missing rule_id.
 func compiledRuleIDs(w coraza.WAF) (map[int]bool, error) {
-	v := reflect.ValueOf(w)
-	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
-		if v.IsNil() {
-			return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: nil wrapper (%T)", w)
-		}
-		v = v.Elem()
+	engine, err := compiledEngine(w)
+	if err != nil {
+		return nil, err
 	}
-	if v.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: expected wrapper struct, got %T", w)
-	}
-	wafField := v.FieldByName("waf")
-	if !wafField.IsValid() || wafField.Kind() != reflect.Pointer || wafField.IsNil() || wafField.Elem().Kind() != reflect.Struct {
-		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing *corazawaf.WAF field on %T", w)
-	}
-	rulesGroup := wafField.Elem().FieldByName("Rules")
+	rulesGroup := engine.FieldByName("Rules")
 	if !rulesGroup.IsValid() || rulesGroup.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing Rules struct field on %T", w)
 	}
@@ -495,4 +535,91 @@ func compiledRuleIDs(w coraza.WAF) (map[int]bool, error) {
 		}
 	}
 	return out, nil
+}
+
+// compiledEngine returns the *corazawaf.WAF struct behind a coraza.WAF wrapper,
+// failing closed with an explicit compatibility error if the layout changed.
+func compiledEngine(w coraza.WAF) (reflect.Value, error) {
+	v := reflect.ValueOf(w)
+	for v.Kind() == reflect.Interface || v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return reflect.Value{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: nil wrapper (%T)", w)
+		}
+		v = v.Elem()
+	}
+	if v.Kind() != reflect.Struct {
+		return reflect.Value{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: expected wrapper struct, got %T", w)
+	}
+	wafField := v.FieldByName("waf")
+	if !wafField.IsValid() || wafField.Kind() != reflect.Pointer || wafField.IsNil() || wafField.Elem().Kind() != reflect.Struct {
+		return reflect.Value{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing *corazawaf.WAF field on %T", w)
+	}
+	return wafField.Elem(), nil
+}
+
+// engineState is the compiled, request-independent engine configuration
+// after every directive (embedded, generated and operator) was applied.
+// Request-specific ctl: actions can still change a single transaction.
+type engineState struct {
+	responseBodyAccess    bool
+	responseBodyMimeTypes []string
+	argumentLimit         int
+	argumentLimitGuard    bool
+}
+
+// compiledEngineState reads the authoritative compiled response-body and
+// argument-limit settings through the same isolated adapter as
+// compiledRuleIDs (#697, #698).
+func compiledEngineState(w coraza.WAF) (engineState, error) {
+	engine, err := compiledEngine(w)
+	if err != nil {
+		return engineState{}, err
+	}
+	access := engine.FieldByName("ResponseBodyAccess")
+	mimes := engine.FieldByName("ResponseBodyMimeTypes")
+	limit := engine.FieldByName("ArgumentLimit")
+	if !access.IsValid() || access.Kind() != reflect.Bool ||
+		!mimes.IsValid() || mimes.Kind() != reflect.Slice || mimes.Type().Elem().Kind() != reflect.String ||
+		!limit.IsValid() || limit.Kind() != reflect.Int {
+		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing response-body or argument-limit settings on %T", w)
+	}
+	st := engineState{responseBodyAccess: access.Bool(), argumentLimit: int(limit.Int())}
+	for i := 0; i < mimes.Len(); i++ {
+		if m := strings.TrimSpace(mimes.Index(i).String()); m != "" {
+			st.responseBodyMimeTypes = append(st.responseBodyMimeTypes, m)
+		}
+	}
+	return st, nil
+}
+
+// maxReportedMimeTypes bounds the compiled MIME selection copied into status
+// surfaces; operator directives can list arbitrarily many.
+const (
+	maxReportedMimeTypes   = 16
+	maxReportedMimeTypeLen = 100
+)
+
+func boundedMimeTypes(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	n := min(len(in), maxReportedMimeTypes)
+	out := make([]string, 0, n)
+	for _, m := range in[:n] {
+		if len(m) > maxReportedMimeTypeLen {
+			m = m[:maxReportedMimeTypeLen]
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// responseBodyOverridden reports whether operator directives changed the
+// compiled response-body access or MIME selection away from the default that
+// response_body_check produces.
+func responseBodyOverridden(check bool, st engineState) bool {
+	if st.responseBodyAccess != check {
+		return true
+	}
+	return check && strings.Join(st.responseBodyMimeTypes, " ") != strings.Join(DefaultResponseBodyMimeTypes, " ")
 }

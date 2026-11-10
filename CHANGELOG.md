@@ -11,6 +11,33 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- WAF: fail closed when argument collection stops at `SecArgumentsLimit`
+  (#697). With `crs_enabled = true`, generated rule `900001` (after the CRS,
+  before operator rules) rejects a request whose arguments reached the limit
+  (1,001+ per collection by default) with `413` before the upstream or cache in
+  block mode, and records it in detect mode. It follows an operator
+  `SecArgumentsLimit`, is removable with `SecRuleRemoveById 900001`, and is
+  attributed as a generated `interrupted_request`, not a body-limit rejection.
+  The interim `1695190` guard still compiles and can be retired.
+  **Behaviour change:** CRS requests with more than 1,000 query or body
+  arguments that were previously forwarded are now rejected; raise
+  `SecArgumentsLimit` where they are legitimate.
+
+- WAF: `response_body_check` now governs response-body inspection with and
+  without CRS (#698). `false` turns it off, including the CRS recommended
+  default that previously inspected text responses; `true` inspects
+  `text/plain`, `text/html` and `text/xml` even without CRS. Operator
+  `SecResponseBodyAccess` / `SecResponseBodyMimeType(sClear)` directives in rule
+  files or `inline_rules` now win deliberately (previously the field silently
+  overrode `SecResponseBodyAccess Off`). **Behaviour change:** CRS routes with
+  the default `false` no longer buffer or inspect text response bodies.
+
+- WAF effective policy, API and Console report the compiled response-body
+  access and MIME selection, operator override, compiled argument limit and
+  argument-limit guard state (#697, #698). The compiled policy identity
+  includes the generated-directive version, so earlier WAF evaluations report
+  `stale_policy_changed` after upgrading.
+
 - Document the #695 WAF/WASM resource assessment: WAF sizing observations,
   an interim `SecArgumentsLimit` fail-closed guard (#697), the CRS
   response-body inspection defect (#698), the plugin `read_body` timeout

@@ -994,6 +994,26 @@ func TestSecurityIsolationCacheAuthAndWAFBoundaries(t *testing.T) {
 			t.Fatalf("unexpected WAF investigation event for warm-cache block: %+v", invSnap.Events)
 		}
 
+		// An oversized argument set (#697) against the warm entry is rejected by
+		// the generated guard before the cache or origin can answer.
+		var q strings.Builder
+		for i := 0; i < 1201; i++ {
+			fmt.Fprintf(&q, "a%d=v&", i)
+		}
+		q.WriteString("x=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+		before = originHits.Load()
+		argsReq := httptest.NewRequest(http.MethodGet, "http://portal.example.test/cached/item?"+q.String(), nil)
+		argsReq.Header.Set("Accept-Language", "en")
+		argsRR := httptest.NewRecorder()
+		wafHandler.ServeHTTP(argsRR, argsReq)
+		if argsRR.Code != http.StatusRequestEntityTooLarge || argsRR.Header().Get("X-Cache") == "HIT" || originHits.Load() != before {
+			t.Fatalf("oversized arguments against warm cache = %d X-Cache=%q origin %d->%d", argsRR.Code, argsRR.Header().Get("X-Cache"), before, originHits.Load())
+		}
+		argsSnap := factory.WAFInvestigationSnapshot(waf.InvestigationFilter{EventID: argsRR.Header().Get(waf.HeaderWAFEvent)})
+		if len(argsSnap.Events) != 1 || argsSnap.Events[0].InterruptedRuleID != config.WAFArgumentLimitGuardRuleID || argsSnap.Events[0].Outcome != waf.OutcomeInterruptedRequest || argsSnap.Events[0].OriginReached {
+			t.Fatalf("unexpected argument-limit event against warm cache: %+v", argsSnap.Events)
+		}
+
 		// Subsequent clean warm hit must NOT replay the previous blocked request's X-Jul-WAF-Event header!
 		cleanReq2 := httptest.NewRequest(http.MethodGet, "http://portal.example.test/cached/item", nil)
 		cleanReq2.Header.Set("Accept-Language", "en")

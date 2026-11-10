@@ -10,6 +10,12 @@ import "time"
 // identifier and never discloses rule IDs, policy digests, or route paths.
 const HeaderWAFEvent = "X-Jul-WAF-Event"
 
+// DefaultResponseBodyMimeTypes is the response MIME selection Jul compiles
+// when response_body_check = true (#698). It equals the engine's recommended
+// configuration: text documents where CRS outbound data-leakage rules apply,
+// excluding JSON, binary and streaming types.
+var DefaultResponseBodyMimeTypes = []string{"text/plain", "text/html", "text/xml"}
+
 // Bounded retention and aggregation limits for the in-memory WAF investigation
 // ring buffer (#632, ADR 0031 §5).
 const (
@@ -137,9 +143,26 @@ type PolicyInfo struct {
 	// RequestBodyLimitBytes is authoritative: Jul applies it after the rule
 	// directives, so no SecRequestBodyLimit in a rule file can change it.
 	RequestBodyLimitBytes int64
-	// ResponseBodyInspection reports response-body access. Its limit is left
-	// to the engine and rule directives and is not reported.
+	// ResponseBodyInspection reports the compiled response-body access after
+	// every directive, including operator overrides (#698). Access alone does
+	// not make a response eligible: only ResponseBodyMimeTypes are buffered and
+	// inspected. Request-specific ctl: actions are not reflected. The body
+	// limit is left to the engine and rule directives and is not reported.
 	ResponseBodyInspection bool
+	// ResponseBodyMimeTypes is the compiled response MIME selection (bounded),
+	// set only when ResponseBodyInspection is true.
+	ResponseBodyMimeTypes []string
+	// ResponseBodyOperatorOverride reports that operator directives changed
+	// the response-body access or MIME selection that response_body_check
+	// produces.
+	ResponseBodyOperatorOverride bool
+	// ArgumentLimit is the compiled SecArgumentsLimit (per argument
+	// collection) after every directive.
+	ArgumentLimit int
+	// ArgumentLimitGuard reports that the generated argument-limit guard (rule
+	// 900001, #697) is compiled and active. It is false without CRS, and false
+	// with CRS when an operator removed it.
+	ArgumentLimitGuard bool
 	// RuleFilesConfigured is the number of directives_files entries.
 	RuleFilesConfigured int
 	// ExternalFiles is the number of distinct filesystem files the compile

@@ -19,15 +19,18 @@ Open defects from the
 [#695 resource assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
 (each blocks the forthcoming release unless fixed or explicitly accepted):
 
-- [#697](https://github.com/victornife/jul/issues/697) (security): WAF
-  arguments beyond `SecArgumentsLimit` (1000) are not inspected and block mode
-  forwards them. Interim guard: [waf.md](waf.md#request-and-response-bodies).
-- [#698](https://github.com/victornife/jul/issues/698): with `crs = true`,
-  `response_body_check = false` does not disable CRS response-body inspection,
-  and posture misreports it.
 - [#699](https://github.com/victornife/jul/issues/699): a `jul-abi/v2`
   `read_body` call reads the client body inside the guest-call timeout, so slow
   legitimate uploads fail with `500`.
+
+The assessment's argument-limit bypass
+([#697](https://github.com/victornife/jul/issues/697), security) and CRS
+response-inspection mismatch
+([#698](https://github.com/victornife/jul/issues/698)) are fixed on `main`
+(unreleased; no published package contains the fix). See the
+[revalidation record](reviews/2026-11-10-697-698-waf-fix-revalidation.md) and
+the WAF section below. On a published package, apply the interim measures in
+[waf.md](waf.md#request-and-response-bodies).
 
 ## Publication and maturity boundaries
 
@@ -653,6 +656,16 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
 - **SecLang parser errors fail closed at startup.** A malformed directive file
   prevents the WAF engine from building, and the server refuses to start so the
   misconfigured location cannot be exposed without protection.
+- **Argument-limit guard is CRS-only.** With `crs_enabled = true`, a request
+  whose arguments reach `SecArgumentsLimit` (default 1000 per collection) is
+  rejected with `413` by generated rule `900001`; legitimate requests with more
+  arguments need a raised `SecArgumentsLimit`. Without CRS, Jul adds no guard,
+  and removing `900001` restores partial inspection (#697).
+- **Response inspection covers text types only.** `response_body_check = true`
+  inspects `text/plain`, `text/html` and `text/xml` responses up to the engine's
+  512 KiB response limit (then partial); other types, including JSON, need an
+  explicit `SecResponseBodyMimeType`. The effective policy reports compiled
+  settings, not per-transaction `ctl:` changes (#698).
 - **No aggregate inspection bound.** WAF and plugin inspection run before
   upstream admission, on cache hits and on no-upstream routes, and continue
   after client disconnect; no process-wide concurrency or memory budget
