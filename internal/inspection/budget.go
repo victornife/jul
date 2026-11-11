@@ -32,9 +32,11 @@ const (
 )
 
 // WAFFacts are the compiled, request-independent engine limits of the WAF
-// guarding a route. Request-specific ctl: actions that raise a limit for a
-// single transaction are outside this static rule; runtime charging still
-// covers them.
+// guarding a route. They also bound ctl:requestBodyLimit and
+// ctl:responseBodyLimit raises: Coraza sizes each transaction's body buffers
+// from the compiled limits and refuses bytes beyond them, so a raise lifts
+// only the transaction's limit check (pinned by the waf package's
+// TestCtlBodyLimitRaiseCannotExceedCompiledBuffers).
 type WAFFacts struct {
 	RequestBodyLimit uint64
 	// RequestBodyInMemoryLimit is the compiled in-memory limit. Zero means it

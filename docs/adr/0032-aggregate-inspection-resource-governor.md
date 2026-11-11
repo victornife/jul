@@ -842,9 +842,14 @@ no lease and needs nothing, so an uninspected configuration has no minimum.
   `SecResponseBodyLimit` and `SecArgumentsLimit` are honoured. Plugin terms come from the module's
   imports and configured limits. R4 and the response buffer are counted for every WAF route because
   `ctl:responseBodyAccess` can enable response inspection per transaction.
-- **Static limit.** `ctl:requestBodyLimit` and `ctl:responseBodyLimit` can raise a limit for one
-  transaction; the static rule cannot see that. Runtime charges (I2–I4) still apply and fail closed
-  with `503`.
+- **Per-transaction raises.** `ctl:requestBodyLimit` and `ctl:responseBodyLimit` raise only the
+  transaction's limit check. Coraza creates each transaction's body buffers with the compiled
+  limits and refuses bytes beyond them, so the compiled limits used here also bound buffered and
+  parsed bytes under a raise. A raised body larger than the compiled limit fails closed (request
+  `400` `request_body_read_error`; response `response_body_buffer_error`) rather than growing.
+  `TestCtlBodyLimitRaiseCannotExceedCompiledBuffers` pins this for every request and response
+  write entry point, so a Coraza change that breaks it fails CI. No `ctl` action changes
+  `ArgumentLimit`.
 - **Where it runs.** The handler build shared by startup, reload and admin apply computes the
   minimum. The server attaches it to the limits it publishes, and the governor refuses
   enforce-mode limits below it. `jul check` and `jul --check` compile the effective WAF policies and

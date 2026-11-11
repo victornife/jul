@@ -31,8 +31,9 @@ publishes process-wide limits and reports them, but no live WAF or plugin path
 consumes the governor yet; configured `enforce` mode is not traffic protection.
 The R3 response-header ceiling now has an explicit 64 KiB accounting default,
 but actual response-path reservation/enforcement remains pending. The
-route-aware minimum budget is validated statically; per-transaction
-`ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises are outside it (see
+route-aware minimum budget is validated statically from compiled limits, which
+also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:
+a raised body beyond the compiled limit is refused, not buffered (see
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)).
 
 The assessment's argument-limit bypass

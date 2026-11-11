@@ -581,7 +581,8 @@ func compiledEngine(w coraza.WAF) (reflect.Value, error) {
 
 // engineState is the compiled, request-independent engine configuration
 // after every directive (embedded, generated and operator) was applied.
-// Request-specific ctl: actions can still change a single transaction.
+// Request-specific ctl: actions can still change a single transaction, but
+// body buffers keep the compiled limits as their capacity.
 type engineState struct {
 	responseBodyAccess    bool
 	responseBodyMimeTypes []string
