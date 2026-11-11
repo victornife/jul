@@ -29,13 +29,18 @@ package configcontract
 // otherwise non-negative") is left out of both tables rather than flattened
 // into a misleading value.
 var DefaultOverrides = map[string]string{
-	"global.worker_threads":           "auto",
-	"global.log_format":               "text",
-	"global.log_level":                "info",
-	"global.redact_min_secret_length": "4",
-	"global.reload_timeout":           "10s",
-	"global.shutdown_timeout":         "30s",
-	"global.config_authority":         "file_owned",
+	"global.worker_threads":                       "auto",
+	"global.inspection.mode":                      "enforce",
+	"global.inspection.max_buffered_bytes":        "256m",
+	"global.inspection.max_response_header_bytes": "64k",
+	"global.inspection.evaluation_queue_timeout":  "1s",
+	"global.inspection.body_timeout":              "60s",
+	"global.log_format":                           "text",
+	"global.log_level":                            "info",
+	"global.redact_min_secret_length":             "4",
+	"global.reload_timeout":                       "10s",
+	"global.shutdown_timeout":                     "30s",
+	"global.config_authority":                     "file_owned",
 
 	"servers.*.client_address.forwarded_headers": "[forwarded, x-forwarded-for]",
 	"servers.*.client_address.max_hops":          "16",

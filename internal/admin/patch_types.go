@@ -308,12 +308,22 @@ type clientAddressPatch struct {
 // globalPatch carries the supported non-secret [global] settings. Legacy
 // compatibility-only access_log/error_log destinations are deliberately absent.
 type globalPatch struct {
-	WorkerThreads         *string `json:"worker_threads,omitempty"`
-	LogLevel              *string `json:"log_level,omitempty"`
-	LogFormat             *string `json:"log_format,omitempty"`
-	ShutdownTimeout       *string `json:"shutdown_timeout,omitempty"`
-	ReloadTimeout         *string `json:"reload_timeout,omitempty"`
-	RedactMinSecretLength *int    `json:"redact_min_secret_length,omitempty"`
+	WorkerThreads         *string          `json:"worker_threads,omitempty"`
+	LogLevel              *string          `json:"log_level,omitempty"`
+	LogFormat             *string          `json:"log_format,omitempty"`
+	ShutdownTimeout       *string          `json:"shutdown_timeout,omitempty"`
+	ReloadTimeout         *string          `json:"reload_timeout,omitempty"`
+	RedactMinSecretLength *int             `json:"redact_min_secret_length,omitempty"`
+	Inspection            *inspectionPatch `json:"inspection,omitempty"`
+}
+
+type inspectionPatch struct {
+	Mode                     *string `json:"mode,omitempty"`
+	MaxBufferedBytes         *string `json:"max_buffered_bytes,omitempty"`
+	MaxResponseHeaderBytes   *string `json:"max_response_header_bytes,omitempty"`
+	MaxConcurrentEvaluations *int    `json:"max_concurrent_evaluations,omitempty"`
+	EvaluationQueueTimeout   *string `json:"evaluation_queue_timeout,omitempty"`
+	BodyTimeout              *string `json:"body_timeout,omitempty"`
 }
 
 // compressionPatch carries the sparse global [compression] settings.

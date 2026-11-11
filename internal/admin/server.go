@@ -28,9 +28,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"jul/internal/adminapi"
 	"jul/internal/buildcaps"
 	"jul/internal/cachemeta"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/logthrottle"
 	"jul/internal/observability"
 	"jul/internal/rbac"
@@ -359,6 +361,13 @@ type Deps struct {
 	// dashboard, polled by the /api/stats endpoint. Nil yields an
 	// "unavailable" snapshot so the console can render an empty state.
 	Stats func() observability.StatsSnapshot
+	// InspectionSnapshot reports process-wide governor limits and charged
+	// usage. Its request-path integration state remains pending until later
+	// implementation slices connect live WAF/plugin calls.
+	InspectionSnapshot func() inspection.Snapshot
+	// InspectionPluginGuestCapacity reports configured guest-memory capacity
+	// across every compiled plugin generation not yet closed.
+	InspectionPluginGuestCapacity func() (adminapi.InspectionPluginGuestCapacity, error)
 	// TrafficSources returns the bounded top-N projection of request hosts,
 	// origins, and referers for the Console Overview Traffic Sources panel
 	// (Milestone 1.4). Nil omits the panel.

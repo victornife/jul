@@ -23,6 +23,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/logthrottle"
 )
 
@@ -202,6 +203,15 @@ type InstanceStats struct {
 	Live   int
 }
 
+// GuestCapacityStats separates configured guest memory capacity from current
+// instance counts. Wazero does not expose a process-wide actual-allocation
+// measurement through this manager.
+type GuestCapacityStats struct {
+	MaxPermittedBytes uint64
+	LiveInstances     uint64
+	MaxInstances      uint64
+}
+
 // InstanceStats reports live instances per plugin name, sorted by name. It is
 // read at scrape time.
 func (m *Manager) InstanceStats() []InstanceStats {
@@ -220,6 +230,33 @@ func (m *Manager) InstanceStats() []InstanceStats {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Plugin < out[j].Plugin })
 	return out
+}
+
+// GuestCapacityStats reports configured maximum guest memory capacity and
+// instance counts across every compiled plugin generation not yet closed.
+func (m *Manager) GuestCapacityStats() (GuestCapacityStats, error) {
+	var out GuestCapacityStats
+	if m == nil {
+		return out, nil
+	}
+	m.liveMu.Lock()
+	defer m.liveMu.Unlock()
+	for p := range m.live {
+		maxInstances := uint64(cap(p.slots))
+		if p.memoryLimitBytes != 0 && maxInstances > ^uint64(0)/p.memoryLimitBytes {
+			return GuestCapacityStats{}, fmt.Errorf("plugin %q guest capacity overflows uint64", p.name)
+		}
+		maxBytes := maxInstances * p.memoryLimitBytes
+		if out.MaxPermittedBytes > ^uint64(0)-maxBytes ||
+			out.LiveInstances > ^uint64(0)-uint64(len(p.slots)) ||
+			out.MaxInstances > ^uint64(0)-maxInstances {
+			return GuestCapacityStats{}, fmt.Errorf("aggregate plugin guest capacity overflows uint64")
+		}
+		out.MaxPermittedBytes += maxBytes
+		out.LiveInstances += uint64(len(p.slots))
+		out.MaxInstances += maxInstances
+	}
+	return out, nil
 }
 
 func (m *Manager) track(p *plugin) {
@@ -311,9 +348,10 @@ type plugin struct {
 	pool     chan *pooledModule // fixed-capacity; see poolCapacity
 	// slots holds one token per live instance (idle or in use); its capacity
 	// is max_instances (#506).
-	slots     chan struct{}
-	timeout   time.Duration
-	isHandler bool
+	slots            chan struct{}
+	memoryLimitBytes uint64
+	timeout          time.Duration
+	isHandler        bool
 	// abi is the configured (and negotiated) ABI; hasResponse reports that a
 	// jul-abi/v2 module exports handle_response.
 	abi         string
@@ -321,6 +359,8 @@ type plugin struct {
 	// readsBody reports that the module imports read_request_body, so each
 	// request's body is prepared before an instance is acquired (#699).
 	readsBody bool
+	// facts sizes this plugin's worst-case inspection charge (ADR 0032 §7).
+	facts inspection.PluginFacts
 
 	capKV        bool
 	capFetch     bool
@@ -391,11 +431,6 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	}
 	wasm := module.Bytes
 
-	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
-	if pages == 0 {
-		pages = 256 // 16 MiB
-	}
-
 	cfgJSON := []byte("{}")
 	if len(pc.Config) > 0 {
 		if b, err := json.Marshal(pc.Config); err == nil {
@@ -403,34 +438,25 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		}
 	}
 
-	p := &plugin{
-		name:         name,
-		identity:     module.Identity,
-		timeout:      pc.Timeout.Std(),
-		isHandler:    pc.Type == "handler",
-		abi:          config.EffectivePluginABI(pc),
-		pool:         make(chan *pooledModule, poolCapacity),
-		capKV:        pc.KV,
-		capFetch:     pc.Fetch,
-		allowedHosts: pc.AllowedHosts,
-		configJSON:   cfgJSON,
-		kv:           m.kv,
-		maxReqBody:   sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
-		maxRespBody:  sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
-		fetchTimeout: pc.FetchTimeout.Std(),
-		maxFetchResp: sizeOr(pc.MaxFetchResponse, 1<<20),
-		kvMaxEntries: pc.KVMaxEntries,
-		kvMaxBytes:   sizeOr(pc.KVMaxBytes, 1<<20),
-		kvUsage:      m.kvLedgerFor(name),
-		log:          m.log,
-		onInvoke:     m.onInvoke,
-		onPanic:      m.onPanic,
-		onRespInv:    m.onRespInv,
-		onNoBody:     m.onNoBody,
-		onWait:       m.onWait,
-		onBodyFail:   m.onBodyErr,
-		egressWrap:   egressWrap,
-	}
+	p, pages := newPluginLimits(name, pc)
+	p.identity = module.Identity
+	p.pool = make(chan *pooledModule, poolCapacity)
+	p.capKV = pc.KV
+	p.allowedHosts = pc.AllowedHosts
+	p.configJSON = cfgJSON
+	p.kv = m.kv
+	p.fetchTimeout = pc.FetchTimeout.Std()
+	p.kvMaxEntries = pc.KVMaxEntries
+	p.kvMaxBytes = sizeOr(pc.KVMaxBytes, 1<<20)
+	p.kvUsage = m.kvLedgerFor(name)
+	p.log = m.log
+	p.onInvoke = m.onInvoke
+	p.onPanic = m.onPanic
+	p.onRespInv = m.onRespInv
+	p.onNoBody = m.onNoBody
+	p.onWait = m.onWait
+	p.onBodyFail = m.onBodyErr
+	p.egressWrap = egressWrap
 	maxInstances := pc.MaxInstances
 	if maxInstances <= 0 {
 		maxInstances = defaultMaxInstances
@@ -507,6 +533,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	}
 	p.hasResponse = decl.hasResponse
 	p.readsBody = decl.readsBody
+	p.facts = p.inspectionFacts(decl)
 
 	p.runtime = r
 	p.compiled = compiled
@@ -523,6 +550,75 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	p.mgr = m
 	m.track(p)
 	return p, nil
+}
+
+// newPluginLimits returns a plugin carrying only the configuration-derived
+// fields that size its inspection charge, and the guest memory limit in
+// pages. compilePlugin and InspectionFacts share it so both report the same
+// limits.
+func newPluginLimits(name string, pc config.PluginConfig) (*plugin, uint32) {
+	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
+	if pages == 0 {
+		pages = 256 // 16 MiB
+	}
+	return &plugin{
+		name:             name,
+		memoryLimitBytes: uint64(pages) * wasmPageSize,
+		timeout:          pc.Timeout.Std(),
+		isHandler:        pc.Type == "handler",
+		abi:              config.EffectivePluginABI(pc),
+		capFetch:         pc.Fetch,
+		maxReqBody:       sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
+		maxRespBody:      sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
+		maxFetchResp:     sizeOr(pc.MaxFetchResponse, 1<<20),
+	}, pages
+}
+
+// InspectionFacts returns every declared plugin's inspection facts without
+// running guest code: each module is read, compiled and ABI-negotiated
+// exactly as Build does, but never instantiated, so neither a WebAssembly
+// start function nor _initialize executes. The offline `jul check` budget
+// uses it; Build remains the only path that instantiates guests.
+func (m *Manager) InspectionFacts(ctx context.Context, cfg map[string]config.PluginConfig) (map[string]inspection.PluginFacts, error) {
+	out := make(map[string]inspection.PluginFacts, len(cfg))
+	for name, pc := range cfg {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("plugin %q: %w", name, err)
+		}
+		facts, err := m.inspectPlugin(ctx, name, pc)
+		if err != nil {
+			return nil, fmt.Errorf("plugin %q: %w", name, err)
+		}
+		out[name] = facts
+	}
+	return out, nil
+}
+
+func (m *Manager) inspectPlugin(ctx context.Context, name string, pc config.PluginConfig) (inspection.PluginFacts, error) {
+	module, err := ReadModule(pc)
+	if err != nil {
+		return inspection.PluginFacts{}, err
+	}
+	p, pages := newPluginLimits(name, pc)
+	if _, ok := abiRegistry[p.abi]; !ok {
+		return inspection.PluginFacts{}, fmt.Errorf("unknown ABI %q", p.abi)
+	}
+	r := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().
+		WithCompilationCache(m.cache).
+		WithMemoryLimitPages(pages).
+		WithCloseOnContextDone(true))
+	defer func() { _ = r.Close(context.Background()) }()
+	// Compilation decodes and validates the module; imports are resolved and
+	// start functions run only at instantiation, which this path never does.
+	compiled, err := r.CompileModule(ctx, module.Bytes)
+	if err != nil {
+		return inspection.PluginFacts{}, fmt.Errorf("compile module: %w", err)
+	}
+	decl, err := negotiateABI(p.abi, compiled)
+	if err != nil {
+		return inspection.PluginFacts{}, err
+	}
+	return p.inspectionFacts(decl), nil
 }
 
 // sizeOr returns the byte count of s, or def when s is non-positive.
@@ -801,4 +897,22 @@ func (p *plugin) close() {
 		return
 	}
 	_ = p.runtime.Close(context.Background())
+}
+
+// inspectionFacts derives the static inputs to the route minimum budget from
+// the plugin's configured limits and the host functions it imports.
+func (p *plugin) inspectionFacts(decl abiDecl) inspection.PluginFacts {
+	return inspection.PluginFacts{
+		Name:                 p.name,
+		MaxRequestBody:       uint64(max(p.maxReqBody, 0)),
+		MaxResponseBody:      uint64(max(p.maxRespBody, 0)),
+		MaxFetchResponse:     uint64(max(p.maxFetchResp, 0)),
+		MemoryLimit:          p.memoryLimitBytes,
+		ReadsBody:            decl.readsBody,
+		SetsRequestState:     decl.imports["set_request_state"],
+		WritesResponseBody:   decl.imports["write_response_body"],
+		Fetch:                p.capFetch && decl.imports["fetch"],
+		SubscribesResponse:   decl.hasResponse && !p.isHandler,
+		ReplacesResponseBody: decl.hasResponse && !p.isHandler && decl.imports["resp_body_replace"],
+	}
 }

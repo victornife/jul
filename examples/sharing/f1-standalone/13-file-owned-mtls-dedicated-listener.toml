@@ -12,6 +12,11 @@
 config_authority = "file_owned"
 log_level = "info"
 
+[global.inspection]
+# WAF routes need a larger budget than the 256 MiB default; see the
+# minimum-budget rule in docs/adr/0032-aggregate-inspection-resource-governor.md.
+max_buffered_bytes = "512m"
+
 [[servers]]
 name = "default-deny"
 listen = "192.0.2.10:443"

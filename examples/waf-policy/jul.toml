@@ -18,6 +18,11 @@ name = "app_backend"
 strategy = "round_robin"
 servers = ["127.0.0.1:9001"]
 
+[global.inspection]
+# WAF routes need a larger budget than the 256 MiB default; see the
+# minimum-budget rule in docs/adr/0032-aggregate-inspection-resource-governor.md.
+max_buffered_bytes = "512m"
+
 [[servers]]
 name = "portal"
 listen = "127.0.0.1:8080"

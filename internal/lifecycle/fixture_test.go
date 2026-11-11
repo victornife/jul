@@ -22,6 +22,8 @@ func durationPtr(d time.Duration) *config.Duration {
 	return &cd
 }
 
+func sizePtr(s config.Size) *config.Size { return &s }
+
 // fullConfig returns a configuration that populates every public schema leaf
 // with a non-zero value. It is the reachability fixture for the closed-world
 // contract: TestFullyPopulatedFixtureReachesEveryEntry fails when a registered
@@ -42,6 +44,14 @@ func fullConfig() *config.Config {
 			ShutdownTimeout:       config.Duration(30 * time.Second),
 			ReloadTimeout:         config.Duration(10 * time.Second),
 			RedactMinSecretLength: 4,
+			Inspection: config.InspectionConfig{
+				Mode:                     "enforce",
+				MaxBufferedBytes:         sizePtr(256 << 20),
+				MaxResponseHeaderBytes:   sizePtr(64 << 10),
+				MaxConcurrentEvaluations: 4,
+				EvaluationQueueTimeout:   durationPtr(time.Second),
+				BodyTimeout:              durationPtr(60 * time.Second),
+			},
 		},
 		Admin: config.AdminConfig{
 			Enabled:              true,

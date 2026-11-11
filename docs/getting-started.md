@@ -6,7 +6,7 @@ console.
 
 ## Prerequisites
 
-- A verified Jul.IA release binary in your working directory, or Go 1.27.2+ to
+- A verified Jul.IA release binary in your working directory, or Go 1.27.4+ to
   build it from source (`go build -o jul ./cmd/jul` from the repository root).
   That source command builds the lean profile without Console, WAF or other
   opt-in tags; use a full package or select the needed build tags. The current

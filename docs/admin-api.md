@@ -224,6 +224,27 @@ Two fields exist for clients that poll or retry:
   **These are minimum guarantees, not caps.** A terminal record is evicted only
   once it is *both* past the age bound *and* over the count bound, so a client
   must not conclude a record is gone because one bound has passed.
+- **`inspection`** reports configured and effective process-wide governor
+  limits, current charged classes, leases, active/waiting evaluations and the
+  draining state. A configured slot value of `0` remains visible as `0` while
+  the effective object reports its resolved count. Its
+  `request_path_integration` is `pending` in I1: `enforce` mode is not evidence
+  that request traffic is gated, and zero usage does not mean traffic is
+  protected. `base_charge_bytes` and `base_charge_scope` describe the measured
+  governor/context scaffolding only. `configured.max_response_header_bytes`
+  and `effective.max_response_header_bytes` report the complete accounted
+  response-header ceiling used for the R3 worst-case term; runtime will reserve
+  the measured R3 amount, not the ceiling, before Coraza ingestion. This ceiling
+  does not raise `max_buffered_bytes`. `plugin_guest_max_bytes`,
+  `plugin_guest_live_instances`, and `plugin_guest_max_instances` report the
+  configured aggregate capacity and live instance counts across compiled,
+  unclosed plugin generations; `plugin_guest_actual_bytes` is omitted with
+  `plugin_guest_actual_bytes_state: "not_sampled"` because actual guest-memory
+  allocation is not measured. `evaluation_headroom_estimate_bytes` is omitted
+  with state `not_calibrated`. Unknown numeric values are omitted rather than
+  emitted as `null` or a measured zero. The configured budget is validated
+  against the route-aware minimum described in
+  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
 
 ### `GET /api/v1/capabilities`
 

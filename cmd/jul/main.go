@@ -97,6 +97,14 @@ func run() int {
 	if checkOnly {
 		// Legacy flag: prefer `jul check` (see usage).
 		fmt.Fprintln(os.Stderr, "Deprecation notice: `jul --check` is kept for compatibility; prefer `jul check`.")
+		budgetWarning, err := app.CheckInspectionBudget(context.Background(), cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "invalid configuration in %s:\n%v\n", src.Name(), err)
+			return 1
+		}
+		if budgetWarning != nil {
+			fmt.Fprintf(os.Stderr, "warning: %v\n", budgetWarning)
+		}
 		if err := checkStaticRoots(cfg, false); err != nil {
 			fmt.Fprintf(os.Stderr, "resource check: %v\n", err)
 			return 1

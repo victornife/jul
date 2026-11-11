@@ -4,12 +4,112 @@
 package configcontract
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 )
+
+func TestInspectionContractDescribesPendingRequestIntegration(t *testing.T) {
+	artifacts, err := RenderArtifacts(buildTestContract(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata ContractMetadata
+	if err := json.Unmarshal(artifacts["generated/config-metadata.json"], &metadata); err != nil {
+		t.Fatal(err)
+	}
+	type schemaNode struct {
+		Description string                `json:"description"`
+		Properties  map[string]schemaNode `json:"properties"`
+	}
+	var schema schemaNode
+	if err := json.Unmarshal(artifacts["generated/config.schema.json"], &schema); err != nil {
+		t.Fatal(err)
+	}
+	global, ok := schema.Properties["global"]
+	if !ok {
+		t.Fatal("schema missing global")
+	}
+	inspection, ok := global.Properties["inspection"]
+	if !ok {
+		t.Fatal("schema missing global.inspection")
+	}
+	reference := string(artifacts["generated/config-reference.md"])
+	tests := []struct {
+		path        string
+		want        string
+		description string
+	}{
+		{
+			"global.inspection.body_timeout",
+			"configured and reported; live inspected-body deadlines are not applied in I1",
+			"BodyTimeout bounds a future inspected-body receive; it is not applied to live requests in I1",
+		},
+		{
+			"global.inspection.evaluation_queue_timeout",
+			"applied by the governor API; live requests do not acquire governor slots in I1",
+			"EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots in I1",
+		},
+		{
+			"global.inspection.max_buffered_bytes",
+			"applied by governor accounting and configuration validation; live WAF/plugin requests are not governed in I1",
+			"MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; live requests are not governed in I1",
+		},
+		{
+			"global.inspection.max_concurrent_evaluations",
+			"applied by the governor API; live WAF/plugin evaluations are not governed in I1",
+			"MaxConcurrentEvaluations is the governor slot limit; live evaluations are not governed in I1",
+		},
+		{
+			"global.inspection.max_response_header_bytes",
+			"used by configuration validation; live response-header accounting is pending in I1",
+			"MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not applied to live responses in I1",
+		},
+		{
+			"global.inspection.mode",
+			"controls governor accounting and configuration validation; live WAF/plugin requests are not governed in I1",
+			`Mode is "enforce" (default) or "observe" for governor accounting; live requests are not governed in I1`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			leaf, ok := inspection.Properties[strings.TrimPrefix(tt.path, "global.inspection.")]
+			if !ok {
+				t.Fatalf("schema missing %s", tt.path)
+			}
+			if leaf.Description != tt.description {
+				t.Errorf("schema description = %q, want %q", leaf.Description, tt.description)
+			}
+			entry, ok := metadata.Fields[tt.path]
+			if !ok {
+				t.Fatalf("metadata missing %s", tt.path)
+			}
+			if entry.ActiveWhen != tt.want {
+				t.Errorf("metadata active_when = %q, want %q", entry.ActiveWhen, tt.want)
+			}
+			if entry.Description != tt.description {
+				t.Errorf("metadata description = %q, want %q", entry.Description, tt.description)
+			}
+			start := strings.Index(reference, "## `"+tt.path+"` ")
+			if start < 0 {
+				t.Fatalf("reference missing %s", tt.path)
+			}
+			section := reference[start:]
+			if end := strings.Index(section, "\n## "); end >= 0 {
+				section = section[:end]
+			}
+			if row := "| Active when | " + tt.want + " |"; !strings.Contains(section, row) {
+				t.Errorf("reference section missing %q", row)
+			}
+			if !strings.Contains(section, tt.description+".") {
+				t.Errorf("reference section missing description %q", tt.description)
+			}
+		})
+	}
+}
 
 func buildTestContract(t *testing.T) Contract {
 	t.Helper()

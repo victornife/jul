@@ -316,7 +316,7 @@ For concepts, configuration, and the full ABI reference see [plugins.md](plugins
 
 2. **Wrong GOOS/GOARCH.** The `wasip1` target is required. Any other pair produces a binary that wazero cannot load.
 
-3. **Unsupported Go version.** Build current examples with Go 1.27.2+ as required
+3. **Unsupported Go version.** Build current examples with Go 1.27.4+ as required
    by their separate `go.mod`. Existing supported v1/v2 guests do not need
    rebuilding when the host toolchain changes; the historical v1 fixture fleet
    remains part of every plugin test run. See [ABI compatibility](abi.md).

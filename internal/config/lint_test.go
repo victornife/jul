@@ -210,6 +210,19 @@ func TestIsLoopbackListen(t *testing.T) {
 	}
 }
 
+func TestInspectionBudgetIsNotLintedWithoutCompiledRoutes(t *testing.T) {
+	cfg := ProxyTarget("127.0.0.1:9000", ":8080")
+	cfg.Global.Inspection.Mode = "observe"
+	budget := Size(1024)
+	cfg.Global.Inspection.MaxBufferedBytes = &budget
+
+	// The minimum budget depends on compiled WAF and plugin route chains, so
+	// it is checked by jul check, startup and reload, not by structural lint.
+	if hasWarning(Lint(cfg), "max_buffered_bytes") {
+		t.Fatalf("structural lint emitted a route-independent budget floor:\n%s", lintMessages(Lint(cfg)))
+	}
+}
+
 func TestSeverityString(t *testing.T) {
 	if SeverityWarning.String() != "warning" {
 		t.Errorf("warning = %q", SeverityWarning.String())

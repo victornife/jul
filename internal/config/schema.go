@@ -321,7 +321,46 @@ type GlobalConfig struct {
 	// restart-required: changing it moves ownership of the configuration file
 	// and can only be staged through stage_restart (ADR 0019 §9.2).
 	ConfigAuthority string `toml:"config_authority"`
+	// Inspection configures process-wide admission accounting for future WAF
+	// and plugin integrations. I1 publishes and reports the limits, but does not
+	// yet gate live requests.
+	Inspection InspectionConfig `toml:"inspection"`
 }
+
+// InspectionConfig holds process-wide inspection-governor limits. It is
+// intentionally global rather than listener- or route-scoped.
+type InspectionConfig struct {
+	// Mode is "enforce" (default) or "observe" for governor accounting; live
+	// requests are not governed in I1.
+	Mode string `toml:"mode"`
+	// MaxBufferedBytes is the shared governor ceiling for base, buffer and
+	// estimated WAF state; live requests are not governed in I1. It must be
+	// positive, and in enforce mode at least the largest inspected route's
+	// worst-case single-request charge (observe only warns).
+	MaxBufferedBytes *Size `toml:"max_buffered_bytes,omitempty"`
+	// MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and
+	// values plus 64 bytes per occurrence); it is not applied to live responses
+	// in I1. It is not a wire-size or actual-memory bound.
+	MaxResponseHeaderBytes *Size `toml:"max_response_header_bytes,omitempty"`
+	// MaxConcurrentEvaluations is the governor slot limit; live evaluations are
+	// not governed in I1. Zero resolves to the candidate
+	// worker_threads/GOMAXPROCS setting.
+	MaxConcurrentEvaluations int `toml:"max_concurrent_evaluations"`
+	// EvaluationQueueTimeout bounds governor slot waiting; live requests do not
+	// acquire slots in I1. Explicit zero disables queueing.
+	EvaluationQueueTimeout *Duration `toml:"evaluation_queue_timeout,omitempty"`
+	// BodyTimeout bounds a future inspected-body receive; it is not applied to
+	// live requests in I1. Explicit zero disables that deadline.
+	BodyTimeout *Duration `toml:"body_timeout,omitempty"`
+}
+
+const InspectionBaseChargeBytes int64 = 16 << 10
+
+const (
+	InspectionResponseHeaderFieldOverheadBytes int64 = 64
+	InspectionResponseHeaderEstimateFactor     int64 = 48
+	InspectionDefaultMaxResponseHeaderBytes    int64 = 64 << 10
+)
 
 // ServerConfig is a virtual host bound to one listen address.
 type ServerConfig struct {

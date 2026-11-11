@@ -659,6 +659,58 @@
       "active_when": "health check enabled"
     },
     {
+      "go_field": "InspectionConfig.BodyTimeout",
+      "path": "global.inspection.body_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted defaults to 60s; explicit 0s disables the future inspected-body deadline",
+      "active_when": "configured and reported; live inspected-body deadlines are not applied in I1"
+    },
+    {
+      "go_field": "InspectionConfig.EvaluationQueueTimeout",
+      "path": "global.inspection.evaluation_queue_timeout",
+      "kind": "duration",
+      "constraint": "between 0s and 10s",
+      "zero_semantics": "omitted defaults to 1s; explicit 0s disables waiting",
+      "active_when": "applied by the governor API; live requests do not acquire governor slots in I1"
+    },
+    {
+      "go_field": "InspectionConfig.MaxBufferedBytes",
+      "path": "global.inspection.max_buffered_bytes",
+      "kind": "size",
+      "constraint": "positive size",
+      "zero_semantics": "omitted defaults to 256 MiB; explicit zero is invalid",
+      "active_when": "applied by governor accounting and configuration validation; live WAF/plugin requests are not governed in I1"
+    },
+    {
+      "go_field": "InspectionConfig.MaxConcurrentEvaluations",
+      "path": "global.inspection.max_concurrent_evaluations",
+      "kind": "integer",
+      "constraint": "0 or between 1 and 1024",
+      "zero_semantics": "0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting",
+      "active_when": "applied by the governor API; live WAF/plugin evaluations are not governed in I1"
+    },
+    {
+      "go_field": "InspectionConfig.MaxResponseHeaderBytes",
+      "path": "global.inspection.max_response_header_bytes",
+      "kind": "size",
+      "constraint": "positive size",
+      "zero_semantics": "omitted defaults to 64 KiB; explicit zero is invalid",
+      "active_when": "used by configuration validation; live response-header accounting is pending in I1"
+    },
+    {
+      "go_field": "InspectionConfig.Mode",
+      "path": "global.inspection.mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to enforce",
+      "active_when": "controls governor accounting and configuration validation; live WAF/plugin requests are not governed in I1",
+      "allowed": [
+        "enforce",
+        "observe"
+      ]
+    },
+    {
       "go_field": "JWTAuthConfig.Timeout",
       "path": "servers[].locations[].auth.jwt.timeout",
       "kind": "duration",

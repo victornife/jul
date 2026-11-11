@@ -198,6 +198,15 @@ metric dimension rather than request-handling behavior.
 | `jul_http_response_bytes_total` | Counter | — | Merged / release pending | HTTP response-body bytes written to clients, after content-encoding/compression and before HTTP/TLS/transport framing. Excludes bytes written after a connection hijack (e.g. WebSocket framing). Node-level bandwidth visibility (#431), not per-route accounting — no dynamic labels. |
 | `jul_http_requests_total` | Counter | `code`, `host`, `method` | Released `v1.32.0` | Total HTTP requests handled, labeled by method, host, and status code. |
 | `jul_http_response_compressed_total` | Counter | `encoding` | Released `v1.32.0` | Responses compressed by the edge, labeled by content coding. |
+| `jul_inspection_abandoned_evaluations` | Gauge | — | Merged / release pending | Evaluations still running after their request context ended. |
+| `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected-body receive timeout outcomes (`timeout`, `would_timeout`, `unsupported`); no body integration is active in I1. |
+| `jul_inspection_bytes` | Gauge | `class` | Merged / release pending | Process-wide charged bytes (`base`, `buffer`, `waf_state`); WAF state is an estimate, not a measured heap bound. Request paths are not yet integrated. |
+| `jul_inspection_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide inspection byte ceiling. |
+| `jul_inspection_evaluations` | Gauge | `state` | Merged / release pending | Active and waiting process-wide inspection evaluations. |
+| `jul_inspection_evaluations_limit` | Gauge | — | Merged / release pending | Effective process-wide inspection evaluation slot limit. |
+| `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor; remains zero until later request-path integration. |
+| `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state and evaluation slots. |
+| `jul_inspection_unslotted_logging_total` | Counter | — | Merged / release pending | Phase-5 logging evaluations that proceeded without a slot; phase-5 integration is pending. |
 | `jul_listener_conns` | Gauge | — | Released `v1.32.0` | Current concurrent connections across all listeners. |
 | `jul_managed_apply_finalization_errors_total` | Counter | `component` | Released `v2.0.0` | Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded. |
 | `jul_managed_apply_finalized_total` | Counter | `mode`, `operation`, `outcome`, `restored` | Released `v2.0.0` | Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a). |
@@ -253,6 +262,25 @@ metric dimension rather than request-handling behavior.
 Metric labels must remain bounded and must never contain request paths, queries,
 client identity, destination URLs, raw errors, or secrets. See the
 [cardinality policy and operator playbook](core-http.md#label-cardinality-policy).
+
+### Inspection governor foundation (#700 I1)
+
+The inspection families are added to the metrics contract, but I1 only
+publishes configured limits and the process-owned governor snapshot. No live
+WAF or plugin request path acquires a lease, buffer charge or evaluation slot;
+therefore zero usage and zero rejection counters do not demonstrate that
+traffic is protected. The `enforce` configuration value is not a request-path
+enforcement claim in this slice. Body-timeout and unslotted-logging counters
+remain idle until their later integration points are implemented.
+
+`waf_state` is a calibrated estimate rather than measured retained heap. The
+lease base reservation is based on a checksummed
+[measurement of lease/context scaffolding](reviews/evidence/2026-11-10-700-i1-base-charge/README.md)
+only; it excludes protocol, request-body, plugin and Coraza allocations.
+Static guest-capacity and evaluation-headroom estimates are not reported as
+measured zero. The response-header accounting ceiling and the route-aware
+minimum budget are defined; see
+[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
 
 ### Runtime resources and capacity (#431)
 

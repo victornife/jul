@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // This file contains the small reusable validators for public scalar and enum
@@ -114,6 +115,33 @@ func validateGlobalValues(c GlobalConfig) []error {
 	}
 	if err := validateNonNegativeInt("[global].redact_min_secret_length", c.RedactMinSecretLength); err != nil {
 		errs = append(errs, err)
+	}
+	errs = append(errs, validateInspectionValues(c.Inspection)...)
+	return errs
+}
+
+func validateInspectionValues(c InspectionConfig) []error {
+	var errs []error
+	if err := validateOptionalEnum("[global.inspection].mode", c.Mode, "enforce", "observe"); err != nil {
+		errs = append(errs, err)
+	}
+	if c.MaxBufferedBytes != nil && *c.MaxBufferedBytes <= 0 {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_buffered_bytes: must be a positive size"))
+	}
+	if c.MaxResponseHeaderBytes != nil && *c.MaxResponseHeaderBytes <= 0 {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_response_header_bytes: must be a positive size"))
+	}
+	if c.MaxResponseHeaderBytes != nil && c.MaxResponseHeaderBytes.Bytes() > int64(^uint64(0)>>1)/InspectionResponseHeaderEstimateFactor {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_response_header_bytes: value is too large to calculate the R3 estimate"))
+	}
+	if c.MaxConcurrentEvaluations < 0 || c.MaxConcurrentEvaluations > 1024 {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_concurrent_evaluations: must be 0 (auto) or between 1 and 1024"))
+	}
+	if c.EvaluationQueueTimeout != nil && (*c.EvaluationQueueTimeout < 0 || *c.EvaluationQueueTimeout > Duration(10*time.Second)) {
+		errs = append(errs, fmt.Errorf("[global.inspection].evaluation_queue_timeout: must be between 0s and 10s"))
+	}
+	if c.BodyTimeout != nil && *c.BodyTimeout < 0 {
+		errs = append(errs, fmt.Errorf("[global.inspection].body_timeout: must not be negative"))
 	}
 	return errs
 }

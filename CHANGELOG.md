@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Require Go 1.27.4 for current source builds, including the upstream
+  `net/http` fix for [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
+  The root and example modules, CI/release toolchain and Docker builder are
+  aligned. Previously published binaries and images are unchanged; deploy a
+  rebuilt artifact to receive the fix.
+
 - WAF: fail closed when argument collection stops at `SecArgumentsLimit`
   (#697). With `crs_enabled = true`, generated rule `900001` (after the CRS,
   before operator rules) rejects a request whose arguments reached the limit
@@ -180,6 +186,17 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 
 ### Added
+
+- Partial #700 I1 inspection-governor foundations: process-wide configuration,
+  including the 64 KiB response-header accounting ceiling and a route-aware
+  minimum budget checked by `jul check`, startup, reload and admin apply;
+  reload publication, bounded Prometheus families, and `/api/v1/status` plus
+  `jul status` projections. In `enforce` mode a WAF route whose
+  `request_body_limit` exceeds about 329 KiB (with otherwise default limits)
+  needs a larger `max_buffered_bytes` than the 256 MiB default. This does
+  **not** yet gate live WAF/plugin paths, apply body deadlines or reserve
+  actual-size R3 usage; configured `enforce` mode is not runtime protection. See [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
+  for the R3 contract and remaining implementation slices.
 
 - Explicit route and backend cutover cache behavior (`reload_policy = "retain" |
   "invalidate"` in `[cache]` and `[servers.locations.cache_policy]`, #624 /

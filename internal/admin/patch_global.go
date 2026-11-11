@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"jul/internal/config"
 )
@@ -147,6 +148,86 @@ func applyGlobalSet(c *config.Config, p *globalPatch) (string, error) {
 			changed = append(changed, "redact_min_secret_length")
 		}
 		next.RedactMinSecretLength = *p.RedactMinSecretLength
+	}
+	if p.Inspection != nil {
+		ip := p.Inspection
+		if !hasInspectionFields(ip) {
+			return "", fmt.Errorf("global_set: inspection payload must contain at least one field")
+		}
+		inspection := next.Inspection
+		if ip.Mode != nil {
+			value := strings.TrimSpace(*ip.Mode)
+			if value != "enforce" && value != "observe" {
+				return "", fmt.Errorf("global_set: inspection.mode must be enforce or observe")
+			}
+			if inspection.Mode != value {
+				changed = append(changed, "inspection.mode")
+			}
+			inspection.Mode = value
+		}
+		if ip.MaxBufferedBytes != nil {
+			var value config.Size
+			if err := value.UnmarshalText([]byte(strings.TrimSpace(*ip.MaxBufferedBytes))); err != nil {
+				return "", fmt.Errorf("global_set: inspection.max_buffered_bytes: %w", err)
+			}
+			if value <= 0 {
+				return "", fmt.Errorf("global_set: inspection.max_buffered_bytes must be positive")
+			}
+			if inspection.MaxBufferedBytes == nil || *inspection.MaxBufferedBytes != value {
+				changed = append(changed, "inspection.max_buffered_bytes")
+			}
+			inspection.MaxBufferedBytes = &value
+		}
+		if ip.MaxResponseHeaderBytes != nil {
+			var value config.Size
+			if err := value.UnmarshalText([]byte(strings.TrimSpace(*ip.MaxResponseHeaderBytes))); err != nil {
+				return "", fmt.Errorf("global_set: inspection.max_response_header_bytes: %w", err)
+			}
+			if value <= 0 {
+				return "", fmt.Errorf("global_set: inspection.max_response_header_bytes must be positive")
+			}
+			if inspection.MaxResponseHeaderBytes == nil || *inspection.MaxResponseHeaderBytes != value {
+				changed = append(changed, "inspection.max_response_header_bytes")
+			}
+			inspection.MaxResponseHeaderBytes = &value
+		}
+		if ip.MaxConcurrentEvaluations != nil {
+			value := *ip.MaxConcurrentEvaluations
+			if value < 0 || value > 1024 {
+				return "", fmt.Errorf("global_set: inspection.max_concurrent_evaluations must be 0 (auto) or between 1 and 1024")
+			}
+			if inspection.MaxConcurrentEvaluations != value {
+				changed = append(changed, "inspection.max_concurrent_evaluations")
+			}
+			inspection.MaxConcurrentEvaluations = value
+		}
+		if ip.EvaluationQueueTimeout != nil {
+			var value config.Duration
+			if err := value.UnmarshalText([]byte(strings.TrimSpace(*ip.EvaluationQueueTimeout))); err != nil {
+				return "", fmt.Errorf("global_set: inspection.evaluation_queue_timeout: %w", err)
+			}
+			if value < 0 || value > config.Duration(10*time.Second) {
+				return "", fmt.Errorf("global_set: inspection.evaluation_queue_timeout must be between 0s and 10s")
+			}
+			if inspection.EvaluationQueueTimeout == nil || *inspection.EvaluationQueueTimeout != value {
+				changed = append(changed, "inspection.evaluation_queue_timeout")
+			}
+			inspection.EvaluationQueueTimeout = &value
+		}
+		if ip.BodyTimeout != nil {
+			var value config.Duration
+			if err := value.UnmarshalText([]byte(strings.TrimSpace(*ip.BodyTimeout))); err != nil {
+				return "", fmt.Errorf("global_set: inspection.body_timeout: %w", err)
+			}
+			if value < 0 {
+				return "", fmt.Errorf("global_set: inspection.body_timeout must not be negative")
+			}
+			if inspection.BodyTimeout == nil || *inspection.BodyTimeout != value {
+				changed = append(changed, "inspection.body_timeout")
+			}
+			inspection.BodyTimeout = &value
+		}
+		next.Inspection = inspection
 	}
 
 	c.Global = next
@@ -312,7 +393,14 @@ func applyGlobalRateLimitSet(c *config.Config, p *rateLimitPatch) (string, error
 
 func hasGlobalFields(p *globalPatch) bool {
 	return p.WorkerThreads != nil || p.LogLevel != nil || p.LogFormat != nil ||
-		p.ShutdownTimeout != nil || p.ReloadTimeout != nil || p.RedactMinSecretLength != nil
+		p.ShutdownTimeout != nil || p.ReloadTimeout != nil || p.RedactMinSecretLength != nil ||
+		p.Inspection != nil && hasInspectionFields(p.Inspection)
+}
+
+func hasInspectionFields(p *inspectionPatch) bool {
+	return p != nil && (p.Mode != nil || p.MaxBufferedBytes != nil ||
+		p.MaxResponseHeaderBytes != nil || p.MaxConcurrentEvaluations != nil ||
+		p.EvaluationQueueTimeout != nil || p.BodyTimeout != nil)
 }
 
 func hasCompressionFields(p *compressionPatch) bool {

@@ -115,6 +115,10 @@
       "description": "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement."
     },
     {
+      "name": "inspection",
+      "description": "Process-wide inspection-governor limits and accounting; request-path enforcement is pending."
+    },
+    {
       "name": "listener",
       "description": "The listen address a socket binds to."
     },
@@ -256,12 +260,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 462,
-    "schema_leaves": 392,
-    "registry_entries": 392,
+    "schema_paths": 469,
+    "schema_leaves": 398,
+    "registry_entries": 398,
     "startup_consumed": 29,
     "by_class": {
-      "hot_reload": 349,
+      "hot_reload": 355,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 29,
@@ -1320,6 +1324,84 @@
       "conditional": false,
       "deprecated": true,
       "ignored": true,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.body_timeout",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.evaluation_queue_timeout",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.max_buffered_bytes",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.max_concurrent_evaluations",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.max_response_header_bytes",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "The response-header accounting ceiling publishes atomically with the other process-owned inspection limits.",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.mode",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
       "reserved": false,
       "secret_digested": false
     },

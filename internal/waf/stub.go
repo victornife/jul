@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/middleware"
 )
 
@@ -58,6 +59,9 @@ func (f *Firewall) IsClosed() bool {
 
 // Info is empty in the stub: there is no compiled policy to describe.
 func (f *Firewall) Info() PolicyInfo { return PolicyInfo{} }
+
+// InspectionFacts is empty in the stub: a lean build constructs no Firewall.
+func (f *Firewall) InspectionFacts() inspection.WAFFacts { return inspection.WAFFacts{} }
 
 // SourceChanged reports whether two stub Firewalls differ.
 func (f *Firewall) SourceChanged(other *Firewall) bool {

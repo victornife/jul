@@ -21,6 +21,7 @@ import (
 	"jul/internal/background"
 	"jul/internal/cachemeta"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/lifecycle"
 	"jul/internal/logthrottle"
 	"jul/internal/redact"
@@ -198,6 +199,9 @@ type Server struct {
 	// enable ACME and answers HTTP-01 challenges. It is built and set once by
 	// the composition root before Run; nil means static-file TLS only.
 	ACME ACMEManager
+	// Inspection is the process-owned governor whose candidate limits publish
+	// in the same reload transaction as the handler generation.
+	Inspection *inspection.Governor
 
 	// HTTP3ConnHook, when set, is invoked with +1 when an HTTP/3 (QUIC)
 	// connection opens and -1 when it closes, so the composition root can track
@@ -270,6 +274,9 @@ type Server struct {
 	// WAFSourceDigests returns the engine-owned external source digests of the
 	// compiled global and per-location WAF policies for generation genID (#642, #563).
 	WAFSourceDigests func(genID uint64) (string, map[[2]int]string)
+	// InspectionRequirement returns generation genID's route-aware minimum
+	// inspection budget and the route that needs it (ADR 0032 §7).
+	InspectionRequirement func(genID uint64) (minimum uint64, route string, ok bool)
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -727,9 +734,15 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	// The startup effective config is already resolved by the composition root
 	// and passed as s.cfg. The factory receives the same candidate that will be
 	// served, so there is no second secret resolution at startup (R7-05).
-	handlers, genID, commit, _, err := s.factory(config.WithRawConfig(ctx, s.rawCfg), s.cfg)
+	handlers, genID, commit, abort, err := s.factory(config.WithRawConfig(ctx, s.rawCfg), s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
+	}
+	if err := s.publishStartupInspectionLimits(genID); err != nil {
+		if abort != nil {
+			abort()
+		}
+		return fmt.Errorf("inspection limits: %w", err)
 	}
 	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
 	s.exchanges.SetInitialGeneration(genID)

@@ -556,6 +556,15 @@ func cmdCheck(args []string) int {
 			}
 			return 1
 		}
+		budgetWarning, err := app.CheckInspectionBudget(context.Background(), cfg)
+		if err != nil {
+			if *jsonOut {
+				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
+			} else {
+				fmt.Fprintf(stderr, "runtime check: %v\n", err)
+			}
+			return 1
+		}
 		if err := checkStaticRoots(cfg, *skipStaticRoots); err != nil {
 			if *jsonOut {
 				_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": false, "error": err.Error()})
@@ -565,8 +574,18 @@ func cmdCheck(args []string) int {
 			return 1
 		}
 		if *jsonOut {
-			_ = json.NewEncoder(stdout).Encode(map[string]any{"source": src.Name(), "ok": true})
-		} else if !*quiet {
+			result := map[string]any{"source": src.Name(), "ok": true}
+			if budgetWarning != nil {
+				result["warnings"] = []string{budgetWarning.Error()}
+			}
+			_ = json.NewEncoder(stdout).Encode(result)
+		} else {
+			if budgetWarning != nil {
+				fmt.Fprintf(stderr, "warning: %v\n", budgetWarning)
+			}
+			if *quiet {
+				return 0
+			}
 			fmt.Fprintf(stdout, "%s is valid (structural + runtime)\n", src.Name())
 		}
 	}

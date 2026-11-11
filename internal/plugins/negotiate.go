@@ -30,6 +30,9 @@ type abiDecl struct {
 	// ABI's host module. It is static capability, not per-request demand: a
 	// module that imports the function may still not call it (#699).
 	readsBody bool
+	// imports is the set of functions the module imports from its ABI's
+	// host module; it sizes the inspection minimum budget (ADR 0032 §7).
+	imports map[string]bool
 }
 
 // importRequestBody is the host import whose presence makes a module's
@@ -43,15 +46,18 @@ func negotiateABI(abi string, compiled wazero.CompiledModule) (abiDecl, error) {
 	exports := compiled.ExportedFunctions()
 	importsV1, importsV2 := false, false
 	readsV1, readsV2 := false, false
+	namesV1, namesV2 := map[string]bool{}, map[string]bool{}
 	for _, def := range compiled.ImportedFunctions() {
 		mod, name, _ := def.Import()
 		switch mod {
 		case hostModuleV1:
 			importsV1 = true
 			readsV1 = readsV1 || name == importRequestBody
+			namesV1[name] = true
 		case hostModuleV2:
 			importsV2 = true
 			readsV2 = readsV2 || name == importRequestBody
+			namesV2[name] = true
 		}
 	}
 	_, marker := exports[exportABIV2Marker]
@@ -63,7 +69,7 @@ func negotiateABI(abi string, compiled wazero.CompiledModule) (abiDecl, error) {
 		if _, ok := exports[exportHandleRequest]; !ok {
 			return abiDecl{}, errors.New("module does not export handle_request (build it against the Jul.IA plugin SDK)")
 		}
-		return abiDecl{readsBody: readsV1}, nil
+		return abiDecl{readsBody: readsV1, imports: namesV1}, nil
 	case ABIJulV2:
 		if !marker {
 			return abiDecl{}, fmt.Errorf("module does not declare %s (no %s export); it is a %s module or was not built against the v2 SDK", ABIJulV2, exportABIV2Marker, ABIJulV1)
@@ -83,7 +89,7 @@ func negotiateABI(abi string, compiled wazero.CompiledModule) (abiDecl, error) {
 				return abiDecl{}, err
 			}
 		}
-		return abiDecl{hasResponse: hasResponse, readsBody: readsV2}, nil
+		return abiDecl{hasResponse: hasResponse, readsBody: readsV2, imports: namesV2}, nil
 	default:
 		return abiDecl{}, fmt.Errorf("unknown ABI %q", abi)
 	}

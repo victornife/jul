@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/middleware"
 )
 
@@ -71,6 +72,18 @@ type InstanceStats struct {
 // InstanceStats reports nothing in the lean build.
 func (*Manager) InstanceStats() []InstanceStats { return nil }
 
+// GuestCapacityStats mirrors the compiled build's guest-capacity report.
+type GuestCapacityStats struct {
+	MaxPermittedBytes uint64
+	LiveInstances     uint64
+	MaxInstances      uint64
+}
+
+// GuestCapacityStats reports no plugin guest capacity in the lean build.
+func (*Manager) GuestCapacityStats() (GuestCapacityStats, error) {
+	return GuestCapacityStats{}, nil
+}
+
 // Manager is a no-op plugin manager in the lean build.
 type Manager struct{}
 
@@ -93,6 +106,15 @@ func (*Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.Plugi
 		return nil, errors.New("plugins are configured but this build was compiled without the \"wasmplugins\" tag")
 	}
 	return &Set{}, nil
+}
+
+// InspectionFacts mirrors Build: empty when no plugins are configured, and an
+// error when any are.
+func (m *Manager) InspectionFacts(ctx context.Context, cfg map[string]config.PluginConfig) (map[string]inspection.PluginFacts, error) {
+	if _, err := m.BuildWithEgress(ctx, cfg, nil); err != nil {
+		return nil, err
+	}
+	return map[string]inspection.PluginFacts{}, nil
 }
 
 // Set is an empty plugin set in the lean build.
@@ -120,3 +142,8 @@ func (*Set) ResponsePoint(...string) middleware.Middleware { return nil }
 
 // ABIs is empty in the lean build.
 func (*Set) ABIs() map[string]string { return nil }
+
+// InspectionFacts reports no plugin: the lean build has none.
+func (*Set) InspectionFacts(string) (inspection.PluginFacts, bool) {
+	return inspection.PluginFacts{}, false
+}

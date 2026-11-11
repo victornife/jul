@@ -294,10 +294,11 @@ transform).
 
 ## Building a plugin
 
-Plugins are built for the WASI preview-1 target with the standard Go toolchain
-(Go 1.27.2+). `c-shared` build mode produces a reactor module (one that exposes a
-`_initialize` start function instead of `main`), which is how the host runs guest
-`init` functions before invoking the export:
+Plugins are built for the WASI preview-1 target with the standard Go toolchain;
+the example module requires Go 1.27.4 or later. `c-shared` build mode produces
+a reactor module (one that exposes a `_initialize` start function instead of
+`main`), which is how the host runs guest `init` functions before invoking the
+export:
 
 ```bash
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o header-inject.wasm ./header-inject

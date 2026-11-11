@@ -321,7 +321,6 @@ func LintWithRaw(rawCfg, effCfg *Config, forPlan bool) []Diagnostic {
 			Hint:     "remove error_log; redirect stderr in your process supervisor instead",
 		})
 	}
-
 	diags = append(diags, LintSharingFindingsWithRaw(rawCfg, effCfg, forPlan)...)
 
 	return diags

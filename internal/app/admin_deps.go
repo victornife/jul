@@ -11,6 +11,7 @@ import (
 	"jul/internal/admin"
 	"jul/internal/cache"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/observability"
 	"jul/internal/server"
 	"jul/internal/upstream"
@@ -28,6 +29,7 @@ type Subsystems struct {
 	PluginEngine     string
 	StreamCompiled   bool
 	WAFCompiled      bool
+	Inspection       *inspection.Governor
 	LastStreamReload *atomic.Pointer[string]
 }
 
@@ -43,6 +45,9 @@ func BuildAdminDeps(productName, version string, src config.Source, subsystems S
 		Metrics:    subsystems.Metrics.Handler(),
 		Stats:      subsystems.Metrics.Snapshot,
 		Cache:      AdminCache(subsystems.ResponseCache),
+	}
+	if subsystems.Inspection != nil {
+		deps.InspectionSnapshot = subsystems.Inspection.Snapshot
 	}
 
 	deps.TrafficSources = subsystems.Metrics.TrafficSnapshot

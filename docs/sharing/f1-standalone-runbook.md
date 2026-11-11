@@ -72,7 +72,7 @@ Node/pnpm, or Docker**.
 | Role | Required tools | When needed |
 | --- | --- | --- |
 | **Operator running a downloaded archive** | Full-profile `jul` binary, existing HTTP backend (or `python3` for the sample `dashboard_backend.py`), `openssl` + `curl` for TLS/verification, `systemd` (Linux service profile) | Normal standalone operation and runbook execution |
-| **Maintainer building from source / running CI harness** | Go `1.27.2` (`go.mod`), `python3` (`3.12+`), `iproute2` + `iptables` (for multi-namespace lab verification) | Building a development archive from `main` or running `scripts/sharing_f1_lab.py` |
+| **Maintainer building from source / running CI harness** | Go `1.27.4+` (`go.mod`), `python3` (`3.12+`), `iproute2` + `iptables` (for multi-namespace lab verification) | Building a development archive from `main` or running `scripts/sharing_f1_lab.py` |
 
 ### Stage or unpack the full-profile distribution
 

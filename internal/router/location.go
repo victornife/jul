@@ -27,6 +27,9 @@ const (
 
 // actionOf derives the action for a location from which fields are set. Deeper
 // conflict checks (e.g. root + proxy_pass together) live in config validation.
+// ActionOf reports the action a location derives, as the router builds it.
+func ActionOf(loc config.LocationConfig) (string, error) { return actionOf(loc) }
+
 func actionOf(loc config.LocationConfig) (string, error) {
 	switch {
 	case loc.Deny:
