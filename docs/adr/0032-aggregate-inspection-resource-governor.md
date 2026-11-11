@@ -1,10 +1,12 @@
 # ADR 0032 — Aggregate inspection resource governor
 
-- **Status:** Proposed
+- **Status:** Accepted — design for #700; not implemented (slices I1–I6 not started)
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
-- **Deciders:** Jul.IA maintainer
+- **Accepted:** 2026-11-10 by the maintainer. PR #704 merged as `8c483be2` from head
+  `81f07e75`. The PR proposed the ADR; this acceptance is recorded separately.
+- **Deciders:** Victor Niharra (`@victornife`)
 - **Applies to:**
   - the WAF (Coraza) request and response inspection;
   - WASM plugin request-body preparation, guest invocation and response subscriptions;
@@ -28,9 +30,11 @@
   - [ADR 0031](0031-waf-operations-posture-isolation-and-alerting.md): WAF transaction outcomes;
   - [resource ownership](../resource-ownership.md).
 
-> **Proposed design record.** This ADR selects a contract for #700. It does not add configuration
-> fields, enforcement or metrics. It does not establish protection, release readiness, a maturity
-> change or soak. Implementation follows only after the ADR is accepted.
+> **Accepted design record.** This ADR is the implementation contract for #700. Acceptance adds no
+> configuration fields, enforcement or metrics. It does not establish protection, release readiness,
+> a maturity change or soak. Those require implementation slices I1–I6 and the acceptance plan
+> (A1–A18). Until then, current operator guidance in `docs/waf.md`, `docs/plugins.md` and
+> `docs/known-limitations.md` still applies.
 
 ## Context
 
@@ -1052,7 +1056,7 @@ never contains paths, hosts or bodies.
 
 | Slice | Content | Depends on |
 | --- | --- | --- |
-| I1 | `internal/inspection` governor, which supersedes the prototype: counters, lease, slots, FIFO waits, overflow-safe arithmetic, `SetLimits`. Config schema, defaults and validation (including the minimum-budget rule). Lifecycle registry ownership and Publish wiring. Metrics and the status object (observe-capable, with no enforcement points yet). Measure the base charge. | ADR accepted |
+| I1 | `internal/inspection` governor, which supersedes the prototype: counters, lease, slots, FIFO waits, overflow-safe arithmetic, `SetLimits`. Config schema, defaults and validation (including the minimum-budget rule). Lifecycle registry ownership and Publish wiring. Metrics and the status object (observe-capable, with no enforcement points yet). Measure the base charge. | ADR accepted (2026-11-10) |
 | I2 | Plugin request path: lease creation before `p.prepare`, grow-before-allocate in `readBounded`, fail-fast 503, `body_timeout` through the per-request deadline owner (sticky retirement abort), narrow `SetReadDeadline` forwarding where a wrapper lacks it, and guest replacement charging. | I1 |
 | I3 | WAF request path: lease reuse or creation; a Jul read loop that replaces `ReadRequestBodyFrom`; slots and reservations around every rule-evaluating request call, including implicit phase 2 and phase 5 (§3); queue eligibility by unread data; `B_buf` and `B_total` charging; cumulative R1 and R2 with true-down; the deadline owner; the calibration test (`-tags waf`) covering the §4 list; and outcome taxonomy additions. | I1 |
 | I4 | Response paths: nested plugin subscription buffers (`reason="budget"`), WAF response buffer (2×), phase-3 and phase-4 slots including implicit phase 4 in `WriteResponseBody`, R3 and R4 (fail-closed), and the JSON/XML response calibration. | I2, I3 |
@@ -1142,8 +1146,9 @@ suppressed.
 
 ## Maintainer decisions
 
-Recorded 2026-11-10 from the maintainer's review of #704. They form part of the proposed contract.
-The ADR stays **Proposed** until the maintainer accepts this revision.
+Recorded 2026-11-10 from the maintainer's review of #704. They form part of the accepted contract;
+the ADR was accepted on 2026-11-10 when #704 merged. Decisions 1 and 2 still carry their stated
+validation conditions.
 
 1. **Default mode: `enforce`**, once implementation acceptance (A1–A18) passes. `observe` is an
    explicit migration option, not a default for a release. The architecture is accepted; the exact
