@@ -87,6 +87,7 @@ type HandlerFactory struct {
 	// guarded by moduleMu.
 	liveWAF               *admin.WAFEffectivePolicy
 	wafDigests            wafDigestRecord
+	inspectionReq         inspectionRequirementRecord
 	liveGlobalPolicySHA   string
 	liveGlobalAssets      []waf.ExternalAssetRecord
 	liveOverridePolicySHA map[string]string
@@ -316,6 +317,7 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 		f.publishPluginModules(0, gen.pluginModules)
 		f.publishPluginPhases(gen.pluginResponse)
 		f.publishWAFDigests(0, gen.wafGlobalDigest, gen.wafDigestByLoc)
+		f.publishInspectionRequirement(0, gen.inspectionReq)
 		f.publishWAFAssets(gen.wafGlobalPolicyRaw, gen.wafGlobalAssets, gen.wafOverridePolicyRaw, gen.wafOverrideExtRaw, gen.wafOverrideAssets)
 		f.publishWAF(0, gen.wafPolicy, gen.wafActiveCounts, c)
 		retirePrev = combineRetirement(retireHandlers, retiredEgress)
@@ -371,6 +373,7 @@ func (f *HandlerFactory) Prepare(ctx context.Context, c *config.Config) (handler
 	}
 	genID = f.genCounter.Add(1)
 	gen.SetPublishedGeneration(genID)
+	f.publishInspectionRequirement(genID, gen.inspectionReq)
 
 	committed := false
 	commitFn = func() (upstream.SnapshotMap, func()) {
@@ -828,6 +831,26 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	}
 	gen.wafPolicy = wafReport.finish(time.Now())
 	gen.wafActiveCounts = wafReport.activeCounts
+	// Route-aware minimum budget (ADR 0032 §7): every inspected route's
+	// single worst-case request must fit the aggregate budget. Checked here so
+	// startup, reload and admin apply share one calculation; observe mode
+	// only warns.
+	inspectionRoutes := inspectionRouteFacts(c, pluginSet.InspectionFacts, func(srv config.ServerConfig, loc config.LocationConfig) *inspection.WAFFacts {
+		fw := wafByScope[WAFScope(srv, loc)]
+		if fw == nil {
+			return nil
+		}
+		facts := fw.InspectionFacts()
+		return &facts
+	})
+	inspectionReq, inspectionWarning, err := inspectionRequirement(c, inspectionRoutes)
+	if err != nil {
+		return nil, err
+	}
+	if inspectionWarning != nil && f.Log != nil {
+		f.Log.Warn("inspection budget below route minimum", "error", inspectionWarning)
+	}
+	gen.inspectionReq = inspectionReq
 	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 		scopeKey := WAFScope(srv, loc)
 		fw := wafByScope[scopeKey]

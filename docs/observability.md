@@ -278,9 +278,9 @@ lease base reservation is based on a checksummed
 [measurement of lease/context scaffolding](reviews/evidence/2026-11-10-700-i1-base-charge/README.md)
 only; it excludes protocol, request-body, plugin and Coraza allocations.
 Static guest-capacity and evaluation-headroom estimates are not reported as
-measured zero. The response-header accounting ceiling is defined, but the
-accepted effective-route minimum-budget check remains incomplete; see
-[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap).
+measured zero. The response-header accounting ceiling and the route-aware
+minimum budget are defined; see
+[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
 
 ### Runtime resources and capacity (#431)
 

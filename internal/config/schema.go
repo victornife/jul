@@ -335,7 +335,8 @@ type InspectionConfig struct {
 	Mode string `toml:"mode"`
 	// MaxBufferedBytes is the shared governor ceiling for base, buffer and
 	// estimated WAF state; live requests are not governed in I1. It must be
-	// positive.
+	// positive, and in enforce mode at least the largest inspected route's
+	// worst-case single-request charge (observe only warns).
 	MaxBufferedBytes *Size `toml:"max_buffered_bytes,omitempty"`
 	// MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and
 	// values plus 64 bytes per occurrence); it is not applied to live responses

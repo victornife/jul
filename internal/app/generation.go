@@ -10,6 +10,7 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/cache"
+	"jul/internal/inspection"
 	"jul/internal/plugins"
 	"jul/internal/waf"
 )
@@ -88,6 +89,7 @@ type Generation struct {
 	wafOverrideExtRaw    map[string]string
 	wafOverrideAssets    map[string][]waf.ExternalAssetRecord
 	wafActiveCounts      [4]int
+	inspectionReq        inspection.Requirement
 	// basicByLoc holds the exact htpasswd file bytes loaded by auth.New for
 	// each Basic-authenticated location (srvIdx, locIdx) in this generation (#642, #563).
 	basicByLoc         map[[2]int][]byte

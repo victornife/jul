@@ -30,11 +30,10 @@ aggregate inspection bound remains
 publishes process-wide limits and reports them, but no live WAF or plugin path
 consumes the governor yet; configured `enforce` mode is not traffic protection.
 The R3 response-header ceiling now has an explicit 64 KiB accounting default,
-but actual response-path reservation/enforcement and complete effective-route
-minimum-budget validation remain pending. The current unconditional floor can
-reject an uninspected configuration and can accept an insufficient budget for
-an inspected route (see
-[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap)).
+but actual response-path reservation/enforcement remains pending. The
+route-aware minimum budget is validated statically; per-transaction
+`ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises are outside it (see
+[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)).
 
 The assessment's argument-limit bypass
 ([#697](https://github.com/victornife/jul/issues/697), security) and CRS
@@ -683,10 +682,9 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   and status/metrics foundations do not yet gate WAF or plugin request paths.
   Inspection still runs before upstream admission, on cache hits and
   no-upstream routes, and can continue after client disconnect. Configured
-  limits do not protect these paths. Startup validation checks the known base
-  plus R3 floor only; complete route-chain minimum-budget validation and actual
-  response-header reservations remain pending under
-  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap)
+  limits do not protect these paths. The route-aware minimum budget is
+  validated, but actual response-header reservations remain pending under
+  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)
   (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
 
 ---

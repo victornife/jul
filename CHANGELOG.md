@@ -188,12 +188,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 ### Added
 
 - Partial #700 I1 inspection-governor foundations: process-wide configuration,
-  including the 64 KiB response-header accounting ceiling and known base + R3
-  minimum check; reload publication, bounded Prometheus families, and
-  `/api/v1/status` plus `jul status` projections. This does **not** yet gate
-  live WAF/plugin paths, apply body deadlines, reserve actual-size R3 usage, or
-  validate the complete effective-route minimum; configured `enforce` mode is
-  not runtime protection. See [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
+  including the 64 KiB response-header accounting ceiling and a route-aware
+  minimum budget checked by `jul check`, startup, reload and admin apply;
+  reload publication, bounded Prometheus families, and `/api/v1/status` plus
+  `jul status` projections. In `enforce` mode a WAF route whose
+  `request_body_limit` exceeds about 329 KiB (with otherwise default limits)
+  needs a larger `max_buffered_bytes` than the 256 MiB default. This does
+  **not** yet gate live WAF/plugin paths, apply body deadlines or reserve
+  actual-size R3 usage; configured `enforce` mode is not runtime protection. See [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
   for the R3 contract and remaining implementation slices.
 
 - Explicit route and backend cutover cache behavior (`reload_policy = "retain" |

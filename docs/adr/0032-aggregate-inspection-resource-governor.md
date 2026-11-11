@@ -778,14 +778,14 @@ max_concurrent_evaluations = 2
 | Field | Semantics |
 | --- | --- |
 | `mode` | `enforce` (default) or `observe`. Observe charges and reports so that operators can size before enforcing; its behaviour for each control is defined below. There is no `off`: accounting is cheap, and an unmeasured process cannot be sized. |
-| `max_buffered_bytes` | Required to fit the largest single-request worst-case charge. The accepted full formula includes `base`, plugin request/response buffers and replacement copies, WAF request/response bodies, plugin state, and R1 + R2 + R3 + R4 for the worst route chain. I1 currently validates only the known `base + maximum R3` floor; complete route-chain validation remains pending and is not claimed. |
+| `max_buffered_bytes` | Required to fit the largest single-request worst-case charge of any inspected route: `base`, plugin request/response buffers and replacement copies, WAF request/response bodies, plugin state, and R1 + R2 + R3 + R4 for that route's chain (§Minimum-budget rule). A configuration with no inspected route has no minimum. |
 | `max_response_header_bytes` | Positive, default `64k` (64 KiB), configurable upward and not disableable. This is the complete R3 accounting measure for one final response, not wire bytes or a mathematical memory bound: for every decoded header field-value occurrence, `H` adds `len(name) + len(value) + 64` bytes. Repeated fields are counted separately. The `64` bytes is a fixed per-occurrence accounting allowance; the WAF multiplier remains a calibrated estimate. Startup's known R3 term is `48 × max_response_header_bytes` (3 MiB at the default). Runtime reserves `48 × actual H` before adding any response header to Coraza, then retains that R3 reservation for the transaction lifetime; it does not reserve the maximum for every lease. Raising this ceiling does not raise `max_buffered_bytes`; an unaffordable actual reservation still produces the separate governor `503`. |
 | `max_concurrent_evaluations` | `0` resolves to `GOMAXPROCS` at Prepare. The effective value is reported. |
 | `evaluation_queue_timeout` | Waiters are also capped internally at `16 × slots`. That count is a constant, not a field. |
 | `body_timeout` | Applies only while an inspection layer reads a request body. Downloads, streaming responses and post-inspection reads are never affected. |
 | All | Process-wide. Not overridable per listener or route. |
 
-### Minimum-budget contract gap
+### Minimum-budget rule
 
 The R3 bound is `max_response_header_bytes`, default `64k`, and is measured at
 the shared Coraza response-header ingestion point immediately before
@@ -810,18 +810,57 @@ ceiling and byte budget produce would-reject observations, but inspection
 continues without a new governor-driven 500 or 503. Actual R3 reservations use
 the measured response charge, never the configured maximum.
 
-This amendment makes R3 finite but does not establish the full startup
-minimum-budget calculation. I1 currently validates only the known `base + R3`
-floor; plugin, body, and route-chain terms still require implementation and
-verification. This floor is currently applied even to configurations with no
-inspection, which can wrongly reject them; omitting the other terms can also
-accept an insufficient budget for an inspected route. The default is an initial
-compatibility-sensitive policy, not an experimentally established optimum.
-Before shipping the response-path enforcement, qualify representative
-responses, especially repeated `Set-Cookie` fields and authentication flows.
-The R3 runtime check and
+The 64 KiB default is an initial compatibility-sensitive policy, not an
+experimentally established optimum. Before shipping the response-path
+enforcement, qualify representative responses, especially repeated
+`Set-Cookie` fields and authentication flows. The R3 runtime check and
 reservation are a separate response-path prerequisite in I4; no live request
 path is claimed in I1.
+
+**Route minimum.** Each route's static worst-case single-request charge is the
+sum of the terms below, and `max_buffered_bytes` must be at least the largest
+one over all inspected routes. A route with neither a WAF nor a plugin acquires
+no lease and needs nothing, so an uninspected configuration has no minimum.
+
+| Term | Counted when | Bytes |
+| --- | --- | --- |
+| `base` | The route is inspected | 16 KiB |
+| Plugin request bodies | Each server, location or handler plugin importing `read_request_body` | `Σ(L + 1) + max(L + 1)` over their `max_request_body` values: every prepared body stays reachable, and the largest holds both arrays during its final growth copy |
+| Plugin request state | `set_request_state` imported | 4 KiB per plugin |
+| Plugin generated response | `write_response_body` imported | `3 × max_response_body` |
+| Plugin fetch | `fetch = true` and `fetch` imported | `max_fetch_response + 1` plus the guest memory limit |
+| Plugin response subscription | A jul-abi/v2 middleware exporting `handle_response` | `2 × max_response_body`, or `3 ×` when it imports `resp_body_replace` |
+| WAF request buffer | A WAF guards the route | `2 × min(in-memory limit, request body limit)`, or `2 ×` the request body limit when the in-memory limit is unknown |
+| R1 | A WAF guards the route | `64 KiB + 56 KiB × ArgumentLimit + 48 × (H + 4 KiB)`, where `H` is the listener's `max_header_bytes` (default 1 MiB) and 4 KiB is Go's header slack |
+| R2 | A WAF guards the route | `56 KiB × ArgumentLimit + 48 ×` request body limit |
+| R3 | A WAF guards the route | `48 × max_response_header_bytes` |
+| R4 | A WAF guards the route | `56 KiB × ArgumentLimit + 48 ×` response body limit |
+| WAF response buffer | A WAF guards the route | `2 ×` response body limit |
+
+- **Inputs.** WAF limits are read from the compiled engine, after directives and Jul's
+  `request_body_limit`, so `SecRequestBodyLimit`, `SecRequestBodyInMemoryLimit`,
+  `SecResponseBodyLimit` and `SecArgumentsLimit` are honoured. Plugin terms come from the module's
+  imports and configured limits. R4 and the response buffer are counted for every WAF route because
+  `ctl:responseBodyAccess` can enable response inspection per transaction.
+- **Static limit.** `ctl:requestBodyLimit` and `ctl:responseBodyLimit` can raise a limit for one
+  transaction; the static rule cannot see that. Runtime charges (I2–I4) still apply and fail closed
+  with `503`.
+- **Where it runs.** The handler build shared by startup, reload and admin apply computes the
+  minimum. The server attaches it to the limits it publishes, and the governor refuses
+  enforce-mode limits below it. `jul check` and `jul --check` compile the effective WAF policies and
+  plugins offline and apply the same calculation. In `enforce` a shortfall is a configuration
+  error naming the route, the required bytes and the largest terms; in `observe` it is a warning
+  (a log line, stderr, or `warnings` in `jul check -json`).
+- **Default fit.** Jul's default CRS route (128 KiB request body limit, 128 KiB in-memory limit,
+  512 KiB response body limit, `ArgumentLimit` 1000, 1 MiB request headers, 64 KiB response-header
+  ceiling) needs 258,555,904 B (about 246.6 MiB), which fits the 256 MiB default with about 9.4 MiB
+  of headroom. With otherwise default limits, a WAF `request_body_limit` above 336,896 B (about
+  329 KiB) exceeds the default budget: 1 MiB needs 302,596,096 B. Adding a plugin that imports
+  `write_response_body` (default 8 MiB response body, 24 MiB charged) to a default WAF route needs
+  283,721,728 B. Several shipped WAF configurations therefore set `max_buffered_bytes = "512m"`
+  explicitly; whether the default itself should change remains an I6 acceptance question.
+- **Scope.** The rule guarantees that one worst-case request on any route can be admitted. It does
+  not size concurrency; that is the runtime budget's job.
 
 **`mode = "observe"` for each control.** Observe introduces no governor-driven `503`, `408` or
 `500`. It preserves every existing security decision, WAF and plugin limit, and server timeout.
@@ -1115,9 +1154,10 @@ metrics, status/CLI projection, and a checksummed lease-scaffolding
 measurement. Status reports configured guest-memory capacity across compiled,
 unclosed plugin generations, distinguishes it from live instance counts, and
 leaves actual guest allocation and uncalibrated evaluation headroom explicitly
-unknown. Live request paths remain untouched. I1 remains in progress because
-only the known base + R3 floor is validated; complete route-chain minimum
-validation and I2–I4 runtime enforcement remain pending. No request-path
+unknown. The route-aware minimum-budget rule (§Minimum-budget rule) is
+computed from compiled WAF and plugin facts and applied consistently by
+`jul check`, startup, reload and admin apply. Live request paths remain
+untouched: I2–I4 runtime enforcement remains pending, and no request-path
 integration or A1–A18 qualification is claimed.
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and

@@ -173,7 +173,7 @@ max_response_header_bytes = "64k"
 | Key | Type | Default and validation |
 | --- | --- | --- |
 | `mode` | string | `enforce` (default) or `observe`; other values are rejected |
-| `max_buffered_bytes` | size | `256m` (256 MiB); must be positive and at least the known base plus maximum R3 charge in `enforce` mode (16 KiB + 48 × `max_response_header_bytes`) |
+| `max_buffered_bytes` | size | `256m` (256 MiB); must be positive. In `enforce` mode it must also fit the largest single-request worst-case charge of any inspected (WAF or plugin) route; `observe` only warns. Uninspected configurations have no minimum |
 | `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled |
 | `max_concurrent_evaluations` | int | `0` means auto, resolved from the configured `worker_threads` value or the startup container-aware `GOMAXPROCS`; explicit values are 1–1024 |
 | `evaluation_queue_timeout` | duration | `1s`; 0 disables waiting; explicit values are 0–10s |
@@ -187,14 +187,19 @@ startup `GOMAXPROCS` when worker threads are `auto`.
 **I1 does not yet enforce these limits on live requests.** The status API marks
 request-path integration as `pending`; no live WAF/plugin request acquires a
 lease or evaluation slot, and `body_timeout` is not applied. `mode = "enforce"`
-is therefore configured policy, not production traffic protection. Startup
-validation currently checks the known base + maximum R3 floor only; complete
-effective-route worst-case validation and actual-size R3 reservations remain
-pending. The current floor is unconditional and can reject configurations
-without inspection, while omitting plugin and WAF terms can allow an
-insufficient budget for an inspected route. The 64 KiB ceiling is a
-compatibility policy default, not an experimentally established optimum. See
-[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap).
+is therefore configured policy, not production traffic protection.
+
+`jul check`, startup, reload and admin apply compute each inspected route's
+worst-case single-request charge from the compiled WAF limits, plugin limits
+and imports, and the listener's `max_header_bytes`. A shortfall names the route
+and its largest terms. The default CRS route needs about 246.6 MiB; with
+otherwise default limits, a WAF `request_body_limit` above about 329 KiB needs a
+larger `max_buffered_bytes` (1 MiB needs about 288.6 MiB), as does a default
+WAF route that also runs a response-generating plugin (about 270.6 MiB). Raise the budget,
+lower that route's limits, or use `mode = "observe"` while sizing. Actual-size
+R3 reservations remain pending, and the 64 KiB ceiling is a compatibility
+policy default, not an experimentally established optimum. See
+[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
 
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.
 

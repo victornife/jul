@@ -16,7 +16,8 @@ import (
 const BaseChargeBytes uint64 = uint64(config.InspectionBaseChargeBytes)
 
 // LimitsFromConfig resolves configured auto slots against the candidate
-// worker_threads value. The caller supplies the container-aware startup
+// worker_threads value. It does not set MinimumBytes: that needs the compiled
+// route chains, so the generation build supplies it before publication. The caller supplies the container-aware startup
 // GOMAXPROCS value used when worker_threads is auto or omitted.
 func LimitsFromConfig(cfg *config.Config, startupProcs int) (Limits, error) {
 	if cfg == nil {
@@ -51,13 +52,6 @@ func LimitsFromConfig(cfg *config.Config, startupProcs int) (Limits, error) {
 	bodyTimeout := 60 * time.Second
 	if inspection.BodyTimeout != nil {
 		bodyTimeout = inspection.BodyTimeout.Std()
-	}
-	minimumBytes, err := config.InspectionMinimumKnownBudget(int64(maxResponseHeaderBytes))
-	if err != nil {
-		return Limits{}, fmt.Errorf("%w: global.inspection.max_response_header_bytes: %v", ErrInvalidLimits, err)
-	}
-	if mode == Enforce && maxBytes < uint64(minimumBytes) {
-		return Limits{}, fmt.Errorf("%w: global.inspection.max_buffered_bytes is %d B; enforce mode requires at least %d B for the known base + R3 minimum", ErrInvalidLimits, maxBytes, minimumBytes)
 	}
 	effectiveSlots := inspection.MaxConcurrentEvaluations
 	if effectiveSlots == 0 {

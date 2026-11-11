@@ -76,7 +76,16 @@ type Limits struct {
 	EvaluationQueueTimeout    time.Duration
 	BodyTimeout               time.Duration
 	BaseChargeBytes           uint64
+	// MinimumBytes is the effective-route worst-case single-request charge
+	// of the generation these limits are published with (ADR 0032 §7). Zero
+	// means no inspected route; enforce mode rejects MaxBytes below it.
+	MinimumBytes uint64
+	// MinimumRoute names the route that sets MinimumBytes, for errors.
+	MinimumRoute string
 }
+
+// Validate reports whether the limits can be published.
+func (l Limits) Validate() error { return l.validate() }
 
 func (l Limits) validate() error {
 	if l.Mode != Enforce && l.Mode != Observe {
@@ -103,15 +112,11 @@ func (l Limits) validate() error {
 	if l.BaseChargeBytes == 0 {
 		return fmt.Errorf("%w: base charge must be positive", ErrInvalidLimits)
 	}
-	if l.Mode == Enforce {
-		factor := uint64(config.InspectionResponseHeaderEstimateFactor)
-		if l.MaxResponseHeaderBytes > (math.MaxUint64-l.BaseChargeBytes)/factor {
-			return fmt.Errorf("%w: global.inspection.max_response_header_bytes overflows the known base + R3 minimum", ErrInvalidLimits)
-		}
-		minimumBytes := l.BaseChargeBytes + factor*l.MaxResponseHeaderBytes
-		if minimumBytes > l.MaxBytes {
-			return fmt.Errorf("%w: global.inspection.max_buffered_bytes is %d B; enforce mode requires at least %d B for the known base + R3 minimum", ErrInvalidLimits, l.MaxBytes, minimumBytes)
-		}
+	if l.MaxResponseHeaderBytes > math.MaxUint64/uint64(config.InspectionResponseHeaderEstimateFactor) {
+		return fmt.Errorf("%w: global.inspection.max_response_header_bytes overflows the R3 estimate", ErrInvalidLimits)
+	}
+	if l.Mode == Enforce && l.MinimumBytes > l.MaxBytes {
+		return fmt.Errorf("%w: global.inspection.max_buffered_bytes is %d B; enforce mode requires at least %d B for route %s", ErrInvalidLimits, l.MaxBytes, l.MinimumBytes, l.MinimumRoute)
 	}
 	return nil
 }
@@ -238,8 +243,7 @@ func (g *Governor) AcquireLease(ctx context.Context) (*Lease, context.Context, b
 	}
 	g.leases++
 	lease := &Lease{g: g}
-	charge := &Charge{lease: lease, class: BaseBytes, amount: g.limits.BaseChargeBytes}
-	lease.charges = append(lease.charges, charge)
+	lease.attachLocked(&Charge{lease: lease, class: BaseBytes, amount: g.limits.BaseChargeBytes})
 	if wouldExceed {
 		g.noteRejectionLocked(ByteSaturated)
 		hook := g.hooks.OnRejection
@@ -260,7 +264,34 @@ type Lease struct {
 	closed          bool
 	chargesReleased bool
 	evaluations     uint64
-	charges         []*Charge
+	// charges holds only live (unreleased) reservations so retained
+	// bookkeeping scales with live charges, not with charge history.
+	charges []*Charge
+}
+
+func (l *Lease) attachLocked(c *Charge) {
+	c.index = len(l.charges)
+	l.charges = append(l.charges, c)
+}
+
+func (l *Lease) detachLocked(c *Charge) {
+	i := c.index
+	if i < 0 || i >= len(l.charges) || l.charges[i] != c {
+		return
+	}
+	last := len(l.charges) - 1
+	if i != last {
+		l.charges[i] = l.charges[last]
+		l.charges[i].index = i
+	}
+	l.charges[last] = nil
+	l.charges = l.charges[:last]
+	c.index = -1
+	// Shrink the backing array after a burst so a long-lived lease does not
+	// pin peak bookkeeping capacity.
+	if cap(l.charges) > 64 && len(l.charges) < cap(l.charges)/4 {
+		l.charges = append(make([]*Charge, 0, cap(l.charges)/2), l.charges...)
+	}
 }
 
 // Charge reserves bytes before the represented allocation. Existing charges
@@ -296,7 +327,7 @@ func (l *Lease) Charge(class ByteClass, amount uint64) (*Charge, error) {
 		return nil, &AdmissionError{Outcome: InvalidAccounting}
 	}
 	charge := &Charge{lease: l, class: class, amount: amount}
-	l.charges = append(l.charges, charge)
+	l.attachLocked(charge)
 	if wouldExceed {
 		g.noteRejectionLocked(reason)
 		hook := g.hooks.OnRejection
@@ -383,10 +414,13 @@ func (l *Lease) releaseChargesLocked() bool {
 			return false
 		}
 	}
-	for _, charge := range l.charges {
+	for i, charge := range l.charges {
 		charge.amount = 0
 		charge.released = true
+		charge.index = -1
+		l.charges[i] = nil
 	}
+	l.charges = nil
 	l.chargesReleased = true
 	return true
 }
@@ -405,6 +439,7 @@ type Charge struct {
 	class    ByteClass
 	amount   uint64
 	released bool
+	index    int
 }
 
 // Resize changes one independently-accounted reservation. A decrease refunds
@@ -478,6 +513,7 @@ func (c *Charge) Release() error {
 	}
 	c.amount = 0
 	c.released = true
+	c.lease.detachLocked(c)
 	return nil
 }
 
@@ -531,20 +567,55 @@ func (e *Evaluation) MarkAbandoned() error {
 }
 
 func (g *Governor) TryEvaluation(ctx context.Context, lease *Lease) (*Evaluation, Outcome, error) {
-	return g.acquireEvaluation(ctx, lease, false)
+	return g.acquireEvaluation(ctx, lease, false, false)
 }
 
 func (g *Governor) AcquireEvaluation(ctx context.Context, lease *Lease) (*Evaluation, Outcome, error) {
-	return g.acquireEvaluation(ctx, lease, true)
+	return g.acquireEvaluation(ctx, lease, true, false)
 }
 
-func (g *Governor) AcquireLoggingEvaluation(ctx context.Context, lease *Lease) (*Evaluation, Outcome, error) {
-	token, outcome, err := g.AcquireEvaluation(ctx, lease)
+// LoggingPolicy selects how a phase-5 evaluation obtains its slot (ADR 0032
+// §3). The caller chooses it from whether unread request-body data remains on
+// the network, never from the phase number.
+type LoggingPolicy uint8
+
+const (
+	// LoggingTry is required while unread request-body data remains: phase 5
+	// try-acquires and overflows immediately when no slot is free.
+	LoggingTry LoggingPolicy = iota
+	// LoggingWait is permitted once no unread request-body data remains:
+	// phase 5 joins the bounded FIFO wait before overflowing.
+	LoggingWait
+)
+
+// AcquireLoggingEvaluation obtains a slot for phase 5 or reports Unslotted.
+// Phase 5 is never refused: client cancellation, saturation, queue exhaustion
+// and wait expiry all degrade to an unslotted (nil token, Unslotted, nil
+// error) evaluation that is counted, never to a rejection. Only a closed,
+// foreign or invalid lease is an error, because those are caller defects.
+// A cancelled ctx skips the wait but still takes a free slot when one exists.
+func (g *Governor) AcquireLoggingEvaluation(ctx context.Context, lease *Lease, policy LoggingPolicy) (*Evaluation, Outcome, error) {
+	if ctx == nil || ctx.Err() != nil {
+		ctx = context.Background()
+		policy = LoggingTry
+	}
+	token, outcome, err := g.acquireEvaluation(ctx, lease, policy == LoggingWait, true)
 	if err == nil && token != nil {
 		return token, outcome, nil
 	}
-	if outcome == Cancelled || outcome == LeaseClosed || outcome == InvalidAccounting {
+	if outcome == LeaseClosed || outcome == InvalidAccounting {
 		return nil, outcome, err
+	}
+	if outcome == Cancelled {
+		// The client went away mid-wait; logging still runs, slotted if a
+		// slot is free now.
+		token, outcome, err = g.acquireEvaluation(context.Background(), lease, false, true)
+		if err == nil && token != nil {
+			return token, outcome, nil
+		}
+		if outcome == LeaseClosed || outcome == InvalidAccounting {
+			return nil, outcome, err
+		}
 	}
 	g.mu.Lock()
 	if g.unslotted < math.MaxUint64 {
@@ -558,7 +629,10 @@ func (g *Governor) AcquireLoggingEvaluation(ctx context.Context, lease *Lease) (
 	return nil, Unslotted, nil
 }
 
-func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWait bool) (*Evaluation, Outcome, error) {
+// acquireEvaluation implements slot admission. logging marks a phase-5
+// acquisition: its overflow is reported as Unslotted by the caller and is
+// never recorded as an evaluation rejection or would-reject decision.
+func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWait, logging bool) (*Evaluation, Outcome, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -572,7 +646,7 @@ func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWai
 	}
 	timeout := g.limits.EvaluationQueueTimeout
 	if g.limits.Mode == Observe {
-		wouldReject := g.active >= uint64(g.limits.EvaluationSlots) || len(g.waiters) > 0
+		wouldReject := !logging && (g.active >= uint64(g.limits.EvaluationSlots) || len(g.waiters) > 0)
 		if g.active == math.MaxUint64 || lease.evaluations == math.MaxUint64 {
 			g.mu.Unlock()
 			return nil, InvalidAccounting, &AdmissionError{Outcome: InvalidAccounting}
@@ -603,8 +677,7 @@ func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWai
 		return &Evaluation{g: g, lease: lease}, Acquired, nil
 	}
 	if !allowWait || timeout == 0 {
-		g.noteRejectionLocked(EvaluationSaturated)
-		hook := g.hooks.OnRejection
+		hook := g.rejectionHookLocked(EvaluationSaturated, logging)
 		mode := g.limits.Mode
 		g.mu.Unlock()
 		if hook != nil {
@@ -619,8 +692,7 @@ func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWai
 		waitingLimit = math.MaxUint64
 	}
 	if uint64(len(g.waiters)) >= waitingLimit {
-		g.noteRejectionLocked(EvaluationSaturated)
-		hook := g.hooks.OnRejection
+		hook := g.rejectionHookLocked(EvaluationSaturated, logging)
 		mode := g.limits.Mode
 		g.mu.Unlock()
 		if hook != nil {
@@ -641,13 +713,23 @@ func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWai
 		}
 		return nil, w.outcome, &AdmissionError{Outcome: w.outcome}
 	case <-ctx.Done():
-		return g.abandonWaiter(w, Cancelled)
+		return g.abandonWaiter(w, Cancelled, logging)
 	case <-timer.C:
-		return g.abandonWaiter(w, WaitExpired)
+		return g.abandonWaiter(w, WaitExpired, logging)
 	}
 }
 
-func (g *Governor) abandonWaiter(w *evaluationWaiter, outcome Outcome) (*Evaluation, Outcome, error) {
+// rejectionHookLocked records an evaluation rejection and returns the hook to
+// call after unlocking. Phase-5 overflow is not a rejection.
+func (g *Governor) rejectionHookLocked(reason Outcome, logging bool) func(Outcome, Mode) {
+	if logging {
+		return nil
+	}
+	g.noteRejectionLocked(reason)
+	return g.hooks.OnRejection
+}
+
+func (g *Governor) abandonWaiter(w *evaluationWaiter, outcome Outcome, logging bool) (*Evaluation, Outcome, error) {
 	g.mu.Lock()
 	if w.granted != nil {
 		token := w.granted
@@ -659,8 +741,7 @@ func (g *Governor) abandonWaiter(w *evaluationWaiter, outcome Outcome) (*Evaluat
 		var hook func(Outcome, Mode)
 		mode := g.limits.Mode
 		if outcome == WaitExpired {
-			g.noteRejectionLocked(EvaluationSaturated)
-			hook = g.hooks.OnRejection
+			hook = g.rejectionHookLocked(EvaluationSaturated, logging)
 		}
 		g.mu.Unlock()
 		if hook != nil {
@@ -685,8 +766,7 @@ func (g *Governor) abandonWaiter(w *evaluationWaiter, outcome Outcome) (*Evaluat
 	var rejectionHook func(Outcome, Mode)
 	mode := g.limits.Mode
 	if outcome == WaitExpired {
-		g.noteRejectionLocked(EvaluationSaturated)
-		rejectionHook = g.hooks.OnRejection
+		rejectionHook = g.rejectionHookLocked(EvaluationSaturated, logging)
 	}
 	g.grantWaitersLocked()
 	g.mu.Unlock()

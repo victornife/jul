@@ -30,6 +30,7 @@ func TestV2WAFInspectsThePluginOutput(t *testing.T) {
 	}))
 	defer backend.Close()
 	withWAF := func(c *config.Config) {
+		provisionedInspection(c)
 		c.Servers[0].Locations[0].WAF = &config.WAFConfig{
 			Enabled: true, Mode: "block", BlockStatus: 403, ResponseBodyCheck: true,
 			InlineRules: "SecResponseBodyMimeType text/plain\n" +

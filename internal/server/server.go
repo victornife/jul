@@ -274,6 +274,9 @@ type Server struct {
 	// WAFSourceDigests returns the engine-owned external source digests of the
 	// compiled global and per-location WAF policies for generation genID (#642, #563).
 	WAFSourceDigests func(genID uint64) (string, map[[2]int]string)
+	// InspectionRequirement returns generation genID's route-aware minimum
+	// inspection budget and the route that needs it (ADR 0032 §7).
+	InspectionRequirement func(genID uint64) (minimum uint64, route string, ok bool)
 
 	// OnReloadStart, when set, is invoked at the beginning of every reload
 	// transaction so the composition root can increment an in-progress gauge.
@@ -731,9 +734,15 @@ func (s *Server) Run(ctx context.Context, reload <-chan ReloadRequest, initialRe
 	// The startup effective config is already resolved by the composition root
 	// and passed as s.cfg. The factory receives the same candidate that will be
 	// served, so there is no second secret resolution at startup (R7-05).
-	handlers, genID, commit, _, err := s.factory(config.WithRawConfig(ctx, s.rawCfg), s.cfg)
+	handlers, genID, commit, abort, err := s.factory(config.WithRawConfig(ctx, s.rawCfg), s.cfg)
 	if err != nil {
 		return fmt.Errorf("build handlers: %w", err)
+	}
+	if err := s.publishStartupInspectionLimits(genID); err != nil {
+		if abort != nil {
+			abort()
+		}
+		return fmt.Errorf("inspection limits: %w", err)
 	}
 	snapshots, _ := commit() // promote the initial generation; retirePrev is nil at startup
 	s.exchanges.SetInitialGeneration(genID)

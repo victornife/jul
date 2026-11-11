@@ -374,6 +374,11 @@ servers = ["127.0.0.1:25353"]
 # ---------------------------------------------------------------------------
 # Server 1 — plain HTTP (:8080): the core routing/feature showcase.
 # ---------------------------------------------------------------------------
+[global.inspection]
+# WAF routes need a larger budget than the 256 MiB default; see the
+# minimum-budget rule in docs/adr/0032-aggregate-inspection-resource-governor.md.
+max_buffered_bytes = "512m"
+
 [[servers]]
 listen = "127.0.0.1:8080"
 server_names = ["localhost", "example.com"]

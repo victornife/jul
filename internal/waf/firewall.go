@@ -28,6 +28,7 @@ import (
 	mergefsio "github.com/jcchavezs/mergefs/io"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/redact"
@@ -58,6 +59,7 @@ type Firewall struct {
 	sourceSum   [32]byte
 	policySum   [32]byte
 	assets      []ExternalAssetRecord
+	facts       inspection.WAFFacts
 	closed      *atomic.Bool
 }
 
@@ -132,6 +134,7 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	return &Firewall{
 		waf:         &clientAddrWAF{WAF: w},
 		info:        info,
+		facts:       inspectionFacts(state),
 		opts:        opts,
 		hasExternal: info.ExternalFiles > 0,
 		sourceSum:   rawSum,
@@ -143,6 +146,25 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 
 // Info describes the compiled policy this Firewall enforces.
 func (f *Firewall) Info() PolicyInfo { return f.info }
+
+// InspectionFacts returns the compiled engine limits that size this WAF's
+// worst-case inspection charge (ADR 0032 §7).
+func (f *Firewall) InspectionFacts() inspection.WAFFacts { return f.facts }
+
+func inspectionFacts(st engineState) inspection.WAFFacts {
+	nonNegative := func(v int64) uint64 {
+		if v < 0 {
+			return 0
+		}
+		return uint64(v)
+	}
+	return inspection.WAFFacts{
+		RequestBodyLimit:         nonNegative(st.requestBodyLimit),
+		RequestBodyInMemoryLimit: nonNegative(st.requestBodyInMemoryLimit),
+		ResponseBodyLimit:        nonNegative(st.responseBodyLimit),
+		ArgumentLimit:            nonNegative(int64(st.argumentLimit)),
+	}
+}
 
 // SourceChanged reports whether two compiled Firewalls read different external
 // file bytes, using the private in-memory digest chain rather than any public
@@ -565,6 +587,12 @@ type engineState struct {
 	responseBodyMimeTypes []string
 	argumentLimit         int
 	argumentLimitGuard    bool
+	// Compiled body limits for the inspection minimum budget (ADR 0032 §7).
+	// requestBodyInMemoryLimit is 0 when Coraza leaves it unset, which means
+	// the whole request body limit may be held in memory.
+	requestBodyLimit         int64
+	requestBodyInMemoryLimit int64
+	responseBodyLimit        int64
 }
 
 // compiledEngineState reads the authoritative compiled response-body and
@@ -584,6 +612,19 @@ func compiledEngineState(w coraza.WAF) (engineState, error) {
 		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing response-body or argument-limit settings on %T", w)
 	}
 	st := engineState{responseBodyAccess: access.Bool(), argumentLimit: int(limit.Int())}
+	reqLimit := engine.FieldByName("RequestBodyLimit")
+	respLimit := engine.FieldByName("ResponseBodyLimit")
+	inMemory := engine.FieldByName("requestBodyInMemoryLimit")
+	if !reqLimit.IsValid() || reqLimit.Kind() != reflect.Int64 ||
+		!respLimit.IsValid() || respLimit.Kind() != reflect.Int64 ||
+		!inMemory.IsValid() || inMemory.Kind() != reflect.Pointer || inMemory.Type().Elem().Kind() != reflect.Int64 {
+		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing body-limit settings on %T", w)
+	}
+	st.requestBodyLimit = reqLimit.Int()
+	st.responseBodyLimit = respLimit.Int()
+	if !inMemory.IsNil() {
+		st.requestBodyInMemoryLimit = inMemory.Elem().Int()
+	}
 	for i := 0; i < mimes.Len(); i++ {
 		if m := strings.TrimSpace(mimes.Index(i).String()); m != "" {
 			st.responseBodyMimeTypes = append(st.responseBodyMimeTypes, m)

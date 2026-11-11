@@ -6,6 +6,7 @@ package inspection
 import (
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,32 +156,43 @@ func TestLimitsFromConfigRejectsInvalidInputs(t *testing.T) {
 			}
 		})
 	}
-	enforceTooSmall := &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
-		MaxBufferedBytes: sizePointer(1024),
-	}}}
-	if _, err := LimitsFromConfig(enforceTooSmall, 1); err == nil ||
-		!errors.Is(err, ErrInvalidLimits) {
-		t.Fatalf("enforce accepted a budget below the known base + R3 minimum: %v", err)
-	}
-	observeTooSmall := &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
-		Mode:             "observe",
-		MaxBufferedBytes: sizePointer(1024),
-	}}}
-	if limits, err := LimitsFromConfig(observeTooSmall, 1); err != nil || limits.MaxBytes != 1024 {
-		t.Fatalf("observe rejected a below-base measurement budget: limits=%+v err=%v", limits, err)
-	}
-
-	minimum := config.InspectionBaseChargeBytes +
-		config.InspectionResponseHeaderEstimateFactor*config.InspectionDefaultMaxResponseHeaderBytes
-	exactMinimum := &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
-		MaxBufferedBytes: sizePointer(minimum),
-	}}}
-	if limits, err := LimitsFromConfig(exactMinimum, 1); err != nil || limits.MaxBytes != uint64(minimum) {
-		t.Fatalf("enforce rejected exact known base + R3 minimum: limits=%+v err=%v", limits, err)
+	for _, mode := range []string{"enforce", "observe"} {
+		small := &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
+			Mode:             mode,
+			MaxBufferedBytes: sizePointer(1024),
+		}}}
+		limits, err := LimitsFromConfig(small, 1)
+		if err != nil || limits.MaxBytes != 1024 || limits.MinimumBytes != 0 {
+			t.Fatalf("%s: configuration-only limits applied a route-independent floor: limits=%+v err=%v", mode, limits, err)
+		}
 	}
 }
 
-func TestResponseHeaderCeilingSetsKnownR3MinimumWithoutChangingBudget(t *testing.T) {
+func TestLimitsValidateEnforcesRouteMinimum(t *testing.T) {
+	limits := Limits{
+		Mode: Enforce, MaxBytes: 4 << 20, MaxResponseHeaderBytes: 64 << 10,
+		ConfiguredEvaluationSlots: 1, EvaluationSlots: 1, BaseChargeBytes: BaseChargeBytes,
+		MinimumBytes: 4<<20 + 1, MinimumRoute: "servers[0].locations[0]",
+	}
+	if err := limits.validate(); !errors.Is(err, ErrInvalidLimits) || !strings.Contains(err.Error(), "servers[0].locations[0]") {
+		t.Fatalf("enforce accepted a budget below the route minimum: %v", err)
+	}
+	limits.MinimumBytes = 4 << 20
+	if err := limits.validate(); err != nil {
+		t.Fatalf("enforce rejected the exact route minimum: %v", err)
+	}
+	limits.Mode, limits.MinimumBytes = Observe, 8<<20
+	if err := limits.validate(); err != nil {
+		t.Fatalf("observe rejected a below-minimum measurement budget: %v", err)
+	}
+	limits.Mode, limits.MinimumBytes = Enforce, 0
+	limits.MaxBytes = 1
+	if err := limits.validate(); err != nil {
+		t.Fatalf("enforce rejected a budget with no inspected route: %v", err)
+	}
+}
+
+func TestResponseHeaderCeilingSetsR3EstimateWithoutChangingBudget(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		headerBytes int64
@@ -190,8 +202,6 @@ func TestResponseHeaderCeilingSetsKnownR3MinimumWithoutChangingBudget(t *testing
 		{name: "raised 256 KiB", headerBytes: 256 << 10, wantR3: 12 << 20},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			minimum := config.InspectionBaseChargeBytes +
-				config.InspectionResponseHeaderEstimateFactor*tc.headerBytes
 			cfg := &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
 				MaxBufferedBytes:       sizePointer(256 << 20),
 				MaxResponseHeaderBytes: sizePointer(tc.headerBytes),
@@ -205,12 +215,6 @@ func TestResponseHeaderCeilingSetsKnownR3MinimumWithoutChangingBudget(t *testing
 			}
 			if got := uint64(config.InspectionResponseHeaderEstimateFactor) * limits.MaxResponseHeaderBytes; got != tc.wantR3 {
 				t.Fatalf("maximum R3 estimate = %d, want %d", got, tc.wantR3)
-			}
-
-			cfg.Global.Inspection.MaxBufferedBytes = sizePointer(minimum)
-			limits, err = LimitsFromConfig(cfg, 2)
-			if err != nil || limits.MaxBytes != uint64(minimum) {
-				t.Fatalf("exact base + R3 minimum rejected: limits=%+v err=%v", limits, err)
 			}
 		})
 	}

@@ -73,28 +73,19 @@ max_response_header_bytes = "96k"
 	}
 }
 
-func TestEnforceInspectionBudgetValidatesKnownBaseAndR3Charges(t *testing.T) {
+func TestStructuralValidationAppliesNoRouteIndependentBudgetFloor(t *testing.T) {
 	cfg := ProxyTarget("127.0.0.1:9000", ":8080")
 	headerLimit := Size(1)
 	cfg.Global.Inspection.MaxResponseHeaderBytes = &headerLimit
 	budget := Size(1024)
 	cfg.Global.Inspection.MaxBufferedBytes = &budget
-	err := Validate(cfg)
-	if err == nil ||
-		!strings.Contains(err.Error(), "[global.inspection].max_buffered_bytes") ||
-		!strings.Contains(err.Error(), "configured 1024 B") ||
-		!strings.Contains(err.Error(), "known base + R3 minimum of 16432 B") {
-		t.Fatalf("enforce validation error = %v", err)
-	}
-
-	cfg.Global.Inspection.Mode = "observe"
-	if err := Validate(cfg); err != nil {
-		t.Fatalf("observe mode rejected a below-base measurement budget: %v", err)
-	}
-	budget = Size(InspectionBaseChargeBytes + InspectionResponseHeaderEstimateFactor)
-	cfg.Global.Inspection.Mode = "enforce"
-	if err := Validate(cfg); err != nil {
-		t.Fatalf("enforce mode rejected the exact base-charge boundary: %v", err)
+	// An uninspected configuration needs no inspection budget; the
+	// effective-route minimum is enforced where compiled routes are known.
+	for _, mode := range []string{"enforce", "observe"} {
+		cfg.Global.Inspection.Mode = mode
+		if err := Validate(cfg); err != nil {
+			t.Fatalf("%s mode rejected a small budget on an uninspected configuration: %v", mode, err)
+		}
 	}
 }
 

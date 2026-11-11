@@ -247,6 +247,9 @@ func (p *ReloadPlan) Prepare() error {
 			if err != nil {
 				return fmt.Errorf("prepare inspection limits: %w", err)
 			}
+			if limits, err = p.s.withRouteMinimum(limits, p.GenID); err != nil {
+				return fmt.Errorf("prepare inspection limits: %w", err)
+			}
 			p.Runtime.add(&inspectionLimitsComponent{governor: p.s.Inspection, limits: limits})
 		}
 

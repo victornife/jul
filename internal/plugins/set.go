@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 
+	"jul/internal/inspection"
 	"jul/internal/middleware"
 )
 
@@ -87,6 +88,20 @@ func (s *Set) ResponsePoint(names ...string) middleware.Middleware {
 		}
 	}
 	return nil
+}
+
+// InspectionFacts returns the named plugin's static inspection-budget facts
+// (ADR 0032 §7). SubscribesResponse is a plugin property; the caller decides
+// whether the plugin sits in a route's middleware chain.
+func (s *Set) InspectionFacts(name string) (inspection.PluginFacts, bool) {
+	if s == nil {
+		return inspection.PluginFacts{}, false
+	}
+	p := s.plugins[name]
+	if p == nil {
+		return inspection.PluginFacts{}, false
+	}
+	return p.facts, true
 }
 
 // ABIs returns the configured ABI of every plugin in the set.

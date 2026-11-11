@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/middleware"
 )
 
@@ -132,3 +133,8 @@ func (*Set) ResponsePoint(...string) middleware.Middleware { return nil }
 
 // ABIs is empty in the lean build.
 func (*Set) ABIs() map[string]string { return nil }
+
+// InspectionFacts reports no plugin: the lean build has none.
+func (*Set) InspectionFacts(string) (inspection.PluginFacts, bool) {
+	return inspection.PluginFacts{}, false
+}

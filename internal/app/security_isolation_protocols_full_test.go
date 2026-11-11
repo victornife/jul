@@ -163,7 +163,7 @@ func verifyFullProtocolIsolationBoundaries(t *testing.T, factory *HandlerFactory
 		}},
 	}
 
-	hMap, _, commit, _, err := factory.Prepare(ctx, protoCfg)
+	hMap, _, commit, _, err := factory.Prepare(ctx, provisionedInspection(protoCfg))
 	if err != nil {
 		t.Fatalf("Prepare protoCfg: %v", err)
 	}

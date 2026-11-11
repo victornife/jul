@@ -6,6 +6,7 @@ package inspection
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"runtime"
 	"strings"
@@ -64,7 +65,7 @@ func TestNewRejectsInvalidLimits(t *testing.T) {
 		{name: "negative body timeout", change: func(l *Limits) { l.BodyTimeout = -1 }},
 		{name: "zero base charge", change: func(l *Limits) { l.BaseChargeBytes = 0 }},
 		{name: "R3 estimate overflow", change: func(l *Limits) { l.MaxResponseHeaderBytes = math.MaxUint64 }},
-		{name: "below known base and R3", change: func(l *Limits) { l.MaxBytes = 57 }},
+		{name: "below route minimum", change: func(l *Limits) { l.MinimumBytes = 101 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -473,7 +474,7 @@ func TestCanceledContextAndUnslottedLogging(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token, outcome, err := g.AcquireLoggingEvaluation(context.Background(), lease); token != nil || outcome != Unslotted || err != nil {
+	if token, outcome, err := g.AcquireLoggingEvaluation(context.Background(), lease, LoggingTry); token != nil || outcome != Unslotted || err != nil {
 		t.Fatalf("phase-5 fallback = (%v, %s, %v)", token, outcome, err)
 	}
 	if g.Snapshot().UnslottedLogging != 1 {
@@ -488,7 +489,9 @@ func TestCanceledContextAndUnslottedLogging(t *testing.T) {
 }
 
 func TestCheckedAccountingRejectsOverflowWithoutCorruptingState(t *testing.T) {
-	if _, err := New(testLimits(Enforce, 1, 0, 10, 11), Hooks{}); !errors.Is(err, ErrInvalidLimits) {
+	belowRoute := testLimits(Enforce, 1, 0, 10, 11)
+	belowRoute.MinimumBytes = 11
+	if _, err := New(belowRoute, Hooks{}); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("invalid base budget error = %v", err)
 	}
 	g := newTestGovernor(t, testLimits(Observe, 1, 0, math.MaxUint64, 1), Hooks{})
@@ -651,10 +654,12 @@ func TestObserveBaseOverflowAndEvaluationOutcomeAccounting(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := New(testLimits(Enforce, 1, 0, 1, 10), Hooks{}); err == nil ||
+	tooSmall := testLimits(Enforce, 1, 0, 1, 10)
+	tooSmall.MinimumBytes, tooSmall.MinimumRoute = 58, "servers[0].locations[0]"
+	if _, err := New(tooSmall, Hooks{}); err == nil ||
 		!errors.Is(err, ErrInvalidLimits) ||
 		!strings.Contains(err.Error(), "global.inspection.max_buffered_bytes is 1 B") ||
-		!strings.Contains(err.Error(), "requires at least 58 B") {
+		!strings.Contains(err.Error(), "requires at least 58 B for route servers[0].locations[0]") {
 		t.Fatalf("enforce mode accepted base charge above budget: %v", err)
 	}
 	if err := overBudgetLease.Close(); err != nil {
@@ -748,13 +753,18 @@ func TestObserveMakesDeterministicWouldRejectDecisionWithoutWaiting(t *testing.T
 func TestLoggingFallbackAndEvaluationInvalidInputs(t *testing.T) {
 	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 100, 1), Hooks{})
 	lease := acquireTestLease(t, g)
-	if _, outcome, err := g.AcquireLoggingEvaluation(context.Background(), nil); outcome != InvalidAccounting || !IsOutcome(err, InvalidAccounting) {
+	if _, outcome, err := g.AcquireLoggingEvaluation(context.Background(), nil, LoggingWait); outcome != InvalidAccounting || !IsOutcome(err, InvalidAccounting) {
 		t.Fatalf("invalid logging lease = (%s, %v)", outcome, err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, outcome, err := g.AcquireLoggingEvaluation(ctx, lease); outcome != Cancelled || !IsOutcome(err, Cancelled) {
-		t.Fatalf("cancelled logging evaluation = (%s, %v)", outcome, err)
+	// Phase 5 survives client cancellation: a free slot is still taken.
+	token, outcome, err := g.AcquireLoggingEvaluation(ctx, lease, LoggingWait)
+	if token == nil || outcome != Acquired || err != nil {
+		t.Fatalf("cancelled logging evaluation = (%v, %s, %v)", token, outcome, err)
+	}
+	if err := token.Release(); err != nil {
+		t.Fatal(err)
 	}
 	if _, outcome, err := g.AcquireEvaluation(context.Background(), nil); outcome != InvalidAccounting || !IsOutcome(err, InvalidAccounting) {
 		t.Fatalf("nil evaluation lease = (%s, %v)", outcome, err)
@@ -905,7 +915,7 @@ func TestDefensiveAccountingAndWaiterRaceBranches(t *testing.T) {
 
 	ready := make(chan struct{})
 	w := &evaluationWaiter{ready: ready, outcome: LeaseClosed}
-	if _, outcome, err := g.abandonWaiter(w, Cancelled); outcome != LeaseClosed || !IsOutcome(err, LeaseClosed) {
+	if _, outcome, err := g.abandonWaiter(w, Cancelled, false); outcome != LeaseClosed || !IsOutcome(err, LeaseClosed) {
 		t.Fatalf("already-completed waiter = (%s, %v)", outcome, err)
 	}
 	close(ready)
@@ -917,7 +927,7 @@ func TestDefensiveAccountingAndWaiterRaceBranches(t *testing.T) {
 	granted := &Evaluation{g: g, lease: grantedLease}
 	w = &evaluationWaiter{ready: make(chan struct{}), granted: granted}
 	g.mu.Unlock()
-	if token, outcome, err := g.abandonWaiter(w, WaitExpired); token != nil || outcome != WaitExpired || !IsOutcome(err, WaitExpired) {
+	if token, outcome, err := g.abandonWaiter(w, WaitExpired, false); token != nil || outcome != WaitExpired || !IsOutcome(err, WaitExpired) {
 		t.Fatalf("grant/timeout race resolution = (%v, %s, %v)", token, outcome, err)
 	}
 	if g.Snapshot().ActiveEvaluations != 0 {
@@ -975,5 +985,281 @@ func TestLeaseCloseDoesNotPartiallyReleaseCorruptedAccounting(t *testing.T) {
 	after := g.Snapshot()
 	if after.Usage != before.Usage || after.ActiveLeases != before.ActiveLeases {
 		t.Fatalf("failed close partially mutated accounting: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestLoggingNeverRefusedAfterCancellation(t *testing.T) {
+	for _, policy := range []LoggingPolicy{LoggingTry, LoggingWait} {
+		var unslottedHook, rejectionHook int
+		g := newTestGovernor(t, testLimits(Enforce, 1, 10*time.Second, 100, 1), Hooks{
+			OnUnslotted: func() { unslottedHook++ },
+			OnRejection: func(Outcome, Mode) { rejectionHook++ },
+		})
+		lease := acquireTestLease(t, g)
+		holder, _, err := g.TryEvaluation(context.Background(), lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		token, outcome, err := g.AcquireLoggingEvaluation(ctx, lease, policy)
+		if token != nil || outcome != Unslotted || err != nil {
+			t.Fatalf("policy %d: cancelled saturated logging = (%v, %s, %v)", policy, token, outcome, err)
+		}
+		snap := g.Snapshot()
+		if snap.UnslottedLogging != 1 || unslottedHook != 1 || snap.WaitingEvaluations != 0 {
+			t.Fatalf("policy %d: unslotted=%d hook=%d waiting=%d", policy, snap.UnslottedLogging, unslottedHook, snap.WaitingEvaluations)
+		}
+		if snap.Rejections != ([3][2]uint64{}) || rejectionHook != 0 {
+			t.Fatalf("policy %d: phase-5 overflow recorded as rejection: %v hook=%d", policy, snap.Rejections, rejectionHook)
+		}
+		if err := holder.Release(); err != nil {
+			t.Fatal(err)
+		}
+		if err := lease.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLoggingTryDoesNotWait(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Enforce, 1, 10*time.Second, 100, 1), Hooks{})
+	lease := acquireTestLease(t, g)
+	holder, _, err := g.TryEvaluation(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan Outcome, 1)
+	go func() {
+		_, outcome, _ := g.AcquireLoggingEvaluation(context.Background(), lease, LoggingTry)
+		done <- outcome
+	}()
+	select {
+	case outcome := <-done:
+		if outcome != Unslotted {
+			t.Fatalf("try logging outcome = %s", outcome)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("LoggingTry waited for a slot while unread request-body data may remain")
+	}
+	if g.Snapshot().UnslottedLogging != 1 {
+		t.Fatalf("unslotted = %d", g.Snapshot().UnslottedLogging)
+	}
+	if err := holder.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoggingWaitGetsReleasedSlot(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Enforce, 1, 10*time.Second, 100, 1), Hooks{})
+	lease := acquireTestLease(t, g)
+	holder, _, err := g.TryEvaluation(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		token   *Evaluation
+		outcome Outcome
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		token, outcome, err := g.AcquireLoggingEvaluation(context.Background(), lease, LoggingWait)
+		done <- result{token, outcome, err}
+	}()
+	waitForWaiters(t, g, 1)
+	if err := holder.Release(); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	if got.token == nil || got.outcome != Acquired || got.err != nil {
+		t.Fatalf("waiting logging = (%v, %s, %v)", got.token, got.outcome, got.err)
+	}
+	if g.Snapshot().UnslottedLogging != 0 {
+		t.Fatal("slotted logging counted as unslotted")
+	}
+	if err := got.token.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoggingWaitCancelledMidWaitRunsUnslotted(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Enforce, 1, 10*time.Second, 100, 1), Hooks{})
+	lease := acquireTestLease(t, g)
+	holder, _, err := g.TryEvaluation(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		token, outcome, err := g.AcquireLoggingEvaluation(ctx, lease, LoggingWait)
+		if err == nil && (token != nil || outcome != Unslotted) {
+			err = fmt.Errorf("mid-wait cancellation = (%v, %s)", token, outcome)
+		}
+		done <- err
+	}()
+	waitForWaiters(t, g, 1)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	snap := g.Snapshot()
+	if snap.UnslottedLogging != 1 || snap.WaitingEvaluations != 0 || snap.Rejections != ([3][2]uint64{}) {
+		t.Fatalf("snapshot after cancelled logging wait = %+v", snap)
+	}
+	if err := holder.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoggingWaitExpiryRunsUnslottedWithoutRejection(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Enforce, 1, 10*time.Millisecond, 100, 1), Hooks{})
+	lease := acquireTestLease(t, g)
+	holder, _, err := g.TryEvaluation(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, outcome, err := g.AcquireLoggingEvaluation(context.Background(), lease, LoggingWait)
+	if token != nil || outcome != Unslotted || err != nil {
+		t.Fatalf("expired logging wait = (%v, %s, %v)", token, outcome, err)
+	}
+	if snap := g.Snapshot(); snap.Rejections != ([3][2]uint64{}) || snap.UnslottedLogging != 1 {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+	if err := holder.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoggingObserveNeverWaitsOrRecordsWouldReject(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Observe, 1, 10*time.Second, 100, 1), Hooks{})
+	lease := acquireTestLease(t, g)
+	holder, _, err := g.TryEvaluation(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, c := range []context.Context{context.Background(), ctx} {
+		token, outcome, err := g.AcquireLoggingEvaluation(c, lease, LoggingWait)
+		if token == nil || outcome != Acquired || err != nil {
+			t.Fatalf("observe logging = (%v, %s, %v)", token, outcome, err)
+		}
+		if err := token.Release(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if snap := g.Snapshot(); snap.Rejections != ([3][2]uint64{}) || snap.UnslottedLogging != 0 {
+		t.Fatalf("observe snapshot = %+v", snap)
+	}
+	if err := holder.Release(); err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReleasedChargesDoNotAccumulate(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 1<<20, 16384), Hooks{})
+	lease := acquireTestLease(t, g)
+	kept, err := lease.Charge(BufferBytes, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 100000; i++ {
+		c, err := lease.Charge(BufferBytes, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Release(); err != nil {
+			t.Fatal(err)
+		}
+		if err := c.Release(); err != nil {
+			t.Fatalf("second release: %v", err)
+		}
+	}
+	g.mu.Lock()
+	records, capacity := len(lease.charges), cap(lease.charges)
+	g.mu.Unlock()
+	if records != 2 || capacity > 64 {
+		t.Fatalf("retained %d charge records (cap %d), want base + 1 live", records, capacity)
+	}
+	if snap := g.Snapshot(); snap.Usage[BufferBytes] != 7 || snap.Usage[BaseBytes] != 16384 {
+		t.Fatalf("usage = %v", snap.Usage)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := kept.Release(); err != nil {
+		t.Fatalf("release after close of already-refunded charge: %v", err)
+	}
+	if snap := g.Snapshot(); snap.Usage != ([byteClassCount]uint64{}) {
+		t.Fatalf("usage after close = %v", snap.Usage)
+	}
+}
+
+func TestChargeReleaseOrderKeepsIndexes(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 1<<20, 1), Hooks{})
+	lease := acquireTestLease(t, g)
+	var charges []*Charge
+	for i := 1; i <= 200; i++ {
+		c, err := lease.Charge(WAFStateBytes, uint64(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		charges = append(charges, c)
+	}
+	// Release in an interleaved order to exercise swap-delete and shrinking.
+	for _, i := range []int{0, 199, 50, 1, 198} {
+		if err := charges[i].Release(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 2; i < 198; i += 2 {
+		if i == 50 {
+			continue
+		}
+		if err := charges[i].Release(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var want uint64
+	for i := 3; i < 198; i += 2 {
+		want += uint64(i + 1)
+	}
+	g.mu.Lock()
+	for i, c := range lease.charges {
+		if c.index != i || c.released {
+			g.mu.Unlock()
+			t.Fatalf("charge record %d has index %d released=%v", i, c.index, c.released)
+		}
+	}
+	live := len(lease.charges)
+	g.mu.Unlock()
+	if live != 1+98 {
+		t.Fatalf("live records = %d", live)
+	}
+	if got := g.Snapshot().Usage[WAFStateBytes]; got != want {
+		t.Fatalf("waf usage = %d want %d", got, want)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if snap := g.Snapshot(); snap.Usage != ([byteClassCount]uint64{}) {
+		t.Fatalf("usage after close = %v", snap.Usage)
 	}
 }

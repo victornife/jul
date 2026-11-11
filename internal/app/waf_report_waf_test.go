@@ -148,7 +148,7 @@ func TestFactoryWAFEffectiveTracksServingGeneration(t *testing.T) {
 		RequestBodyLimit: 1 << 20,
 		DirectivesFiles:  []string{globalRuleFile},
 	}
-	prepareAndCommit(t, f, cfgEval)
+	prepareAndCommit(t, f, provisionedInspection(cfgEval))
 
 	// Before running evaluation, WAFEffective().Evaluation is "unrun".
 	if ev := f.WAFEffective().Evaluation; ev == nil || ev.State != "unrun" {
@@ -632,7 +632,7 @@ func TestWAFEvaluationPerScopeOverridesOnlyAndServingBinding(t *testing.T) {
 	}
 	f.Versions = vctx
 
-	_, _, commit, abort, err := f.Prepare(ctx, cfg)
+	_, _, commit, abort, err := f.Prepare(ctx, provisionedInspection(cfg))
 	if err != nil {
 		t.Fatalf("Prepare initial: %v", err)
 	}
@@ -772,7 +772,7 @@ func TestWAFEvidenceMetricsTransitionOnScrapeWithoutAdminReads(t *testing.T) {
 		},
 	}
 
-	_, _, commit, _, err := f.Prepare(context.Background(), cfg)
+	_, _, commit, _, err := f.Prepare(context.Background(), provisionedInspection(cfg))
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
@@ -934,7 +934,7 @@ func TestWAFArgumentGuardAndResponseInspectionAcrossRoutes(t *testing.T) {
 	defer cleanup()
 	serve := func(cfg *config.Config) (http.Handler, func()) {
 		t.Helper()
-		hMap, _, commit, _, err := f.Prepare(ctx, cfg)
+		hMap, _, commit, _, err := f.Prepare(ctx, provisionedInspection(cfg))
 		if err != nil {
 			t.Fatalf("Prepare: %v", err)
 		}

@@ -461,7 +461,7 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 		})
 		factory.Metrics.ObserveSecurityEvidenceState("posture_evaluator", "ok")
 	})
-	hMap, _, commit1, _, err := factory.Prepare(ctx, makeCfg("block", true))
+	hMap, _, commit1, _, err := factory.Prepare(ctx, provisionedInspection(makeCfg("block", true)))
 	if err != nil {
 		t.Fatalf("Prepare initial block: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 
 	// 4. Protection weakening alert (reload into detect-only with 0 block routes) fires JulWAFProtectionWeakened,
 	// and receiver failure (503) never degrades Jul serving or WAF enforcement!
-	hMapDetect, _, commitDetect, _, err := factory.Prepare(ctx, makeCfg("detect", true))
+	hMapDetect, _, commitDetect, _, err := factory.Prepare(ctx, provisionedInspection(makeCfg("detect", true)))
 	if err != nil {
 		t.Fatalf("Prepare detect weakening: %v", err)
 	}
@@ -604,7 +604,7 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 	// enforcement continue unaffected while Alertmanager receives 503s, and then
 	// restore the receiver and confirm Alertmanager's retry delivers the resolved webhook!
 	failReceiver.Store(true)
-	hMapRestore, _, commitRestore, _, err := factory.Prepare(ctx, makeCfg("block", true))
+	hMapRestore, _, commitRestore, _, err := factory.Prepare(ctx, provisionedInspection(makeCfg("block", true)))
 	if err != nil {
 		t.Fatalf("Prepare block restore: %v", err)
 	}
@@ -1339,7 +1339,7 @@ func TestAdversarialReviewFixesSR01ToSR05AndCR01ToCR04(t *testing.T) {
 		},
 	}
 
-	_, _, commit, _, err := factory.Prepare(ctx, cfgWithdrawnAndOverride)
+	_, _, commit, _, err := factory.Prepare(ctx, provisionedInspection(cfgWithdrawnAndOverride))
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}

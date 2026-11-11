@@ -23,6 +23,7 @@ import (
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/logthrottle"
 )
 
@@ -358,6 +359,8 @@ type plugin struct {
 	// readsBody reports that the module imports read_request_body, so each
 	// request's body is prepared before an instance is acquired (#699).
 	readsBody bool
+	// facts sizes this plugin's worst-case inspection charge (ADR 0032 §7).
+	facts inspection.PluginFacts
 
 	capKV        bool
 	capFetch     bool
@@ -545,6 +548,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	}
 	p.hasResponse = decl.hasResponse
 	p.readsBody = decl.readsBody
+	p.facts = p.inspectionFacts(decl)
 
 	p.runtime = r
 	p.compiled = compiled
@@ -839,4 +843,22 @@ func (p *plugin) close() {
 		return
 	}
 	_ = p.runtime.Close(context.Background())
+}
+
+// inspectionFacts derives the static inputs to the route minimum budget from
+// the plugin's configured limits and the host functions it imports.
+func (p *plugin) inspectionFacts(decl abiDecl) inspection.PluginFacts {
+	return inspection.PluginFacts{
+		Name:                 p.name,
+		MaxRequestBody:       uint64(max(p.maxReqBody, 0)),
+		MaxResponseBody:      uint64(max(p.maxRespBody, 0)),
+		MaxFetchResponse:     uint64(max(p.maxFetchResp, 0)),
+		MemoryLimit:          p.memoryLimitBytes,
+		ReadsBody:            decl.readsBody,
+		SetsRequestState:     decl.imports["set_request_state"],
+		WritesResponseBody:   decl.imports["write_response_body"],
+		Fetch:                p.capFetch && decl.imports["fetch"],
+		SubscribesResponse:   decl.hasResponse && !p.isHandler,
+		ReplacesResponseBody: decl.hasResponse && !p.isHandler && decl.imports["resp_body_replace"],
+	}
 }
