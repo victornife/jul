@@ -19,6 +19,10 @@ import (
 	"jul/internal/upstream"
 )
 
+// reloadResultWait only guards against a hung reload; the tests assert outcomes,
+// not latency, so it leaves room for contended CI runners.
+const reloadResultWait = 10 * time.Second
+
 func cfgWithReloadTimeout(addr string, timeout time.Duration) *config.Config {
 	c := cfgWith(addr)
 	c.Global.ReloadTimeout = config.Duration(timeout)
@@ -217,7 +221,7 @@ func TestReloadResultCorrelation(t *testing.T) {
 	var rr ReloadResult
 	select {
 	case rr = <-resultCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(reloadResultWait):
 		t.Fatal("timed out waiting for reload result on supplied channel")
 	}
 
@@ -275,7 +279,7 @@ func TestReloadDeadlineBoundsCancellation(t *testing.T) {
 	var rr ReloadResult
 	select {
 	case rr = <-resultCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(reloadResultWait):
 		t.Fatal("timed out waiting for reload result")
 	}
 
@@ -322,7 +326,7 @@ func TestReloadResultIncludesAdminSubsystem(t *testing.T) {
 	var rr ReloadResult
 	select {
 	case rr = <-resultCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(reloadResultWait):
 		t.Fatal("timed out waiting for reload result")
 	}
 
@@ -375,7 +379,7 @@ func TestReloadResultAdminFailureDegrades(t *testing.T) {
 	var rr ReloadResult
 	select {
 	case rr = <-resultCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(reloadResultWait):
 		t.Fatal("timed out waiting for reload result")
 	}
 
@@ -430,7 +434,7 @@ func TestReloadPostPublishTimeoutReportsDegraded(t *testing.T) {
 	var rr ReloadResult
 	select {
 	case rr = <-resultCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(reloadResultWait):
 		t.Fatal("timed out waiting for reload result")
 	}
 
@@ -471,7 +475,7 @@ func TestReloadPhaseTimingRecordsDurations(t *testing.T) {
 	var rr ReloadResult
 	select {
 	case rr = <-resultCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(reloadResultWait):
 		t.Fatal("timed out waiting for reload result")
 	}
 
