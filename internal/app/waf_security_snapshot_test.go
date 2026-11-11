@@ -214,13 +214,21 @@ func TestWAFSecretPredicateSecurityWorkflow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// The deadline only guards against a hung Node process. Node's start-up
+		// with type stripping can take well over 15 s on a contended Windows
+		// runner, so it is not a latency assertion.
+		const handoffTimeout = 2 * time.Minute
+		ctx, cancel := context.WithTimeout(context.Background(), handoffTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, node, "--experimental-strip-types", "--input-type=module", "-e", wafSnapshotConsoleHandoff)
+		cmd.WaitDelay = 5 * time.Second
 		cmd.Stdin = bytes.NewReader(payload)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		patches, err := cmd.Output()
+		if ctx.Err() != nil {
+			t.Fatalf("actual Console handoff timed out after %s: %v: %s", handoffTimeout, err, stderr.String())
+		}
 		if err != nil {
 			t.Fatalf("actual Console handoff failed: %v: %s", err, stderr.String())
 		}
