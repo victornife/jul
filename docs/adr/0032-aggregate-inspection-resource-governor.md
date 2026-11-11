@@ -852,8 +852,10 @@ no lease and needs nothing, so an uninspected configuration has no minimum.
   `ArgumentLimit`.
 - **Where it runs.** The handler build shared by startup, reload and admin apply computes the
   minimum. The server attaches it to the limits it publishes, and the governor refuses
-  enforce-mode limits below it. `jul check` and `jul --check` compile the effective WAF policies and
-  plugins offline and apply the same calculation. In `enforce` a shortfall is a configuration
+  enforce-mode limits below it. `jul check` and `jul --check` compile the effective WAF policies
+  offline and apply the same calculation. They compile each plugin module and negotiate its ABI
+  for the same facts, but never instantiate it, so no guest start function or `_initialize` runs
+  during a check. In `enforce` a shortfall is a configuration
   error naming the route, the required bytes and the largest terms; in `observe` it is a warning
   (a log line, stderr, or `warnings` in `jul check -json`).
 - **Default fit.** Jul's default CRS route (128 KiB request body limit, 128 KiB in-memory limit,

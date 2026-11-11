@@ -431,11 +431,6 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	}
 	wasm := module.Bytes
 
-	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
-	if pages == 0 {
-		pages = 256 // 16 MiB
-	}
-
 	cfgJSON := []byte("{}")
 	if len(pc.Config) > 0 {
 		if b, err := json.Marshal(pc.Config); err == nil {
@@ -443,35 +438,25 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		}
 	}
 
-	p := &plugin{
-		name:             name,
-		identity:         module.Identity,
-		memoryLimitBytes: uint64(pages) * wasmPageSize,
-		timeout:          pc.Timeout.Std(),
-		isHandler:        pc.Type == "handler",
-		abi:              config.EffectivePluginABI(pc),
-		pool:             make(chan *pooledModule, poolCapacity),
-		capKV:            pc.KV,
-		capFetch:         pc.Fetch,
-		allowedHosts:     pc.AllowedHosts,
-		configJSON:       cfgJSON,
-		kv:               m.kv,
-		maxReqBody:       sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
-		maxRespBody:      sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
-		fetchTimeout:     pc.FetchTimeout.Std(),
-		maxFetchResp:     sizeOr(pc.MaxFetchResponse, 1<<20),
-		kvMaxEntries:     pc.KVMaxEntries,
-		kvMaxBytes:       sizeOr(pc.KVMaxBytes, 1<<20),
-		kvUsage:          m.kvLedgerFor(name),
-		log:              m.log,
-		onInvoke:         m.onInvoke,
-		onPanic:          m.onPanic,
-		onRespInv:        m.onRespInv,
-		onNoBody:         m.onNoBody,
-		onWait:           m.onWait,
-		onBodyFail:       m.onBodyErr,
-		egressWrap:       egressWrap,
-	}
+	p, pages := newPluginLimits(name, pc)
+	p.identity = module.Identity
+	p.pool = make(chan *pooledModule, poolCapacity)
+	p.capKV = pc.KV
+	p.allowedHosts = pc.AllowedHosts
+	p.configJSON = cfgJSON
+	p.kv = m.kv
+	p.fetchTimeout = pc.FetchTimeout.Std()
+	p.kvMaxEntries = pc.KVMaxEntries
+	p.kvMaxBytes = sizeOr(pc.KVMaxBytes, 1<<20)
+	p.kvUsage = m.kvLedgerFor(name)
+	p.log = m.log
+	p.onInvoke = m.onInvoke
+	p.onPanic = m.onPanic
+	p.onRespInv = m.onRespInv
+	p.onNoBody = m.onNoBody
+	p.onWait = m.onWait
+	p.onBodyFail = m.onBodyErr
+	p.egressWrap = egressWrap
 	maxInstances := pc.MaxInstances
 	if maxInstances <= 0 {
 		maxInstances = defaultMaxInstances
@@ -565,6 +550,75 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	p.mgr = m
 	m.track(p)
 	return p, nil
+}
+
+// newPluginLimits returns a plugin carrying only the configuration-derived
+// fields that size its inspection charge, and the guest memory limit in
+// pages. compilePlugin and InspectionFacts share it so both report the same
+// limits.
+func newPluginLimits(name string, pc config.PluginConfig) (*plugin, uint32) {
+	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
+	if pages == 0 {
+		pages = 256 // 16 MiB
+	}
+	return &plugin{
+		name:             name,
+		memoryLimitBytes: uint64(pages) * wasmPageSize,
+		timeout:          pc.Timeout.Std(),
+		isHandler:        pc.Type == "handler",
+		abi:              config.EffectivePluginABI(pc),
+		capFetch:         pc.Fetch,
+		maxReqBody:       sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
+		maxRespBody:      sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
+		maxFetchResp:     sizeOr(pc.MaxFetchResponse, 1<<20),
+	}, pages
+}
+
+// InspectionFacts returns every declared plugin's inspection facts without
+// running guest code: each module is read, compiled and ABI-negotiated
+// exactly as Build does, but never instantiated, so neither a WebAssembly
+// start function nor _initialize executes. The offline `jul check` budget
+// uses it; Build remains the only path that instantiates guests.
+func (m *Manager) InspectionFacts(ctx context.Context, cfg map[string]config.PluginConfig) (map[string]inspection.PluginFacts, error) {
+	out := make(map[string]inspection.PluginFacts, len(cfg))
+	for name, pc := range cfg {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("plugin %q: %w", name, err)
+		}
+		facts, err := m.inspectPlugin(ctx, name, pc)
+		if err != nil {
+			return nil, fmt.Errorf("plugin %q: %w", name, err)
+		}
+		out[name] = facts
+	}
+	return out, nil
+}
+
+func (m *Manager) inspectPlugin(ctx context.Context, name string, pc config.PluginConfig) (inspection.PluginFacts, error) {
+	module, err := ReadModule(pc)
+	if err != nil {
+		return inspection.PluginFacts{}, err
+	}
+	p, pages := newPluginLimits(name, pc)
+	if _, ok := abiRegistry[p.abi]; !ok {
+		return inspection.PluginFacts{}, fmt.Errorf("unknown ABI %q", p.abi)
+	}
+	r := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().
+		WithCompilationCache(m.cache).
+		WithMemoryLimitPages(pages).
+		WithCloseOnContextDone(true))
+	defer func() { _ = r.Close(context.Background()) }()
+	// Compilation decodes and validates the module; imports are resolved and
+	// start functions run only at instantiation, which this path never does.
+	compiled, err := r.CompileModule(ctx, module.Bytes)
+	if err != nil {
+		return inspection.PluginFacts{}, fmt.Errorf("compile module: %w", err)
+	}
+	decl, err := negotiateABI(p.abi, compiled)
+	if err != nil {
+		return inspection.PluginFacts{}, err
+	}
+	return p.inspectionFacts(decl), nil
 }
 
 // sizeOr returns the byte count of s, or def when s is non-positive.

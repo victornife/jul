@@ -114,9 +114,10 @@ func (f *HandlerFactory) InspectionRequirement(genID uint64) (minimum uint64, ro
 // CheckInspectionBudget is the offline (`jul check`) form of the route-aware
 // minimum-budget check that startup, reload and admin apply perform while
 // building handlers. It compiles the effective WAF policies and plugins of a
-// secret-resolved clone, reads their static limits and closes them. A
-// shortfall is an error in enforce mode and a returned warning in observe
-// mode. Plugin or WAF compile errors are left to ValidateRuntimeConfig.
+// secret-resolved clone, reads their static limits and closes them. Plugins
+// are compiled and ABI-negotiated but never instantiated, so no guest code
+// (start function or _initialize) runs during an offline check. A shortfall
+// is an error in enforce mode and a returned warning in observe mode.
 func CheckInspectionBudget(ctx context.Context, c *config.Config) (warning error, err error) {
 	err = config.PreflightClone(c, func(clone *config.Config) error {
 		pluginFacts := func(string) (inspection.PluginFacts, bool) { return inspection.PluginFacts{}, false }
@@ -126,12 +127,14 @@ func CheckInspectionBudget(ctx context.Context, c *config.Config) (warning error
 				return fmt.Errorf("plugins: %w", err)
 			}
 			defer mgr.Close()
-			set, err := mgr.Build(ctx, clone.Plugins)
+			facts, err := mgr.InspectionFacts(ctx, clone.Plugins)
 			if err != nil {
 				return fmt.Errorf("plugins: %w", err)
 			}
-			defer set.Close()
-			pluginFacts = set.InspectionFacts
+			pluginFacts = func(name string) (inspection.PluginFacts, bool) {
+				pf, ok := facts[name]
+				return pf, ok
+			}
 		}
 		firewalls := map[string]*inspection.WAFFacts{}
 		var compiled []*waf.Firewall

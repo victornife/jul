@@ -108,6 +108,15 @@ func (*Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.Plugi
 	return &Set{}, nil
 }
 
+// InspectionFacts mirrors Build: empty when no plugins are configured, and an
+// error when any are.
+func (m *Manager) InspectionFacts(ctx context.Context, cfg map[string]config.PluginConfig) (map[string]inspection.PluginFacts, error) {
+	if _, err := m.BuildWithEgress(ctx, cfg, nil); err != nil {
+		return nil, err
+	}
+	return map[string]inspection.PluginFacts{}, nil
+}
+
 // Set is an empty plugin set in the lean build.
 type Set struct{}
 
