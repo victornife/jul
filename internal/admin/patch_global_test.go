@@ -155,6 +155,82 @@ func TestApplyGlobalSetRejectsInvalidFieldsWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestGlobalSetSupportsInspectionFields(t *testing.T) {
+	mode := "observe"
+	maxBytes := "32m"
+	maxResponseHeaderBytes := "96k"
+	slots := 4
+	queueTimeout := "0s"
+	bodyTimeout := "0s"
+	patch := globalPatch{Inspection: &inspectionPatch{
+		Mode:                     &mode,
+		MaxBufferedBytes:         &maxBytes,
+		MaxResponseHeaderBytes:   &maxResponseHeaderBytes,
+		MaxConcurrentEvaluations: &slots,
+		EvaluationQueueTimeout:   &queueTimeout,
+		BodyTimeout:              &bodyTimeout,
+	}}
+	cfg := issue80BaseConfig()
+	if _, err := applyPatch(cfg, patchRequest{Op: "global_set", Global: &patch}); err != nil {
+		t.Fatalf("apply inspection fields: %v", err)
+	}
+	got := cfg.Global.Inspection
+	if got.Mode != mode || got.MaxBufferedBytes == nil || *got.MaxBufferedBytes != config.Size(32<<20) ||
+		got.MaxResponseHeaderBytes == nil || *got.MaxResponseHeaderBytes != config.Size(96<<10) ||
+		got.MaxConcurrentEvaluations != slots || got.EvaluationQueueTimeout == nil || *got.EvaluationQueueTimeout != 0 ||
+		got.BodyTimeout == nil || *got.BodyTimeout != 0 {
+		t.Fatalf("inspection patch = %+v", got)
+	}
+	if summary, err := applyPatch(cfg, patchRequest{Op: "global_set", Global: &patch}); err != nil || summary != "global fields changed: none" {
+		t.Fatalf("reapplying unchanged inspection fields = %q, %v", summary, err)
+	}
+}
+
+func TestGlobalSetRejectsInvalidInspectionFields(t *testing.T) {
+	negativeSlots, tooManySlots := -1, 1025
+	for _, tt := range []struct {
+		name string
+		ip   *inspectionPatch
+		want string
+	}{
+		{name: "empty inspection patch", ip: &inspectionPatch{}, want: "at least one field is required"},
+		{name: "invalid mode", ip: &inspectionPatch{Mode: ptr("bad")}, want: "mode must be enforce or observe"},
+		{name: "malformed byte size", ip: &inspectionPatch{MaxBufferedBytes: ptr("bad")}, want: "max_buffered_bytes"},
+		{name: "zero byte size", ip: &inspectionPatch{MaxBufferedBytes: ptr("0")}, want: "max_buffered_bytes must be positive"},
+		{name: "malformed response ceiling", ip: &inspectionPatch{MaxResponseHeaderBytes: ptr("bad")}, want: "max_response_header_bytes"},
+		{name: "negative slots", ip: &inspectionPatch{MaxConcurrentEvaluations: &negativeSlots}, want: "max_concurrent_evaluations"},
+		{name: "too many slots", ip: &inspectionPatch{MaxConcurrentEvaluations: &tooManySlots}, want: "max_concurrent_evaluations"},
+		{name: "malformed queue timeout", ip: &inspectionPatch{EvaluationQueueTimeout: ptr("bad")}, want: "evaluation_queue_timeout"},
+		{name: "queue timeout above maximum", ip: &inspectionPatch{EvaluationQueueTimeout: ptr("11s")}, want: "evaluation_queue_timeout"},
+		{name: "malformed body timeout", ip: &inspectionPatch{BodyTimeout: ptr("bad")}, want: "body_timeout"},
+		{name: "negative body timeout", ip: &inspectionPatch{BodyTimeout: ptr("-1s")}, want: "body_timeout must not be negative"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := issue80BaseConfig()
+			_, err := applyPatch(cfg, patchRequest{
+				Op:     "global_set",
+				Global: &globalPatch{Inspection: tt.ip},
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("applyPatch() error = %v, want it to contain %q", err, tt.want)
+			}
+		})
+	}
+
+	cfg := issue80BaseConfig()
+	workerThreads := "8"
+	_, err := applyPatch(cfg, patchRequest{
+		Op: "global_set",
+		Global: &globalPatch{
+			WorkerThreads: &workerThreads,
+			Inspection:    &inspectionPatch{},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "inspection payload must contain at least one field") {
+		t.Fatalf("empty nested inspection payload error = %v", err)
+	}
+}
+
 func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 	workerThreads := lifecycle.InitialGOMAXPROCS() + 1
 	if workerThreads == 4 {

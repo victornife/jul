@@ -59,6 +59,39 @@ func TestDiffConfigsExportedWrapper(t *testing.T) {
 	}
 }
 
+func TestDiffGlobalInspectionFields(t *testing.T) {
+	before := &config.Config{}
+	maxBytes := config.Size(128 << 20)
+	maxResponseHeaderBytes := config.Size(128 << 10)
+	queueTimeout := config.Duration(0)
+	bodyTimeout := config.Duration(30 * time.Second)
+	after := &config.Config{
+		Global: config.GlobalConfig{
+			Inspection: config.InspectionConfig{
+				Mode:                     "observe",
+				MaxBufferedBytes:         &maxBytes,
+				MaxResponseHeaderBytes:   &maxResponseHeaderBytes,
+				MaxConcurrentEvaluations: 4,
+				EvaluationQueueTimeout:   &queueTimeout,
+				BodyTimeout:              &bodyTimeout,
+			},
+		},
+	}
+	d := diffConfigs(before, after)
+	for _, field := range []string{
+		"process-wide inspection governor mode",
+		"process-wide inspection byte ceiling",
+		"process-wide response-header accounting ceiling",
+		"process-wide inspection evaluation slots",
+		"process-wide inspection evaluation queue timeout",
+		"process-wide inspected-body receive timeout",
+	} {
+		if !diffHas(d, field) {
+			t.Errorf("expected inspection diff for %q, got %+v", field, d.Modifications)
+		}
+	}
+}
+
 func TestDiffLocationActionAndTarget(t *testing.T) {
 	before := &config.Config{Servers: []config.ServerConfig{{
 		Listen: ":8080",

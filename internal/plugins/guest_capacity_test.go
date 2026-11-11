@@ -32,3 +32,27 @@ func TestGuestCapacityStatsRejectsOverflow(t *testing.T) {
 		t.Fatal("GuestCapacityStats accepted an overflowing capacity")
 	}
 }
+
+func TestGuestCapacityStatsAllowsEmptyAndNilManagers(t *testing.T) {
+	for name, manager := range map[string]*Manager{
+		"nil":   nil,
+		"empty": {live: map[*plugin]struct{}{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := manager.GuestCapacityStats()
+			if err != nil || got != (GuestCapacityStats{}) {
+				t.Fatalf("GuestCapacityStats() = %+v, %v; want zero stats and no error", got, err)
+			}
+		})
+	}
+}
+
+func TestGuestCapacityStatsRejectsAggregateOverflow(t *testing.T) {
+	first := &plugin{name: "first", memoryLimitBytes: 1 << 63, slots: make(chan struct{}, 1)}
+	second := &plugin{name: "second", memoryLimitBytes: 1 << 63, slots: make(chan struct{}, 1)}
+	manager := &Manager{live: map[*plugin]struct{}{first: {}, second: {}}}
+
+	if _, err := manager.GuestCapacityStats(); err == nil {
+		t.Fatal("GuestCapacityStats accepted aggregate capacity overflow")
+	}
+}

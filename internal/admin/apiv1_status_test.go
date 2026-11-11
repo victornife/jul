@@ -5,6 +5,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -191,6 +192,20 @@ func TestV1StatusDoesNotRepresentUnavailableGuestCapacityAsZero(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), `"plugin_guest_max_bytes"`) {
 		t.Fatalf("unavailable guest capacity must be omitted, not encoded as zero: %s", rr.Body.String())
+	}
+}
+
+func TestV1StatusSurfacesGuestCapacityFailure(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return inspection.Snapshot{} },
+		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
+			return adminapi.InspectionPluginGuestCapacity{}, errors.New("injected capacity failure")
+		},
+	})
+	rr := getV1(t, s, "/api/v1/status", "")
+	if rr.Code != http.StatusInternalServerError ||
+		!strings.Contains(rr.Body.String(), "could not report plugin guest capacity") {
+		t.Fatalf("guest capacity failure response = %d %s", rr.Code, rr.Body.String())
 	}
 }
 

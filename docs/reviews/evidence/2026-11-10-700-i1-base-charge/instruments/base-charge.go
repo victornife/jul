@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -26,22 +27,31 @@ type result struct {
 	Delta      int64  `json:"heap_alloc_delta_bytes"`
 }
 
+var measurementLeaseCounts = []int{0, 256, 1024, 4096}
+var measurementRepetitions = 7
+
 func main() {
-	enc := json.NewEncoder(os.Stdout)
+	if err := run(os.Stdout, measurementLeaseCounts, measurementRepetitions); err != nil {
+		panic(err)
+	}
+}
+
+func run(out io.Writer, leaseCounts []int, repetitions int) error {
+	enc := json.NewEncoder(out)
 	if err := enc.Encode(result{
 		Kind:      "environment",
 		GoVersion: runtime.Version(),
 		GOOS:      runtime.GOOS,
 		GOARCH:    runtime.GOARCH,
 	}); err != nil {
-		panic(err)
+		return fmt.Errorf("encode environment: %w", err)
 	}
 
-	for _, leases := range []int{0, 256, 1024, 4096} {
-		for repetition := 1; repetition <= 7; repetition++ {
+	for _, leases := range leaseCounts {
+		for repetition := 1; repetition <= repetitions; repetition++ {
 			before, after, err := measure(leases)
 			if err != nil {
-				panic(err)
+				return fmt.Errorf("measure %d leases: %w", leases, err)
 			}
 			delta := int64(after) - int64(before)
 			if err := enc.Encode(result{
@@ -52,10 +62,11 @@ func main() {
 				After:      after,
 				Delta:      delta,
 			}); err != nil {
-				panic(err)
+				return fmt.Errorf("encode sample: %w", err)
 			}
 		}
 	}
+	return nil
 }
 
 func measure(count int) (uint64, uint64, error) {

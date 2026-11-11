@@ -58,6 +58,24 @@ func projectPluginInstanceStats(stats []plugins.InstanceStats) []observability.P
 	return out
 }
 
+type pluginGuestCapacityReporter interface {
+	GuestCapacityStats() (plugins.GuestCapacityStats, error)
+}
+
+func inspectionPluginGuestCapacitySource(reporter pluginGuestCapacityReporter) func() (adminapi.InspectionPluginGuestCapacity, error) {
+	return func() (adminapi.InspectionPluginGuestCapacity, error) {
+		stats, err := reporter.GuestCapacityStats()
+		if err != nil {
+			return adminapi.InspectionPluginGuestCapacity{}, err
+		}
+		return adminapi.InspectionPluginGuestCapacity{
+			MaxPermittedBytes: stats.MaxPermittedBytes,
+			LiveInstances:     stats.LiveInstances,
+			MaxInstances:      stats.MaxInstances,
+		}, nil
+	}
+}
+
 // WithLogOutput directs Serve's log output to w instead of os.Stderr. It is
 // used by integration tests that need to inspect startup logs for secret
 // leakage without touching the process-wide stderr.
@@ -444,17 +462,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		LastStreamReload: &rt.LastStreamReload,
 	}
 	deps := BuildAdminDeps(productName, version, src, subsystems)
-	deps.InspectionPluginGuestCapacity = func() (adminapi.InspectionPluginGuestCapacity, error) {
-		stats, err := pluginMgr.GuestCapacityStats()
-		if err != nil {
-			return adminapi.InspectionPluginGuestCapacity{}, err
-		}
-		return adminapi.InspectionPluginGuestCapacity{
-			MaxPermittedBytes: stats.MaxPermittedBytes,
-			LiveInstances:     stats.LiveInstances,
-			MaxInstances:      stats.MaxInstances,
-		}, nil
-	}
+	deps.InspectionPluginGuestCapacity = inspectionPluginGuestCapacitySource(pluginMgr)
 	// Defer the candidate-injecting reload until after the server is created.
 	// For now wire the no-candidate fallback used by the admin /reload button.
 	deps.Reload = func() error { return triggerReload(nil, [32]byte{}) }

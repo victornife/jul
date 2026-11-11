@@ -29,10 +29,10 @@ Raw per-repetition measurements are in
 
 | Live leases | Median retained heap delta | Median delta per lease |
 |---:|---:|---:|
-| 0 | 0 B | — |
+| 0 | 112 B | — |
 | 256 | 34,816 B | 136 B |
 | 1,024 | 139,264 B | 136 B |
-| 4,096 | 557,168 B | 136 B |
+| 4,096 | 557,056 B | 136 B |
 
 The 16 KiB base reservation is about 120 times the measured median lease/context
 scaffolding on this toolchain and platform. This supports retaining 16 KiB as a

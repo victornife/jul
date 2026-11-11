@@ -164,6 +164,39 @@ func TestInspectionLimitsPublishWithReloadAndPreserveProcessGovernor(t *testing.
 	}
 }
 
+func TestInspectionLimitsComponentCommitAndAbort(t *testing.T) {
+	limits := inspection.Limits{
+		Mode:                   inspection.Enforce,
+		MaxBytes:               32 << 20,
+		MaxResponseHeaderBytes: 64 << 10,
+		EvaluationSlots:        1,
+		BaseChargeBytes:        inspection.BaseChargeBytes,
+	}
+	governor, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	component := &inspectionLimitsComponent{governor: governor, limits: limits}
+	if got := component.component(); got != ComponentInspectionLimits {
+		t.Fatalf("component() = %q, want %q", got, ComponentInspectionLimits)
+	}
+	if retirement := component.commit(); retirement != nil {
+		t.Fatalf("commit() returned retirement %v, want nil", retirement)
+	}
+	component.abort()
+
+	invalid := *component
+	invalid.limits.Mode = inspection.Mode("invalid")
+	func() {
+		defer func() {
+			if recovered := recover(); recovered == nil {
+				t.Fatal("commit() did not panic when prepared limits became invalid")
+			}
+		}()
+		invalid.commit()
+	}()
+}
+
 func sizePtr(value int64) *config.Size {
 	s := config.Size(value)
 	return &s
