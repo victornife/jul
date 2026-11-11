@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Require Go 1.27.4 for current source builds, including the upstream
+  `net/http` fix for [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
+  The root and example modules, CI/release toolchain and Docker builder are
+  aligned. Previously published binaries and images are unchanged; deploy a
+  rebuilt artifact to receive the fix.
+
 - WAF: fail closed when argument collection stops at `SecArgumentsLimit`
   (#697). With `crs_enabled = true`, generated rule `900001` (after the CRS,
   before operator rules) rejects a request whose arguments reached the limit

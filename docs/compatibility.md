@@ -21,18 +21,20 @@ this policy remain open-source per [ADR 0012](adr/0012-oss-open-core-boundary.md
 
 ## Supported build toolchain and platforms
 
-Current source requires **Go 1.27.2 or later**. The root and example WASM guest
+Current source requires **Go 1.27.4 or later**. The root and example WASM guest
 modules use the same minimum; CI and release workflows select the exact patch
 from the root `go.mod`. The Docker builder tag and digest are pinned separately,
 and deployment CI checks that its Go version equals the root directive. The
 vendored FastCGI module retains its own Go 1.21 minimum and is compiled and
 tested with Jul's selected toolchain.
+Go 1.27.4 includes the upstream `net/http` fix for
+[GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
 
 Release profiles remain `lean` and `full` for Linux, Windows and macOS, on
 `amd64` and `arm64`. **Binaries built with Go 1.27 require macOS 13 Ventura or
 later**; operators on older macOS versions must upgrade the OS before using
-these builds. Published release packages and their recorded build environments
-remain unchanged by a source toolchain upgrade.
+these builds. Published release packages, container images and their recorded
+build environments remain unchanged by a source toolchain upgrade.
 
 Go 1.27 changes implementation details in HTTP, JSON and compression. Existing
 Jul configuration and v1/v2 plugin ABI contracts remain in force; exact Go JSON
