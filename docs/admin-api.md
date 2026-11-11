@@ -242,8 +242,9 @@ Two fields exist for clients that poll or retry:
   `plugin_guest_actual_bytes_state: "not_sampled"` because actual guest-memory
   allocation is not measured. `evaluation_headroom_estimate_bytes` is omitted
   with state `not_calibrated`. Unknown numeric values are omitted rather than
-  emitted as `null` or a measured zero. The
-  accepted minimum-budget check is pending the response-header-bound gap in
+  emitted as `null` or a measured zero. Only the unconditional base + R3
+  minimum is currently checked; the accepted effective-route minimum remains
+  pending as described in
   [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap).
 
 ### `GET /api/v1/capabilities`

@@ -190,8 +190,10 @@ lease or evaluation slot, and `body_timeout` is not applied. `mode = "enforce"`
 is therefore configured policy, not production traffic protection. Startup
 validation currently checks the known base + maximum R3 floor only; complete
 effective-route worst-case validation and actual-size R3 reservations remain
-pending later implementation slices. The 64 KiB ceiling is a compatibility
-policy default, not an experimentally established optimum. See
+pending. The current floor is unconditional and can reject configurations
+without inspection, while omitting plugin and WAF terms can allow an
+insufficient budget for an inspected route. The 64 KiB ceiling is a
+compatibility policy default, not an experimentally established optimum. See
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap).
 
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.

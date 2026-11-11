@@ -31,7 +31,9 @@ publishes process-wide limits and reports them, but no live WAF or plugin path
 consumes the governor yet; configured `enforce` mode is not traffic protection.
 The R3 response-header ceiling now has an explicit 64 KiB accounting default,
 but actual response-path reservation/enforcement and complete effective-route
-minimum-budget validation remain pending (see
+minimum-budget validation remain pending. The current unconditional floor can
+reject an uninspected configuration and can accept an insufficient budget for
+an inspected route (see
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap)).
 
 The assessment's argument-limit bypass

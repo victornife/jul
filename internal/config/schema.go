@@ -330,24 +330,26 @@ type GlobalConfig struct {
 // InspectionConfig holds process-wide inspection-governor limits. It is
 // intentionally global rather than listener- or route-scoped.
 type InspectionConfig struct {
-	// Mode is "enforce" (default) or "observe". I1 only prepares the governor;
-	// request-path enforcement is introduced by later implementation slices.
+	// Mode is "enforce" (default) or "observe" for governor accounting; live
+	// requests are not governed in I1.
 	Mode string `toml:"mode"`
-	// MaxBufferedBytes is the shared ceiling for base, buffer and estimated WAF
-	// state reservations; it must be positive.
+	// MaxBufferedBytes is the shared governor ceiling for base, buffer and
+	// estimated WAF state; live requests are not governed in I1. It must be
+	// positive.
 	MaxBufferedBytes *Size `toml:"max_buffered_bytes,omitempty"`
-	// MaxResponseHeaderBytes is the positive ceiling for the complete R3
-	// accounting measure: decoded field names/values plus 64 bytes per
-	// occurrence. It is not a wire-size or actual-memory bound.
+	// MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and
+	// values plus 64 bytes per occurrence); it is not applied to live responses
+	// in I1. It is not a wire-size or actual-memory bound.
 	MaxResponseHeaderBytes *Size `toml:"max_response_header_bytes,omitempty"`
-	// MaxConcurrentEvaluations is the configured slot limit. Zero resolves to
-	// the candidate worker_threads/GOMAXPROCS setting.
+	// MaxConcurrentEvaluations is the governor slot limit; live evaluations are
+	// not governed in I1. Zero resolves to the candidate
+	// worker_threads/GOMAXPROCS setting.
 	MaxConcurrentEvaluations int `toml:"max_concurrent_evaluations"`
-	// EvaluationQueueTimeout bounds waiting for an evaluation slot; explicit
-	// zero disables queueing.
+	// EvaluationQueueTimeout bounds governor slot waiting; live requests do not
+	// acquire slots in I1. Explicit zero disables queueing.
 	EvaluationQueueTimeout *Duration `toml:"evaluation_queue_timeout,omitempty"`
-	// BodyTimeout bounds a future inspected-body receive; explicit zero disables
-	// that deadline.
+	// BodyTimeout bounds a future inspected-body receive; it is not applied to
+	// live requests in I1. Explicit zero disables that deadline.
 	BodyTimeout *Duration `toml:"body_timeout,omitempty"`
 }
 

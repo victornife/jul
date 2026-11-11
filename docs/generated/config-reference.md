@@ -1061,7 +1061,7 @@ ErrorLog is the legacy destination for error records, kept for v1 compatibility.
 
 ## `global.inspection.body_timeout` {#global-inspection-body_timeout}
 
-BodyTimeout bounds a future inspected-body receive; explicit zero disables that deadline.
+BodyTimeout bounds a future inspected-body receive; it is not applied to live requests in I1.
 
 | | |
 | --- | --- |
@@ -1073,11 +1073,11 @@ BodyTimeout bounds a future inspected-body receive; explicit zero disables that 
 | Default | 60s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted defaults to 60s; explicit 0s disables the future inspected-body deadline |
-| Active when | always |
+| Active when | configured and reported; live inspected-body deadlines are not applied in I1 |
 
 ## `global.inspection.evaluation_queue_timeout` {#global-inspection-evaluation_queue_timeout}
 
-EvaluationQueueTimeout bounds waiting for an evaluation slot; explicit zero disables queueing.
+EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots in I1.
 
 | | |
 | --- | --- |
@@ -1089,11 +1089,11 @@ EvaluationQueueTimeout bounds waiting for an evaluation slot; explicit zero disa
 | Default | 1s |
 | Constraint | between 0s and 10s |
 | Zero/empty semantics | omitted defaults to 1s; explicit 0s disables waiting |
-| Active when | always |
+| Active when | applied by the governor API; live requests do not acquire governor slots in I1 |
 
 ## `global.inspection.max_buffered_bytes` {#global-inspection-max_buffered_bytes}
 
-MaxBufferedBytes is the shared ceiling for base, buffer and estimated WAF state reservations; it must be positive.
+MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; live requests are not governed in I1.
 
 | | |
 | --- | --- |
@@ -1105,11 +1105,11 @@ MaxBufferedBytes is the shared ceiling for base, buffer and estimated WAF state 
 | Default | 256m |
 | Constraint | positive size |
 | Zero/empty semantics | omitted defaults to 256 MiB; explicit zero is invalid |
-| Active when | always |
+| Active when | applied by governor accounting and configuration validation; live WAF/plugin requests are not governed in I1 |
 
 ## `global.inspection.max_concurrent_evaluations` {#global-inspection-max_concurrent_evaluations}
 
-MaxConcurrentEvaluations is the configured slot limit.
+MaxConcurrentEvaluations is the governor slot limit; live evaluations are not governed in I1.
 
 | | |
 | --- | --- |
@@ -1119,11 +1119,11 @@ MaxConcurrentEvaluations is the configured slot limit.
 | Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
 | Constraint | 0 or between 1 and 1024 |
 | Zero/empty semantics | 0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting |
-| Active when | always |
+| Active when | applied by the governor API; live WAF/plugin evaluations are not governed in I1 |
 
 ## `global.inspection.max_response_header_bytes` {#global-inspection-max_response_header_bytes}
 
-MaxResponseHeaderBytes is the positive ceiling for the complete R3 accounting measure: decoded field names/values plus 64 bytes per occurrence.
+MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not applied to live responses in I1.
 
 | | |
 | --- | --- |
@@ -1133,10 +1133,13 @@ MaxResponseHeaderBytes is the positive ceiling for the complete R3 accounting me
 | Subsystem | `inspection` |
 | Why | The response-header accounting ceiling publishes atomically with the other process-owned inspection limits. |
 | Default | 64k |
+| Constraint | positive size |
+| Zero/empty semantics | omitted defaults to 64 KiB; explicit zero is invalid |
+| Active when | used by configuration validation; live response-header accounting is pending in I1 |
 
 ## `global.inspection.mode` {#global-inspection-mode}
 
-Mode is "enforce" (default) or "observe".
+Mode is "enforce" (default) or "observe" for governor accounting; live requests are not governed in I1.
 
 | | |
 | --- | --- |
@@ -1148,7 +1151,7 @@ Mode is "enforce" (default) or "observe".
 | Allowed values | `enforce`, `observe` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to enforce |
-| Active when | always |
+| Active when | controls governor accounting and configuration validation; live WAF/plugin requests are not governed in I1 |
 
 ## `global.log_format` {#global-log_format}
 

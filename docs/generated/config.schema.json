@@ -561,39 +561,40 @@
           "properties": {
             "body_timeout": {
               "default": "60s",
-              "description": "BodyTimeout bounds a future inspected-body receive; explicit zero disables that deadline",
+              "description": "BodyTimeout bounds a future inspected-body receive; it is not applied to live requests in I1",
               "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
               "type": "string",
               "x-jul-constraint": "non-negative"
             },
             "evaluation_queue_timeout": {
               "default": "1s",
-              "description": "EvaluationQueueTimeout bounds waiting for an evaluation slot; explicit zero disables queueing",
+              "description": "EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots in I1",
               "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
               "type": "string",
               "x-jul-constraint": "between 0s and 10s"
             },
             "max_buffered_bytes": {
               "default": "256m",
-              "description": "MaxBufferedBytes is the shared ceiling for base, buffer and estimated WAF state reservations; it must be positive",
+              "description": "MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; live requests are not governed in I1",
               "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
               "type": "string",
               "x-jul-constraint": "positive size"
             },
             "max_concurrent_evaluations": {
-              "description": "MaxConcurrentEvaluations is the configured slot limit",
+              "description": "MaxConcurrentEvaluations is the governor slot limit; live evaluations are not governed in I1",
               "type": "integer",
               "x-jul-constraint": "0 or between 1 and 1024"
             },
             "max_response_header_bytes": {
               "default": "64k",
-              "description": "MaxResponseHeaderBytes is the positive ceiling for the complete R3 accounting measure: decoded field names/values plus 64 bytes per occurrence",
+              "description": "MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not applied to live responses in I1",
               "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
-              "type": "string"
+              "type": "string",
+              "x-jul-constraint": "positive size"
             },
             "mode": {
               "default": "enforce",
-              "description": "Mode is \"enforce\" (default) or \"observe\"",
+              "description": "Mode is \"enforce\" (default) or \"observe\" for governor accounting; live requests are not governed in I1",
               "enum": [
                 "enforce",
                 "observe"

@@ -813,10 +813,13 @@ the measured response charge, never the configured maximum.
 This amendment makes R3 finite but does not establish the full startup
 minimum-budget calculation. I1 currently validates only the known `base + R3`
 floor; plugin, body, and route-chain terms still require implementation and
-verification. The default is an initial compatibility-sensitive policy, not an
-experimentally established optimum. Before shipping the response-path
-enforcement, qualify representative responses, especially repeated
-`Set-Cookie` fields and authentication flows. The R3 runtime check and
+verification. This floor is currently applied even to configurations with no
+inspection, which can wrongly reject them; omitting the other terms can also
+accept an insufficient budget for an inspected route. The default is an initial
+compatibility-sensitive policy, not an experimentally established optimum.
+Before shipping the response-path enforcement, qualify representative
+responses, especially repeated `Set-Cookie` fields and authentication flows.
+The R3 runtime check and
 reservation are a separate response-path prerequisite in I4; no live request
 path is claimed in I1.
 
@@ -1097,7 +1100,7 @@ never contains paths, hosts or bodies.
 
 | Slice | Content | Depends on |
 | --- | --- | --- |
-| I1 | `internal/inspection` governor, which supersedes the prototype: counters, lease, slots, FIFO waits, overflow-safe arithmetic, `SetLimits`. Config schema, defaults and known base + R3 minimum validation. Lifecycle registry ownership and Publish wiring. Metrics and status/CLI projection (observe-capable, with no enforcement points yet). Measure the base charge. | ADR accepted (2026-11-10) |
+| I1 | `internal/inspection` governor, which supersedes the prototype: counters, lease, slots, FIFO waits, overflow-safe arithmetic, `SetLimits`. Config schema, defaults and validation (including the full effective-route minimum-budget rule). Lifecycle registry ownership and Publish wiring. Metrics and status/CLI projection (observe-capable, with no enforcement points yet). Measure the base charge. | ADR accepted (2026-11-10) |
 | I2 | Plugin request path: lease creation before `p.prepare`, grow-before-allocate in `readBounded`, fail-fast 503, `body_timeout` through the per-request deadline owner (sticky retirement abort), narrow `SetReadDeadline` forwarding where a wrapper lacks it, and guest replacement charging. | I1 |
 | I3 | WAF request path: lease reuse or creation; a Jul read loop that replaces `ReadRequestBodyFrom`; slots and reservations around every rule-evaluating request call, including implicit phase 2 and phase 5 (§3); queue eligibility by unread data; `B_buf` and `B_total` charging; cumulative R1 and R2 with true-down; the deadline owner; the calibration test (`-tags waf`) covering the §4 list; and outcome taxonomy additions. | I1 |
 | I4 | Response paths: nested plugin subscription buffers (`reason="budget"`), WAF response buffer (2×), phase-3 and phase-4 slots including implicit phase 4 in `WriteResponseBody`, actual-size R3 reservation before header ingestion (configured ceiling overflow fails closed with 500; governor saturation remains 503), R4, and the JSON/XML/header response calibration including repeated `Set-Cookie` and authentication flows. | I2, I3 |
