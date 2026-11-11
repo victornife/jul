@@ -556,6 +556,54 @@
           "type": "string",
           "x-jul-ignored": true
         },
+        "inspection": {
+          "additionalProperties": false,
+          "properties": {
+            "body_timeout": {
+              "default": "60s",
+              "description": "BodyTimeout bounds a future inspected-body receive; explicit zero disables that deadline",
+              "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "type": "string",
+              "x-jul-constraint": "non-negative"
+            },
+            "evaluation_queue_timeout": {
+              "default": "1s",
+              "description": "EvaluationQueueTimeout bounds waiting for an evaluation slot; explicit zero disables queueing",
+              "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+              "type": "string",
+              "x-jul-constraint": "between 0s and 10s"
+            },
+            "max_buffered_bytes": {
+              "default": "256m",
+              "description": "MaxBufferedBytes is the shared ceiling for base, buffer and estimated WAF state reservations; it must be positive",
+              "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
+              "type": "string",
+              "x-jul-constraint": "positive size"
+            },
+            "max_concurrent_evaluations": {
+              "description": "MaxConcurrentEvaluations is the configured slot limit",
+              "type": "integer",
+              "x-jul-constraint": "0 or between 1 and 1024"
+            },
+            "max_response_header_bytes": {
+              "default": "64k",
+              "description": "MaxResponseHeaderBytes is the positive ceiling for the complete R3 accounting measure: decoded field names/values plus 64 bytes per occurrence",
+              "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
+              "type": "string"
+            },
+            "mode": {
+              "default": "enforce",
+              "description": "Mode is \"enforce\" (default) or \"observe\"",
+              "enum": [
+                "enforce",
+                "observe"
+              ],
+              "type": "string",
+              "x-jul-constraint": "exact lowercase enum"
+            }
+          },
+          "type": "object"
+        },
         "log_format": {
           "default": "text",
           "description": "LogFormat is \"text\" (human readable, default in dev) or \"json\"",

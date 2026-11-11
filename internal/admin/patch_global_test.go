@@ -141,6 +141,7 @@ func TestApplyGlobalSetRejectsInvalidFieldsWithoutMutation(t *testing.T) {
 		{ShutdownTimeout: ptr("-1s")},
 		{ReloadTimeout: ptr("not-a-duration")},
 		{RedactMinSecretLength: ptr(-1)},
+		{Inspection: &inspectionPatch{MaxResponseHeaderBytes: ptr("0")}},
 	}
 	for _, patch := range tests {
 		c := issue80BaseConfig()
@@ -160,6 +161,7 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 		workerThreads++
 	}
 	workerThreadsText := strconv.Itoa(workerThreads)
+	responseHeaderBytes := "96k"
 
 	hot, err := executePatchBatch(context.Background(), patchBatchBaseline{
 		Config: issue80BaseConfig(),
@@ -171,6 +173,9 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 			LogLevel:        ptr("debug"),
 			ShutdownTimeout: ptr("45s"),
 			ReloadTimeout:   ptr("25s"),
+			Inspection: &inspectionPatch{
+				MaxResponseHeaderBytes: &responseHeaderBytes,
+			},
 		},
 	}})
 	if err != nil {
@@ -179,7 +184,13 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 	if !hot.Valid || !hot.Lifecycle.CanApplyHot || !hot.Lifecycle.CanStageRestart {
 		t.Fatalf("hot lifecycle = %+v, valid=%v errors=%+v", hot.Lifecycle, hot.Valid, hot.ValidationErrors)
 	}
-	for _, path := range []string{"global.worker_threads", "global.log_level", "global.shutdown_timeout", "global.reload_timeout"} {
+	for _, path := range []string{
+		"global.worker_threads",
+		"global.log_level",
+		"global.shutdown_timeout",
+		"global.reload_timeout",
+		"global.inspection.max_response_header_bytes",
+	} {
 		found := false
 		for _, ch := range hot.Lifecycle.Changes {
 			if ch.Path == path && ch.Effective == lifecycle.HotReloadClass {
@@ -195,6 +206,9 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 	}
 	if hot.CandidateConfig.Global.ReloadTimeout.Std() != 25*time.Second {
 		t.Fatalf("candidate reload_timeout = %v, want 25s", hot.CandidateConfig.Global.ReloadTimeout.Std())
+	}
+	if got := hot.CandidateConfig.Global.Inspection.MaxResponseHeaderBytes; got == nil || *got != config.Size(96<<10) {
+		t.Fatalf("candidate response-header ceiling = %v, want 96 KiB", got)
 	}
 	if _, err := config.Parse(hot.CandidateRaw); err != nil {
 		t.Fatalf("candidate does not round-trip: %v", err)
@@ -267,5 +281,51 @@ func TestIssue80WireHasSingleRateLimitJSONField(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("patchRequest has %d rate_limit JSON fields, want exactly one", count)
+	}
+}
+
+func TestGlobalSetPreservesInspectionExplicitZeros(t *testing.T) {
+	c := issue80BaseConfig()
+	_, err := applyPatch(c, patchRequest{
+		Op: "global_set",
+		Global: &globalPatch{Inspection: &inspectionPatch{
+			Mode:                     ptr("observe"),
+			MaxResponseHeaderBytes:   ptr("96k"),
+			EvaluationQueueTimeout:   ptr("0s"),
+			BodyTimeout:              ptr("0s"),
+			MaxConcurrentEvaluations: ptr(0),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := c.Global.Inspection
+	if i.Mode != "observe" || i.MaxResponseHeaderBytes == nil || *i.MaxResponseHeaderBytes != config.Size(96<<10) ||
+		i.EvaluationQueueTimeout == nil || *i.EvaluationQueueTimeout != 0 ||
+		i.BodyTimeout == nil || *i.BodyTimeout != 0 || i.MaxConcurrentEvaluations != 0 {
+		t.Fatalf("inspection patch lost explicit values: %+v", i)
+	}
+	_, err = applyPatch(c, patchRequest{
+		Op:     "global_set",
+		Global: &globalPatch{Inspection: &inspectionPatch{Mode: ptr("enforce")}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Global.Inspection.EvaluationQueueTimeout == nil || *c.Global.Inspection.EvaluationQueueTimeout != 0 ||
+		c.Global.Inspection.BodyTimeout == nil || *c.Global.Inspection.BodyTimeout != 0 {
+		t.Fatalf("sparse patch changed omitted inspection values: %+v", c.Global.Inspection)
+	}
+	roundTrip, err := config.Parse(mustConfigBytes(t, c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roundTrip.Global.Inspection.EvaluationQueueTimeout == nil ||
+		*roundTrip.Global.Inspection.EvaluationQueueTimeout != 0 ||
+		roundTrip.Global.Inspection.BodyTimeout == nil ||
+		*roundTrip.Global.Inspection.BodyTimeout != 0 ||
+		roundTrip.Global.Inspection.MaxResponseHeaderBytes == nil ||
+		*roundTrip.Global.Inspection.MaxResponseHeaderBytes != config.Size(96<<10) {
+		t.Fatalf("inspection zeros lost after persistence round-trip: %+v", roundTrip.Global.Inspection)
 	}
 }

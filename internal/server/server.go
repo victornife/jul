@@ -21,6 +21,7 @@ import (
 	"jul/internal/background"
 	"jul/internal/cachemeta"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/lifecycle"
 	"jul/internal/logthrottle"
 	"jul/internal/redact"
@@ -198,6 +199,9 @@ type Server struct {
 	// enable ACME and answers HTTP-01 challenges. It is built and set once by
 	// the composition root before Run; nil means static-file TLS only.
 	ACME ACMEManager
+	// Inspection is the process-owned governor whose candidate limits publish
+	// in the same reload transaction as the handler generation.
+	Inspection *inspection.Governor
 
 	// HTTP3ConnHook, when set, is invoked with +1 when an HTTP/3 (QUIC)
 	// connection opens and -1 when it closes, so the composition root can track

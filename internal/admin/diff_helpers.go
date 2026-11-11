@@ -94,6 +94,30 @@ func sizeStr(s config.Size) string {
 	return string(b)
 }
 
+func inspectionSize(value *config.Size) string {
+	if value == nil {
+		return sizeStr(config.Size(256 << 20))
+	}
+	return sizeStr(*value)
+}
+
+func inspectionResponseHeaderSize(value *config.Size) string {
+	if value == nil {
+		return sizeStr(config.Size(config.InspectionDefaultMaxResponseHeaderBytes))
+	}
+	return sizeStr(*value)
+}
+
+func inspectionDuration(value *config.Duration, fallback time.Duration) string {
+	if value == nil {
+		return fallback.String()
+	}
+	if *value == 0 {
+		return "0s (disabled)"
+	}
+	return time.Duration(*value).String()
+}
+
 func orNone(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return "(none)"

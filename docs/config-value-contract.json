@@ -659,6 +659,50 @@
       "active_when": "health check enabled"
     },
     {
+      "go_field": "InspectionConfig.BodyTimeout",
+      "path": "global.inspection.body_timeout",
+      "kind": "duration",
+      "constraint": "non-negative",
+      "zero_semantics": "omitted defaults to 60s; explicit 0s disables the future inspected-body deadline",
+      "active_when": "always"
+    },
+    {
+      "go_field": "InspectionConfig.EvaluationQueueTimeout",
+      "path": "global.inspection.evaluation_queue_timeout",
+      "kind": "duration",
+      "constraint": "between 0s and 10s",
+      "zero_semantics": "omitted defaults to 1s; explicit 0s disables waiting",
+      "active_when": "always"
+    },
+    {
+      "go_field": "InspectionConfig.MaxBufferedBytes",
+      "path": "global.inspection.max_buffered_bytes",
+      "kind": "size",
+      "constraint": "positive size",
+      "zero_semantics": "omitted defaults to 256 MiB; explicit zero is invalid",
+      "active_when": "always"
+    },
+    {
+      "go_field": "InspectionConfig.MaxConcurrentEvaluations",
+      "path": "global.inspection.max_concurrent_evaluations",
+      "kind": "integer",
+      "constraint": "0 or between 1 and 1024",
+      "zero_semantics": "0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting",
+      "active_when": "always"
+    },
+    {
+      "go_field": "InspectionConfig.Mode",
+      "path": "global.inspection.mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enum",
+      "zero_semantics": "omitted defaults to enforce",
+      "active_when": "always",
+      "allowed": [
+        "enforce",
+        "observe"
+      ]
+    },
+    {
       "go_field": "JWTAuthConfig.Timeout",
       "path": "servers[].locations[].auth.jwt.timeout",
       "kind": "duration",

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"jul/internal/admin"
+	"jul/internal/adminapi"
 	"jul/internal/cache"
 	"jul/internal/cachemeta"
 	"jul/internal/config"
@@ -315,6 +316,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		PluginMgr:     pluginMgr,
 		GenRes:        genRes,
 		RT:            rt,
+		Inspection:    rt.Inspection,
 		Versions:      options.versions,
 	}
 
@@ -438,9 +440,21 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		PluginEngine:     pluginEngine,
 		StreamCompiled:   stream.Compiled,
 		WAFCompiled:      waf.Compiled,
+		Inspection:       rt.Inspection,
 		LastStreamReload: &rt.LastStreamReload,
 	}
 	deps := BuildAdminDeps(productName, version, src, subsystems)
+	deps.InspectionPluginGuestCapacity = func() (adminapi.InspectionPluginGuestCapacity, error) {
+		stats, err := pluginMgr.GuestCapacityStats()
+		if err != nil {
+			return adminapi.InspectionPluginGuestCapacity{}, err
+		}
+		return adminapi.InspectionPluginGuestCapacity{
+			MaxPermittedBytes: stats.MaxPermittedBytes,
+			LiveInstances:     stats.LiveInstances,
+			MaxInstances:      stats.MaxInstances,
+		}, nil
+	}
 	// Defer the candidate-injecting reload until after the server is created.
 	// For now wire the no-candidate fallback used by the admin /reload button.
 	deps.Reload = func() error { return triggerReload(nil, [32]byte{}) }
@@ -478,6 +492,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	srv := server.New(cfg, startupCand.Raw, startupFP, log, factory, src, func(ctx context.Context, c *config.Config) error {
 		return ValidateRuntimeConfig(ctx, c)
 	}, options.versions)
+	srv.Inspection = rt.Inspection
 	// Overrides the src.Load()-backed default from BuildAdminDeps: certificate
 	// status must reflect the server's actually-installed certificate, not
 	// whatever bytes currently sit on disk — a rejected candidate, or an

@@ -234,6 +234,25 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 	if c.Global.LogLevel == "" {
 		c.Global.LogLevel = "info"
 	}
+	if c.Global.Inspection.Mode == "" {
+		c.Global.Inspection.Mode = "enforce"
+	}
+	if c.Global.Inspection.MaxBufferedBytes == nil {
+		maxBytes := Size(256 << 20)
+		c.Global.Inspection.MaxBufferedBytes = &maxBytes
+	}
+	if c.Global.Inspection.MaxResponseHeaderBytes == nil {
+		maxBytes := Size(InspectionDefaultMaxResponseHeaderBytes)
+		c.Global.Inspection.MaxResponseHeaderBytes = &maxBytes
+	}
+	if c.Global.Inspection.EvaluationQueueTimeout == nil {
+		timeout := Duration(time.Second)
+		c.Global.Inspection.EvaluationQueueTimeout = &timeout
+	}
+	if c.Global.Inspection.BodyTimeout == nil {
+		timeout := Duration(60 * time.Second)
+		c.Global.Inspection.BodyTimeout = &timeout
+	}
 	if c.Global.LogFormat == "" {
 		c.Global.LogFormat = "text"
 	}

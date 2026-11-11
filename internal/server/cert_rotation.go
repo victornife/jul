@@ -18,6 +18,8 @@ const (
 	ComponentStaticCertificates RuntimeComponent = iota
 )
 
+const ComponentInspectionLimits RuntimeComponent = ComponentStaticCertificates + 2
+
 // certProviderSwap pairs a retained listener's entry with the candidate
 // provider that will replace its live one, and the identity fingerprint the
 // swap advances to.

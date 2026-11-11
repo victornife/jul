@@ -332,6 +332,79 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_inspection_abandoned_evaluations",
+      "type": "gauge",
+      "help": "Evaluations still running after their request context ended.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_body_timeouts_total",
+      "type": "counter",
+      "help": "Inspected-body receive timeout outcomes, when body integration is enabled.",
+      "labels": [
+        "protocol",
+        "result"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_bytes",
+      "type": "gauge",
+      "help": "Current process-wide inspection reservations by class; WAF state is an estimate, not a measured heap bound.",
+      "labels": [
+        "class"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_bytes_limit",
+      "type": "gauge",
+      "help": "Configured process-wide inspection byte ceiling.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_evaluations",
+      "type": "gauge",
+      "help": "Current process-wide inspection evaluations by state.",
+      "labels": [
+        "state"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_evaluations_limit",
+      "type": "gauge",
+      "help": "Effective process-wide inspection evaluation slot limit.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_leases",
+      "type": "gauge",
+      "help": "Current outer request leases held by the inspection governor.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_rejections_total",
+      "type": "counter",
+      "help": "Inspection admission rejections in enforce mode and would-reject decisions in observe mode.",
+      "labels": [
+        "mode",
+        "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_unslotted_logging_total",
+      "type": "counter",
+      "help": "Phase-5 logging evaluations that proceeded without an evaluation slot.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_listener_conns",
       "type": "gauge",
       "help": "Current concurrent connections across all listeners.",

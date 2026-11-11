@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 392 configurable leaves.
+Coverage: 398 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -1058,6 +1058,97 @@ ErrorLog is the legacy destination for error records, kept for v1 compatibility.
 | Subsystem | `error_log` |
 | Why | structured process logs are written to stderr; no runtime consumer reads it |
 | Flags | deprecated, ignored |
+
+## `global.inspection.body_timeout` {#global-inspection-body_timeout}
+
+BodyTimeout bounds a future inspected-body receive; explicit zero disables that deadline.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| Default | 60s |
+| Constraint | non-negative |
+| Zero/empty semantics | omitted defaults to 60s; explicit 0s disables the future inspected-body deadline |
+| Active when | always |
+
+## `global.inspection.evaluation_queue_timeout` {#global-inspection-evaluation_queue_timeout}
+
+EvaluationQueueTimeout bounds waiting for an evaluation slot; explicit zero disables queueing.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| Default | 1s |
+| Constraint | between 0s and 10s |
+| Zero/empty semantics | omitted defaults to 1s; explicit 0s disables waiting |
+| Active when | always |
+
+## `global.inspection.max_buffered_bytes` {#global-inspection-max_buffered_bytes}
+
+MaxBufferedBytes is the shared ceiling for base, buffer and estimated WAF state reservations; it must be positive.
+
+| | |
+| --- | --- |
+| Type | `size` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| Default | 256m |
+| Constraint | positive size |
+| Zero/empty semantics | omitted defaults to 256 MiB; explicit zero is invalid |
+| Active when | always |
+
+## `global.inspection.max_concurrent_evaluations` {#global-inspection-max_concurrent_evaluations}
+
+MaxConcurrentEvaluations is the configured slot limit.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| Constraint | 0 or between 1 and 1024 |
+| Zero/empty semantics | 0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting |
+| Active when | always |
+
+## `global.inspection.max_response_header_bytes` {#global-inspection-max_response_header_bytes}
+
+MaxResponseHeaderBytes is the positive ceiling for the complete R3 accounting measure: decoded field names/values plus 64 bytes per occurrence.
+
+| | |
+| --- | --- |
+| Type | `size` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | The response-header accounting ceiling publishes atomically with the other process-owned inspection limits. |
+| Default | 64k |
+
+## `global.inspection.mode` {#global-inspection-mode}
+
+Mode is "enforce" (default) or "observe".
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| Default | enforce |
+| Allowed values | `enforce`, `observe` |
+| Constraint | exact lowercase enum |
+| Zero/empty semantics | omitted defaults to enforce |
+| Active when | always |
 
 ## `global.log_format` {#global-log_format}
 

@@ -39,6 +39,7 @@ subsystems:
   headers: "Headers added to the upstream request, and response-header add/set/remove operations."
   health_check: "Active health probing for an upstream pool."
   http3: "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement."
+  inspection: "Process-wide inspection-governor limits and accounting; request-path enforcement is pending."
   listener: "The listen address a socket binds to."
   listener_limits: "Byte limits fixed when a listener binds."
   listener_timeouts: "Timeouts fixed when a listener binds."
@@ -76,12 +77,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 462
-  schema_leaves: 392
-  registry_entries: 392
+  schema_paths: 469
+  schema_leaves: 398
+  registry_entries: 398
   startup_consumed: 29
   by_class:
-    hot_reload: 349
+    hot_reload: 355
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -440,6 +441,30 @@ fields:
     reason: "structured process logs are written to stderr; no runtime consumer reads it"
     deprecated: true
     ignored: true
+  - path: "global.inspection.body_timeout"
+    class: hot_reload
+    subsystem: inspection
+    reason: "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."
+  - path: "global.inspection.evaluation_queue_timeout"
+    class: hot_reload
+    subsystem: inspection
+    reason: "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."
+  - path: "global.inspection.max_buffered_bytes"
+    class: hot_reload
+    subsystem: inspection
+    reason: "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."
+  - path: "global.inspection.max_concurrent_evaluations"
+    class: hot_reload
+    subsystem: inspection
+    reason: "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."
+  - path: "global.inspection.max_response_header_bytes"
+    class: hot_reload
+    subsystem: inspection
+    reason: "The response-header accounting ceiling publishes atomically with the other process-owned inspection limits."
+  - path: "global.inspection.mode"
+    class: hot_reload
+    subsystem: inspection
+    reason: "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."
   - path: "global.log_format"
     class: hot_reload
     subsystem: log_format

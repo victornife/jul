@@ -202,6 +202,15 @@ type InstanceStats struct {
 	Live   int
 }
 
+// GuestCapacityStats separates configured guest memory capacity from current
+// instance counts. Wazero does not expose a process-wide actual-allocation
+// measurement through this manager.
+type GuestCapacityStats struct {
+	MaxPermittedBytes uint64
+	LiveInstances     uint64
+	MaxInstances      uint64
+}
+
 // InstanceStats reports live instances per plugin name, sorted by name. It is
 // read at scrape time.
 func (m *Manager) InstanceStats() []InstanceStats {
@@ -220,6 +229,33 @@ func (m *Manager) InstanceStats() []InstanceStats {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Plugin < out[j].Plugin })
 	return out
+}
+
+// GuestCapacityStats reports configured maximum guest memory capacity and
+// instance counts across every compiled plugin generation not yet closed.
+func (m *Manager) GuestCapacityStats() (GuestCapacityStats, error) {
+	var out GuestCapacityStats
+	if m == nil {
+		return out, nil
+	}
+	m.liveMu.Lock()
+	defer m.liveMu.Unlock()
+	for p := range m.live {
+		maxInstances := uint64(cap(p.slots))
+		if p.memoryLimitBytes != 0 && maxInstances > ^uint64(0)/p.memoryLimitBytes {
+			return GuestCapacityStats{}, fmt.Errorf("plugin %q guest capacity overflows uint64", p.name)
+		}
+		maxBytes := maxInstances * p.memoryLimitBytes
+		if out.MaxPermittedBytes > ^uint64(0)-maxBytes ||
+			out.LiveInstances > ^uint64(0)-uint64(len(p.slots)) ||
+			out.MaxInstances > ^uint64(0)-maxInstances {
+			return GuestCapacityStats{}, fmt.Errorf("aggregate plugin guest capacity overflows uint64")
+		}
+		out.MaxPermittedBytes += maxBytes
+		out.LiveInstances += uint64(len(p.slots))
+		out.MaxInstances += maxInstances
+	}
+	return out, nil
 }
 
 func (m *Manager) track(p *plugin) {
@@ -311,9 +347,10 @@ type plugin struct {
 	pool     chan *pooledModule // fixed-capacity; see poolCapacity
 	// slots holds one token per live instance (idle or in use); its capacity
 	// is max_instances (#506).
-	slots     chan struct{}
-	timeout   time.Duration
-	isHandler bool
+	slots            chan struct{}
+	memoryLimitBytes uint64
+	timeout          time.Duration
+	isHandler        bool
 	// abi is the configured (and negotiated) ABI; hasResponse reports that a
 	// jul-abi/v2 module exports handle_response.
 	abi         string
@@ -404,32 +441,33 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	}
 
 	p := &plugin{
-		name:         name,
-		identity:     module.Identity,
-		timeout:      pc.Timeout.Std(),
-		isHandler:    pc.Type == "handler",
-		abi:          config.EffectivePluginABI(pc),
-		pool:         make(chan *pooledModule, poolCapacity),
-		capKV:        pc.KV,
-		capFetch:     pc.Fetch,
-		allowedHosts: pc.AllowedHosts,
-		configJSON:   cfgJSON,
-		kv:           m.kv,
-		maxReqBody:   sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
-		maxRespBody:  sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
-		fetchTimeout: pc.FetchTimeout.Std(),
-		maxFetchResp: sizeOr(pc.MaxFetchResponse, 1<<20),
-		kvMaxEntries: pc.KVMaxEntries,
-		kvMaxBytes:   sizeOr(pc.KVMaxBytes, 1<<20),
-		kvUsage:      m.kvLedgerFor(name),
-		log:          m.log,
-		onInvoke:     m.onInvoke,
-		onPanic:      m.onPanic,
-		onRespInv:    m.onRespInv,
-		onNoBody:     m.onNoBody,
-		onWait:       m.onWait,
-		onBodyFail:   m.onBodyErr,
-		egressWrap:   egressWrap,
+		name:             name,
+		identity:         module.Identity,
+		memoryLimitBytes: uint64(pages) * wasmPageSize,
+		timeout:          pc.Timeout.Std(),
+		isHandler:        pc.Type == "handler",
+		abi:              config.EffectivePluginABI(pc),
+		pool:             make(chan *pooledModule, poolCapacity),
+		capKV:            pc.KV,
+		capFetch:         pc.Fetch,
+		allowedHosts:     pc.AllowedHosts,
+		configJSON:       cfgJSON,
+		kv:               m.kv,
+		maxReqBody:       sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
+		maxRespBody:      sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
+		fetchTimeout:     pc.FetchTimeout.Std(),
+		maxFetchResp:     sizeOr(pc.MaxFetchResponse, 1<<20),
+		kvMaxEntries:     pc.KVMaxEntries,
+		kvMaxBytes:       sizeOr(pc.KVMaxBytes, 1<<20),
+		kvUsage:          m.kvLedgerFor(name),
+		log:              m.log,
+		onInvoke:         m.onInvoke,
+		onPanic:          m.onPanic,
+		onRespInv:        m.onRespInv,
+		onNoBody:         m.onNoBody,
+		onWait:           m.onWait,
+		onBodyFail:       m.onBodyErr,
+		egressWrap:       egressWrap,
 	}
 	maxInstances := pc.MaxInstances
 	if maxInstances <= 0 {

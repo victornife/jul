@@ -7,19 +7,23 @@
 package app
 
 import (
+	"context"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/observability"
 )
 
 func TestRuntimeBuilderBuildMinimalConfig(t *testing.T) {
 	log := observability.NewLogger(io.Discard, "info", "text")
 	cfg := config.ProxyTarget("127.0.0.1:9000", ":0")
+	metrics := observability.NewMetrics()
 
-	rt, err := RuntimeBuilder{Config: cfg, Logger: log, Metrics: observability.NewMetrics()}.Build()
+	rt, err := RuntimeBuilder{Config: cfg, Logger: log, Metrics: metrics}.Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -31,6 +35,25 @@ func TestRuntimeBuilderBuildMinimalConfig(t *testing.T) {
 	}
 	if rt.Stream == nil {
 		t.Error("Stream is nil; it is reloaded on every OnReloaded")
+	}
+	if rt.Inspection == nil {
+		t.Fatal("process-owned inspection governor is nil")
+	}
+	if snapshot := rt.Inspection.Snapshot(); snapshot.Limits.Mode != inspection.Enforce ||
+		snapshot.Limits.MaxBytes != 256<<20 || snapshot.ActiveLeases != 0 {
+		t.Fatalf("inspection startup snapshot = %+v", snapshot)
+	}
+	lease, _, owner, err := rt.Inspection.AcquireLease(context.TODO())
+	if err != nil || !owner {
+		t.Fatalf("synthetic I1 lease = (%v, %v, %v)", lease, owner, err)
+	}
+	metricsResponse := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(metricsResponse, httptest.NewRequest("GET", "/metrics", nil))
+	if metricsResponse.Code != 200 || !strings.Contains(metricsResponse.Body.String(), "jul_inspection_bytes{class=\"base\"} 16384") {
+		t.Fatalf("inspection metrics did not report the process governor: status=%d body=%s", metricsResponse.Code, metricsResponse.Body.String())
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
 	}
 	if rt.ACME != nil {
 		t.Error("ACME should be nil for a config that enables no ACME domain")

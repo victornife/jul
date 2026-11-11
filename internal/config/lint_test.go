@@ -210,6 +210,17 @@ func TestIsLoopbackListen(t *testing.T) {
 	}
 }
 
+func TestObserveInspectionBudgetWarnsBelowKnownBaseAndR3Floor(t *testing.T) {
+	cfg := ProxyTarget("127.0.0.1:9000", ":8080")
+	cfg.Global.Inspection.Mode = "observe"
+	budget := Size(1024)
+	cfg.Global.Inspection.MaxBufferedBytes = &budget
+
+	if !hasWarning(Lint(cfg), "below the known base + R3 minimum") {
+		t.Fatalf("observe mode did not warn below the known inspection floor:\n%s", lintMessages(Lint(cfg)))
+	}
+}
+
 func TestSeverityString(t *testing.T) {
 	if SeverityWarning.String() != "warning" {
 		t.Errorf("warning = %q", SeverityWarning.String())

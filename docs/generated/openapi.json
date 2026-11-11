@@ -8893,6 +8893,31 @@
                 "global": {
                   "type": "object",
                   "properties": {
+                    "inspection": {
+                      "type": "object",
+                      "properties": {
+                        "body_timeout": {
+                          "type": "string"
+                        },
+                        "evaluation_queue_timeout": {
+                          "type": "string"
+                        },
+                        "max_buffered_bytes": {
+                          "type": "string"
+                        },
+                        "max_concurrent_evaluations": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "max_response_header_bytes": {
+                          "type": "string"
+                        },
+                        "mode": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
                     "log_format": {
                       "type": "string"
                     },
@@ -11366,6 +11391,170 @@
           },
           "drift": {
             "$ref": "#/components/schemas/DriftState"
+          },
+          "inspection": {
+            "type": "object",
+            "properties": {
+              "active_evaluations": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "active_leases": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "base_charge_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "base_charge_scope": {
+                "type": "string"
+              },
+              "configured": {
+                "type": "object",
+                "properties": {
+                  "body_timeout": {
+                    "type": "string"
+                  },
+                  "evaluation_queue_timeout": {
+                    "type": "string"
+                  },
+                  "max_buffered_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_concurrent_evaluations": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_response_header_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "mode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "body_timeout",
+                  "evaluation_queue_timeout",
+                  "max_buffered_bytes",
+                  "max_concurrent_evaluations",
+                  "max_response_header_bytes",
+                  "mode"
+                ],
+                "additionalProperties": false
+              },
+              "draining": {
+                "type": "boolean"
+              },
+              "effective": {
+                "type": "object",
+                "properties": {
+                  "body_timeout": {
+                    "type": "string"
+                  },
+                  "evaluation_queue_timeout": {
+                    "type": "string"
+                  },
+                  "max_buffered_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_concurrent_evaluations": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_response_header_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "mode": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "body_timeout",
+                  "evaluation_queue_timeout",
+                  "max_buffered_bytes",
+                  "max_concurrent_evaluations",
+                  "max_response_header_bytes",
+                  "mode"
+                ],
+                "additionalProperties": false
+              },
+              "evaluation_headroom_estimate_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "evaluation_headroom_estimate_state": {
+                "type": "string"
+              },
+              "plugin_guest_actual_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "plugin_guest_actual_bytes_state": {
+                "type": "string"
+              },
+              "plugin_guest_live_instances": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "plugin_guest_max_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "plugin_guest_max_instances": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "request_path_integration": {
+                "type": "string"
+              },
+              "usage": {
+                "type": "object",
+                "properties": {
+                  "base_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "buffer_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "waf_state_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "base_bytes",
+                  "buffer_bytes",
+                  "waf_state_bytes"
+                ],
+                "additionalProperties": false
+              },
+              "waiting_evaluations": {
+                "type": "integer",
+                "format": "int64"
+              }
+            },
+            "required": [
+              "active_evaluations",
+              "active_leases",
+              "base_charge_bytes",
+              "base_charge_scope",
+              "configured",
+              "draining",
+              "effective",
+              "evaluation_headroom_estimate_state",
+              "plugin_guest_actual_bytes_state",
+              "request_path_integration",
+              "usage",
+              "waiting_evaluations"
+            ],
+            "additionalProperties": false
           },
           "last_apply": {
             "$ref": "#/components/schemas/ApplySummary"

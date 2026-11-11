@@ -26,7 +26,13 @@ published package contains the fix. Bodies are prepared before the guest call
 On a published package, set `timeout` above the slowest legitimate upload for
 body-reading plugins and set a finite server `read_timeout`. The missing
 aggregate inspection bound remains
-[#700](https://github.com/victornife/jul/issues/700).
+[#700](https://github.com/victornife/jul/issues/700). The I1 foundation
+publishes process-wide limits and reports them, but no live WAF or plugin path
+consumes the governor yet; configured `enforce` mode is not traffic protection.
+The R3 response-header ceiling now has an explicit 64 KiB accounting default,
+but actual response-path reservation/enforcement and complete effective-route
+minimum-budget validation remain pending (see
+[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap)).
 
 The assessment's argument-limit bypass
 ([#697](https://github.com/victornife/jul/issues/697), security) and CRS
@@ -671,10 +677,15 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   512 KiB response limit (then partial); other types, including JSON, need an
   explicit `SecResponseBodyMimeType`. The effective policy reports compiled
   settings, not per-transaction `ctl:` changes (#698).
-- **No aggregate inspection bound.** WAF and plugin inspection run before
-  upstream admission, on cache hits and on no-upstream routes, and continue
-  after client disconnect; no process-wide concurrency or memory budget
-  covers them (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
+- **No aggregate inspection enforcement yet.** The I1 process-owned governor
+  and status/metrics foundations do not yet gate WAF or plugin request paths.
+  Inspection still runs before upstream admission, on cache hits and
+  no-upstream routes, and can continue after client disconnect. Configured
+  limits do not protect these paths. Startup validation checks the known base
+  plus R3 floor only; complete route-chain minimum-budget validation and actual
+  response-header reservations remain pending under
+  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap)
+  (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
 
 ---
 

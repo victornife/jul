@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 462 |
-| Schema leaves (configurable values) | 392 |
-| Registry entries | 392 |
+| Schema paths (containers included) | 469 |
+| Schema leaves (configurable values) | 398 |
+| Registry entries | 398 |
 | Startup-consumed entries | 29 |
-| Class `hot_reload` | 349 |
+| Class `hot_reload` | 355 |
 | Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -74,6 +74,7 @@ set, so preview and apply reach the same verdict.
 | `headers` | Headers added to the upstream request, and response-header add/set/remove operations. |
 | `health_check` | Active health probing for an upstream pool. |
 | `http3` | The HTTP/3 (QUIC) listener and its Alt-Svc advertisement. |
+| `inspection` | Process-wide inspection-governor limits and accounting; request-path enforcement is pending. |
 | `listener` | The listen address a socket binds to. |
 | `listener_limits` | Byte limits fixed when a listener binds. |
 | `listener_timeouts` | Timeouts fixed when a listener binds. |
@@ -198,6 +199,12 @@ value is compared as a digest so no secret material leaves the process.
 | `global.access_log` | `ignored_deprecated` | `access_log` | deprecated, ignored | superseded by observability.access_log; no runtime consumer reads it |
 | `global.config_authority` | `restart_required` | `config_authority` | startup | authority is resolved once at startup and wires the file watcher, SIGHUP, and the managed baseline before any writer exists; changing it moves ownership of the configuration file and cannot be hot-applied (ADR 0019 §9.2) |
 | `global.error_log` | `ignored_deprecated` | `error_log` | deprecated, ignored | structured process logs are written to stderr; no runtime consumer reads it |
+| `global.inspection.body_timeout` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| `global.inspection.evaluation_queue_timeout` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| `global.inspection.max_buffered_bytes` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| `global.inspection.max_concurrent_evaluations` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
+| `global.inspection.max_response_header_bytes` | `hot_reload` | `inspection` | — | The response-header accounting ceiling publishes atomically with the other process-owned inspection limits. |
+| `global.inspection.mode` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
 | `global.log_format` | `hot_reload` | `log_format` | — | the slog handler encoding is a swappable delegate behind DynamicHandler; OnReloaded installs the new one atomically on each successful reload without rebuilding the logger (#91) |
 | `global.log_level` | `hot_reload` | `log_level` | — | the level var is updated by OnReloaded on each successful reload |
 | `global.redact_min_secret_length` | `hot_reload` | `redact` | — | the redaction state is rebuilt and installed atomically on each successful reload |

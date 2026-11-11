@@ -521,6 +521,11 @@ Labels fall into three classes by what bounds them:
 | `jul_plugin_response_invocations_total` | `plugin`, `result` | configured plugins × `continue`/`reject`/`error` |
 | `jul_plugin_response_duration_seconds` | `plugin` | configured plugins |
 | `jul_plugin_response_body_unavailable_total` | `plugin`, `reason` | configured plugins × `none`/`too_large`/`streaming`/`encoded`/`partial`/`upgraded` |
+| `jul_inspection_bytes` | `class` | `base`/`buffer`/`waf_state` |
+| `jul_inspection_evaluations` | `state` | `active`/`waiting` |
+| `jul_inspection_rejections_total` | `reason`, `mode` | `bytes`/`waf_state`/`evaluation` × `enforce`/`observe` |
+| `jul_inspection_body_timeouts_total` | `protocol`, `result` | `h1`/`h2`/`h3` × `timeout`/`would_timeout`/`unsupported` |
+| `jul_inspection_leases`, `jul_inspection_bytes_limit`, `jul_inspection_evaluations_limit`, `jul_inspection_unslotted_logging_total`, `jul_inspection_abandoned_evaluations` | — | single series each |
 | `jul_listener_conns` | — | single series |
 | `jul_http3_connections` | — | single series |
 | `jul_http3_altsvc_transitions_total` | `to` | `advertise`/`clear` |

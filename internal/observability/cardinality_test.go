@@ -164,6 +164,12 @@ func labelPolicy(t *testing.T, m *Metrics) map[string][]string {
 // exerciseAllMetrics touches every metric hook once so that each collector
 // exports at least one series for the label-policy audit.
 func exerciseAllMetrics(m *Metrics) {
+	m.SetInspectionSource(func() InspectionMetricsSnapshot {
+		return InspectionMetricsSnapshot{MaxBytes: 256 << 20, EvaluationLimit: 2}
+	})
+	m.ObserveInspectionRejection("bytes", "enforce")
+	m.ObserveInspectionBodyTimeout("h1", "timeout")
+	m.ObserveInspectionUnslottedLogging()
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Cache", "HIT")
 		w.WriteHeader(http.StatusOK)

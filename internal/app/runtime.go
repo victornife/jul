@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
+	"jul/internal/lifecycle"
 	"jul/internal/observability"
 	"jul/internal/server"
 	"jul/internal/stream"
@@ -44,6 +46,11 @@ type RuntimeBuilder struct {
 // created once per process and must not be copied (LastStreamReload embeds an
 // atomic pointer); callers pass it around as *Runtime.
 type Runtime struct {
+	// Inspection is the process-owned governor shared with every handler
+	// generation and listener. I1 publishes configured limits and accounting
+	// only; later slices connect request paths.
+	Inspection *inspection.Governor
+
 	// Tracer is the process TracerProvider / OTLP pipeline. Its Middleware wraps
 	// every listener; Close flushes buffered spans on shutdown. It is a no-op in
 	// a build without the "otel" tag.
@@ -76,6 +83,33 @@ type Runtime struct {
 func (b RuntimeBuilder) Build() (*Runtime, error) {
 	cfg := b.Config
 	rt := &Runtime{log: b.Logger}
+	inspectionLimits, err := inspection.LimitsFromConfig(cfg, lifecycle.InitialGOMAXPROCS())
+	if err != nil {
+		return nil, fmt.Errorf("initialize inspection governor: %w", err)
+	}
+	rt.Inspection, err = inspection.New(inspectionLimits, inspection.Hooks{
+		OnRejection: func(reason inspection.Outcome, mode inspection.Mode) {
+			b.Metrics.ObserveInspectionRejection(string(reason), string(mode))
+		},
+		OnUnslotted: b.Metrics.ObserveInspectionUnslottedLogging,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("initialize inspection governor: %w", err)
+	}
+	b.Metrics.SetInspectionSource(func() observability.InspectionMetricsSnapshot {
+		snapshot := rt.Inspection.Snapshot()
+		return observability.InspectionMetricsSnapshot{
+			BaseBytes:            snapshot.Usage[inspection.BaseBytes],
+			BufferBytes:          snapshot.Usage[inspection.BufferBytes],
+			WAFStateBytes:        snapshot.Usage[inspection.WAFStateBytes],
+			MaxBytes:             snapshot.Limits.MaxBytes,
+			ActiveLeases:         snapshot.ActiveLeases,
+			ActiveEvaluations:    snapshot.ActiveEvaluations,
+			WaitingEvaluations:   snapshot.WaitingEvaluations,
+			EvaluationLimit:      snapshot.Limits.EvaluationSlots,
+			AbandonedEvaluations: snapshot.AbandonedEvaluations,
+		}
+	})
 
 	// Tracing is initialised once at startup (like ACME): the OTLP pipeline and
 	// global TracerProvider identity are fixed for the process. The pipeline

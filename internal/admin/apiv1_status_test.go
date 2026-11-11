@@ -13,6 +13,7 @@ import (
 
 	"jul/internal/adminapi"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/rbac"
 )
 
@@ -113,6 +114,83 @@ func TestV1StatusReportsControlPlaneState(t *testing.T) {
 	}
 	if got.LedgerRetention.Policy != "evict_after_both" {
 		t.Errorf("policy = %q; the bounds are minimum guarantees, not caps", got.LedgerRetention.Policy)
+	}
+}
+
+func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
+	snapshot := inspection.Snapshot{
+		Limits: inspection.Limits{
+			Mode:                      inspection.Enforce,
+			MaxBytes:                  256 << 20,
+			MaxResponseHeaderBytes:    64 << 10,
+			ConfiguredEvaluationSlots: 0,
+			EvaluationSlots:           4,
+			EvaluationQueueTimeout:    time.Second,
+			BodyTimeout:               60 * time.Second,
+			BaseChargeBytes:           inspection.BaseChargeBytes,
+		},
+		Usage:              [3]uint64{inspection.BaseChargeBytes, 8192, 4096},
+		ActiveLeases:       1,
+		ActiveEvaluations:  2,
+		WaitingEvaluations: 1,
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return snapshot },
+		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
+			return adminapi.InspectionPluginGuestCapacity{
+				MaxPermittedBytes: 56 << 20,
+				LiveInstances:     3,
+				MaxInstances:      5,
+			}, nil
+		},
+	})
+	got := decodeInto[adminapi.StatusResponse](t, getV1(t, s, "/api/v1/status", ""))
+	if got.Inspection == nil {
+		t.Fatal("inspection status is missing")
+	}
+	i := got.Inspection
+	if i.Configured.MaxConcurrentEvaluations != 0 || i.Effective.MaxConcurrentEvaluations != 4 ||
+		i.Configured.Mode != "enforce" || i.Effective.Mode != "enforce" ||
+		i.Configured.MaxResponseHeaderBytes != 64<<10 || i.Effective.MaxResponseHeaderBytes != 64<<10 {
+		t.Fatalf("configured/effective inspection limits = %+v/%+v", i.Configured, i.Effective)
+	}
+	if i.Usage.BaseBytes != inspection.BaseChargeBytes || i.Usage.BufferBytes != 8192 ||
+		i.Usage.WAFStateBytes != 4096 || i.ActiveLeases != 1 ||
+		i.ActiveEvaluations != 2 || i.WaitingEvaluations != 1 {
+		t.Fatalf("inspection usage = %+v", i)
+	}
+	if i.RequestPathIntegration != "pending" || i.BaseChargeBytes != inspection.BaseChargeBytes ||
+		!strings.Contains(i.BaseChargeScope, "excludes") {
+		t.Fatalf("inspection delivery boundary = %+v", i)
+	}
+	if i.PluginGuestMaxBytes == nil || *i.PluginGuestMaxBytes != 56<<20 ||
+		i.PluginGuestLiveInstances == nil || *i.PluginGuestLiveInstances != 3 ||
+		i.PluginGuestMaxInstances == nil || *i.PluginGuestMaxInstances != 5 ||
+		i.PluginGuestActualBytes != nil || i.PluginGuestActualBytesState != "not_sampled" {
+		t.Fatalf("plugin guest capacity status = %+v", i)
+	}
+	if i.EvaluationHeadroomEstimateBytes != nil || i.EvaluationHeadroomEstimateState != "not_calibrated" {
+		t.Fatalf("evaluation headroom status = %+v", i)
+	}
+}
+
+func TestV1StatusDoesNotRepresentUnavailableGuestCapacityAsZero(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return inspection.Snapshot{} },
+	})
+	rr := getV1(t, s, "/api/v1/status", "")
+	got := decodeInto[adminapi.StatusResponse](t, rr)
+	if got.Inspection == nil {
+		t.Fatal("inspection status is missing")
+	}
+	if got.Inspection.PluginGuestMaxBytes != nil ||
+		got.Inspection.PluginGuestLiveInstances != nil ||
+		got.Inspection.PluginGuestMaxInstances != nil ||
+		got.Inspection.PluginGuestActualBytesState != "unavailable" {
+		t.Fatalf("unavailable plugin guest capacity = %+v", got.Inspection)
+	}
+	if strings.Contains(rr.Body.String(), `"plugin_guest_max_bytes"`) {
+		t.Fatalf("unavailable guest capacity must be omitted, not encoded as zero: %s", rr.Body.String())
 	}
 }
 

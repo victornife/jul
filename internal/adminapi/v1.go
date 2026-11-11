@@ -27,6 +27,56 @@ type LedgerRetention struct {
 	Policy             string `json:"policy"`
 }
 
+type InspectionStatus struct {
+	Configured                      InspectionConfiguredLimits `json:"configured"`
+	Effective                       InspectionEffectiveLimits  `json:"effective"`
+	Usage                           InspectionUsage            `json:"usage"`
+	ActiveLeases                    uint64                     `json:"active_leases"`
+	ActiveEvaluations               uint64                     `json:"active_evaluations"`
+	WaitingEvaluations              uint64                     `json:"waiting_evaluations"`
+	Draining                        bool                       `json:"draining"`
+	RequestPathIntegration          string                     `json:"request_path_integration"`
+	BaseChargeBytes                 uint64                     `json:"base_charge_bytes"`
+	BaseChargeScope                 string                     `json:"base_charge_scope"`
+	PluginGuestMaxBytes             *uint64                    `json:"plugin_guest_max_bytes,omitempty"`
+	PluginGuestLiveInstances        *uint64                    `json:"plugin_guest_live_instances,omitempty"`
+	PluginGuestMaxInstances         *uint64                    `json:"plugin_guest_max_instances,omitempty"`
+	PluginGuestActualBytes          *uint64                    `json:"plugin_guest_actual_bytes,omitempty"`
+	PluginGuestActualBytesState     string                     `json:"plugin_guest_actual_bytes_state"`
+	EvaluationHeadroomEstimateBytes *uint64                    `json:"evaluation_headroom_estimate_bytes,omitempty"`
+	EvaluationHeadroomEstimateState string                     `json:"evaluation_headroom_estimate_state"`
+}
+
+type InspectionPluginGuestCapacity struct {
+	MaxPermittedBytes uint64
+	LiveInstances     uint64
+	MaxInstances      uint64
+}
+
+type InspectionConfiguredLimits struct {
+	Mode                     string `json:"mode"`
+	MaxBufferedBytes         uint64 `json:"max_buffered_bytes"`
+	MaxResponseHeaderBytes   uint64 `json:"max_response_header_bytes"`
+	MaxConcurrentEvaluations int    `json:"max_concurrent_evaluations"`
+	EvaluationQueueTimeout   string `json:"evaluation_queue_timeout"`
+	BodyTimeout              string `json:"body_timeout"`
+}
+
+type InspectionEffectiveLimits struct {
+	Mode                     string `json:"mode"`
+	MaxBufferedBytes         uint64 `json:"max_buffered_bytes"`
+	MaxResponseHeaderBytes   uint64 `json:"max_response_header_bytes"`
+	MaxConcurrentEvaluations int    `json:"max_concurrent_evaluations"`
+	EvaluationQueueTimeout   string `json:"evaluation_queue_timeout"`
+	BodyTimeout              string `json:"body_timeout"`
+}
+
+type InspectionUsage struct {
+	BaseBytes     uint64 `json:"base_bytes"`
+	BufferBytes   uint64 `json:"buffer_bytes"`
+	WAFStateBytes uint64 `json:"waf_state_bytes"`
+}
+
 // AuthorityState is the configuration-authority projection every state-reporting response carries.
 type AuthorityState struct {
 	ConfigAuthority          string `json:"config_authority"`
@@ -70,6 +120,7 @@ type StatusResponse struct {
 	LastApply       *ApplySummary       `json:"last_apply"`
 	BootID          string              `json:"boot_id"`
 	LedgerRetention LedgerRetention     `json:"ledger_retention"`
+	Inspection      *InspectionStatus   `json:"inspection,omitempty"`
 }
 
 // ApplySummary is the bounded projection of a managed apply transaction.

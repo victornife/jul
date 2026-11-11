@@ -71,6 +71,18 @@ type InstanceStats struct {
 // InstanceStats reports nothing in the lean build.
 func (*Manager) InstanceStats() []InstanceStats { return nil }
 
+// GuestCapacityStats mirrors the compiled build's guest-capacity report.
+type GuestCapacityStats struct {
+	MaxPermittedBytes uint64
+	LiveInstances     uint64
+	MaxInstances      uint64
+}
+
+// GuestCapacityStats reports no plugin guest capacity in the lean build.
+func (*Manager) GuestCapacityStats() (GuestCapacityStats, error) {
+	return GuestCapacityStats{}, nil
+}
+
 // Manager is a no-op plugin manager in the lean build.
 type Manager struct{}
 

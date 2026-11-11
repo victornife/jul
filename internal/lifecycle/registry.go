@@ -45,6 +45,7 @@ const (
 	SubHeaders         Subsystem = "headers"
 	SubHealthCheck     Subsystem = "health_check"
 	SubHTTP3           Subsystem = "http3"
+	SubInspection      Subsystem = "inspection"
 	SubListener        Subsystem = "listener"
 	SubListenerLimits  Subsystem = "listener_limits"
 	SubListenerTimes   Subsystem = "listener_timeouts"
@@ -107,6 +108,7 @@ var subsystemDescriptions = map[Subsystem]string{
 	SubHeaders:         "Headers added to the upstream request, and response-header add/set/remove operations.",
 	SubHealthCheck:     "Active health probing for an upstream pool.",
 	SubHTTP3:           "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement.",
+	SubInspection:      "Process-wide inspection-governor limits and accounting; request-path enforcement is pending.",
 	SubListener:        "The listen address a socket binds to.",
 	SubListenerLimits:  "Byte limits fixed when a listener binds.",
 	SubListenerTimes:   "Timeouts fixed when a listener binds.",
@@ -295,6 +297,12 @@ func globalEntries() []Entry {
 		hot("global.reload_timeout", SubReloadTimeout, "the threshold is read from the effective config at the start of each reload"),
 		hot("global.shutdown_timeout", SubShutdown, "the drain budget is read from the effective config on each graceful stop"),
 		hot("global.worker_threads", SubWorkerThreads, "OnReloaded applies the cap with runtime.GOMAXPROCS, restoring the container-aware default for \"auto\""),
+		hot("global.inspection.mode", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
+		hot("global.inspection.max_buffered_bytes", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
+		hot("global.inspection.max_response_header_bytes", SubInspection, "The response-header accounting ceiling publishes atomically with the other process-owned inspection limits."),
+		hot("global.inspection.max_concurrent_evaluations", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
+		hot("global.inspection.evaluation_queue_timeout", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
+		hot("global.inspection.body_timeout", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
 	}
 }
 

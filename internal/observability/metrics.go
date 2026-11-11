@@ -190,6 +190,7 @@ type Metrics struct {
 	// the only label and is a fixed low-cardinality enum — never an apply ID,
 	// actor, source IP, path, or version.
 	managedApplyLookup *prometheus.CounterVec
+	inspection         *inspectionCollector
 
 	// certMu guards certSeen, the last observed NotAfter (unix seconds) per
 	// domain. It lets ObserveCertExpiry distinguish a genuine renewal (the
@@ -609,6 +610,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_managed_apply_terminal_lookup_total",
 			Help: "Exact-ID managed-apply lookups, labeled by bounded result (pending/finalizing/terminal/missing/invalid).",
 		}, []string{"result"}),
+		inspection: newInspectionCollector(),
 		reloadPhaseDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "jul_reload_phase_duration_seconds",
 			Help:    "Latency of individual reload phases (resolve/validate/lifecycle/change_assessment/prepare/stage_listeners/publish/activate), labeled by phase and outcome.",
@@ -719,6 +721,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.managedApplyHistory,
 		m.managedApplyRegistryEntries,
 		m.managedApplyLookup,
+		m.inspection,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

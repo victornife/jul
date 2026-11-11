@@ -109,6 +109,35 @@ func TestRemoteStatusAndApplyLookup(t *testing.T) {
 	})
 }
 
+func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) {
+	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+		`,"inspection":{"configured":{"mode":"enforce","max_buffered_bytes":268435456,"max_response_header_bytes":65536,"max_concurrent_evaluations":0,"evaluation_queue_timeout":"1s","body_timeout":"60s"},` +
+		`"effective":{"mode":"enforce","max_buffered_bytes":268435456,"max_response_header_bytes":65536,"max_concurrent_evaluations":4,"evaluation_queue_timeout":"1s","body_timeout":"60s"},` +
+		`"usage":{"base_bytes":16384,"buffer_bytes":0,"waf_state_bytes":0},"active_leases":1,"active_evaluations":0,"waiting_evaluations":0,"draining":false,"request_path_integration":"pending","base_charge_bytes":16384,"base_charge_scope":"governor lease/context scaffolding only; excludes request buffers and process memory"}}`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, payload)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 {
+			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+		}
+		for _, want := range []string{
+			"inspection: mode=enforce byte_limit=268435456B response_header_accounting_ceiling=65536B slots=0 (effective 4)",
+			"evaluations=0 waiting=0",
+			"request_path_integration=pending",
+			"inspection base charge: 16384B",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("status output missing %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
 func mutationServer(t *testing.T, outcome string, degraded bool) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()

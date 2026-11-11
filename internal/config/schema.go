@@ -321,7 +321,43 @@ type GlobalConfig struct {
 	// restart-required: changing it moves ownership of the configuration file
 	// and can only be staged through stage_restart (ADR 0019 §9.2).
 	ConfigAuthority string `toml:"config_authority"`
+	// Inspection configures process-wide admission accounting for future WAF
+	// and plugin integrations. I1 publishes and reports the limits, but does not
+	// yet gate live requests.
+	Inspection InspectionConfig `toml:"inspection"`
 }
+
+// InspectionConfig holds process-wide inspection-governor limits. It is
+// intentionally global rather than listener- or route-scoped.
+type InspectionConfig struct {
+	// Mode is "enforce" (default) or "observe". I1 only prepares the governor;
+	// request-path enforcement is introduced by later implementation slices.
+	Mode string `toml:"mode"`
+	// MaxBufferedBytes is the shared ceiling for base, buffer and estimated WAF
+	// state reservations; it must be positive.
+	MaxBufferedBytes *Size `toml:"max_buffered_bytes,omitempty"`
+	// MaxResponseHeaderBytes is the positive ceiling for the complete R3
+	// accounting measure: decoded field names/values plus 64 bytes per
+	// occurrence. It is not a wire-size or actual-memory bound.
+	MaxResponseHeaderBytes *Size `toml:"max_response_header_bytes,omitempty"`
+	// MaxConcurrentEvaluations is the configured slot limit. Zero resolves to
+	// the candidate worker_threads/GOMAXPROCS setting.
+	MaxConcurrentEvaluations int `toml:"max_concurrent_evaluations"`
+	// EvaluationQueueTimeout bounds waiting for an evaluation slot; explicit
+	// zero disables queueing.
+	EvaluationQueueTimeout *Duration `toml:"evaluation_queue_timeout,omitempty"`
+	// BodyTimeout bounds a future inspected-body receive; explicit zero disables
+	// that deadline.
+	BodyTimeout *Duration `toml:"body_timeout,omitempty"`
+}
+
+const InspectionBaseChargeBytes int64 = 16 << 10
+
+const (
+	InspectionResponseHeaderFieldOverheadBytes int64 = 64
+	InspectionResponseHeaderEstimateFactor     int64 = 48
+	InspectionDefaultMaxResponseHeaderBytes    int64 = 64 << 10
+)
 
 // ServerConfig is a virtual host bound to one listen address.
 type ServerConfig struct {

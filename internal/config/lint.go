@@ -321,6 +321,20 @@ func LintWithRaw(rawCfg, effCfg *Config, forPlan bool) []Diagnostic {
 			Hint:     "remove error_log; redirect stderr in your process supervisor instead",
 		})
 	}
+	if c.Global.Inspection.Mode == "observe" &&
+		c.Global.Inspection.MaxBufferedBytes != nil &&
+		c.Global.Inspection.MaxResponseHeaderBytes != nil {
+		minimum, err := InspectionMinimumKnownBudget(c.Global.Inspection.MaxResponseHeaderBytes.Bytes())
+		if err == nil && c.Global.Inspection.MaxBufferedBytes.Bytes() > 0 &&
+			c.Global.Inspection.MaxBufferedBytes.Bytes() < minimum {
+			diags = append(diags, Diagnostic{
+				Severity: SeverityWarning,
+				Field:    "[global.inspection].max_buffered_bytes",
+				Message:  fmt.Sprintf("configured budget %d B is below the known base + R3 minimum of %d B", c.Global.Inspection.MaxBufferedBytes.Bytes(), minimum),
+				Hint:     "raise max_buffered_bytes before enabling enforce mode; the complete effective-route minimum is not yet validated",
+			})
+		}
+	}
 
 	diags = append(diags, LintSharingFindingsWithRaw(rawCfg, effCfg, forPlan)...)
 

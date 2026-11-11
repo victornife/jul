@@ -47,6 +47,32 @@ func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: fmt.Sprintf("%d", b.RedactMinSecretLength), After: fmt.Sprintf("%d", a.RedactMinSecretLength), Detail: "Change secret redaction minimum length"}, "global redact_min")
 	}
 	d.cover("global.redact_min_secret_length")
+
+	bi, ai := b.Inspection, a.Inspection
+	if bi.Mode != ai.Mode {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(bi.Mode), After: orNone(ai.Mode), Detail: "Change process-wide inspection governor mode"}, "global inspection mode")
+	}
+	d.cover("global.inspection.mode")
+	if inspectionSize(bi.MaxBufferedBytes) != inspectionSize(ai.MaxBufferedBytes) {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: inspectionSize(bi.MaxBufferedBytes), After: inspectionSize(ai.MaxBufferedBytes), Detail: "Change process-wide inspection byte ceiling"}, "global inspection max_buffered_bytes")
+	}
+	d.cover("global.inspection.max_buffered_bytes")
+	if inspectionResponseHeaderSize(bi.MaxResponseHeaderBytes) != inspectionResponseHeaderSize(ai.MaxResponseHeaderBytes) {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: inspectionResponseHeaderSize(bi.MaxResponseHeaderBytes), After: inspectionResponseHeaderSize(ai.MaxResponseHeaderBytes), Detail: "Change process-wide response-header accounting ceiling"}, "global inspection max_response_header_bytes")
+	}
+	d.cover("global.inspection.max_response_header_bytes")
+	if bi.MaxConcurrentEvaluations != ai.MaxConcurrentEvaluations {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: fmt.Sprintf("%d", bi.MaxConcurrentEvaluations), After: fmt.Sprintf("%d", ai.MaxConcurrentEvaluations), Detail: "Change process-wide inspection evaluation slots (0 means auto)"}, "global inspection max_concurrent_evaluations")
+	}
+	d.cover("global.inspection.max_concurrent_evaluations")
+	if inspectionDuration(bi.EvaluationQueueTimeout, time.Second) != inspectionDuration(ai.EvaluationQueueTimeout, time.Second) {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: inspectionDuration(bi.EvaluationQueueTimeout, time.Second), After: inspectionDuration(ai.EvaluationQueueTimeout, time.Second), Detail: "Change process-wide inspection evaluation queue timeout"}, "global inspection evaluation_queue_timeout")
+	}
+	d.cover("global.inspection.evaluation_queue_timeout")
+	if inspectionDuration(bi.BodyTimeout, 60*time.Second) != inspectionDuration(ai.BodyTimeout, 60*time.Second) {
+		d.mod(DiffEntry{Kind: "global", Name: "global", Before: inspectionDuration(bi.BodyTimeout, 60*time.Second), After: inspectionDuration(ai.BodyTimeout, 60*time.Second), Detail: "Change process-wide inspected-body receive timeout"}, "global inspection body_timeout")
+	}
+	d.cover("global.inspection.body_timeout")
 }
 
 func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {

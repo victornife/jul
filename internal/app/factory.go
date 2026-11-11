@@ -25,6 +25,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/egress"
 	"jul/internal/handler"
+	"jul/internal/inspection"
 	"jul/internal/middleware"
 	"jul/internal/observability"
 	"jul/internal/plugins"
@@ -64,6 +65,7 @@ type HandlerFactory struct {
 	PluginMgr        *plugins.Manager
 	GenRes           *GenerationResources
 	RT               *Runtime                // Tracer.Middleware, ACME
+	Inspection       *inspection.Governor    // process-owned; handed to future request-path integrations
 	Versions         *versionid.Context      // private effective-version context (#649)
 	WAFInvestigation *waf.InvestigationStore // bounded WAF transaction investigation buffer (#632)
 

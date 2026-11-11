@@ -1,0 +1,841 @@
+// Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+// SPDX-License-Identifier: agpl
+
+package inspection
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"math"
+	"sync"
+	"time"
+
+	"jul/internal/config"
+)
+
+type Mode string
+
+const (
+	Enforce Mode = "enforce"
+	Observe Mode = "observe"
+)
+
+type ByteClass uint8
+
+const (
+	BaseBytes ByteClass = iota
+	BufferBytes
+	WAFStateBytes
+	byteClassCount
+)
+
+func (c ByteClass) String() string {
+	switch c {
+	case BaseBytes:
+		return "base"
+	case BufferBytes:
+		return "buffer"
+	case WAFStateBytes:
+		return "waf_state"
+	default:
+		return "unknown"
+	}
+}
+
+type Outcome string
+
+const (
+	Acquired            Outcome = "acquired"
+	WouldReject         Outcome = "would_reject"
+	Unslotted           Outcome = "unslotted"
+	ByteSaturated       Outcome = "bytes"
+	WAFStateSaturated   Outcome = "waf_state"
+	EvaluationSaturated Outcome = "evaluation"
+	QueueExhausted      Outcome = "queue_exhausted"
+	WaitExpired         Outcome = "wait_expired"
+	Cancelled           Outcome = "cancelled"
+	LeaseClosed         Outcome = "lease_closed"
+	InvalidAccounting   Outcome = "invalid_accounting"
+)
+
+var (
+	ErrInvalidLimits = errors.New("inspection: invalid limits")
+	ErrForeignLease  = errors.New("inspection: foreign lease in context")
+)
+
+// Limits is an immutable candidate for the process-wide governor. Configured
+// slots preserve the operator's 0=auto choice; EvaluationSlots is the resolved
+// process-wide value used by admission.
+type Limits struct {
+	Mode                      Mode
+	MaxBytes                  uint64
+	MaxResponseHeaderBytes    uint64
+	ConfiguredEvaluationSlots int
+	EvaluationSlots           int
+	EvaluationQueueTimeout    time.Duration
+	BodyTimeout               time.Duration
+	BaseChargeBytes           uint64
+}
+
+func (l Limits) validate() error {
+	if l.Mode != Enforce && l.Mode != Observe {
+		return fmt.Errorf("%w: mode must be enforce or observe", ErrInvalidLimits)
+	}
+	if l.MaxBytes == 0 {
+		return fmt.Errorf("%w: max bytes must be positive", ErrInvalidLimits)
+	}
+	if l.MaxResponseHeaderBytes == 0 {
+		return fmt.Errorf("%w: max response header bytes must be positive", ErrInvalidLimits)
+	}
+	if l.ConfiguredEvaluationSlots < 0 || l.ConfiguredEvaluationSlots > 1024 {
+		return fmt.Errorf("%w: configured evaluation slots must be between 0 and 1024", ErrInvalidLimits)
+	}
+	if l.EvaluationSlots < 1 {
+		return fmt.Errorf("%w: effective evaluation slots must be positive", ErrInvalidLimits)
+	}
+	if l.EvaluationQueueTimeout < 0 || l.EvaluationQueueTimeout > 10*time.Second {
+		return fmt.Errorf("%w: queue timeout must be between 0 and 10s", ErrInvalidLimits)
+	}
+	if l.BodyTimeout < 0 {
+		return fmt.Errorf("%w: body timeout must not be negative", ErrInvalidLimits)
+	}
+	if l.BaseChargeBytes == 0 {
+		return fmt.Errorf("%w: base charge must be positive", ErrInvalidLimits)
+	}
+	if l.Mode == Enforce {
+		factor := uint64(config.InspectionResponseHeaderEstimateFactor)
+		if l.MaxResponseHeaderBytes > (math.MaxUint64-l.BaseChargeBytes)/factor {
+			return fmt.Errorf("%w: global.inspection.max_response_header_bytes overflows the known base + R3 minimum", ErrInvalidLimits)
+		}
+		minimumBytes := l.BaseChargeBytes + factor*l.MaxResponseHeaderBytes
+		if minimumBytes > l.MaxBytes {
+			return fmt.Errorf("%w: global.inspection.max_buffered_bytes is %d B; enforce mode requires at least %d B for the known base + R3 minimum", ErrInvalidLimits, l.MaxBytes, minimumBytes)
+		}
+	}
+	return nil
+}
+
+type Hooks struct {
+	OnRejection    func(reason Outcome, mode Mode)
+	OnQueueAbandon func()
+	OnUnslotted    func()
+}
+
+type Governor struct {
+	mu      sync.Mutex
+	limits  Limits
+	hooks   Hooks
+	usage   [byteClassCount]uint64
+	leases  uint64
+	active  uint64
+	waiters []*evaluationWaiter
+
+	rejections [3][2]uint64
+	abandoned  uint64
+	unslotted  uint64
+}
+
+func New(limits Limits, hooks Hooks) (*Governor, error) {
+	if err := limits.validate(); err != nil {
+		return nil, err
+	}
+	return &Governor{limits: limits, hooks: hooks}, nil
+}
+
+// PublishLimits changes the coherent policy snapshot without resetting usage,
+// leases, reservations, waiters, or counters. Held work drains naturally after
+// a limit decrease; no new work is granted until it fits the published limit.
+func (g *Governor) PublishLimits(limits Limits) error {
+	if err := limits.validate(); err != nil {
+		return err
+	}
+	g.mu.Lock()
+	if g.limits == limits {
+		g.mu.Unlock()
+		return nil
+	}
+	g.limits = limits
+	g.grantWaitersLocked()
+	g.mu.Unlock()
+	return nil
+}
+
+type Snapshot struct {
+	Limits               Limits
+	Usage                [byteClassCount]uint64
+	ActiveLeases         uint64
+	ActiveEvaluations    uint64
+	WaitingEvaluations   uint64
+	Draining             bool
+	AbandonedEvaluations uint64
+	UnslottedLogging     uint64
+	Rejections           [3][2]uint64
+}
+
+func (g *Governor) Snapshot() Snapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return Snapshot{
+		Limits:               g.limits,
+		Usage:                g.usage,
+		ActiveLeases:         g.leases,
+		ActiveEvaluations:    g.active,
+		WaitingEvaluations:   uint64(len(g.waiters)),
+		Draining:             g.overLimitLocked(),
+		AbandonedEvaluations: g.abandoned,
+		UnslottedLogging:     g.unslotted,
+		Rejections:           g.rejections,
+	}
+}
+
+func (g *Governor) overLimitLocked() bool {
+	total, ok := sumBytes(g.usage[:])
+	return !ok || total > g.limits.MaxBytes || g.active > uint64(g.limits.EvaluationSlots)
+}
+
+type contextKey struct{}
+
+// AcquireLease creates the outer request lease, or returns the current
+// governor's lease from ctx for nested inspection layers. The caller that gets
+// owner=true must Close the lease; nested callers must not.
+func (g *Governor) AcquireLease(ctx context.Context) (*Lease, context.Context, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if existing, ok := ctx.Value(contextKey{}).(*Lease); ok && existing != nil {
+		if existing.g != g {
+			return nil, ctx, false, fmt.Errorf("%w: context contains a lease from another governor", ErrForeignLease)
+		}
+		g.mu.Lock()
+		closed := existing.closed
+		g.mu.Unlock()
+		if closed {
+			return nil, ctx, false, &AdmissionError{Outcome: LeaseClosed}
+		}
+		return existing, ctx, false, nil
+	}
+
+	g.mu.Lock()
+	if g.leases == math.MaxUint64 {
+		g.mu.Unlock()
+		return nil, ctx, false, &AdmissionError{Outcome: InvalidAccounting}
+	}
+	wouldExceed := !g.canChargeLocked(g.limits.BaseChargeBytes)
+	if g.limits.Mode == Enforce && wouldExceed {
+		g.noteRejectionLocked(ByteSaturated)
+		hook := g.hooks.OnRejection
+		mode := g.limits.Mode
+		g.mu.Unlock()
+		if hook != nil {
+			hook(ByteSaturated, mode)
+		}
+		return nil, ctx, false, &AdmissionError{Outcome: ByteSaturated}
+	}
+	if !addTo(&g.usage[BaseBytes], g.limits.BaseChargeBytes) {
+		g.mu.Unlock()
+		return nil, ctx, false, &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g.leases++
+	lease := &Lease{g: g}
+	charge := &Charge{lease: lease, class: BaseBytes, amount: g.limits.BaseChargeBytes}
+	lease.charges = append(lease.charges, charge)
+	if wouldExceed {
+		g.noteRejectionLocked(ByteSaturated)
+		hook := g.hooks.OnRejection
+		mode := g.limits.Mode
+		g.mu.Unlock()
+		if hook != nil {
+			hook(ByteSaturated, mode)
+		}
+		return lease, context.WithValue(ctx, contextKey{}, lease), true, nil
+	}
+	g.mu.Unlock()
+
+	return lease, context.WithValue(ctx, contextKey{}, lease), true, nil
+}
+
+type Lease struct {
+	g               *Governor
+	closed          bool
+	chargesReleased bool
+	evaluations     uint64
+	charges         []*Charge
+}
+
+// Charge reserves bytes before the represented allocation. Existing charges
+// remain held while a replacement allocation is built; release the old charge
+// only after references to that allocation have been dropped.
+func (l *Lease) Charge(class ByteClass, amount uint64) (*Charge, error) {
+	if l == nil || l.g == nil || class >= byteClassCount || class == BaseBytes {
+		return nil, &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g := l.g
+	g.mu.Lock()
+	if l.closed {
+		g.mu.Unlock()
+		return nil, &AdmissionError{Outcome: LeaseClosed}
+	}
+	wouldExceed := amount > 0 && !g.canChargeLocked(amount)
+	reason := ByteSaturated
+	if class == WAFStateBytes {
+		reason = WAFStateSaturated
+	}
+	if g.limits.Mode == Enforce && wouldExceed {
+		g.noteRejectionLocked(reason)
+		hook := g.hooks.OnRejection
+		mode := g.limits.Mode
+		g.mu.Unlock()
+		if hook != nil {
+			hook(reason, mode)
+		}
+		return nil, &AdmissionError{Outcome: reason}
+	}
+	if !addTo(&g.usage[class], amount) {
+		g.mu.Unlock()
+		return nil, &AdmissionError{Outcome: InvalidAccounting}
+	}
+	charge := &Charge{lease: l, class: class, amount: amount}
+	l.charges = append(l.charges, charge)
+	if wouldExceed {
+		g.noteRejectionLocked(reason)
+		hook := g.hooks.OnRejection
+		mode := g.limits.Mode
+		g.mu.Unlock()
+		if hook != nil {
+			hook(reason, mode)
+		}
+		return charge, nil
+	}
+	g.mu.Unlock()
+	return charge, nil
+}
+
+func (l *Lease) Close() error {
+	if l == nil || l.g == nil {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g := l.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if l.closed {
+		return nil
+	}
+	var totals [byteClassCount]uint64
+	for _, charge := range l.charges {
+		if charge.released {
+			continue
+		}
+		if !addTo(&totals[charge.class], charge.amount) {
+			return &AdmissionError{Outcome: InvalidAccounting}
+		}
+	}
+	for class, amount := range totals {
+		if g.usage[class] < amount {
+			return &AdmissionError{Outcome: InvalidAccounting}
+		}
+	}
+	if g.leases == 0 {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	l.closed = true
+	g.leases--
+	for i := 0; i < len(g.waiters); {
+		waiter := g.waiters[i]
+		if waiter.lease != l {
+			i++
+			continue
+		}
+		copy(g.waiters[i:], g.waiters[i+1:])
+		g.waiters[len(g.waiters)-1] = nil
+		g.waiters = g.waiters[:len(g.waiters)-1]
+		waiter.outcome = LeaseClosed
+		close(waiter.ready)
+	}
+	if l.evaluations == 0 {
+		if !l.releaseChargesLocked() {
+			return &AdmissionError{Outcome: InvalidAccounting}
+		}
+	}
+	g.grantWaitersLocked()
+	return nil
+}
+
+func (l *Lease) releaseChargesLocked() bool {
+	if l.chargesReleased {
+		return true
+	}
+	g := l.g
+	var totals [byteClassCount]uint64
+	for _, charge := range l.charges {
+		if charge.released {
+			continue
+		}
+		if !addTo(&totals[charge.class], charge.amount) {
+			return false
+		}
+	}
+	if !l.canReleaseChargesLocked(totals) {
+		return false
+	}
+	for class, amount := range totals {
+		if !subtractFrom(&g.usage[class], amount) {
+			return false
+		}
+	}
+	for _, charge := range l.charges {
+		charge.amount = 0
+		charge.released = true
+	}
+	l.chargesReleased = true
+	return true
+}
+
+func (l *Lease) canReleaseChargesLocked(totals [byteClassCount]uint64) bool {
+	for class, amount := range totals {
+		if l.g.usage[class] < amount {
+			return false
+		}
+	}
+	return true
+}
+
+type Charge struct {
+	lease    *Lease
+	class    ByteClass
+	amount   uint64
+	released bool
+}
+
+// Resize changes one independently-accounted reservation. A decrease refunds
+// only this reservation; earlier WAF phase reservations are unaffected.
+func (c *Charge) Resize(amount uint64) error {
+	if c == nil || c.lease == nil || c.lease.g == nil {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g := c.lease.g
+	g.mu.Lock()
+	if c.released || c.lease.closed {
+		g.mu.Unlock()
+		return &AdmissionError{Outcome: LeaseClosed}
+	}
+	if amount > c.amount {
+		delta := amount - c.amount
+		wouldExceed := !g.canChargeLocked(delta)
+		reason := ByteSaturated
+		if c.class == WAFStateBytes {
+			reason = WAFStateSaturated
+		}
+		if g.limits.Mode == Enforce && wouldExceed {
+			g.noteRejectionLocked(reason)
+			hook := g.hooks.OnRejection
+			mode := g.limits.Mode
+			g.mu.Unlock()
+			if hook != nil {
+				hook(reason, mode)
+			}
+			return &AdmissionError{Outcome: reason}
+		}
+		if !addTo(&g.usage[c.class], delta) {
+			g.mu.Unlock()
+			return &AdmissionError{Outcome: InvalidAccounting}
+		}
+		c.amount = amount
+		if wouldExceed {
+			g.noteRejectionLocked(reason)
+			hook := g.hooks.OnRejection
+			mode := g.limits.Mode
+			g.mu.Unlock()
+			if hook != nil {
+				hook(reason, mode)
+			}
+			return nil
+		}
+	} else if !subtractFrom(&g.usage[c.class], c.amount-amount) {
+		g.mu.Unlock()
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	c.amount = amount
+	g.mu.Unlock()
+	return nil
+}
+
+func (c *Charge) Release() error {
+	if c == nil || c.lease == nil || c.lease.g == nil {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g := c.lease.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if c.released {
+		return nil
+	}
+	if c.lease.closed {
+		return &AdmissionError{Outcome: LeaseClosed}
+	}
+	if !subtractFrom(&g.usage[c.class], c.amount) {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	c.amount = 0
+	c.released = true
+	return nil
+}
+
+type AdmissionError struct {
+	Outcome Outcome
+}
+
+func (e *AdmissionError) Error() string { return "inspection admission: " + string(e.Outcome) }
+
+func IsOutcome(err error, outcome Outcome) bool {
+	var admission *AdmissionError
+	return errors.As(err, &admission) && admission.Outcome == outcome
+}
+
+type evaluationWaiter struct {
+	ready   chan struct{}
+	granted *Evaluation
+	lease   *Lease
+	outcome Outcome
+}
+
+type Evaluation struct {
+	g         *Governor
+	lease     *Lease
+	released  bool
+	abandoned bool
+}
+
+// MarkAbandoned records that the request context ended while this evaluation
+// remains active. Release removes it from the gauge only after the actual work
+// has completed.
+func (e *Evaluation) MarkAbandoned() error {
+	if e == nil || e.g == nil {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g := e.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if e.released {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	if e.abandoned {
+		return nil
+	}
+	if g.abandoned == math.MaxUint64 {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g.abandoned++
+	e.abandoned = true
+	return nil
+}
+
+func (g *Governor) TryEvaluation(ctx context.Context, lease *Lease) (*Evaluation, Outcome, error) {
+	return g.acquireEvaluation(ctx, lease, false)
+}
+
+func (g *Governor) AcquireEvaluation(ctx context.Context, lease *Lease) (*Evaluation, Outcome, error) {
+	return g.acquireEvaluation(ctx, lease, true)
+}
+
+func (g *Governor) AcquireLoggingEvaluation(ctx context.Context, lease *Lease) (*Evaluation, Outcome, error) {
+	token, outcome, err := g.AcquireEvaluation(ctx, lease)
+	if err == nil && token != nil {
+		return token, outcome, nil
+	}
+	if outcome == Cancelled || outcome == LeaseClosed || outcome == InvalidAccounting {
+		return nil, outcome, err
+	}
+	g.mu.Lock()
+	if g.unslotted < math.MaxUint64 {
+		g.unslotted++
+	}
+	hook := g.hooks.OnUnslotted
+	g.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return nil, Unslotted, nil
+}
+
+func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWait bool) (*Evaluation, Outcome, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, Cancelled, &AdmissionError{Outcome: Cancelled}
+	}
+	g.mu.Lock()
+	if lease == nil || lease.g != g || lease.closed {
+		g.mu.Unlock()
+		return nil, InvalidAccounting, &AdmissionError{Outcome: InvalidAccounting}
+	}
+	timeout := g.limits.EvaluationQueueTimeout
+	if g.limits.Mode == Observe {
+		wouldReject := g.active >= uint64(g.limits.EvaluationSlots) || len(g.waiters) > 0
+		if g.active == math.MaxUint64 || lease.evaluations == math.MaxUint64 {
+			g.mu.Unlock()
+			return nil, InvalidAccounting, &AdmissionError{Outcome: InvalidAccounting}
+		}
+		token := &Evaluation{g: g, lease: lease}
+		g.active++
+		lease.evaluations++
+		if wouldReject {
+			g.noteRejectionLocked(EvaluationSaturated)
+		}
+		g.mu.Unlock()
+		if wouldReject && g.hooks.OnRejection != nil {
+			g.hooks.OnRejection(EvaluationSaturated, Observe)
+		}
+		if wouldReject {
+			return token, WouldReject, nil
+		}
+		return token, Acquired, nil
+	}
+	if len(g.waiters) == 0 && g.active < uint64(g.limits.EvaluationSlots) {
+		if g.active == math.MaxUint64 || lease.evaluations == math.MaxUint64 {
+			g.mu.Unlock()
+			return nil, InvalidAccounting, &AdmissionError{Outcome: InvalidAccounting}
+		}
+		g.active++
+		lease.evaluations++
+		g.mu.Unlock()
+		return &Evaluation{g: g, lease: lease}, Acquired, nil
+	}
+	if !allowWait || timeout == 0 {
+		g.noteRejectionLocked(EvaluationSaturated)
+		hook := g.hooks.OnRejection
+		mode := g.limits.Mode
+		g.mu.Unlock()
+		if hook != nil {
+			hook(EvaluationSaturated, mode)
+		}
+		return nil, EvaluationSaturated, &AdmissionError{Outcome: EvaluationSaturated}
+	}
+	waitingLimit := uint64(g.limits.EvaluationSlots)
+	if waitingLimit <= math.MaxUint64/16 {
+		waitingLimit *= 16
+	} else {
+		waitingLimit = math.MaxUint64
+	}
+	if uint64(len(g.waiters)) >= waitingLimit {
+		g.noteRejectionLocked(EvaluationSaturated)
+		hook := g.hooks.OnRejection
+		mode := g.limits.Mode
+		g.mu.Unlock()
+		if hook != nil {
+			hook(EvaluationSaturated, mode)
+		}
+		return nil, QueueExhausted, &AdmissionError{Outcome: QueueExhausted}
+	}
+	w := &evaluationWaiter{ready: make(chan struct{}), lease: lease}
+	g.waiters = append(g.waiters, w)
+	g.mu.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-w.ready:
+		if w.granted != nil {
+			return w.granted, Acquired, nil
+		}
+		return nil, w.outcome, &AdmissionError{Outcome: w.outcome}
+	case <-ctx.Done():
+		return g.abandonWaiter(w, Cancelled)
+	case <-timer.C:
+		return g.abandonWaiter(w, WaitExpired)
+	}
+}
+
+func (g *Governor) abandonWaiter(w *evaluationWaiter, outcome Outcome) (*Evaluation, Outcome, error) {
+	g.mu.Lock()
+	if w.granted != nil {
+		token := w.granted
+		if !g.releaseEvaluationLocked(token) {
+			g.mu.Unlock()
+			return nil, InvalidAccounting, &AdmissionError{Outcome: InvalidAccounting}
+		}
+		g.grantWaitersLocked()
+		var hook func(Outcome, Mode)
+		mode := g.limits.Mode
+		if outcome == WaitExpired {
+			g.noteRejectionLocked(EvaluationSaturated)
+			hook = g.hooks.OnRejection
+		}
+		g.mu.Unlock()
+		if hook != nil {
+			hook(EvaluationSaturated, mode)
+		}
+		return nil, outcome, &AdmissionError{Outcome: outcome}
+	}
+	if w.outcome != "" {
+		result := w.outcome
+		g.mu.Unlock()
+		return nil, result, &AdmissionError{Outcome: result}
+	}
+	for i, queued := range g.waiters {
+		if queued == w {
+			copy(g.waiters[i:], g.waiters[i+1:])
+			g.waiters[len(g.waiters)-1] = nil
+			g.waiters = g.waiters[:len(g.waiters)-1]
+			break
+		}
+	}
+	queueHook := g.hooks.OnQueueAbandon
+	var rejectionHook func(Outcome, Mode)
+	mode := g.limits.Mode
+	if outcome == WaitExpired {
+		g.noteRejectionLocked(EvaluationSaturated)
+		rejectionHook = g.hooks.OnRejection
+	}
+	g.grantWaitersLocked()
+	g.mu.Unlock()
+	if queueHook != nil {
+		queueHook()
+	}
+	if rejectionHook != nil {
+		rejectionHook(EvaluationSaturated, mode)
+	}
+	return nil, outcome, &AdmissionError{Outcome: outcome}
+}
+
+func (e *Evaluation) Release() error {
+	if e == nil || e.g == nil {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g := e.g
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if e.released {
+		return nil
+	}
+	if !g.releaseEvaluationLocked(e) {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g.grantWaitersLocked()
+	return nil
+}
+
+func (g *Governor) releaseEvaluationLocked(e *Evaluation) bool {
+	if e.released || g.active == 0 {
+		return e.released
+	}
+	if e.lease == nil || e.lease.evaluations == 0 {
+		return false
+	}
+	if e.lease.closed && e.lease.evaluations == 1 && !e.lease.chargesReleased {
+		var totals [byteClassCount]uint64
+		for _, charge := range e.lease.charges {
+			if charge.released {
+				continue
+			}
+			if !addTo(&totals[charge.class], charge.amount) {
+				return false
+			}
+		}
+		if !e.lease.canReleaseChargesLocked(totals) {
+			return false
+		}
+	}
+	if e.abandoned {
+		if g.abandoned == 0 {
+			return false
+		}
+		g.abandoned--
+	}
+	g.active--
+	e.lease.evaluations--
+	e.released = true
+	if e.lease.closed && e.lease.evaluations == 0 && !e.lease.releaseChargesLocked() {
+		return false
+	}
+	return true
+}
+
+func (g *Governor) grantWaitersLocked() {
+	for len(g.waiters) > 0 {
+		w := g.waiters[0]
+		if w.lease != nil && w.lease.closed {
+			copy(g.waiters, g.waiters[1:])
+			g.waiters[len(g.waiters)-1] = nil
+			g.waiters = g.waiters[:len(g.waiters)-1]
+			w.outcome = LeaseClosed
+			close(w.ready)
+			continue
+		}
+		if g.limits.Mode == Enforce && g.active >= uint64(g.limits.EvaluationSlots) {
+			return
+		}
+		copy(g.waiters, g.waiters[1:])
+		g.waiters[len(g.waiters)-1] = nil
+		g.waiters = g.waiters[:len(g.waiters)-1]
+		if g.active == math.MaxUint64 {
+			w.outcome = InvalidAccounting
+			close(w.ready)
+			continue
+		}
+		if w.lease.evaluations == math.MaxUint64 {
+			w.outcome = InvalidAccounting
+			close(w.ready)
+			continue
+		}
+		g.active++
+		w.lease.evaluations++
+		w.granted = &Evaluation{g: g, lease: w.lease}
+		close(w.ready)
+	}
+}
+
+func (g *Governor) canChargeLocked(amount uint64) bool {
+	total, ok := sumBytes(g.usage[:])
+	if !ok || total > g.limits.MaxBytes {
+		return false
+	}
+	return amount <= g.limits.MaxBytes-total
+}
+
+func (g *Governor) noteRejectionLocked(reason Outcome) {
+	index := 0
+	switch reason {
+	case WAFStateSaturated:
+		index = 1
+	case EvaluationSaturated:
+		index = 2
+	default:
+		index = 0
+	}
+	modeIndex := 0
+	if g.limits.Mode == Observe {
+		modeIndex = 1
+	}
+	if g.rejections[index][modeIndex] < math.MaxUint64 {
+		g.rejections[index][modeIndex]++
+	}
+}
+
+func addTo(dst *uint64, n uint64) bool {
+	if math.MaxUint64-*dst < n {
+		return false
+	}
+	*dst += n
+	return true
+}
+
+func subtractFrom(dst *uint64, n uint64) bool {
+	if *dst < n {
+		return false
+	}
+	*dst -= n
+	return true
+}
+
+func sumBytes(values []uint64) (uint64, bool) {
+	var total uint64
+	for _, value := range values {
+		if math.MaxUint64-total < value {
+			return 0, false
+		}
+		total += value
+	}
+	return total, true
+}

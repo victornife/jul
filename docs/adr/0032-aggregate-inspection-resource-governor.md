@@ -1,6 +1,6 @@
 # ADR 0032 — Aggregate inspection resource governor
 
-- **Status:** Accepted — design for #700; not implemented (slices I1–I6 not started)
+- **Status:** Accepted — I1 implementation in progress in an unmerged change; I2–I6 remain pending
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
@@ -762,6 +762,7 @@ max_buffered_bytes = "256m"      # Size, > 0; default 256 MiB (suffixes b, k, m,
 max_concurrent_evaluations = 0   # int, 0 = auto (GOMAXPROCS); 1..1024 otherwise
 evaluation_queue_timeout = "1s"  # Duration, 0s..10s; 0s = no wait (pure fail-fast)
 body_timeout = "60s"             # Duration; omitted = 60s; explicit "0s" disables
+max_response_header_bytes = "64k" # Size; positive; accounted header ceiling for R3
 ```
 
 Example for the 2 vCPU / 768 MiB envelope (inferred sizing; it must be validated by A1–A3):
@@ -777,11 +778,47 @@ max_concurrent_evaluations = 2
 | Field | Semantics |
 | --- | --- |
 | `mode` | `enforce` (default) or `observe`. Observe charges and reports so that operators can size before enforcing; its behaviour for each control is defined below. There is no `off`: accounting is cheap, and an unmeasured process cannot be sized. |
-| `max_buffered_bytes` | Required to be at least the largest single-request worst-case charge. Validation computes it from the effective configuration, for the worst route chain, as the sum of: `base`; 2 × the largest plugin `max_request_body`, because old and new arrays are both charged during growth; 2 × the WAF in-memory body limit; the worst-case request `waf_state`; the request-phase fetch and state allocations of every plugin on the chain; and the response-phase allocations that can coexist — 2 × every subscribed plugin's `max_response_body` (growth copies), its replacements, 2 × the WAF response limit and the worst-case response state. The WAF terms are R1 + R2 + R3 + R4 at their worst case (§4). If the budget is smaller, validation fails in `enforce` mode with an error naming both fields, because some requests could never be admitted. In `observe` mode it is a warning. |
+| `max_buffered_bytes` | Required to fit the largest single-request worst-case charge. The accepted full formula includes `base`, plugin request/response buffers and replacement copies, WAF request/response bodies, plugin state, and R1 + R2 + R3 + R4 for the worst route chain. I1 currently validates only the known `base + maximum R3` floor; complete route-chain validation remains pending and is not claimed. |
+| `max_response_header_bytes` | Positive, default `64k` (64 KiB), configurable upward and not disableable. This is the complete R3 accounting measure for one final response, not wire bytes or a mathematical memory bound: for every decoded header field-value occurrence, `H` adds `len(name) + len(value) + 64` bytes. Repeated fields are counted separately. The `64` bytes is a fixed per-occurrence accounting allowance; the WAF multiplier remains a calibrated estimate. Startup's known R3 term is `48 × max_response_header_bytes` (3 MiB at the default). Runtime reserves `48 × actual H` before adding any response header to Coraza, then retains that R3 reservation for the transaction lifetime; it does not reserve the maximum for every lease. Raising this ceiling does not raise `max_buffered_bytes`; an unaffordable actual reservation still produces the separate governor `503`. |
 | `max_concurrent_evaluations` | `0` resolves to `GOMAXPROCS` at Prepare. The effective value is reported. |
 | `evaluation_queue_timeout` | Waiters are also capped internally at `16 × slots`. That count is a constant, not a field. |
 | `body_timeout` | Applies only while an inspection layer reads a request body. Downloads, streaming responses and post-inspection reads are never affected. |
 | All | Process-wide. Not overridable per listener or route. |
+
+### Minimum-budget contract gap
+
+The R3 bound is `max_response_header_bytes`, default `64k`, and is measured at
+the shared Coraza response-header ingestion point immediately before
+`ProcessResponseHeaders`. It applies to final response sources that pass this
+boundary, regardless of whether they originate upstream, in a plugin, or in
+Jul. The request-side `servers[].max_header_bytes` remains unrelated.
+
+The R3 measure counts decoded name/value bytes and 64 bytes for each field
+occurrence, including repeated values. It is not compressed HTTP/2 or HTTP/3
+wire size. Informational responses other than 101 bypass this existing phase-3
+boundary and are outside R3. Trailer declarations visible at the boundary are
+counted as ordinary fields; trailer values added after phase 3 are outside R3
+and are not inspected by this phase. Headers already allocated by a transport
+or producer are not retroactively bounded; this governor charge represents
+Coraza's retained transaction state, not total process memory.
+
+In enforce mode, an over-ceiling response fails closed with an empty 500 before
+any response header is added to Coraza or committed to the client. It is not
+truncated and inspection is not bypassed. A governor reservation failure for
+an in-ceiling response remains a 503 with `Retry-After`. In observe mode, the
+ceiling and byte budget produce would-reject observations, but inspection
+continues without a new governor-driven 500 or 503. Actual R3 reservations use
+the measured response charge, never the configured maximum.
+
+This amendment makes R3 finite but does not establish the full startup
+minimum-budget calculation. I1 currently validates only the known `base + R3`
+floor; plugin, body, and route-chain terms still require implementation and
+verification. The default is an initial compatibility-sensitive policy, not an
+experimentally established optimum. Before shipping the response-path
+enforcement, qualify representative responses, especially repeated
+`Set-Cookie` fields and authentication flows. The R3 runtime check and
+reservation are a separate response-path prerequisite in I4; no live request
+path is claimed in I1.
 
 **`mode = "observe"` for each control.** Observe introduces no governor-driven `503`, `408` or
 `500`. It preserves every existing security decision, WAF and plugin limit, and server timeout.
@@ -873,7 +910,11 @@ Existing metrics gain at most new closed values:
 - usage per class, leases, active and waiting evaluations, and `draining`;
 - static baselines:
   - `plugin_guest_max_bytes` = Σ `max_instances × memory_limit` over loaded plugins and generations;
+    this is permitted capacity, not actual guest-memory allocation; live instance counts are
+    reported separately, while actual allocation remains explicitly unknown unless measured;
   - `evaluation_headroom_estimate_bytes` = slots × the worst-case evaluation working set.
+    Until that working set is calibrated, the API reports this estimate as unavailable rather than
+    as a zero-valued measurement.
 
 It is read-only and uses the existing status read permission.
 
@@ -1056,12 +1097,25 @@ never contains paths, hosts or bodies.
 
 | Slice | Content | Depends on |
 | --- | --- | --- |
-| I1 | `internal/inspection` governor, which supersedes the prototype: counters, lease, slots, FIFO waits, overflow-safe arithmetic, `SetLimits`. Config schema, defaults and validation (including the minimum-budget rule). Lifecycle registry ownership and Publish wiring. Metrics and the status object (observe-capable, with no enforcement points yet). Measure the base charge. | ADR accepted (2026-11-10) |
+| I1 | `internal/inspection` governor, which supersedes the prototype: counters, lease, slots, FIFO waits, overflow-safe arithmetic, `SetLimits`. Config schema, defaults and known base + R3 minimum validation. Lifecycle registry ownership and Publish wiring. Metrics and status/CLI projection (observe-capable, with no enforcement points yet). Measure the base charge. | ADR accepted (2026-11-10) |
 | I2 | Plugin request path: lease creation before `p.prepare`, grow-before-allocate in `readBounded`, fail-fast 503, `body_timeout` through the per-request deadline owner (sticky retirement abort), narrow `SetReadDeadline` forwarding where a wrapper lacks it, and guest replacement charging. | I1 |
 | I3 | WAF request path: lease reuse or creation; a Jul read loop that replaces `ReadRequestBodyFrom`; slots and reservations around every rule-evaluating request call, including implicit phase 2 and phase 5 (§3); queue eligibility by unread data; `B_buf` and `B_total` charging; cumulative R1 and R2 with true-down; the deadline owner; the calibration test (`-tags waf`) covering the §4 list; and outcome taxonomy additions. | I1 |
-| I4 | Response paths: nested plugin subscription buffers (`reason="budget"`), WAF response buffer (2×), phase-3 and phase-4 slots including implicit phase 4 in `WriteResponseBody`, R3 and R4 (fail-closed), and the JSON/XML response calibration. | I2, I3 |
+| I4 | Response paths: nested plugin subscription buffers (`reason="budget"`), WAF response buffer (2×), phase-3 and phase-4 slots including implicit phase 4 in `WriteResponseBody`, actual-size R3 reservation before header ingestion (configured ceiling overflow fails closed with 500; governor saturation remains 503), R4, and the JSON/XML/header response calibration including repeated `Set-Cookie` and authentication flows. | I2, I3 |
 | I5 | Maintained measurement tooling: promote the #695 harness, the #699 patch and the F2/F3/F4 clients into `scripts/inspection-assessment/` with unit tests for scenario definitions, summarisation and manifest checksums. | none (parallel) |
 | I6 | Acceptance: run A1–A18 and publish a dated review with raw evidence and checksums. Docs: operator guide and sizing, the ADR 0017 caution, release notes and a `feature-status.yaml` entry (Beta/unreleased). | I4, I5 |
+
+### I1 progress
+
+The current unmerged I1 change adds the typed process governor, configuration
+and generated contracts, process ownership, reload publication, bounded
+metrics, status/CLI projection, and a checksummed lease-scaffolding
+measurement. Status reports configured guest-memory capacity across compiled,
+unclosed plugin generations, distinguishes it from live instance counts, and
+leaves actual guest allocation and uncalibrated evaluation headroom explicitly
+unknown. Live request paths remain untouched. I1 remains in progress because
+only the known base + R3 floor is validated; complete route-chain minimum
+validation and I2–I4 runtime enforcement remain pending. No request-path
+integration or A1–A18 qualification is claimed.
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.

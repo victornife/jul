@@ -15,6 +15,7 @@ import (
 	"jul/internal/adminapi"
 	"jul/internal/buildcaps"
 	"jul/internal/configcontract"
+	"jul/internal/inspection"
 )
 
 // externalEndpointList is derived from Catalog after the v1 write closure has
@@ -38,7 +39,70 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 		LedgerRetention: s.ledgerRetention(),
 	}
 	out.PersistedVersion = authority.DiskVersion
+	if s.deps.InspectionSnapshot != nil {
+		snapshot := s.deps.InspectionSnapshot()
+		guestCapacity := adminapi.InspectionPluginGuestCapacity{}
+		guestCapacityState := "unavailable"
+		if s.deps.InspectionPluginGuestCapacity != nil {
+			var err error
+			guestCapacity, err = s.deps.InspectionPluginGuestCapacity()
+			if err != nil {
+				writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError,
+					"could not report plugin guest capacity: %v", err))
+				return
+			}
+			guestCapacityState = "not_sampled"
+		}
+		out.Inspection = inspectionStatus(snapshot, guestCapacity, guestCapacityState)
+	}
 	writeAPIJSON(w, http.StatusOK, out)
+}
+
+func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.InspectionPluginGuestCapacity, guestCapacityState string) *adminapi.InspectionStatus {
+	limits := snapshot.Limits
+	var guestMaxBytes, guestLiveInstances, guestMaxInstances *uint64
+	if guestCapacityState != "unavailable" {
+		guestMaxBytes = &guestCapacity.MaxPermittedBytes
+		guestLiveInstances = &guestCapacity.LiveInstances
+		guestMaxInstances = &guestCapacity.MaxInstances
+	}
+	return &adminapi.InspectionStatus{
+		Configured: adminapi.InspectionConfiguredLimits{
+			Mode:                     string(limits.Mode),
+			MaxBufferedBytes:         limits.MaxBytes,
+			MaxResponseHeaderBytes:   limits.MaxResponseHeaderBytes,
+			MaxConcurrentEvaluations: limits.ConfiguredEvaluationSlots,
+			EvaluationQueueTimeout:   limits.EvaluationQueueTimeout.String(),
+			BodyTimeout:              limits.BodyTimeout.String(),
+		},
+		Effective: adminapi.InspectionEffectiveLimits{
+			Mode:                     string(limits.Mode),
+			MaxBufferedBytes:         limits.MaxBytes,
+			MaxResponseHeaderBytes:   limits.MaxResponseHeaderBytes,
+			MaxConcurrentEvaluations: limits.EvaluationSlots,
+			EvaluationQueueTimeout:   limits.EvaluationQueueTimeout.String(),
+			BodyTimeout:              limits.BodyTimeout.String(),
+		},
+		Usage: adminapi.InspectionUsage{
+			BaseBytes:     snapshot.Usage[inspection.BaseBytes],
+			BufferBytes:   snapshot.Usage[inspection.BufferBytes],
+			WAFStateBytes: snapshot.Usage[inspection.WAFStateBytes],
+		},
+		ActiveLeases:                    snapshot.ActiveLeases,
+		ActiveEvaluations:               snapshot.ActiveEvaluations,
+		WaitingEvaluations:              snapshot.WaitingEvaluations,
+		Draining:                        snapshot.Draining,
+		RequestPathIntegration:          "pending",
+		BaseChargeBytes:                 limits.BaseChargeBytes,
+		BaseChargeScope:                 "governor lease/context scaffolding only; excludes request buffers, plugin/WAF state, protocol and process memory",
+		PluginGuestMaxBytes:             guestMaxBytes,
+		PluginGuestLiveInstances:        guestLiveInstances,
+		PluginGuestMaxInstances:         guestMaxInstances,
+		PluginGuestActualBytes:          nil,
+		PluginGuestActualBytesState:     guestCapacityState,
+		EvaluationHeadroomEstimateBytes: nil,
+		EvaluationHeadroomEstimateState: "not_calibrated",
+	}
 }
 
 func (s *Server) handleV1Capabilities(w http.ResponseWriter, r *http.Request) {

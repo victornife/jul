@@ -237,6 +237,17 @@ func cmdRemoteStatus(args []string) int {
 	if v.LastApply != nil {
 		fmt.Fprintf(stdout, "last apply: %s state=%s outcome=%s\n", v.LastApply.ApplyID, v.LastApply.State, emptyDash(string(v.LastApply.Outcome)))
 	}
+	if v.Inspection != nil {
+		i := v.Inspection
+		fmt.Fprintf(stdout, "inspection: mode=%s byte_limit=%dB response_header_accounting_ceiling=%dB slots=%d (effective %d) queue_timeout=%s body_timeout=%s\n",
+			i.Configured.Mode, i.Configured.MaxBufferedBytes, i.Configured.MaxResponseHeaderBytes,
+			i.Configured.MaxConcurrentEvaluations, i.Effective.MaxConcurrentEvaluations,
+			i.Configured.EvaluationQueueTimeout, i.Configured.BodyTimeout)
+		fmt.Fprintf(stdout, "inspection usage: base=%dB buffer=%dB waf_state=%dB leases=%d evaluations=%d waiting=%d draining=%t request_path_integration=%s\n",
+			i.Usage.BaseBytes, i.Usage.BufferBytes, i.Usage.WAFStateBytes, i.ActiveLeases,
+			i.ActiveEvaluations, i.WaitingEvaluations, i.Draining, i.RequestPathIntegration)
+		fmt.Fprintf(stdout, "inspection base charge: %dB (%s)\n", i.BaseChargeBytes, i.BaseChargeScope)
+	}
 	return 0
 }
 

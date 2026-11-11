@@ -12,6 +12,7 @@ import (
 
 	"jul/internal/cachemeta"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/lifecycle"
 	"jul/internal/observability"
 	"jul/internal/respwriter"
@@ -240,6 +241,14 @@ func (p *ReloadPlan) Prepare() error {
 		p.GenID = genID
 		p.handlerCommit = commit
 		p.handlerAbort = abort
+
+		if p.s.Inspection != nil {
+			limits, err := inspection.LimitsFromConfig(p.Candidate.Effective, lifecycle.InitialGOMAXPROCS())
+			if err != nil {
+				return fmt.Errorf("prepare inspection limits: %w", err)
+			}
+			p.Runtime.add(&inspectionLimitsComponent{governor: p.s.Inspection, limits: limits})
+		}
 
 		certRotation, err := p.s.prepareCertRotation(p.Candidate.Effective)
 		if err != nil {

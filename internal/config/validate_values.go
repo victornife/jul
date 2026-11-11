@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // This file contains the small reusable validators for public scalar and enum
@@ -115,7 +116,60 @@ func validateGlobalValues(c GlobalConfig) []error {
 	if err := validateNonNegativeInt("[global].redact_min_secret_length", c.RedactMinSecretLength); err != nil {
 		errs = append(errs, err)
 	}
+	errs = append(errs, validateInspectionValues(c.Inspection)...)
 	return errs
+}
+
+func validateInspectionValues(c InspectionConfig) []error {
+	var errs []error
+	if err := validateOptionalEnum("[global.inspection].mode", c.Mode, "enforce", "observe"); err != nil {
+		errs = append(errs, err)
+	}
+	if c.MaxBufferedBytes != nil && *c.MaxBufferedBytes <= 0 {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_buffered_bytes: must be a positive size"))
+	}
+	if c.MaxResponseHeaderBytes != nil && *c.MaxResponseHeaderBytes <= 0 {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_response_header_bytes: must be a positive size"))
+	}
+	mode := c.Mode
+	if mode == "" {
+		mode = "enforce"
+	}
+	maxResponseHeaderBytes := InspectionDefaultMaxResponseHeaderBytes
+	if c.MaxResponseHeaderBytes != nil && c.MaxResponseHeaderBytes.Bytes() > 0 {
+		maxResponseHeaderBytes = c.MaxResponseHeaderBytes.Bytes()
+	}
+	minimum, minimumErr := InspectionMinimumKnownBudget(maxResponseHeaderBytes)
+	if minimumErr != nil {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_response_header_bytes: %w", minimumErr))
+	} else if mode == "enforce" && c.MaxBufferedBytes != nil && c.MaxBufferedBytes.Bytes() > 0 {
+		if c.MaxBufferedBytes.Bytes() < minimum {
+			errs = append(errs, fmt.Errorf("[global.inspection].max_buffered_bytes: configured %d B is below the known base + R3 minimum of %d B (base %d B + %d x max_response_header_bytes %d B)", c.MaxBufferedBytes.Bytes(), minimum, InspectionBaseChargeBytes, InspectionResponseHeaderEstimateFactor, maxResponseHeaderBytes))
+		}
+	}
+	if c.MaxConcurrentEvaluations < 0 || c.MaxConcurrentEvaluations > 1024 {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_concurrent_evaluations: must be 0 (auto) or between 1 and 1024"))
+	}
+	if c.EvaluationQueueTimeout != nil && (*c.EvaluationQueueTimeout < 0 || *c.EvaluationQueueTimeout > Duration(10*time.Second)) {
+		errs = append(errs, fmt.Errorf("[global.inspection].evaluation_queue_timeout: must be between 0s and 10s"))
+	}
+	if c.BodyTimeout != nil && *c.BodyTimeout < 0 {
+		errs = append(errs, fmt.Errorf("[global.inspection].body_timeout: must not be negative"))
+	}
+	return errs
+}
+
+// InspectionMinimumKnownBudget returns the enforced known floor from the
+// per-lease base charge and maximum R3 response-header estimate.
+func InspectionMinimumKnownBudget(maxResponseHeaderBytes int64) (int64, error) {
+	if maxResponseHeaderBytes <= 0 {
+		return 0, fmt.Errorf("max_response_header_bytes must be positive")
+	}
+	const maxInt64 = int64(^uint64(0) >> 1)
+	if maxResponseHeaderBytes > (maxInt64-InspectionBaseChargeBytes)/InspectionResponseHeaderEstimateFactor {
+		return 0, fmt.Errorf("value is too large to calculate the R3 estimate")
+	}
+	return InspectionBaseChargeBytes + InspectionResponseHeaderEstimateFactor*maxResponseHeaderBytes, nil
 }
 
 // validateConfigAuthority rejects any value outside the closed

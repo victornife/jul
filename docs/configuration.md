@@ -154,6 +154,44 @@ config_authority = "managed"
 | `redact_min_secret_length` | int | Shortest resolved secret value masked from logs; `0` uses the default (4). Lower it (down to 1) for short secrets, accepting possible masking of incidental log text |
 | `config_authority` | string | Who owns configuration persistence and drift detection: `managed` (Jul.IA owns the file; the Console/API may write it) or `file_owned` (an external file or GitOps pipeline owns it; every mutating admin endpoint is refused). `controller_owned` is reserved and rejected. **Omitted resolves to `file_owned`** — a fixed default that is never derived from `[admin].enabled` or any other field. Restart-required; can only change through `stage_restart`. See [reload-semantics.md](reload-semantics.md#configuration-authority-managed-vs-file-owned) and [deployment.md](deployment.md#configuration-authority) |
 
+### `[global.inspection]`
+
+These process-wide settings configure the I1 inspection-governor foundation:
+
+```toml
+[global.inspection]
+mode = "enforce"
+max_buffered_bytes = "256m"
+max_concurrent_evaluations = 0
+evaluation_queue_timeout = "1s"
+body_timeout = "60s"
+max_response_header_bytes = "64k"
+```
+
+| Key | Type | Default and validation |
+| --- | --- | --- |
+| `mode` | string | `enforce` (default) or `observe`; other values are rejected |
+| `max_buffered_bytes` | size | `256m` (256 MiB); must be positive and at least the known base plus maximum R3 charge in `enforce` mode (16 KiB + 48 × `max_response_header_bytes`) |
+| `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled |
+| `max_concurrent_evaluations` | int | `0` means auto, resolved from the configured `worker_threads` value or the startup container-aware `GOMAXPROCS`; explicit values are 1–1024 |
+| `evaluation_queue_timeout` | duration | `1s`; 0 disables waiting; explicit values are 0–10s |
+| `body_timeout` | duration | `60s`; explicit `0s` disables it; negative values are rejected |
+
+These fields have process scope and hot-reload together. A reload publishes the
+complete limit set without recreating the governor or resetting its counters;
+automatic slots resolve against the candidate `worker_threads` value, or the
+startup `GOMAXPROCS` when worker threads are `auto`.
+
+**I1 does not yet enforce these limits on live requests.** The status API marks
+request-path integration as `pending`; no live WAF/plugin request acquires a
+lease or evaluation slot, and `body_timeout` is not applied. `mode = "enforce"`
+is therefore configured policy, not production traffic protection. Startup
+validation currently checks the known base + maximum R3 floor only; complete
+effective-route worst-case validation and actual-size R3 reservations remain
+pending later implementation slices. The 64 KiB ceiling is a compatibility
+policy default, not an experimentally established optimum. See
+[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-contract-gap).
+
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.
 
 Durations use Go syntax: `30s`, `5m`, `1h`. Sizes use `512k`, `1m`,
@@ -181,6 +219,8 @@ The structured patch API supports three process-wide operations:
 
 - `global_set` for `worker_threads`, `log_level`, `log_format`,
   `shutdown_timeout`, `reload_timeout`, and `redact_min_secret_length`
+  and the supported `[global.inspection]` fields (`mode`, both byte ceilings,
+  evaluation slots, queue timeout, and body timeout)
   (`config_authority` is intentionally excluded: it changes persistence
   ownership and may only move through `stage_restart` as a complete
   candidate, never a sparse hot field);
