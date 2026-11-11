@@ -157,6 +157,8 @@ config_authority = "managed"
 ### `[global.inspection]`
 
 These process-wide settings configure the I1 inspection-governor foundation:
+the [runnable example](../examples/inspection-governor/jul.toml) passes
+`jul check -config examples/inspection-governor/jul.toml`.
 
 ```toml
 [global.inspection]
