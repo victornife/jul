@@ -187,8 +187,10 @@ under v1, v2 and v3 have different plan hashes and are never merged.
     8 reloads with zero governed bytes.
   - At 5 s, main completed but still held about 495 MiB of heap after two GCs. Most of it was
     wazero guest memory and decoded modules from retired generations, with 2 live instances.
-  - That retention predates I2 and belongs to the reload/generation lifecycle. p4 therefore
-    asserts reload acknowledgement and governor drain, not the 576 MiB peak objective.
+  - That retention predated I2 and belonged to the reload/generation lifecycle, so plan v3's p4
+    asserts reload acknowledgement and governor drain, not the 576 MiB peak objective. The I2 PR
+    fixed it (#709): retired exchanges no longer keep their request context. The fixed build
+    peaked at about 500 MiB with 69–103 MiB of heap after two GCs, and survived the 2 s cadence.
 - Governor drain (every cell): after recovery, `jul_inspection_leases` and the `bytes` and
   `evaluations` gauges must be zero. A nonzero gauge is a runtime finding. Targets without these
   gauges are not judged, except p4, where they are required. A zero gauge shows that charges

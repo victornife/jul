@@ -1,0 +1,111 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "run2",
+  "started": "2026-11-12T17:22:17.091308542Z",
+  "ended": "2026-11-12T17:23:22.998925002Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v3",
+  "plan_sha256": "5ce583d03555dddb1ecde57cd3e03c0edff0af95cae73a2f62efba7676314bd8",
+  "interpretation_sha256": "ee32d6ef4f0098920f5beee542ad75cd43f6b5ab1e8dee526ee7c07ac4da4c63",
+  "profile": {
+    "name": "qualification",
+    "acceptance_eligible": true,
+    "warmup": "5s",
+    "measure": "20s",
+    "recovery": "10s",
+    "reload_measure": "40s",
+    "reload_recovery": "15s",
+    "step_warmup": "2s",
+    "f3_duration": "20s",
+    "f4_client_limit": "20s",
+    "description": "the archived #695/#700 windows; eligible as acceptance evidence only inside the verified envelope"
+  },
+  "repetitions": 1,
+  "selection": [
+    "p4-reload-budget-plugin/wasm"
+  ],
+  "scenario_sha256": {
+    "p4-reload-budget-plugin/wasm": "832fb14b4bc6e3d6f2da08e9d68df6023b50925b68c8d1d5ea5dcfd4bc573278"
+  },
+  "targets": [
+    {
+      "label": "dbg",
+      "adapter": "current",
+      "path": "/tmp/jul-709-dbg/jul-dbg",
+      "binary": {
+        "path": "/tmp/jul-709-dbg/jul-dbg",
+        "sha256": "0f4235b3bb7c36a7fbce17655d0c61ba109bf0de9c300b977a4a11b8df38b194",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/home/victornf/jul-i2-builds/bin/ia-b1a670fe",
+    "sha256": "732e24feef6f52b58e2501751bb0e99bcfe229f6bbb86719f587affbdfc2291c",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "-trimpath": "true",
+      "CGO_ENABLED": "0",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux"
+    }
+  },
+  "guest": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-load.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a",
+    "source_tree_sha256": "217eb5033fa205bb2ca702c908e03294c59b849d6ba61a0e41b9de8f24ecf3c0",
+    "source": "examples/plugins/inspect-load"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/jul-i2-builds/src/b1a670fe/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 6,
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "required",
+    "jul_cpus": "0,1",
+    "cpu_quota": "200%",
+    "memory_max": "768M",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "4-9",
+    "jul": "0,1",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/p4-reload-budget-plugin/wasm/dbg/rep1/result.json"
+  ],
+  "interrupted": false
+}

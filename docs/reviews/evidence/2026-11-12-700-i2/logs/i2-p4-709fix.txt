@@ -1,0 +1,7 @@
+2026-11-12T17:34:25Z p4-reload-budget-plugin/wasm/main rep1: state=completed valid=true correct=false load/load=1412.0rps(56495/56496) load/inflight=3.6rps(160/240) cpu=0.96 findings=phase load class load: error:reset ×1
+2026-11-12T17:35:30Z p4-reload-budget-plugin/wasm/cand2 rep1: state=completed valid=true correct=false load/load=2342.1rps(93699/93701) load/inflight=3.6rps(160/224) cpu=0.95 findings=phase load class load: error:body-eof ×2
+2026-11-12T17:36:35Z p4-reload-budget-plugin/wasm/main rep2: state=completed valid=true correct=true load/load=1987.8rps(79526/79526) load/inflight=3.6rps(160/224) cpu=0.95
+2026-11-12T17:37:41Z p4-reload-budget-plugin/wasm/cand2 rep2: state=completed valid=true correct=true load/load=2193.3rps(87750/87750) load/inflight=3.6rps(162/224) cpu=0.94
+2026-11-12T17:38:47Z p4-reload-budget-plugin/wasm/main rep3: state=completed valid=true correct=false load/load=1803.9rps(72171/72172) load/inflight=3.6rps(160/224) cpu=0.96 findings=phase load class load: error:reset ×1
+2026-11-12T17:39:52Z p4-reload-budget-plugin/wasm/cand2 rep3: state=completed valid=true correct=false load/load=1883.0rps(75334/75334) load/inflight=3.7rps(164/224) cpu=0.94 findings=phase load class inflight: error:body-stream-reset ×1
+run i2-p4-709fix: complete, 6 results in /home/victornf/jul-i2-evidence/frozen/i2-p4-709fix

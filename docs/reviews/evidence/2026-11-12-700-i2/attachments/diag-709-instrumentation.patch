@@ -1,0 +1,135 @@
+--- a/internal/dbg709/dbg.go
++++ b/internal/dbg709/dbg.go
+@@ -0,0 +1,58 @@
++package dbg709
++
++import (
++	"fmt"
++	"os"
++	"runtime"
++	"sync"
++	"sync/atomic"
++	"time"
++)
++
++type ctr struct{ made, closed, collected atomic.Int64 }
++
++var (
++	mu   sync.Mutex
++	ctrs = map[string]*ctr{}
++)
++
++func get(k string) *ctr {
++	mu.Lock()
++	defer mu.Unlock()
++	c := ctrs[k]
++	if c == nil {
++		c = &ctr{}
++		ctrs[k] = c
++	}
++	return c
++}
++
++func Track[T any](kind string, p *T) {
++	c := get(kind)
++	c.made.Add(1)
++	runtime.AddCleanup(p, func(c *ctr) { c.collected.Add(1) }, c)
++}
++
++func Closed(kind string) { get(kind).closed.Add(1) }
++
++var once sync.Once
++
++func Start() {
++	once.Do(func() {
++		go func() {
++			for range time.Tick(3 * time.Second) {
++				runtime.GC()
++				runtime.GC()
++				var ms runtime.MemStats
++				runtime.ReadMemStats(&ms)
++				mu.Lock()
++				s := fmt.Sprintf("DBG709 heap=%dMiB", ms.HeapAlloc>>20)
++				for k, c := range ctrs {
++					s += fmt.Sprintf(" %s(made=%d closed=%d gc=%d)", k, c.made.Load(), c.closed.Load(), c.collected.Load())
++				}
++				mu.Unlock()
++				fmt.Fprintln(os.Stderr, s)
++			}
++		}()
++	})
++}
+--- a/internal/plugins/runtime.go
++++ b/internal/plugins/runtime.go
+@@ -6,6 +6,7 @@
+ package plugins
+ 
+ import (
++	"jul/internal/dbg709"
+ 	"context"
+ 	"encoding/json"
+ 	"errors"
+@@ -581,6 +582,7 @@
+ 	p.mgr = m
+ 	p.gov = m.gov
+ 	m.track(p)
++	dbg709.Track("plugin", p)
+ 	return p, nil
+ }
+ 
+@@ -982,6 +984,7 @@
+ 	if p == nil {
+ 		return
+ 	}
++	dbg709.Closed("plugin")
+ 	p.abortPreparations()
+ 	if p.mgr != nil {
+ 		p.mgr.forget(p)
+--- a/internal/server/server.go
++++ b/internal/server/server.go
+@@ -6,6 +6,7 @@
+ package server
+ 
+ import (
++	"jul/internal/dbg709"
+ 	"context"
+ 	"crypto/sha256"
+ 	"crypto/tls"
+@@ -450,6 +451,8 @@
+ 
+ func newHandlerGen(parent context.Context, grace time.Duration, handlers map[string]http.Handler, snapshots upstream.SnapshotMap, genID uint64) *handlerGen {
+ 	g := &handlerGen{handlers: handlers, snapshots: snapshots, genID: genID, drained: make(chan struct{})}
++	dbg709.Track("gen", g)
++	dbg709.Start()
+ 	g.bg = background.NewGroup(parent, background.GroupOptions{
+ 		Generation:   genID,
+ 		MaxOperation: grace,
+@@ -503,6 +506,7 @@
+ func (g *handlerGen) doRetire() bool {
+ 	retired := false
+ 	g.retireOnce.Do(func() {
++		dbg709.Closed("gen")
+ 		if g.bg != nil {
+ 			g.bg.Cancel()
+ 		}
+--- a/internal/respwriter/exchange.go
++++ b/internal/respwriter/exchange.go
+@@ -4,6 +4,8 @@
+ package respwriter
+ 
+ import (
++	"fmt"
++	"os"
+ 	"bufio"
+ 	"context"
+ 	"crypto/tls"
+@@ -899,6 +901,9 @@
+ 		_ = ctrl.SetWriteDeadline(now)
+ 	}
+ 	cancel, rawConn := ex.cancel, ex.rawH1Conn
++	if ex.protoMajor == 1 && wroteHdr && !ex.closed.Load() {
++		fmt.Fprintf(os.Stderr, "DBG709 h1-abort-after-header force=%v t=%s\n", forceConnClose, time.Now().Format("15:04:05.000"))
++	}
+ 	ex.mu.Unlock()
+ 
+ 	if cancel != nil {

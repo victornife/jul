@@ -465,6 +465,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   read it. Concurrent body-reading requests × `max_request_body` is no longer
   limited by `max_instances`; an aggregate bound remains #700.
 
+- Reloads no longer keep retired handler generations in memory (#709). The
+  exchange registry's retirement history kept each closed exchange's request
+  context, and for 101 upgrades its upstream leg. That pinned the old
+  generation, including plugin instances and guest memory, for up to 32
+  further reloads. Under frequent reloads with WASM plugins, this could
+  exhaust memory with no inspection bytes held. Responses and streams aborted
+  by retirement still end with a client-visible error, as designed.
+
 - Route selectors now count declaration order across matching server blocks
   (#643). Console edits use the projection revision. Old cross-block selectors
   and batches that could shift later ordinal targets are refused before writes;

@@ -186,6 +186,7 @@ These are intentional and are **not** technical debt:
 | #415 | semantic no-op skipped repair of a degraded admin runtime | `TestServingChangeForcesReloadWhenAdminRuntimeDegraded`, `TestServingChangeStaysNoChangeWhenAdminRuntimeHealthy`, `TestRuntimeHealthyDetectsDegradedAuditSinkAndRepairAfterFix` |
 | #420 | `sync.Pool` dropped wazero instances that needed an explicit Close | `TestPooledInstanceRetiresAfterMaxInvocations` |
 | #427 | gRPC health probe connections/checkers must not leak across churn | `TestProbeGRPCChurnQuiescence`, `TestHealthProbeCancelledAndFencedOnPoolRetirement` |
+| #709 | the exchange registry's bounded retirement history (32 publishes) kept closed exchanges' request contexts, upgraded sessions and upstream legs, pinning retired handler generations and their guest memory | `TestRetiredExchangeHistoryDropsRequestContext`, `TestRetiredUpgradedExchangeHistoryDropsBackend` |
 
 ## Test vocabulary
 

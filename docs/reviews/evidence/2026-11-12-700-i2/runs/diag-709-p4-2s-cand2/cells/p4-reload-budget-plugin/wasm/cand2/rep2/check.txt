@@ -1,0 +1,1 @@
+/home/victornf/jul-i2-evidence/frozen/diag-709-p4-2s-cand2/cells/p4-reload-budget-plugin/wasm/cand2/rep2/config.toml is valid (structural + runtime)

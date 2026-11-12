@@ -265,6 +265,7 @@ under harness plan v3. They are not A1–A18 qualification, which remains I6.
   No v1 or v2 value is reused or merged.
 - **Targets.**
   - `cand` is `b1a670fe` (I2).
+  - `cand2` is `a8be1417`, I2 with the main #709 fix, measured only in the `p4` re-run.
   - `main` is `d8d0520b` (pre-I2 main).
   - `base` is the ADR source `858590dc`, as its historical go1.27.3 build.
   - `base4` is the I5 go1.27.4 rebuild of `858590dc`. It differs in toolchain and in linkage
@@ -272,8 +273,12 @@ under harness plan v3. They are not A1–A18 qualification, which remains I6.
 
   `main`, `cand`, the harness and both guests were rebuilt from `git archive` exports and
   reproduced their sha256 values.
-- **Head versus measured binary.** The head adds `e1c6357c` (section 4) to the measured
-  `b1a670fe`. It changes only the `fetch` host function, which no campaign fixture calls.
+- **Head versus measured binary.** The head adds two runtime commits to the measured `b1a670fe`:
+  - `e1c6357c` (section 4) changes only the `fetch` host function, which no campaign fixture
+    calls.
+  - `a8be1417` fixes #709 (section 3.2). It changes reload retention, so `p4` was re-measured as
+    `cand2`. Otherwise it only clears fields of exchanges that have already closed.
+  - `2a9ced55` completes #709 for 101-upgraded exchanges, which no campaign fixture uses.
 - **Envelope.** Verified on every run: 2 vCPU, 768 MiB, no swap, `GOMAXPROCS=2`. The client and
   origin run outside the envelope.
 - **Budgets.** Each fixture has an admissible budget that passes the real minimum-budget
@@ -293,7 +298,54 @@ under harness plan v3. They are not A1–A18 qualification, which remains I6.
 | Valid slow uploads keep working and spend no guest time while arriving (#699) | `f4-stalled-body`, `r1-slow-upload-c16-h1` | Default 60 s: slow H1/H2/H3 uploads succeeded in 7.6–8.1 s with healthy siblings, and stalled uploads reached the client watchdog, unchanged from `main`.<br>r1: 3.2 rps on both, peak 234 vs 225 MiB. |
 | Non-body plugins stream and charge only host state | `p3-nobody-plugin-h1`, `r2-fast-nobody-h1` | Governed bytes ≤ 648 KiB and ≤ 27 leases, drained to 0. Bodies are not prepared. See 3.3 for peaks. |
 | Large bodies stay bounded | `p1-large-body-plugin-h1` (pool 4) | `cand`: peak 461 MiB (`main` 481); governed bytes up to 48 MiB; drained to 0. |
-| Reload and budget churn drain | `p4-reload-budget-plugin` | `cand`:<br>• valid, including the v3 drain rule;<br>• 8 reloads: 7 applied live (budgets 128m/256m/512m, enforce↔observe) and a `1m` budget refused by minimum-budget validation;<br>• 63,760 loads, all correct; in-flight H2 streams reset on generation drain: 48 (`main` 80);<br>• leases and bytes 0 after recovery. |
+| Reload and budget churn drain | `p4-reload-budget-plugin` | `cand`:<br>• valid, including the v3 drain rule;<br>• 8 reloads: 7 applied live (budgets 128m/256m/512m, enforce↔observe) and a `1m` budget refused by minimum-budget validation;<br>• 63,760 loads, all correct; in-flight H2 streams reset on generation drain: 48 (`main` 80);<br>• leases and bytes 0 after recovery.<br>After the #709 fix, `cand2` (3 repetitions, `runs/i2-p4-709fix`): peak 500–501 MiB, below the 576 MiB objective (`main` 658–677); post-GC heap 69–103 MiB (`main` 504–525); no OOM; every reload acknowledged; leases and bytes 0. |
+
+#### Reload retirement (#709): fixed in this PR
+
+Under reload churn, retired handler generations stayed reachable, with their plugins, wazero
+instances and guest memory. I2 must keep reload and retirement correct, so this is fixed here in
+two separate commits, `a8be1417` and `2a9ced55`, even though the defect predates I2.
+
+- **Root cause.** `respwriter.ExchangeRegistry.PublishGeneration` keeps the last 32 generation
+  steps so later recomputes can report outcomes. Each step's tracker keeps its retired
+  `*ActiveExchange`. A closed exchange still held its `cancel` closure, an unused `ctx` field and
+  the raw H1 connection. The request context carries the generation lease (`background.WithLease`),
+  which reaches the `handlerGen`. Every stream retired by a reload therefore pinned its generation
+  for up to 32 further reloads. Governed charges were never involved; leases and bytes drained to
+  0 in every run before and after the fix.
+- **Fix.** `markClosed` now drops `cancel`, `rawH1Conn` and `controller` under the exchange lock
+  before cancelling, and the unused `ctx` field is gone. `triggerStreamAbort` reads both under the
+  lock and tolerates a closed exchange. `TestRetiredExchangeHistoryDropsRequestContext` fails
+  without the fix.
+- **Upgraded exchanges.** A closed 101 upgrade (WebSocket or opaque) also kept its session for
+  outcome reporting. The session keeps the upstream leg, which is the proxy's attempt body and
+  holds the request context. In `2a9ced55` the exchange keeps only the session's shared
+  clean-handshake flag, and `markClosed` drops the session and upstream references.
+  `TestRetiredUpgradedExchangeHistoryDropsBackend` fails without it. No campaign fixture
+  upgrades, so this path has unit evidence only.
+- **Outcome reporting** (graceful, forced, within bound) reads the same values as before.
+- **Attribution.** Instrumented diagnostic builds (`runs/diag-709-instr-*`,
+  `attachments/diag-709-instrumentation.patch`) counted objects created, closed and collected
+  after two GCs at the end of `p4`:
+
+  | Build | Generations made / closed / collected | Plugins made / closed / collected | Heap |
+  | --- | --- | --- | --- |
+  | Before the fix | 15 / 14 / 8 | 34 / 32 / 20 | 523 MiB |
+  | With the fix | 15 / 14 / 14 | 34 / 32 / 32 | 99 MiB |
+
+- **Faster churn.** A labelled re-check with the pre-freeze `ia-wip` harness (2 s unacknowledged
+  reloads, default pools, no `GOMEMLIMIT`, `runs/diag-709-p4-2s-cand2`) completed both repetitions
+  with 22 reloads, peaks of 587 and 542 MiB and post-GC heaps of 98 and 122 MiB. The pre-freeze
+  2 s runs of `main` and `cand` were OOM-killed. The identities differ, so this is a diagnostic,
+  not a comparison.
+- **H1 and H2 errors during reload.** A plugin change makes the route `uncertain`, so the
+  ADR 0026/#642 retirement contract aborts old-generation exchanges: at once if a header was
+  already written, otherwise after the 1 s grace. An H1 abort closes the connection. Three
+  instrumented `p4` runs logged 4, 0 and 1 H1 aborts after a written header and saw exactly 4, 0
+  and 1 H1 client errors (`body-eof`, `reset`, `eof`). Each failure is reported to the client as
+  an error, never as a complete response. These are designed retirement aborts, not truncation
+  defects, and occur on `main` as well. The in-flight H2 `stream-reset` counts are the same
+  contract.
 
 ### 3.3 Findings: not I2 regressions, and owned elsewhere
 
@@ -301,8 +353,6 @@ Each finding is preserved as a `correct=false`, invalid or OOM run.
 
 | Finding | Evidence | Attribution and owner |
 | --- | --- | --- |
-| Generations retired under reload churn keep guest memory reachable | `p4`:<br>• post-GC heap 519 MiB on `main` and 533 MiB on `cand`; peaks 671/678 MiB.<br>• Pre-freeze runs at a 2 s reload interval were OOM-killed on both binaries with zero governed bytes.<br>• `pprof/` holds the captures: 323 MiB in wazero `MemoryInstance.Grow`, with 2 live instances. | Pre-existing on `main`. Reload/generation lifecycle (`internal/server`, `internal/plugins` `Set`/`Manager`, `internal/app`). Follow-up #709; I6 sizing. |
-| Rare H1 truncation during reload churn | `p4` `main`: `error:body-eof` ×1, about 1 per 25k–72k requests, also in pre-freeze runs | Pre-existing on `main`; #709. |
 | Default plugin pools exceed the envelope | Pre-freeze `p1`/`p2` default-pool runs were OOM-killed on both binaries. `p3` peaks track live instances, not governed bytes:<br>• frozen `cand` 704 MiB with 32 instances;<br>• the 5-repetition investigation: `main` 339–531 MiB (12–26 instances), `cand` 313–550 MiB (13–25 instances). | Static guest-pool term (`max_instances × memory_limit`), outside the dynamic governor by ADR 0032. I6 sizing; operators size pools. |
 | Connection buffers under no-backoff clients | `p2h-saturation-hostile-h1` `cand`: OOM-killed with governed bytes at 126 MiB. In the pre-freeze `memory.stat`, socket memory reached 286 MiB beside 393 MiB anon. | ADR 0032 §10: kernel and connection buffers are not governed. The cell is a frozen record cell, never a protection claim. `main` does not reject, so it shows no flood. I6. |
 | WAF state is uncharged | `s6`/`s7`/`s8` `both`: peaks 446–652 MiB on both binaries | I3 (and I6). `both` cells are wrapper-integration checks only. |
@@ -367,3 +417,4 @@ c8).
 | Rubber-duck harness review | Plan v3 changes (two rounds) | Unexercised budget churn, drain gauges and reload cadence were fixed; the final round found no blocking issue |
 | Code review agent | Full I2 diff at `b1a670fe` | No significant issue |
 | Security review agent | Full I2 diff at `b1a670fe` | No vulnerability found. One robustness note was fixed in `e1c6357c`: the late fetch-body waiter goroutine could outlive a request whose transport never closes the body. It now also ends with the request context; the copy stays charged until lease close (`TestFetchBodyHeldWaiterEndsWithRequest`) |
+| Code review agent | #709 fixes `a8be1417` and `2a9ced55` (locking, outcome reporting, upgrade ordering, regression tests) | One data race fixed before push: `Hijack` re-read `upgradedBack` after unlocking while `markClosed` could clear it. It now reads it once under the lock. The regression tests passed 200 times under `-race -cpu 1,2,8` |

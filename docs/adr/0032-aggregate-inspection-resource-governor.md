@@ -1235,8 +1235,9 @@ Measurement under harness plan v3 covers several behaviours:
 
 The unsaturated 10% rule found no pooled failure but stayed inconclusive because of host noise.
 That makes throughput an I6 validation gap. Peaks above 576 MiB in the plugin cells come from
-static guest pools, from pre-existing generation retention under reload churn (#709), or
-from ungoverned socket buffers (§10). They do not come from governed bytes.
+static guest pools or from ungoverned socket buffers (§10). They do not come from governed bytes.
+The I2 PR also fixes a pre-existing retention of retired handler generations under reload churn
+(#709). With the fix, the p4 reload cell peaks at about 500 MiB.
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.
