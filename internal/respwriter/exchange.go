@@ -372,7 +372,6 @@ func (r *ExchangeRegistry) Admit(w http.ResponseWriter, req *http.Request, coord
 		protoMajor: req.ProtoMajor,
 		reqMethod:  req.Method,
 		reqUpgrade: strings.TrimSpace(req.Header.Get("Upgrade")),
-		ctx:        exCtx,
 		cancel:     exCancel,
 		rawH1Conn:  rawConn,
 		controller: http.NewResponseController(w),
@@ -816,7 +815,10 @@ type ActiveExchange struct {
 	reqMethod  string
 	reqUpgrade string
 
-	ctx        context.Context
+	// cancel, rawH1Conn and controller reach the request context (and so its
+	// handler generation) and the connection. They are guarded by mu and
+	// released when the exchange closes, because PublishGeneration keeps
+	// retired exchanges in its bounded history for outcome reporting (#709).
 	cancel     context.CancelFunc
 	rawH1Conn  net.Conn
 	controller *http.ResponseController
@@ -896,13 +898,16 @@ func (ex *ActiveExchange) triggerStreamAbort(forceConnClose bool) {
 		_ = ctrl.SetReadDeadline(now)
 		_ = ctrl.SetWriteDeadline(now)
 	}
+	cancel, rawConn := ex.cancel, ex.rawH1Conn
 	ex.mu.Unlock()
 
-	ex.cancel()
-	if forceConnClose && ex.protoMajor == 1 && ex.rawH1Conn != nil {
+	if cancel != nil {
+		cancel()
+	}
+	if forceConnClose && ex.protoMajor == 1 && rawConn != nil {
 		ex.forcedClose.Store(true)
 		ex.gracefulDone.Store(false)
-		_ = ex.rawH1Conn.Close()
+		_ = rawConn.Close()
 	}
 }
 
@@ -990,7 +995,11 @@ func (ex *ActiveExchange) markClosed() {
 	}
 	if ex.closed.CompareAndSwap(false, true) {
 		ex.closedAt.Store(time.Now().UnixNano())
-		ex.cancel()
+		ex.mu.Lock()
+		cancel := ex.cancel
+		ex.cancel, ex.rawH1Conn, ex.controller = nil, nil, nil
+		ex.mu.Unlock()
+		cancel()
 		ex.reg.mu.Lock()
 		delete(ex.reg.active, ex.id)
 		recompute := ex.reg.lastRecomputeFn

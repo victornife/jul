@@ -1260,3 +1260,46 @@ func TestR4AndR5DeadlineAndRemovedExchangeIsolation(t *testing.T) {
 		}
 	})
 }
+
+// TestRetiredExchangeHistoryDropsRequestContext pins #709: PublishGeneration
+// keeps retired exchanges in its bounded history for outcome reporting, and a
+// closed exchange there must not keep its request context (which carries the
+// handler generation and its plugin runtimes) reachable.
+func TestRetiredExchangeHistoryDropsRequestContext(t *testing.T) {
+	type genPin struct{ _ [1 << 16]byte }
+	type pinKey struct{}
+
+	reg := NewExchangeRegistry()
+	reg.Grace = time.Hour
+	reg.Bound = time.Hour
+	reg.SetInitialGeneration(1)
+
+	collected := make(chan struct{})
+	release, wait := func() (func(), func() []EntryRetirementResult) {
+		pin := &genPin{}
+		runtime.AddCleanup(pin, func(ch chan struct{}) { close(ch) }, collected)
+		req, _ := http.NewRequestWithContext(context.WithValue(context.Background(), pinKey{}, pin), http.MethodPost, "https://example.com/", nil)
+		req.ProtoMajor = 2
+		_, _, _, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1, ListenAddr: "127.0.0.1:8443", RouteID: "plugin"})
+		wait := reg.PublishGeneration(1, 2, []EntryTransition{{
+			FromRouteID: "plugin", ToRouteID: "plugin", Retire: true, DisplayLabel: "plugin",
+		}})
+		return release, wait
+	}()
+	release()
+	results := wait()
+	if len(results) != 1 || results[0].EndedExchanges != 1 {
+		t.Fatalf("retirement results = %+v, want the closed exchange still reported", results)
+	}
+
+	for range 50 {
+		runtime.GC()
+		select {
+		case <-collected:
+			runtime.KeepAlive(reg)
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatal("a closed exchange kept in the retirement history still pins its request context")
+}
