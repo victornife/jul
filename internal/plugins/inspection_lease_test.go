@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -272,6 +273,30 @@ func (w *deadlineWriter) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
+// h1Conn stands in for a registered HTTP/1 connection: like net/http's own,
+// a past read deadline or a close ends the read in progress.
+type h1Conn struct {
+	net.Conn
+	body *stallBody
+}
+
+func (c h1Conn) SetReadDeadline(t time.Time) error {
+	if !t.IsZero() && !t.After(time.Now()) {
+		c.body.fail(os.ErrDeadlineExceeded)
+	}
+	return nil
+}
+
+func (c h1Conn) Close() error {
+	c.body.fail(net.ErrClosed)
+	return nil
+}
+
+// withH1Conn registers body's connection on r, as Jul's server does.
+func withH1Conn(r *http.Request, body *stallBody) *http.Request {
+	return r.WithContext(reqdeadline.ConnContext(r.Context(), h1Conn{body: body}))
+}
+
 // stallBody delivers its data, then blocks until released or failed.
 type stallBody struct {
 	data    *bytes.Reader
@@ -357,6 +382,7 @@ func TestBodyDeadlineOutcomes(t *testing.T) {
 			dw := &deadlineWriter{ResponseRecorder: w.(*httptest.ResponseRecorder), body: body, refuse: c.refuse}
 			if c.supported {
 				w = dw
+				r = withH1Conn(r, body)
 			}
 			// A supported writer's upload stalls until the deadline aborts it;
 			// otherwise it completes after the timeout has passed.
@@ -411,7 +437,8 @@ func TestRetirementAbortIsStickyAndAttributed(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/", nil)
 	r.Body, r.ContentLength = body, -1
 	dw := &deadlineWriter{ResponseRecorder: httptest.NewRecorder(), body: body}
-	owner := reqdeadline.New(dw, reqdeadline.ProtocolOf(r))
+	r = withH1Conn(r, body)
+	owner := reqdeadline.NewForRequest(dw, r)
 	r = r.WithContext(reqdeadline.With(r.Context(), owner))
 	var hits atomic.Int64
 	done := make(chan struct{})

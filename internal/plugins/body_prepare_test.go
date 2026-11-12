@@ -974,9 +974,10 @@ func TestPreparationPreservesTrailers(t *testing.T) {
 	}
 }
 
-// A response writer without read-deadline support cannot have its body read
-// ended by a deadline: the warning is logged, the read is interrupted by
-// closing its body, and the request fails as retired without a guest call.
+// An HTTP/2 response writer without read-deadline support cannot have its body
+// read ended by a deadline: the warning is logged, the read is interrupted by
+// closing its body (which, unlike an HTTP/1 body, ends a blocked read), and
+// the request fails as retired without a guest call.
 func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
 	m, hooks := bodyManager(t)
 	s := buildSet(t, m, map[string]config.PluginConfig{"g": bodyGuestConfig(ABIJulV1, guestEcho)})
@@ -984,6 +985,7 @@ func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
 	s.plugins["g"].log = slog.New(slog.NewTextHandler(&logs, nil))
 	pr, pw := io.Pipe()
 	req := httptest.NewRequest(http.MethodPost, "/p", pr)
+	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/2.0", 2, 0
 	rec := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() { s.Handler("g").ServeHTTP(rec, req); close(done) }()
