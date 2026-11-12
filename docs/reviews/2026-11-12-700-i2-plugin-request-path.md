@@ -211,8 +211,10 @@ this section governs.
 - **Fetch request copy (R1).** At most one copy is live per invocation. The fixed grace is
   `fetchBodyCloseGrace` = 2 s. A copy still held by the transport after the grace stays charged
   and is refunded when the transport closes it, or at lease close if that comes first (a release
-  after close is a no-op). Tests: `TestFetchBodyCopyHeldPastGraceRefundsOnLateClose` and
-  `TestFetchBodyRefusesReplayAfterSeal`.
+  after close is a no-op). The goroutine waiting for that late close ends with the request. A
+  copy the transport still holds then stays charged until the lease closes. Tests:
+  `TestFetchBodyCopyHeldPastGraceRefundsOnLateClose`, `TestFetchBodyHeldWaiterEndsWithRequest`
+  and `TestFetchBodyRefusesReplayAfterSeal`.
 - **Fetch read.** A manual read loop replaces `io.ReadFull`. A response cut short of its declared
   length (`io.ErrUnexpectedEOF` from the transport) is therefore an error, not a short success.
   This was found and fixed during implementation (`TestFetchResponseChargeBySize/cut_short`).

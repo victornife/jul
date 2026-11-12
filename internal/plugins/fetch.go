@@ -35,6 +35,10 @@ type ipResolver interface {
 // the charged request-body copy before the host call returns.
 var fetchBodyCloseGrace = 2 * time.Second
 
+// fetchHeldWaiterEnded is a test hook, called when a late-close waiter ends
+// with its request instead of the transport closing the copy.
+var fetchHeldWaiterEnded = func() {}
+
 // doFetch performs a guarded outbound HTTP request for a plugin holding the
 // fetch capability. It enforces the allow-list, an SSRF address guard, a
 // per-call timeout, and a response-size cap, and refuses redirects to hosts that
@@ -55,7 +59,20 @@ func (p *plugin) doFetch(parent context.Context, inv *invocation, method, rawURL
 				p.log.Warn("plugin: fetch request body still held by the transport after the call; refunding at lease close",
 					"name", p.name)
 			}
-			go func(c *chargedBuf) { <-fb.idle; c.release() }(body)
+			// The waiter ends with the request: a copy still held then stays
+			// charged until the lease closes, which refunds it.
+			var reqDone <-chan struct{}
+			if inv != nil && inv.r != nil {
+				reqDone = inv.r.Context().Done()
+			}
+			go func(c *chargedBuf) {
+				select {
+				case <-fb.idle:
+					c.release()
+				case <-reqDone:
+					fetchHeldWaiterEnded()
+				}
+			}(body)
 			return
 		}
 		body.release()
