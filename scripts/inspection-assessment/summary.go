@@ -214,6 +214,38 @@ type ComparisonSummary struct {
 	Regression *float64 `json:"median_regression"`
 }
 
+// ClassRow is one workload class of one phase of one repetition. Cells
+// summarise only the primary class, so probes, slow and warm classes and
+// later phases are reported here.
+type ClassRow struct {
+	Scenario    string   `json:"scenario"`
+	Variant     string   `json:"variant"`
+	Target      string   `json:"target"`
+	Run         string   `json:"run"`
+	Rep         int      `json:"rep"`
+	Phase       string   `json:"phase"`
+	Class       string   `json:"class"`
+	Proto       string   `json:"proto"`
+	Concurrency int      `json:"concurrency"`
+	Attempts    int      `json:"attempts"`
+	Good        int      `json:"verified_in_window"`
+	Goodput     float64  `json:"goodput_rps"`
+	CrossedIn   int      `json:"crossed_in_from_warmup"`
+	Outstanding int      `json:"outstanding_at_window_end"`
+	P99ms       *float64 `json:"p99_ms"`
+	Outcomes    string   `json:"outcomes"`
+}
+
+// ProbeRow is one F4 probe of one repetition.
+type ProbeRow struct {
+	Scenario string `json:"scenario"`
+	Variant  string `json:"variant"`
+	Target   string `json:"target"`
+	Run      string `json:"run"`
+	Rep      int    `json:"rep"`
+	F4Result
+}
+
 // Summary is the deterministic report.
 type Summary struct {
 	PlanVersion string              `json:"plan_version"`
@@ -223,8 +255,18 @@ type Summary struct {
 	Targets     []TargetIdentity    `json:"targets"`
 	Cells       []CellSummary       `json:"cells"`
 	Comparisons []ComparisonSummary `json:"comparisons"`
+	Classes     []ClassRow          `json:"classes"`
+	Probes      []ProbeRow          `json:"f4_probes,omitempty"`
 	Failures    []string            `json:"failed_or_invalid_runs"`
 	Boundary    string              `json:"acceptance_boundary"`
+}
+
+func outcomes(m map[string]int) string {
+	var parts []string
+	for _, k := range sortedKeys(m) {
+		parts = append(parts, fmt.Sprintf("%s ×%d", k, m[k]))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // BuildSummary builds the report; pairs are baseline:candidate labels.
@@ -249,6 +291,16 @@ func BuildSummary(runs []LoadedRun, pairs [][2]string) Summary {
 				cells[key] = c
 			}
 			c.Points = append(c.Points, PointOf(lr.Manifest.RunID, r))
+			for _, ph := range r.Phases {
+				for _, cs := range ph.Classes {
+					s.Classes = append(s.Classes, ClassRow{Scenario: r.Scenario, Variant: r.Variant, Target: r.Target, Run: lr.Manifest.RunID, Rep: r.Rep,
+						Phase: ph.Name, Class: cs.Workload, Proto: cs.Proto, Concurrency: cs.Concurrency, Attempts: cs.Attempts, Good: cs.GoodN,
+						Goodput: cs.GoodputRPS, CrossedIn: cs.CrossedIn, Outstanding: cs.Outstanding, P99ms: cs.P99ms, Outcomes: outcomes(cs.Classes)})
+				}
+			}
+			for _, f := range r.F4 {
+				s.Probes = append(s.Probes, ProbeRow{Scenario: r.Scenario, Variant: r.Variant, Target: r.Target, Run: lr.Manifest.RunID, Rep: r.Rep, F4Result: f})
+			}
 			id := fmt.Sprintf("%s %s/%s/%s rep%d", lr.Manifest.RunID, r.Scenario, r.Variant, r.Target, r.Rep)
 			if !r.Valid {
 				s.Failures = append(s.Failures, id+": instrument-invalid: "+strings.Join(PointOf("", r).Reasons, "; "))
@@ -261,6 +313,15 @@ func BuildSummary(runs []LoadedRun, pairs [][2]string) Summary {
 	slices.Sort(s.Runs)
 	slices.SortFunc(s.Targets, func(a, b TargetIdentity) int { return strings.Compare(a.Label, b.Label) })
 	slices.Sort(s.Failures)
+	cellOrder := func(sc, v, t, run string, rep int) string {
+		return fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%09d", sc, v, t, run, rep)
+	}
+	slices.SortStableFunc(s.Classes, func(a, b ClassRow) int {
+		return strings.Compare(cellOrder(a.Scenario, a.Variant, a.Target, a.Run, a.Rep), cellOrder(b.Scenario, b.Variant, b.Target, b.Run, b.Rep))
+	})
+	slices.SortStableFunc(s.Probes, func(a, b ProbeRow) int {
+		return strings.Compare(cellOrder(a.Scenario, a.Variant, a.Target, a.Run, a.Rep), cellOrder(b.Scenario, b.Variant, b.Target, b.Run, b.Rep))
+	})
 	for _, k := range sortedKeys(cells) {
 		c := cells[k]
 		slices.SortFunc(c.Points, func(a, b Point) int {
@@ -329,6 +390,21 @@ func (s Summary) Markdown() string {
 		b.WriteString("\n## Comparisons (informational; not A13 acceptance)\n\n| Scenario | Variant | Baseline | Candidate | Median regression | Verdict |\n| --- | --- | --- | --- | ---: | --- |\n")
 		for _, c := range s.Comparisons {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n", c.Scenario, c.Variant, c.Baseline, c.Candidate, fnum(c.Regression, 3), c.Verdict)
+		}
+	}
+	b.WriteString("\n## Phases and classes\n\nOne row per repetition, phase and workload class. Goodput counts verified responses that started and finished in the window; requests crossing in from warm-up and those outstanding at the window end are excluded from it.\n\n")
+	b.WriteString("| Scenario | Variant | Target | Run | Rep | Phase | Class | Proto | C | Attempts | Verified in window | Goodput rps | Crossed in | Outstanding | p99 ms | Outcomes |\n")
+	b.WriteString("| --- | --- | --- | --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+	for _, c := range s.Classes {
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %s | %s | %s | %d | %d | %d | %.1f | %d | %d | %s | %s |\n", c.Scenario, c.Variant, c.Target, c.Run, c.Rep,
+			c.Phase, c.Class, c.Proto, c.Concurrency, c.Attempts, c.Good, c.Goodput, c.CrossedIn, c.Outstanding, fnum(c.P99ms, 1), c.Outcomes)
+	}
+	if len(s.Probes) > 0 {
+		b.WriteString("\n## F4 probes\n\n| Scenario | Variant | Target | Run | Rep | Proto | Mode | Upload | Upload s | Client watchdog ended it | Sibling | Sibling ms | Same connection | Dials/expected |\n")
+		b.WriteString("| --- | --- | --- | --- | ---: | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |\n")
+		for _, p := range s.Probes {
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %s | %s | %s | %.1f | %t | %s | %.0f | %t | %d/%d |\n", p.Scenario, p.Variant, p.Target, p.Run, p.Rep,
+				p.Proto, p.Mode, p.UploadClass, p.UploadSeconds, p.WatchdogFired, p.SiblingClass, p.SiblingMs, p.SameConnection, p.Dials, p.WantDials)
 		}
 	}
 	b.WriteString("\n## Failed, invalid or inconclusive runs\n\n")

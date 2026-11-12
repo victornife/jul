@@ -144,7 +144,14 @@ Each result records the effective envelope that the kernel applied: `memory.max`
 - a result whose scenario hash differs from the manifest.
 
 `summarize` rejects any set of runs that mixes plans, rules, profiles, envelope modes, faults,
-guests, or a target label with different binaries or adapters.
+guests, or a target label with different binaries or adapters. Its report has one row per cell
+(the primary class of the first phase), comparisons, a row per repetition, phase and workload class
+(including probe, slow, warm and later-phase classes), and the F4 probe outcomes.
+
+`counter_deltas` in each result are diagnostic Jul counters (WAF outcomes, plugin invocations,
+errors and traps, instance waits, admission, cache, reloads). They do not affect any verdict. A
+test checks each label filter against the values Jul documents, so a filter cannot read a false
+zero.
 
 ### Interpreting results
 

@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -234,6 +235,37 @@ func TestMetricsParsing(t *testing.T) {
 	}
 	if f := Foundation(map[string]float64{"jul_inspection_x": 1, "go_y": 2}); len(f) != 1 {
 		t.Errorf("foundation %v", f)
+	}
+}
+
+// TestCounterFiltersMatchJulLabels guards against a filter on a label value
+// Jul never emits, which would read as a false zero. Jul exposes a labelled
+// series only after observing it, so each value is checked against the
+// enumeration in the metric's Help text instead of a scrape.
+func TestCounterFiltersMatchJulLabels(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "internal", "observability", "metrics.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	for _, c := range CounterMetrics {
+		i := strings.Index(text, `Name: "`+c.Metric+`"`)
+		if i < 0 {
+			t.Errorf("%s: metric %s not defined by Jul", c.Key, c.Metric)
+			continue
+		}
+		help := text[i:]
+		help = help[:strings.Index(help, "\n\t\t}")]
+		for _, f := range c.Filters {
+			label, value, _ := strings.Cut(f, "=")
+			value = strings.Trim(value, `"`)
+			if label == "pool" { // the harness names this upstream in its own configuration
+				continue
+			}
+			if !regexp.MustCompile(`[(/]` + regexp.QuoteMeta(value) + `[/)]`).MatchString(help) {
+				t.Errorf("%s: %s is not a documented %s value", c.Key, f, c.Metric)
+			}
+		}
 	}
 }
 

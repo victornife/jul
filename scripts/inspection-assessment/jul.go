@@ -444,20 +444,23 @@ var CounterMetrics = []struct {
 	Key, Metric string
 	Filters     []string
 }{
-	{"waf_tx_pass", "jul_waf_transactions_total", []string{`outcome="pass"`}},
+	{"waf_tx_clean", "jul_waf_transactions_total", []string{`outcome="clean"`}},
 	{"waf_tx_all", "jul_waf_transactions_total", nil},
 	{"waf_tx_body_limit", "jul_waf_transactions_total", []string{`outcome="rejected_body_limit"`}},
+	{"waf_tx_inspection_error", "jul_waf_transactions_total", []string{`outcome="inspection_error"`}},
 	{"plugin_invocations", "jul_plugin_invocations_total", nil},
-	{"plugin_invocations_ok", "jul_plugin_invocations_total", []string{`result="ok"`}},
+	{"plugin_invocations_error", "jul_plugin_invocations_total", []string{`result="error"`}},
+	{"plugin_panics", "jul_plugin_panics_total", nil},
 	{"plugin_resp_invocations", "jul_plugin_response_invocations_total", nil},
+	{"plugin_resp_error", "jul_plugin_response_invocations_total", []string{`result="error"`}},
 	{"plugin_resp_unavailable", "jul_plugin_response_body_unavailable_total", nil},
 	{"plugin_waits_acquired", "jul_plugin_instance_waits_total", []string{`result="acquired"`}},
 	{"plugin_waits_rejected", "jul_plugin_instance_waits_total", []string{`result="rejected"`}},
 	{"admission_rejected", "jul_upstream_admission_rejected_total", []string{`pool="limited"`}},
-	{"cache_hit", "jul_cache_events_total", []string{`state="hit"`}},
-	{"cache_miss", "jul_cache_events_total", []string{`state="miss"`}},
-	{"reload_success", "jul_reload_total", []string{`outcome="success"`}},
-	{"reload_failure", "jul_reload_total", []string{`outcome="failure"`}},
+	{"cache_hit", "jul_cache_events_total", []string{`state="HIT"`}},
+	{"cache_miss", "jul_cache_events_total", []string{`state="MISS"`}},
+	{"reload_applied", "jul_reload_total", []string{`outcome="applied_live"`}},
+	{"reload_not_applied", "jul_reload_total", []string{`outcome="not_applied"`}},
 	{"transport_retired", "jul_transport_retired_total", nil},
 }
 

@@ -389,7 +389,7 @@ func oneLine(r RunResult) string {
 
 func verifyCmd(args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: verify RUN_DIR...")
+		return errors.New("usage: verify RUN_DIR [RUN_DIR]")
 	}
 	for _, d := range args {
 		if err := VerifyRun(d); err != nil {

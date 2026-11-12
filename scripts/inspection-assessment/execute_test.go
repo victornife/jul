@@ -127,6 +127,19 @@ func TestExecuteEndToEndVerifiesAndSummarises(t *testing.T) {
 	if len(s.Comparisons) != 4 {
 		t.Errorf("comparisons: %+v", s.Comparisons)
 	}
+	wantRows, wantProbes := 0, 0
+	for _, r := range runs[0].Results {
+		for _, ph := range r.Phases {
+			wantRows += len(ph.Classes)
+		}
+		wantProbes += len(r.F4)
+	}
+	if len(s.Classes) != wantRows || len(s.Probes) != wantProbes || wantProbes == 0 {
+		t.Errorf("summary rows: %d classes (want %d), %d probes (want %d)", len(s.Classes), wantRows, len(s.Probes), wantProbes)
+	}
+	if md := s.Markdown(); !strings.Contains(md, "## Phases and classes") || !strings.Contains(md, "## F4 probes") {
+		t.Error("summary omits class or probe detail")
+	}
 	for _, c := range s.Comparisons {
 		if c.Verdict != VerdictInsufficient {
 			t.Errorf("one repetition must be insufficient, got %s", c.Verdict)
