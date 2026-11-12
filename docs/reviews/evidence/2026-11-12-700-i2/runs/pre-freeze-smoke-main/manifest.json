@@ -1,0 +1,122 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "ia-smoke-main",
+  "started": "2026-11-12T11:28:27.656576172Z",
+  "ended": "2026-11-12T11:28:59.136396367Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v3",
+  "plan_sha256": "fcb1d784c6c1fe29e3e02f22455b2fe42363f7e6897d54ed671c925efce232e5",
+  "interpretation_sha256": "a65f6713b1ee1d1d660023e79af7e598be198fb6c0ce959d426646887de530dc",
+  "profile": {
+    "name": "quick",
+    "acceptance_eligible": false,
+    "warmup": "1s",
+    "measure": "3s",
+    "recovery": "2s",
+    "reload_measure": "8s",
+    "reload_recovery": "2s",
+    "step_warmup": "1s",
+    "f3_duration": "4s",
+    "f4_client_limit": "12s",
+    "description": "smoke only: exercises the instruments; never acceptance, comparison or capacity evidence"
+  },
+  "repetitions": 1,
+  "selection": [
+    "p1-large-body-plugin-h1/wasm",
+    "s6-static-h2/wasm",
+    "s7-cache-h1/wasm"
+  ],
+  "scenario_sha256": {
+    "p1-large-body-plugin-h1/wasm": "7d9328b096b3aa92475e0279061dfbe3aa463746a54269dcc20316dbd73d6384",
+    "s6-static-h2/wasm": "315b34f9ac080dc45801eead912dca51b3c7bfd7a47fdce1389396ba5a0e50cb",
+    "s7-cache-h1/wasm": "17fdfa6d949a6da10a9771ccffa7b825ed0b9188bd278c7de5a930d40368779f"
+  },
+  "targets": [
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+        "sha256": "65a0f8b9d42909b048fe3fe00ecda7dbf17ae28320bdef28bd82a1ea2f0add37",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/tmp/ia-wip",
+    "sha256": "02be3aeea417be12ce9c4fc179c08eeaf6d250372fe6ce0ffe6b5fd4552e2ac5",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "CGO_ENABLED": "1",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux",
+      "vcs": "git",
+      "vcs.modified": "true",
+      "vcs.revision": "d8d0520b1b57ef8c0df08e8902b407856f2d47cd",
+      "vcs.time": "2026-11-12T08:26:43Z"
+    }
+  },
+  "guest": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-load.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a"
+  },
+  "guest_nobody": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-nobody.wasm",
+    "sha256": "5df6763d8a9fc4ff15d0931376cade46f6d50238fcde412d0a341400f3afa22e"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/jul-700-i2/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 12,
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "none",
+    "jul_cpus": "",
+    "cpu_quota": "",
+    "memory_max": "",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "0-11",
+    "jul": "unconstrained (envelope none)",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/p1-large-body-plugin-h1/wasm/main/rep1/result.json",
+    "cells/s6-static-h2/wasm/main/rep1/result.json",
+    "cells/s7-cache-h1/wasm/main/rep1/result.json"
+  ],
+  "interrupted": false
+}

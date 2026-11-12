@@ -1,0 +1,16 @@
+== 2026-11-12T15:49:42Z i2-p3-repeat
+2026-11-12T15:50:22Z p3-nobody-plugin-h1/wasm/main rep1: state=completed valid=true correct=true load/load=1421.0rps(28435/28435) load/load=1452.7rps(29069/29069) cpu=0.95
+2026-11-12T15:51:03Z p3-nobody-plugin-h1/wasm/cand rep1: state=completed valid=true correct=false load/load=830.6rps(16629/16629) load/load=860.4rps(17224/17225) cpu=0.98 findings=phase load class load: status:500 ×1
+2026-11-12T15:51:44Z p3-nobody-plugin-h1/wasm/main rep2: state=completed valid=true correct=true load/load=1202.0rps(24056/24056) load/load=1228.2rps(24581/24581) cpu=0.97
+2026-11-12T15:52:24Z p3-nobody-plugin-h1/wasm/cand rep2: state=completed valid=true correct=true load/load=1206.5rps(24147/24147) load/load=1236.8rps(24751/24751) cpu=0.97
+2026-11-12T15:53:05Z p3-nobody-plugin-h1/wasm/main rep3: state=completed valid=true correct=false load/load=1134.2rps(22701/22702) load/load=1161.1rps(23238/23238) cpu=0.97 findings=phase load class load: status:500 ×1
+2026-11-12T15:53:46Z p3-nobody-plugin-h1/wasm/cand rep3: state=completed valid=true correct=true load/load=1185.6rps(23728/23728) load/load=1222.8rps(24471/24471) cpu=0.96
+2026-11-12T15:54:26Z p3-nobody-plugin-h1/wasm/main rep4: state=completed valid=true correct=true load/load=1416.0rps(28336/28336) load/load=1457.8rps(29172/29172) cpu=0.96
+2026-11-12T15:55:05Z p3-nobody-plugin-h1/wasm/cand rep4: state=completed valid=true correct=true load/load=1285.9rps(25734/25734) load/load=1330.4rps(26624/26624) cpu=0.96
+2026-11-12T15:55:45Z p3-nobody-plugin-h1/wasm/main rep5: state=completed valid=true correct=true load/load=1395.9rps(27934/27934) load/load=1432.3rps(28662/28662) cpu=0.97
+2026-11-12T15:56:25Z p3-nobody-plugin-h1/wasm/cand rep5: state=completed valid=true correct=true load/load=1279.8rps(25613/25613) load/load=1315.5rps(26326/26326) cpu=0.97
+run i2-p3-repeat: complete, 10 results in /home/victornf/jul-i2-evidence/frozen/i2-p3-repeat
+exit=0
+/home/victornf/jul-i2-evidence/frozen/i2-p3-repeat: verified
+verify=0
+== 2026-11-12T15:56:25Z done

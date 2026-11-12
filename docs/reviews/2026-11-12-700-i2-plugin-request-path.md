@@ -243,3 +243,127 @@ this section governs.
 | Observe | `TestObserveMatchesEnforceDecisions`, `TestBodyDeadlineOutcomes`, `TestObserveRecordsWouldTimeoutOnceWithoutAbort` |
 | Error taxonomy and redaction | `internal/inspection/respond_test.go`, `internal/app/inspection_log_test.go`, `TestContainedTrapLogIsBoundedAndThrottled`, `TestTrapReasonUsesOnlyPublicExitCodes` |
 | Streaming and #697/#698/#699 | `TestNonReaderStreamsWithoutPreparation`, `TestSlowUploadDoesNotConsumeGuestTimeout` and the existing suites, unchanged and passing |
+
+## 3. Measured evidence
+
+Raw runs, identities, scripts and regenerated summaries are in
+[`evidence/2026-11-12-700-i2/`](evidence/2026-11-12-700-i2/README.md). These are I2 measurements
+under harness plan v3. They are not A1–A18 qualification, which remains I6.
+
+### 3.1 Plan, builds and environment
+
+- **Plan.** v3, sha256 `5ce583d03555dddb1ecde57cd3e03c0edff0af95cae73a2f62efba7676314bd8`,
+  frozen before the campaign. The rubber-duck review of the harness changes ran in two rounds and
+  found no blocking issue. v3 adds:
+  - the `inspect-nobody` guest;
+  - the p1–p4 plugin cells and the plugin-only `f4-body-deadline-5s` variant;
+  - the H3 `wasm` normal cell, calibrated as `pre-freeze-cal-h3-wasm`;
+  - the `u1b` H1-none revision;
+  - `reload_every`;
+  - the acknowledged-reload and post-recovery drain validity rules.
+
+  No v1 or v2 value is reused or merged.
+- **Targets.**
+  - `cand` is `b1a670fe` (I2).
+  - `main` is `d8d0520b` (pre-I2 main).
+  - `base` is the ADR source `858590dc`, as its historical go1.27.3 build.
+  - `base4` is the I5 go1.27.4 rebuild of `858590dc`. It differs in toolchain and in linkage
+    (`CGO_ENABLED=1`), is labelled separately and is used only in the supplement.
+
+  `main`, `cand`, the harness and both guests were rebuilt from `git archive` exports and
+  reproduced their sha256 values.
+- **Head versus measured binary.** The head adds `e1c6357c` (section 4) to the measured
+  `b1a670fe`. It changes only the `fetch` host function, which no campaign fixture calls.
+- **Envelope.** Verified on every run: 2 vCPU, 768 MiB, no swap, `GOMAXPROCS=2`. The client and
+  origin run outside the envelope.
+- **Budgets.** Each fixture has an admissible budget that passes the real minimum-budget
+  validation:
+  - the default 256 MiB, or 512 MiB for WAF variants;
+  - 128 MiB with sized pools for the p2 saturation cells.
+
+  Global defaults are unchanged.
+
+### 3.2 Protection results for the I2-governed allocations
+
+| Claim | Cell | Result |
+| --- | --- | --- |
+| Fail-fast overload is delivered and leaves other traffic progressing | `p2-saturation-plugin-h1` | `cand`:<br>• 539 × `503 inspection_overloaded`, p50 1.8 ms and max 245 ms, against a p50 of 5.3 s for an admitted upload.<br>• Governed bytes peaked at 126.6 of 128 MiB with 135 leases; 35,748 probes succeeded.<br>• Peak 518 MiB; post-GC heap 55 MiB.<br>• Leases and bytes drained to 0.<br>`main` never rejects, so its p2 run is instrument-invalid (unexercised) by design. |
+| Observe accounts and continues | `p2o-saturation-plugin-observe-h1` | `cand`:<br>• All 640 uploads succeeded with no 503.<br>• `rejections_total{mode="observe"}` = 84,965. Observe counts every refused charge (documented I1 meaning).<br>• Governed bytes reached 152 MiB, above the 128 MiB budget, as observe allows.<br>• Peak 525 MiB. |
+| Body deadline: plugin-only, on real protocols | `f4-body-deadline-5s` (`body_timeout = "5s"`) | `cand` `wasm` and `both`: H1, H2 and H3 stalled uploads each received `408` at 5.0 s. The sibling on the same connection (H2/H3) or a parallel one (H1) answered within a few milliseconds.<br>`main` ran until the client's 20 s watchdog.<br>`none` (no inspection) reached 20 s on both binaries. |
+| Valid slow uploads keep working and spend no guest time while arriving (#699) | `f4-stalled-body`, `r1-slow-upload-c16-h1` | Default 60 s: slow H1/H2/H3 uploads succeeded in 7.6–8.1 s with healthy siblings, and stalled uploads reached the client watchdog, unchanged from `main`.<br>r1: 3.2 rps on both, peak 234 vs 225 MiB. |
+| Non-body plugins stream and charge only host state | `p3-nobody-plugin-h1`, `r2-fast-nobody-h1` | Governed bytes ≤ 648 KiB and ≤ 27 leases, drained to 0. Bodies are not prepared. See 3.3 for peaks. |
+| Large bodies stay bounded | `p1-large-body-plugin-h1` (pool 4) | `cand`: peak 461 MiB (`main` 481); governed bytes up to 48 MiB; drained to 0. |
+| Reload and budget churn drain | `p4-reload-budget-plugin` | `cand`:<br>• valid, including the v3 drain rule;<br>• 8 reloads: 7 applied live (budgets 128m/256m/512m, enforce↔observe) and a `1m` budget refused by minimum-budget validation;<br>• 63,760 loads, all correct; in-flight H2 streams reset on generation drain: 48 (`main` 80);<br>• leases and bytes 0 after recovery. |
+
+### 3.3 Findings: not I2 regressions, and owned elsewhere
+
+Each finding is preserved as a `correct=false`, invalid or OOM run.
+
+| Finding | Evidence | Attribution and owner |
+| --- | --- | --- |
+| Generations retired under reload churn keep guest memory reachable | `p4`:<br>• post-GC heap 519 MiB on `main` and 533 MiB on `cand`; peaks 671/678 MiB.<br>• Pre-freeze runs at a 2 s reload interval were OOM-killed on both binaries with zero governed bytes.<br>• `pprof/` holds the captures: 323 MiB in wazero `MemoryInstance.Grow`, with 2 live instances. | Pre-existing on `main`. Reload/generation lifecycle (`internal/server`, `internal/plugins` `Set`/`Manager`, `internal/app`). Follow-up #709; I6 sizing. |
+| Rare H1 truncation during reload churn | `p4` `main`: `error:body-eof` ×1, about 1 per 25k–72k requests, also in pre-freeze runs | Pre-existing on `main`; #709. |
+| Default plugin pools exceed the envelope | Pre-freeze `p1`/`p2` default-pool runs were OOM-killed on both binaries. `p3` peaks track live instances, not governed bytes:<br>• frozen `cand` 704 MiB with 32 instances;<br>• the 5-repetition investigation: `main` 339–531 MiB (12–26 instances), `cand` 313–550 MiB (13–25 instances). | Static guest-pool term (`max_instances × memory_limit`), outside the dynamic governor by ADR 0032. I6 sizing; operators size pools. |
+| Connection buffers under no-backoff clients | `p2h-saturation-hostile-h1` `cand`: OOM-killed with governed bytes at 126 MiB. In the pre-freeze `memory.stat`, socket memory reached 286 MiB beside 393 MiB anon. | ADR 0032 §10: kernel and connection buffers are not governed. The cell is a frozen record cell, never a protection claim. `main` does not reject, so it shows no flood. I6. |
+| WAF state is uncharged | `s6`/`s7`/`s8` `both`: peaks 446–652 MiB on both binaries | I3 (and I6). `both` cells are wrapper-integration checks only. |
+| Contained guest 500s under CPU saturation | `p1`, `p3`, `s6`, `s7`, `s8` `wasm`/`both`: 1–48 per run on both binaries. Logged reasons:<br>• `timeout` (guest invocation deadline under saturation);<br>• `unknown` in `p1`. | Pre-existing guest behaviour (#699 containment). I2 now logs a bounded reason. |
+
+### 3.4 Unsaturated throughput (ADR 10% rule)
+
+Cells: `u1`/`u2` × `none`/`waf`/`wasm`/`both`, `u10` × `none`/`wasm`/`both`, and `u1b` (H1 none,
+c8).
+
+- **Frozen campaign, `main` → `cand`.** No median regression above 10%. `u2` `none`/`both`/`waf`
+  pass. The other cells are `inconclusive-noise`, so 3 more repetitions were added
+  (`runs/i2-normal-supplement`, 5 for `u1b`).
+- **Supplement alone.** Two `main` → `cand` cells crossed 10%: `u1b none` +13.7% and `u2 wasm`
+  +19.4%.
+- **Pooled (6–10 per cell).** Every cell is within 10%: the worst is `u10 wasm` at +9.3%, and
+  `u1b none` −8.7% and `u2 wasm` −6.4% favour the candidate. The pooled verdict is
+  `inconclusive-noise` except where it passes.
+- **Noise investigation.** Spreads are 20–82%. Every target moves together in the same time window:
+  for example, all four targets fell to 283–378 rps in the third supplement repetition of `u2 wasm`.
+  Same-source comparisons show swings of the same size:
+  - `base` vs `base4` crosses 10% in several cells;
+  - `u1b none` exercises no I2 path except the per-request deadline owner (one small allocation)
+    and still moved ±14%.
+
+  `summary/paired-ratios.md` divides each `cand` result by the `main` result of the same
+  repetition, measured about 40 s apart. The median within-block regression is at most +4.4%
+  (`u10 wasm` and `u1 waf`) in every cell. This is a descriptive drift check; it does not replace
+  the ADR rule.
+- **Direct cost.** Interleaved `internal/plugins` benchmarks (`attachments/bench/`, n=8) show:
+  - no significant time change on any plugin path (geomean −5%, all p > 0.1);
+  - +5 allocations and about 0.5 KiB per plugin request for the lease and charges.
+- **Verdict.** Under the ADR rule, the I2 throughput result is **not a fail but remains
+  inconclusive through host noise**. The evidence attributes the noise to the host: an arm64 WSL2
+  machine with time-correlated drift. A quieter qualification host is an I6 requirement.
+- **`base` comparisons.**
+  - `base` → `cand` pooled is within 10%.
+  - `base` → `main` fails for `u1 none`, `u10 none` and `u2 wasm`. Those differences predate I2,
+    and they combine the toolchain confound and the noise above.
+  - No improvement percentage is claimed. The `none` cells are faster on `cand` within every block
+    (16–26%), which is unexplained, so this is not claimed either.
+- **Capacity cells (saturated, outside the 10% rule).**
+  - `p3 wasm`: `cand` median 1206 vs `main` 1396 rps over 5 repetitions. The within-block ratios
+    are 0.58–1.05, and the frozen repetition favoured `cand` (1695 vs 1647).
+  - `p1 none` (no plugin): 1858 vs 2332, with block ratios of 0.68, 1.35 and 0.79.
+
+  Both are recorded as noise-dominated. The benchmarks above bound the direct I2 cost.
+
+### 3.5 Validation gaps
+
+- The throughput criterion is inconclusive on this host, not passed. This is restated for I6.
+- Single repetitions of the plugin and deadline record cells establish behaviour, not sizing
+  distributions.
+- s9/F3 `both` (WAF state) and response-subscription (I4) exposure were not re-measured as I2
+  claims.
+
+## 4. Reviews
+
+| Review | Scope | Result |
+| --- | --- | --- |
+| Rubber-duck design review | Lifetime, deadline restoration, error classification (before coding) | R1–R6 (section 1.10); the deadline finding led to ADR §6 amendment 8 (maintainer decision) |
+| Rubber-duck harness review | Plan v3 changes (two rounds) | Unexercised budget churn, drain gauges and reload cadence were fixed; the final round found no blocking issue |
+| Code review agent | Full I2 diff at `b1a670fe` | No significant issue |
+| Security review agent | Full I2 diff at `b1a670fe` | No vulnerability found. One robustness note was fixed in `e1c6357c`: the late fetch-body waiter goroutine could outlive a request whose transport never closes the body. It now also ends with the request context; the copy stays charged until lease close (`TestFetchBodyHeldWaiterEndsWithRequest`) |

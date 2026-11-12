@@ -1,0 +1,218 @@
+{
+  "scenario": "p4-reload-budget-plugin",
+  "scenario_sha256": "16ec1084b1bca510de6d28c48f5b6d4bcff14e91145679900c6205a5462df7d6",
+  "comparison": "record",
+  "variant": "wasm",
+  "target": "main",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T12:37:36.953161135Z",
+  "ended": "2026-11-12T12:38:42.303787735Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "b0d2f0d0641e8bad96e145ecc5d4f05554f65f7634aba29f434525c573aa33d5",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-965199-990737738.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "gomemlimit_env": "480MiB",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 53
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 40,
+          "attempts": 38859,
+          "verified": 38859,
+          "verified_in_window": 38843,
+          "goodput_rps": 971.075,
+          "goodput_bytes_per_second": 63640371.2,
+          "classes": {
+            "ok": 38859
+          },
+          "p50_ms": 12.592,
+          "p95_ms": 41.757,
+          "p99_ms": 71.974,
+          "max_ms": 231.239,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/1.1": 38859
+          },
+          "connections_dialled": 16
+        },
+        {
+          "workload": "inflight",
+          "proto": "h2",
+          "concurrency": 16,
+          "window_seconds": 40,
+          "attempts": 224,
+          "verified": 144,
+          "verified_in_window": 144,
+          "goodput_rps": 3.6,
+          "goodput_bytes_per_second": 235929.6,
+          "classes": {
+            "error:stream-reset": 80,
+            "ok": 144
+          },
+          "p50_ms": 3091.073,
+          "p95_ms": 3203.112,
+          "p99_ms": 3240.316,
+          "max_ms": 3274.658,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/2.0": 144
+          },
+          "connections_dialled": 16,
+          "expected_classes": [
+            "error:stream-reset"
+          ],
+          "error_samples": {
+            "error:stream-reset": "Post \"https://localhost:39765/proxy/echo?resp=65536\u0026delay=3000\": stream error: stream ID 107; INTERNAL_ERROR; received from peer"
+          },
+          "outcome_latency_ms": {
+            "error:stream-reset": {
+              "n": 80,
+              "p50": 2294.875,
+              "p95": 2968.584,
+              "p99": 2978.744,
+              "max": 2980.895
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.961,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    }
+  ],
+  "reloads": [
+    "t+5.0s reload 1 nameA=a2 rule=1695111 broken=false max_buffered=128m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=134217728",
+    "t+10.5s reload 2 nameA=a1 rule=1695101 broken=false max_buffered=256m mode=observe outcome=applied_live effective=mode=observe max_buffered_bytes=268435456",
+    "t+15.7s reload 3 nameA=a2 rule=1695111 broken=false max_buffered=512m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=536870912",
+    "t+21.0s reload 4 nameA=a1 rule=1695101 broken=false max_buffered=256m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=268435456",
+    "t+26.5s reload 5 nameA=a2 rule=1695111 broken=false max_buffered=1m mode= outcome=not_applied effective=mode=enforce max_buffered_bytes=268435456",
+    "t+32.0s reload 6 nameA=a1 rule=1695101 broken=false max_buffered=256m mode=observe outcome=applied_live effective=mode=observe max_buffered_bytes=268435456",
+    "t+37.7s reload 7 nameA=a2 rule=1695111 broken=false max_buffered=512m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=536870912",
+    "t+43.3s reload 8 nameA=a1 rule=1695101 broken=false max_buffered=256m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=268435456"
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 679198720,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 698687488,
+  "heap_inuse_after_two_gcs": 518979584,
+  "heap_alloc_after_two_gcs": 505873976,
+  "rss_after_two_gcs": 580845568,
+  "counter_deltas": {
+    "inspection_body_timeout": 0,
+    "inspection_body_unsupported": 0,
+    "inspection_body_would_timeout": 0,
+    "inspection_rejected_enforce": 0,
+    "inspection_rejected_observe": 0,
+    "plugin_invocations": 90528,
+    "plugin_invocations_error": 0,
+    "plugin_waits_acquired": 48,
+    "plugin_waits_rejected": 0,
+    "reload_applied": 14,
+    "reload_not_applied": 2,
+    "transport_retired": 14,
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_clean": 0,
+    "waf_tx_inspection_error": 0
+  },
+  "unavailable_metrics": [
+    "plugin_panics",
+    "plugin_resp_invocations",
+    "plugin_resp_error",
+    "plugin_resp_unavailable",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss"
+  ],
+  "inspection_foundation_series_after": {
+    "jul_inspection_abandoned_evaluations": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"would_timeout\"}": 0,
+    "jul_inspection_bytes_limit": 268435456,
+    "jul_inspection_bytes{class=\"base\"}": 0,
+    "jul_inspection_bytes{class=\"buffer\"}": 0,
+    "jul_inspection_bytes{class=\"waf_state\"}": 0,
+    "jul_inspection_evaluations_limit": 2,
+    "jul_inspection_evaluations{state=\"active\"}": 0,
+    "jul_inspection_evaluations{state=\"waiting\"}": 0,
+    "jul_inspection_leases": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"waf_state\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"waf_state\"}": 0,
+    "jul_inspection_unslotted_logging_total": 0
+  },
+  "samples": 123
+}

@@ -1,0 +1,1 @@
+/tmp/ia-smoke-p2r/cells/p2-saturation-plugin-h1/wasm/cand/rep1/config.toml is valid (structural + runtime)

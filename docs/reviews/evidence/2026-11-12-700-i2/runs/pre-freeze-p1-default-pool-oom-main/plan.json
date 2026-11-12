@@ -1,0 +1,3854 @@
+{
+  "version": "inspection-assessment-plan/v3",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "suites": {
+    "calibration": [
+      "cal-normal-h1",
+      "cal-normal-h2",
+      "cal-normal-h3"
+    ],
+    "campaign-normal": [
+      "u1-normal-h1",
+      "u2-normal-h2",
+      "u10-normal-h3"
+    ],
+    "destructive": [
+      "s3-large-h2",
+      "s4-ramp-large-h2",
+      "s11-arg-amplification-h1"
+    ],
+    "fidelity": [
+      "r1-slow-upload-c16-h1",
+      "s8-slow-clients-h1",
+      "s11l-arg-amplification-low-h1",
+      "s9-reload-churn",
+      "f3-admission-pending16",
+      "f3-admission-pending0",
+      "f4-stalled-body",
+      "s6-static-h2",
+      "s7-cache-h1",
+      "r2-fast-nobody-h1"
+    ],
+    "historical-695": [
+      "s1-normal-h1",
+      "s2-normal-h2",
+      "s3-large-h2",
+      "s4-ramp-large-h2",
+      "s5-admission-h2",
+      "s6-static-h2",
+      "s7-cache-h1",
+      "s8-slow-clients-h1",
+      "s9-reload-churn",
+      "s10-normal-h3",
+      "s11-arg-amplification-h1"
+    ],
+    "historical-699": [
+      "r1-slow-upload-c16-h1",
+      "r2-fast-nobody-h1",
+      "r3-fast-body-h1"
+    ],
+    "i2-deadline": [
+      "f4-stalled-body",
+      "f4-body-deadline-5s"
+    ],
+    "i2-normal": [
+      "u1-normal-h1",
+      "u1b-normal-h1-none-c8",
+      "u2-normal-h2",
+      "u10-normal-h3"
+    ],
+    "i2-plugin": [
+      "r1-slow-upload-c16-h1",
+      "s8-slow-clients-h1",
+      "r2-fast-nobody-h1",
+      "s6-static-h2",
+      "s7-cache-h1",
+      "p1-large-body-plugin-h1",
+      "p2-saturation-plugin-h1",
+      "p2o-saturation-plugin-observe-h1",
+      "p2h-saturation-hostile-h1",
+      "p3-nobody-plugin-h1",
+      "p4-reload-budget-plugin"
+    ],
+    "smoke": [
+      "u1-normal-h1",
+      "u2-normal-h2",
+      "u10-normal-h3",
+      "s8-slow-clients-h1",
+      "s9-reload-churn",
+      "f3-admission-pending0",
+      "f4-stalled-body"
+    ]
+  },
+  "profiles": {
+    "qualification": {
+      "name": "qualification",
+      "acceptance_eligible": true,
+      "warmup": "5s",
+      "measure": "20s",
+      "recovery": "10s",
+      "reload_measure": "40s",
+      "reload_recovery": "15s",
+      "step_warmup": "2s",
+      "f3_duration": "20s",
+      "f4_client_limit": "20s",
+      "description": "the archived #695/#700 windows; eligible as acceptance evidence only inside the verified envelope"
+    },
+    "quick": {
+      "name": "quick",
+      "acceptance_eligible": false,
+      "warmup": "1s",
+      "measure": "3s",
+      "recovery": "2s",
+      "reload_measure": "8s",
+      "reload_recovery": "2s",
+      "step_warmup": "1s",
+      "f3_duration": "4s",
+      "f4_client_limit": "12s",
+      "description": "smoke only: exercises the instruments; never acceptance, comparison or capacity evidence"
+    }
+  },
+  "scenarios_by_profile": {
+    "qualification": [
+      {
+        "id": "s1-normal-h1",
+        "source": "#695 s1",
+        "kind": "load",
+        "purpose": "historical normal H1 shape (C=16; CPU-saturated for inspected variants)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s2-normal-h2",
+        "source": "#695 s2",
+        "kind": "load",
+        "purpose": "historical normal H2 shape (C=16; CPU-saturated for inspected variants)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s3-large-h2",
+        "source": "#695 s3",
+        "kind": "load",
+        "purpose": "large bodies and responses (destructive on uncapped runtimes)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s4-ramp-large-h2",
+        "source": "#695 s4",
+        "kind": "load",
+        "purpose": "concurrency ramp of large inspected bodies (destructive)",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c16",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 16,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c32",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c64",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 64,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c128",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 128,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c192",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 192,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s5-admission-h2",
+        "source": "#695 s5",
+        "kind": "load",
+        "purpose": "ADR 0017 admission behind a slow origin",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/admitted/echo?resp=65536\u0026delay=500",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 128,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "body is 256 KiB as in the archived code; the #695 plan text said 64 KiB"
+        ]
+      },
+      {
+        "id": "s6-static-h2",
+        "source": "#695 s6",
+        "kind": "load",
+        "purpose": "no-upstream static route through the same layers",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "GET",
+                "path": "/static/page.html?x=1",
+                "resp_bytes": 262144,
+                "concurrency": 128,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "plan v3 adds the wasm variant"
+        ]
+      },
+      {
+        "id": "s7-cache-h1",
+        "source": "#695 s7",
+        "kind": "load",
+        "purpose": "cache cold (unique keys) then warm (one key)",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "cache": true,
+        "phases": [
+          {
+            "name": "cold",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "cold",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/cached/echo?resp=262144",
+                "resp_bytes": 262144,
+                "concurrency": 16,
+                "timeout": "30s",
+                "unique_key": true
+              }
+            ]
+          },
+          {
+            "name": "warm",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "warm",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/cached/echo?resp=262144\u0026k=warm",
+                "resp_bytes": 262144,
+                "concurrency": 16,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "plan v3 adds the wasm variant"
+        ]
+      },
+      {
+        "id": "s8-slow-clients-h1",
+        "source": "#695 s8",
+        "kind": "load",
+        "purpose": "slow and cancelling uploads with fast probes",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "slow",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 65536,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 96,
+                "slow_bytes_per_sec": 16384,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "slow-cancel",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 65536,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 32,
+                "slow_bytes_per_sec": 16384,
+                "cancel_after": "2s",
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "client-cancel"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record"
+      },
+      {
+        "id": "s9-reload-churn",
+        "source": "#695 s9",
+        "kind": "reload",
+        "purpose": "policy reload churn every 2s, reload 5 invalid, slow in-flight H2",
+        "variants": [
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "40s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "inflight",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536\u0026delay=3000",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "error:stream-reset"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "15s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "in-flight requests on the policy-changed route are retired within 2s by design (#642/#562; WAF rules and plugin modules are access inputs), so the inflight class expects error:stream-reset; the archived #695 runtime already contained it (#653) but the archive counted every non-200 as an error and s9 was OOM-killed before per-class outcomes were captured"
+        ]
+      },
+      {
+        "id": "s10-normal-h3",
+        "source": "#695 s10",
+        "kind": "load",
+        "purpose": "historical normal H3 shape (C=16)",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s11-arg-amplification-h1",
+        "source": "#695 s11",
+        "kind": "load",
+        "purpose": "many-argument JSON at C=1..16 (destructive on uncapped runtimes)",
+        "variants": [
+          "none",
+          "waf"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record"
+      },
+      {
+        "id": "s11l-arg-amplification-low-h1",
+        "source": "#695 s11 (C=1,2 subset)",
+        "kind": "load",
+        "purpose": "non-destructive amplification smoke",
+        "variants": [
+          "none",
+          "waf"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "only the C=1 and C=2 steps; the full s11 ramp is the destructive I6 profile"
+        ]
+      },
+      {
+        "id": "r1-slow-upload-c16-h1",
+        "source": "#699 r1",
+        "kind": "load",
+        "purpose": "slow uploads below the instance cap with POST probes",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "slow",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 65536,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "slow_bytes_per_sec": 16384,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "the #699 review text calls the probes GET; the measured #699 patch used the 2 KiB POST probe kept here"
+        ]
+      },
+      {
+        "id": "r2-fast-nobody-h1",
+        "source": "#699 r2",
+        "kind": "load",
+        "purpose": "fast requests without a body",
+        "variants": [
+          "none",
+          "wasm"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/proxy/echo?resp=4096",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "r3-fast-body-h1",
+        "source": "#699 r3",
+        "kind": "load",
+        "purpose": "fast body requests (normal H1 shape)",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "cal-normal-h1",
+        "source": "I5 calibration of s1",
+        "kind": "load",
+        "purpose": "unsaturated-concurrency calibration",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record"
+      },
+      {
+        "id": "cal-normal-h2",
+        "source": "I5 calibration of s2",
+        "kind": "load",
+        "purpose": "unsaturated-concurrency calibration",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record"
+      },
+      {
+        "id": "cal-normal-h3",
+        "source": "I5 calibration of s10",
+        "kind": "load",
+        "purpose": "unsaturated-concurrency calibration",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record"
+      },
+      {
+        "id": "u1-normal-h1",
+        "source": "#695 s1 at calibrated concurrency",
+        "kind": "load",
+        "purpose": "unsaturated normal throughput (A13 shape)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "the calibrated concurrency replaces the archived C=16 for inspected variants (waf and both 1, wasm 2), so those cells are not comparable with #695 C=16 numbers; none stays at C=16, where Jul CPU is about 0.6 of the envelope but throughput flattens, so a limit outside Jul CPU may bound it"
+        ],
+        "concurrency_by_variant": {
+          "both": 1,
+          "none": 16,
+          "waf": 1,
+          "wasm": 2
+        }
+      },
+      {
+        "id": "u2-normal-h2",
+        "source": "#695 s2 at calibrated concurrency",
+        "kind": "load",
+        "purpose": "unsaturated normal throughput (A13 shape)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "the calibrated concurrency replaces the archived C=16 for inspected variants (waf and both 1, wasm 2), so those cells are not comparable with #695 C=16 numbers; none stays at C=16, where Jul CPU is about 0.6 of the envelope but throughput flattens, so a limit outside Jul CPU may bound it"
+        ],
+        "concurrency_by_variant": {
+          "both": 1,
+          "none": 16,
+          "waf": 1,
+          "wasm": 2
+        }
+      },
+      {
+        "id": "u10-normal-h3",
+        "source": "#695 s10 at calibrated concurrency",
+        "kind": "load",
+        "purpose": "unsaturated normal throughput (A13 shape)",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "the calibrated concurrency replaces the archived C=16 for inspected variants (waf and both 1, wasm 2), so those cells are not comparable with #695 C=16 numbers; none stays at C=16, where Jul CPU is about 0.6 of the envelope but throughput flattens, so a limit outside Jul CPU may bound it"
+        ],
+        "concurrency_by_variant": {
+          "both": 1,
+          "none": 16,
+          "wasm": 2
+        }
+      },
+      {
+        "id": "f3-admission-pending16",
+        "source": "#700 ADR F3",
+        "kind": "load",
+        "purpose": "single-connection H2 admission goodput with a separate-connection probe",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "max_pending": 16,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "0s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "admission",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/admitted/echo?resp=65536\u0026delay=500",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 128,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "expected_classes": [
+                  "status:503"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "5s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "interval": "100ms"
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "responses are verified (status, length, content, origin echo) before counting goodput; the archived client counted any 200",
+          "bodies are the wide JSON shape with Content-Type application/json instead of unlabelled 'x'/'p' fill so the both variant inspects ordinary JSON; the none variant is unaffected",
+          "the worker and probe connection counts are measured and must each equal one",
+          "the archived optional Retry-After pacing mode is not ported"
+        ]
+      },
+      {
+        "id": "f3-admission-pending0",
+        "source": "#700 ADR F3",
+        "kind": "load",
+        "purpose": "single-connection H2 admission goodput with a separate-connection probe",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "max_pending": 0,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "0s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "admission",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/admitted/echo?resp=65536\u0026delay=500",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 128,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "expected_classes": [
+                  "status:503"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "5s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "interval": "100ms"
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "responses are verified (status, length, content, origin echo) before counting goodput; the archived client counted any 200",
+          "bodies are the wide JSON shape with Content-Type application/json instead of unlabelled 'x'/'p' fill so the both variant inspects ordinary JSON; the none variant is unaffected",
+          "the worker and probe connection counts are measured and must each equal one",
+          "the archived optional Retry-After pacing mode is not ported"
+        ]
+      },
+      {
+        "id": "u1b-normal-h1-none-c8",
+        "source": "#695 s1 at C=8 (plan v3)",
+        "kind": "load",
+        "purpose": "stabilised uninspected H1 throughput (A13 shape)",
+        "variants": [
+          "none"
+        ],
+        "repetitions": 5,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "added in plan v3 before any I2 measurement: I5 recorded u1/none (C=16) as inconclusive-noise (spread 0.119) with throughput bound partly outside Jul CPU; C=8 keeps the client and origin further from their limit and 5 repetitions are planned; u1/none at C=16 is still run and reported"
+        ],
+        "concurrency_by_variant": {
+          "none": 8
+        }
+      },
+      {
+        "id": "p1-large-body-plugin-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "bounded large-body plugin-only request path at the default 256 MiB budget",
+        "variants": [
+          "none",
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 786432,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 64,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record"
+      },
+      {
+        "id": "p2-saturation-plugin-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "deliberate enforce-mode byte saturation of the plugin request path (fail-fast 503 with probes)",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "max_buffered_bytes": "128m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096\u0026delay=5000",
+                "body_bytes": 983040,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 160,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ],
+                "honor_retry_after": true
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ],
+                "honor_retry_after": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "128m is above the 103825411 B compiled minimum of the two-plugin route (default plugin limits), so genuine validation passes; 160 concurrent 960 KiB bodies held 5 s at the origin need about 150 MiB of prepared capacity",
+          "plugin timeout 2s: a pre-freeze smoke with the 100ms default and a 1 s hold turned CPU contention between up to 64 concurrent 1 MB guest scans per plugin into contained guest timeouts (500) before the byte budget filled; the longer timeout and hold isolate the byte dimension and change no governor limit",
+          "static footprint sized per ADR 0032 §10 (not guaranteed: guest pools and GC headroom): with default pools (2 × 64 × 16 MiB = 2 GiB) a pre-freeze envelope smoke was OOM-killed at 593 MiB heap with 37 instances and 50 MiB governed; with 2 × 8 instances and no GOMEMLIMIT it was OOM-killed at 532 MiB heap with 126 MiB governed (GC headroom over a ~420 MiB live set)",
+          "max_instances 4 per plugin (128 MiB guest pool) and GOMEMLIMIT=480MiB, the ADR's recommendation: about 128 MiB governed + 128 MiB pool + baseline stays well below the limit, and the limit is below the 576 MiB objective",
+          "only a 503 with Retry-After: 1 and the inspection_overloaded body is the expected overload class; any other 503 is a finding",
+          "load and probe workers wait the advertised Retry-After after an overload response; p2h keeps the no-backoff shape as a separate record"
+        ],
+        "exercise_requirements": [
+          {
+            "counter": "inspection_rejected_enforce",
+            "at_least": 1
+          },
+          {
+            "class": "status:503-inspection-overloaded",
+            "at_least": 1
+          },
+          {
+            "counter": "inspection_rejected_observe",
+            "at_most": 0
+          }
+        ]
+      },
+      {
+        "id": "p2h-saturation-hostile-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "p2 with clients that ignore Retry-After: records connection-buffer exposure of fast rejection (ADR 0032 §10, not guaranteed)",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "max_buffered_bytes": "128m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096\u0026delay=5000",
+                "body_bytes": 983040,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 160,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ],
+                "honor_retry_after": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "pre-freeze envelope smokes of the no-backoff shape were OOM-killed with governed bytes at 126 MiB: about 1300 rejected 960 KiB uploads per second each leave a connection in net/http's 500 ms close-write linger while the client keeps sending, and the unread bytes sit in kernel socket buffers charged to Jul's cgroup (memory.stat sock reached 286 MiB beside 393 MiB anon)",
+          "connection and kernel buffers are outside the governor (ADR 0032 §10); this cell is a record for I6 sizing, never a protection claim, and an OOM here is preserved as a finding"
+        ],
+        "exercise_requirements": [
+          {
+            "counter": "inspection_rejected_enforce",
+            "at_least": 1
+          },
+          {
+            "class": "status:503-inspection-overloaded",
+            "at_least": 1
+          }
+        ]
+      },
+      {
+        "id": "p2o-saturation-plugin-observe-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "observe twin of p2: same load and budget, would-reject recorded, no governor rejection",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "inspection_mode": "observe",
+        "max_buffered_bytes": "128m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096\u0026delay=5000",
+                "body_bytes": 983040,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 160,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "honor_retry_after": true
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "honor_retry_after": true
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "exercise_requirements": [
+          {
+            "counter": "inspection_rejected_observe",
+            "at_least": 1
+          },
+          {
+            "counter": "inspection_rejected_enforce",
+            "at_most": 0
+          },
+          {
+            "class": "status:503-inspection-overloaded",
+            "at_most": 0
+          }
+        ]
+      },
+      {
+        "id": "p3-nobody-plugin-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "non-body plugins: streamed bodies, request state and header-only subscription",
+        "variants": [
+          "none",
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "nobody",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/proxy/echo?resp=4096",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "p4-reload-budget-plugin",
+        "source": "#700 I2 (plan v3)",
+        "kind": "reload",
+        "purpose": "plugin-only reload churn with budget decrease/increase, enforce/observe changes and an inadmissible reload, slow in-flight H2",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "max_buffered_bytes": "256m",
+        "reload_churn": "budget",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "40s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "inflight",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536\u0026delay=3000",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "error:stream-reset"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "15s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "reload i cycles max_buffered_bytes 128m, mode observe, 512m, 256m with the inspect-a name; reload 5 sets 1m, below the route minimum, and must be refused with the previous limits kept",
+          "each budget reload waits up to 10 s for its jul_reload_total sighup outcome and then reads the effective limits from GET /api/v1/status; a missing acknowledgement, an unexpected outcome or effective limits other than those expected is a runtime finding"
+        ]
+      },
+      {
+        "id": "f4-stalled-body",
+        "source": "#700 ADR F4",
+        "kind": "f4",
+        "purpose": "stalled/slow uploads with a sibling request on the same connection",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "recovery": "10s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall",
+            "slow"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "20s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "the upload is the 16 KiB wide JSON shape with Content-Type application/json instead of unlabelled 's' fill so the both variant inspects ordinary JSON",
+          "the sibling response is verified (length, content, plugin headers) and its connection relationship is measured (one dialled connection for H2/H3) instead of assumed",
+          "the external client limit is the watchdog for runtimes without an inspection body deadline",
+          "plan v3 adds the plugin-only wasm variant"
+        ]
+      },
+      {
+        "id": "f4-stalled-body-rt5s",
+        "source": "#700 ADR F4",
+        "kind": "f4",
+        "purpose": "stalled/slow uploads with a sibling request on the same connection",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "read_timeout": "5s",
+        "recovery": "10s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall",
+            "slow"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "20s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "the upload is the 16 KiB wide JSON shape with Content-Type application/json instead of unlabelled 's' fill so the both variant inspects ordinary JSON",
+          "the sibling response is verified (length, content, plugin headers) and its connection relationship is measured (one dialled connection for H2/H3) instead of assumed",
+          "the external client limit is the watchdog for runtimes without an inspection body deadline",
+          "plan v3 adds the plugin-only wasm variant"
+        ]
+      },
+      {
+        "id": "f4-body-deadline-5s",
+        "source": "I5 review of #708 (ADR 0032 H6, F4)",
+        "kind": "f4",
+        "purpose": "stalled uploads against [global.inspection].body_timeout = 5s, well inside the client watchdog; inspected variants expect 408 near 5 s, uninspected ones are outside the deadline's scope",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "body_timeout": "5s",
+        "recovery": "10s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "20s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart",
+          "plan v3 adds the plugin-only wasm variant (I2 governs the plugin request path; a WAF-only body deadline is I3)"
+        ]
+      }
+    ],
+    "quick": [
+      {
+        "id": "s1-normal-h1",
+        "source": "#695 s1",
+        "kind": "load",
+        "purpose": "historical normal H1 shape (C=16; CPU-saturated for inspected variants)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s2-normal-h2",
+        "source": "#695 s2",
+        "kind": "load",
+        "purpose": "historical normal H2 shape (C=16; CPU-saturated for inspected variants)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s3-large-h2",
+        "source": "#695 s3",
+        "kind": "load",
+        "purpose": "large bodies and responses (destructive on uncapped runtimes)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s4-ramp-large-h2",
+        "source": "#695 s4",
+        "kind": "load",
+        "purpose": "concurrency ramp of large inspected bodies (destructive)",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c16",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 16,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c32",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c64",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 64,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c128",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 128,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c192",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 192,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s5-admission-h2",
+        "source": "#695 s5",
+        "kind": "load",
+        "purpose": "ADR 0017 admission behind a slow origin",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/admitted/echo?resp=65536\u0026delay=500",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 128,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "body is 256 KiB as in the archived code; the #695 plan text said 64 KiB"
+        ]
+      },
+      {
+        "id": "s6-static-h2",
+        "source": "#695 s6",
+        "kind": "load",
+        "purpose": "no-upstream static route through the same layers",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "GET",
+                "path": "/static/page.html?x=1",
+                "resp_bytes": 262144,
+                "concurrency": 128,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "plan v3 adds the wasm variant"
+        ]
+      },
+      {
+        "id": "s7-cache-h1",
+        "source": "#695 s7",
+        "kind": "load",
+        "purpose": "cache cold (unique keys) then warm (one key)",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "cache": true,
+        "phases": [
+          {
+            "name": "cold",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "cold",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/cached/echo?resp=262144",
+                "resp_bytes": 262144,
+                "concurrency": 16,
+                "timeout": "30s",
+                "unique_key": true
+              }
+            ]
+          },
+          {
+            "name": "warm",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "warm",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/cached/echo?resp=262144\u0026k=warm",
+                "resp_bytes": 262144,
+                "concurrency": 16,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "plan v3 adds the wasm variant"
+        ]
+      },
+      {
+        "id": "s8-slow-clients-h1",
+        "source": "#695 s8",
+        "kind": "load",
+        "purpose": "slow and cancelling uploads with fast probes",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "slow",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 65536,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 96,
+                "slow_bytes_per_sec": 16384,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "slow-cancel",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 65536,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 32,
+                "slow_bytes_per_sec": 16384,
+                "cancel_after": "2s",
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "client-cancel"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record"
+      },
+      {
+        "id": "s9-reload-churn",
+        "source": "#695 s9",
+        "kind": "reload",
+        "purpose": "policy reload churn every 2s, reload 5 invalid, slow in-flight H2",
+        "variants": [
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "8s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "inflight",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536\u0026delay=3000",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "error:stream-reset"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "in-flight requests on the policy-changed route are retired within 2s by design (#642/#562; WAF rules and plugin modules are access inputs), so the inflight class expects error:stream-reset; the archived #695 runtime already contained it (#653) but the archive counted every non-200 as an error and s9 was OOM-killed before per-class outcomes were captured"
+        ]
+      },
+      {
+        "id": "s10-normal-h3",
+        "source": "#695 s10",
+        "kind": "load",
+        "purpose": "historical normal H3 shape (C=16)",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "s11-arg-amplification-h1",
+        "source": "#695 s11",
+        "kind": "load",
+        "purpose": "many-argument JSON at C=1..16 (destructive on uncapped runtimes)",
+        "variants": [
+          "none",
+          "waf"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record"
+      },
+      {
+        "id": "s11l-arg-amplification-low-h1",
+        "source": "#695 s11 (C=1,2 subset)",
+        "kind": "load",
+        "purpose": "non-destructive amplification smoke",
+        "variants": [
+          "none",
+          "waf"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "only the C=1 and C=2 steps; the full s11 ramp is the destructive I6 profile"
+        ]
+      },
+      {
+        "id": "r1-slow-upload-c16-h1",
+        "source": "#699 r1",
+        "kind": "load",
+        "purpose": "slow uploads below the instance cap with POST probes",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "slow",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 65536,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "slow_bytes_per_sec": 16384,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "the #699 review text calls the probes GET; the measured #699 patch used the 2 KiB POST probe kept here"
+        ]
+      },
+      {
+        "id": "r2-fast-nobody-h1",
+        "source": "#699 r2",
+        "kind": "load",
+        "purpose": "fast requests without a body",
+        "variants": [
+          "none",
+          "wasm"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/proxy/echo?resp=4096",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "r3-fast-body-h1",
+        "source": "#699 r3",
+        "kind": "load",
+        "purpose": "fast body requests (normal H1 shape)",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "cal-normal-h1",
+        "source": "I5 calibration of s1",
+        "kind": "load",
+        "purpose": "unsaturated-concurrency calibration",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record"
+      },
+      {
+        "id": "cal-normal-h2",
+        "source": "I5 calibration of s2",
+        "kind": "load",
+        "purpose": "unsaturated-concurrency calibration",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record"
+      },
+      {
+        "id": "cal-normal-h3",
+        "source": "I5 calibration of s10",
+        "kind": "load",
+        "purpose": "unsaturated-concurrency calibration",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record"
+      },
+      {
+        "id": "u1-normal-h1",
+        "source": "#695 s1 at calibrated concurrency",
+        "kind": "load",
+        "purpose": "unsaturated normal throughput (A13 shape)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "the calibrated concurrency replaces the archived C=16 for inspected variants (waf and both 1, wasm 2), so those cells are not comparable with #695 C=16 numbers; none stays at C=16, where Jul CPU is about 0.6 of the envelope but throughput flattens, so a limit outside Jul CPU may bound it"
+        ],
+        "concurrency_by_variant": {
+          "both": 1,
+          "none": 16,
+          "waf": 1,
+          "wasm": 2
+        }
+      },
+      {
+        "id": "u2-normal-h2",
+        "source": "#695 s2 at calibrated concurrency",
+        "kind": "load",
+        "purpose": "unsaturated normal throughput (A13 shape)",
+        "variants": [
+          "none",
+          "waf",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "the calibrated concurrency replaces the archived C=16 for inspected variants (waf and both 1, wasm 2), so those cells are not comparable with #695 C=16 numbers; none stays at C=16, where Jul CPU is about 0.6 of the envelope but throughput flattens, so a limit outside Jul CPU may bound it"
+        ],
+        "concurrency_by_variant": {
+          "both": 1,
+          "none": 16,
+          "waf": 1,
+          "wasm": 2
+        }
+      },
+      {
+        "id": "u10-normal-h3",
+        "source": "#695 s10 at calibrated concurrency",
+        "kind": "load",
+        "purpose": "unsaturated normal throughput (A13 shape)",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 3,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h3",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "the calibrated concurrency replaces the archived C=16 for inspected variants (waf and both 1, wasm 2), so those cells are not comparable with #695 C=16 numbers; none stays at C=16, where Jul CPU is about 0.6 of the envelope but throughput flattens, so a limit outside Jul CPU may bound it"
+        ],
+        "concurrency_by_variant": {
+          "both": 1,
+          "none": 16,
+          "wasm": 2
+        }
+      },
+      {
+        "id": "f3-admission-pending16",
+        "source": "#700 ADR F3",
+        "kind": "load",
+        "purpose": "single-connection H2 admission goodput with a separate-connection probe",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "max_pending": 16,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "0s",
+            "measure": "4s",
+            "workloads": [
+              {
+                "name": "admission",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/admitted/echo?resp=65536\u0026delay=500",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 128,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "expected_classes": [
+                  "status:503"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "5s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "interval": "100ms"
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "responses are verified (status, length, content, origin echo) before counting goodput; the archived client counted any 200",
+          "bodies are the wide JSON shape with Content-Type application/json instead of unlabelled 'x'/'p' fill so the both variant inspects ordinary JSON; the none variant is unaffected",
+          "the worker and probe connection counts are measured and must each equal one",
+          "the archived optional Retry-After pacing mode is not ported"
+        ]
+      },
+      {
+        "id": "f3-admission-pending0",
+        "source": "#700 ADR F3",
+        "kind": "load",
+        "purpose": "single-connection H2 admission goodput with a separate-connection probe",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "max_pending": 0,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "0s",
+            "measure": "4s",
+            "workloads": [
+              {
+                "name": "admission",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/admitted/echo?resp=65536\u0026delay=500",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 128,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "expected_classes": [
+                  "status:503"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "5s",
+                "want_origin_echo": true,
+                "connections": 1,
+                "interval": "100ms"
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "responses are verified (status, length, content, origin echo) before counting goodput; the archived client counted any 200",
+          "bodies are the wide JSON shape with Content-Type application/json instead of unlabelled 'x'/'p' fill so the both variant inspects ordinary JSON; the none variant is unaffected",
+          "the worker and probe connection counts are measured and must each equal one",
+          "the archived optional Retry-After pacing mode is not ported"
+        ]
+      },
+      {
+        "id": "u1b-normal-h1-none-c8",
+        "source": "#695 s1 at C=8 (plan v3)",
+        "kind": "load",
+        "purpose": "stabilised uninspected H1 throughput (A13 shape)",
+        "variants": [
+          "none"
+        ],
+        "repetitions": 5,
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "throughput",
+        "changes_from_archive": [
+          "added in plan v3 before any I2 measurement: I5 recorded u1/none (C=16) as inconclusive-noise (spread 0.119) with throughput bound partly outside Jul CPU; C=8 keeps the client and origin further from their limit and 5 repetitions are planned; u1/none at C=16 is still run and reported"
+        ],
+        "concurrency_by_variant": {
+          "none": 8
+        }
+      },
+      {
+        "id": "p1-large-body-plugin-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "bounded large-body plugin-only request path at the default 256 MiB budget",
+        "variants": [
+          "none",
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 786432,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 64,
+                "timeout": "1m0s",
+                "want_origin_echo": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record"
+      },
+      {
+        "id": "p2-saturation-plugin-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "deliberate enforce-mode byte saturation of the plugin request path (fail-fast 503 with probes)",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "max_buffered_bytes": "128m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096\u0026delay=5000",
+                "body_bytes": 983040,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 160,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ],
+                "honor_retry_after": true
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ],
+                "honor_retry_after": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "128m is above the 103825411 B compiled minimum of the two-plugin route (default plugin limits), so genuine validation passes; 160 concurrent 960 KiB bodies held 5 s at the origin need about 150 MiB of prepared capacity",
+          "plugin timeout 2s: a pre-freeze smoke with the 100ms default and a 1 s hold turned CPU contention between up to 64 concurrent 1 MB guest scans per plugin into contained guest timeouts (500) before the byte budget filled; the longer timeout and hold isolate the byte dimension and change no governor limit",
+          "static footprint sized per ADR 0032 §10 (not guaranteed: guest pools and GC headroom): with default pools (2 × 64 × 16 MiB = 2 GiB) a pre-freeze envelope smoke was OOM-killed at 593 MiB heap with 37 instances and 50 MiB governed; with 2 × 8 instances and no GOMEMLIMIT it was OOM-killed at 532 MiB heap with 126 MiB governed (GC headroom over a ~420 MiB live set)",
+          "max_instances 4 per plugin (128 MiB guest pool) and GOMEMLIMIT=480MiB, the ADR's recommendation: about 128 MiB governed + 128 MiB pool + baseline stays well below the limit, and the limit is below the 576 MiB objective",
+          "only a 503 with Retry-After: 1 and the inspection_overloaded body is the expected overload class; any other 503 is a finding",
+          "load and probe workers wait the advertised Retry-After after an overload response; p2h keeps the no-backoff shape as a separate record"
+        ],
+        "exercise_requirements": [
+          {
+            "counter": "inspection_rejected_enforce",
+            "at_least": 1
+          },
+          {
+            "class": "status:503-inspection-overloaded",
+            "at_least": 1
+          },
+          {
+            "counter": "inspection_rejected_observe",
+            "at_most": 0
+          }
+        ]
+      },
+      {
+        "id": "p2h-saturation-hostile-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "p2 with clients that ignore Retry-After: records connection-buffer exposure of fast rejection (ADR 0032 §10, not guaranteed)",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "max_buffered_bytes": "128m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096\u0026delay=5000",
+                "body_bytes": 983040,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 160,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ],
+                "honor_retry_after": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "pre-freeze envelope smokes of the no-backoff shape were OOM-killed with governed bytes at 126 MiB: about 1300 rejected 960 KiB uploads per second each leave a connection in net/http's 500 ms close-write linger while the client keeps sending, and the unread bytes sit in kernel socket buffers charged to Jul's cgroup (memory.stat sock reached 286 MiB beside 393 MiB anon)",
+          "connection and kernel buffers are outside the governor (ADR 0032 §10); this cell is a record for I6 sizing, never a protection claim, and an OOM here is preserved as a finding"
+        ],
+        "exercise_requirements": [
+          {
+            "counter": "inspection_rejected_enforce",
+            "at_least": 1
+          },
+          {
+            "class": "status:503-inspection-overloaded",
+            "at_least": 1
+          }
+        ]
+      },
+      {
+        "id": "p2o-saturation-plugin-observe-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "observe twin of p2: same load and budget, would-reject recorded, no governor rejection",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "inspection_mode": "observe",
+        "max_buffered_bytes": "128m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096\u0026delay=5000",
+                "body_bytes": 983040,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 160,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "honor_retry_after": true
+              },
+              {
+                "name": "probe",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 2048,
+                "body_shape": "wide",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "honor_retry_after": true
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "exercise_requirements": [
+          {
+            "counter": "inspection_rejected_observe",
+            "at_least": 1
+          },
+          {
+            "counter": "inspection_rejected_enforce",
+            "at_most": 0
+          },
+          {
+            "class": "status:503-inspection-overloaded",
+            "at_most": 0
+          }
+        ]
+      },
+      {
+        "id": "p3-nobody-plugin-h1",
+        "source": "#700 I2 (plan v3)",
+        "kind": "load",
+        "purpose": "non-body plugins: streamed bodies, request state and header-only subscription",
+        "variants": [
+          "none",
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "nobody",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "GET",
+                "path": "/proxy/echo?resp=4096",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s"
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity"
+      },
+      {
+        "id": "p4-reload-budget-plugin",
+        "source": "#700 I2 (plan v3)",
+        "kind": "reload",
+        "purpose": "plugin-only reload churn with budget decrease/increase, enforce/observe changes and an inadmissible reload, slow in-flight H2",
+        "variants": [
+          "wasm"
+        ],
+        "repetitions": 1,
+        "fixture": "request-only",
+        "max_buffered_bytes": "256m",
+        "reload_churn": "budget",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "8s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true
+              },
+              {
+                "name": "inflight",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=65536\u0026delay=3000",
+                "body_bytes": 16384,
+                "body_shape": "wide",
+                "resp_bytes": 65536,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "error:stream-reset"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "reload i cycles max_buffered_bytes 128m, mode observe, 512m, 256m with the inspect-a name; reload 5 sets 1m, below the route minimum, and must be refused with the previous limits kept",
+          "each budget reload waits up to 10 s for its jul_reload_total sighup outcome and then reads the effective limits from GET /api/v1/status; a missing acknowledgement, an unexpected outcome or effective limits other than those expected is a runtime finding"
+        ]
+      },
+      {
+        "id": "f4-stalled-body",
+        "source": "#700 ADR F4",
+        "kind": "f4",
+        "purpose": "stalled/slow uploads with a sibling request on the same connection",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "recovery": "2s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall",
+            "slow"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "12s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "the upload is the 16 KiB wide JSON shape with Content-Type application/json instead of unlabelled 's' fill so the both variant inspects ordinary JSON",
+          "the sibling response is verified (length, content, plugin headers) and its connection relationship is measured (one dialled connection for H2/H3) instead of assumed",
+          "the external client limit is the watchdog for runtimes without an inspection body deadline",
+          "plan v3 adds the plugin-only wasm variant"
+        ]
+      },
+      {
+        "id": "f4-stalled-body-rt5s",
+        "source": "#700 ADR F4",
+        "kind": "f4",
+        "purpose": "stalled/slow uploads with a sibling request on the same connection",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "read_timeout": "5s",
+        "recovery": "2s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall",
+            "slow"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "12s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "the upload is the 16 KiB wide JSON shape with Content-Type application/json instead of unlabelled 's' fill so the both variant inspects ordinary JSON",
+          "the sibling response is verified (length, content, plugin headers) and its connection relationship is measured (one dialled connection for H2/H3) instead of assumed",
+          "the external client limit is the watchdog for runtimes without an inspection body deadline",
+          "plan v3 adds the plugin-only wasm variant"
+        ]
+      },
+      {
+        "id": "f4-body-deadline-5s",
+        "source": "I5 review of #708 (ADR 0032 H6, F4)",
+        "kind": "f4",
+        "purpose": "stalled uploads against [global.inspection].body_timeout = 5s, well inside the client watchdog; inspected variants expect 408 near 5 s, uninspected ones are outside the deadline's scope",
+        "variants": [
+          "none",
+          "wasm",
+          "both"
+        ],
+        "repetitions": 1,
+        "body_timeout": "5s",
+        "recovery": "2s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "20s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart",
+          "plan v3 adds the plugin-only wasm variant (I2 governs the plugin request path; a WAF-only body deadline is I3)"
+        ]
+      }
+    ]
+  },
+  "config_template_sha256": "fa3523a08b339919b287c33b6cda5dfa045ea97c66fb58091ca104f20a1fda62"
+}

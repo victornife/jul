@@ -1226,6 +1226,18 @@ paths (I3) and response-subscription buffers (I4) are untouched, so no
 A1–A18 criterion is claimed. Design, test matrix, measurements and reviews:
 `docs/reviews/2026-11-12-700-i2-plugin-request-path.md`.
 
+Measurement under harness plan v3 covers several behaviours:
+
+- plugin-only saturation delivering `503` while probes progress;
+- the observe equivalent;
+- `408` at a 5 s `body_timeout` on H1, H2 and H3, with healthy siblings;
+- the drain after reload and budget churn.
+
+The unsaturated 10% rule found no pooled failure but stayed inconclusive because of host noise.
+That makes throughput an I6 validation gap. Peaks above 576 MiB in the plugin cells come from
+static guest pools, from pre-existing generation retention under reload churn (#709), or
+from ungoverned socket buffers (§10). They do not come from governed bytes.
+
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.
 

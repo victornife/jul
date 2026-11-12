@@ -1,0 +1,12 @@
+== 2026-11-12T15:56:43Z i2-p1-none-repeat
+2026-11-12T15:57:19Z p1-large-body-plugin-h1/none/main rep1: state=completed valid=true correct=true load/load=2751.7rps(55097/55097) cpu=0.95
+2026-11-12T15:57:54Z p1-large-body-plugin-h1/none/cand rep1: state=completed valid=true correct=true load/load=1858.2rps(37227/37227) cpu=0.97
+2026-11-12T15:58:30Z p1-large-body-plugin-h1/none/main rep2: state=completed valid=true correct=true load/load=1673.0rps(33525/33525) cpu=0.96
+2026-11-12T15:59:06Z p1-large-body-plugin-h1/none/cand rep2: state=completed valid=true correct=true load/load=2256.3rps(45190/45190) cpu=0.96
+2026-11-12T15:59:41Z p1-large-body-plugin-h1/none/main rep3: state=completed valid=true correct=true load/load=2331.7rps(46697/46697) cpu=0.96
+2026-11-12T16:00:17Z p1-large-body-plugin-h1/none/cand rep3: state=completed valid=true correct=true load/load=1842.4rps(36912/36912) cpu=0.96
+run i2-p1-none-repeat: complete, 6 results in /home/victornf/jul-i2-evidence/frozen/i2-p1-none-repeat
+exit=0
+/home/victornf/jul-i2-evidence/frozen/i2-p1-none-repeat: verified
+verify=0
+== 2026-11-12T16:00:17Z done

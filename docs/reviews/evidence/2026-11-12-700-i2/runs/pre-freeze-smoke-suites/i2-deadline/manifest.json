@@ -1,0 +1,135 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "i2-deadline",
+  "started": "2026-11-12T11:23:17.070563172Z",
+  "ended": "2026-11-12T11:28:14.034799957Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v3",
+  "plan_sha256": "fcb1d784c6c1fe29e3e02f22455b2fe42363f7e6897d54ed671c925efce232e5",
+  "interpretation_sha256": "a65f6713b1ee1d1d660023e79af7e598be198fb6c0ce959d426646887de530dc",
+  "profile": {
+    "name": "quick",
+    "acceptance_eligible": false,
+    "warmup": "1s",
+    "measure": "3s",
+    "recovery": "2s",
+    "reload_measure": "8s",
+    "reload_recovery": "2s",
+    "step_warmup": "1s",
+    "f3_duration": "4s",
+    "f4_client_limit": "12s",
+    "description": "smoke only: exercises the instruments; never acceptance, comparison or capacity evidence"
+  },
+  "repetitions": 1,
+  "selection": [
+    "f4-stalled-body/none",
+    "f4-stalled-body/wasm",
+    "f4-stalled-body/both",
+    "f4-body-deadline-5s/none",
+    "f4-body-deadline-5s/wasm",
+    "f4-body-deadline-5s/both"
+  ],
+  "scenario_sha256": {
+    "f4-body-deadline-5s/both": "6200a86d06c5d80ef4dc48af889255530206227a1d61250c1d2686bf21fc037f",
+    "f4-body-deadline-5s/none": "6200a86d06c5d80ef4dc48af889255530206227a1d61250c1d2686bf21fc037f",
+    "f4-body-deadline-5s/wasm": "6200a86d06c5d80ef4dc48af889255530206227a1d61250c1d2686bf21fc037f",
+    "f4-stalled-body/both": "c38e4c15fc1376a3e3be38bd682dbc64b8c0cc344905030076a9b6778abd8cdb",
+    "f4-stalled-body/none": "c38e4c15fc1376a3e3be38bd682dbc64b8c0cc344905030076a9b6778abd8cdb",
+    "f4-stalled-body/wasm": "c38e4c15fc1376a3e3be38bd682dbc64b8c0cc344905030076a9b6778abd8cdb"
+  },
+  "targets": [
+    {
+      "label": "cand",
+      "adapter": "current",
+      "path": "/tmp/jul-i2-wip",
+      "binary": {
+        "path": "/tmp/jul-i2-wip",
+        "sha256": "2eba4cc66b52cb9476fb2e433072b48afc5b5b8ce05edb38cb5e802fecfe0f8e",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "true",
+          "vcs.revision": "d8d0520b1b57ef8c0df08e8902b407856f2d47cd",
+          "vcs.time": "2026-11-12T08:26:43Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/tmp/ia-wip",
+    "sha256": "02be3aeea417be12ce9c4fc179c08eeaf6d250372fe6ce0ffe6b5fd4552e2ac5",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "CGO_ENABLED": "1",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux",
+      "vcs": "git",
+      "vcs.modified": "true",
+      "vcs.revision": "d8d0520b1b57ef8c0df08e8902b407856f2d47cd",
+      "vcs.time": "2026-11-12T08:26:43Z"
+    }
+  },
+  "guest": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-load.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a"
+  },
+  "guest_nobody": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-nobody.wasm",
+    "sha256": "5df6763d8a9fc4ff15d0931376cade46f6d50238fcde412d0a341400f3afa22e"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/jul-700-i2/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 12,
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "none",
+    "jul_cpus": "",
+    "cpu_quota": "",
+    "memory_max": "",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "0-11",
+    "jul": "unconstrained (envelope none)",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/f4-stalled-body/none/cand/rep1/result.json",
+    "cells/f4-stalled-body/wasm/cand/rep1/result.json",
+    "cells/f4-stalled-body/both/cand/rep1/result.json",
+    "cells/f4-body-deadline-5s/none/cand/rep1/result.json",
+    "cells/f4-body-deadline-5s/wasm/cand/rep1/result.json",
+    "cells/f4-body-deadline-5s/both/cand/rep1/result.json"
+  ],
+  "interrupted": false
+}

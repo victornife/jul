@@ -1,0 +1,40 @@
+BenchmarkPluginMiddleware-2     	   29767	     41081 ns/op	   19499 B/op	      64 allocs/op
+BenchmarkPluginMiddleware-2     	   32360	     37304 ns/op	   19577 B/op	      65 allocs/op
+BenchmarkPluginMiddleware-2     	   25399	     42434 ns/op	   19551 B/op	      64 allocs/op
+BenchmarkPluginMiddleware-2     	   34255	     31388 ns/op	   19597 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   61756	     18202 ns/op	   19663 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   61195	     16897 ns/op	   19620 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   68822	     15117 ns/op	   19655 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   77599	     16748 ns/op	   19667 B/op	      65 allocs/op
+BenchmarkV2RequestOnly-2        	   43545	     25345 ns/op	         1.000 guest-calls/op	   23177 B/op	      68 allocs/op
+BenchmarkV2RequestOnly-2        	   53082	     22224 ns/op	         1.000 guest-calls/op	   23200 B/op	      68 allocs/op
+BenchmarkV2RequestOnly-2        	   54709	     20888 ns/op	         1.000 guest-calls/op	   23157 B/op	      68 allocs/op
+BenchmarkV2RequestOnly-2        	   54586	     21082 ns/op	         1.000 guest-calls/op	   23178 B/op	      68 allocs/op
+BenchmarkV2ResponseMetadata-2   	   28029	     39358 ns/op	         2.000 guest-calls/op	   39330 B/op	     135 allocs/op
+BenchmarkV2ResponseMetadata-2   	   31311	     34314 ns/op	         2.000 guest-calls/op	   39231 B/op	     135 allocs/op
+BenchmarkV2ResponseMetadata-2   	   34017	     35159 ns/op	         2.000 guest-calls/op	   39336 B/op	     135 allocs/op
+BenchmarkV2ResponseMetadata-2   	   30966	     34172 ns/op	         2.000 guest-calls/op	   39174 B/op	     135 allocs/op
+BenchmarkV2BodyInspect-2        	    9847	    133075 ns/op	         2.000 guest-calls/op	   69398 B/op	     187 allocs/op
+BenchmarkV2BodyInspect-2        	    8733	    120924 ns/op	         2.000 guest-calls/op	   69793 B/op	     188 allocs/op
+BenchmarkV2BodyInspect-2        	    8614	    133206 ns/op	         2.000 guest-calls/op	   70323 B/op	     189 allocs/op
+BenchmarkV2BodyInspect-2        	    7892	    137846 ns/op	         2.000 guest-calls/op	   69724 B/op	     186 allocs/op
+BenchmarkPluginMiddleware-2     	   48016	     22034 ns/op	   19638 B/op	      65 allocs/op
+BenchmarkPluginMiddleware-2     	   61886	     18696 ns/op	   19559 B/op	      65 allocs/op
+BenchmarkPluginMiddleware-2     	   56762	     21049 ns/op	   19564 B/op	      65 allocs/op
+BenchmarkPluginMiddleware-2     	   55836	     20449 ns/op	   19555 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   84757	     13416 ns/op	   19657 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   89251	     14582 ns/op	   19622 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   86665	     13777 ns/op	   19660 B/op	      65 allocs/op
+BenchmarkPluginParallel-2       	   77518	     13890 ns/op	   19602 B/op	      65 allocs/op
+BenchmarkV2RequestOnly-2        	   42772	     27684 ns/op	         1.000 guest-calls/op	   23128 B/op	      67 allocs/op
+BenchmarkV2RequestOnly-2        	   44901	     28655 ns/op	         1.000 guest-calls/op	   23106 B/op	      67 allocs/op
+BenchmarkV2RequestOnly-2        	   45066	     26440 ns/op	         1.000 guest-calls/op	   23201 B/op	      68 allocs/op
+BenchmarkV2RequestOnly-2        	   46448	     29073 ns/op	         1.000 guest-calls/op	   23126 B/op	      68 allocs/op
+BenchmarkV2ResponseMetadata-2   	   23259	     54610 ns/op	         2.000 guest-calls/op	   39218 B/op	     135 allocs/op
+BenchmarkV2ResponseMetadata-2   	   25312	     49133 ns/op	         2.000 guest-calls/op	   39204 B/op	     135 allocs/op
+BenchmarkV2ResponseMetadata-2   	   26199	     41836 ns/op	         2.000 guest-calls/op	   39257 B/op	     135 allocs/op
+BenchmarkV2ResponseMetadata-2   	   28554	     41258 ns/op	         2.000 guest-calls/op	   39321 B/op	     135 allocs/op
+BenchmarkV2BodyInspect-2        	    9216	    131610 ns/op	         2.000 guest-calls/op	   69890 B/op	     188 allocs/op
+BenchmarkV2BodyInspect-2        	   10106	    110529 ns/op	         2.000 guest-calls/op	   70346 B/op	     189 allocs/op
+BenchmarkV2BodyInspect-2        	   10659	    107129 ns/op	         2.000 guest-calls/op	   70149 B/op	     189 allocs/op
+BenchmarkV2BodyInspect-2        	   11185	    102734 ns/op	         2.000 guest-calls/op	   70065 B/op	     189 allocs/op

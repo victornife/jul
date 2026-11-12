@@ -1,0 +1,125 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "ia-rep-main-1",
+  "started": "2026-11-12T12:07:18.658075566Z",
+  "ended": "2026-11-12T12:10:15.021802232Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v3",
+  "plan_sha256": "f8e5899ec8e705d122be1dc1da2733250dbf9afc6aefe9f4566f190b8595b846",
+  "interpretation_sha256": "a65f6713b1ee1d1d660023e79af7e598be198fb6c0ce959d426646887de530dc",
+  "profile": {
+    "name": "qualification",
+    "acceptance_eligible": true,
+    "warmup": "5s",
+    "measure": "20s",
+    "recovery": "10s",
+    "reload_measure": "40s",
+    "reload_recovery": "15s",
+    "step_warmup": "2s",
+    "f3_duration": "20s",
+    "f4_client_limit": "20s",
+    "description": "the archived #695/#700 windows; eligible as acceptance evidence only inside the verified envelope"
+  },
+  "repetitions": 1,
+  "selection": [
+    "s8-slow-clients-h1/wasm",
+    "s8-slow-clients-h1/both",
+    "s6-static-h2/wasm",
+    "s6-static-h2/both"
+  ],
+  "scenario_sha256": {
+    "s6-static-h2/both": "59df9ec76e7141c149a2736f5dfe19e3aee2783385eeef1e42c9e43d3874e8d3",
+    "s6-static-h2/wasm": "59df9ec76e7141c149a2736f5dfe19e3aee2783385eeef1e42c9e43d3874e8d3",
+    "s8-slow-clients-h1/both": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b",
+    "s8-slow-clients-h1/wasm": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b"
+  },
+  "targets": [
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+        "sha256": "65a0f8b9d42909b048fe3fe00ecda7dbf17ae28320bdef28bd82a1ea2f0add37",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/tmp/ia-wip",
+    "sha256": "41190c8190df1c023916d89bb95798eeced2c2b2fd75e542e1eda09efe34d0f7",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "CGO_ENABLED": "1",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux",
+      "vcs": "git",
+      "vcs.modified": "true",
+      "vcs.revision": "d8d0520b1b57ef8c0df08e8902b407856f2d47cd",
+      "vcs.time": "2026-11-12T08:26:43Z"
+    }
+  },
+  "guest": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-load.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a"
+  },
+  "guest_nobody": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-nobody.wasm",
+    "sha256": "5df6763d8a9fc4ff15d0931376cade46f6d50238fcde412d0a341400f3afa22e"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/jul-700-i2/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 6,
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "required",
+    "jul_cpus": "0,1",
+    "cpu_quota": "200%",
+    "memory_max": "768M",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "4-9",
+    "jul": "0,1",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/s8-slow-clients-h1/wasm/main/rep1/result.json",
+    "cells/s8-slow-clients-h1/both/main/rep1/result.json",
+    "cells/s6-static-h2/wasm/main/rep1/result.json",
+    "cells/s6-static-h2/both/main/rep1/result.json"
+  ],
+  "interrupted": false
+}

@@ -1,0 +1,177 @@
+goroutine profile: total 26
+3 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10894c 0x10893d 0x20ed48 0x21e014 0x34eeb8 0x2c709c 0x2c71d8 0x35439c 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f		runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27		internal/poll/fd_poll_runtime.go:84
+#	0x10894b	internal/poll.(*pollDesc).waitRead+0x22b	internal/poll/fd_poll_runtime.go:89
+#	0x10893c	internal/poll.(*FD).Read+0x21c			internal/poll/fd_unix.go:170
+#	0x20ed47	net.(*netFD).Read+0x27				net/fd_posix.go:68
+#	0x21e013	net.(*conn).Read+0x33				net/net.go:196
+#	0x34eeb7	net/http.(*connReader).Read+0x227		net/http/server.go:852
+#	0x2c709b	bufio.(*Reader).fill+0xdb			bufio/bufio.go:113
+#	0x2c71d7	bufio.(*Reader).Peek+0x57			bufio/bufio.go:152
+#	0x35439b	net/http.(*conn).serve+0x6cb			net/http/server.go:2197
+
+1 @ 0x2e674 0x9dae4 0xdfb01c 0xa2cf4
+#	0x9dae3		os/signal.signal_recv+0x113	runtime/sigqueue.go:152
+#	0xdfb01b	os/signal.loop+0x1b		os/signal/signal_unix.go:23
+
+1 @ 0x57bec 0x99e44 0x70e6b4 0x70e360 0x70bbc4 0xc51c24 0xc52450 0x355bc8 0x357334 0xd72a84 0x355bc8 0xd76f64 0x355bc8 0xd76dc4 0x355bc8 0xd76cb8 0x355bc8 0x357334 0xd769c4 0x355bc8 0xd75378 0x355bc8 0xd7527c 0xd75130 0xd75101 0x355bc8 0xd768c8 0x355bc8 0xd76818 0x355bc8 0x376190 0x354270 0xa2cf4
+#	0x70e6b3	runtime/pprof.writeRuntimeProfile+0xb3					runtime/pprof/pprof.go:848
+#	0x70e35f	runtime/pprof.writeGoroutine+0x4f					runtime/pprof/pprof.go:781
+#	0x70bbc3	runtime/pprof.(*Profile).WriteTo+0x143					runtime/pprof/pprof.go:405
+#	0xc51c23	net/http/pprof.handler.ServeHTTP+0x433					net/http/pprof/pprof.go:272
+#	0xc5244f	net/http/pprof.Index+0xaf						net/http/pprof/pprof.go:391
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0x357333	net/http.(*ServeMux).ServeHTTP+0x193					net/http/server.go:2927
+#	0xd72a83	jul/internal/admin.init.func104.1+0x83					jul/internal/admin/route_catalog.go:940
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76f63	jul/internal/admin.(*Server).requirePermission.func1+0x143		jul/internal/admin/rbac.go:259
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76dc3	jul/internal/admin.(*Server).guardOIDCCredentials.func1+0xa3		jul/internal/admin/oidc.go:45
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76cb7	jul/internal/admin.(*Server).limitRoute.func1+0x167			jul/internal/admin/ratelimit.go:387
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0x357333	net/http.(*ServeMux).ServeHTTP+0x193					net/http/server.go:2927
+#	0xd769c3	jul/internal/admin.(*Server).observeConsole.func1+0xb3			jul/internal/admin/operational.go:121
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd75377	jul/internal/admin.(*Server).requireBrowserSameOrigin.func2+0xc7	jul/internal/admin/origin_guard.go:39
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd7527b	net/http.(*CrossOriginProtection).Handler.func1+0xdb			net/http/csrf.go:216
+#	0xd7512f	net/http.HandlerFunc.ServeHTTP+0x8f					net/http/server.go:2362
+#	0xd75100	jul/internal/admin.(*Server).requireBrowserSameOrigin.func3+0x60	jul/internal/admin/origin_guard.go:46
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd768c7	jul/internal/admin.(*Server).requireSecureTransport.func1+0x87		jul/internal/admin/transport_gate.go:68
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76817	jul/internal/admin.(*Server).captureAdminRuntimeSnapshot.func1+0xa7	jul/internal/admin/runtime_snapshot.go:31
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0x37618f	net/http.serverHandler.ServeHTTP+0xaf					net/http/server.go:3440
+#	0x35426f	net/http.(*conn).serve+0x59f						net/http/server.go:2161
+
+1 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10894c 0x10893d 0x112bd8 0x112bd1 0x4d10d0 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f			runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27			internal/poll/fd_poll_runtime.go:84
+#	0x10894b	internal/poll.(*pollDesc).waitRead+0x22b		internal/poll/fd_poll_runtime.go:89
+#	0x10893c	internal/poll.(*FD).Read+0x21c				internal/poll/fd_unix.go:170
+#	0x112bd7	os.(*File).read+0x67					os/file_posix.go:30
+#	0x112bd0	os.(*File).Read+0x60					os/file.go:144
+#	0x4d10cf	github.com/fsnotify/fsnotify.(*inotify).readEvents+0xdf	github.com/fsnotify/fsnotify@v1.10.1/backend_inotify.go:368
+
+1 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10b580 0x10b571 0x210348 0x226744 0x225b6c 0x3589b8 0xd7822c 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f		runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27		internal/poll/fd_poll_runtime.go:84
+#	0x10b57f	internal/poll.(*pollDesc).waitRead+0x20f	internal/poll/fd_poll_runtime.go:89
+#	0x10b570	internal/poll.(*FD).Accept+0x200		internal/poll/fd_unix.go:618
+#	0x210347	net.(*netFD).accept+0x27			net/fd_unix.go:149
+#	0x226743	net.(*TCPListener).accept+0x23			net/tcpsock_posix.go:159
+#	0x225b6b	net.(*TCPListener).Accept+0x2b			net/tcpsock.go:387
+#	0x3589b7	net/http.(*Server).Serve+0x2a7			net/http/server.go:3578
+#	0xd7822b	jul/internal/admin.(*Server).Run.func1+0x2b	jul/internal/admin/server.go:980
+
+1 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10b580 0x10b571 0x210348 0x226744 0x225b6c 0xb8cf68 0x54f95c 0x2b1928 0x3589b8 0xbb1b30 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f			runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27			internal/poll/fd_poll_runtime.go:84
+#	0x10b57f	internal/poll.(*pollDesc).waitRead+0x20f		internal/poll/fd_poll_runtime.go:89
+#	0x10b570	internal/poll.(*FD).Accept+0x200			internal/poll/fd_unix.go:618
+#	0x210347	net.(*netFD).accept+0x27				net/fd_unix.go:149
+#	0x226743	net.(*TCPListener).accept+0x23				net/tcpsock_posix.go:159
+#	0x225b6b	net.(*TCPListener).Accept+0x2b				net/tcpsock.go:387
+#	0xb8cf67	jul/internal/server.(*dynamicConnLimiter).Accept+0x27	jul/internal/server/dynamic_conn_limit.go:80
+#	0x54f95b	jul/internal/respwriter.sendTimeoutListener.Accept+0x2b	jul/internal/respwriter/respwriter.go:156
+#	0x2b1927	crypto/tls.(*listener).Accept+0x27			crypto/tls/tls.go:78
+#	0x3589b7	net/http.(*Server).Serve+0x2a7				net/http/server.go:3578
+#	0xbb1b2f	jul/internal/server.(*Server).startServing.func1+0x5f	jul/internal/server/server.go:997
+
+1 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10b580 0x10b571 0x210348 0x226744 0x225b6c 0xb8cf68 0x54f95c 0x3589b8 0xbb1b30 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f			runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27			internal/poll/fd_poll_runtime.go:84
+#	0x10b57f	internal/poll.(*pollDesc).waitRead+0x20f		internal/poll/fd_poll_runtime.go:89
+#	0x10b570	internal/poll.(*FD).Accept+0x200			internal/poll/fd_unix.go:618
+#	0x210347	net.(*netFD).accept+0x27				net/fd_unix.go:149
+#	0x226743	net.(*TCPListener).accept+0x23				net/tcpsock_posix.go:159
+#	0x225b6b	net.(*TCPListener).Accept+0x2b				net/tcpsock.go:387
+#	0xb8cf67	jul/internal/server.(*dynamicConnLimiter).Accept+0x27	jul/internal/server/dynamic_conn_limit.go:80
+#	0x54f95b	jul/internal/respwriter.sendTimeoutListener.Accept+0x2b	jul/internal/respwriter/respwriter.go:156
+#	0x3589b7	net/http.(*Server).Serve+0x2a7				net/http/server.go:3578
+#	0xbb1b2f	jul/internal/server.(*Server).startServing.func1+0x5f	jul/internal/server/server.go:997
+
+1 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10bf74 0x10bf61 0x221940 0xafbf74 0xafcda4 0xb04294 0xb04289 0xb4322c 0xb45444 0xb4cee8 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f				runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27				internal/poll/fd_poll_runtime.go:84
+#	0x10bf73	internal/poll.(*pollDesc).waitRead+0x113			internal/poll/fd_poll_runtime.go:89
+#	0x10bf60	internal/poll.(*FD).RawRead+0x100				internal/poll/fd_unix.go:715
+#	0x22193f	net.(*rawConn).Read+0x2f					net/rawconn.go:44
+#	0xafbf73	golang.org/x/net/internal/socket.(*syscaller).recvmmsg+0x63	golang.org/x/net@v0.62.0/internal/socket/mmsghdr_unix.go:120
+#	0xafcda3	golang.org/x/net/internal/socket.(*Conn).recvMsgs+0x123		golang.org/x/net@v0.62.0/internal/socket/rawconn_mmsg.go:24
+#	0xb04293	golang.org/x/net/internal/socket.(*Conn).RecvMsgs+0x43		golang.org/x/net@v0.62.0/internal/socket/socket.go:272
+#	0xb04288	golang.org/x/net/ipv4.(*payloadHandler).ReadBatch+0x38		golang.org/x/net@v0.62.0/ipv4/batch.go:83
+#	0xb4322b	github.com/quic-go/quic-go.(*oobConn).ReadPacket+0x6db		github.com/quic-go/quic-go@v0.65.0/sys_conn_oob.go:155
+#	0xb45443	github.com/quic-go/quic-go.(*Transport).listen+0x43		github.com/quic-go/quic-go@v0.65.0/transport.go:531
+#	0xb4cee7	github.com/quic-go/quic-go.(*Transport).init.func1.1+0x57	github.com/quic-go/quic-go@v0.65.0/transport.go:423
+
+1 @ 0x9b108 0x74b48 0x50b6b4 0x5431a8 0xa2cf4
+#	0x50b6b3	jul/internal/config.watchFileEvents+0xd3	jul/internal/config/reload.go:69
+#	0x5431a7	jul/internal/config.WatchFile.func1+0x57	jul/internal/config/reload.go:51
+
+1 @ 0x9b108 0x74b48 0x5c70f0 0xa2cf4
+#	0x5c70ef	jul/internal/middleware.(*RateLimiterStore).janitor+0xbf	jul/internal/middleware/ratelimit.go:153
+
+1 @ 0x9b108 0x74b48 0xb38cfc 0xa2cf4
+#	0xb38cfb	github.com/quic-go/quic-go.(*baseServer).run+0xbb	github.com/quic-go/quic-go@v0.65.0/server.go:314
+
+1 @ 0x9b108 0x74b48 0xb38ec0 0xa2cf4
+#	0xb38ebf	github.com/quic-go/quic-go.(*baseServer).runSendQueue+0xff	github.com/quic-go/quic-go@v0.65.0/server.go:327
+
+1 @ 0x9b108 0x74b48 0xb390a0 0xb8de14 0xb8ddf5 0xa2cf4
+#	0xb3909f	github.com/quic-go/quic-go.(*baseServer).accept+0x7f	github.com/quic-go/quic-go@v0.65.0/server.go:349
+#	0xb8de13	github.com/quic-go/quic-go.(*EarlyListener).Accept+0x53	github.com/quic-go/quic-go@v0.65.0/server.go:174
+#	0xb8ddf4	jul/internal/server.(*h3Conn).acceptLoop+0x34		jul/internal/server/http3.go:187
+
+1 @ 0x9b108 0x74b48 0xb44c84 0xa2cf4
+#	0xb44c83	github.com/quic-go/quic-go.(*Transport).runSendQueue+0xa3	github.com/quic-go/quic-go@v0.65.0/transport.go:444
+
+1 @ 0x9b108 0x74b48 0xb97460 0xdd7afc 0xe662d0 0xe63540 0xe6c8cc 0xe6c7cc 0x62030 0xa2cf4
+#	0xb9745f	jul/internal/server.(*Server).Run+0x5af	jul/internal/server/server.go:788
+#	0xdd7afb	jul/internal/app.Serve+0x41eb		jul/internal/app/serve.go:1249
+#	0xe662cf	main.cmdServe+0x46f			jul/cmd/jul/cli.go:507
+#	0xe6353f	main.dispatchSubcommand+0x19f		jul/cmd/jul/cli.go:55
+#	0xe6c8cb	main.run+0xdb				jul/cmd/jul/main.go:52
+#	0xe6c7cb	main.main+0x1b				jul/cmd/jul/main.go:35
+#	0x6202f		runtime.main+0x37f			runtime/proc.go:302
+
+1 @ 0x9b108 0x74b48 0xd3f810 0xdf04a8 0xa2cf4
+#	0xd3f80f	jul/internal/admin.(*Server).Run+0x4cf	jul/internal/admin/server.go:987
+#	0xdf04a7	jul/internal/app.Serve.func45+0x27	jul/internal/app/serve.go:1070
+
+1 @ 0x9b108 0x74b48 0xdd8904 0xa2cf4
+#	0xdd8903	jul/internal/app.watchConfigEvents+0xb3	jul/internal/app/serve.go:1396
+
+1 @ 0x9b108 0x74b48 0xdf2a98 0xa2cf4
+#	0xdf2a97	jul/internal/app.Serve.func23+0xa7	jul/internal/app/serve.go:670
+
+1 @ 0x9b108 0x74b48 0xdf43a4 0xa2cf4
+#	0xdf43a3	jul/internal/app.MergeReload.func3+0xe3	jul/internal/app/wiring.go:327
+
+1 @ 0x9b108 0x74b48 0xdf4990 0xa2cf4
+#	0xdf498f	jul/internal/app.MergeReload.func2+0x10f	jul/internal/app/wiring.go:264
+
+1 @ 0x9b108 0x74b48 0xdf4cc4 0xa2cf4
+#	0xdf4cc3	jul/internal/app.MergeReload.func1.1+0x103	jul/internal/app/wiring.go:237
+
+1 @ 0x9b108 0x74b48 0xdfbae0 0xa2cf4
+#	0xdfbadf	jul/internal/signals.Listen.func1+0x9f	jul/internal/signals/signals.go:33
+
+1 @ 0x9b108 0x75614 0x755f5 0x9cea8 0xb10f4 0xdf4294 0xa2cf4
+#	0x9cea7		sync.runtime_SemacquireWaitGroup+0x37	runtime/sema.go:114
+#	0xb10f3		sync.(*WaitGroup).Wait+0xa3		sync/waitgroup.go:206
+#	0xdf4293	jul/internal/app.MergeReload.func4+0x23	jul/internal/app/wiring.go:347
+
+1 @ 0xea2c0 0xe80a0 0x1088b8 0x1088a9 0x108819 0x20ed48 0x21e014 0x34e998 0xa2cf4
+#	0xea2bf		syscall.Syscall+0x1f				syscall/syscall_linux.go:74
+#	0xe809f		syscall.read+0x3f				syscall/zsyscall_linux_arm64.go:736
+#	0x1088b7	syscall.Read+0x197				syscall/syscall_unix.go:183
+#	0x1088a8	internal/poll.ignoringEINTRIO+0x188		internal/poll/fd_unix.go:743
+#	0x108818	internal/poll.(*FD).Read+0xf8			internal/poll/fd_unix.go:166
+#	0x20ed47	net.(*netFD).Read+0x27				net/fd_posix.go:68
+#	0x21e013	net.(*conn).Read+0x33				net/net.go:196
+#	0x34e997	net/http.(*connReader).backgroundRead+0x37	net/http/server.go:742
+

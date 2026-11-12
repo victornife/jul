@@ -1,0 +1,4 @@
+time=2026-11-12T12:09:46.681+01:00 level=WARN msg="inspection budget saturated; observe mode would reject" class=bytes mode=observe max_buffered_bytes=134217728
+time=2026-11-12T12:09:48.659+01:00 level=WARN msg="plugin instance limit reached; request rejected" plugin=inspect-a max_instances=4
+time=2026-11-12T12:09:56.682+01:00 level=WARN msg="inspection budget saturated; observe mode would reject" class=bytes mode=observe max_buffered_bytes=134217728
+time=2026-11-12T12:10:06.682+01:00 level=WARN msg="inspection budget saturated; observe mode would reject" class=bytes mode=observe max_buffered_bytes=134217728

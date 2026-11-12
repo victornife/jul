@@ -1,0 +1,11 @@
+time=2026-11-12T12:34:25.728+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T12:34:25.815+01:00 level=WARN msg="plugin instance limit reached; request rejected" plugin=inspect-a max_instances=4
+time=2026-11-12T12:34:26.785+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
+time=2026-11-12T12:34:28.895+01:00 level=WARN msg="plugin instance limit reached; request rejected" plugin=inspect-b max_instances=4
+time=2026-11-12T12:34:35.820+01:00 level=WARN msg="plugin instance limit reached; request rejected" plugin=inspect-a max_instances=4
+time=2026-11-12T12:34:36.256+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T12:34:36.876+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
+time=2026-11-12T12:34:40.335+01:00 level=WARN msg="plugin instance limit reached; request rejected" plugin=inspect-b max_instances=4
+time=2026-11-12T12:34:45.829+01:00 level=WARN msg="plugin instance limit reached; request rejected" plugin=inspect-a max_instances=4
+time=2026-11-12T12:34:46.268+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T12:34:46.977+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout

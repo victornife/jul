@@ -1,0 +1,190 @@
+{
+  "scenario": "p1-large-body-plugin-h1",
+  "scenario_sha256": "ba46394e15264dc143c9f70155cfa01a18db75bfe984c84f2ccc3073038cef2d",
+  "comparison": "record",
+  "variant": "wasm",
+  "target": "cand",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T11:34:21.193554636Z",
+  "ended": "2026-11-12T11:35:01.148716596Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "phase load class load: status:500 ×170",
+    "phase load class load: status:503 ×3309"
+  ],
+  "config_sha256": "7e4ebafd051722b383f28fcf81e198a2c57db9cc6ecfaf4fdb84e0cadefbe365",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-946440-304463525.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "gomemlimit_env": "480MiB",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 47
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 64,
+          "window_seconds": 20,
+          "attempts": 5131,
+          "verified": 1652,
+          "verified_in_window": 1618,
+          "goodput_rps": 80.9,
+          "goodput_bytes_per_second": 331366.4,
+          "classes": {
+            "ok": 1652,
+            "status:500": 170,
+            "status:503": 3309
+          },
+          "p50_ms": 344.865,
+          "p95_ms": 497.44,
+          "p99_ms": 555.087,
+          "max_ms": 723.674,
+          "crossed_in_from_warmup": 64,
+          "outstanding_at_window_end": 64,
+          "response_protos": {
+            "HTTP/1.1": 5131
+          },
+          "connections_dialled": 64,
+          "outcome_latency_ms": {
+            "status:500": {
+              "n": 170,
+              "p50": 316.668,
+              "p95": 459.713,
+              "p99": 502.409,
+              "max": 547.913
+            },
+            "status:503": {
+              "n": 3309,
+              "p50": 188.715,
+              "p95": 263.511,
+              "p99": 326.685,
+              "max": 423.14
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.967,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 437592064,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 464461824,
+  "heap_inuse_after_two_gcs": 111460352,
+  "heap_alloc_after_two_gcs": 108344608,
+  "rss_after_two_gcs": 392658944,
+  "counter_deltas": {
+    "inspection_body_timeout": 0,
+    "inspection_body_unsupported": 0,
+    "inspection_body_would_timeout": 0,
+    "inspection_rejected_enforce": 0,
+    "inspection_rejected_observe": 0,
+    "plugin_invocations": 4615,
+    "plugin_invocations_error": 209,
+    "plugin_panics": 209,
+    "plugin_waits_acquired": 3552,
+    "plugin_waits_rejected": 4115,
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_clean": 0,
+    "waf_tx_inspection_error": 0
+  },
+  "unavailable_metrics": [
+    "plugin_resp_invocations",
+    "plugin_resp_error",
+    "plugin_resp_unavailable",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_applied",
+    "reload_not_applied",
+    "transport_retired"
+  ],
+  "inspection_foundation_series_after": {
+    "jul_inspection_abandoned_evaluations": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"would_timeout\"}": 0,
+    "jul_inspection_bytes_limit": 268435456,
+    "jul_inspection_bytes{class=\"base\"}": 0,
+    "jul_inspection_bytes{class=\"buffer\"}": 0,
+    "jul_inspection_bytes{class=\"waf_state\"}": 0,
+    "jul_inspection_evaluations_limit": 2,
+    "jul_inspection_evaluations{state=\"active\"}": 0,
+    "jul_inspection_evaluations{state=\"waiting\"}": 0,
+    "jul_inspection_leases": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"waf_state\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"waf_state\"}": 0,
+    "jul_inspection_unslotted_logging_total": 0
+  },
+  "samples": 72
+}

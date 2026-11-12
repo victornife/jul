@@ -1,0 +1,118 @@
+goroutine profile: total 16
+1 @ 0x2e674 0x9dae4 0xdfb01c 0xa2cf4
+#	0x9dae3		os/signal.signal_recv+0x113	runtime/sigqueue.go:152
+#	0xdfb01b	os/signal.loop+0x1b		os/signal/signal_unix.go:23
+
+1 @ 0x43b1a4 0x46cac0 0x46da1c 0x46e900 0x4641fc 0x41683c 0x416835 0x475934 0x474a94 0x473f6c 0x48d1c8 0x5d3cec 0x5d3270 0xdc25dc 0xdc1bd4 0xdf3b18 0xb96f4c 0xdd7afc 0xe662d0 0xe63540 0xe6c8cc 0xe6c7cc 0x62030 0xa2cf4
+#	0x43b1a3	github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/arm64.(*instruction).AssignUse+0x8e3		github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/backend/isa/arm64/instr.go:365
+#	0x46cabf	github.com/tetratelabs/wazero/internal/engine/wazevo/backend/regalloc.(*Allocator[...]).allocBlock+0x9ef	github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/backend/regalloc/regalloc.go:777
+#	0x46da1b	github.com/tetratelabs/wazero/internal/engine/wazevo/backend/regalloc.(*Allocator[...]).alloc+0x5b		github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/backend/regalloc/regalloc.go:570
+#	0x46e8ff	github.com/tetratelabs/wazero/internal/engine/wazevo/backend/regalloc.(*Allocator[...]).DoAllocation+0x3f	github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/backend/regalloc/regalloc.go:360
+#	0x4641fb	github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/arm64.(*machine).RegAlloc+0x3b			github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/backend/isa/arm64/machine.go:243
+#	0x41683b	github.com/tetratelabs/wazero/internal/engine/wazevo/backend.(*compiler).RegAlloc+0x3b				github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/backend/compiler.go:191
+#	0x416834	github.com/tetratelabs/wazero/internal/engine/wazevo/backend.(*compiler).Compile+0x34				github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/backend/compiler.go:170
+#	0x475933	github.com/tetratelabs/wazero/internal/engine/wazevo.(*engine).compileLocalWasmFunction+0x103			github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/engine.go:535
+#	0x474a93	github.com/tetratelabs/wazero/internal/engine/wazevo.(*engine).compileModule+0x513				github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/engine.go:277
+#	0x473f6b	github.com/tetratelabs/wazero/internal/engine/wazevo.(*engine).CompileModule+0x7b				github.com/tetratelabs/wazero@v1.12.0/internal/engine/wazevo/engine.go:161
+#	0x48d1c7	github.com/tetratelabs/wazero.(*runtime).CompileModule+0x197							github.com/tetratelabs/wazero@v1.12.0/runtime.go:262
+#	0x5d3ceb	jul/internal/plugins.(*Manager).compilePlugin+0x81b								jul/internal/plugins/runtime.go:525
+#	0x5d326f	jul/internal/plugins.(*Manager).BuildWithEgress+0x1af								jul/internal/plugins/runtime.go:329
+#	0xdc25db	jul/internal/app.(*HandlerFactory).buildHandlers+0x40b								jul/internal/app/factory.go:519
+#	0xdc1bd3	jul/internal/app.(*HandlerFactory).Prepare+0x2b3								jul/internal/app/factory.go:356
+#	0xdf3b17	jul/internal/app.Serve.func8+0x37										jul/internal/app/serve.go:348
+#	0xb96f4b	jul/internal/server.(*Server).Run+0x9b										jul/internal/server/server.go:737
+#	0xdd7afb	jul/internal/app.Serve+0x41eb											jul/internal/app/serve.go:1249
+#	0xe662cf	main.cmdServe+0x46f												jul/cmd/jul/cli.go:507
+#	0xe6353f	main.dispatchSubcommand+0x19f											jul/cmd/jul/cli.go:55
+#	0xe6c8cb	main.run+0xdb													jul/cmd/jul/main.go:52
+#	0xe6c7cb	main.main+0x1b													jul/cmd/jul/main.go:35
+#	0x6202f		runtime.main+0x37f												runtime/proc.go:302
+
+1 @ 0x57bec 0x99e44 0x70e6b4 0x70e360 0x70bbc4 0xc51c24 0xc52450 0x355bc8 0x357334 0xd72a84 0x355bc8 0xd76f64 0x355bc8 0xd76dc4 0x355bc8 0xd76cb8 0x355bc8 0x357334 0xd769c4 0x355bc8 0xd75378 0x355bc8 0xd7527c 0xd75130 0xd75101 0x355bc8 0xd768c8 0x355bc8 0xd76818 0x355bc8 0x376190 0x354270 0xa2cf4
+#	0x70e6b3	runtime/pprof.writeRuntimeProfile+0xb3					runtime/pprof/pprof.go:848
+#	0x70e35f	runtime/pprof.writeGoroutine+0x4f					runtime/pprof/pprof.go:781
+#	0x70bbc3	runtime/pprof.(*Profile).WriteTo+0x143					runtime/pprof/pprof.go:405
+#	0xc51c23	net/http/pprof.handler.ServeHTTP+0x433					net/http/pprof/pprof.go:272
+#	0xc5244f	net/http/pprof.Index+0xaf						net/http/pprof/pprof.go:391
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0x357333	net/http.(*ServeMux).ServeHTTP+0x193					net/http/server.go:2927
+#	0xd72a83	jul/internal/admin.init.func104.1+0x83					jul/internal/admin/route_catalog.go:940
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76f63	jul/internal/admin.(*Server).requirePermission.func1+0x143		jul/internal/admin/rbac.go:259
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76dc3	jul/internal/admin.(*Server).guardOIDCCredentials.func1+0xa3		jul/internal/admin/oidc.go:45
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76cb7	jul/internal/admin.(*Server).limitRoute.func1+0x167			jul/internal/admin/ratelimit.go:387
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0x357333	net/http.(*ServeMux).ServeHTTP+0x193					net/http/server.go:2927
+#	0xd769c3	jul/internal/admin.(*Server).observeConsole.func1+0xb3			jul/internal/admin/operational.go:121
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd75377	jul/internal/admin.(*Server).requireBrowserSameOrigin.func2+0xc7	jul/internal/admin/origin_guard.go:39
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd7527b	net/http.(*CrossOriginProtection).Handler.func1+0xdb			net/http/csrf.go:216
+#	0xd7512f	net/http.HandlerFunc.ServeHTTP+0x8f					net/http/server.go:2362
+#	0xd75100	jul/internal/admin.(*Server).requireBrowserSameOrigin.func3+0x60	jul/internal/admin/origin_guard.go:46
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd768c7	jul/internal/admin.(*Server).requireSecureTransport.func1+0x87		jul/internal/admin/transport_gate.go:68
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0xd76817	jul/internal/admin.(*Server).captureAdminRuntimeSnapshot.func1+0xa7	jul/internal/admin/runtime_snapshot.go:31
+#	0x355bc7	net/http.HandlerFunc.ServeHTTP+0x37					net/http/server.go:2362
+#	0x37618f	net/http.serverHandler.ServeHTTP+0xaf					net/http/server.go:3440
+#	0x35426f	net/http.(*conn).serve+0x59f						net/http/server.go:2161
+
+1 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10894c 0x10893d 0x112bd8 0x112bd1 0x4d10d0 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f			runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27			internal/poll/fd_poll_runtime.go:84
+#	0x10894b	internal/poll.(*pollDesc).waitRead+0x22b		internal/poll/fd_poll_runtime.go:89
+#	0x10893c	internal/poll.(*FD).Read+0x21c				internal/poll/fd_unix.go:170
+#	0x112bd7	os.(*File).read+0x67					os/file_posix.go:30
+#	0x112bd0	os.(*File).Read+0x60					os/file.go:144
+#	0x4d10cf	github.com/fsnotify/fsnotify.(*inotify).readEvents+0xdf	github.com/fsnotify/fsnotify@v1.10.1/backend_inotify.go:368
+
+1 @ 0x9b108 0x5b5d0 0x9a300 0x107968 0x10b580 0x10b571 0x210348 0x226744 0x225b6c 0x3589b8 0xd7822c 0xa2cf4
+#	0x9a2ff		internal/poll.runtime_pollWait+0x9f		runtime/netpoll.go:351
+#	0x107967	internal/poll.(*pollDesc).wait+0x27		internal/poll/fd_poll_runtime.go:84
+#	0x10b57f	internal/poll.(*pollDesc).waitRead+0x20f	internal/poll/fd_poll_runtime.go:89
+#	0x10b570	internal/poll.(*FD).Accept+0x200		internal/poll/fd_unix.go:618
+#	0x210347	net.(*netFD).accept+0x27			net/fd_unix.go:149
+#	0x226743	net.(*TCPListener).accept+0x23			net/tcpsock_posix.go:159
+#	0x225b6b	net.(*TCPListener).Accept+0x2b			net/tcpsock.go:387
+#	0x3589b7	net/http.(*Server).Serve+0x2a7			net/http/server.go:3578
+#	0xd7822b	jul/internal/admin.(*Server).Run.func1+0x2b	jul/internal/admin/server.go:980
+
+1 @ 0x9b108 0x74b48 0x50b6b4 0x5431a8 0xa2cf4
+#	0x50b6b3	jul/internal/config.watchFileEvents+0xd3	jul/internal/config/reload.go:69
+#	0x5431a7	jul/internal/config.WatchFile.func1+0x57	jul/internal/config/reload.go:51
+
+1 @ 0x9b108 0x74b48 0x5c70f0 0xa2cf4
+#	0x5c70ef	jul/internal/middleware.(*RateLimiterStore).janitor+0xbf	jul/internal/middleware/ratelimit.go:153
+
+1 @ 0x9b108 0x74b48 0xd3f810 0xdf04a8 0xa2cf4
+#	0xd3f80f	jul/internal/admin.(*Server).Run+0x4cf	jul/internal/admin/server.go:987
+#	0xdf04a7	jul/internal/app.Serve.func45+0x27	jul/internal/app/serve.go:1070
+
+1 @ 0x9b108 0x74b48 0xdd8904 0xa2cf4
+#	0xdd8903	jul/internal/app.watchConfigEvents+0xb3	jul/internal/app/serve.go:1396
+
+1 @ 0x9b108 0x74b48 0xdf2a98 0xa2cf4
+#	0xdf2a97	jul/internal/app.Serve.func23+0xa7	jul/internal/app/serve.go:670
+
+1 @ 0x9b108 0x74b48 0xdf43a4 0xa2cf4
+#	0xdf43a3	jul/internal/app.MergeReload.func3+0xe3	jul/internal/app/wiring.go:327
+
+1 @ 0x9b108 0x74b48 0xdf4990 0xa2cf4
+#	0xdf498f	jul/internal/app.MergeReload.func2+0x10f	jul/internal/app/wiring.go:264
+
+1 @ 0x9b108 0x74b48 0xdf4cc4 0xa2cf4
+#	0xdf4cc3	jul/internal/app.MergeReload.func1.1+0x103	jul/internal/app/wiring.go:237
+
+1 @ 0x9b108 0x74b48 0xdfbae0 0xa2cf4
+#	0xdfbadf	jul/internal/signals.Listen.func1+0x9f	jul/internal/signals/signals.go:33
+
+1 @ 0x9b108 0x75614 0x755f5 0x9cea8 0xb10f4 0xdf4294 0xa2cf4
+#	0x9cea7		sync.runtime_SemacquireWaitGroup+0x37	runtime/sema.go:114
+#	0xb10f3		sync.(*WaitGroup).Wait+0xa3		sync/waitgroup.go:206
+#	0xdf4293	jul/internal/app.MergeReload.func4+0x23	jul/internal/app/wiring.go:347
+
+1 @ 0xa2cf4
+

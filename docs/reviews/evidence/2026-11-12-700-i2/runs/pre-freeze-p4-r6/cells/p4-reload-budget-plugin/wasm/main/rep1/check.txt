@@ -1,0 +1,1 @@
+/tmp/ia-p4-r6/cells/p4-reload-budget-plugin/wasm/main/rep1/config.toml is valid (structural + runtime)

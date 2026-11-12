@@ -1,0 +1,3 @@
+jul_plugin_instances{plugin="inspect-a"} 3
+jul_plugin_instances{plugin="inspect-b"} 2
+jul_reload_in_progress 1

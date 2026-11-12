@@ -1,0 +1,198 @@
+{
+  "scenario": "s7-cache-h1",
+  "scenario_sha256": "17fdfa6d949a6da10a9771ccffa7b825ed0b9188bd278c7de5a930d40368779f",
+  "comparison": "capacity",
+  "variant": "wasm",
+  "target": "cand",
+  "rep": 1,
+  "profile": "quick",
+  "started": "2026-11-12T11:21:22.334530297Z",
+  "ended": "2026-11-12T11:21:37.065500077Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "phase warm class warm: status:500 ×7"
+  ],
+  "config_sha256": "a48488d9fe7364e23fead496d93d386a3e240861b6756554d36c96bdfd7b3eef",
+  "config_check_ok": true,
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "cold",
+      "classes": [
+        {
+          "workload": "cold",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 3,
+          "attempts": 895,
+          "verified": 895,
+          "verified_in_window": 879,
+          "goodput_rps": 293,
+          "goodput_bytes_per_second": 76808192,
+          "classes": {
+            "ok": 895
+          },
+          "p50_ms": 52.284,
+          "p95_ms": 84.433,
+          "p99_ms": 101.689,
+          "max_ms": 136.639,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/1.1": 895
+          },
+          "connections_dialled": 16
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.998,
+      "cpu_source": "/proc/pid/stat utime+stime (process only)",
+      "saturated": true
+    },
+    {
+      "name": "warm",
+      "classes": [
+        {
+          "workload": "warm",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 3,
+          "attempts": 949,
+          "verified": 942,
+          "verified_in_window": 927,
+          "goodput_rps": 309,
+          "goodput_bytes_per_second": 81002496,
+          "classes": {
+            "ok": 942,
+            "status:500": 7
+          },
+          "p50_ms": 47.761,
+          "p95_ms": 74.545,
+          "p99_ms": 187.931,
+          "max_ms": 311.614,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/1.1": 949
+          },
+          "connections_dialled": 16,
+          "outcome_latency_ms": {
+            "status:500": {
+              "n": 7,
+              "p50": 209.493,
+              "p95": 234.425,
+              "p99": 234.425,
+              "max": 410.211
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 1,
+      "cpu_source": "/proc/pid/stat utime+stime (process only)",
+      "saturated": true
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": null,
+  "peak_cg_memory_bytes": null,
+  "peak_rss_bytes": 533909504,
+  "heap_inuse_after_two_gcs": 170205184,
+  "heap_alloc_after_two_gcs": 165054632,
+  "rss_after_two_gcs": 356618240,
+  "counter_deltas": {
+    "cache_hit": 1271,
+    "cache_miss": 1173,
+    "inspection_body_timeout": 0,
+    "inspection_body_unsupported": 0,
+    "inspection_body_would_timeout": 0,
+    "inspection_rejected_enforce": 0,
+    "inspection_rejected_observe": 0,
+    "plugin_invocations": 4916,
+    "plugin_invocations_error": 1,
+    "plugin_panics": 10,
+    "plugin_resp_error": 9,
+    "plugin_resp_invocations": 4910,
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_clean": 0,
+    "waf_tx_inspection_error": 0
+  },
+  "unavailable_metrics": [
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "reload_applied",
+    "reload_not_applied",
+    "transport_retired"
+  ],
+  "inspection_foundation_series_after": {
+    "jul_inspection_abandoned_evaluations": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"would_timeout\"}": 0,
+    "jul_inspection_bytes_limit": 268435456,
+    "jul_inspection_bytes{class=\"base\"}": 0,
+    "jul_inspection_bytes{class=\"buffer\"}": 0,
+    "jul_inspection_bytes{class=\"waf_state\"}": 0,
+    "jul_inspection_evaluations_limit": 2,
+    "jul_inspection_evaluations{state=\"active\"}": 0,
+    "jul_inspection_evaluations{state=\"waiting\"}": 0,
+    "jul_inspection_leases": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"waf_state\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"waf_state\"}": 0,
+    "jul_inspection_unslotted_logging_total": 0
+  },
+  "samples": 21
+}

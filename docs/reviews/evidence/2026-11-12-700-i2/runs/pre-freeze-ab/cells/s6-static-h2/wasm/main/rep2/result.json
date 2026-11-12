@@ -1,0 +1,153 @@
+{
+  "scenario": "s6-static-h2",
+  "scenario_sha256": "315b34f9ac080dc45801eead912dca51b3c7bfd7a47fdce1389396ba5a0e50cb",
+  "comparison": "capacity",
+  "variant": "wasm",
+  "target": "main",
+  "rep": 2,
+  "profile": "quick",
+  "started": "2026-11-12T11:30:10.839098439Z",
+  "ended": "2026-11-12T11:30:20.594506033Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "d410edfd4fb1dd7012b7f6c59e609b4ebd26ceb3b9e940228b92fec89666da84",
+  "config_check_ok": true,
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 128,
+          "window_seconds": 3,
+          "attempts": 1049,
+          "verified": 1049,
+          "verified_in_window": 921,
+          "goodput_rps": 307,
+          "goodput_bytes_per_second": 80478208,
+          "classes": {
+            "ok": 1049
+          },
+          "p50_ms": 370.096,
+          "p95_ms": 596.853,
+          "p99_ms": 652.479,
+          "max_ms": 653.492,
+          "crossed_in_from_warmup": 128,
+          "outstanding_at_window_end": 128,
+          "response_protos": {
+            "HTTP/2.0": 1049
+          },
+          "connections_dialled": 46
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.983,
+      "cpu_source": "/proc/pid/stat utime+stime (process only)",
+      "saturated": true
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": null,
+  "peak_cg_memory_bytes": null,
+  "peak_rss_bytes": 453128192,
+  "heap_inuse_after_two_gcs": 166395904,
+  "heap_alloc_after_two_gcs": 163260720,
+  "rss_after_two_gcs": 426516480,
+  "counter_deltas": {
+    "inspection_body_timeout": 0,
+    "inspection_body_unsupported": 0,
+    "inspection_body_would_timeout": 0,
+    "inspection_rejected_enforce": 0,
+    "inspection_rejected_observe": 0,
+    "plugin_invocations": 2892,
+    "plugin_invocations_error": 0,
+    "plugin_panics": 5,
+    "plugin_resp_error": 5,
+    "plugin_resp_invocations": 2888,
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_clean": 0,
+    "waf_tx_inspection_error": 0
+  },
+  "unavailable_metrics": [
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_applied",
+    "reload_not_applied",
+    "transport_retired"
+  ],
+  "inspection_foundation_series_after": {
+    "jul_inspection_abandoned_evaluations": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"would_timeout\"}": 0,
+    "jul_inspection_bytes_limit": 268435456,
+    "jul_inspection_bytes{class=\"base\"}": 0,
+    "jul_inspection_bytes{class=\"buffer\"}": 0,
+    "jul_inspection_bytes{class=\"waf_state\"}": 0,
+    "jul_inspection_evaluations_limit": 2,
+    "jul_inspection_evaluations{state=\"active\"}": 0,
+    "jul_inspection_evaluations{state=\"waiting\"}": 0,
+    "jul_inspection_leases": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"waf_state\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"waf_state\"}": 0,
+    "jul_inspection_unslotted_logging_total": 0
+  },
+  "samples": 14
+}

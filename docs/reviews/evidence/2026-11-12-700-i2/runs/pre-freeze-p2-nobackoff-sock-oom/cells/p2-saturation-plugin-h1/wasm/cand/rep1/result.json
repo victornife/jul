@@ -1,0 +1,155 @@
+{
+  "scenario": "p2-saturation-plugin-h1",
+  "scenario_sha256": "7e35d923edc30fc4ed61b62e7e80c17e75c508022e163eb21c558b9a4965c3e7",
+  "comparison": "record",
+  "variant": "wasm",
+  "target": "cand",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T11:09:02.060658048Z",
+  "ended": "2026-11-12T11:09:40.04680848Z",
+  "state": "completed",
+  "valid": false,
+  "invalid_reasons": [
+    "unexercised: inspection_rejected_enforce unavailable",
+    "unexercised: class status:503-inspection-overloaded = 0, want at least 1"
+  ],
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class load: error:refused ×1469770",
+    "phase load class probe: error:refused ×24814",
+    "exercise check: inspection_rejected_observe unavailable",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "49747764eccb830c5b560fbffd0f64470fea7c29860d102c279ba70cf9c8d7ad",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-938001-377983717.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "gomemlimit_env": "480MiB",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 42
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 160,
+          "window_seconds": 20,
+          "attempts": 1469770,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:refused": 1469770
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 160,
+          "outstanding_at_window_end": 157,
+          "response_protos": {},
+          "connections_dialled": 812,
+          "expected_classes": [
+            "status:503-inspection-overloaded"
+          ],
+          "error_samples": {
+            "error:refused": "Post \"http://127.0.0.1:45945/proxy/echo?resp=4096\u0026delay=5000\": dial tcp 127.0.0.1:45945: connect: connection refused"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 1469770,
+              "p50": 1.442,
+              "p95": 6.116,
+              "p99": 9.821,
+              "max": 62.627
+            }
+          }
+        },
+        {
+          "workload": "probe",
+          "proto": "h1",
+          "concurrency": 2,
+          "window_seconds": 20,
+          "attempts": 24814,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:refused": 24814
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 2,
+          "outstanding_at_window_end": 2,
+          "response_protos": {},
+          "connections_dialled": 2,
+          "expected_classes": [
+            "status:503-inspection-overloaded"
+          ],
+          "error_samples": {
+            "error:refused": "Post \"http://127.0.0.1:45945/proxy/echo?resp=4096\": dial tcp 127.0.0.1:45945: connect: connection refused"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 24814,
+              "p50": 0.882,
+              "p95": 5.437,
+              "p99": 8.969,
+              "max": 90.884
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 805912576,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 393297920,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "heap_after_two_gcs_unavailable": "jul exited during the run",
+  "rss_after_two_gcs": null,
+  "samples": 4
+}

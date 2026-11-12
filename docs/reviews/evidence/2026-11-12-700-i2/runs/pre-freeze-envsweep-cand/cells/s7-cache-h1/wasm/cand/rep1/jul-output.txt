@@ -1,0 +1,8 @@
+time=2026-11-12T12:45:09.816+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
+time=2026-11-12T12:45:09.986+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T12:45:35.457+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T12:45:36.229+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
+time=2026-11-12T12:45:45.482+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T12:45:47.477+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
+time=2026-11-12T12:45:55.529+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T12:45:59.604+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
