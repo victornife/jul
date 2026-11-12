@@ -36,24 +36,27 @@ Archived #695, #699 and #700 ADR reports, raw data and checksums are unchanged.
 | ADR comparison baseline | `858590dc7c430d24cd33b096a81ca6051591b427` (contains #702 and #703) |
 | I1 merge (#706) | `a57afa4d0a241dacfa6c76efc814daad8be2dfca` |
 | Post-I1 main measured | `363d6cd4a9fef4c020b25e5c810b2bd34e481732` (I1 plus the #707 test-only fix). This was `origin/main` throughout. |
-| Harness, frozen plan and measurement | `30ff0650` (`ia` sha256 `3a39975e7849db319b086fde624947b51f6b9d5b867d7fbac2f9ec56b39a3fc2`) |
-| Harness, diagnosis and summaries | `21cb2440` (diagnostic counter labels, class and probe tables; see [Harness defects](#harness-defects-found-during-the-campaign)) |
+| Harness, frozen plan and measurement | `30ff0650ba2120b72189bdf963250de390fdf26f` (`ia` sha256 `3a39975e7849db319b086fde624947b51f6b9d5b867d7fbac2f9ec56b39a3fc2`) |
+| Harness, diagnosis and summaries | `21cb24407c8d5d14796050ce7e201eec8a9723d4` (diagnostic counter labels, class and probe tables; see [Harness defects](#harness-defects-found-during-the-campaign)) |
 | Frozen plan | `inspection-assessment-plan/v1`, `plan.json` sha256 `8432278801a88346f9a60c118ac41c9ba2d8bb766e23d73b0f9da5915df0db5d`. Interpretation sha256 `a65f6713…`. |
 | Synthetic guest | `examples/plugins/inspect-load`. Source tree sha256 `217eb5033fa205bb2ca702c908e03294c59b849d6ba61a0e41b9de8f24ecf3c0`; `wasip1` artifact sha256 `27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a` (go1.27.4, `-trimpath -buildvcs=false -buildmode=c-shared`). The artifact is not committed. |
 
-All three Jul binaries share the same build settings:
+All three Jul binaries were built from clean trees (`vcs.modified=false`) for linux/arm64 with tags
+`brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf`.
+Their cgo setting differs, as recorded in each binary's embedded build information and in the run
+manifests:
 
-- `CGO_ENABLED=0`, linux/arm64, `vcs.modified=false`;
-- tags `brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf`.
+| Label | Source | Toolchain | cgo / linkage | Binary sha256 | Adapter | Role |
+| --- | --- | --- | --- | --- | --- | --- |
+| `base` | `858590dc7c430d24cd33b096a81ca6051591b427` | go1.27.3 | `CGO_ENABLED=0`, static | `520febcbad5669da0ea8ad98e29f0bb78304817511cd7ed63bfb48e9d63ea52f` | `baseline-858590dc` | ADR baseline built as pinned (the historical toolchain) |
+| `base4` | `858590dc7c430d24cd33b096a81ca6051591b427` | go1.27.4 | `CGO_ENABLED=1`, dynamic (glibc) | `e0f105cbae69939b5b91a5bbfd7165f993fcb181c4d813bfa241486ab3a2291b` | `baseline-858590dc` | Same-toolchain rebuild, labelled separately |
+| `main` | `363d6cd4a9fef4c020b25e5c810b2bd34e481732` | go1.27.4 | `CGO_ENABLED=1`, dynamic (glibc) | `db6c6378b782b25e41fdfdbaa139517440e7beec44349a5fc6ee8df57800d7c8` | `current` | Post-I1 secondary baseline |
 
-| Label | Source | Toolchain | Binary sha256 | Adapter | Role |
-| --- | --- | --- | --- | --- | --- |
-| `base` | `858590dc` | go1.27.3 | `520febcbad5669da0ea8ad98e29f0bb78304817511cd7ed63bfb48e9d63ea52f` | `baseline-858590dc` | ADR baseline built as pinned (the historical toolchain) |
-| `base4` | `858590dc` | go1.27.4 | `e0f105cbae69939b5b91a5bbfd7165f993fcb181c4d813bfa241486ab3a2291b` | `baseline-858590dc` | Same-toolchain rebuild, labelled separately |
-| `main` | `363d6cd4` | go1.27.4 | `db6c6378b782b25e41fdfdbaa139517440e7beec44349a5fc6ee8df57800d7c8` | `current` | Post-I1 secondary baseline |
-
-The `base`→`main` difference combines I1 and the Go 1.27.3→1.27.4 update. `base4`→`main` isolates
-the source change, and `base`→`base4` isolates the toolchain.
+`base4` and `main` share toolchain, cgo setting and linkage, so `base4`→`main` isolates the source
+change. `base`→`base4` changes both the toolchain (1.27.3→1.27.4) and cgo linkage (static→dynamic),
+so it does not isolate the toolchain. `base`→`main` combines I1, the toolchain and the linkage
+change. The repository's container build uses `CGO_ENABLED=0`; `base` matches that convention and
+`base4`/`main` do not. A `CGO_ENABLED=0` go1.27.4 rebuild was not measured.
 
 ### Host and envelope
 
@@ -267,13 +270,14 @@ calibrated.
 
 **Peak cgroup memory.**
 
-| Cells | base (go1.27.3) | base4 and main (go1.27.4) |
+| Cells | base (go1.27.3, static) | base4 and main (go1.27.4, dynamic) |
 | --- | --- | --- |
 | `none` | about 24–27 MiB | about 40–45 MiB |
 | inspected | — | about 10–30 MiB higher than base |
 
-`base4` and `main` agree with each other. The step is therefore associated with the toolchain
-rebuild, not with I1; its cause was not investigated.
+`base4` and `main` agree with each other, so the step is not associated with I1. It coincides with
+both the toolchain update and the static→dynamic (cgo) linkage change between `base` and `base4`;
+these were not separated and the cause was not investigated.
 
 **Investigating `u1/none`.**
 
@@ -392,6 +396,10 @@ archived runs are not invalidated.
   governor gauges are foundation-only: they stay at 0 because nothing charges them.
 - **Not ported.** F1/F1b (I3), F4b (I2/I3) and the F3 `Retry-After` pacing mode. A8 needs a
   two-listener fixture that I6 adds.
+- **Mixed cgo linkage.** `base` is a static `CGO_ENABLED=0` build; `base4` and `main` are dynamic
+  `CGO_ENABLED=1` builds. `base`→`base4` therefore confounds toolchain and linkage, and only
+  `base4`→`main` isolates the source change. I6 should measure release-convention
+  (`CGO_ENABLED=0`) binaries.
 - **No historical rerun.** The `453e6237` #695 runtime was not rerun. Its archived results stay
   historical and are not comparable with verified goodput.
 
