@@ -267,7 +267,12 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 			return fail("envelope not verified")
 		}
 	}
-	target := Target{Port: p.Port, TLSPort: p.TLSPort, WASM: wasm}
+	roots, err := TrustedRoots(r.Opt.Cert)
+	if err != nil {
+		res.Invalid = append(res.Invalid, "tls: "+err.Error())
+		return fail("trusted certificate not loaded")
+	}
+	target := Target{Port: p.Port, TLSPort: p.TLSPort, WASM: wasm, Roots: roots}
 	samp := NewSampler(j, r.Opt.SampleEvery)
 	before, _ := Scrape(p.AdminPort)
 	res.PreCanaries = RunCanaries(target, waf, wasm)

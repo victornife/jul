@@ -8,8 +8,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -212,6 +214,48 @@ func TestOriginFaults(t *testing.T) {
 	}
 	if _, b := get(&Origin{Fault: "truncate"}, "/proxy/echo?resp=100"); len(b) >= 100 {
 		t.Errorf("truncate fault wrote %d bytes", len(b))
+	}
+}
+
+func TestClientVerifiesPinnedCertificate(t *testing.T) {
+	kp, err := tls.LoadX509KeyPair("../../testdata/tls/localhost.crt", "../../testdata/tls/localhost.key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
+	srv.TLS = &tls.Config{Certificates: []tls.Certificate{kp}, NextProtos: []string{"h2"}}
+	srv.EnableHTTP2 = true
+	srv.StartTLS()
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	tp, _ := strconv.Atoi(port)
+	roots, err := TrustedRoots("../../testdata/tls/localhost.crt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	get := func(r *Target) error {
+		c, err := NewClient("h2", *r, 1, 5*time.Second)
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		resp, err := c.HTTP.Get(c.Base + "/")
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		return err
+	}
+	if err := get(&Target{TLSPort: tp, Roots: roots}); err != nil {
+		t.Fatalf("pinned certificate rejected: %v", err)
+	}
+	if err := get(&Target{TLSPort: tp}); err == nil {
+		t.Fatal("unpinned client accepted the self-signed loopback certificate")
+	}
+	if _, err := TrustedRoots("../../testdata/tls/localhost.key.missing"); err == nil {
+		t.Error("missing certificate accepted")
+	}
+	if _, err := TrustedRoots("../../testdata/tls/localhost.ext"); err == nil {
+		t.Error("non-PEM certificate accepted")
 	}
 }
 

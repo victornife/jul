@@ -372,6 +372,12 @@ After the independent review, `summarize -compare` was hardened to refuse runs t
 qualification-profile runs with a required envelope. All archived comparisons meet both
 conditions, and their summaries regenerate unchanged.
 
+CodeQL then flagged the client's `InsecureSkipVerify`. The H2/H3 clients now verify Jul's
+certificate against the configured `-cert`, which is pinned as the only trust root. The archived
+runs used the earlier, unverified client against the same loopback certificate. Verification
+happens only in the client, which is outside the envelope; the workload is unchanged, and the
+archived runs are not invalidated.
+
 ## Limitations
 
 - **Single host.** One WSL2 arm64 machine, with one interleaved campaign per target. These are

@@ -9,11 +9,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,6 +31,22 @@ import (
 type Target struct {
 	Port, TLSPort int
 	WASM          bool
+	// Roots trusts the certificate Jul serves; the TLS clients verify against it.
+	Roots *x509.CertPool
+}
+
+// TrustedRoots returns a pool holding the PEM certificates in path. The
+// harness pins the self-signed loopback certificate it configured Jul with.
+func TrustedRoots(path string) (*x509.CertPool, error) {
+	pem, err := os.ReadFile(path) //nolint:gosec // operator-supplied certificate path
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%s: no PEM certificate", path)
+	}
+	return pool, nil
 }
 
 // Client is a protocol-specific client that counts the connections it dials.
@@ -49,8 +67,7 @@ func (c *Client) Close() { c.close() }
 // NewClient builds an h1, h2 or h3 client. conns > 0 caps H1/H2 connections;
 // H2 then queues streams on the existing connection rather than dialling.
 func NewClient(proto string, t Target, conns int, timeout time.Duration) (*Client, error) {
-	// The loopback listener uses the repository's self-signed test certificate.
-	tlsCfg := &tls.Config{InsecureSkipVerify: true, ServerName: "localhost"} //nolint:gosec // synthetic loopback assessment
+	tlsCfg := &tls.Config{RootCAs: t.Roots, ServerName: "localhost", MinVersion: tls.VersionTLS12}
 	c := &Client{Proto: proto}
 	d := &net.Dialer{Timeout: 10 * time.Second}
 	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {

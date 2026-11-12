@@ -84,6 +84,9 @@ Use these flags to check that the harness itself detects failures:
 - `-fault truncate|corrupt|stall` injects an origin fault.
 - `-kill-jul-after D` sends SIGKILL to Jul inside each cell.
 - `-watchdog D` bounds a cell.
+- `-cert`/`-key` (default `testdata/tls/localhost.*`) configure Jul's TLS listener. The H2/H3
+  clients trust only that certificate and verify it; a certificate that fails to load makes the
+  cell invalid.
 
 A run with a fault never qualifies for comparison: `summarize` refuses to mix it with clean runs.
 `summarize -compare` also refuses runs that are not qualification-profile runs with a required
