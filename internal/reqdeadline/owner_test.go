@@ -6,6 +6,7 @@ package reqdeadline
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -85,10 +86,19 @@ func (r *results) list() []string {
 	return append([]string(nil), r.got...)
 }
 
+// stubConn is a registered HTTP/1 connection whose deadlines always apply.
+type stubConn struct{ net.Conn }
+
+func (*stubConn) SetReadDeadline(time.Time) error { return nil }
+func (*stubConn) Close() error                    { return nil }
+
+// h1Owner returns an HTTP/1 owner on w with a registered connection.
+func h1Owner(w http.ResponseWriter) *Owner { return build(w, ProtoH1, &stubConn{}) }
+
 func newOwner(t *testing.T, w http.ResponseWriter, proto string) (*Owner, *manualTimer, *results) {
 	t.Helper()
 	rec := &results{}
-	o := New(w, proto)
+	o := build(w, proto, &stubConn{})
 	o.record = rec.record
 	mt := &manualTimer{}
 	o.afterFunc = mt.after
@@ -211,6 +221,35 @@ func TestObserveRecordsWouldTimeoutOnceWithoutAbort(t *testing.T) {
 	}
 }
 
+// TestUnregisteredH1IsUnsupported: an HTTP/1 owner without a registered
+// connection cannot end a read whose abort is refused, so even a writer that
+// applies deadlines is unsupported: enforce fails before any read, observe
+// records unsupported and continues, and no deadline is ever probed.
+func TestUnregisteredH1IsUnsupported(t *testing.T) {
+	for _, observe := range []bool{false, true} {
+		fw := &fakeWriter{}
+		o := New(fw, ProtoH1)
+		rec := &results{}
+		o.record = rec.record
+		mt := &manualTimer{}
+		o.afterFunc = mt.after
+		if o.Supported() {
+			t.Fatal("unregistered HTTP/1 owner reported as supported")
+		}
+		err := o.BeginBodyRead(time.Second, observe, nil)
+		if observe && err != nil || !observe && !errors.Is(err, ErrUnsupported) {
+			t.Fatalf("observe=%v BeginBodyRead = %v", observe, err)
+		}
+		if got := rec.list(); len(got) != 1 || got[0] != "h1/unsupported" {
+			t.Fatalf("observe=%v results = %v, want one unsupported", observe, got)
+		}
+		if n := len(fw.applied()); n != 0 {
+			t.Fatalf("observe=%v applied %d deadlines", observe, n)
+		}
+		o.EndBodyRead()
+	}
+}
+
 func TestUnsupportedWriter(t *testing.T) {
 	t.Run("enforce fails closed", func(t *testing.T) {
 		o, mt, rec := newOwner(t, httptest.NewRecorder(), ProtoH1)
@@ -273,7 +312,7 @@ func (u unwrapper) Unwrap() http.ResponseWriter { return u.inner }
 
 func TestFindSetterWalksUnwrap(t *testing.T) {
 	fw := &fakeWriter{ResponseWriter: httptest.NewRecorder()}
-	o := New(unwrapper{ResponseWriter: httptest.NewRecorder(), inner: fw}, ProtoH1)
+	o := h1Owner(unwrapper{ResponseWriter: httptest.NewRecorder(), inner: fw})
 	if !o.Supported() {
 		t.Fatal("setter behind Unwrap not found")
 	}
@@ -391,7 +430,7 @@ func TestRacingAbortExpiryCompletionAndEnd(t *testing.T) {
 func TestRealTimerExpires(t *testing.T) {
 	fw := &fakeWriter{}
 	rec := &results{}
-	o := New(fw, ProtoH1)
+	o := h1Owner(fw)
 	o.record = rec.record
 	if err := o.BeginBodyRead(time.Millisecond, false, nil); err != nil {
 		t.Fatal(err)
@@ -547,16 +586,16 @@ type forwarder struct {
 func (f *forwarder) SupportsReadDeadline() bool { return f.supports }
 
 func TestSupportReporterDecidesSupport(t *testing.T) {
-	if New(&forwarder{}, ProtoH1).Supported() {
+	if h1Owner(&forwarder{}).Supported() {
 		t.Fatal("a forwarder reporting no support was treated as supported")
 	}
-	if !New(&forwarder{supports: true}, ProtoH1).Supported() {
+	if !h1Owner(&forwarder{supports: true}).Supported() {
 		t.Fatal("a forwarder reporting support was rejected")
 	}
 	if WriterSupports(httptest.NewRecorder()) {
 		t.Fatal("a recorder applies no read deadline")
 	}
-	o := New(&forwarder{}, ProtoH1)
+	o := h1Owner(&forwarder{})
 	if err := o.BeginBodyRead(time.Second, false, nil); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("BeginBodyRead = %v", err)
 	}
@@ -564,7 +603,7 @@ func TestSupportReporterDecidesSupport(t *testing.T) {
 
 func TestRecorderFromFirstBegin(t *testing.T) {
 	rec := &results{}
-	o := New(&fakeWriter{}, ProtoH1)
+	o := h1Owner(&fakeWriter{})
 	mt := &manualTimer{}
 	o.afterFunc = mt.after
 	if err := o.BeginBodyRead(time.Second, false, rec.record); err != nil {

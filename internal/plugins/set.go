@@ -175,6 +175,10 @@ func writePluginError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, inspection.ErrBodyTimeout):
 		inspection.WriteBodyTimeout(w, r)
 		return
+	case errors.Is(err, inspection.ErrDeadlineUnsupported) && r.ProtoMajor < 2:
+		// The body is left unread and nothing bounds an HTTP/1 read here,
+		// so close the connection instead of letting net/http drain it.
+		w.Header().Set("Connection", "close")
 	}
 	if errors.Is(err, errInstanceLimit) {
 		w.Header().Set("Retry-After", "1")

@@ -820,6 +820,12 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 	return nil
 }
 
+// serverConnContext registers each accepted connection for send timeouts and
+// as the HTTP/1 transport interrupt of the request read-deadline owner.
+func serverConnContext(ctx context.Context, c net.Conn) context.Context {
+	return reqdeadline.ConnContext(respwriter.SendTimeoutContext(ctx, c), c)
+}
+
 // buildListenerEntry creates a listenerEntry for addr using cfg for all
 // bind-time settings: TLS, mTLS, h2c, HTTP/3, timeouts and header limits.
 // The connection cap is listener-owned but live policy, initialized from cfg and
@@ -827,12 +833,6 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 // is NOT yet started — connections queue in the kernel backlog until startServing
 // is called. This separation lets doReload stage binds before committing the
 // generation, so no 503 responses are served on a new address during an abort.
-// serverConnContext registers each accepted connection for send timeouts and
-// as the HTTP/1 transport interrupt of the request read-deadline owner.
-func serverConnContext(ctx context.Context, c net.Conn) context.Context {
-	return reqdeadline.ConnContext(respwriter.SendTimeoutContext(ctx, c), c)
-}
-
 func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerEntry, error) {
 	// cv is a configuration view for this bind: a lightweight Server value whose
 	// only purpose is to let the config-reading helper methods (readHeaderTimeout,

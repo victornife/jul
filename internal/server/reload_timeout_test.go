@@ -409,15 +409,20 @@ func TestReloadResultAdminFailureDegrades(t *testing.T) {
 func TestReloadPostPublishTimeoutReportsDegraded(t *testing.T) {
 	addr := freePort(t)
 	src := &stubSource{}
-	src.set(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil)
+	// The budget must cover every pre-Publish phase even on a loaded -race
+	// runner; only the post-commit phase may overrun it.
+	const budget = 2 * time.Second
+	src.set(cfgWithReloadTimeout(addr, budget), nil)
 
 	tag := &atomic.Pointer[string]{}
 	v1 := "v1"
 	tag.Store(&v1)
-	// OnReloaded sleeps past the deadline so the post-commit phase times out.
-	srv := New(cfgWithReloadTimeout(addr, 50*time.Millisecond), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
+	var deadline atomic.Int64
+	// OnReloaded runs after Publish and returns only once the deadline has
+	// passed, so the post-commit phase times out however fast the rest ran.
+	srv := New(cfgWithReloadTimeout(addr, budget), nil, lifecycle.Fingerprint{}, quietLogger(), bodyHandlerFactory(tag), src, func(context.Context, *config.Config) error { return nil })
 	srv.OnReloaded = func(*config.Config) (error, error) {
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(time.Until(time.Unix(0, deadline.Load())) + 50*time.Millisecond)
 		return nil, nil
 	}
 
@@ -429,7 +434,9 @@ func TestReloadPostPublishTimeoutReportsDegraded(t *testing.T) {
 	waitDialable(t, addr)
 
 	resultCh := make(chan ReloadResult, 1)
-	reload <- ReloadRequest{Source: ReloadSourceSIGHUP, Deadline: time.Now().Add(50 * time.Millisecond), Result: resultCh}
+	d := time.Now().Add(budget)
+	deadline.Store(d.UnixNano())
+	reload <- ReloadRequest{Source: ReloadSourceSIGHUP, Deadline: d, Result: resultCh}
 
 	var rr ReloadResult
 	select {

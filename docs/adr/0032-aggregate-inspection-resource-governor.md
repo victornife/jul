@@ -481,7 +481,9 @@ unconditional bound on total process memory, and no verdict below claims one.
      method but refuses the abort at expiry is also `unsupported`, and the request fails closed with
      `500`, not `408`. The read is still ended: on H1 by the same past read deadline applied to
      the request's connection, which the server registers, and closed only if it refuses too. On
-     H2 and H3 the request body is closed. Closing an H1 body cannot end a blocked read.
+     H2 and H3 the request body is closed. Closing an H1 body cannot end a blocked read, so an H1
+     request whose connection is not registered (an embedder's own `http.Server` without
+     `reqdeadline.ConnContext`) is `unsupported` before any read: `500` in enforce mode.
    - **Isolation and accounting are unchanged.** H2 and H3 abort only the affected stream. Charges
      are held until the blocked read and represented work actually end.
    - The guarantee covers Jul's own setters and the upload-admission phase. net/http itself clears

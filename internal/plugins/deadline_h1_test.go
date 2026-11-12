@@ -7,6 +7,7 @@ package plugins
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -25,6 +26,17 @@ type refusingDeadlineWriter struct{ http.ResponseWriter }
 
 func (refusingDeadlineWriter) SetReadDeadline(time.Time) error { return http.ErrNotSupported }
 
+// h1Upload configures stalledH1With.
+type h1Upload struct {
+	// unregistered serves without reqdeadline.ConnContext, as an embedder's
+	// own http.Server would.
+	unregistered bool
+	// native passes net/http's own writer instead of one refusing deadlines.
+	native bool
+	// wait is how long the client waits for a response; 5s when zero.
+	wait time.Duration
+}
+
 // stalledH1 serves h through a real HTTP/1 server that registers its
 // connections as Jul's server does, behind a writer refusing every read
 // deadline. The client declares 100 body bytes, sends one and stalls; onStall
@@ -32,10 +44,20 @@ func (refusingDeadlineWriter) SetReadDeadline(time.Time) error { return http.Err
 // none arrived within 5 seconds.
 func stalledH1(t *testing.T, h http.Handler, onStall func()) int {
 	t.Helper()
+	return stalledH1With(t, h, h1Upload{}, onStall)
+}
+
+func stalledH1With(t *testing.T, h http.Handler, u h1Upload, onStall func()) int {
+	t.Helper()
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ServeHTTP(refusingDeadlineWriter{w}, r)
+		if !u.native {
+			w = refusingDeadlineWriter{w}
+		}
+		h.ServeHTTP(w, r)
 	}))
-	srv.Config.ConnContext = reqdeadline.ConnContext
+	if !u.unregistered {
+		srv.Config.ConnContext = reqdeadline.ConnContext
+	}
 	srv.Start()
 	defer srv.Close()
 	c, err := net.Dial("tcp", srv.Listener.Addr().String())
@@ -49,7 +71,10 @@ func stalledH1(t *testing.T, h http.Handler, onStall func()) int {
 	if onStall != nil {
 		onStall()
 	}
-	_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if u.wait == 0 {
+		u.wait = 5 * time.Second
+	}
+	_ = c.SetReadDeadline(time.Now().Add(u.wait))
 	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
 	if err != nil {
 		return 0
@@ -90,6 +115,63 @@ func TestRefusedAbortEndsRealH1Upload(t *testing.T) {
 		})
 		if got != http.StatusInternalServerError {
 			t.Fatalf("status %d, want 500", got)
+		}
+		if reason := hooks.awaitFail(t); reason != bodyFailRetired {
+			t.Fatalf("reason %s", reason)
+		}
+		if n, _, _, panics, _ := hooks.snapshot(); n != 0 || panics != 0 {
+			t.Fatalf("invocations=%d panics=%d", n, panics)
+		}
+	})
+}
+
+// TestUnregisteredH1UploadFailsClosed: an embedder serving the plugin chain on
+// its own http.Server without reqdeadline.ConnContext gives the owner no way
+// to end a read whose abort is refused. An enforced body deadline then fails
+// closed before reading: a real stalled HTTP/1 upload gets 500 and
+// unsupported promptly, with no guest call, for net/http's own writer and for
+// one refusing deadlines. Without an enforced deadline the read starts, and
+// retirement must not wait for it: the request still fails as retired once
+// the client gives up.
+func TestUnregisteredH1UploadFailsClosed(t *testing.T) {
+	for _, native := range []bool{true, false} {
+		t.Run(fmt.Sprintf("expiry native=%v", native), func(t *testing.T) {
+			m, hooks, g, rec := govManager(t, limitsWith(1<<20, func(l *inspection.Limits) {
+				l.Mode, l.BodyTimeout = inspection.Enforce, 25*time.Millisecond
+			}))
+			s := buildSet(t, m, map[string]config.PluginConfig{"r": bodyGuestConfig(ABIJulV2, guestReadContinue)})
+			var hits atomic.Int64
+			got := stalledH1With(t, s.Middleware("r")(echoNext(&hits)), h1Upload{unregistered: true, native: native}, nil)
+			if got != http.StatusInternalServerError {
+				t.Fatalf("status %d, want 500 while the upload stalls", got)
+			}
+			if _, timeouts := rec.snapshot(); !mapsEqual(timeouts, map[string]int{"h1/unsupported": 1}) {
+				t.Fatalf("body timeout metrics %v", timeouts)
+			}
+			if inv, _, _, panics, _ := hooks.snapshot(); inv != 0 || panics != 0 || hits.Load() != 0 {
+				t.Fatalf("inv=%d panics=%d origin=%d", inv, panics, hits.Load())
+			}
+			assertDrained(t, g)
+		})
+	}
+	t.Run("retirement without deadline", func(t *testing.T) {
+		m, hooks := bodyManager(t)
+		s := buildSet(t, m, map[string]config.PluginConfig{"g": bodyGuestConfig(ABIJulV1, guestEcho)})
+		closed := make(chan struct{})
+		var blocked bool
+		stalledH1With(t, s.Handler("g"), h1Upload{unregistered: true, wait: 300 * time.Millisecond}, func() {
+			waitFor(t, "upload preparing", func() bool { return preparing(s.plugins["g"]) == 1 })
+			go func() { defer close(closed); _ = s.Close() }()
+			select {
+			case <-closed:
+			case <-time.After(150 * time.Millisecond):
+				// The client gives up after its wait and frees the read.
+				blocked = true
+			}
+		})
+		<-closed
+		if blocked {
+			t.Fatal("retirement waited for the stalled HTTP/1 read")
 		}
 		if reason := hooks.awaitFail(t); reason != bodyFailRetired {
 			t.Fatalf("reason %s", reason)

@@ -215,8 +215,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   records would-reject decisions instead. `global.inspection.body_timeout`
   (default `60s`, `0s` disables) now bounds body-reading plugin uploads with
   `408` (gRPC `DEADLINE_EXCEEDED`); a writer that cannot apply or refuses the
-  deadline fails closed with `500`, and plugin retirement aborts a read in
-  progress. Headers a plugin set before a failed call (for example
+  deadline fails closed with `500`, as does an HTTP/1 request on an embedder's
+  server that does not register connections with `reqdeadline.ConnContext`
+  (before the body is read, closing the connection); plugin retirement aborts
+  a read in progress. Headers a plugin set before a failed call (for example
   `Content-Encoding`) are removed from the error response. `/api/v1/status` reports `request_path_integration = "partial"`.
   New throttled overload and contained-guest-failure warnings carry bounded
   fields only. WAF charging and evaluation slots (I3) and response

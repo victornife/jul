@@ -27,6 +27,7 @@ import (
 	"github.com/tetratelabs/wazero"
 
 	"jul/internal/config"
+	"jul/internal/reqdeadline"
 )
 
 // bodyGuestMode selects what a hand-assembled body guest's handle_request does.
@@ -797,6 +798,9 @@ func netServer(t *testing.T, h http.Handler, h2 bool, readTimeout time.Duration)
 	t.Helper()
 	srv := httptest.NewUnstartedServer(h)
 	srv.Config.ReadTimeout = readTimeout
+	// Register connections as Jul's server does, so HTTP/1 deadlines are
+	// enforceable.
+	srv.Config.ConnContext = reqdeadline.ConnContext
 	var conns atomic.Int64
 	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
 		if st == http.StateNew {

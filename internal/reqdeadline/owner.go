@@ -115,6 +115,10 @@ type Owner struct {
 	// with ConnContext. It replaces interrupt on HTTP/1, whose body holds its
 	// lock during a blocked read, so closing the body cannot end that read.
 	conn net.Conn
+	// enforceable reports that a deadline can be guaranteed: the writer
+	// applies read deadlines, and a refused abort can still end the read
+	// through the transport. An HTTP/1 owner needs a registered connection.
+	enforceable bool
 
 	// The body-arrival phase. Its deadline is fixed by the first
 	// BeginBodyRead and never refreshed.
@@ -134,19 +138,29 @@ type Owner struct {
 
 // New returns the owner for a request served through w. w is the transport's
 // own writer, or a writer that forwards SetReadDeadline to it. proto is one of
-// the Proto* labels.
+// the Proto* labels. An HTTP/1 owner built by New has no registered
+// connection, so its deadlines are unsupported; use NewForRequest.
 func New(w http.ResponseWriter, proto string) *Owner {
-	return &Owner{setter: findSetter(w), proto: proto}
+	return build(w, proto, nil)
 }
 
-// NewForRequest returns New(w, ProtocolOf(r)). On HTTP/1 it also takes the
-// request's connection, if the server registered it with ConnContext, as the
-// transport-level interrupt for a refused abort.
+// NewForRequest returns the owner for r served through w. On HTTP/1 it takes
+// the request's connection, if the server registered it with ConnContext, as
+// the transport-level interrupt for a refused abort. Without one, nothing can
+// end a blocked HTTP/1 read whose abort is refused, so the owner reports its
+// deadlines as unsupported: an enforced body deadline fails closed before
+// reading.
 func NewForRequest(w http.ResponseWriter, r *http.Request) *Owner {
-	o := New(w, ProtocolOf(r))
-	if o.proto == ProtoH1 {
-		o.conn, _ = r.Context().Value(connKey{}).(net.Conn)
+	conn, _ := r.Context().Value(connKey{}).(net.Conn)
+	return build(w, ProtocolOf(r), conn)
+}
+
+func build(w http.ResponseWriter, proto string, conn net.Conn) *Owner {
+	o := &Owner{setter: findSetter(w), proto: proto}
+	if proto == ProtoH1 {
+		o.conn = conn
 	}
+	o.enforceable = o.setter != nil && (proto != ProtoH1 || conn != nil)
 	return o
 }
 
@@ -202,8 +216,9 @@ func From(ctx context.Context) *Owner {
 	return o
 }
 
-// Supported reports whether the request's writer applies read deadlines.
-func (o *Owner) Supported() bool { return o.setter != nil }
+// Supported reports whether the owner can guarantee a read deadline: the
+// writer applies read deadlines and, on HTTP/1, a connection is registered.
+func (o *Owner) Supported() bool { return o.enforceable }
 
 // Protocol returns the owner's protocol label.
 func (o *Owner) Protocol() string { return o.proto }
@@ -249,11 +264,11 @@ func (o *Owner) abortLocked() error {
 // BeginBodyRead and is dropped by EndBodyRead. It is called before
 // BeginBodyRead, and c is closed at most once, never under the owner lock.
 //
-// An HTTP/1 owner with a registered connection ignores c: a net/http HTTP/1
-// body holds its lock while a read blocks, so closing it waits for the read
-// instead of ending it. The connection's own past read deadline ends the read
-// instead, or closing the connection if it refuses that too. Without a
-// registered connection a refused HTTP/1 abort cannot end a blocked read.
+// An HTTP/1 owner never closes c: a net/http HTTP/1 body holds its lock while
+// a read blocks, so closing it would wait for the read instead of ending it.
+// The registered connection's own past read deadline ends the read instead,
+// or closing the connection if it refuses that too. An HTTP/1 owner without a
+// registered connection is unsupported, so an enforced read never starts.
 func (o *Owner) InterruptWith(c io.Closer) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -268,7 +283,10 @@ func (o *Owner) takeInterruptLocked(abortErr error) io.Closer {
 	if abortErr == nil || !o.reading || o.interrupted {
 		return nil
 	}
-	if o.conn != nil {
+	if o.proto == ProtoH1 {
+		if o.conn == nil {
+			return nil
+		}
 		o.interrupted = true
 		if o.conn.SetReadDeadline(pastDeadline) == nil {
 			return nil
@@ -301,8 +319,9 @@ func (o *Owner) Aborted() bool {
 // timeout <= 0 applies no inspection deadline. In observe mode the deadline is
 // not applied, and a read that outlasts it is recorded once as would_timeout.
 //
-// In enforce mode, when the writer cannot apply a read deadline, it records
-// result unsupported once and fails with ErrUnsupported. In observe mode the
+// In enforce mode, when the owner cannot guarantee a read deadline (the writer
+// does not apply one, or an HTTP/1 connection is not registered), it records
+// result unsupported once and fails with ErrUnsupported before any read. In observe mode the
 // same condition is recorded and the read continues. record, which may be nil,
 // receives each body-arrival result at most once for the request; the first
 // call's recorder is kept.
@@ -333,7 +352,7 @@ func (o *Owner) BeginBodyRead(timeout time.Duration, observe bool, record Record
 	if o.timeout <= 0 || o.bodyDone {
 		return nil
 	}
-	if o.setter == nil {
+	if !o.enforceable {
 		o.recordLocked(recUnsupported, ResultUnsupported)
 		if !o.observe {
 			o.reading = false
@@ -368,7 +387,7 @@ func (o *Owner) fire() {
 // returns the abort error when the writer refused it.
 func (o *Owner) expireLocked() error {
 	o.expired = true
-	if o.observe || o.setter == nil {
+	if o.observe || !o.enforceable {
 		o.recordLocked(recWouldTimeout, ResultWouldTimeout)
 		return nil
 	}
@@ -406,7 +425,7 @@ func (o *Owner) EndBodyRead() BodyResult {
 		o.timer = nil
 	}
 	switch {
-	case !o.expired || o.observe || o.setter == nil:
+	case !o.expired || o.observe || !o.enforceable:
 		return BodyComplete
 	case o.refused:
 		return BodyUnsupported

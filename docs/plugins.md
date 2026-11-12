@@ -561,7 +561,7 @@ modules and idle instances, which are sized statically (see
 | --- | --- | --- |
 | Budget exhausted at admission, while a body arrives, or in a host call | `503`, `Retry-After: 1`, body `inspection_overloaded`; gRPC `UNAVAILABLE`. No guest or origin call follows | Request continues; `jul_inspection_rejections_total{mode="observe"}` counts each charge enforce would refuse, so one request can count several |
 | Body still arriving after `body_timeout` | `408` (HTTP/1.1 adds `Connection: close`); gRPC `DEADLINE_EXCEEDED` | Request continues; `would_timeout` counted once |
-| Response writer cannot set a read deadline, or refuses the abort when `body_timeout` expires | `500`, `unsupported` counted; a refused abort still ends the upload, through the connection's read deadline on HTTP/1 and by closing the request body on HTTP/2 and HTTP/3 | Request continues; `unsupported` counted |
+| Response writer cannot set a read deadline, or refuses the abort when `body_timeout` expires | `500`, `unsupported` counted; a refused abort still ends the upload, through the connection's read deadline on HTTP/1 and by closing the request body on HTTP/2 and HTTP/3. An HTTP/1 request on a server that does not register its connections (an embedding, not Jul's own listeners) fails before its body is read, and the connection is closed | Request continues; `unsupported` counted |
 | Plugin limits, guest traps, timeouts, instance exhaustion | Unchanged: `500`, or `503` for instance exhaustion | Unchanged |
 
 A guest cannot avoid an overload by ignoring a host function's error return:
