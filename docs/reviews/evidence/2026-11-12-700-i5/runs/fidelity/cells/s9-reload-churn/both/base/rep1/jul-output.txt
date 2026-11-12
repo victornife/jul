@@ -1,0 +1,13 @@
+time=2026-11-12T02:32:27.386+01:00 level=WARN msg="waf rule matched" rule_id=1695101 path=/proxy/echo query_omitted=true mode=block phase=2 severity=unknown
+time=2026-11-12T02:32:27.392+01:00 level=WARN msg="waf rule matched" rule_id=1695102 path=/proxy/echo query_omitted=true mode=block phase=4 severity=unknown
+time=2026-11-12T02:32:39.665+01:00 level=ERROR msg="reload aborted" stage=validate error="validate: validate: waf: waf: compiling rules: invalid WAF config from string: failed to compile the directive \"secrule\": unknown variable" reload_id=""
+time=2026-11-12T02:32:40.574+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=85f616729ee463e7
+time=2026-11-12T02:32:40.594+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=ef5b48ae3dcc0480
+time=2026-11-12T02:32:40.595+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=a811b71b3bbe3cff
+time=2026-11-12T02:32:40.613+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=8c92634851a6687a
+time=2026-11-12T02:32:40.625+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=0846aa0222f2901f
+time=2026-11-12T02:32:40.643+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=c46f52e3b576cea0
+time=2026-11-12T02:32:40.669+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=0989acb016b46af1
+time=2026-11-12T02:32:40.690+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=2f4ff1351d23ddd4
+time=2026-11-12T02:32:40.692+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=0cea52ccfc24915b
+time=2026-11-12T02:32:40.704+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=3a48bc4804309337

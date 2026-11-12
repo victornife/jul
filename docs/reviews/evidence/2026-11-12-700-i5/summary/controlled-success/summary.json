@@ -1,0 +1,292 @@
+{
+  "plan_version": "inspection-assessment-plan/v1",
+  "profile": "quick",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "controlled-success"
+  ],
+  "targets": [
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i5-builds/bin/jul-363d6cd4-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i5-builds/bin/jul-363d6cd4-go1.27.4",
+        "sha256": "db6c6378b782b25e41fdfdbaa139517440e7beec44349a5fc6ee8df57800d7c8",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "CGO_ENABLED": "1",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "363d6cd4a9fef4c020b25e5c810b2bd34e481732",
+          "vcs.time": "2026-11-11T22:36:26Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "u1-normal-h1",
+      "variant": "none",
+      "target": "main",
+      "comparison": "throughput",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 6242.333,
+        "min_goodput_rps": 6242.333,
+        "max_goodput_rps": 6242.333,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "controlled-success",
+          "rep": 1,
+          "goodput_rps": 6242.333,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.554,
+          "peak_cg_memory_bytes": 41160704,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "u1-normal-h1",
+      "variant": "wasm",
+      "target": "main",
+      "comparison": "throughput",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 589.333,
+        "min_goodput_rps": 589.333,
+        "max_goodput_rps": 589.333,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "controlled-success",
+          "rep": 1,
+          "goodput_rps": 589.333,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.633,
+          "peak_cg_memory_bytes": 206004224,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "u10-normal-h3",
+      "variant": "none",
+      "target": "main",
+      "comparison": "throughput",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 2945.667,
+        "min_goodput_rps": 2945.667,
+        "max_goodput_rps": 2945.667,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "controlled-success",
+          "rep": 1,
+          "goodput_rps": 2945.667,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.594,
+          "peak_cg_memory_bytes": 41054208,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "u2-normal-h2",
+      "variant": "none",
+      "target": "main",
+      "comparison": "throughput",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 2892,
+        "min_goodput_rps": 2892,
+        "max_goodput_rps": 2892,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "controlled-success",
+          "rep": 1,
+          "goodput_rps": 2892,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.587,
+          "peak_cg_memory_bytes": 42393600,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "u2-normal-h2",
+      "variant": "wasm",
+      "target": "main",
+      "comparison": "throughput",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 573.667,
+        "min_goodput_rps": 573.667,
+        "max_goodput_rps": 573.667,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "controlled-success",
+          "rep": 1,
+          "goodput_rps": 573.667,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.63,
+          "peak_cg_memory_bytes": 219299840,
+          "state": "completed"
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "u1-normal-h1",
+      "variant": "none",
+      "target": "main",
+      "run": "controlled-success",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 18743,
+      "verified_in_window": 18727,
+      "goodput_rps": 6242.333,
+      "crossed_in_from_warmup": 14,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 9.404,
+      "outcomes": "ok ×18743"
+    },
+    {
+      "scenario": "u1-normal-h1",
+      "variant": "wasm",
+      "target": "main",
+      "run": "controlled-success",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 1770,
+      "verified_in_window": 1768,
+      "goodput_rps": 589.333,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 10.325,
+      "outcomes": "ok ×1770"
+    },
+    {
+      "scenario": "u10-normal-h3",
+      "variant": "none",
+      "target": "main",
+      "run": "controlled-success",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h3",
+      "concurrency": 16,
+      "attempts": 8853,
+      "verified_in_window": 8837,
+      "goodput_rps": 2945.667,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 12.858,
+      "outcomes": "ok ×8853"
+    },
+    {
+      "scenario": "u2-normal-h2",
+      "variant": "none",
+      "target": "main",
+      "run": "controlled-success",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 8692,
+      "verified_in_window": 8676,
+      "goodput_rps": 2892,
+      "crossed_in_from_warmup": 15,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 12.045,
+      "outcomes": "ok ×8692"
+    },
+    {
+      "scenario": "u2-normal-h2",
+      "variant": "wasm",
+      "target": "main",
+      "run": "controlled-success",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 2,
+      "attempts": 1723,
+      "verified_in_window": 1721,
+      "goodput_rps": 573.667,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 9.405,
+      "outcomes": "ok ×1723"
+    }
+  ],
+  "failed_or_invalid_runs": null,
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

@@ -1,0 +1,150 @@
+{
+  "scenario": "f3-admission-pending16",
+  "scenario_sha256": "487cdbdeabc4308e9c446c9ad3a28501120ba440ec802e3c94514a3efd932e28",
+  "comparison": "record",
+  "variant": "both",
+  "target": "base",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T01:35:34.823290009Z",
+  "ended": "2026-11-12T01:36:14.073959503Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class admission: error:reset ×124",
+    "phase load class admission: status:500 ×5",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "53a3c55c4d24de65413e669a824b770525a3440377b735a9f58b647e87f5ee22",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-724199-5170317.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 34
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "admission",
+          "proto": "h2",
+          "concurrency": 128,
+          "window_seconds": 20,
+          "attempts": 129,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:reset": 124,
+            "status:500": 5
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 0,
+          "outstanding_at_window_end": 128,
+          "response_protos": {
+            "HTTP/2.0": 5
+          },
+          "connections_dialled": 1,
+          "connections_required": 1,
+          "expected_classes": [
+            "status:503"
+          ],
+          "error_samples": {
+            "error:reset": "Post \"https://localhost:40515/admitted/echo?resp=65536\u0026delay=500\": read tcp 127.0.0.1:39480-\u003e127.0.0.1:40515: read: connection reset by peer"
+          }
+        },
+        {
+          "workload": "probe",
+          "proto": "h2",
+          "concurrency": 1,
+          "window_seconds": 20,
+          "attempts": 11,
+          "verified": 11,
+          "verified_in_window": 10,
+          "goodput_rps": 0.5,
+          "goodput_bytes_per_second": 2048,
+          "classes": {
+            "ok": 11
+          },
+          "p50_ms": 1374.613,
+          "p95_ms": 3034.258,
+          "p99_ms": 3034.258,
+          "max_ms": 3257.268,
+          "crossed_in_from_warmup": 0,
+          "outstanding_at_window_end": 1,
+          "response_protos": {
+            "HTTP/2.0": 11
+          },
+          "connections_dialled": 1,
+          "connections_required": 1
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.995,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 805306368,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 752513024,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "rss_after_two_gcs": null,
+  "samples": 26
+}

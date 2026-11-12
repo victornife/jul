@@ -1,0 +1,186 @@
+{
+  "scenario": "s9-reload-churn",
+  "scenario_sha256": "1dae49558f2a8ed429619e79e0805a540db4258fab0ddc412887a21821eff95b",
+  "comparison": "record",
+  "variant": "both",
+  "target": "base",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T01:32:25.548929966Z",
+  "ended": "2026-11-12T01:33:27.550194064Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class load: error:eof ×11",
+    "phase load class load: error:refused ×1752259",
+    "phase load class load: error:reset ×5",
+    "phase load class inflight: error:refused ×1575742",
+    "phase load class inflight: error:reset ×16",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "7d64e8eb0afe1c08fcf7e4299e2959e2aa905d38c29817e8335ec0e2d0caae1e",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-724199-710325866.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 32
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 40,
+          "attempts": 1752376,
+          "verified": 101,
+          "verified_in_window": 101,
+          "goodput_rps": 2.525,
+          "goodput_bytes_per_second": 165478.4,
+          "classes": {
+            "error:eof": 11,
+            "error:refused": 1752259,
+            "error:reset": 5,
+            "ok": 101
+          },
+          "p50_ms": 1044.292,
+          "p95_ms": 1706.193,
+          "p99_ms": 1883.582,
+          "max_ms": 2038.982,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/1.1": 101
+          },
+          "connections_dialled": 16,
+          "error_samples": {
+            "error:eof": "Post \"http://127.0.0.1:46793/proxy/echo?resp=65536\": EOF",
+            "error:refused": "Post \"http://127.0.0.1:46793/proxy/echo?resp=65536\": dial tcp 127.0.0.1:46793: connect: connection refused",
+            "error:reset": "Post \"http://127.0.0.1:46793/proxy/echo?resp=65536\": read tcp 127.0.0.1:35842-\u003e127.0.0.1:46793: read: connection reset by peer"
+          }
+        },
+        {
+          "workload": "inflight",
+          "proto": "h2",
+          "concurrency": 16,
+          "window_seconds": 40,
+          "attempts": 1575775,
+          "verified": 1,
+          "verified_in_window": 1,
+          "goodput_rps": 0.025,
+          "goodput_bytes_per_second": 1638.4,
+          "classes": {
+            "error:refused": 1575742,
+            "error:reset": 16,
+            "error:stream-reset": 16,
+            "ok": 1
+          },
+          "p50_ms": 4896.551,
+          "p95_ms": 4896.551,
+          "p99_ms": 4896.551,
+          "max_ms": 4896.551,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/2.0": 1
+          },
+          "connections_dialled": 16,
+          "expected_classes": [
+            "error:stream-reset"
+          ],
+          "error_samples": {
+            "error:refused": "Post \"https://localhost:43659/proxy/echo?resp=65536\u0026delay=3000\": dial tcp 127.0.0.1:43659: connect: connection refused",
+            "error:reset": "Post \"https://localhost:43659/proxy/echo?resp=65536\u0026delay=3000\": read tcp 127.0.0.1:37528-\u003e127.0.0.1:43659: read: connection reset by peer",
+            "error:stream-reset": "Post \"https://localhost:43659/proxy/echo?resp=65536\u0026delay=3000\": stream error: stream ID 69; INTERNAL_ERROR; received from peer"
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "reloads": [
+    "t+2.0s reload 1 nameA=a2 rule=1695111 broken=false",
+    "t+4.0s reload 2 nameA=a1 rule=1695101 broken=false",
+    "t+6.0s reload 3 nameA=a2 rule=1695111 broken=false",
+    "t+8.0s reload 4 nameA=a1 rule=1695101 broken=false",
+    "t+10.0s reload 5 nameA=a2 rule=1695111 broken=true",
+    "t+12.0s reload 6 nameA=a1 rule=1695101 broken=false",
+    "t+14.0s reload 7 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+16.0s reload 8 nameA=a1 rule=1695101 broken=false error=os: process already finished",
+    "t+18.0s reload 9 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+20.0s reload 10 nameA=a1 rule=1695101 broken=false error=os: process already finished",
+    "t+22.0s reload 11 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+24.0s reload 12 nameA=a1 rule=1695101 broken=false error=os: process already finished",
+    "t+26.0s reload 13 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+28.0s reload 14 nameA=a1 rule=1695101 broken=false error=os: process already finished",
+    "t+30.0s reload 15 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+32.0s reload 16 nameA=a1 rule=1695101 broken=false error=os: process already finished",
+    "t+34.0s reload 17 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+36.0s reload 18 nameA=a1 rule=1695101 broken=false error=os: process already finished",
+    "t+38.0s reload 19 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+40.0s reload 20 nameA=a1 rule=1695101 broken=false error=os: process already finished",
+    "t+42.0s reload 21 nameA=a2 rule=1695111 broken=false error=os: process already finished",
+    "t+44.0s reload 22 nameA=a1 rule=1695101 broken=false error=os: process already finished"
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 702033920,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 731131904,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "rss_after_two_gcs": null,
+  "samples": 27
+}

@@ -1,0 +1,143 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "calibration",
+  "started": "2026-11-12T00:12:25.659330834Z",
+  "ended": "2026-11-12T00:24:25.977804573Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v1",
+  "plan_sha256": "91d79388c2312fa44624f3600b64b897e12672de34e167a5a28fe6e44333ae65",
+  "interpretation_sha256": "a65f6713b1ee1d1d660023e79af7e598be198fb6c0ce959d426646887de530dc",
+  "profile": {
+    "name": "qualification",
+    "acceptance_eligible": true,
+    "warmup": "5s",
+    "measure": "20s",
+    "recovery": "10s",
+    "reload_measure": "40s",
+    "reload_recovery": "15s",
+    "step_warmup": "2s",
+    "f3_duration": "20s",
+    "f4_client_limit": "20s",
+    "description": "the archived #695/#700 windows; eligible as acceptance evidence only inside the verified envelope"
+  },
+  "repetitions": 1,
+  "selection": [
+    "cal-normal-h1/none",
+    "cal-normal-h1/waf",
+    "cal-normal-h1/wasm",
+    "cal-normal-h1/both",
+    "cal-normal-h2/none",
+    "cal-normal-h2/waf",
+    "cal-normal-h2/wasm",
+    "cal-normal-h2/both",
+    "cal-normal-h3/none",
+    "cal-normal-h3/both"
+  ],
+  "scenario_sha256": {
+    "cal-normal-h1/both": "3d8038a7603a2e66fd6f90316dd093e6292834cd90a6572d6123d6908a63cf65",
+    "cal-normal-h1/none": "3d8038a7603a2e66fd6f90316dd093e6292834cd90a6572d6123d6908a63cf65",
+    "cal-normal-h1/waf": "3d8038a7603a2e66fd6f90316dd093e6292834cd90a6572d6123d6908a63cf65",
+    "cal-normal-h1/wasm": "3d8038a7603a2e66fd6f90316dd093e6292834cd90a6572d6123d6908a63cf65",
+    "cal-normal-h2/both": "1a2e96a1b98017eb0f15c2861fd464c9788a27a78c0ee01a2d2365b83b6bd6d3",
+    "cal-normal-h2/none": "1a2e96a1b98017eb0f15c2861fd464c9788a27a78c0ee01a2d2365b83b6bd6d3",
+    "cal-normal-h2/waf": "1a2e96a1b98017eb0f15c2861fd464c9788a27a78c0ee01a2d2365b83b6bd6d3",
+    "cal-normal-h2/wasm": "1a2e96a1b98017eb0f15c2861fd464c9788a27a78c0ee01a2d2365b83b6bd6d3",
+    "cal-normal-h3/both": "8d0afad8a9d3c0cdd2dd0c697836a14f104d712b743298f1031001160f49b2ae",
+    "cal-normal-h3/none": "8d0afad8a9d3c0cdd2dd0c697836a14f104d712b743298f1031001160f49b2ae"
+  },
+  "targets": [
+    {
+      "label": "base",
+      "adapter": "baseline-858590dc",
+      "path": "/home/victornf/jul-i5-builds/bin/jul-858590dc-go1.27.3",
+      "binary": {
+        "path": "/home/victornf/jul-i5-builds/bin/jul-858590dc-go1.27.3",
+        "sha256": "520febcbad5669da0ea8ad98e29f0bb78304817511cd7ed63bfb48e9d63ea52f",
+        "go_version": "go1.27.3",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "858590dc7c430d24cd33b096a81ca6051591b427",
+          "vcs.time": "2026-11-10T14:59:56Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "baseline-858590dc",
+        "global_inspection": false,
+        "description": "ADR 0032 comparison baseline (#702, #703); no [global.inspection] table"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/tmp/ia",
+    "sha256": "d6a326f1fcdd5ba437b6180d8692743b30b079a90f48708ac960034338f191a4",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "CGO_ENABLED": "1",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux",
+      "vcs": "git",
+      "vcs.modified": "true",
+      "vcs.revision": "363d6cd4a9fef4c020b25e5c810b2bd34e481732",
+      "vcs.time": "2026-11-11T22:36:26Z"
+    }
+  },
+  "guest": {
+    "path": "/tmp/il.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a",
+    "source_tree_sha256": "217eb5033fa205bb2ca702c908e03294c59b849d6ba61a0e41b9de8f24ecf3c0",
+    "source": "examples/plugins/inspect-load"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/jul-700-i5/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 6,
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "required",
+    "jul_cpus": "0,1",
+    "cpu_quota": "200%",
+    "memory_max": "768M",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "4-9",
+    "jul": "0,1",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/cal-normal-h1/none/base/rep1/result.json",
+    "cells/cal-normal-h1/waf/base/rep1/result.json",
+    "cells/cal-normal-h1/wasm/base/rep1/result.json",
+    "cells/cal-normal-h1/both/base/rep1/result.json",
+    "cells/cal-normal-h2/none/base/rep1/result.json",
+    "cells/cal-normal-h2/waf/base/rep1/result.json",
+    "cells/cal-normal-h2/wasm/base/rep1/result.json",
+    "cells/cal-normal-h2/both/base/rep1/result.json",
+    "cells/cal-normal-h3/none/base/rep1/result.json",
+    "cells/cal-normal-h3/both/base/rep1/result.json"
+  ],
+  "interrupted": false
+}

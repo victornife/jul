@@ -1,0 +1,146 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "diagnose-s6-both",
+  "started": "2026-11-12T02:14:54.436765442Z",
+  "ended": "2026-11-12T02:16:17.859740832Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v1",
+  "plan_sha256": "8432278801a88346f9a60c118ac41c9ba2d8bb766e23d73b0f9da5915df0db5d",
+  "interpretation_sha256": "a65f6713b1ee1d1d660023e79af7e598be198fb6c0ce959d426646887de530dc",
+  "profile": {
+    "name": "qualification",
+    "acceptance_eligible": true,
+    "warmup": "5s",
+    "measure": "20s",
+    "recovery": "10s",
+    "reload_measure": "40s",
+    "reload_recovery": "15s",
+    "step_warmup": "2s",
+    "f3_duration": "20s",
+    "f4_client_limit": "20s",
+    "description": "the archived #695/#700 windows; eligible as acceptance evidence only inside the verified envelope"
+  },
+  "repetitions": 1,
+  "selection": [
+    "s6-static-h2/both"
+  ],
+  "scenario_sha256": {
+    "s6-static-h2/both": "a070bbd5c0ccf6b514a03f14a4f0345c218445e0dc3b9bece3be473da3ff1908"
+  },
+  "targets": [
+    {
+      "label": "base",
+      "adapter": "baseline-858590dc",
+      "path": "/home/victornf/jul-i5-builds/bin/jul-858590dc-go1.27.3",
+      "binary": {
+        "path": "/home/victornf/jul-i5-builds/bin/jul-858590dc-go1.27.3",
+        "sha256": "520febcbad5669da0ea8ad98e29f0bb78304817511cd7ed63bfb48e9d63ea52f",
+        "go_version": "go1.27.3",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "858590dc7c430d24cd33b096a81ca6051591b427",
+          "vcs.time": "2026-11-10T14:59:56Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "baseline-858590dc",
+        "global_inspection": false,
+        "description": "ADR 0032 comparison baseline (#702, #703); no [global.inspection] table"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i5-builds/bin/jul-363d6cd4-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i5-builds/bin/jul-363d6cd4-go1.27.4",
+        "sha256": "db6c6378b782b25e41fdfdbaa139517440e7beec44349a5fc6ee8df57800d7c8",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "CGO_ENABLED": "1",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "363d6cd4a9fef4c020b25e5c810b2bd34e481732",
+          "vcs.time": "2026-11-11T22:36:26Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/home/victornf/jul-i5-builds/bin/ia-diag",
+    "sha256": "1d321c482b25d9e2776d662aaa7b589afc85e4eb612da5a571decf72e5d79424",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "CGO_ENABLED": "1",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux",
+      "vcs": "git",
+      "vcs.modified": "true",
+      "vcs.revision": "30ff0650ba2120b72189bdf963250de390fdf26f",
+      "vcs.time": "2026-11-12T00:25:27Z"
+    }
+  },
+  "guest": {
+    "path": "/tmp/il.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a",
+    "source_tree_sha256": "217eb5033fa205bb2ca702c908e03294c59b849d6ba61a0e41b9de8f24ecf3c0",
+    "source": "examples/plugins/inspect-load"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/jul-700-i5/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 6,
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "required",
+    "jul_cpus": "0,1",
+    "cpu_quota": "200%",
+    "memory_max": "768M",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "4-9",
+    "jul": "0,1",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/s6-static-h2/both/base/rep1/result.json",
+    "cells/s6-static-h2/both/main/rep1/result.json"
+  ],
+  "interrupted": false
+}

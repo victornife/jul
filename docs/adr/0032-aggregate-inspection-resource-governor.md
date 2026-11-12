@@ -1176,7 +1176,11 @@ envelope check, checksummed run evidence and deterministic summaries. It
 records baselines for `858590dc` and post-I1 main
 (`docs/reviews/2026-11-12-700-i5-assessment-tooling-baselines.md`). F2 is not
 ported because the I1 governor supersedes it. The baselines are measurement
-evidence only: no A1–A18 criterion is satisfied by I5.
+evidence only: no A1–A18 criterion is satisfied by I5. The campaign found no
+over-10% regression after added repetitions (the uninspected H1 cell remains
+inconclusive through noise). On both runtimes, reload churn and single-connection
+admission with WAF and plugins were OOM-killed, and stalled bodies ended only at
+the client's limit; these are the baselines I2–I4 must change.
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.

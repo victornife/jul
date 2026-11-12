@@ -1,0 +1,108 @@
+{
+  "scenario": "u1-normal-h1",
+  "scenario_sha256": "1d66f1d73a82c2bd158ce7d23c98f7c8b2c3bc021885359ffbbe6950da08fb70",
+  "comparison": "throughput",
+  "variant": "none",
+  "target": "base4",
+  "rep": 3,
+  "profile": "qualification",
+  "started": "2026-11-12T01:05:05.003144437Z",
+  "ended": "2026-11-12T01:05:40.514852757Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "0456999520f9a17bf0ae60673965fccfb528d186aefd2357e5ada9aab4cd7d85",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-710878-17613937.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 32
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 20,
+          "attempts": 144371,
+          "verified": 144371,
+          "verified_in_window": 144355,
+          "goodput_rps": 7217.75,
+          "goodput_bytes_per_second": 473022464,
+          "classes": {
+            "ok": 144371
+          },
+          "p50_ms": 1.64,
+          "p95_ms": 5.923,
+          "p99_ms": 9.705,
+          "max_ms": 25.399,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/1.1": 144371
+          },
+          "connections_dialled": 17
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.624,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 42598400,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 69087232,
+  "heap_inuse_after_two_gcs": 9043968,
+  "heap_alloc_after_two_gcs": 6861944,
+  "rss_after_two_gcs": 61648896,
+  "counter_deltas": {
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_pass": 0
+  },
+  "unavailable_metrics": [
+    "plugin_invocations",
+    "plugin_invocations_ok",
+    "plugin_resp_invocations",
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_success",
+    "reload_failure",
+    "transport_retired"
+  ],
+  "samples": 71
+}

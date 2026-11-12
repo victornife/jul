@@ -1,0 +1,1 @@
+/home/victornf/jul-i5-evidence/frozen/campaign-normal/cells/u10-normal-h3/none/base4/rep1/config.toml is valid (structural + runtime)

@@ -1,0 +1,382 @@
+[
+  {
+    "scenario": "cal-normal-h1",
+    "variant": "both",
+    "target": "base",
+    "chosen_concurrency": 1,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.504,
+        "all_verified": true,
+        "goodput_rps": 10
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.984,
+        "all_verified": true,
+        "goodput_rps": 18.3
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.993,
+        "all_verified": true,
+        "goodput_rps": 18.6
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.991,
+        "all_verified": true,
+        "goodput_rps": 18.5
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.991,
+        "all_verified": false,
+        "goodput_rps": 17.2
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h1",
+    "variant": "none",
+    "target": "base",
+    "chosen_concurrency": 16,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.326,
+        "all_verified": true,
+        "goodput_rps": 1532.3
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.433,
+        "all_verified": true,
+        "goodput_rps": 3100.9
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.523,
+        "all_verified": true,
+        "goodput_rps": 5374.1
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.569,
+        "all_verified": true,
+        "goodput_rps": 6442.3
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.611,
+        "all_verified": true,
+        "goodput_rps": 7482.4
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h1",
+    "variant": "waf",
+    "target": "base",
+    "chosen_concurrency": 1,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.503,
+        "all_verified": true,
+        "goodput_rps": 10.4
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.978,
+        "all_verified": true,
+        "goodput_rps": 18.8
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.986,
+        "all_verified": true,
+        "goodput_rps": 18.9
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.99,
+        "all_verified": true,
+        "goodput_rps": 18.6
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.993,
+        "all_verified": true,
+        "goodput_rps": 17.7
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h1",
+    "variant": "wasm",
+    "target": "base",
+    "chosen_concurrency": 2,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.463,
+        "all_verified": true,
+        "goodput_rps": 385.2
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.633,
+        "all_verified": true,
+        "goodput_rps": 635.4
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.882,
+        "all_verified": true,
+        "goodput_rps": 964.5
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.945,
+        "all_verified": true,
+        "goodput_rps": 1047.9
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.983,
+        "all_verified": true,
+        "goodput_rps": 1075.3
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h2",
+    "variant": "both",
+    "target": "base",
+    "chosen_concurrency": 1,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.504,
+        "all_verified": true,
+        "goodput_rps": 10.1
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.977,
+        "all_verified": true,
+        "goodput_rps": 18.3
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.994,
+        "all_verified": true,
+        "goodput_rps": 18.5
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.995,
+        "all_verified": true,
+        "goodput_rps": 18.6
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.998,
+        "all_verified": true,
+        "goodput_rps": 17.4
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h2",
+    "variant": "none",
+    "target": "base",
+    "chosen_concurrency": 16,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.424,
+        "all_verified": true,
+        "goodput_rps": 1252.1
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.519,
+        "all_verified": true,
+        "goodput_rps": 1989.6
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.565,
+        "all_verified": true,
+        "goodput_rps": 2592.6
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.583,
+        "all_verified": true,
+        "goodput_rps": 2833.7
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.608,
+        "all_verified": true,
+        "goodput_rps": 2885.7
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h2",
+    "variant": "waf",
+    "target": "base",
+    "chosen_concurrency": 1,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.504,
+        "all_verified": true,
+        "goodput_rps": 10.3
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.983,
+        "all_verified": true,
+        "goodput_rps": 18.7
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.995,
+        "all_verified": true,
+        "goodput_rps": 18.7
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.985,
+        "all_verified": true,
+        "goodput_rps": 17.5
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.995,
+        "all_verified": true,
+        "goodput_rps": 17.8
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h2",
+    "variant": "wasm",
+    "target": "base",
+    "chosen_concurrency": 2,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.488,
+        "all_verified": true,
+        "goodput_rps": 355.6
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.634,
+        "all_verified": true,
+        "goodput_rps": 562.8
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.832,
+        "all_verified": true,
+        "goodput_rps": 785.9
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.938,
+        "all_verified": true,
+        "goodput_rps": 931.8
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.976,
+        "all_verified": true,
+        "goodput_rps": 924.8
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h3",
+    "variant": "both",
+    "target": "base",
+    "chosen_concurrency": 1,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.503,
+        "all_verified": true,
+        "goodput_rps": 9.9
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.968,
+        "all_verified": true,
+        "goodput_rps": 18.1
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.995,
+        "all_verified": true,
+        "goodput_rps": 18.5
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.998,
+        "all_verified": true,
+        "goodput_rps": 18.1
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.995,
+        "all_verified": true,
+        "goodput_rps": 17.2
+      }
+    ]
+  },
+  {
+    "scenario": "cal-normal-h3",
+    "variant": "none",
+    "target": "base",
+    "chosen_concurrency": 16,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.381,
+        "all_verified": true,
+        "goodput_rps": 854.7
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.492,
+        "all_verified": true,
+        "goodput_rps": 1658.4
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.567,
+        "all_verified": true,
+        "goodput_rps": 2459.4
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.602,
+        "all_verified": true,
+        "goodput_rps": 2893.7
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.608,
+        "all_verified": true,
+        "goodput_rps": 3069.9
+      }
+    ]
+  }
+]

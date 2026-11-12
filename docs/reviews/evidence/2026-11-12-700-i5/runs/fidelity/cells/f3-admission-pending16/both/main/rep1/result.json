@@ -1,0 +1,150 @@
+{
+  "scenario": "f3-admission-pending16",
+  "scenario_sha256": "487cdbdeabc4308e9c446c9ad3a28501120ba440ec802e3c94514a3efd932e28",
+  "comparison": "record",
+  "variant": "both",
+  "target": "main",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T01:36:14.074339703Z",
+  "ended": "2026-11-12T01:36:53.986858338Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class admission: error:eof ×128",
+    "phase load class admission: status:500 ×1",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "6a5cf3021d69d7879c44f4b91fe3ab368b816dbdbeb976c155a1a9c1909a8f6f",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-724199-434259064.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 35
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "admission",
+          "proto": "h2",
+          "concurrency": 128,
+          "window_seconds": 20,
+          "attempts": 129,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:eof": 128,
+            "status:500": 1
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 0,
+          "outstanding_at_window_end": 128,
+          "response_protos": {
+            "HTTP/2.0": 1
+          },
+          "connections_dialled": 1,
+          "connections_required": 1,
+          "expected_classes": [
+            "status:503"
+          ],
+          "error_samples": {
+            "error:eof": "Post \"https://localhost:38481/admitted/echo?resp=65536\u0026delay=500\": unexpected EOF"
+          }
+        },
+        {
+          "workload": "probe",
+          "proto": "h2",
+          "concurrency": 1,
+          "window_seconds": 20,
+          "attempts": 13,
+          "verified": 13,
+          "verified_in_window": 12,
+          "goodput_rps": 0.6,
+          "goodput_bytes_per_second": 2457.6,
+          "classes": {
+            "ok": 13
+          },
+          "p50_ms": 1212.092,
+          "p95_ms": 2656.696,
+          "p99_ms": 2656.696,
+          "max_ms": 3164.112,
+          "crossed_in_from_warmup": 0,
+          "outstanding_at_window_end": 1,
+          "response_protos": {
+            "HTTP/2.0": 13
+          },
+          "connections_dialled": 1,
+          "connections_required": 1
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.996,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 804638720,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 801669120,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "rss_after_two_gcs": null,
+  "samples": 23
+}

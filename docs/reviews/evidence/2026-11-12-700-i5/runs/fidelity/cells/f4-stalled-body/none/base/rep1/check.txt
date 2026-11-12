@@ -1,0 +1,1 @@
+/home/victornf/jul-i5-evidence/frozen/fidelity/cells/f4-stalled-body/none/base/rep1/config.toml is valid (structural + runtime)
