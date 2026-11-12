@@ -815,10 +815,11 @@ type ActiveExchange struct {
 	reqMethod  string
 	reqUpgrade string
 
-	// cancel, rawH1Conn and controller reach the request context (and so its
-	// handler generation) and the connection. They are guarded by mu and
-	// released when the exchange closes, because PublishGeneration keeps
-	// retired exchanges in its bounded history for outcome reporting (#709).
+	// cancel, rawH1Conn, controller, upgraded and upgradedBack reach the
+	// request context (and so its handler generation) and the connections.
+	// They are guarded by mu and released when the exchange closes, because
+	// PublishGeneration keeps retired exchanges in its bounded history for
+	// outcome reporting (#709). That reporting reads only upgradedHandshake.
 	cancel     context.CancelFunc
 	rawH1Conn  net.Conn
 	controller *http.ResponseController
@@ -833,9 +834,10 @@ type ActiveExchange struct {
 	statusCode    int
 	hijacked      bool
 	upgraded      *upgradedSession
-	upgradedPtr   atomic.Pointer[upgradedSession]
-	upgradedBack  *upgradedBackConn
-	batches       []*retirementBatch
+	// upgradedHandshake is the upgraded session's clean-handshake flag.
+	upgradedHandshake atomic.Pointer[atomic.Bool]
+	upgradedBack      *upgradedBackConn
+	batches           []*retirementBatch
 
 	closed       atomic.Bool
 	closedAt     atomic.Int64
@@ -998,6 +1000,7 @@ func (ex *ActiveExchange) markClosed() {
 		ex.mu.Lock()
 		cancel := ex.cancel
 		ex.cancel, ex.rawH1Conn, ex.controller = nil, nil, nil
+		ex.upgraded, ex.upgradedBack = nil, nil
 		ex.mu.Unlock()
 		cancel()
 		ex.reg.mu.Lock()
@@ -1035,8 +1038,8 @@ func (ex *ActiveExchange) outcome(boundDeadline time.Time) (graceful bool, force
 	closedTime := time.Unix(0, closedNs)
 	withinBound = !closedTime.After(effBound)
 
-	if up := ex.upgradedPtr.Load(); up != nil {
-		if up.completedCleanHandshake() {
+	if hs := ex.upgradedHandshake.Load(); hs != nil {
+		if hs.Load() {
 			return true, false, withinBound, 0
 		}
 		return false, true, withinBound, 0
@@ -1104,21 +1107,18 @@ func (w *exchangeResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if w.ex.upgradedBack != nil && w.ex.upgradedBack.isWebSocket {
 		isWS = true
 	}
-	up := newUpgradedSession(w.ex, conn, brw, w.ex.upgradedBack, isWS)
+	back := w.ex.upgradedBack
+	up := newUpgradedSession(w.ex, conn, brw, back, isWS)
 	w.ex.hijacked = true
 	w.ex.upgraded = up
-	w.ex.upgradedPtr.Store(up)
+	w.ex.upgradedHandshake.Store(up.handshakeCompleted)
 	retiring := w.ex.retiring
 	grace := w.ex.graceDeadline
 	bound := w.ex.boundDeadline
 	code := w.ex.closeCode
 	w.ex.mu.Unlock()
 
-	if isWS {
-		up.attachSessionToBack(w.ex.upgradedBack)
-	} else if w.ex.upgradedBack != nil {
-		up.attachSessionToBack(w.ex.upgradedBack)
-	}
+	up.attachSessionToBack(back)
 	if retiring {
 		up.initiateClose(grace, bound, code)
 	}
@@ -1142,6 +1142,10 @@ func AttachUpgradedBackend(ctx context.Context, back io.ReadWriteCloser, resHead
 		holdCh:          make(chan struct{}),
 	}
 	ex.mu.Lock()
+	if ex.closed.Load() {
+		ex.mu.Unlock()
+		return back
+	}
 	ex.upgradedBack = wb
 	if ex.upgraded != nil {
 		ex.upgraded.attachBackend(wb, isWS)

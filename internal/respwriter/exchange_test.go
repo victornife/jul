@@ -1303,3 +1303,68 @@ func TestRetiredExchangeHistoryDropsRequestContext(t *testing.T) {
 	}
 	t.Fatal("a closed exchange kept in the retirement history still pins its request context")
 }
+
+// ctxBackend models the proxy's upgraded attempt body, which keeps the request
+// context (upstream.WrapAttemptBody).
+type ctxBackend struct {
+	io.ReadWriteCloser
+	ctx context.Context
+}
+
+func TestRetiredUpgradedExchangeHistoryDropsBackend(t *testing.T) {
+	type genPin struct{ _ [1 << 16]byte }
+	type pinKey struct{}
+
+	reg := NewExchangeRegistry()
+	// The close sequence's watchdog timer references the session until it
+	// is stopped and leaves the timer heap, so keep it short.
+	reg.Grace = 50 * time.Millisecond
+	reg.Bound = 50 * time.Millisecond
+	reg.SetInitialGeneration(1)
+
+	collected := make(chan struct{})
+	wait := func() func() []EntryRetirementResult {
+		pin := &genPin{}
+		runtime.AddCleanup(pin, func(ch chan struct{}) { close(ch) }, collected)
+		clientPeer, proxyClientSide := net.Pipe()
+		defer clientPeer.Close()
+		upstreamPeer, proxyBackSide := net.Pipe()
+		defer upstreamPeer.Close()
+
+		req, _ := http.NewRequestWithContext(context.WithValue(context.Background(), pinKey{}, pin), http.MethodGet, "http://example.com/raw", nil)
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "raw")
+		w, admitted, _, release := reg.Admit(newHijackableRecorder(proxyClientSide), req, EntryCoord{GenID: 1, ListenAddr: "127.0.0.1:8080", RouteID: "raw"})
+		AttachUpgradedBackend(admitted.Context(), &ctxBackend{ReadWriteCloser: proxyBackSide, ctx: admitted.Context()}, http.Header{"Upgrade": []string{"raw"}})
+		conn, brw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Fatalf("Hijack: %v", err)
+		}
+		go func() { _, _ = io.Copy(io.Discard, clientPeer) }()
+		_, _ = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: raw\r\nConnection: Upgrade\r\n\r\n")
+		if err := brw.Flush(); err != nil {
+			t.Fatalf("write 101: %v", err)
+		}
+		wait := reg.PublishGeneration(1, 2, []EntryTransition{{
+			FromRouteID: "raw", ToRouteID: "raw", Retire: true, DisplayLabel: "raw",
+		}})
+		_ = conn.Close()
+		release()
+		return wait
+	}()
+	results := wait()
+	if len(results) != 1 || results[0].EndedExchanges != 1 {
+		t.Fatalf("retirement results = %+v, want the closed upgraded exchange still reported", results)
+	}
+
+	for range 200 {
+		runtime.GC()
+		select {
+		case <-collected:
+			runtime.KeepAlive(reg)
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatal("a closed upgraded exchange kept in the retirement history still pins its upstream and request context")
+}
