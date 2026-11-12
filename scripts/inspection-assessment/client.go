@@ -347,6 +347,26 @@ type ClassStats struct {
 	Expect      []string       `json:"expected_classes,omitempty"`
 	// ErrorSamples keeps the first error text of each error class.
 	ErrorSamples map[string]string `json:"error_samples,omitempty"`
+	// OutcomeLatency is the latency of every completed attempt started in
+	// the window, per non-ok outcome class (for example status:503 for
+	// overload), including attempts that finished after the window.
+	// Unfinished attempts have no latency. Absent before plan v2.
+	OutcomeLatency map[string]Latency `json:"outcome_latency_ms,omitempty"`
+}
+
+// Latency summarises one outcome class's request durations in milliseconds.
+type Latency struct {
+	N   int     `json:"n"`
+	P50 float64 `json:"p50"`
+	P95 float64 `json:"p95"`
+	P99 float64 `json:"p99"`
+	Max float64 `json:"max"`
+}
+
+func latencyOf(ms []float64) Latency {
+	slices.Sort(ms)
+	q := func(p float64) float64 { return round3(ms[int(p*float64(len(ms)-1))]) }
+	return Latency{N: len(ms), P50: q(0.50), P95: q(0.95), P99: q(0.99), Max: q(1)}
 }
 
 // Check separates instrument problems (the class did not measure what it
@@ -375,6 +395,7 @@ func Summarize(w Workload, outs []Outcome, from, to time.Time, dials int64) Clas
 	s := ClassStats{Workload: w.Name, Proto: w.Proto, Concurrency: w.Concurrency, WindowSec: to.Sub(from).Seconds(),
 		Classes: map[string]int{}, Protos: map[string]int{}, Dials: dials, WantConns: w.Connections, Expect: w.Expect}
 	var lats []float64
+	other := map[string][]float64{}
 	var good int64
 	for _, o := range outs {
 		if o.Start.Before(from) {
@@ -403,6 +424,10 @@ func Summarize(w Workload, outs []Outcome, from, to time.Time, dials int64) Clas
 		if late {
 			s.Outstanding++
 		}
+		ms := float64(o.End.Sub(o.Start).Microseconds()) / 1000
+		if o.Class != "ok" && o.Class != "unfinished" {
+			other[o.Class] = append(other[o.Class], ms)
+		}
 		if o.Class == "ok" {
 			s.Verified++
 			if late {
@@ -410,7 +435,7 @@ func Summarize(w Workload, outs []Outcome, from, to time.Time, dials int64) Clas
 			}
 			s.GoodN++
 			good += o.Bytes
-			lats = append(lats, float64(o.End.Sub(o.Start).Microseconds())/1000)
+			lats = append(lats, ms)
 		}
 	}
 	if s.WindowSec > 0 {
@@ -418,9 +443,14 @@ func Summarize(w Workload, outs []Outcome, from, to time.Time, dials int64) Clas
 		s.GoodputBPS = round3(float64(good) / s.WindowSec)
 	}
 	if len(lats) > 0 {
-		slices.Sort(lats)
-		q := func(p float64) *float64 { v := round3(lats[int(p*float64(len(lats)-1))]); return &v }
-		s.P50ms, s.P95ms, s.P99ms, s.MaxMs = q(0.50), q(0.95), q(0.99), q(1)
+		l := latencyOf(lats)
+		s.P50ms, s.P95ms, s.P99ms, s.MaxMs = &l.P50, &l.P95, &l.P99, &l.Max
+	}
+	for k, v := range other {
+		if s.OutcomeLatency == nil {
+			s.OutcomeLatency = map[string]Latency{}
+		}
+		s.OutcomeLatency[k] = latencyOf(v)
 	}
 	return s
 }

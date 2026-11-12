@@ -89,31 +89,33 @@ type RunResult struct {
 	Invalid []string `json:"invalid_reasons,omitempty"`
 	// Correct reports no runtime finding; Findings are Jul's unexpected
 	// outcomes, recorded as evidence.
-	Correct        bool               `json:"correct"`
-	Findings       []string           `json:"runtime_findings,omitempty"`
-	ConfigSHA      string             `json:"config_sha256"`
-	CheckOK        bool               `json:"config_check_ok"`
-	Envelope       *Effective         `json:"effective_envelope,omitempty"`
-	PreCanaries    []Canary           `json:"pre_canaries,omitempty"`
-	PostCanaries   []Canary           `json:"post_canaries,omitempty"`
-	Phases         []PhaseResult      `json:"phases,omitempty"`
-	F4             []F4Result         `json:"f4,omitempty"`
-	Reloads        []string           `json:"reloads,omitempty"`
-	JulExit        string             `json:"jul_exit"`
-	JulExitedEarly bool               `json:"jul_exited_during_run"`
-	OOMKillDelta   *int64             `json:"oom_kill_delta"`
-	OOMScope       string             `json:"oom_kill_scope,omitempty"`
-	PeakCgMem      *int64             `json:"peak_cg_memory_bytes"`
-	PeakSource     string             `json:"peak_source,omitempty"`
-	PeakRSS        *int64             `json:"peak_rss_bytes"`
-	HeapInuseGC    *float64           `json:"heap_inuse_after_two_gcs"`
-	HeapAllocGC    *float64           `json:"heap_alloc_after_two_gcs"`
-	RSSAfterGC     *int64             `json:"rss_after_two_gcs"`
-	CounterDelta   Metrics            `json:"counter_deltas,omitempty"`
-	Unavailable    []string           `json:"unavailable_metrics,omitempty"`
-	Foundation     map[string]float64 `json:"inspection_foundation_series_after,omitempty"`
-	Samples        int                `json:"samples"`
-	Notes          []string           `json:"notes,omitempty"`
+	Correct        bool          `json:"correct"`
+	Findings       []string      `json:"runtime_findings,omitempty"`
+	ConfigSHA      string        `json:"config_sha256"`
+	CheckOK        bool          `json:"config_check_ok"`
+	Envelope       *Effective    `json:"effective_envelope,omitempty"`
+	PreCanaries    []Canary      `json:"pre_canaries,omitempty"`
+	PostCanaries   []Canary      `json:"post_canaries,omitempty"`
+	Phases         []PhaseResult `json:"phases,omitempty"`
+	F4             []F4Result    `json:"f4,omitempty"`
+	Reloads        []string      `json:"reloads,omitempty"`
+	JulExit        string        `json:"jul_exit"`
+	JulExitedEarly bool          `json:"jul_exited_during_run"`
+	OOMKillDelta   *int64        `json:"oom_kill_delta"`
+	OOMScope       string        `json:"oom_kill_scope,omitempty"`
+	PeakCgMem      *int64        `json:"peak_cg_memory_bytes"`
+	PeakSource     string        `json:"peak_source,omitempty"`
+	PeakRSS        *int64        `json:"peak_rss_bytes"`
+	HeapInuseGC    *float64      `json:"heap_inuse_after_two_gcs"`
+	HeapAllocGC    *float64      `json:"heap_alloc_after_two_gcs"`
+	// HeapGCUnavailable explains nil post-GC heap values (absent before plan v2).
+	HeapGCUnavailable string             `json:"heap_after_two_gcs_unavailable,omitempty"`
+	RSSAfterGC        *int64             `json:"rss_after_two_gcs"`
+	CounterDelta      Metrics            `json:"counter_deltas,omitempty"`
+	Unavailable       []string           `json:"unavailable_metrics,omitempty"`
+	Foundation        map[string]float64 `json:"inspection_foundation_series_after,omitempty"`
+	Samples           int                `json:"samples"`
+	Notes             []string           `json:"notes,omitempty"`
 }
 
 var portMu sync.Mutex
@@ -212,7 +214,7 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 		pending = *sc.MaxPending
 	}
 	p := ConfigParams{Adapter: Adapters[t.Adapter], WAF: waf, WASM: wasm, Cache: sc.Cache, Port: ports[0], TLSPort: ports[1], AdminPort: ports[2],
-		Origin: r.Origin, WWW: r.Opt.WWW, Plugin: r.Opt.Guest, Cert: r.Opt.Cert, Key: r.Opt.Key, ReadTimeout: sc.ReadTimeout, MaxPending: pending}
+		Origin: r.Origin, WWW: r.Opt.WWW, Plugin: r.Opt.Guest, Cert: r.Opt.Cert, Key: r.Opt.Key, ReadTimeout: sc.ReadTimeout, BodyTimeout: sc.BodyTimeout, MaxPending: pending}
 	cfg, err := RenderConfig(p)
 	if err != nil {
 		return fail("render: %v", err)
@@ -295,7 +297,8 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 		samp.SetPhase("f4")
 		for _, proto := range sc.F4.Protos {
 			for _, mode := range sc.F4.Modes {
-				res.F4 = append(res.F4, RunF4(wctx, target, *sc.F4, proto, mode))
+				expect, deadline := F4Expect(sc, proto, mode, c.Variant)
+				res.F4 = append(res.F4, RunF4(wctx, target, *sc.F4, proto, mode, expect, deadline))
 			}
 		}
 	default:
@@ -314,7 +317,7 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 	res.JulExitedEarly = j.Exited()
 	if !res.JulExitedEarly {
 		res.PostCanaries = RunCanaries(target, waf, wasm)
-		res.HeapInuseGC, res.HeapAllocGC = HeapAfterGC(p.AdminPort)
+		res.HeapInuseGC, res.HeapAllocGC, res.HeapGCUnavailable = HeapAfterGC(p.AdminPort)
 		if st := j.sys.status(j.PID); st != nil {
 			res.RSSAfterGC = kib(st["VmRSS"])
 		}
@@ -322,6 +325,8 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 			res.CounterDelta, res.Unavailable = deltas(before, after)
 			res.Foundation = Foundation(after)
 		}
+	} else {
+		res.HeapGCUnavailable = "jul exited during the run"
 	}
 	samples := samp.Finish()
 	res.Samples = len(samples)

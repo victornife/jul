@@ -107,10 +107,23 @@ envelope, so smoke and unconstrained runs never receive a verdict.
 | `historical-695`, `historical-699` | The archived s1–s11 and r1–r3 definitions. |
 | `destructive` | `s3`, `s4`, full `s11`. They OOM uncapped runtimes and are kept for I6 runs in an isolated envelope. |
 
-`plan.json` is the frozen plan: scenarios, profiles, suites, interpretation rules and the
-configuration-template hash. A test fails when the code and `plan.json` disagree. Any change to
+`f4-body-deadline-5s` is in no suite; select it with `-scenario`. It sets
+`[global.inspection].body_timeout = "5s"`, well inside its 20 s watchdog, because the 60 s default
+outlasts every F4 watchdog. Only the `current` adapter can express it, and `run` refuses other
+targets before starting. Post-I1 main records a runtime finding for `both` (no 408; the watchdog
+ends the upload) until I2/I3 implement the deadline.
+
+`plan.json` is the frozen plan (`inspection-assessment-plan/v2`): scenarios, profiles, suites,
+interpretation rules and the configuration-template hash. A test fails when the code and `plan.json` disagree. Any change to
 scenarios or rules must regenerate `plan.json` (`/tmp/ia plan > scripts/inspection-assessment/plan.json`)
 and be reviewed. Runs made under another plan hash are not comparable.
+
+Plan v2 (after the review of #708) added the upload checks, heap-after-GC availability, the
+non-success latency and `f4-body-deadline-5s`. It also raised the quick profile's F4 watchdog from 6 s
+to 12 s, because the 8 s slow upload must finish inside it. Qualification scenarios other than the
+new one are unchanged, and every existing cell renders a byte-identical configuration. The
+#700 I5 baseline campaign ran under v1. Its stored results lack the new fields, and `summarize`
+does not re-judge them or merge them with v2 runs.
 
 ## What a run records
 
@@ -148,8 +161,17 @@ Each result records the effective envelope that the kernel applied: `memory.max`
 - a `plan.json` that does not match `manifest.plan_sha256`;
 - a result whose scenario hash differs from the manifest.
 
-`summarize` rejects any set of runs that mixes plans, rules, profiles, envelope modes, faults,
-guests, or a target label with different binaries or adapters. Its report has one row per cell
+`summarize` rejects any set of runs that mixes plans, configuration templates, rules, profiles,
+envelope modes, faults or guests, or a target label with different binaries or adapters. It also
+rejects duplicated evidence, which would otherwise count repetitions more than once:
+
+- a repeated run ID or manifest;
+- a result file already loaded from another directory, including a copied or renamed run.
+
+It applies the interpretation archived in each run's `plan.json`, after checking it against the
+manifest's rules hash. It refuses runs frozen under rules that differ from this harness's rules,
+rather than reinterpreting them. Thresholds compare unrounded medians and spreads; only the
+reported values are rounded. Its report has one row per cell
 (the primary class of the first phase), comparisons, a row per repetition, phase and workload class
 (including probe, slow, warm and later-phase classes), and the F4 probe outcomes.
 
@@ -178,12 +200,32 @@ following never count as goodput and are reported separately:
 - requests that cross into the window from warm-up;
 - requests still outstanding at the window end.
 
+Each class also records `outcome_latency_ms`, the latency of every completed non-success attempt
+that started in the window, per outcome (for example `status:503` for overload). It includes
+attempts that finished after the window; unfinished attempts have none. The report shows it under
+"Non-success outcome latency". Plan v1 results did not record it.
+
+F4 verifies the upload response as well as the warm-up and sibling. Each upload has a planned
+outcome, recorded as `upload_expected`, and an observed `upload_outcome`:
+
+| Expected | Applies to | Pass |
+| --- | --- | --- |
+| `verified` | `slow` mode within every runtime limit | 2xx with the complete echoed body and canaries. A 500 or a truncated or corrupted 200 is a finding. |
+| `no-inspection-deadline` | `stall` without a positive `body_timeout`, or the `none` variant | The client watchdog or another runtime limit ends it. Success or another status is a finding. |
+| `body-timeout-408` | `stall` with a positive `body_timeout` on an inspected variant | 408 between 0.9× the deadline and the deadline plus 3 s. Anything else, including the watchdog, is a finding. |
+| `read-timeout` | H1/H2 when the listener `read_timeout` is shorter than the upload, for example `f4-stalled-body-rt5s` | Jul ends the upload between 0.9× and 3 s after the limit. The status depends on the layer that reads the body (observed: 499 or 400 for `none`, 500 for `both`, as documented in `docs/plugins.md`), so it is not judged. A success or the watchdog is a finding. HTTP/3 is outside `read_timeout`, so the other rows apply to it. |
+
+Plan v1 F4 results have no expectation and are not re-judged.
+
 When a metric is unavailable, it is recorded as unavailable, never as zero. These measurements are
 separate:
 
 - cgroup peak and current memory;
 - RSS;
-- live heap after two forced GCs, through the admin pprof endpoint;
+- live heap after two forced GCs, through the admin pprof endpoint. Both collections must succeed
+  (HTTP 200 and a complete body) and both heap gauges must be exported. Otherwise the values are
+  null and `heap_after_two_gcs_unavailable` gives the reason. Plan v1 results did not check
+  this, so their post-GC values may be ordinary heap gauges;
 - governor gauges, which exist only on post-I1 binaries.
 
 The OOM delta comes from the parent cgroup's hierarchical `memory.events`, so it also counts
@@ -277,22 +319,22 @@ still pending until I2–I4 implement it and I6 runs it.
 
 | # | Maintained scenario or instrument | Also required (later slice) |
 | --- | --- | --- |
-| A1 | `s11-arg-amplification-h1` (destructive) and `s11l` smoke; overload class timing | I3 slots/reservations; 503 latency check in I6 |
+| A1 | `s11-arg-amplification-h1` (destructive) and `s11l` smoke; `outcome_latency_ms["status:503"]` per class (plan v2) | I3 slots/reservations; 503 latency check in I6 |
 | A2 | `s3-large-h2`, `s4-ramp-large-h2` (destructive) | I2/I3 charging |
 | A3 | `s5-admission-h2`; the F3 scenarios set `max_pending_requests` 0 and 16 | I6 runs s5 at both pending values |
 | A4 | `s11` with `both`; peak and per-class metrics | I3 per-class limits; combined fixture in I6 |
 | A5a | `s6`, `s7`, `r2` with `none` | Lease counter assertion after I2/I3 create leases |
 | A5b | `s6`, `s7`, `r2` with `both` | I2/I3 slots and charging |
-| A6 | `s8`, `r1`, `f4-stalled-body` (H1/H2/H3, stall and slow) with external watchdog | I2/I3 `body_timeout` deadline owner; drain-to-zero check |
-| A7 | `f4` `slow` mode below the limit | I2/I3 deadline |
+| A6 | `s8`, `r1`, `f4-stalled-body` (H1/H2/H3, stall and slow) with external watchdog; `f4-body-deadline-5s` (408 timing) | I2/I3 `body_timeout` deadline owner; drain-to-zero check |
+| A7 | `f4` `slow` mode below the limit, with the upload verified | I2/I3 deadline |
 | A8 | — (needs a two-listener fixture) | I6 scenario plus I1 unit tests (single process governor) |
 | A9 | `s9-reload-churn` | I1 reload/limit unit tests; I6 overlap, rollback and mode-toggle variants |
-| A10 | `f4-stalled-body` H3 with the sibling connection check | I2/I3 per-stream deadline |
+| A10 | `f4-stalled-body` and `f4-body-deadline-5s` H3 with the sibling connection check | I2/I3 per-stream deadline |
 | A11 | — | I3 unit and race tests (cancellation during evaluation) |
 | A12 | WAF response inspection in `waf`/`both` cells; plugin subscription in `both` | I4 |
 | A13 | `u1`, `u2`, `u10` (calibrated); `r3` as a capacity scenario | I6 in enforce mode; a calibrated `r3` cell is added in I6 |
 | A14 | — | I2–I4 observe/enforce deterministic tests |
-| A15 | Heap after two GCs, RSS and cgroup memory per sample, governor gauges | I6 burst-then-idle runs after I2–I4 |
+| A15 | Heap after two successful GCs (else unavailable with a reason), RSS and cgroup memory per sample, governor gauges | I6 burst-then-idle runs after I2–I4 |
 | A16 | — | I2/I4 unit tests (fetch, request state, nested subscriptions) and I1 minimum-budget tests |
 | A17 | `f3-admission-pending0` and `-pending16` (single connection, separate probe) | I3 fail-fast phase 1 |
 | A18 | — | I3/I4 unit and race tests (implicit phases, phase 5) |
@@ -302,8 +344,9 @@ still pending until I2–I4 implement it and I6 runs it.
 `go test -race ./scripts/inspection-assessment` runs the following, without privileges:
 
 - unit tests for plan selection and fidelity, adapters, verification, goodput accounting,
-  comparison verdicts, manifests and checksums, and the envelope readers (on a fake `/proc` and
-  cgroup tree);
+  comparison verdicts (unrounded thresholds), manifests and checksums, duplicate and
+  reinterpreted evidence, F4 upload outcomes, heap-after-GC availability, non-success latency,
+  and the envelope readers (on a fake `/proc` and cgroup tree);
 - end-to-end tests against a fake Jul (the test binary re-executed), including:
   - truncated and corrupted responses;
   - Jul exits at startup, never becoming ready, check failures, crashes, ignored SIGTERM and kills;

@@ -53,6 +53,7 @@ type ConfigParams struct {
 	WAFRuleID         int    // request canary rule id; changing it is a real WAF policy change
 	BrokenWAF         bool   // an invalid directive: preparation must fail
 	ReadTimeout       string
+	BodyTimeout       string
 	MaxPending        int
 }
 
@@ -63,10 +64,16 @@ func VariantFlags(v string) (waf, wasm bool) {
 
 const configTemplate = `[global]
 log_level = "warn"
-{{- if and .Adapter.GlobalInspection .WAF .Adapter.WAFBudget}}
+{{- $budget := and .Adapter.GlobalInspection .WAF .Adapter.WAFBudget}}
+{{- if or $budget .BodyTimeout}}
 
 [global.inspection]
+{{- if $budget}}
 max_buffered_bytes = "{{.Adapter.WAFBudget}}"
+{{- end}}
+{{- if .BodyTimeout}}
+body_timeout = "{{.BodyTimeout}}"
+{{- end}}
 {{- end}}
 
 [admin]
@@ -177,6 +184,9 @@ var configTmpl = template.Must(template.New("cfg").Funcs(template.FuncMap{
 func RenderConfig(p ConfigParams) ([]byte, error) {
 	if p.Adapter.Name == "" {
 		return nil, fmt.Errorf("configuration adapter is required")
+	}
+	if p.BodyTimeout != "" && !p.Adapter.GlobalInspection {
+		return nil, fmt.Errorf("adapter %s cannot express [global.inspection].body_timeout", p.Adapter.Name)
 	}
 	if p.NameA == "" {
 		p.NameA = "a"

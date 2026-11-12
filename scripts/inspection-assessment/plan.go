@@ -19,7 +19,7 @@ import (
 // PlanVersion identifies the scenario semantics. Change it whenever a
 // workload, phase, variant set, verification rule or interpretation rule
 // changes; runs with different plan identities are never merged or compared.
-const PlanVersion = "inspection-assessment-plan/v1"
+const PlanVersion = "inspection-assessment-plan/v2"
 
 // Variants are the four inspection configurations preserved from #695.
 var Variants = []string{"none", "waf", "wasm", "both"}
@@ -100,7 +100,10 @@ type Scenario struct {
 	// MaxPending overrides the limited pool's max_pending_requests (F3).
 	MaxPending *int `json:"max_pending,omitempty"`
 	// ReadTimeout sets the listener read_timeout ("" keeps the default).
-	ReadTimeout string  `json:"read_timeout,omitempty"`
+	ReadTimeout string `json:"read_timeout,omitempty"`
+	// BodyTimeout sets [global.inspection].body_timeout. Only adapters with
+	// GlobalInspection can express it; others refuse the cell.
+	BodyTimeout string  `json:"body_timeout,omitempty"`
 	Phases      []Phase `json:"phases,omitempty"`
 	Recovery    Dur     `json:"recovery"`
 	F4          *F4     `json:"f4,omitempty"`
@@ -139,7 +142,7 @@ var Profiles = map[string]Profile{
 	"quick": {Name: "quick", AcceptanceEligible: false,
 		Warmup: Dur(time.Second), Measure: Dur(3 * time.Second), Recovery: Dur(2 * time.Second),
 		ReloadMeasure: Dur(8 * time.Second), ReloadRecovery: Dur(2 * time.Second), StepWarmup: Dur(time.Second),
-		F3Duration: Dur(4 * time.Second), F4ClientLimit: Dur(6 * time.Second),
+		F3Duration: Dur(4 * time.Second), F4ClientLimit: Dur(12 * time.Second),
 		Description: "smoke only: exercises the instruments; never acceptance, comparison or capacity evidence"},
 }
 
@@ -295,6 +298,12 @@ func BuildScenarios(p Profile) []Scenario {
 		f3("f3-admission-pending0", 0),
 		f4("f4-stalled-body", ""),
 		f4("f4-stalled-body-rt5s", "5s"),
+		{ID: "f4-body-deadline-5s", Source: "I5 review of #708 (ADR 0032 H6, F4)", Kind: "f4",
+			Purpose:  "stalled uploads against [global.inspection].body_timeout = 5s, well inside the client watchdog; inspected variants expect 408 near 5 s, uninspected ones are outside the deadline's scope",
+			Variants: []string{"none", "both"}, Reps: 1, BodyTimeout: "5s", Recovery: rec, Comparison: "record",
+			F4: &F4{Protos: []string{"h1", "h2", "h3"}, Modes: []string{"stall"}, BodyBytes: 16 << 10, ChunkBytes: 1 << 10,
+				SlowInterval: Dur(500 * time.Millisecond), SiblingAfter: Dur(time.Second), ClientLimit: Dur(20 * time.Second)},
+			Changes: []string{"added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart"}},
 	}
 }
 

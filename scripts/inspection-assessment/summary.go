@@ -7,7 +7,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -51,11 +53,19 @@ type Stats struct {
 	Spread  *float64 `json:"relative_spread"`
 }
 
-// Describe computes median and spread over every point.
+// Describe computes median and spread over every point. The returned values
+// are rounded for presentation; decisions use describe's unrounded values.
 func Describe(ps []Point) Stats {
-	s := Stats{N: len(ps)}
+	s, _, _ := describe(ps)
+	return s
+}
+
+// describe also returns the unrounded median and spread; spread is negative
+// when it is undefined (no points, or a median that is not positive).
+func describe(ps []Point) (s Stats, median, spread float64) {
+	s, spread = Stats{N: len(ps)}, -1
 	if len(ps) == 0 {
-		return s
+		return s, 0, spread
 	}
 	vals := make([]float64, 0, len(ps))
 	for _, p := range ps {
@@ -75,9 +85,10 @@ func Describe(ps []Point) Stats {
 	lo, hi := vals[0], vals[len(vals)-1]
 	s.Median, s.Min, s.Max = ptr(round3(med)), ptr(lo), ptr(hi)
 	if med > 0 {
-		s.Spread = ptr(round3((hi - lo) / med))
+		spread = (hi - lo) / med
+		s.Spread = ptr(round3(spread))
 	}
-	return s
+	return s, med, spread
 }
 
 func ptr[T any](v T) *T { return &v }
@@ -107,15 +118,19 @@ func Compare(base, cand []Point, rules Interpretation) (string, *float64) {
 			return VerdictSaturated, nil
 		}
 	}
-	b, c := Describe(base), Describe(cand)
-	if *b.Median <= 0 {
+	// Thresholds apply to unrounded values; only the reported regression is
+	// rounded.
+	_, bMed, bSpread := describe(base)
+	_, cMed, cSpread := describe(cand)
+	if bMed <= 0 {
 		return VerdictBaseInvalid, nil
 	}
-	reg := round3(1 - *c.Median / *b.Median)
-	if reg > rules.MaxRegression {
+	raw := 1 - cMed/bMed
+	reg := round3(raw)
+	if raw > rules.MaxRegression {
 		return VerdictRegression, &reg
 	}
-	if (b.Spread != nil && *b.Spread > rules.MaxSpread) || (c.Spread == nil || *c.Spread > rules.MaxSpread) {
+	if bSpread > rules.MaxSpread || cSpread < 0 || cSpread > rules.MaxSpread {
 		return VerdictNoise, &reg
 	}
 	return VerdictPass, &reg
@@ -126,38 +141,99 @@ type LoadedRun struct {
 	Dir      string
 	Manifest Manifest
 	Results  []RunResult
+	// Rules and ConfigTemplate come from the run's own archived plan.json.
+	Rules          Interpretation
+	ConfigTemplate string
 }
 
-// LoadRuns verifies and loads run directories, rejecting combinations whose
-// plan, scenario semantics, adapters, binaries or envelope differ.
+// archivedPlan reads the interpretation and configuration-template identity
+// recorded with a run and checks the interpretation against the manifest and
+// against the rules this harness applies. A harness whose rules differ must
+// not reinterpret the run.
+func archivedPlan(d string, m Manifest) (Interpretation, string, error) {
+	var doc struct {
+		Rules          *Interpretation `json:"interpretation"`
+		ConfigTemplate string          `json:"config_template_sha256"`
+	}
+	b, err := os.ReadFile(filepath.Join(d, "plan.json"))
+	if err == nil {
+		err = json.Unmarshal(b, &doc)
+	}
+	switch {
+	case err != nil:
+		return Interpretation{}, "", fmt.Errorf("archived plan: %w", err)
+	case doc.Rules == nil || doc.ConfigTemplate == "":
+		return Interpretation{}, "", errors.New("archived plan lacks its interpretation or configuration-template identity")
+	}
+	got, _ := indentJSON(*doc.Rules)
+	if sha256Hex(got) != m.RulesSHA {
+		return Interpretation{}, "", fmt.Errorf("archived interpretation hashes to %s, manifest records %s", sha256Hex(got), m.RulesSHA)
+	}
+	if *doc.Rules != Rules {
+		cur, _ := indentJSON(Rules)
+		return Interpretation{}, "", fmt.Errorf("archived interpretation %s differs from this harness's %s; summarise with the harness that froze it", m.RulesSHA, sha256Hex(cur))
+	}
+	return *doc.Rules, doc.ConfigTemplate, nil
+}
+
+// LoadRuns verifies and loads run directories, rejecting duplicated evidence
+// and combinations whose plan, interpretation, configuration template,
+// scenario semantics, adapters, binaries or envelope differ.
 func LoadRuns(dirs []string) ([]LoadedRun, error) {
 	var out []LoadedRun
 	targets := map[string]TargetIdentity{}
 	scen := map[string]string{}
-	var first *Manifest
+	// Copied or repeated inputs would otherwise count their repetitions
+	// more than once.
+	seen := map[string]string{}
+	claim := func(kind, id, d string) error {
+		if prev, ok := seen[kind+"\x00"+id]; ok {
+			return fmt.Errorf("%s: duplicate evidence: %s %s already loaded from %s", d, kind, id, prev)
+		}
+		seen[kind+"\x00"+id] = d
+		return nil
+	}
+	var first *LoadedRun
 	for _, d := range dirs {
 		if err := VerifyRun(d); err != nil {
 			return nil, fmt.Errorf("%s: %w", d, err)
 		}
 		m, _ := ReadManifest(d)
+		ms, err := fileSHA(filepath.Join(d, "manifest.json"))
+		if err != nil {
+			return nil, err
+		}
+		if err := claim("run id", m.RunID, d); err != nil {
+			return nil, err
+		}
+		if err := claim("manifest", ms, d); err != nil {
+			return nil, err
+		}
+		rules, tmpl, err := archivedPlan(d, m)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", d, err)
+		}
+		lr := LoadedRun{Dir: d, Manifest: m, Rules: rules, ConfigTemplate: tmpl}
 		if first == nil {
-			first = &m
+			first = &lr
 		}
 		switch {
-		case m.PlanVersion != first.PlanVersion || m.RulesSHA != first.RulesSHA:
-			return nil, fmt.Errorf("%s: plan %s/%s is incompatible with %s/%s", d, m.PlanVersion, m.RulesSHA, first.PlanVersion, first.RulesSHA)
-		case m.Profile.Name != first.Profile.Name:
-			return nil, fmt.Errorf("%s: profile %s is incompatible with %s", d, m.Profile.Name, first.Profile.Name)
-		case m.Envelope != first.Envelope:
-			return nil, fmt.Errorf("%s: envelope %+v is incompatible with %+v", d, m.Envelope, first.Envelope)
+		case m.PlanVersion != first.Manifest.PlanVersion || m.RulesSHA != first.Manifest.RulesSHA:
+			return nil, fmt.Errorf("%s: plan %s/%s is incompatible with %s/%s", d, m.PlanVersion, m.RulesSHA, first.Manifest.PlanVersion, first.Manifest.RulesSHA)
+		case tmpl != first.ConfigTemplate:
+			return nil, fmt.Errorf("%s: configuration template %s is incompatible with %s", d, tmpl, first.ConfigTemplate)
+		case m.Profile.Name != first.Manifest.Profile.Name:
+			return nil, fmt.Errorf("%s: profile %s is incompatible with %s", d, m.Profile.Name, first.Manifest.Profile.Name)
+		case m.Envelope != first.Manifest.Envelope:
+			return nil, fmt.Errorf("%s: envelope %+v is incompatible with %+v", d, m.Envelope, first.Manifest.Envelope)
 		case m.Fault != "" || m.KillJulAfter != "":
 			return nil, fmt.Errorf("%s: controlled-fault runs are runner validation, not measurement", d)
 		}
-		if m.Guest != nil && first.Guest != nil && m.Guest.SHA256 != first.Guest.SHA256 {
-			return nil, fmt.Errorf("%s: guest %s differs from %s", d, m.Guest.SHA256, first.Guest.SHA256)
+		if fg := first.Manifest.Guest; m.Guest != nil && fg != nil && m.Guest.SHA256 != fg.SHA256 {
+			return nil, fmt.Errorf("%s: guest %s differs from %s", d, m.Guest.SHA256, fg.SHA256)
 		}
 		for _, t := range m.Targets {
-			if prev, ok := targets[t.Label]; ok && (prev.Binary.SHA256 != t.Binary.SHA256 || prev.Adapter != t.Adapter) {
+			if prev, ok := targets[t.Label]; ok && (prev.Binary.SHA256 != t.Binary.SHA256 || prev.TargetSpec.Adapter != t.TargetSpec.Adapter || prev.Adapter != t.Adapter) {
 				return nil, fmt.Errorf("%s: target %s binary/adapter differs between runs", d, t.Label)
 			}
 			targets[t.Label] = t
@@ -168,10 +244,16 @@ func LoadRuns(dirs []string) ([]LoadedRun, error) {
 			}
 			scen[k] = v
 		}
-		lr := LoadedRun{Dir: d, Manifest: m}
 		for _, rel := range m.Results {
 			var r RunResult
 			if err := readJSON(filepath.Join(d, rel), &r); err != nil {
+				return nil, err
+			}
+			rs, err := fileSHA(filepath.Join(d, rel))
+			if err != nil {
+				return nil, err
+			}
+			if err := claim("result", rs, d); err != nil {
 				return nil, err
 			}
 			lr.Results = append(lr.Results, r)
@@ -234,6 +316,9 @@ type ClassRow struct {
 	Outstanding int      `json:"outstanding_at_window_end"`
 	P99ms       *float64 `json:"p99_ms"`
 	Outcomes    string   `json:"outcomes"`
+	// OutcomeLatency is the per-outcome latency of non-ok responses
+	// (absent for runs before plan v2, which did not record it).
+	OutcomeLatency map[string]Latency `json:"outcome_latency_ms,omitempty"`
 }
 
 // ProbeRow is one F4 probe of one repetition.
@@ -271,7 +356,11 @@ func outcomes(m map[string]int) string {
 
 // BuildSummary builds the report; pairs are baseline:candidate labels.
 func BuildSummary(runs []LoadedRun, pairs [][2]string) Summary {
-	s := Summary{Rules: Rules, Boundary: Rules.AcceptanceBoundary}
+	rules := Rules
+	if len(runs) > 0 {
+		rules = runs[0].Rules
+	}
+	s := Summary{Rules: rules, Boundary: rules.AcceptanceBoundary}
 	cells := map[string]*CellSummary{}
 	seenT := map[string]bool{}
 	for _, lr := range runs {
@@ -295,7 +384,8 @@ func BuildSummary(runs []LoadedRun, pairs [][2]string) Summary {
 				for _, cs := range ph.Classes {
 					s.Classes = append(s.Classes, ClassRow{Scenario: r.Scenario, Variant: r.Variant, Target: r.Target, Run: lr.Manifest.RunID, Rep: r.Rep,
 						Phase: ph.Name, Class: cs.Workload, Proto: cs.Proto, Concurrency: cs.Concurrency, Attempts: cs.Attempts, Good: cs.GoodN,
-						Goodput: cs.GoodputRPS, CrossedIn: cs.CrossedIn, Outstanding: cs.Outstanding, P99ms: cs.P99ms, Outcomes: outcomes(cs.Classes)})
+						Goodput: cs.GoodputRPS, CrossedIn: cs.CrossedIn, Outstanding: cs.Outstanding, P99ms: cs.P99ms, Outcomes: outcomes(cs.Classes),
+						OutcomeLatency: cs.OutcomeLatency})
 				}
 			}
 			for _, f := range r.F4 {
@@ -342,7 +432,7 @@ func BuildSummary(runs []LoadedRun, pairs [][2]string) Summary {
 			if !ok {
 				continue
 			}
-			v, reg := Compare(c.Points, cand.Points, Rules)
+			v, reg := Compare(c.Points, cand.Points, rules)
 			s.Comparisons = append(s.Comparisons, ComparisonSummary{Scenario: c.Scenario, Variant: c.Variant, Baseline: pr[0], Candidate: pr[1], Verdict: v, Regression: reg})
 		}
 	}
@@ -399,12 +489,38 @@ func (s Summary) Markdown() string {
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %s | %s | %s | %d | %d | %d | %.1f | %d | %d | %s | %s |\n", c.Scenario, c.Variant, c.Target, c.Run, c.Rep,
 			c.Phase, c.Class, c.Proto, c.Concurrency, c.Attempts, c.Good, c.Goodput, c.CrossedIn, c.Outstanding, fnum(c.P99ms, 1), c.Outcomes)
 	}
+	var lat strings.Builder
+	for _, c := range s.Classes {
+		for _, k := range sortedKeys(c.OutcomeLatency) {
+			l := c.OutcomeLatency[k]
+			fmt.Fprintf(&lat, "| %s | %s | %s | %s | %d | %s | %s | %s | %d | %.1f | %.1f | %.1f | %.1f |\n", c.Scenario, c.Variant, c.Target, c.Run, c.Rep,
+				c.Phase, c.Class, k, l.N, l.P50, l.P95, l.P99, l.Max)
+		}
+	}
+	if lat.Len() > 0 {
+		b.WriteString("\n## Non-success outcome latency\n\nCompleted attempts started in the window, per outcome (for example `status:503` for overload), including those that finished after it.\n\n")
+		b.WriteString("| Scenario | Variant | Target | Run | Rep | Phase | Class | Outcome | n | p50 ms | p95 ms | p99 ms | max ms |\n")
+		b.WriteString("| --- | --- | --- | --- | ---: | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |\n")
+		b.WriteString(lat.String())
+	}
 	if len(s.Probes) > 0 {
 		b.WriteString("\n## F4 probes\n\n| Scenario | Variant | Target | Run | Rep | Proto | Mode | Upload | Upload s | Client watchdog ended it | Sibling | Sibling ms | Same connection | Dials/expected |\n")
 		b.WriteString("| --- | --- | --- | --- | ---: | --- | --- | --- | ---: | --- | --- | ---: | --- | --- |\n")
 		for _, p := range s.Probes {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %d | %s | %s | %s | %.1f | %t | %s | %.0f | %t | %d/%d |\n", p.Scenario, p.Variant, p.Target, p.Run, p.Rep,
 				p.Proto, p.Mode, p.UploadClass, p.UploadSeconds, p.WatchdogFired, p.SiblingClass, p.SiblingMs, p.SameConnection, p.Dials, p.WantDials)
+		}
+		var up strings.Builder
+		for _, p := range s.Probes {
+			if p.Expect != "" {
+				fmt.Fprintf(&up, "| %s | %s | %s | %s | %d | %s | %s | %s | %s | %.1f |\n", p.Scenario, p.Variant, p.Target, p.Run, p.Rep,
+					p.Proto, p.Mode, p.Expect, p.UploadOutcome, p.UploadSeconds)
+			}
+		}
+		if up.Len() > 0 {
+			b.WriteString("\n## F4 upload outcomes\n\nPlan v2 verifies the upload response. A mismatch with the expectation is a runtime finding listed below.\n\n")
+			b.WriteString("| Scenario | Variant | Target | Run | Rep | Proto | Mode | Expected | Outcome | Upload s |\n| --- | --- | --- | --- | ---: | --- | --- | --- | --- | ---: |\n")
+			b.WriteString(up.String())
 		}
 	}
 	b.WriteString("\n## Failed, invalid or inconclusive runs\n\n")
@@ -457,7 +573,7 @@ func Calibrate(runs []LoadedRun, target string) []Calibration {
 				in, fi := cs.Check()
 				st := CalibrationStep{Concurrency: cs.Concurrency, CPU: ph.CPUFraction, Verified: len(in) == 0 && len(fi) == 0, Goodput: cs.GoodputRPS}
 				c.Steps = append(c.Steps, st)
-				if r.State == "completed" && st.Verified && st.CPU != nil && *st.CPU <= Rules.CalibrationCPU && st.Concurrency > c.Chosen {
+				if r.State == "completed" && st.Verified && st.CPU != nil && *st.CPU <= lr.Rules.CalibrationCPU && st.Concurrency > c.Chosen {
 					c.Chosen = st.Concurrency
 				}
 			}

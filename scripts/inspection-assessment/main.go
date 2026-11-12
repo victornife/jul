@@ -206,6 +206,13 @@ func runCmd(args []string, stdout, stderr io.Writer) error {
 		}
 		specs = append(specs, s)
 	}
+	for _, c := range cells {
+		for _, s := range specs {
+			if c.Scenario.BodyTimeout != "" && !Adapters[s.Adapter].GlobalInspection {
+				return fmt.Errorf("scenario %s needs [global.inspection].body_timeout, which adapter %s (target %s) cannot express", c.Scenario.ID, s.Adapter, s.Label)
+			}
+		}
+	}
 	needGuest := false
 	for _, c := range cells {
 		if _, wasm := VariantFlags(c.Variant); wasm {

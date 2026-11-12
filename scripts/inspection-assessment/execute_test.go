@@ -43,7 +43,8 @@ func testCell(t *testing.T, id, variant string) Cell {
 	sc.Phases = phases
 	if sc.F4 != nil {
 		f := *sc.F4
-		f.ClientLimit, f.SiblingAfter, f.SlowInterval = Dur(time.Second), Dur(200*time.Millisecond), Dur(100*time.Millisecond)
+		// The slow upload takes 16 × 100 ms; the limit must outlast it.
+		f.ClientLimit, f.SiblingAfter, f.SlowInterval = Dur(3*time.Second), Dur(200*time.Millisecond), Dur(100*time.Millisecond)
 		f.Protos = []string{"h2"}
 		sc.F4 = &f
 	}
@@ -104,7 +105,8 @@ func TestExecuteEndToEndVerifiesAndSummarises(t *testing.T) {
 				}
 			}
 		}
-		if r.Scenario == "f4-stalled-body" && (len(r.F4) != 2 || !r.F4[0].WatchdogFired) {
+		if r.Scenario == "f4-stalled-body" && (len(r.F4) != 2 || !r.F4[0].WatchdogFired || r.F4[0].Expect != UploadNoDeadline ||
+			r.F4[1].WatchdogFired || r.F4[1].UploadOutcome != UploadVerified) {
 			t.Errorf("f4 result: %+v", r.F4)
 		}
 	}
@@ -137,7 +139,8 @@ func TestExecuteEndToEndVerifiesAndSummarises(t *testing.T) {
 	if len(s.Classes) != wantRows || len(s.Probes) != wantProbes || wantProbes == 0 {
 		t.Errorf("summary rows: %d classes (want %d), %d probes (want %d)", len(s.Classes), wantRows, len(s.Probes), wantProbes)
 	}
-	if md := s.Markdown(); !strings.Contains(md, "## Phases and classes") || !strings.Contains(md, "## F4 probes") {
+	if md := s.Markdown(); !strings.Contains(md, "## Phases and classes") || !strings.Contains(md, "## F4 probes") ||
+		!strings.Contains(md, "## F4 upload outcomes") {
 		t.Error("summary omits class or probe detail")
 	}
 	for _, c := range s.Comparisons {

@@ -653,29 +653,39 @@ func (s *Sampler) Finish() []Sample {
 	return s.out
 }
 
-// HeapAfterGC forces two collections through pprof and reads the live heap.
-// The values are nil when the target does not expose them.
-func HeapAfterGC(adminPort int) (inuse, alloc *float64) {
-	for range 2 {
+// HeapAfterGC forces two collections through pprof and then reads the live
+// heap. Unless both collections succeed (HTTP 200 and a complete body) and
+// both gauges are exported, the values are nil and unavailable says why:
+// ordinary heap gauges are never reported as post-GC values.
+func HeapAfterGC(adminPort int) (inuse, alloc *float64, unavailable string) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	for i := range 2 {
 		req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/debug/pprof/heap?gc=1&debug=1", adminPort), nil)
 		req.Header.Set("Authorization", "Bearer "+adminToken)
-		if resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req); err == nil {
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, nil, fmt.Sprintf("gc %d: %v", i+1, err)
+		}
+		_, rerr := io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		switch {
+		case resp.StatusCode != http.StatusOK:
+			return nil, nil, fmt.Sprintf("gc %d: pprof heap returned %d", i+1, resp.StatusCode)
+		case rerr != nil:
+			return nil, nil, fmt.Sprintf("gc %d: reading pprof heap: %v", i+1, rerr)
 		}
 	}
 	time.Sleep(300 * time.Millisecond)
 	m, err := Scrape(adminPort)
 	if err != nil {
-		return nil, nil
+		return nil, nil, "metrics after gc: " + err.Error()
 	}
-	if v, ok := Sum(m, "go_memstats_heap_inuse_bytes"); ok {
-		inuse = &v
+	in, ok1 := Sum(m, "go_memstats_heap_inuse_bytes")
+	al, ok2 := Sum(m, "go_memstats_heap_alloc_bytes")
+	if !ok1 || !ok2 {
+		return nil, nil, "go_memstats_heap_inuse_bytes or go_memstats_heap_alloc_bytes not exported"
 	}
-	if v, ok := Sum(m, "go_memstats_heap_alloc_bytes"); ok {
-		alloc = &v
-	}
-	return inuse, alloc
+	return &in, &al, ""
 }
 
 // Foundation returns every exported jul_inspection_* series. On post-I1

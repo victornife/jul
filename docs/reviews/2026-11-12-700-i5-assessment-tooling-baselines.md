@@ -39,6 +39,7 @@ Archived #695, #699 and #700 ADR reports, raw data and checksums are unchanged.
 | Harness, frozen plan and measurement | `30ff0650ba2120b72189bdf963250de390fdf26f` (`ia` sha256 `3a39975e7849db319b086fde624947b51f6b9d5b867d7fbac2f9ec56b39a3fc2`) |
 | Harness, diagnosis and summaries | `21cb24407c8d5d14796050ce7e201eec8a9723d4` (diagnostic counter labels, class and probe tables; see [Harness defects](#harness-defects-found-during-the-campaign)) |
 | Frozen plan | `inspection-assessment-plan/v1`, `plan.json` sha256 `8432278801a88346f9a60c118ac41c9ba2d8bb766e23d73b0f9da5915df0db5d`. Interpretation sha256 `a65f6713…`. |
+| Harness plan after review | `inspection-assessment-plan/v2`, `plan.json` sha256 `1065441c60975e0572586480a6cc1aeb097a02adbd6c14a6162b8a511a0d4e73`, configuration template `b71fd25414c3…`, same interpretation. No campaign evidence uses it yet; see [Post-review harness fixes](#post-review-harness-fixes-plan-v2). |
 | Synthetic guest | `examples/plugins/inspect-load`. Source tree sha256 `217eb5033fa205bb2ca702c908e03294c59b849d6ba61a0e41b9de8f24ecf3c0`; `wasip1` artifact sha256 `27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a` (go1.27.4, `-trimpath -buildvcs=false -buildmode=c-shared`). The artifact is not committed. |
 
 All three Jul binaries were built from clean trees (`vcs.modified=false`) for linux/arm64 with tags
@@ -314,7 +315,7 @@ These validate the instruments and record observed behaviour. They carry no pass
 | s9 reload churn, `both` | **OOM-killed on both binaries** (`oom_kill` delta 1 each; peak cgroup memory 669.5 MiB `base`, 768.2 MiB `main`). After the kill, requests fail with `error:refused` (millions, from the open-loop client). Before it, the resets and EOFs are recorded separately. |
 | F3 admission, pending 16 and 0, `none` | Correct. One H2 connection. Pending 0 fails fast with 503 (about 100k); pending 16 queues (p99 13–17 s). The probe stayed at about 9.8 rps and p99 7–8 ms. |
 | F3 admission, pending 16 and 0, `both` | **OOM-killed on both binaries.** 128 admission streams on one connection, each with a body inspected by WAF and plugins. |
-| F4 stalled body, H1/H2/H3, `none` and `both` | Every stalled upload ran until the client's 20 s limit (`watchdog_fired=true`). **Neither runtime has an inspection body deadline**; the external watchdog is the only bound, as expected. Slow uploads completed in 7.6–8.1 s. Siblings completed in 1–6 ms; H2/H3 siblings shared the single measured connection (dials 1/1), and H1 used 2/2. |
+| F4 stalled body, H1/H2/H3, `none` and `both` | Every stalled upload ran until the client's 20 s limit (`watchdog_fired=true`). **Neither runtime has an inspection body deadline**; the external watchdog is the only bound, as expected. Slow uploads returned 2xx in 7.6–8.1 s; the v1 client did not verify their bodies. Siblings completed in 1–6 ms; H2/H3 siblings shared the single measured connection (dials 1/1), and H1 used 2/2. |
 | s6 static H2, `none`/`both` | `none` about 1380 rps on both. `both` (CPU 0.99): `status:500` ×10 on `base` and ×13 on `main`. |
 | s7 cache H1, `none`/`both` | Cold/warm recorded separately. `both` (CPU 0.99): `status:500` ×2+2 on `base` and ×6+4 on `main`. Inspection runs before cache hits. `none` main was low (warm 4688 against 6012); see the investigation. |
 | r2 fast no-body H1, `none`/`wasm` | Correct. `none` about 14,000 rps (CPU 0.70); `wasm` about 4280 rps (CPU 0.94). |
@@ -382,6 +383,42 @@ runs used the earlier, unverified client against the same loopback certificate. 
 happens only in the client, which is outside the envelope; the workload is unchanged, and the
 archived runs are not invalidated.
 
+## Post-review harness fixes (plan v2)
+
+A review of #708 at `b0874c56` found five harness gaps that could weaken later acceptance
+evidence. They are fixed in plan `inspection-assessment-plan/v2`. The campaign above ran under
+v1 and its evidence is unchanged.
+
+1. **Duplicate evidence.** `summarize` rejects a repeated run ID or manifest, and any result file
+   already loaded from another directory, including copied or renamed runs. Before the fix, a
+   single-repetition run supplied three times could satisfy the three-repetition rule.
+2. **Frozen interpretation.** Inputs must share their configuration-template identity. Each
+   run's archived interpretation must hash to its manifest's rules hash. Runs frozen under other
+   rules are refused, rather than reinterpreted with the current rules. Thresholds compare
+   unrounded medians and spreads; only reported values are rounded.
+3. **F4 upload outcome.** The upload body is now read and verified. Each upload has a planned
+   outcome (`verified`, `no-inspection-deadline`, `body-timeout-408` or `read-timeout`). A slow
+   upload expected to verify that ends in 500, or in a truncated or corrupted 200, is a finding.
+   `read-timeout` covers H1/H2 uploads that outlast a configured listener `read_timeout`
+   (`f4-stalled-body-rt5s`): Jul must end them near the limit, so an ending is not a finding. `f4-body-deadline-5s` measures the
+   deadline inside the watchdog. The quick profile's F4 watchdog rises from 6 s to 12 s so that
+   the 8 s slow upload can finish.
+4. **Heap after two GCs.** Values are reported only when both pprof collections return 200 with a
+   complete body and both gauges are exported. Otherwise they are null with
+   `heap_after_two_gcs_unavailable`.
+5. **Overload latency.** Each class records the latency of non-success outcomes (for example
+   `status:503`) in `outcome_latency_ms`.
+
+Effect on the v1 evidence above:
+
+- The v1 F4 results did not verify upload responses. They carry no expectation, and plan v2 does
+  not re-judge them. The slow uploads' "completed" status above means a 2xx status only.
+- The v1 heap-after-two-GC values were collected without the success checks. They may be ordinary
+  heap gauges if a collection failed, so they are not A15 evidence.
+- The v1 results have no non-success latency, so they cannot support A1 timing.
+- The archived summaries regenerate byte for byte with the plan v2 harness, and every existing cell
+  renders a byte-identical configuration.
+
 ## Limitations
 
 - **Single host.** One WSL2 arm64 machine, with one interleaved campaign per target. These are
@@ -426,20 +463,33 @@ maintained scenarios.
    - Validate with r1 (slow class, probe isolation), s8 and `f3-*`.
 2. **Grow-before-allocate.** `readBounded` and its successors must reserve from the lease before
    growing a buffer, never after.
-   - Validate with s9 and F3 `both`, which OOM today. These must become bounded rejections
-     without an OOM delta.
-   - Supporting evidence: per-class peak cgroup memory and heap after two GCs (A2 and A15
-     support).
+   - I2 charges plugin memory only. Its mandatory protection evidence is the `wasm`-only cells:
+     r1, s8 and r2 `wasm`, and s3 `wasm` in an isolated envelope. Plugin charges must be bounded
+     there, with no OOM delta.
+   - s9 and F3 `both`, which OOM today, combine WAF and plugin bodies. WAF charging is I3, so I2
+     does not promise to remove those OOMs. I2 records them as evidence (for example, whether
+     the plugin share of peak memory falls). Eliminating them is I3/I6 acceptance.
+   - s9 and F3 have no `wasm` variant. If I2 needs that evidence, it adds the variant through a
+     reviewed plan revision before measuring, not after seeing results.
+   - Supporting evidence: per-class peak cgroup memory and heap after two successful GCs (A2 and
+     A15 support).
 3. **Fail-fast admission.** A request that cannot be granted must be refused quickly with 503 and
    `Retry-After`, not queued.
-   - F3 pending 0 and 16 with `both` show today's behaviour: OOM.
+   - F3 pending 0 and 16 with `both` show today's behaviour: OOM. Under I2 alone, the WAF share
+     stays uncharged, as in item 2.
    - The F3 probe class and the separate-connection probe measure sibling progress (A17).
+   - `outcome_latency_ms["status:503"]` (plan v2) records how quickly overloads are refused. A1's
+     50 ms bound is an I3/I6 acceptance check.
 4. **Sticky deadline ownership.** `body_timeout` (default 60s; `"0s"` disables it) must own the
    stalled-body deadline per stream.
    - F4 shows today's baseline: every stall ends at the client's 20 s limit, and siblings stay
      responsive.
-   - After I2, the stalled upload must end at the runtime deadline: `watchdog_fired=false`,
-     within the configured bound.
+   - The 60 s default outlasts the 20 s F4 watchdog, so `f4-stalled-body` cannot observe it.
+     I2 validates the deadline with `f4-body-deadline-5s` (plan v2). This scenario configures
+     `body_timeout = "5s"` and expects, for `both`, a 408 between 4.5 s and 8 s with
+     `watchdog_fired=false`. `none` stays outside the deadline's scope.
+   - Post-I1 main records a finding there today. In a local quick smoke (`-envelope none`, not
+     evidence), H1, H2 and H3 `both` all ended at the 20 s watchdog with no 408.
    - H2/H3 siblings must stay on the same connection and complete (A6, A7, A10).
 5. **Guest replacement.** A trapped or discarded instance must release its charge, and its
    replacement must be charged.
@@ -447,13 +497,16 @@ maintained scenarios.
      report them as `plugin_panics` and `plugin_invocations_error` deltas with no leaked charge.
    - Validate with s6, s7 and s8 `both` and the diagnostic counters.
 6. **Regression guard.** u1, u2 and u10 (3 or more repetitions; ADR baseline, `base4` and the I2
-   candidate) must not regress by more than 10%. The `u1/none` cell needs added repetitions or a
+   candidate) must not regress by more than 10%. The comparison must be re-baselined under plan v2:
+   `summarize` does not merge v1 and v2 runs. The `u1/none` cell needs added repetitions or a
    more stable configuration (see above). s6, s7 and r2 `none` must show no lease activity (A5a).
 
 ## Verification of this record
 
 - `sha256sum -c SHA256SUMS`, run in the evidence directory, passes. It covers every file
   in the evidence directory except itself.
-- `ia verify` passes for all 21 run directories after they were copied into the repository.
+- `ia verify` passes for all 18 run directories (18 manifests: 12 top-level runs and 6
+  pre-freeze controlled runs) after they were copied into the repository. An earlier revision of
+  this record said 21.
 - `regenerate-summaries.sh` with the `21cb2440` harness reproduces `summary/` byte for byte
   (`diff -r` is empty).

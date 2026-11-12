@@ -1,5 +1,5 @@
 {
-  "version": "inspection-assessment-plan/v1",
+  "version": "inspection-assessment-plan/v2",
   "interpretation": {
     "min_repetitions": 3,
     "max_median_regression": 0.1,
@@ -97,7 +97,7 @@
       "reload_recovery": "2s",
       "step_warmup": "1s",
       "f3_duration": "4s",
-      "f4_client_limit": "6s",
+      "f4_client_limit": "12s",
       "description": "smoke only: exercises the instruments; never acceptance, comparison or capacity evidence"
     }
   },
@@ -1522,6 +1522,38 @@
           "the sibling response is verified (length, content, plugin headers) and its connection relationship is measured (one dialled connection for H2/H3) instead of assumed",
           "the external client limit is the watchdog for runtimes without an inspection body deadline"
         ]
+      },
+      {
+        "id": "f4-body-deadline-5s",
+        "source": "I5 review of #708 (ADR 0032 H6, F4)",
+        "kind": "f4",
+        "purpose": "stalled uploads against [global.inspection].body_timeout = 5s, well inside the client watchdog; inspected variants expect 408 near 5 s, uninspected ones are outside the deadline's scope",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "body_timeout": "5s",
+        "recovery": "10s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "20s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart"
+        ]
       }
     ],
     "quick": [
@@ -2901,7 +2933,7 @@
           "chunk_bytes": 1024,
           "slow_interval": "500ms",
           "sibling_after": "1s",
-          "client_limit": "6s"
+          "client_limit": "12s"
         },
         "comparison": "record",
         "changes_from_archive": [
@@ -2936,7 +2968,7 @@
           "chunk_bytes": 1024,
           "slow_interval": "500ms",
           "sibling_after": "1s",
-          "client_limit": "6s"
+          "client_limit": "12s"
         },
         "comparison": "record",
         "changes_from_archive": [
@@ -2944,8 +2976,40 @@
           "the sibling response is verified (length, content, plugin headers) and its connection relationship is measured (one dialled connection for H2/H3) instead of assumed",
           "the external client limit is the watchdog for runtimes without an inspection body deadline"
         ]
+      },
+      {
+        "id": "f4-body-deadline-5s",
+        "source": "I5 review of #708 (ADR 0032 H6, F4)",
+        "kind": "f4",
+        "purpose": "stalled uploads against [global.inspection].body_timeout = 5s, well inside the client watchdog; inspected variants expect 408 near 5 s, uninspected ones are outside the deadline's scope",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "body_timeout": "5s",
+        "recovery": "2s",
+        "f4": {
+          "protos": [
+            "h1",
+            "h2",
+            "h3"
+          ],
+          "modes": [
+            "stall"
+          ],
+          "body_bytes": 16384,
+          "chunk_bytes": 1024,
+          "slow_interval": "500ms",
+          "sibling_after": "1s",
+          "client_limit": "20s"
+        },
+        "comparison": "record",
+        "changes_from_archive": [
+          "added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart"
+        ]
       }
     ]
   },
-  "config_template_sha256": "f1fb0a896bdc9823a694a7c9cb47fdb6e579056cf5e0e00b3e59e8b9cf117c57"
+  "config_template_sha256": "b71fd25414c3e5756362725ea2b75793f02f5134f61f9b61499ad558ea1d0c4f"
 }

@@ -9,7 +9,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -510,6 +512,8 @@ func TestRenderConfigAdapters(t *testing.T) {
 	}
 }
 
+var writeRunSeq int
+
 // writeRun makes a minimal finished run directory for loader tests.
 func writeRun(t *testing.T, mut func(*Manifest, *RunResult)) string {
 	t.Helper()
@@ -529,8 +533,12 @@ func writeRun(t *testing.T, mut func(*Manifest, *RunResult)) string {
 		r.Phases = append(r.Phases, PhaseResult{Name: "c", CPUFraction: &frac, Saturated: &s,
 			Classes: []ClassStats{{Concurrency: c, Attempts: 10, GoodN: 10, GoodputRPS: float64(10 * c), Classes: map[string]int{"ok": 10}}}})
 	}
-	m := Manifest{Schema: ManifestSchema, RunID: "run", Started: now, Ended: &now, State: "complete", PlanVersion: PlanVersion, PlanSHA: sha256Hex(plan),
-		RulesSHA: "rules", Profile: Profiles["quick"], ScenarioSHAs: map[string]string{sc.ID + "/none": r.ScenarioHash},
+	rules, _ := indentJSON(Rules)
+	rulesSHA := sha256Hex(rules)
+	writeRunSeq++
+	r.Started = now.Add(time.Duration(writeRunSeq) * time.Second)
+	m := Manifest{Schema: ManifestSchema, RunID: fmt.Sprintf("run-%d", writeRunSeq), Started: now, Ended: &now, State: "complete", PlanVersion: PlanVersion, PlanSHA: sha256Hex(plan),
+		RulesSHA: rulesSHA, Profile: Profiles["quick"], ScenarioSHAs: map[string]string{sc.ID + "/none": r.ScenarioHash},
 		Targets: []TargetIdentity{{TargetSpec: TargetSpec{Label: "base", Adapter: "baseline-858590dc"}, Binary: BinaryIdentity{SHA256: "b"}}},
 		Results: []string{"cells/result.json"}}
 	if mut != nil {
@@ -713,5 +721,269 @@ func TestSamplerReadsCgroupAndProcess(t *testing.T) {
 	}
 	if kib("x") != nil || kib("") != nil || num("x") != nil {
 		t.Error("malformed values parsed")
+	}
+}
+
+func TestLoadRunsRejectsDuplicatesAndReinterpretation(t *testing.T) {
+	a, b := writeRun(t, nil), writeRun(t, nil)
+	if _, err := LoadRuns([]string{a, b}); err != nil {
+		t.Fatalf("distinct runs rejected: %v", err)
+	}
+	if _, err := LoadRuns([]string{a, a}); err == nil || !strings.Contains(err.Error(), "duplicate evidence") {
+		t.Errorf("same directory twice: %v", err)
+	}
+	cp := filepath.Join(t.TempDir(), "copy")
+	if err := os.CopyFS(cp, os.DirFS(a)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRuns([]string{a, cp}); err == nil || !strings.Contains(err.Error(), "duplicate evidence") {
+		t.Errorf("copied directory: %v", err)
+	}
+	// A renamed copy keeps its result files, which still identify it.
+	renamed := writeRun(t, nil)
+	res, _ := os.ReadFile(filepath.Join(a, "cells", "result.json"))
+	_ = os.WriteFile(filepath.Join(renamed, "cells", "result.json"), res, 0o600)
+	if err := WriteSums(renamed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRuns([]string{a, renamed}); err == nil || !strings.Contains(err.Error(), "duplicate evidence") {
+		t.Errorf("copied result under a new run ID: %v", err)
+	}
+
+	rewritePlan := func(dir string, edit func(map[string]any)) {
+		t.Helper()
+		var doc map[string]any
+		b, _ := os.ReadFile(filepath.Join(dir, "plan.json"))
+		if err := json.Unmarshal(b, &doc); err != nil {
+			t.Fatal(err)
+		}
+		edit(doc)
+		nb, _ := indentJSON(doc)
+		_ = os.WriteFile(filepath.Join(dir, "plan.json"), nb, 0o600)
+		var m Manifest
+		if err := readJSON(filepath.Join(dir, "manifest.json"), &m); err != nil {
+			t.Fatal(err)
+		}
+		m.PlanSHA = sha256Hex(nb)
+		_ = writeJSON(filepath.Join(dir, "manifest.json"), m)
+		if err := WriteSums(dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl := writeRun(t, nil)
+	rewritePlan(tmpl, func(d map[string]any) { d["config_template_sha256"] = "other" })
+	if _, err := LoadRuns([]string{a, tmpl}); err == nil || !strings.Contains(err.Error(), "template") {
+		t.Errorf("different configuration template merged: %v", err)
+	}
+	later := writeRun(t, nil)
+	rewritePlan(later, func(d map[string]any) { d["interpretation"].(map[string]any)["max_median_regression"] = 0.2 })
+	if _, err := LoadRuns([]string{later}); err == nil || !strings.Contains(err.Error(), "manifest records") {
+		t.Errorf("archived interpretation not bound to the manifest: %v", err)
+	}
+	// A consistent archive frozen under other rules must not be
+	// reinterpreted by this harness's rules.
+	other := Rules
+	other.MaxRegression = 0.2
+	ob, _ := indentJSON(other)
+	frozen := writeRun(t, func(m *Manifest, _ *RunResult) { m.RulesSHA = sha256Hex(ob) })
+	rewritePlan(frozen, func(d map[string]any) { d["interpretation"].(map[string]any)["max_median_regression"] = 0.2 })
+	if _, err := LoadRuns([]string{frozen}); err == nil || !strings.Contains(err.Error(), "harness that froze it") {
+		t.Errorf("other frozen rules reinterpreted: %v", err)
+	}
+	missing := writeRun(t, nil)
+	rewritePlan(missing, func(d map[string]any) { delete(d, "interpretation") })
+	if _, err := LoadRuns([]string{missing}); err == nil {
+		t.Error("plan without an interpretation loaded")
+	}
+}
+
+func TestCompareThresholdsUseUnroundedValues(t *testing.T) {
+	no := false
+	pts := func(vs ...float64) []Point {
+		var ps []Point
+		for _, v := range vs {
+			ps = append(ps, Point{Goodput: v, Valid: true, Correct: true, Saturated: &no})
+		}
+		return ps
+	}
+	// 1 - 899.6/1000 = 0.1004, which rounds to the 0.100 threshold.
+	v, reg := Compare(pts(1000, 1000, 1000), pts(899.6, 899.6, 899.6), Rules)
+	if v != VerdictRegression || reg == nil || *reg != 0.1 {
+		t.Errorf("0.1004 regression: %s %v", v, reg)
+	}
+	// Spread (1000.4-900)/... crosses MaxSpread only before rounding.
+	hi := 1000 * (1 + Rules.MaxSpread + 0.0004)
+	if v, _ := Compare(pts(1000, 1000, hi), pts(1000, 1000, 1000), Rules); v != VerdictNoise {
+		t.Errorf("unrounded spread above the limit: %s", v)
+	}
+}
+
+func TestF4UploadOutcomes(t *testing.T) {
+	base := F4Result{Proto: "h2", Warmup: "ok", SiblingClass: "ok", Dials: 1, WantDials: 1}
+	for name, tc := range map[string]struct {
+		r       F4Result
+		finding bool
+	}{
+		"slow verified":          {F4Result{Mode: "slow", Expect: UploadVerified, UploadClass: "ok"}, false},
+		"slow 500":               {F4Result{Mode: "slow", Expect: UploadVerified, UploadClass: "status:500"}, true},
+		"slow truncated 200":     {F4Result{Mode: "slow", Expect: UploadVerified, UploadClass: "unverified:length"}, true},
+		"slow corrupted 200":     {F4Result{Mode: "slow", Expect: UploadVerified, UploadClass: "unverified:echo"}, true},
+		"stall watchdog":         {F4Result{Mode: "stall", Expect: UploadNoDeadline, UploadClass: "error:timeout", WatchdogFired: true}, false},
+		"stall succeeded":        {F4Result{Mode: "stall", Expect: UploadNoDeadline, UploadClass: "ok"}, true},
+		"stall 500":              {F4Result{Mode: "stall", Expect: UploadNoDeadline, UploadClass: "status:500"}, true},
+		"deadline on time":       {F4Result{Mode: "stall", Expect: UploadDeadline, Deadline: 5, UploadClass: "status:408", UploadSeconds: 5.2}, false},
+		"deadline early":         {F4Result{Mode: "stall", Expect: UploadDeadline, Deadline: 5, UploadClass: "status:408", UploadSeconds: 1}, true},
+		"deadline late":          {F4Result{Mode: "stall", Expect: UploadDeadline, Deadline: 5, UploadClass: "status:408", UploadSeconds: 9}, true},
+		"deadline not enforced":  {F4Result{Mode: "stall", Expect: UploadDeadline, Deadline: 5, UploadClass: "error:timeout", WatchdogFired: true, UploadSeconds: 20}, true},
+		"deadline other status":  {F4Result{Mode: "stall", Expect: UploadDeadline, Deadline: 5, UploadClass: "status:503", UploadSeconds: 5}, true},
+		"read timeout ends it":   {F4Result{Mode: "slow", Expect: UploadReadTimeout, Deadline: 5, UploadClass: "status:500", UploadSeconds: 5}, false},
+		"read timeout ignored":   {F4Result{Mode: "slow", Expect: UploadReadTimeout, Deadline: 5, UploadClass: "ok", UploadSeconds: 8}, true},
+		"read timeout watchdog":  {F4Result{Mode: "stall", Expect: UploadReadTimeout, Deadline: 5, UploadClass: "error:timeout", WatchdogFired: true, UploadSeconds: 12}, true},
+		"v1 result not rejudged": {F4Result{Mode: "slow", UploadClass: "status:500"}, false},
+	} {
+		r := tc.r
+		r.Proto, r.Warmup, r.SiblingClass, r.Dials, r.WantDials = base.Proto, base.Warmup, base.SiblingClass, base.Dials, base.WantDials
+		inst, f := r.Check()
+		if len(inst) != 0 || (len(f) != 0) != tc.finding {
+			t.Errorf("%s: instrument=%v findings=%v", name, inst, f)
+		}
+	}
+	sc := func(read, body string) Scenario {
+		return Scenario{ReadTimeout: read, BodyTimeout: body, F4: &F4{BodyBytes: 16, ChunkBytes: 1, SlowInterval: Dur(500 * time.Millisecond)}}
+	}
+	for _, tc := range []struct {
+		read, body, proto, mode, variant string
+		want                             string
+		bound                            float64
+	}{
+		{"", "5s", "h1", "stall", "none", UploadNoDeadline, 0},
+		{"", "5s", "h2", "stall", "both", UploadDeadline, 5},
+		{"", "0s", "h1", "stall", "waf", UploadNoDeadline, 0},
+		{"", "", "h1", "slow", "both", UploadVerified, 0},
+		{"5s", "", "h1", "slow", "none", UploadReadTimeout, 5},
+		{"5s", "", "h2", "stall", "both", UploadReadTimeout, 5},
+		{"5s", "", "h3", "slow", "both", UploadVerified, 0},
+		{"5s", "", "h3", "stall", "both", UploadNoDeadline, 0},
+		{"10s", "", "h1", "slow", "none", UploadVerified, 0},
+		{"3s", "5s", "h1", "stall", "both", UploadReadTimeout, 3},
+		{"9s", "5s", "h1", "stall", "both", UploadDeadline, 5},
+		{"9s", "5s", "h3", "stall", "both", UploadDeadline, 5},
+	} {
+		if e, d := F4Expect(sc(tc.read, tc.body), tc.proto, tc.mode, tc.variant); e != tc.want || d != tc.bound {
+			t.Errorf("%+v: got %s %v", tc, e, d)
+		}
+	}
+}
+
+func TestHeapAfterGCRequiresSuccessfulCollections(t *testing.T) {
+	serve := func(pprofStatus int, metrics string) int {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/metrics" {
+				_, _ = io.WriteString(w, metrics)
+				return
+			}
+			w.WriteHeader(pprofStatus)
+		}))
+		_ = srv.Listener.Close()
+		srv.Listener = ln
+		srv.Start()
+		t.Cleanup(srv.Close)
+		return ln.Addr().(*net.TCPAddr).Port
+	}
+	full := "go_memstats_heap_inuse_bytes 10\ngo_memstats_heap_alloc_bytes 7\n"
+	if in, al, why := HeapAfterGC(serve(http.StatusOK, full)); in == nil || al == nil || *in != 10 || *al != 7 || why != "" {
+		t.Errorf("successful collections: %v %v %q", in, al, why)
+	}
+	if in, al, why := HeapAfterGC(serve(http.StatusNotFound, full)); in != nil || al != nil || !strings.Contains(why, "404") {
+		t.Errorf("failed gc reported heap: %v %v %q", in, al, why)
+	}
+	if in, _, why := HeapAfterGC(serve(http.StatusOK, "go_memstats_heap_inuse_bytes 10\n")); in != nil || why == "" {
+		t.Errorf("missing gauge: %v %q", in, why)
+	}
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	if in, _, why := HeapAfterGC(port); in != nil || !strings.Contains(why, "gc 1") {
+		t.Errorf("unreachable admin: %v %q", in, why)
+	}
+}
+
+func TestSummarizeKeepsNonSuccessLatency(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	at := func(start, ms int, class string) Outcome {
+		s := t0.Add(time.Duration(start) * time.Millisecond)
+		return Outcome{Start: s, End: s.Add(time.Duration(ms) * time.Millisecond), Class: class}
+	}
+	outs := []Outcome{at(10, 5, "ok"), at(20, 12, "status:503"), at(30, 40, "status:503"), at(40, 2000, "status:503"),
+		at(50, 0, "unfinished"), at(-5, 3, "status:503")}
+	s := Summarize(Workload{Name: "w"}, outs, t0, t0.Add(time.Second), 1)
+	l, ok := s.OutcomeLatency["status:503"]
+	if !ok || l.N != 3 || l.P50 != 40 || l.Max != 2000 {
+		t.Errorf("overload latency: %+v", s.OutcomeLatency)
+	}
+	if _, ok := s.OutcomeLatency["unfinished"]; ok || s.OutcomeLatency["ok"] != (Latency{}) {
+		t.Errorf("unfinished or ok latency recorded as an outcome: %+v", s.OutcomeLatency)
+	}
+	if s.MaxMs == nil || *s.MaxMs != 5 {
+		t.Errorf("success latency changed: %v", s.MaxMs)
+	}
+	md := (&Summary{Classes: []ClassRow{{Scenario: "s9", OutcomeLatency: s.OutcomeLatency}}}).Markdown()
+	if !strings.Contains(md, "## Non-success outcome latency") || !strings.Contains(md, "| status:503 | 3 | 40.0 |") {
+		t.Errorf("overload latency not reported:\n%s", md)
+	}
+	if strings.Contains((&Summary{Classes: []ClassRow{{Scenario: "s9"}}}).Markdown(), "Non-success") {
+		t.Error("latency section rendered without data")
+	}
+}
+
+func TestF4WatchdogOutlastsPlannedUploads(t *testing.T) {
+	for name, p := range Profiles {
+		for _, sc := range BuildScenarios(p) {
+			f := sc.F4
+			if f == nil {
+				continue
+			}
+			limit := f.ClientLimit.D()
+			if slices.Contains(f.Modes, "slow") {
+				slow := time.Duration(f.BodyBytes/f.ChunkBytes) * f.SlowInterval.D()
+				if limit <= slow {
+					t.Errorf("%s/%s: watchdog %s ends the %s slow upload", name, sc.ID, limit, slow)
+				}
+			}
+			for _, v := range []string{sc.BodyTimeout, sc.ReadTimeout} {
+				if d, ok := positive(v); ok && limit <= d+time.Duration(deadlineSlack*float64(time.Second)) {
+					t.Errorf("%s/%s: watchdog %s fires before the %s limit can be judged", name, sc.ID, limit, d)
+				}
+			}
+			if d, err := time.ParseDuration(sc.BodyTimeout); err == nil && d > 0 {
+				if limit <= d+time.Duration(deadlineSlack*float64(time.Second)) {
+					t.Errorf("%s/%s: watchdog %s fires before body_timeout %s can be judged", name, sc.ID, limit, d)
+				}
+			}
+		}
+	}
+}
+
+func TestBodyTimeoutNeedsGlobalInspection(t *testing.T) {
+	if _, err := RenderConfig(ConfigParams{Adapter: Adapters["baseline-858590dc"], BodyTimeout: "5s"}); err == nil {
+		t.Error("baseline adapter rendered body_timeout")
+	}
+	cfg, err := RenderConfig(ConfigParams{Adapter: Adapters["current"], BodyTimeout: "5s", Origin: "o:1"})
+	if err != nil || !bytes.Contains(cfg, []byte(`body_timeout = "5s"`)) {
+		t.Errorf("current adapter: %v\n%s", err, cfg)
+	}
+	var errOut bytes.Buffer
+	out := filepath.Join(t.TempDir(), "run")
+	if Main([]string{"run", "-out", out, "-profile", "quick", "-envelope", "none", "-scenario", "f4-body-deadline-5s",
+		"-target", "base:baseline-858590dc:/bin/true"}, io.Discard, &errOut) == 0 || !strings.Contains(errOut.String(), "cannot express") {
+		t.Errorf("run accepted an inexpressible deadline: %s", errOut.String())
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("refused run created its output directory")
 	}
 }
