@@ -742,8 +742,8 @@ can evaluate rules. Jul's call sites are in `internal/waf/outcomes.go`.
 
 | Event | Client | gRPC | Reason or outcome | Body handling |
 | --- | --- | --- | --- | --- |
-| Admission (`base` or first `buffer` charge) fails | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (metric reason `bytes`) | Not read. H1: Go discards up to 256 KiB, then closes the connection. H2/H3: stream reset; siblings unaffected |
-| A growth charge fails mid-body | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`bytes`) | Partial body dropped; charge released |
+| Admission (`base` or first `buffer` charge) fails | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (metric reason `bytes`) | Not read. H1: the response carries `Connection: close`, so net/http does not first drain the unread body, which a stalled upload would delay indefinitely (amended in I2 review; the original text assumed the drain was bounded). H2/H3: stream reset; siblings unaffected |
+| A growth charge fails mid-body | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`bytes`) | Partial body dropped; charge released. H1: `Connection: close`, as above |
 | Worst-case `waf_state` reservation fails before a phase | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`waf_state`) | Slot released first. The phase does not run, so its amplification never happens. The transaction is closed on its owning goroutine. The request is not forwarded, so no verdict is skipped |
 | Slot wait times out, the queue is full, or no slot is free while unread request-body data remains (phases 1–4) | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`evaluation`) | Any charged body is released. An unread body is handled as for admission failure |
 | Plugin response buffer charge fails | Existing subscription policy for `bodyTooLarge` (ADR 0020) | — | `jul_plugin_response_body_unavailable_total{reason="budget"}` | Passthrough or fail-closed per subscription |

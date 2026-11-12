@@ -21,11 +21,11 @@ func TestInspectionResponses(t *testing.T) {
 		conn        string
 		retry       string
 	}{
-		{"overload h1", 1, "", WriteOverloaded, 503, "", "", "1"},
+		{"overload h1 closes", 1, "", WriteOverloaded, 503, "", "close", "1"},
 		{"overload h2", 2, "text/plain", WriteOverloaded, 503, "", "", "1"},
 		{"overload grpc", 2, "application/grpc+proto", WriteOverloaded, 200, "14", "", "1"},
 		{"overload grpc-web reads HTTP status", 2, "application/grpc-web+proto", WriteOverloaded, 503, "", "", "1"},
-		{"overload grpc content type over h1", 1, "application/grpc", WriteOverloaded, 503, "", "", "1"},
+		{"overload grpc content type over h1", 1, "application/grpc", WriteOverloaded, 503, "", "close", "1"},
 		{"timeout h1 closes", 1, "", WriteBodyTimeout, 408, "", "close", ""},
 		{"timeout h3 keeps connection", 3, "", WriteBodyTimeout, 408, "", "", ""},
 		{"timeout grpc", 2, "application/grpc", WriteBodyTimeout, 200, "4", "", ""},

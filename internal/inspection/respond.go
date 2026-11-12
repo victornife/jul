@@ -35,13 +35,18 @@ func IsOverload(err error) bool {
 	return IsOutcome(err, ByteSaturated) || IsOutcome(err, WAFStateSaturated) || IsOutcome(err, EvaluationSaturated)
 }
 
-// WriteOverloaded answers an inspection overload: 503 with Retry-After: 1, or
-// a trailers-only UNAVAILABLE for a gRPC request.
+// WriteOverloaded answers an inspection overload: 503 with Retry-After: 1,
+// closing an HTTP/1 connection whose request body may be unread, or a
+// trailers-only UNAVAILABLE for a gRPC request. Without the close, net/http
+// would first drain a stalled upload and the 503 might never arrive.
 func WriteOverloaded(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Retry-After", "1")
 	if isGRPC(r) {
 		writeGRPCStatus(w, upstream.GRPCCodeUnavailable, ReasonOverloaded)
 		return
+	}
+	if r != nil && r.ProtoMajor < 2 {
+		w.Header().Set("Connection", "close")
 	}
 	http.Error(w, ReasonOverloaded, http.StatusServiceUnavailable)
 }

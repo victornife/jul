@@ -8,10 +8,10 @@ package plugins
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,6 +35,10 @@ type h1Upload struct {
 	native bool
 	// wait is how long the client waits for a response; 5s when zero.
 	wait time.Duration
+	// declared and sent override the 100-byte declaration and the one byte
+	// sent before the stall.
+	declared int
+	sent     string
 }
 
 // stalledH1 serves h through a real HTTP/1 server that registers its
@@ -65,7 +69,10 @@ func stalledH1With(t *testing.T, h http.Handler, u h1Upload, onStall func()) int
 		t.Fatal(err)
 	}
 	defer c.Close()
-	if _, err := io.WriteString(c, "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: 100\r\n\r\na"); err != nil {
+	if u.declared == 0 {
+		u.declared, u.sent = 100, "a"
+	}
+	if _, err := fmt.Fprintf(c, "POST / HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", u.declared, u.sent); err != nil {
 		t.Fatal(err)
 	}
 	if onStall != nil {
@@ -81,6 +88,41 @@ func stalledH1With(t *testing.T, h http.Handler, u h1Upload, onStall func()) int
 	}
 	_ = resp.Body.Close()
 	return resp.StatusCode
+}
+
+// TestOverloadReachesStalledH1Upload: an overload refusal, at admission or
+// when the body's buffer cannot grow, reaches a real HTTP/1 client whose
+// upload has stalled. Without Connection: close, net/http would drain the
+// unread body before the 503 and, with no read timeout, wait indefinitely.
+func TestOverloadReachesStalledH1Upload(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		limit uint64
+		u     h1Upload
+		hold  bool
+	}{
+		{"admission", 4096, h1Upload{native: true}, true},
+		{"body allocation", 4096, h1Upload{native: true, declared: 20000, sent: strings.Repeat("m", 8000)}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m, hooks, g, _ := govManager(t, limitsWith(c.limit, func(l *inspection.Limits) { l.BodyTimeout = 0 }))
+			s := buildSet(t, m, map[string]config.PluginConfig{"r": bodyGuestConfig(ABIJulV2, guestReadContinue)})
+			if c.hold {
+				holder, _, _, err := g.AcquireLease(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer holder.Close()
+			}
+			var hits atomic.Int64
+			if got := stalledH1With(t, s.Middleware("r")(echoNext(&hits)), c.u, nil); got != http.StatusServiceUnavailable {
+				t.Fatalf("status %d, want 503 before the stalled body", got)
+			}
+			if inv, _, _, panics, _ := hooks.snapshot(); inv != 0 || panics != 0 || hits.Load() != 0 {
+				t.Fatalf("invocations=%d panics=%d origin=%d", inv, panics, hits.Load())
+			}
+		})
+	}
 }
 
 // TestRefusedAbortEndsRealH1Upload: when the writer exposes SetReadDeadline

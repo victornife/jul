@@ -211,7 +211,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   the downstream handler; prepared request bodies, `fetch` copies and
   responses, request state, and generated or replacement bodies are charged
   before allocation. An exhausted budget answers `503` with `Retry-After: 1`
-  (gRPC `UNAVAILABLE`) without running the guest or the origin; observe mode
+  (gRPC `UNAVAILABLE`; on HTTP/1 the connection is closed rather than draining
+  an unread upload) without running the guest or the origin; observe mode
   records would-reject decisions instead. `global.inspection.body_timeout`
   (default `60s`, `0s` disables) now bounds body-reading plugin uploads with
   `408` (gRPC `DEADLINE_EXCEEDED`); a writer that cannot apply or refuses the
