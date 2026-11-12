@@ -209,7 +209,7 @@ func (h *bodyHooks) awaitFail(t *testing.T) string {
 func bodyManager(t *testing.T) (*Manager, *bodyHooks) {
 	t.Helper()
 	h := &bodyHooks{results: map[string]int{}, failed: make(chan string, 16)}
-	m, err := NewManager(Options{
+	m, err := NewManager(Options{Inspection: testGovernor(t),
 		Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OnInvocation:         h.invoked,
 		OnPanic:              func(string) { h.mu.Lock(); h.panics++; h.mu.Unlock() },
@@ -739,28 +739,35 @@ func TestReloadKeepsPreparingRequestOnItsGeneration(t *testing.T) {
 }
 
 func TestReadBoundedSizingAndPreparedBody(t *testing.T) {
-	b, err := readBounded(strings.NewReader("12345"), 5, 8)
+	rb := func(r io.Reader, hint int64, limit int) ([]byte, error) {
+		cb, err := readBounded(r, hint, limit, freeCharge)
+		if err != nil {
+			return nil, err
+		}
+		return cb.b, nil
+	}
+	b, err := rb(strings.NewReader("12345"), 5, 8)
 	if err != nil || string(b) != "12345" || cap(b) != 6 {
 		t.Fatalf("known length: %q cap=%d err=%v, want exact capacity 6", b, cap(b), err)
 	}
-	if b, err = readBounded(strings.NewReader("12345"), 100, 8); err != nil || string(b) != "12345" {
+	if b, err = rb(strings.NewReader("12345"), 100, 8); err != nil || string(b) != "12345" {
 		t.Fatalf("hint over limit: %q %v", b, err)
 	}
 	big := strings.Repeat("q", 3000)
-	if b, err = readBounded(strings.NewReader(big), -1, 4096); err != nil || string(b) != big {
+	if b, err = rb(strings.NewReader(big), -1, 4096); err != nil || string(b) != big {
 		t.Fatalf("unknown length growth: len=%d %v", len(b), err)
 	}
-	if _, err = readBounded(strings.NewReader(big), -1, 2999); !errors.Is(err, errBodyTooLarge) {
+	if _, err = rb(strings.NewReader(big), -1, 2999); !errors.Is(err, errBodyTooLarge) {
 		t.Fatalf("limit+1: %v", err)
 	}
 	// A declared length is not trusted for allocation: before any byte
 	// arrives the buffer offered to the body is at most initialBodyBuffer.
 	probe := &firstReadCap{}
-	if _, err = readBounded(probe, 1<<20, 1<<20); err != nil || probe.n > initialBodyBuffer {
+	if _, err = rb(probe, 1<<20, 1<<20); err != nil || probe.n > initialBodyBuffer {
 		t.Fatalf("declared 1 MiB: first read offered %d bytes (err %v), want <= %d", probe.n, err, initialBodyBuffer)
 	}
 	known := strings.Repeat("k", 100<<10)
-	if b, err = readBounded(strings.NewReader(known), int64(len(known)), 1<<20); err != nil || string(b) != known || cap(b) != len(known)+1 {
+	if b, err = rb(strings.NewReader(known), int64(len(known)), 1<<20); err != nil || string(b) != known || cap(b) != len(known)+1 {
 		t.Fatalf("known 100 KiB: len=%d cap=%d %v, want growth to stop at the declared length", len(b), cap(b), err)
 	}
 	orig := &countingBody{r: strings.NewReader("")}

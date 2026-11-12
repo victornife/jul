@@ -7,6 +7,8 @@ package plugins
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -19,6 +21,7 @@ import (
 	"time"
 
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/sys"
 
 	"jul/internal/config"
 )
@@ -27,7 +30,7 @@ const testdataDir = "../../testdata/plugins/"
 
 func testManager(t testing.TB) *Manager {
 	t.Helper()
-	m, err := NewManager(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	m, err := NewManager(Options{Inspection: testGovernor(t), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -266,6 +269,83 @@ func TestTimeoutIsContained(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("runaway guest was not interrupted within 5s")
 	}
+}
+
+// TestContainedTrapLogIsBoundedAndThrottled: each contained guest failure is
+// logged with a bounded reason only from the public wazero exit codes, at most
+// once per interval per plugin, and never with the guest's error text.
+func TestContainedTrapLogIsBoundedAndThrottled(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  config.PluginConfig
+		want string
+	}{
+		// A Go wasip1 panic aborts through a wasm trap, not proc_exit.
+		{"go guest panic", pcfg("testguest-panic"), trapUnknown},
+		{"invocation timeout", pcfg("testguest-loop", func(pc *config.PluginConfig) {
+			pc.Timeout = config.Duration(100 * time.Millisecond)
+		}), trapTimeout},
+		{"wasm trap", hostGuest{abi: ABIJulV1, fns: []hostFn{hfStatus}, pages: 1,
+			body: []byte{opUnreachable}}.config(), trapUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf strings.Builder
+			var mu sync.Mutex
+			m, err := NewManager(Options{Inspection: testGovernor(t),
+				Logger: slog.New(slog.NewTextHandler(lockedWriter{&mu, &buf}, nil))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = m.Close() })
+			s := buildSet(t, m, map[string]config.PluginConfig{"p": tc.cfg})
+			for range 2 {
+				rec := httptest.NewRecorder()
+				s.Middleware("p")(http.NotFoundHandler()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+				if rec.Code != http.StatusInternalServerError {
+					t.Fatalf("status %d", rec.Code)
+				}
+			}
+			mu.Lock()
+			out := buf.String()
+			mu.Unlock()
+			if n := strings.Count(out, "plugin guest failure contained"); n != 1 {
+				t.Fatalf("%d trap lines, want 1 (throttled):\n%s", n, out)
+			}
+			if !strings.Contains(out, "reason="+tc.want) {
+				t.Fatalf("want reason=%s:\n%s", tc.want, out)
+			}
+			for _, leak := range []string{"boom", "wasm error", "panicked", "exit_code", "unreachable"} {
+				if strings.Contains(out, leak) {
+					t.Fatalf("log carries guest error text %q:\n%s", leak, out)
+				}
+			}
+		})
+	}
+}
+
+func TestTrapReasonUsesOnlyPublicExitCodes(t *testing.T) {
+	for err, want := range map[error]string{
+		sys.NewExitError(sys.ExitCodeDeadlineExceeded):                 trapTimeout,
+		sys.NewExitError(sys.ExitCodeContextCanceled):                  trapCanceled,
+		fmt.Errorf("wrapped: %w", sys.NewExitError(2)):                 trapGuestExit,
+		errors.New("wasm error: out of bounds memory access (secret)"): trapUnknown,
+	} {
+		if got := trapReason(err); got != want {
+			t.Errorf("trapReason(%v) = %q, want %q", err, got, want)
+		}
+	}
+}
+
+type lockedWriter struct {
+	mu *sync.Mutex
+	w  io.Writer
+}
+
+func (l lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
 }
 
 func TestKVCounterWithCapability(t *testing.T) {

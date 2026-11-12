@@ -24,7 +24,7 @@ import (
 func benchV2(b *testing.B, module string, pc config.PluginConfig, origin http.Handler, hdr ...string) {
 	b.Helper()
 	var calls atomic.Int64
-	m, err := NewManager(Options{
+	m, err := NewManager(Options{Inspection: testGovernor(b),
 		Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OnInvocation:         func(string, string, time.Duration) { calls.Add(1) },
 		OnResponseInvocation: func(string, string, time.Duration) { calls.Add(1) },

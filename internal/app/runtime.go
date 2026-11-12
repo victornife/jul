@@ -14,6 +14,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/lifecycle"
+	"jul/internal/logthrottle"
 	"jul/internal/observability"
 	"jul/internal/server"
 	"jul/internal/stream"
@@ -87,11 +88,14 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize inspection governor: %w", err)
 	}
+	logRejection := inspectionRejectionLog(b.Logger, func() uint64 { return rt.Inspection.Limits().MaxBytes })
 	rt.Inspection, err = inspection.New(inspectionLimits, inspection.Hooks{
 		OnRejection: func(reason inspection.Outcome, mode inspection.Mode) {
 			b.Metrics.ObserveInspectionRejection(string(reason), string(mode))
+			logRejection(reason, mode)
 		},
-		OnUnslotted: b.Metrics.ObserveInspectionUnslottedLogging,
+		OnUnslotted:   b.Metrics.ObserveInspectionUnslottedLogging,
+		OnBodyTimeout: b.Metrics.ObserveInspectionBodyTimeout,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize inspection governor: %w", err)
@@ -220,5 +224,25 @@ func (r *Runtime) Close() {
 		if err := r.Tracer.Shutdown(shutCtx); err != nil {
 			r.log.Warn("tracing shutdown", "error", err)
 		}
+	}
+}
+
+// inspectionRejectionLogInterval spaces the overload warning (ADR 0032 §9).
+const inspectionRejectionLogInterval = 10 * time.Second
+
+// inspectionRejectionLog returns the governor's rate-limited overload
+// warning: at most one line per interval, carrying only the class, mode and
+// limit, never request paths, hosts or bodies.
+func inspectionRejectionLog(log *slog.Logger, limit func() uint64) func(inspection.Outcome, inspection.Mode) {
+	var throttle logthrottle.Limiter
+	return func(reason inspection.Outcome, mode inspection.Mode) {
+		if log == nil || !throttle.Allow(inspectionRejectionLogInterval) {
+			return
+		}
+		msg := "inspection budget saturated; request rejected"
+		if mode == inspection.Observe {
+			msg = "inspection budget saturated; observe mode would reject"
+		}
+		log.Warn(msg, "class", string(reason), "mode", string(mode), "max_buffered_bytes", limit())
 	}
 }

@@ -1196,10 +1196,10 @@
       "lifecycle_reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
       "value_kind": "duration",
       "constraint": "non-negative",
-      "zero_semantics": "omitted defaults to 60s; explicit 0s disables the future inspected-body deadline",
-      "active_when": "configured and reported; live inspected-body deadlines are not applied in I1",
+      "zero_semantics": "omitted defaults to 60s; explicit 0s disables the inspection body-arrival deadline",
+      "active_when": "enforce mode bounds plugin request-body arrival from its first read; observe counts would_timeout instead; WAF-only routes do not apply it yet",
       "default": "60s",
-      "description": "BodyTimeout bounds a future inspected-body receive; it is not applied to live requests in I1",
+      "description": "BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only routes do not apply it yet",
       "anchor": "global-inspection-body_timeout"
     },
     "global.inspection.evaluation_queue_timeout": {
@@ -1214,9 +1214,9 @@
       "value_kind": "duration",
       "constraint": "between 0s and 10s",
       "zero_semantics": "omitted defaults to 1s; explicit 0s disables waiting",
-      "active_when": "applied by the governor API; live requests do not acquire governor slots in I1",
+      "active_when": "applied by the governor API; live requests do not acquire governor slots yet",
       "default": "1s",
-      "description": "EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots in I1",
+      "description": "EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots yet",
       "anchor": "global-inspection-evaluation_queue_timeout"
     },
     "global.inspection.max_buffered_bytes": {
@@ -1231,9 +1231,9 @@
       "value_kind": "size",
       "constraint": "positive size",
       "zero_semantics": "omitted defaults to 256 MiB; explicit zero is invalid",
-      "active_when": "applied by governor accounting and configuration validation; live WAF/plugin requests are not governed in I1",
+      "active_when": "applied by governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet",
       "default": "256m",
-      "description": "MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; live requests are not governed in I1",
+      "description": "MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; it governs live plugin requests, not WAF requests yet",
       "anchor": "global-inspection-max_buffered_bytes"
     },
     "global.inspection.max_concurrent_evaluations": {
@@ -1248,8 +1248,8 @@
       "value_kind": "integer",
       "constraint": "0 or between 1 and 1024",
       "zero_semantics": "0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting",
-      "active_when": "applied by the governor API; live WAF/plugin evaluations are not governed in I1",
-      "description": "MaxConcurrentEvaluations is the governor slot limit; live evaluations are not governed in I1",
+      "active_when": "applied by the governor API; live WAF evaluations do not acquire slots yet",
+      "description": "MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations do not acquire slots yet",
       "anchor": "global-inspection-max_concurrent_evaluations"
     },
     "global.inspection.max_response_header_bytes": {
@@ -1264,9 +1264,9 @@
       "value_kind": "size",
       "constraint": "positive size",
       "zero_semantics": "omitted defaults to 64 KiB; explicit zero is invalid",
-      "active_when": "used by configuration validation; live response-header accounting is pending in I1",
+      "active_when": "used by configuration validation; live response-header accounting is pending",
       "default": "64k",
-      "description": "MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not applied to live responses in I1",
+      "description": "MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not yet applied to live responses",
       "anchor": "global-inspection-max_response_header_bytes"
     },
     "global.inspection.mode": {
@@ -1281,13 +1281,13 @@
       "value_kind": "enum",
       "constraint": "exact lowercase enum",
       "zero_semantics": "omitted defaults to enforce",
-      "active_when": "controls governor accounting and configuration validation; live WAF/plugin requests are not governed in I1",
+      "active_when": "controls governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet",
       "allowed": [
         "enforce",
         "observe"
       ],
       "default": "enforce",
-      "description": "Mode is \"enforce\" (default) or \"observe\" for governor accounting; live requests are not governed in I1",
+      "description": "Mode is \"enforce\" (default) or \"observe\" for governor accounting; live plugin requests are governed, WAF requests are not yet",
       "anchor": "global-inspection-mode"
     },
     "global.log_format": {

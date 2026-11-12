@@ -92,11 +92,11 @@ func TestInstanceAcquisitionFailureIsContained(t *testing.T) {
 	pm := <-p.pool
 	_ = pm.mod.Close(t.Context())
 	_ = p.runtime.Close(t.Context())
-	if _, _, err := p.invoke(t.Context(), httptest.NewRecorder(), req(http.MethodGet, "/")); err == nil {
+	if _, _, err := p.invoke(leaseCtx(t, t.Context()), httptest.NewRecorder(), req(http.MethodGet, "/")); err == nil {
 		t.Fatal("request phase ran without an instance")
 	}
 	view := &responseView{status: 200, header: http.Header{}, bodyState: bodyNotRequested}
-	if _, err := p.invokeResponse(t.Context(), req(http.MethodGet, "/"), view, nil); err == nil {
+	if _, err := p.invokeResponse(leaseCtx(t, t.Context()), req(http.MethodGet, "/"), view, nil); err == nil {
 		t.Fatal("response phase ran without an instance")
 	}
 	if hooks.panics != 2 || hooks.count(hooks.results, "error") != 1 {

@@ -59,7 +59,7 @@ func minimalFactory(t *testing.T) (*HandlerFactory, func()) {
 	})
 	genRes := NewGenerationResources(poolReg)
 
-	pm, err := plugins.NewManager(plugins.Options{Logger: log})
+	pm, err := plugins.NewManager(plugins.Options{Logger: log, Inspection: rt.Inspection})
 	if err != nil {
 		rt.Close()
 		poolReg.CloseAll()

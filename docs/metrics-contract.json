@@ -341,7 +341,7 @@
     {
       "name": "jul_inspection_body_timeouts_total",
       "type": "counter",
-      "help": "Inspected-body receive timeout outcomes, when body integration is enabled.",
+      "help": "Inspected request-body receive outcomes: enforced timeouts, observe-mode would-timeouts and unsupported read deadlines.",
       "labels": [
         "protocol",
         "result"

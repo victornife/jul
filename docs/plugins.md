@@ -459,9 +459,17 @@ Every invocation updates Prometheus metrics:
 - `jul_plugin_request_body_failures_total{plugin,reason}` — request bodies a
   body-reading plugin could not prepare, so the guest never ran: `too_large`,
   `read_error` (including an expired `read_timeout`), `canceled` or `retired`.
-  These requests are not in `jul_plugin_invocations_total`.
+  These requests are not in `jul_plugin_invocations_total`. An expired
+  `body_timeout` or an inspection overload is counted by the
+  `jul_inspection_rejections_total` and `jul_inspection_body_timeouts_total` instead (see
+  [Inspection governor](#inspection-governor)).
 
 Guest `log` output is emitted on the server log with the plugin name attached.
+A contained guest failure logs at most one warning per plugin every 10 s,
+`plugin guest failure contained`, with a bounded `reason`: `timeout`,
+`canceled`, `guest_exit`, `host_panic` or `unknown`. A wasm trap (including a
+Go `wasip1` panic) is `unknown`: wazero does not expose its trap kind through
+a stable API. The guest's error text is never logged.
 
 ### Request bodies
 
@@ -476,23 +484,28 @@ Preparation works as follows
    `Content-Length` above the limit is rejected without reading; otherwise at
    most `max_request_body + 1` bytes are read, whatever the declared length.
    The buffer grows as bytes arrive (at most 32 KiB before the first byte), so
-   a declared length alone does not reserve memory.
+   a declared length alone does not reserve memory. Each buffer, and each
+   growth copy, is charged to the
+   [inspection governor](#inspection-governor) before it is allocated.
 2. Only then is an instance acquired and `handle_request` called with its
    normal `timeout`. `read_request_body` returns the prepared bytes, as often
    as the guest calls it.
 3. The next handler receives the exact same bytes, with `Content-Length` set
    to their length. Trailers are kept.
 
-Upload time is therefore bounded by the transport, not by `timeout`: a client
-disconnect, an explicitly configured server `read_timeout` (HTTP/1.1 and
-HTTP/2; HTTP/3 does not apply it, see [http3.md](http3.md)) or a reload that
-retires the plugin. With the default `read_timeout = 0` a stalled upload waits
-for its client. No instance is held while the body arrives.
+Upload time is not bounded by `timeout`. It is bounded by
+`[global.inspection].body_timeout` (default `60s`, in `enforce` mode,
+measured from the first body read and never refreshed), a client disconnect,
+an explicitly configured server `read_timeout` (HTTP/1.1 and HTTP/2; HTTP/3
+does not apply it, see [http3.md](http3.md)) and a reload that retires the
+plugin, whichever comes first. No instance is held while the body arrives.
 
 A body over the limit, a read error, a client cancel or a retired plugin
 answers `500 plugin error`. The guest and the next handler do not run, and no
 instance is acquired. These requests are counted in
-`jul_plugin_request_body_failures_total`, not in the invocation metrics.
+`jul_plugin_request_body_failures_total`, not in the invocation metrics. An
+expired `body_timeout` answers `408` and an exhausted budget `503`; see
+[Inspection governor](#inspection-governor).
 
 In a chain, the first body-reading plugin prepares the body and later ones
 reuse it without copying, each still enforcing its own `max_request_body`.
@@ -510,6 +523,67 @@ Raise `max_request_body`, or split the header check into its own plugin that
 does not import `read_request_body`. Modules without the import are unchanged:
 they never read or buffer the body, and it streams to the next handler.
 
+### Inspection governor
+
+Every request that reaches a plugin is admitted to the process-wide
+inspection governor configured by
+[`[global.inspection]`](configuration.md#globalinspection)
+([ADR 0032](adr/0032-aggregate-inspection-resource-governor.md), slice I2 of
+[#700](https://github.com/victornife/jul/issues/700)).
+
+**Lease.** The outermost plugin on a route takes one lease before any body is
+read or guest runs, and later plugins in the chain reuse it. The lease is held
+until the whole downstream handler, including response-phase callbacks, has
+returned, so a prepared body stays charged while an origin may still replay
+it. Routes with no plugin take no lease and are not charged.
+
+**What is charged, before it is allocated.**
+
+| Allocation | Charged | Released |
+| --- | --- | --- |
+| Prepared request body | Its capacity, re-charged before each growth; old and new arrays both stay charged during the copy | When the request ends |
+| `fetch` request-body copy | Its length | When the transport has closed it; if it has not within 2 s of the call, when the request ends |
+| `fetch` response | `Content-Length + 1` when that is within `max_fetch_response`, otherwise `max_fetch_response + 1`, before reading | At the next `fetch`, or when the call ends |
+| Per-request state (`set_request_state`) | Its length; an overwrite replaces the charge | When the downstream handler returns, if a response callback is subscribed; otherwise before the request continues |
+| Generated response body (`write_response_body`) | Its capacity, before each growth | After the response is written |
+| `jul-abi/v2` response-body replacement | Its length | After it is written, or replaced again |
+
+Not charged: short strings copied from guest memory (header names and values,
+URIs, KV keys), KV values (persistent, bounded by the KV quotas), the
+`jul-abi/v2` response-subscription buffer (up to `max_response_body`;
+slice I4), WAF request state (slice I3), and guest linear memory, compiled
+modules and idle instances, which are sized statically (see
+[Sizing instances and memory](#sizing-instances-and-memory)).
+
+**Outcomes.**
+
+| Condition | `enforce` | `observe` |
+| --- | --- | --- |
+| Budget exhausted at admission, while a body arrives, or in a host call | `503`, `Retry-After: 1`, body `inspection_overloaded`; gRPC `UNAVAILABLE`. No guest or origin call follows | Request continues; `jul_inspection_rejections_total{mode="observe"}` counts each charge enforce would refuse, so one request can count several |
+| Body still arriving after `body_timeout` | `408` (HTTP/1.1 adds `Connection: close`); gRPC `DEADLINE_EXCEEDED` | Request continues; `would_timeout` counted once |
+| Response writer cannot set a read deadline | `500`, `unsupported` counted | Request continues; `unsupported` counted |
+| Plugin limits, guest traps, timeouts, instance exhaustion | Unchanged: `500`, or `503` for instance exhaustion | Unchanged |
+
+A guest cannot avoid an overload by ignoring a host function's error return:
+the call still ends with `503`. An overload is not counted as a guest panic.
+Bytes never wait for budget. A request that waits for a busy instance keeps
+its lease and its prepared body for that finite wait.
+
+**Body deadline.** `body_timeout` starts at the first body read and is never
+refreshed by later chunks, plugins or replays. It only ever shortens the
+transport's own read deadline. It is removed once the body has arrived, so
+downloads, SSE, WebSockets and response streaming are not limited by it.
+`body_timeout = "0s"` disables it, but not `read_timeout` or the abort on
+plugin retirement. On HTTP/2 and HTTP/3 it ends only the affected stream.
+
+**Reloads.** A reload publishes new limits for new admissions and new body
+reads only. Requests already admitted keep their charges, and a body already
+arriving keeps the deadline it started with. A lowered budget is drained, not
+revoked.
+
+A slow upload therefore holds governed bytes, not an instance or guest time:
+the budget, not `max_instances`, bounds concurrent body preparation.
+
 ### Sizing instances and memory
 
 A plugin holds at most `max_instances` module instances. Each can grow to
@@ -525,10 +599,12 @@ Host-side buffers are separate and follow request concurrency: up to
 `max_request_body` per request with a body-reading plugin (one copy, shared by
 the chain and kept until the request ends) and, for a `jul-abi/v2`
 body subscription, up to `max_response_body` per subscribed response.
-These are not an aggregate server budget. Upstream admission occurs after
-request plugins and WAF on proxy routes and does not cap earlier inspection or
-routes without an upstream. Account for all enabled layers and overlapping
-generations when sizing the host.
+Request-side buffers are capped together by `max_buffered_bytes` (see
+[Inspection governor](#inspection-governor)); response-subscription buffers
+and WAF state are not yet. Upstream admission occurs after request plugins
+and WAF on proxy routes and does not cap earlier inspection or routes without
+an upstream. Account for all enabled layers and overlapping generations when
+sizing the host.
 
 Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`
@@ -545,10 +621,12 @@ instances led to an OOM kill. Under CPU saturation, guest calls that exceed
 `timeout` fail with `500`. Smaller guests (TinyGo, Rust) need less memory.
 
 Since #699, slow uploads no longer hold instances, so `max_instances` no longer
-limits how many requests prepare bodies at once. Concurrent body-reading
-requests × `max_request_body` is now the request-body bound, alongside the
-instance product above. Jul has no aggregate inspection or byte budget yet;
-that is tracked in [#700](https://github.com/victornife/jul/issues/700).
+limits how many requests prepare bodies at once. In `enforce` mode,
+`max_buffered_bytes` bounds the prepared bodies and other charged host
+allocations of all concurrent plugin requests together; excess requests get
+`503`. In `observe` mode, concurrent body-reading requests ×
+`max_request_body` remains the bound. The guest-memory product above is not
+part of that budget.
 
 ## Uploading modules (Console API)
 
@@ -611,6 +689,10 @@ The `jul-abi/v1` ABI is request-phase only:
 | Guest timeout contained | `testguest-loop.wasm`, 150 ms timeout | `500`, next **not** called | TestTimeoutIsContained |
 | Slow upload to a body reader | 64 KiB paced over ~400 ms, 100 ms timeout, v1/v2, middleware/handler | `200`, exact body to guest and next, no instance held while it arrives | TestSlowUploadDoesNotConsumeGuestTimeout, TestBodyPreparationHoldsNoInstance |
 | Body preparation failures | over limit, read error, cancel, `read_timeout`, retirement (H1/H2/H3) | `500`, guest and next **not** called, reason counted | TestPreparedBodyLimits, TestPreparationFailuresSkipGuestAndOrigin, TestPreparationEndsOnTransportControls, TestForcedRetirementAbortsPreparation |
+| One lease per request | Chain of body/non-body plugins, v1/v2, Continue/Stop/error, downstream still running | One lease, body charged once, closed once after downstream returns; uninspected routes take none | TestRequestLeaseSpansChainAndDownstream, TestRequestLeaseClosesOnEveryOutcome |
+| Inspection overload | Budget below one request, mid-body exhaustion, refused host call ignored by the guest, gRPC | `503` + `Retry-After: 1` (gRPC 14); no guest, origin or panic count | TestLeaseAdmissionOverloadDoesNoWork, TestBodyChargeOverloadMidRead, TestGuestIgnoringFetchRefusalGets503, TestOverloadGRPCMapping |
+| Charged growth | Every growth step refused; overflow; arbitrary chunking (fuzz) | Unchanged buffer on refusal, no false-complete body, charges drain | TestChargedBufGrowHoldsBothArrays, TestReadBoundedRefusedAtEveryStep, FuzzReadBoundedCharged |
+| Body deadline | Stalled, slow-valid and empty uploads; `0s`; unsupported writer; observe (H1/H2/H3, full server stack) | `408` in enforce, `would_timeout` in observe, sibling streams unaffected | TestBodyDeadlineOutcomes, TestInspectionOutcomesOverH1H2, TestInspectionOutcomesOverH3, TestServeInspectionDeadlineThroughFullStack |
 | KV capability granted | `kv-counter.wasm`, `kv = true` | Counter increments across requests, `X-Count` grows | TestKVCounterWithCapability |
 | KV capability denied | `kv-counter.wasm`, `kv = false` | Counter resets every request, `X-Count = 1` | TestKVDeniedWithoutCapability |
 | Reload reuses compilation cache | Same module, two generations | Second generation works, first can be closed | TestReloadReusesManager |
@@ -714,7 +796,8 @@ are addressed by design, configuration, or runtime containment:
 | ------ | ------ | ---------- | ------------- |
 | Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
-| Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699) | With `read_timeout = 0` (default) or on HTTP/3, a stalled upload keeps the bytes it has sent (and its request) until the client gives up; no aggregate byte budget (#700) |
+| Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, the absolute inspection `body_timeout` (`408`), client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699, #700) | With `observe` mode or `body_timeout = "0s"` and `read_timeout = 0`, a stalled upload keeps its bytes until the client gives up |
+| Memory exhaustion by concurrent plugin requests | Many concurrent body-reading or allocating requests | Request-side host buffers are charged to `max_buffered_bytes` before allocation; excess requests get `503` (#700) | Response-subscription buffers and WAF state are not charged yet; `observe` mode does not refuse |
 | Memory or CPU exhaustion by concurrency | Many concurrent requests on a plugin route, each instantiating a module | `max_instances` (default 64) caps live instances per plugin; excess calls wait one `timeout`, then get `503` and are counted in `jul_plugin_instance_waits_total` (#506) | Operator sets `max_instances × memory_limit` above what the host can hold |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |

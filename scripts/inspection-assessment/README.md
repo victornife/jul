@@ -47,6 +47,8 @@ The examples run from the repository root. `$B` is a directory of Jul binaries.
 go build -o /tmp/ia ./scripts/inspection-assessment
 (cd examples/plugins && GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false \
   -buildmode=c-shared -o /tmp/inspect-load.wasm ./inspect-load)   # or: examples/plugins/build.sh DIR all
+(cd examples/plugins && GOOS=wasip1 GOARCH=wasm go build -trimpath -buildvcs=false \
+  -buildmode=c-shared -o /tmp/inspect-nobody.wasm ./inspect-nobody)   # plan v3 non-body fixture
 /tmp/ia fixtures -guest /tmp/inspect-load.wasm \
   -guest-source examples/plugins/inspect-load        # prints the guest source/artifact and static-page sha256
 
@@ -58,7 +60,8 @@ go build -o /tmp/ia ./scripts/inspection-assessment
 taskset -c 4-9 /tmp/ia run -out /tmp/ia-run -profile qualification -suite campaign-normal -reps 3 \
   -target base:baseline-858590dc:$B/jul-858590dc \
   -target main:current:$B/jul-main \
-  -guest /tmp/inspect-load.wasm -guest-source examples/plugins/inspect-load
+  -guest /tmp/inspect-load.wasm -guest-source examples/plugins/inspect-load \
+  -guest-nobody /tmp/inspect-nobody.wasm -guest-nobody-source examples/plugins/inspect-nobody
 
 # A quick, unconstrained smoke. It is never comparison or acceptance evidence.
 /tmp/ia run -out /tmp/ia-smoke -profile quick -envelope none -scenario u1-normal-h1 -variants none \
@@ -102,7 +105,10 @@ envelope, so smoke and unconstrained runs never receive a verdict.
 | Suite | Scenarios |
 | --- | --- |
 | `calibration` | `cal-normal-h1/h2/h3`: concurrency steps that choose the unsaturated normal profile. |
-| `campaign-normal` | `u1`/`u2` (H1/H2 across `none`/`waf`/`wasm`/`both`) and `u10` (H3 `none`/`both`) at the calibrated concurrency, 3 repetitions. These are the throughput comparison cells. |
+| `campaign-normal` | `u1`/`u2` (H1/H2 across `none`/`waf`/`wasm`/`both`) and `u10` (H3 `none`/`wasm`/`both`) at the calibrated concurrency, 3 repetitions. These are the throughput comparison cells. |
+| `i2-normal` | `campaign-normal` plus `u1b` (H1 `none` at C=8, 5 repetitions), the plan v3 stabilised uninspected H1 cell. |
+| `i2-plugin` | The #700 I2 plugin request-path cells: `r1`, `s8`, `r2`, `s6`, `s7` and the plan v3 `p1`–`p4` cells below. |
+| `i2-deadline` | `f4-stalled-body` and `f4-body-deadline-5s`, including their plan v3 `wasm` variant. |
 | `fidelity` | `r1`, `s8`, `s11l`, `s9`, F3 pending 16 and 0, F4, `s6`, `s7`, `r2`: instrument fidelity smokes. Their outcomes are recorded without a pass verdict. |
 | `historical-695`, `historical-699` | The archived s1–s11 and r1–r3 definitions. |
 | `destructive` | `s3`, `s4`, full `s11`. They OOM uncapped runtimes and are kept for I6 runs in an isolated envelope. |
@@ -113,7 +119,7 @@ outlasts every F4 watchdog. Only the `current` adapter can express it, and `run`
 targets before starting. Post-I1 main records a runtime finding for `both` (no 408; the watchdog
 ends the upload) until I2/I3 implement the deadline.
 
-`plan.json` is the frozen plan (`inspection-assessment-plan/v2`): scenarios, profiles, suites,
+`plan.json` is the frozen plan (`inspection-assessment-plan/v3`): scenarios, profiles, suites,
 interpretation rules and the configuration-template hash. A test fails when the code and `plan.json` disagree. Any change to
 scenarios or rules must regenerate `plan.json` (`/tmp/ia plan > scripts/inspection-assessment/plan.json`)
 and be reviewed. Runs made under another plan hash are not comparable.
@@ -124,6 +130,91 @@ to 12 s, because the 8 s slow upload must finish inside it. Qualification scenar
 new one are unchanged, and every existing cell renders a byte-identical configuration. The
 #700 I5 baseline campaign ran under v1. Its stored results lack the new fields, and `summarize`
 does not re-judge them or merge them with v2 runs.
+
+Plan v3 (#700 I2) adds plugin fixtures, explicit inspection limits and plugin-only cells. Runs
+under v1, v2 and v3 have different plan hashes and are never merged.
+
+- `fixture` selects the plugin pair for `wasm`/`both`: `full` (the default, unchanged),
+  `request-only` (inspect-load reading only the request body; no response subscription, so
+  ungoverned I4 response buffering cannot dominate a plugin-only experiment) or `nobody`
+  (`examples/plugins/inspect-nobody`, which has no `read_request_body` import, streams the body
+  and holds 4 KiB of request state per plugin; it needs `-guest-nobody`). Each fixture has its
+  own verification: echoed request lengths for `request-only`, echoed state and `state-4096`
+  response headers for `nobody`. The `nobody` canary blocks on the `X-Assess-Wasm-Block` header
+  because the guest cannot see the body.
+- `inspection_mode` and `max_buffered_bytes` write `[global.inspection]`. They replace the
+  adapter's WAF budget, and only the `current` adapter can express them.
+- `plugin_timeout`, `plugin_max_instances` and `gomemlimit` size a plugin-only cell's static
+  footprint. The first two render `timeout`/`max_instances` for both request-only plugins and are
+  refused for other fixtures. `gomemlimit` sets Jul's `GOMEMLIMIT`, as ADR 0032 §10 recommends.
+  `Launch` otherwise starts Jul with `GOMEMLIMIT` unset, and the envelope check reads the value
+  from `/proc/<pid>/environ` (`gomemlimit_env`). Guest pools (`max_instances × memory_limit` per
+  plugin), Go GC headroom and kernel socket buffers are outside the governor. With the default
+  pools (2 × 64 × 16 MiB) the pre-freeze smokes of p1 and p2 were OOM-killed in the 768 MiB
+  envelope, and p1 was killed in the same way on pre-I2 main `d8d0520b`.
+- `p1-large-body-plugin-h1`: 768 KiB bodies at C=64 through two request-only plugins at the
+  default budget. Four instances per plugin, a 2 s plugin timeout and `GOMEMLIMIT=480MiB`.
+- `p2-saturation-plugin-h1` and its observe twin `p2o-…`: 160 concurrent 960 KiB bodies, each held
+  5 s at the origin, against `max_buffered_bytes = "128m"`, with the p1 sizing. A known-length
+  prepared body is charged at about its length, so the retained bodies need about 150 MiB for the
+  whole window. 128m is above the route's compiled minimum (103825411 B with default plugin
+  limits), so genuine validation passes. p2 expects `status:503-inspection-overloaded`: a 503 with
+  `Retry-After: 1` and the `inspection_overloaded` body. Any other 503, such as instance-pool
+  exhaustion, stays `status:503` and is a finding. p2o records would-reject decisions instead.
+  Their clients set `honor_retry_after`: after an overload-class answer a worker waits at least 1 s
+  before its next request.
+- `p2h-saturation-hostile-h1` is p2 without that backoff. It is a record-only I6 sizing cell. A
+  closed-loop client resends rejected 960 KiB uploads at about 1300 per second. net/http keeps each
+  rejected connection open for its 500 ms close linger while unread body bytes arrive, so socket
+  buffers charged to Jul's cgroup (about 290 MiB pre-freeze) took the process past the envelope.
+  The governor bounds retained bodies, not kernel receive buffers. Its OOM is expected evidence,
+  not an I2 pass condition.
+- `observe` rejection counters count decisions. Every refused charge in a request counts, so p2o
+  can record more rejections than requests.
+- `p3-nobody-plugin-h1`: the non-body fixture with 16 KiB POSTs and bodiless GETs.
+- `p4-reload-budget-plugin`: the s9 shape with the `budget` reload churn. It cycles 128m,
+  observe, 512m and 256m, and reload 5 sets 1m, below the route minimum, which must be refused.
+  Each budget reload waits up to 10 s for its `jul_reload_total{source="sighup"}` outcome, then
+  reads the effective mode and budget from `GET /api/v1/status`. Reload 5 must be `not_applied`
+  with the previous limits kept; every other reload must be `applied_live` with its own limits.
+  A missing acknowledgement or any other result is a runtime finding. The s9 policy churn is
+  unchanged and is not acknowledged.
+  - p4 uses p1's static footprint. `reload_every` makes it wait 5 s after each reload and its
+    acknowledgement, not 2 s; this is an inter-step delay, not a fixed cadence.
+  - Fewer than 5 acknowledged budget reloads means the inadmissible step never ran, so the run
+    is `unexercised`.
+  - At 2 s, sized pools were OOM-killed on both the candidate and main `d8d0520b`, after about
+    8 reloads with zero governed bytes.
+  - At 5 s, main completed but still held about 495 MiB of heap after two GCs. Most of it was
+    wazero guest memory and decoded modules from retired generations, with 2 live instances.
+  - That retention predates I2 and belongs to the reload/generation lifecycle. p4 therefore
+    asserts reload acknowledgement and governor drain, not the 576 MiB peak objective.
+- Governor drain (every cell): after recovery, `jul_inspection_leases` and the `bytes` and
+  `evaluations` gauges must be zero. A nonzero gauge is a runtime finding. Targets without these
+  gauges are not judged, except p4, where they are required. A zero gauge shows that charges
+  drained, not that memory was reclaimed; the post-GC heap reports that separately.
+  - Each harness reload rewrites the config file and sends SIGHUP. Jul's file watcher also sees
+    the write, so `jul_reload_total` carries both `source="sighup"` and `source="watch"`
+    outcomes, and each step may build two generations. This matches the v1/v2 s9 behaviour.
+- Exercise requirements (`exercise_requirements`). p2 must show enforce rejections and overload
+  responses, and no observe decisions. p2o must show observe decisions, and no enforce
+  rejections or overload responses. An unmet minimum makes the run invalid
+  (`unexercised: …`), never a clean pass. An exceeded maximum is a runtime finding. A target
+  that cannot exercise the scenario, such as pre-I2 main, is therefore recorded as unexercised.
+- `u1b-normal-h1-none-c8` was frozen before any I2 measurement because I5 recorded u1/none at C=16
+  as noise bound partly outside Jul. `u1` is still run and reported.
+- `u10` and `cal-normal-h3` gain `wasm`. Its H3 concurrency (`H3WasmConcurrency`) is set by the
+  calibration rule from a `cal-normal-h3` run on the ADR baseline before the campaign.
+- `s6`, `s7` and the F4 scenarios gain `wasm`.
+- The inspection rejection and body-timeout counters are added to the counter deltas.
+- Every non-2xx response is classified by `StatusClass`. A governor overload answer is
+  `status:503-inspection-overloaded` in every scenario, so a governor 503 in a cell that expects
+  only pool or admission 503s (for example F3) is a finding rather than an expected outcome.
+- Summaries refuse to merge runs whose `guest` or `guest_nobody` identities differ.
+
+Every v2 cell with the default fixture renders a byte-identical configuration under v3. The
+origin echoes `X-Echo-A-Req-Len` from `a1`/`a2` as well as `a`, which changes only s9's
+responses, and adds the state echoes only when they are present.
 
 ## What a run records
 

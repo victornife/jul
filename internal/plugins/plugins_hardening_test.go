@@ -72,7 +72,7 @@ func TestFetchBlocksSpecialUseDNSAnswerBeforeDial(t *testing.T) {
 
 func TestFetchBlocksDisallowedHost(t *testing.T) {
 	p := &plugin{capFetch: true, allowedHosts: []string{"api.example.com"}, fetchTimeout: time.Second, maxFetchResp: 1 << 10}
-	if _, _, err := p.doFetch(context.Background(), "GET", "https://evil.com/", nil); err != errFetchBlocked {
+	if _, _, err := p.doFetch(context.Background(), invocationOr(t, context.Background()), "GET", "https://evil.com/", nil); err != errFetchBlocked {
 		t.Fatalf("doFetch disallowed host err = %v, want errFetchBlocked", err)
 	}
 }
@@ -81,7 +81,7 @@ func TestFetchBlocksLoopbackEvenIfAllowed(t *testing.T) {
 	srv := httptest.NewServer(nil)
 	defer srv.Close()
 	p := &plugin{capFetch: true, allowedHosts: []string{"127.0.0.1"}, fetchTimeout: time.Second, maxFetchResp: 1 << 10}
-	if _, _, err := p.doFetch(context.Background(), "GET", srv.URL, nil); err == nil {
+	if _, _, err := p.doFetch(context.Background(), invocationOr(t, context.Background()), "GET", srv.URL, nil); err == nil {
 		t.Fatal("doFetch to loopback succeeded, want SSRF guard rejection")
 	}
 }
@@ -104,7 +104,7 @@ func TestFetchBlocksDNSRebinding(t *testing.T) {
 		maxFetchResp: 1 << 10,
 		resolver:     rebindResolver{ip: "127.0.0.1"},
 	}
-	if _, _, err := p.doFetch(context.Background(), "GET", "https://api.example.com/", nil); err == nil {
+	if _, _, err := p.doFetch(context.Background(), invocationOr(t, context.Background()), "GET", "https://api.example.com/", nil); err == nil {
 		t.Fatal("doFetch to rebound private IP succeeded, want SSRF guard rejection")
 	}
 }
@@ -201,7 +201,7 @@ func TestFetchGlobalEgressBlocksDoFetch(t *testing.T) {
 		resolver:     res,
 		egressWrap:   pol.For(egress.SubsystemPlugin).DialContextWith,
 	}
-	_, _, err = p.doFetch(context.Background(), "GET", "https://api.example.com/", nil)
+	_, _, err = p.doFetch(context.Background(), invocationOr(t, context.Background()), "GET", "https://api.example.com/", nil)
 	if !errors.Is(err, egress.ErrBlocked) {
 		t.Fatalf("err = %v, want wrapping egress.ErrBlocked", err)
 	}
@@ -313,7 +313,7 @@ func TestFetchTruncationDetected(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil)), lease: testLease(t)}
 	ctx := withInvocation(context.Background(), inv)
 
 	// Custom client that dials the test server directly, bypassing SSRF guards
@@ -327,7 +327,7 @@ func TestFetchTruncationDetected(t *testing.T) {
 	}
 
 	p := &plugin{capFetch: true, allowedHosts: []string{"127.0.0.1"}, fetchTimeout: time.Second, maxFetchResp: 100, client: testClient}
-	status, data, err := p.doFetch(ctx, "GET", srv.URL, nil)
+	status, data, err := p.doFetch(ctx, invocationOr(t, ctx), "GET", srv.URL, nil)
 	if err != nil {
 		t.Fatalf("doFetch err = %v", err)
 	}
@@ -352,7 +352,7 @@ func TestFetchNotTruncated(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil)), lease: testLease(t)}
 	ctx := withInvocation(context.Background(), inv)
 
 	testClient := &http.Client{
@@ -364,7 +364,7 @@ func TestFetchNotTruncated(t *testing.T) {
 	}
 
 	p := &plugin{capFetch: true, allowedHosts: []string{"127.0.0.1"}, fetchTimeout: time.Second, maxFetchResp: 100, client: testClient}
-	status, data, err := p.doFetch(ctx, "GET", srv.URL, nil)
+	status, data, err := p.doFetch(ctx, invocationOr(t, ctx), "GET", srv.URL, nil)
 	if err != nil {
 		t.Fatalf("doFetch err = %v", err)
 	}
@@ -387,7 +387,7 @@ func TestFetchClearsLastFetchOnError(t *testing.T) {
 	}))
 	defer live.Close()
 
-	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil)), lease: testLease(t)}
 	ctx := withInvocation(context.Background(), inv)
 
 	// First client succeeds.
@@ -399,7 +399,7 @@ func TestFetchClearsLastFetchOnError(t *testing.T) {
 		},
 	}
 	p := &plugin{capFetch: true, allowedHosts: []string{"127.0.0.1"}, fetchTimeout: time.Second, maxFetchResp: 100, client: okClient}
-	if _, _, err := p.doFetch(ctx, "GET", live.URL, nil); err != nil {
+	if _, _, err := p.doFetch(ctx, invocationOr(t, ctx), "GET", live.URL, nil); err != nil {
 		t.Fatalf("first fetch err = %v", err)
 	}
 	if inv.lastFetch == nil {
@@ -415,7 +415,7 @@ func TestFetchClearsLastFetchOnError(t *testing.T) {
 		},
 	}
 	p.client = failClient
-	if _, _, err := p.doFetch(ctx, "GET", "http://127.0.0.1/", nil); err == nil {
+	if _, _, err := p.doFetch(ctx, invocationOr(t, ctx), "GET", "http://127.0.0.1/", nil); err == nil {
 		t.Fatal("second fetch succeeded, want error")
 	}
 	if inv.lastFetch != nil {
@@ -441,7 +441,7 @@ func TestFetchBodyReadErrorReturnsTransportError(t *testing.T) {
 	// If the upstream connects but the response body read fails mid-way,
 	// doFetch must return the read error (mapped to guest code -4) and
 	// clear lastFetch so the guest cannot act on partial data.
-	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	inv := &invocation{log: slog.New(slog.NewTextHandler(io.Discard, nil)), lease: testLease(t)}
 	ctx := withInvocation(context.Background(), inv)
 
 	p := &plugin{
@@ -460,7 +460,7 @@ func TestFetchBodyReadErrorReturnsTransportError(t *testing.T) {
 		},
 	}
 
-	_, _, err := p.doFetch(ctx, "GET", "http://example.com/", nil)
+	_, _, err := p.doFetch(ctx, invocationOr(t, ctx), "GET", "http://example.com/", nil)
 	if err == nil {
 		t.Fatal("doFetch with body read error succeeded, want error")
 	}
@@ -496,7 +496,7 @@ func TestV1HostFetchAndRequestBodyFailures(t *testing.T) {
 		}
 	}
 
-	call("fetch", &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil), log: logger})
+	call("fetch", &invocation{r: httptest.NewRequest(http.MethodGet, "/", nil), log: logger, lease: testLease(t)})
 	if !strings.Contains(output.String(), "reason=ssrf") {
 		t.Fatalf("v1 fetch failure did not use bounded reason: %q", output.String())
 	}

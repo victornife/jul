@@ -183,6 +183,7 @@ func LoadRuns(dirs []string) ([]LoadedRun, error) {
 	var out []LoadedRun
 	targets := map[string]TargetIdentity{}
 	scen := map[string]string{}
+	guests := map[string]string{}
 	// Copied or repeated inputs would otherwise count their repetitions
 	// more than once.
 	seen := map[string]string{}
@@ -229,8 +230,16 @@ func LoadRuns(dirs []string) ([]LoadedRun, error) {
 		case m.Fault != "" || m.KillJulAfter != "":
 			return nil, fmt.Errorf("%s: controlled-fault runs are runner validation, not measurement", d)
 		}
-		if fg := first.Manifest.Guest; m.Guest != nil && fg != nil && m.Guest.SHA256 != fg.SHA256 {
-			return nil, fmt.Errorf("%s: guest %s differs from %s", d, m.Guest.SHA256, fg.SHA256)
+		// Every guest identity a run recorded must match the one other runs
+		// recorded for that fixture guest; a run without wasm cells has none.
+		for kind, g := range map[string]*Artifact{"guest": m.Guest, "guest_nobody": m.GuestNoBody} {
+			if g == nil {
+				continue
+			}
+			if prev, ok := guests[kind]; ok && prev != g.SHA256 {
+				return nil, fmt.Errorf("%s: %s %s differs from %s", d, kind, g.SHA256, prev)
+			}
+			guests[kind] = g.SHA256
 		}
 		for _, t := range m.Targets {
 			if prev, ok := targets[t.Label]; ok && (prev.Binary.SHA256 != t.Binary.SHA256 || prev.TargetSpec.Adapter != t.TargetSpec.Adapter || prev.Adapter != t.Adapter) {

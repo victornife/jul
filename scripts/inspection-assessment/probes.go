@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -171,7 +170,7 @@ func RunF4(ctx context.Context, t Target, f F4, proto, mode, expect string, dead
 	}
 	defer c.Close()
 	small := Workload{Proto: proto, Method: "GET", Path: "/proxy/echo?resp=16", RespBytes: 16}
-	r.Warmup = Do(ctx, c, small, nil, t.WASM).Class
+	r.Warmup = Do(ctx, c, small, nil, t.Fixture).Class
 	body := WideBody(f.BodyBytes, "")
 	pr, pw := io.Pipe()
 	// The external watchdog owns the upload: when it expires the request is
@@ -221,17 +220,17 @@ func RunF4(ctx context.Context, t Target, f F4, proto, mode, expect string, dead
 		case rerr != nil:
 			o.Class = "error:body-" + strings.TrimPrefix(errClass(rerr, false), "error:")
 		case resp.StatusCode/100 != 2:
-			o.Class = "status:" + strconv.Itoa(resp.StatusCode)
+			o.Class = StatusClass(resp, got)
 		default:
 			o.Class = "ok"
-			if why := Verify(resp, got, upload, len(body), t.WASM, c.Proto); why != "" {
+			if why := Verify(resp, got, upload, len(body), t.Fixture, c.Proto); why != "" {
 				o.Class = "unverified:" + why
 			}
 		}
 		done <- o
 	}()
 	sleepCtx(ctx, f.SiblingAfter.D())
-	sib := Do(ctx, c, Workload{Proto: proto, Method: "GET", Path: "/proxy/echo?resp=4096", RespBytes: 4096}, nil, t.WASM)
+	sib := Do(ctx, c, Workload{Proto: proto, Method: "GET", Path: "/proxy/echo?resp=4096", RespBytes: 4096}, nil, t.Fixture)
 	r.SiblingClass, r.SiblingMs, r.SiblingProto = sib.Class, float64(sib.End.Sub(sib.Start).Microseconds())/1000, sib.Proto
 	up := <-done
 	r.UploadClass, r.UploadStatus = up.Class, up.Status

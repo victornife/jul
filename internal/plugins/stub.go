@@ -61,6 +61,9 @@ type Options struct {
 	OnInstanceWait func(plugin, result string)
 	// OnRequestBodyFailure mirrors the compiled build's body-preparation hook.
 	OnRequestBodyFailure func(plugin, reason string)
+	// Inspection and MetadataOnly mirror the compiled build's governor wiring.
+	Inspection   *inspection.Governor
+	MetadataOnly bool
 }
 
 // InstanceStats mirrors the compiled build's live-instance report.

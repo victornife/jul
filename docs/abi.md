@@ -265,6 +265,8 @@ touches the response. Return codes (i32): `0 OK`, `-1 NOT_FOUND`, `-2 INVALID`,
 | The same after a protocol switch | recorded as an error; the connection is untouched |
 | Client cancelled the request | the invocation fails like a timeout |
 | Request body over `max_request_body`, unreadable, cancelled or retired while being prepared (modules importing `read_request_body`, #699) | `500 plugin error` before any instance is acquired; the guest and next handler do not run; counted in `jul_plugin_request_body_failures_total{reason}`, not as an invocation |
+| Inspection budget exhausted at admission, while the body arrives, or when a host function needs a charge (#700) | `503` with `Retry-After: 1` (gRPC `UNAVAILABLE`); the host function returns an existing failure code (`INVALID`, or `-4` for `fetch`), and the call ends with `503` even if the guest ignores it or then traps; counted as an invocation `error`, not a panic |
+| Request body still arriving after `[global.inspection].body_timeout` in `enforce` mode (#700) | `408` before any instance is acquired (gRPC `DEADLINE_EXCEEDED`) |
 
 In every failure the instance is discarded, never returned to the pool, and the
 failure is counted (`jul_plugin_panics_total` for traps/timeouts,

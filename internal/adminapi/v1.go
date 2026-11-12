@@ -27,6 +27,9 @@ type LedgerRetention struct {
 	Policy             string `json:"policy"`
 }
 
+// InspectionStatus reports the process inspection governor.
+// RequestPathIntegration is "partial": plugin request paths are governed; WAF
+// request charging and response-side accounting are not yet.
 type InspectionStatus struct {
 	Configured                      InspectionConfiguredLimits `json:"configured"`
 	Effective                       InspectionEffectiveLimits  `json:"effective"`

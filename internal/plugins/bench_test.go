@@ -19,7 +19,7 @@ import (
 
 func benchManager(b *testing.B) *Manager {
 	b.Helper()
-	m, err := NewManager(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	m, err := NewManager(Options{Inspection: testGovernor(b), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		b.Fatalf("NewManager: %v", err)
 	}

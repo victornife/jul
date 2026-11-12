@@ -21,10 +21,12 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"github.com/tetratelabs/wazero/sys"
 
 	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/logthrottle"
+	"jul/internal/reqdeadline"
 )
 
 // wasmPageSize is the WebAssembly linear-memory page size (64 KiB).
@@ -113,7 +115,21 @@ type Options struct {
 	// guard and the server-wide [egress] policy. It is nil when egress is
 	// disabled, leaving plugin fetches guarded only by their local rules.
 	EgressWrap func(base DialFunc) DialFunc
+	// Inspection is the process-owned aggregate inspection governor (ADR
+	// 0032). Every plugin request takes or reuses its request lease and
+	// charges host-held request allocations to it. Required unless
+	// MetadataOnly is set: a missing governor is a wiring error, never a
+	// silent bypass.
+	Inspection *inspection.Governor
+	// MetadataOnly builds a Manager that only compiles plugins and reads their
+	// static facts (the offline `jul check` path). It never instantiates
+	// guests or serves requests, so it needs no governor.
+	MetadataOnly bool
 }
+
+// errNoGovernor reports a Manager built for requests without the process
+// inspection governor.
+var errNoGovernor = errors.New("plugins: inspection governor is required")
 
 // DialFunc matches net.Dialer.DialContext. The plugin fetch client composes an
 // SSRF-validating dialer beneath the optional global egress guard.
@@ -144,11 +160,17 @@ type Manager struct {
 	// egressWrap composes the global egress guard beneath each plugin's fetch
 	// SSRF guard; nil when egress is disabled.
 	egressWrap func(base DialFunc) DialFunc
+	// gov is the process inspection governor; nil only for MetadataOnly.
+	gov          *inspection.Governor
+	metadataOnly bool
 }
 
-// NewManager creates a Manager. It never fails in the compiled build, but
-// returns an error type for symmetry with the stub build.
+// NewManager creates a Manager. It fails when a request-serving Manager has no
+// inspection governor.
 func NewManager(opts Options) (*Manager, error) {
+	if opts.Inspection == nil && !opts.MetadataOnly {
+		return nil, errNoGovernor
+	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
@@ -181,18 +203,20 @@ func NewManager(opts Options) (*Manager, error) {
 		onBodyErr = func(string, string) {}
 	}
 	return &Manager{
-		log:        opts.Logger,
-		cache:      wazero.NewCompilationCache(),
-		kv:         kv,
-		kvUsage:    make(map[string]*kvLedger),
-		onInvoke:   onInvoke,
-		onPanic:    onPanic,
-		onRespInv:  onRespInv,
-		onNoBody:   onNoBody,
-		onWait:     onWait,
-		onBodyErr:  onBodyErr,
-		live:       make(map[*plugin]struct{}),
-		egressWrap: opts.EgressWrap,
+		log:          opts.Logger,
+		cache:        wazero.NewCompilationCache(),
+		kv:           kv,
+		kvUsage:      make(map[string]*kvLedger),
+		onInvoke:     onInvoke,
+		onPanic:      onPanic,
+		onRespInv:    onRespInv,
+		onNoBody:     onNoBody,
+		onWait:       onWait,
+		onBodyErr:    onBodyErr,
+		live:         make(map[*plugin]struct{}),
+		egressWrap:   opts.EgressWrap,
+		gov:          opts.Inspection,
+		metadataOnly: opts.MetadataOnly,
 	}, nil
 }
 
@@ -315,6 +339,9 @@ func (m *Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig)
 // compilation cache and KV store. A nil wrapper preserves plugin-local SSRF and
 // allowed_hosts enforcement without a global egress policy.
 func (m *Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.PluginConfig, egressWrap func(base DialFunc) DialFunc) (*Set, error) {
+	if m.gov == nil {
+		return nil, errNoGovernor
+	}
 	s := &Set{plugins: make(map[string]*plugin, len(cfg))}
 	ok := false
 	defer func() {
@@ -407,14 +434,18 @@ type plugin struct {
 	onBodyFail func(string, string)
 	// limitLog throttles the instance-cap warning.
 	limitLog logthrottle.Limiter
+	// trapLog throttles the contained-trap warning.
+	trapLog logthrottle.Limiter
 	// mgr tracks this plugin for InstanceStats until close.
 	mgr *Manager
+	// gov is the process inspection governor every request is admitted to.
+	gov *inspection.Governor
 
 	// closed is set when the plugin's generation is torn down; preparing
 	// holds the requests reading their body for it, so close can abort them.
 	closed    atomic.Bool
 	prepMu    sync.Mutex
-	preparing map[*http.ResponseController]struct{}
+	preparing map[*reqdeadline.Owner]int
 }
 
 // afterModuleRead is a test seam between the single module read and
@@ -548,6 +579,7 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	p.pool <- &pooledModule{mod: mod}
 
 	p.mgr = m
+	p.gov = m.gov
 	m.track(p)
 	return p, nil
 }
@@ -780,6 +812,7 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 			err = fmt.Errorf("plugin %q panicked: %v", p.name, rec)
 			p.discard(mod)
 			res, dur, outcome = 0, time.Since(start), callTrapped
+			p.logTrap(trapHostPanic)
 		}
 	}()
 
@@ -787,6 +820,13 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 	dur = time.Since(start)
 	if callErr != nil {
 		p.discard(mod)
+		// A guest that traps after a host call was refused budget still
+		// fails as overload, not as a guest fault: the refusal is retained
+		// in the invocation whatever the guest did with its error return.
+		if inspection.IsOverload(inv.err) {
+			return 0, dur, callHostError, inv.err
+		}
+		p.logTrap(trapReason(callErr))
 		return 0, dur, callTrapped, callErr
 	}
 
@@ -807,13 +847,65 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 	return res, dur, callOK, nil
 }
 
+// Contained-trap reasons. Only distinctions wazero exposes through its public
+// API are named; everything else, including wasm runtime traps whose error
+// type is internal to wazero, is "unknown".
+const (
+	trapTimeout   = "timeout"    // the invocation timeout expired
+	trapCanceled  = "canceled"   // the request or plugin context ended
+	trapGuestExit = "guest_exit" // the guest exited, e.g. a Go wasip1 panic
+	trapHostPanic = "host_panic" // a Go panic recovered around the call
+	trapUnknown   = "unknown"
+)
+
+// trapLogInterval spaces the contained-trap warning per plugin.
+const trapLogInterval = 10 * time.Second
+
+// trapReason classifies a failed guest call into a bounded reason.
+func trapReason(err error) string {
+	var exit *sys.ExitError
+	if !errors.As(err, &exit) {
+		return trapUnknown
+	}
+	switch exit.ExitCode() {
+	case sys.ExitCodeDeadlineExceeded:
+		return trapTimeout
+	case sys.ExitCodeContextCanceled:
+		return trapCanceled
+	}
+	return trapGuestExit
+}
+
+// logTrap emits the throttled contained-trap warning. It carries only the
+// plugin name and a bounded reason, never the guest's error text, which can
+// echo guest memory or request data.
+func (p *plugin) logTrap(reason string) {
+	if p.trapLog.Allow(trapLogInterval) {
+		p.log.Warn("plugin guest failure contained; request answered 500", "plugin", p.name, "reason", reason)
+	}
+}
+
 // invoke runs the guest's handle_request for one HTTP request. It returns the
 // guest's action (Continue/Stop), the invocation holding any response the guest
 // produced, and an error if the guest trapped, panicked, or timed out (which the
 // caller turns into a 500). On error the instance is discarded, not pooled,
 // because a trapped module may be in an undefined state.
+//
+// parent must carry the request's inspection lease; host allocations made for
+// the invocation are charged to it. On error, any charge the invocation still
+// holds has been released.
 func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.Request) (action uint32, inv *invocation, err error) {
-	inv = &invocation{r: r, w: w, log: p.log, maxRespBody: p.maxRespBody, sub: -1}
+	inv = &invocation{r: r, w: w, log: p.log, maxRespBody: p.maxRespBody, sub: -1, lease: leaseFrom(parent)}
+	if inv.lease == nil {
+		return 0, nil, errNoLease
+	}
+	own := inv
+	defer func() {
+		own.endCall()
+		if err != nil {
+			own.releaseAll()
+		}
+	}()
 	if p.readsBody {
 		if err := p.prepare(parent, w, inv); err != nil {
 			return 0, nil, err
@@ -851,7 +943,11 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 // from the request's cancellation, since the request is already over.
 func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *responseView, state []byte) (uint32, error) {
 	inv := &invocation{r: r, log: p.log, maxRespBody: p.maxRespBody,
-		phase: phaseResponse, sub: -1, state: state, resp: view}
+		phase: phaseResponse, sub: -1, state: state, resp: view, lease: leaseFrom(parent)}
+	if inv.lease == nil {
+		return 0, errNoLease
+	}
+	defer inv.endCall()
 	valid := func(v uint32) bool { return v == responseContinue || (v == responseReject && !view.committed) }
 	if view.committed {
 		parent = context.WithoutCancel(parent)

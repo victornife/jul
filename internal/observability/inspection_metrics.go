@@ -60,7 +60,7 @@ func newInspectionCollector() *inspectionCollector {
 		}, []string{"reason", "mode"}),
 		bodyTimeouts: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_inspection_body_timeouts_total",
-			Help: "Inspected-body receive timeout outcomes, when body integration is enabled.",
+			Help: "Inspected request-body receive outcomes: enforced timeouts, observe-mode would-timeouts and unsupported read deadlines.",
 		}, []string{"protocol", "result"}),
 		unslottedLogging: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "jul_inspection_unslotted_logging_total",

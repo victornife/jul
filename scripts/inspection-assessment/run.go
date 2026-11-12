@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -51,15 +52,18 @@ type RunOptions struct {
 	Reps                int
 	Env                 Envelope
 	Guest, WWW          string
-	Cert, Key           string
-	OriginCPUs          string
-	KillJulAfter        time.Duration
-	Watchdog            time.Duration
-	Startup             time.Duration
-	StopGrace           time.Duration // SIGTERM grace before SIGKILL (default 15s)
-	SampleEvery         time.Duration
-	Sys                 Sys
-	Self                string // the harness executable, re-run as the origin
+	// GuestNoBody is the inspect-nobody guest (FixtureNoBody, plan v3) and
+	// GuestNoBodySource its source directory, for provenance.
+	GuestNoBody, GuestNoBodySource string
+	Cert, Key                      string
+	OriginCPUs                     string
+	KillJulAfter                   time.Duration
+	Watchdog                       time.Duration
+	Startup                        time.Duration
+	StopGrace                      time.Duration // SIGTERM grace before SIGKILL (default 15s)
+	SampleEvery                    time.Duration
+	Sys                            Sys
+	Self                           string // the harness executable, re-run as the origin
 }
 
 // PhaseResult is one measured window.
@@ -214,7 +218,8 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 		pending = *sc.MaxPending
 	}
 	p := ConfigParams{Adapter: Adapters[t.Adapter], WAF: waf, WASM: wasm, Cache: sc.Cache, Port: ports[0], TLSPort: ports[1], AdminPort: ports[2],
-		Origin: r.Origin, WWW: r.Opt.WWW, Plugin: r.Opt.Guest, Cert: r.Opt.Cert, Key: r.Opt.Key, ReadTimeout: sc.ReadTimeout, BodyTimeout: sc.BodyTimeout, MaxPending: pending}
+		Origin: r.Origin, WWW: r.Opt.WWW, Plugin: r.Opt.Guest, Cert: r.Opt.Cert, Key: r.Opt.Key, ReadTimeout: sc.ReadTimeout, BodyTimeout: sc.BodyTimeout, MaxPending: pending,
+		Fixture: FixtureOf(sc), PluginNoBody: r.Opt.GuestNoBody, InspectionMode: sc.InspectionMode, MaxBuffered: sc.MaxBuffered, PluginTimeout: sc.PluginTimeout, PluginMaxInstances: sc.PluginMaxInstances}
 	cfg, err := RenderConfig(p)
 	if err != nil {
 		return fail("render: %v", err)
@@ -237,7 +242,9 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 		return fail("%v", err)
 	}
 	unit := fmt.Sprintf("jul-ia-%d-%d", os.Getpid(), time.Now().UnixNano()%1e9)
-	j, err := StartJul(r.Opt.Sys, r.Opt.Env, unit, t.Path, dir, cfgPath, key, p, r.Opt.Startup)
+	env := r.Opt.Env
+	env.GoMemLimit = sc.GoMemLimit
+	j, err := StartJul(r.Opt.Sys, env, unit, t.Path, dir, cfgPath, key, p, r.Opt.Startup)
 	if err != nil {
 		res.JulExit = "startup failed"
 		return fail("start: %v", err)
@@ -262,7 +269,7 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 		}
 	}()
 	if r.Opt.Env.Mode == "required" {
-		eff := r.Opt.Sys.VerifyEnvelope(j.PID, r.Opt.Env)
+		eff := r.Opt.Sys.VerifyEnvelope(j.PID, env)
 		res.Envelope = &eff
 		if !eff.Verified {
 			res.Invalid = append(res.Invalid, "envelope: "+strings.Join(eff.Problems, "; "))
@@ -274,10 +281,13 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 		res.Invalid = append(res.Invalid, "tls: "+err.Error())
 		return fail("trusted certificate not loaded")
 	}
-	target := Target{Port: p.Port, TLSPort: p.TLSPort, WASM: wasm, Roots: roots}
+	target := Target{Port: p.Port, TLSPort: p.TLSPort, Roots: roots}
+	if wasm {
+		target.Fixture = p.Fixture
+	}
 	samp := NewSampler(j, r.Opt.SampleEvery)
 	before, _ := Scrape(p.AdminPort)
-	res.PreCanaries = RunCanaries(target, waf, wasm)
+	res.PreCanaries = RunCanaries(target, waf)
 	wd := r.Opt.Watchdog
 	if wd == 0 {
 		wd = PlannedDuration(sc) + 3*time.Minute
@@ -316,7 +326,7 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 	sleepCtx(ctx, sc.Recovery.D())
 	res.JulExitedEarly = j.Exited()
 	if !res.JulExitedEarly {
-		res.PostCanaries = RunCanaries(target, waf, wasm)
+		res.PostCanaries = RunCanaries(target, waf)
 		res.HeapInuseGC, res.HeapAllocGC, res.HeapGCUnavailable = HeapAfterGC(p.AdminPort)
 		if st := j.sys.status(j.PID); st != nil {
 			res.RSSAfterGC = kib(st["VmRSS"])
@@ -338,6 +348,10 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 		res.JulExit = j.ExitState()
 	}
 	in, fi := validity(res, r.Opt.Env)
+	res.Invalid, res.Findings = append(res.Invalid, in...), append(res.Findings, fi...)
+	in, fi = exercised(sc.Require, res)
+	res.Invalid, res.Findings = append(res.Invalid, in...), append(res.Findings, fi...)
+	in, fi = drained(sc, res)
 	res.Invalid, res.Findings = append(res.Invalid, in...), append(res.Findings, fi...)
 	res.State = "completed"
 	return res
@@ -433,6 +447,70 @@ func validity(res RunResult, env Envelope) (instrument, findings []string) {
 
 func slicesClone[T any](s []T) []T { return append([]T(nil), s...) }
 
+// drainGauges are the governor gauges that must be zero once the recovery
+// window has let every represented request finish.
+var drainGauges = []string{
+	`jul_inspection_leases`,
+	`jul_inspection_bytes{class="base"}`,
+	`jul_inspection_bytes{class="buffer"}`,
+	`jul_inspection_bytes{class="waf_state"}`,
+	`jul_inspection_evaluations{state="active"}`,
+	`jul_inspection_evaluations{state="waiting"}`,
+}
+
+// drained checks that the governor holds no lease, bytes or evaluation after
+// recovery. A nonzero gauge is a runtime finding. Targets without the gauges
+// (before I1) are not judged, except that the budget churn requires them.
+func drained(sc Scenario, res RunResult) (instrument, findings []string) {
+	if res.JulExitedEarly {
+		return nil, nil
+	}
+	var missing []string
+	for _, g := range drainGauges {
+		v, ok := res.Foundation[g]
+		switch {
+		case !ok:
+			missing = append(missing, g)
+		case v != 0:
+			findings = append(findings, fmt.Sprintf("governor not drained after recovery: %s = %g", g, v))
+		}
+	}
+	if len(missing) > 0 && sc.ReloadChurn == "budget" {
+		instrument = append(instrument, "unexercised: governor drain gauges unavailable: "+strings.Join(missing, ", "))
+	}
+	return instrument, findings
+}
+
+// exercised judges a scenario's plan v3 exercise requirements.
+func exercised(reqs []Requirement, res RunResult) (instrument, findings []string) {
+	for _, q := range reqs {
+		name, v, ok := q.Counter, int64(0), true
+		if q.Counter != "" {
+			var f float64
+			f, ok = res.CounterDelta[q.Counter]
+			v = int64(f)
+		} else {
+			name = "class " + q.Class
+			for _, ph := range res.Phases {
+				for _, c := range ph.Classes {
+					v += int64(c.Classes[q.Class])
+				}
+			}
+		}
+		switch {
+		case !ok && q.AtLeast != nil:
+			instrument = append(instrument, fmt.Sprintf("unexercised: %s unavailable", name))
+		case !ok:
+			findings = append(findings, fmt.Sprintf("exercise check: %s unavailable", name))
+		case q.AtLeast != nil && v < *q.AtLeast:
+			instrument = append(instrument, fmt.Sprintf("unexercised: %s = %d, want at least %d", name, v, *q.AtLeast))
+		case q.AtMost != nil && v > *q.AtMost:
+			findings = append(findings, fmt.Sprintf("%s = %d, want at most %d", name, v, *q.AtMost))
+		}
+	}
+	return instrument, findings
+}
+
 // PlannedDuration is the nominal length of a scenario excluding startup.
 func PlannedDuration(sc Scenario) time.Duration {
 	d := sc.Recovery.D()
@@ -487,8 +565,15 @@ func (r *Runner) runPhase(ctx context.Context, j *Jul, samp *Sampler, t Target, 
 	rctx, rcancel := context.WithDeadline(ctx, end)
 	defer rcancel()
 	var reloadWG sync.WaitGroup
+	var reloadFindings, reloadInstrument []string
 	if sc.Kind == "reload" {
-		reloadWG.Go(func() { res.Reloads = reloadChurn(rctx, j, p) })
+		reloadWG.Go(func() {
+			var acked int
+			res.Reloads, reloadFindings, acked = reloadChurn(rctx, j, p, sc.ReloadChurn, sc.ReloadEvery.D())
+			if sc.ReloadChurn == "budget" && acked < budgetSteps {
+				reloadInstrument = append(reloadInstrument, fmt.Sprintf("unexercised: %d budget reloads acknowledged, want at least %d", acked, budgetSteps))
+			}
+		})
 	}
 	classes := make([]ClassStats, len(ph.Workloads))
 	var wg sync.WaitGroup
@@ -504,6 +589,8 @@ func (r *Runner) runPhase(ctx context.Context, j *Jul, samp *Sampler, t Target, 
 	wg.Wait()
 	<-timerDone
 	reloadWG.Wait()
+	res.Findings = append(res.Findings, reloadFindings...)
+	res.Invalid = append(res.Invalid, reloadInstrument...)
 	out.Classes = classes
 	if cpuFrom != nil && cpuTo != nil && ctx.Err() == nil {
 		frac := round3(float64(*cpuTo-*cpuFrom) / (ph.Measure.D().Seconds() * 1e6) / Rules.EnvelopeCPUs)
@@ -513,33 +600,163 @@ func (r *Runner) runPhase(ctx context.Context, j *Jul, samp *Sampler, t Target, 
 	return out
 }
 
-// reloadChurn reloads every 2 s, alternating plugin and WAF policy, with
-// reload 5 invalid, exactly as #695 s9.
-func reloadChurn(ctx context.Context, j *Jul, base ConfigParams) []string {
-	var notes []string
+// reloadChurn reloads every 2 s (or the scenario's ReloadEvery), alternating plugin and WAF policy, with
+// reload 5 invalid, exactly as #695 s9. The "budget" churn (plan v3) also
+// cycles max_buffered_bytes and mode, and makes reload 5 inadmissible with a
+// budget below the route minimum instead of an invalid WAF directive.
+// reloadEvery is the default reload churn interval; reloadEveryTest, when
+// set by tests, replaces every interval.
+const reloadEvery = 2 * time.Second
+
+var reloadEveryTest time.Duration
+
+// budgetSteps is the number of budget reloads p4 must acknowledge: steps 1-4
+// cycle the limits and step 5 is the inadmissible reload.
+const budgetSteps = 5
+
+// reloadChurn returns the reload notes, runtime findings and the number of
+// acknowledged budget reloads. ReloadEvery is the delay after each step (and
+// its acknowledgement), not a fixed cadence.
+func reloadChurn(ctx context.Context, j *Jul, base ConfigParams, churn string, every time.Duration) (notes, findings []string, acked int) {
+	if every <= 0 {
+		every = reloadEvery
+	}
+	if reloadEveryTest > 0 {
+		every = reloadEveryTest
+	}
 	start := time.Now()
+	// The budget churn starts from the scenario's own limits.
+	live := effectiveWant(base.MaxBuffered, base.InspectionMode)
 	for i := 1; ; i++ {
-		sleepCtx(ctx, 2*time.Second)
+		sleepCtx(ctx, every)
 		if ctx.Err() != nil {
-			return notes
+			return notes, findings, acked
 		}
 		p := base
 		p.NameA = []string{"a1", "a2"}[i%2]
 		p.WAFRuleID = 1695101 + i%2*10
-		p.BrokenWAF = i == 5
+		p.BrokenWAF = i == 5 && churn == ""
+		if churn == "budget" {
+			p.MaxBuffered, p.InspectionMode = budgetStep(i)
+		}
+		var before map[string]float64
+		if churn == "budget" {
+			before, _ = Scrape(j.Params.AdminPort)
+		}
 		cfg, err := RenderConfig(p)
 		if err == nil {
 			err = j.Reload(cfg)
 		}
 		note := fmt.Sprintf("t+%.1fs reload %d nameA=%s rule=%d broken=%v", time.Since(start).Seconds(), i, p.NameA, p.WAFRuleID, p.BrokenWAF)
+		if churn == "budget" {
+			note += fmt.Sprintf(" max_buffered=%s mode=%s", p.MaxBuffered, p.InspectionMode)
+		}
 		if err != nil {
 			note += " error=" + err.Error()
+		} else if churn == "budget" {
+			want, wantOutcome := effectiveWant(p.MaxBuffered, p.InspectionMode), "applied_live"
+			if i == 5 {
+				want, wantOutcome = live, "not_applied"
+			}
+			outcome, got, aerr := ackReload(ctx, j.Params.AdminPort, before, 10*time.Second)
+			note += fmt.Sprintf(" outcome=%s effective=%s", outcome, got)
+			switch {
+			case aerr != nil:
+				note += " ack_error=" + aerr.Error()
+				if ctx.Err() == nil {
+					findings = append(findings, fmt.Sprintf("reload %d: %v", i, aerr))
+				}
+			case outcome != wantOutcome || got != want:
+				acked++
+				findings = append(findings, fmt.Sprintf("reload %d: outcome %s effective %s, want %s effective %s", i, outcome, got, wantOutcome, want))
+			default:
+				acked++
+			}
+			if outcome == "applied_live" {
+				live = got
+			}
 		}
 		notes = append(notes, note)
-		if p.BrokenWAF {
+		if p.BrokenWAF || (churn == "budget" && i == 5) {
 			base.NameA = p.NameA
 		}
 	}
+}
+
+// effectiveWant renders the effective limits a budget reload must produce,
+// in the form ackReload reports.
+func effectiveWant(maxBuffered, mode string) string {
+	if mode == "" {
+		mode = "enforce"
+	}
+	n, _ := strconv.ParseUint(strings.TrimSuffix(maxBuffered, "m"), 10, 64)
+	return fmt.Sprintf("mode=%s max_buffered_bytes=%d", mode, n<<20)
+}
+
+// ackReload waits for the SIGHUP reload outcome counter to advance past
+// before, then reads the effective inspection limits from the status API.
+func ackReload(ctx context.Context, adminPort int, before map[string]float64, limit time.Duration) (outcome, effective string, err error) {
+	if before == nil {
+		return "", "", errors.New("metrics unavailable before the reload")
+	}
+	deadline := time.Now().Add(limit)
+	for outcome == "" {
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return "", "", fmt.Errorf("no jul_reload_total sighup outcome within %s", limit)
+		}
+		sleepCtx(ctx, 100*time.Millisecond)
+		after, serr := Scrape(adminPort)
+		if serr != nil {
+			continue
+		}
+		for _, o := range []string{"applied_live", "applied_degraded", "no_change", "not_applied", "saved_not_live"} {
+			f := []string{`source="sighup"`, `outcome="` + o + `"`}
+			a, _ := Sum(after, "jul_reload_total", f...)
+			b, _ := Sum(before, "jul_reload_total", f...)
+			if a > b {
+				outcome = o
+				break
+			}
+		}
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/api/v1/status", adminPort), nil)
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	if err != nil {
+		return outcome, "", fmt.Errorf("status: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var st struct {
+		Inspection *struct {
+			Effective struct {
+				Mode             string `json:"mode"`
+				MaxBufferedBytes uint64 `json:"max_buffered_bytes"`
+			} `json:"effective"`
+		} `json:"inspection"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil || resp.StatusCode != http.StatusOK || st.Inspection == nil {
+		return outcome, "", fmt.Errorf("status: code %d, inspection status unavailable", resp.StatusCode)
+	}
+	e := st.Inspection.Effective
+	return outcome, fmt.Sprintf("mode=%s max_buffered_bytes=%d", e.Mode, e.MaxBufferedBytes), nil
+}
+
+// budgetStep is reload i of the "budget" churn: 128m (decrease), observe,
+// 512m (increase), 256m (back), with reload 5 at 1m, below the route minimum,
+// so enforce-mode validation refuses it and the previous limits stay.
+func budgetStep(i int) (maxBuffered, mode string) {
+	if i == 5 {
+		return "1m", ""
+	}
+	switch i % 4 {
+	case 1:
+		return "128m", ""
+	case 2:
+		return "256m", "observe"
+	case 3:
+		return "512m", ""
+	}
+	return "256m", ""
 }
 
 // StartOrigin runs the harness's origin subcommand as an owned subprocess.

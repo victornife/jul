@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -127,24 +128,33 @@ func TestVerifyRejectsIncompleteOrWrongResponses(t *testing.T) {
 	}
 	echo := map[string]string{"X-Origin-Req-Len": "5"}
 	wasm := map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "8", "X-Assess-b-Resp": "8", "X-Echo-B-Req-Len": "5"}
+	nobody := map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "state-4096", "X-Assess-b-Resp": "state-4096", "X-Echo-A-State": "4096", "X-Echo-B-State": "4096"}
 	cases := []struct {
 		resp *http.Response
 		body []byte
-		wasm bool
+		fix  string
 		want string
 	}{
-		{mk(1, echo), good, false, ""},
-		{mk(2, echo), good, false, "proto"},
-		{mk(1, echo), good[:7], false, "resp-len"},
-		{mk(1, echo), append(good[:7:7], 'X'), false, "resp-content"},
-		{mk(1, nil), good, false, "origin-req-len"},
-		{mk(1, wasm), good, true, ""},
-		{mk(1, echo), good, true, "missing a-resp"},
-		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "8", "X-Assess-b-Resp": "7"}), good, true, "b-resp"},
-		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "8", "X-Assess-b-Resp": "8"}), good, true, "b-req-len"},
+		{mk(1, echo), good, "", ""},
+		{mk(2, echo), good, "", "proto"},
+		{mk(1, echo), good[:7], "", "resp-len"},
+		{mk(1, echo), append(good[:7:7], 'X'), "", "resp-content"},
+		{mk(1, nil), good, "", "origin-req-len"},
+		{mk(1, wasm), good, FixtureFull, ""},
+		{mk(1, echo), good, FixtureFull, "missing a-resp"},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "8", "X-Assess-b-Resp": "7"}), good, FixtureFull, "b-resp"},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "8", "X-Assess-b-Resp": "8"}), good, FixtureFull, "b-req-len"},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Echo-A-Req-Len": "5", "X-Echo-B-Req-Len": "5"}), good, FixtureRequestOnly, ""},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Echo-A-Req-Len": "4", "X-Echo-B-Req-Len": "5"}), good, FixtureRequestOnly, "a-req-len"},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Echo-A-Req-Len": "5"}), good, FixtureRequestOnly, "b-req-len"},
+		{mk(1, nobody), good, FixtureNoBody, ""},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a2-Resp": "state-4096", "X-Assess-b-Resp": "state-4096", "X-Echo-A-State": "4096", "X-Echo-B-State": "4096"}), good, FixtureNoBody, ""},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "state-4096", "X-Assess-b-Resp": "state-0", "X-Echo-A-State": "4096", "X-Echo-B-State": "4096"}), good, FixtureNoBody, "b-resp"},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-b-Resp": "state-4096", "X-Echo-A-State": "4096", "X-Echo-B-State": "4096"}), good, FixtureNoBody, "a-resp"},
+		{mk(1, map[string]string{"X-Origin-Req-Len": "5", "X-Assess-a-Resp": "state-4096", "X-Assess-b-Resp": "state-4096", "X-Echo-B-State": "4096"}), good, FixtureNoBody, "state-echo"},
 	}
 	for i, tc := range cases {
-		got := Verify(tc.resp, tc.body, w, 5, tc.wasm, "h1")
+		got := Verify(tc.resp, tc.body, w, 5, tc.fix, "h1")
 		if (tc.want == "") != (got == "") || !strings.HasPrefix(got, tc.want) {
 			t.Errorf("case %d: %q, want %q", i, got, tc.want)
 		}
@@ -294,7 +304,25 @@ func TestCounterFiltersMatchJulLabels(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(src)
+	insp, err := os.ReadFile(filepath.Join("..", "..", "internal", "observability", "inspection_metrics.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range CounterMetrics {
+		if strings.HasPrefix(c.Metric, "jul_inspection_") {
+			// The inspection collector pre-registers every label value as a
+			// quoted literal rather than listing them in the help text.
+			if !strings.Contains(string(insp), `Name: "`+c.Metric+`"`) {
+				t.Errorf("%s: metric %s not defined by Jul", c.Key, c.Metric)
+			}
+			for _, f := range c.Filters {
+				_, value, _ := strings.Cut(f, "=")
+				if !strings.Contains(string(insp), value) {
+					t.Errorf("%s: %s is not a registered %s value", c.Key, f, c.Metric)
+				}
+			}
+			continue
+		}
 		i := strings.Index(text, `Name: "`+c.Metric+`"`)
 		if i < 0 {
 			t.Errorf("%s: metric %s not defined by Jul", c.Key, c.Metric)
@@ -363,6 +391,21 @@ func TestVerifyEnvelopeChecksEffectiveLimits(t *testing.T) {
 			t.Errorf("parseSize(%q)=%d %v", in, got, err)
 		}
 	}
+	want := DefaultEnvelope
+	want.GoMemLimit = "480MiB"
+	if e := fakeSys(t, "805306368", "0", "200000 100000", "0-1", "2").VerifyEnvelope(42, want); e.Verified {
+		t.Error("a missing GOMEMLIMIT verified against a scenario that sets it")
+	}
+	sys := fakeSys(t, "805306368", "0", "200000 100000", "0-1", "2")
+	if err := os.WriteFile(filepath.Join(sys.Proc, "42", "environ"), []byte("GOMAXPROCS=2\x00GOMEMLIMIT=480MiB\x00"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if e := sys.VerifyEnvelope(42, want); !e.Verified || e.GoMemLimit != "480MiB" {
+		t.Errorf("scenario GOMEMLIMIT not verified: %+v", e)
+	}
+	if e := sys.VerifyEnvelope(42, DefaultEnvelope); e.Verified {
+		t.Error("an inherited GOMEMLIMIT verified against a scenario without one")
+	}
 	if fmtp(nil) != "unavailable" {
 		t.Error("nil must be unavailable, not zero")
 	}
@@ -378,6 +421,14 @@ func TestLaunchAppliesEnvelope(t *testing.T) {
 	}
 	if got := strings.Join(Launch(Envelope{Mode: "none", GOMAXPROCS: 2}, "u", "j", "c", "t").Args, " "); strings.Contains(got, "systemd-run") || strings.Contains(got, "taskset") {
 		t.Errorf("unconstrained launch %q", got)
+	}
+	if got := strings.Join(c.Args, " "); !strings.Contains(got, "env -u GOMEMLIMIT GOMAXPROCS=2") {
+		t.Errorf("launch without a scenario GOMEMLIMIT must clear an inherited one: %q", got)
+	}
+	env := DefaultEnvelope
+	env.GoMemLimit = "480MiB"
+	if got := strings.Join(Launch(env, "u", "j", "c", "t").Args, " "); !strings.Contains(got, "GOMEMLIMIT=480MiB") || strings.Contains(got, "-u GOMEMLIMIT") {
+		t.Errorf("scenario GOMEMLIMIT not applied: %q", got)
 	}
 	if err := EnvelopeSupported(Sys{Cgroup: t.TempDir()}); err == nil {
 		t.Error("missing cgroup v2 hierarchy accepted")
@@ -401,7 +452,7 @@ func TestPlanSelectionAndFrozenFile(t *testing.T) {
 		t.Error("unknown scenario")
 	}
 	cells, err := Select("qualification", "campaign-normal", "", "")
-	if err != nil || len(cells) != 10 {
+	if err != nil || len(cells) != 11 {
 		t.Fatalf("%v %d", err, len(cells))
 	}
 	for _, c := range cells {
@@ -985,5 +1036,230 @@ func TestBodyTimeoutNeedsGlobalInspection(t *testing.T) {
 	}
 	if _, err := os.Stat(out); err == nil {
 		t.Error("refused run created its output directory")
+	}
+}
+
+func TestPlanV3FixturesAndLimits(t *testing.T) {
+	base := ConfigParams{Adapter: Adapters["current"], Origin: "o:1", WASM: true, Plugin: "/g/load.wasm", PluginNoBody: "/g/nobody.wasm"}
+	render := func(p ConfigParams) string {
+		t.Helper()
+		b, err := RenderConfig(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	full := render(base)
+	if !strings.Contains(full, `subscribe = "true", replace = "true"`) || strings.Contains(full, "[global.inspection]") {
+		t.Errorf("full fixture changed:\n%s", full)
+	}
+	p := base
+	p.Fixture, p.MaxBuffered, p.InspectionMode = FixtureRequestOnly, "128m", "observe"
+	ro := render(p)
+	if strings.Contains(ro, "subscribe") || !strings.Contains(ro, `config = { name = "b", read_body = "true" }`) ||
+		!strings.Contains(ro, "[global.inspection]\nmax_buffered_bytes = \"128m\"\nmode = \"observe\"") {
+		t.Errorf("request-only fixture:\n%s", ro)
+	}
+	if strings.Contains(ro, "max_instances") || strings.Contains(ro, "\ntimeout = ") {
+		t.Errorf("request-only fixture without pool settings rendered them:\n%s", ro)
+	}
+	p.PluginTimeout, p.PluginMaxInstances = "2s", 4
+	if ro := render(p); strings.Count(ro, "timeout = \"2s\"\nmax_instances = 4\nconfig = ") != 2 {
+		t.Errorf("request-only pool settings must apply to both plugins:\n%s", ro)
+	}
+	p.Fixture = FixtureFull
+	if _, err := RenderConfig(p); err == nil {
+		t.Error("pool settings rendered outside the request-only fixture")
+	}
+	p = base
+	p.Fixture, p.WAF = FixtureNoBody, true
+	nb := render(p)
+	if !strings.Contains(nb, `path = "/g/nobody.wasm"`) || strings.Contains(nb, "/g/load.wasm") || !strings.Contains(nb, `state_bytes = "4096"`) ||
+		!strings.Contains(nb, `max_buffered_bytes = "512m"`) {
+		t.Errorf("nobody fixture:\n%s", nb)
+	}
+	p.MaxBuffered = "1g"
+	if s := render(p); !strings.Contains(s, `max_buffered_bytes = "1g"`) || strings.Contains(s, "512m") {
+		t.Errorf("scenario budget must replace the adapter WAF budget:\n%s", s)
+	}
+	p.PluginNoBody = ""
+	if _, err := RenderConfig(p); err == nil {
+		t.Error("nobody fixture rendered without its guest")
+	}
+	p = base
+	p.Fixture = "other"
+	if _, err := RenderConfig(p); err == nil {
+		t.Error("unknown fixture rendered")
+	}
+	for _, f := range []func(*ConfigParams){func(c *ConfigParams) { c.MaxBuffered = "1g" }, func(c *ConfigParams) { c.InspectionMode = "observe" }} {
+		q := base
+		q.Adapter = Adapters["baseline-858590dc"]
+		f(&q)
+		if _, err := RenderConfig(q); err == nil {
+			t.Error("baseline adapter rendered [global.inspection]")
+		}
+	}
+	var errOut bytes.Buffer
+	if Main([]string{"run", "-out", filepath.Join(t.TempDir(), "run"), "-profile", "quick", "-envelope", "none", "-scenario", "p2-saturation-plugin-h1",
+		"-target", "base:baseline-858590dc:/bin/true"}, io.Discard, &errOut) == 0 || !strings.Contains(errOut.String(), "cannot express") {
+		t.Errorf("run accepted an inexpressible budget: %s", errOut.String())
+	}
+	errOut.Reset()
+	if Main([]string{"run", "-out", filepath.Join(t.TempDir(), "run"), "-profile", "quick", "-envelope", "none", "-scenario", "p3-nobody-plugin-h1",
+		"-variants", "wasm", "-guest", "/bin/true", "-target", "main:current:/bin/true"}, io.Discard, &errOut) == 0 || !strings.Contains(errOut.String(), "-guest-nobody") {
+		t.Errorf("run accepted the nobody fixture without its guest: %s", errOut.String())
+	}
+	steps := map[int][2]string{1: {"128m", ""}, 2: {"256m", "observe"}, 3: {"512m", ""}, 4: {"256m", ""}, 5: {"1m", ""}, 9: {"128m", ""}}
+	for i, want := range steps {
+		if b, m := budgetStep(i); b != want[0] || m != want[1] {
+			t.Errorf("budgetStep(%d) = %s %s", i, b, m)
+		}
+	}
+	if FixtureOf(Scenario{}) != FixtureFull {
+		t.Error("empty fixture must be full")
+	}
+	o := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/proxy/echo?resp=8", nil)
+	req.Header.Set("X-Assess-a2-State", "4096")
+	req.Header.Set("X-Assess-a1-Req-Len", "7")
+	(&Origin{}).ServeHTTP(o, req)
+	if o.Header().Get("X-Echo-A-State") != "4096" || o.Header().Get("X-Echo-A-Req-Len") != "7" {
+		t.Errorf("origin echo %v", o.Header())
+	}
+}
+
+func TestPlanV3ExerciseChecksAndGuestIdentity(t *testing.T) {
+	// Guest identities are compared across every run, not only the first,
+	// and the non-body guest is checked too.
+	none := writeRun(t, nil)
+	g := func(sha string) func(*Manifest, *RunResult) {
+		return func(m *Manifest, _ *RunResult) { m.Guest = &Artifact{SHA256: sha} }
+	}
+	nb := func(sha string) func(*Manifest, *RunResult) {
+		return func(m *Manifest, _ *RunResult) { m.GuestNoBody = &Artifact{SHA256: sha} }
+	}
+	if _, err := LoadRuns([]string{none, writeRun(t, g("a")), writeRun(t, g("b"))}); err == nil || !strings.Contains(err.Error(), "guest b differs from a") {
+		t.Errorf("guest mismatch after a guest-less run: %v", err)
+	}
+	if _, err := LoadRuns([]string{writeRun(t, nb("a")), none, writeRun(t, nb("b"))}); err == nil || !strings.Contains(err.Error(), "guest_nobody b differs from a") {
+		t.Errorf("nobody guest mismatch: %v", err)
+	}
+	if _, err := LoadRuns([]string{writeRun(t, nb("a")), writeRun(t, g("x")), writeRun(t, nb("a"))}); err != nil {
+		t.Errorf("matching identities rejected: %v", err)
+	}
+
+	// Only the governor's exact overload answer is the overload class.
+	mk := func(code int, retry, body string) string {
+		h := http.Header{}
+		if retry != "" {
+			h.Set("Retry-After", retry)
+		}
+		return StatusClass(&http.Response{StatusCode: code, Header: h}, []byte(body))
+	}
+	if got := mk(503, "1", "inspection_overloaded\n"); got != OverloadClass {
+		t.Errorf("governor overload classified %q", got)
+	}
+	for _, c := range [][3]string{{"503", "", "inspection_overloaded\n"}, {"503", "1", "plugin pool exhausted\n"}, {"503", "2", "inspection_overloaded"}} {
+		if got := mk(503, c[1], c[2]); got != "status:503" {
+			t.Errorf("%v classified %q, want status:503", c, got)
+		}
+	}
+	if got := mk(408, "1", "inspection_overloaded"); got != "status:408" {
+		t.Errorf("408 classified %q", got)
+	}
+
+	// Exercise requirements: unmet minimums are instrument invalidity,
+	// exceeded maximums are findings, and missing counters are never a pass.
+	res := RunResult{CounterDelta: Metrics{"inspection_rejected_enforce": 3, "inspection_rejected_observe": 0},
+		Phases: []PhaseResult{{Classes: []ClassStats{{Classes: map[string]int{OverloadClass: 2}}, {Classes: map[string]int{OverloadClass: 1, "ok": 4}}}}}}
+	in, fi := exercised([]Requirement{
+		{Counter: "inspection_rejected_enforce", AtLeast: atLeast(1)}, {Class: OverloadClass, AtLeast: atLeast(3)},
+		{Counter: "inspection_rejected_observe", AtMost: atLeast(0)},
+	}, res)
+	if len(in) != 0 || len(fi) != 0 {
+		t.Errorf("satisfied requirements reported %v %v", in, fi)
+	}
+	in, fi = exercised([]Requirement{
+		{Counter: "inspection_rejected_observe", AtLeast: atLeast(1)}, {Class: OverloadClass, AtLeast: atLeast(4)},
+		{Counter: "inspection_rejected_enforce", AtMost: atLeast(0)}, {Class: OverloadClass, AtMost: atLeast(0)},
+		{Counter: "absent", AtLeast: atLeast(1)}, {Counter: "absent", AtMost: atLeast(0)},
+	}, res)
+	wantIn := []string{"unexercised: inspection_rejected_observe = 0, want at least 1", "unexercised: class " + OverloadClass + " = 3, want at least 4", "unexercised: absent unavailable"}
+	wantFi := []string{"inspection_rejected_enforce = 3, want at most 0", "class " + OverloadClass + " = 3, want at most 0", "exercise check: absent unavailable"}
+	if !slices.Equal(in, wantIn) || !slices.Equal(fi, wantFi) {
+		t.Errorf("exercised = %q / %q", in, fi)
+	}
+
+	// p2 retains more than its budget for the whole window; p2o is its
+	// observe twin with the same load.
+	var p1, p2, p2o, p2h, p4 Scenario
+	for _, sc := range BuildScenarios(Profiles["qualification"]) {
+		switch sc.ID {
+		case "p4-reload-budget-plugin":
+			p4 = sc
+		case "p1-large-body-plugin-h1":
+			p1 = sc
+		case "p2-saturation-plugin-h1":
+			p2 = sc
+		case "p2o-saturation-plugin-observe-h1":
+			p2o = sc
+		case "p2h-saturation-hostile-h1":
+			p2h = sc
+		}
+	}
+	load := p2.Phases[0].Workloads[0]
+	if retained := int64(load.Concurrency) * int64(len(BodyFor(load))); retained <= 128<<20 || load.BodyBytes >= 1<<20 || !strings.Contains(load.Path, "delay=5000") {
+		t.Errorf("p2 load retains %d bytes with %d-byte bodies on %s", retained, load.BodyBytes, load.Path)
+	}
+	if !load.HonorRetryAfter || !p2.Phases[0].Workloads[1].HonorRetryAfter || p2.GoMemLimit == "" || p2.PluginMaxInstances == 0 {
+		t.Errorf("p2 must model compliant clients inside a sized static footprint: %+v", p2)
+	}
+	hostile := p2h.Phases[0].Workloads[0]
+	if hostile.HonorRetryAfter || hostile.Path != load.Path || hostile.Concurrency != load.Concurrency || p2h.MaxBuffered != p2.MaxBuffered ||
+		p2h.GoMemLimit != p2.GoMemLimit || p2h.PluginMaxInstances != p2.PluginMaxInstances || p2h.Comparison != "record" {
+		t.Errorf("p2h must differ from p2 only by ignoring Retry-After: %+v", p2h)
+	}
+	if p1.PluginMaxInstances != p2.PluginMaxInstances || p1.PluginTimeout != p2.PluginTimeout || p1.GoMemLimit != p2.GoMemLimit || p1.MaxBuffered != "" {
+		t.Errorf("p1 must use the plugin-only static footprint at the default budget: %+v", p1)
+	}
+	if p4.ReloadEvery.D() != 5*time.Second || p4.PluginMaxInstances != p1.PluginMaxInstances || p4.GoMemLimit != p1.GoMemLimit {
+		t.Errorf("p4 must reload every 5 s inside p1's static footprint: %+v", p4)
+	}
+	if !slices.Contains(Suites["i2-plugin"], p2h.ID) {
+		t.Error("p2h is not in the i2-plugin suite")
+	}
+	if p2o.Phases[0].Workloads[0].Path != load.Path || p2o.InspectionMode != "observe" || len(p2.Require) == 0 || len(p2o.Require) == 0 {
+		t.Errorf("p2o is not p2's observe twin: %+v", p2o)
+	}
+}
+
+func TestDriveHonorsRetryAfterOnlyWhenAsked(t *testing.T) {
+	var hits atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, "inspection_overloaded\n")
+	}))
+	defer srv.Close()
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	w := Workload{Name: "load", Proto: "h1", Method: "POST", Path: "/", BodyBytes: 64, BodyShape: "fill", Concurrency: 1,
+		Timeout: Dur(5 * time.Second), Expect: []string{OverloadClass}}
+	run := func(honor bool) ClassStats {
+		hits.Store(0)
+		w.HonorRetryAfter = honor
+		now := time.Now()
+		st, err := Drive(context.Background(), Target{Port: port}, w, now, now.Add(1500*time.Millisecond))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st
+	}
+	if st := run(true); st.Classes[OverloadClass] != 2 || hits.Load() != 2 {
+		t.Errorf("compliant worker sent %d requests in 1.5 s (classes %v), want 2", hits.Load(), st.Classes)
+	}
+	if st := run(false); st.Classes[OverloadClass] < 10 {
+		t.Errorf("hostile worker sent only %d requests (classes %v)", hits.Load(), st.Classes)
 	}
 }

@@ -69,7 +69,7 @@ func (h *respHooks) count(m map[string]int, k string) int {
 func v2Manager(t *testing.T, kv KVStore) (*Manager, *respHooks) {
 	t.Helper()
 	h := &respHooks{results: map[string]int{}, noBody: map[string]int{}, reqs: map[string]int{}}
-	m, err := NewManager(Options{
+	m, err := NewManager(Options{Inspection: testGovernor(t),
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		KV:     kv,
 		OnInvocation: func(_, result string, _ time.Duration) {

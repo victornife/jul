@@ -331,26 +331,27 @@ type GlobalConfig struct {
 // intentionally global rather than listener- or route-scoped.
 type InspectionConfig struct {
 	// Mode is "enforce" (default) or "observe" for governor accounting; live
-	// requests are not governed in I1.
+	// plugin requests are governed, WAF requests are not yet.
 	Mode string `toml:"mode"`
 	// MaxBufferedBytes is the shared governor ceiling for base, buffer and
-	// estimated WAF state; live requests are not governed in I1. It must be
+	// estimated WAF state; it governs live plugin requests, not WAF requests
+	// yet. It must be
 	// positive, and in enforce mode at least the largest inspected route's
 	// worst-case single-request charge (observe only warns).
 	MaxBufferedBytes *Size `toml:"max_buffered_bytes,omitempty"`
 	// MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and
-	// values plus 64 bytes per occurrence); it is not applied to live responses
-	// in I1. It is not a wire-size or actual-memory bound.
+	// values plus 64 bytes per occurrence); it is not yet applied to live
+	// responses. It is not a wire-size or actual-memory bound.
 	MaxResponseHeaderBytes *Size `toml:"max_response_header_bytes,omitempty"`
-	// MaxConcurrentEvaluations is the governor slot limit; live evaluations are
-	// not governed in I1. Zero resolves to the candidate
+	// MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations
+	// do not acquire slots yet. Zero resolves to the candidate
 	// worker_threads/GOMAXPROCS setting.
 	MaxConcurrentEvaluations int `toml:"max_concurrent_evaluations"`
 	// EvaluationQueueTimeout bounds governor slot waiting; live requests do not
-	// acquire slots in I1. Explicit zero disables queueing.
+	// acquire slots yet. Explicit zero disables queueing.
 	EvaluationQueueTimeout *Duration `toml:"evaluation_queue_timeout,omitempty"`
-	// BodyTimeout bounds a future inspected-body receive; it is not applied to
-	// live requests in I1. Explicit zero disables that deadline.
+	// BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only
+	// routes do not apply it yet. Explicit zero disables that deadline.
 	BodyTimeout *Duration `toml:"body_timeout,omitempty"`
 }
 

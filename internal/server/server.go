@@ -25,6 +25,7 @@ import (
 	"jul/internal/lifecycle"
 	"jul/internal/logthrottle"
 	"jul/internal/redact"
+	"jul/internal/reqdeadline"
 	"jul/internal/respwriter"
 	"jul/internal/upstream"
 	"jul/internal/versionid"
@@ -1205,6 +1206,12 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 		// this generation open instead of escaping its accounting.
 		ctx = background.WithLease(ctx, g)
 		ctx = respwriter.WithExchangeRegistry(ctx, s.exchanges, g.genID)
+		// One read-deadline owner per request or stream, on the transport's
+		// own writer (ADR 0032 H6). End runs before the handler returns, so
+		// no inspection timer or abort touches w afterwards.
+		deadlines := reqdeadline.New(w, reqdeadline.ProtocolOf(r))
+		defer deadlines.End()
+		ctx = reqdeadline.With(ctx, deadlines)
 
 		s.mu.Lock()
 		entry := s.listeners[addr]

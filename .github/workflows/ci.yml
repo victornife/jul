@@ -328,7 +328,7 @@ jobs:
           go test -race -count=1 -coverprofile=stream-load.cover scripts/burn-in-stream-load.go scripts/burn-in-stream-load_test.go
           go test -race -count=1 -coverprofile=http-load.cover scripts/burn-in-load.go scripts/burn-in-load_test.go
           python3 scripts/test_check_added_go_coverage.py
-          (cd examples/plugins && go test -count=1 -coverprofile=../../inspect-load.cover ./inspect-load/inspect)
+          (cd examples/plugins && go test -count=1 -coverprofile=../../inspect-load.cover ./inspect-load/inspect ./inspect-nobody/nobody)
           sed -i 's|^juliaplugins/|examples/plugins/|' inspect-load.cover
           git diff --unified=0 origin/main...HEAD -- '*.go' | python3 scripts/strip_moved_lines.py > stream-load.diff
           python3 scripts/check-added-go-coverage.py --diff stream-load.diff --profile cover.out --profile stream-load.cover --profile http-load.cover --profile inspect-load.cover --profile native-coverage/windows-lean.cover --profile native-coverage/windows-full.cover > stream-load-coverage.json

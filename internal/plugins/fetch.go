@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 )
 
 // errFetchBlocked marks a fetch rejected by a guard (host not allow-listed, or
@@ -28,17 +30,40 @@ type ipResolver interface {
 	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 }
 
+// fetchBodyCloseGrace bounds how long a fetch waits, after its response was
+// read and its context cancelled, for the transport to close every reader of
+// the charged request-body copy before the host call returns.
+var fetchBodyCloseGrace = 2 * time.Second
+
 // doFetch performs a guarded outbound HTTP request for a plugin holding the
 // fetch capability. It enforces the allow-list, an SSRF address guard, a
 // per-call timeout, and a response-size cap, and refuses redirects to hosts that
 // fall outside the same guards.
-func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []byte) (int, []byte, error) {
-	// Clear any previous fetch response so a failed call does not leave stale
-	// data visible to fetch_read / last_fetch_len.
-	if inv, _ := parent.Value(invCtxKey{}).(*invocation); inv != nil {
-		inv.lastFetch = nil
-		inv.lastFetchTruncated = false
+//
+// body is the charged copy of the guest's request body (nil for none); doFetch
+// owns it and refunds it once the transport has closed every reader of it.
+// The response is read into a buffer charged to inv's lease before it is
+// allocated; inv retains it for fetch_read until the call ends.
+func (p *plugin) doFetch(parent context.Context, inv *invocation, method, rawURL string, body *chargedBuf) (int, []byte, error) {
+	var fb *fetchBody
+	if body != nil && len(body.b) > 0 {
+		fb = &fetchBody{data: body.b, idle: make(chan struct{})}
 	}
+	defer func() {
+		if fb != nil && !fb.waitClosed(fetchBodyCloseGrace) {
+			if p.log != nil {
+				p.log.Warn("plugin: fetch request body still held by the transport after the call; refunding at lease close",
+					"name", p.name)
+			}
+			go func(c *chargedBuf) { <-fb.idle; c.release() }(body)
+			return
+		}
+		body.release()
+	}()
+	// Clear any previous fetch response so a failed call does not leave stale
+	// data visible to fetch_read / last_fetch_len, and refund it before the
+	// next response is charged.
+	inv.releaseFetch()
 
 	if method == "" {
 		method = "GET"
@@ -64,12 +89,18 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 
 	ctx, cancel := context.WithTimeout(parent, p.fetchTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, rawURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, rawURL, http.NoBody)
 	if err != nil {
 		return 0, nil, err
 	}
+	if fb != nil {
+		req.Body = fb.open()
+		req.ContentLength = int64(len(fb.data))
+		req.GetBody = func() (io.ReadCloser, error) { return fb.reopen() }
+	}
 	resp, err := client.Do(req)
 	if err != nil {
+		cancel()
 		if errors.Is(err, errFetchBlocked) {
 			return 0, nil, errFetchBlocked
 		}
@@ -77,27 +108,146 @@ func (p *plugin) doFetch(parent context.Context, method, rawURL string, body []b
 	}
 	defer resp.Body.Close()
 
-	// Read one byte past the cap so we can detect truncation unambiguously.
-	data, err := io.ReadAll(io.LimitReader(resp.Body, int64(p.maxFetchResp)+1))
+	data, truncated, charge, err := p.readFetchResponse(inv, resp)
+	cancel()
 	if err != nil {
-		if inv, _ := parent.Value(invCtxKey{}).(*invocation); inv != nil {
-			inv.lastFetch = nil
-			inv.lastFetchTruncated = false
-		}
 		return 0, nil, err
 	}
-	truncated := len(data) > p.maxFetchResp
+	inv.lastFetch, inv.lastFetchTruncated, inv.fetchCharge = data, truncated, charge
+	return resp.StatusCode, data, nil
+}
+
+// readFetchResponse reads at most max_fetch_response+1 bytes into one buffer
+// charged before it is allocated: the declared length plus the detection
+// byte when it is within the cap, else the whole cap plus the detection
+// byte. A declared length never caps the read, and the buffer never grows.
+func (p *plugin) readFetchResponse(inv *invocation, resp *http.Response) ([]byte, bool, byteCharge, error) {
+	ceiling := p.maxFetchResp + 1
+	size := ceiling
+	if cl := resp.ContentLength; cl >= 0 && cl < int64(p.maxFetchResp) {
+		size = int(cl) + 1
+	}
+	cb, err := newChargedBuf(inv.chargeFn(), size)
+	if err != nil {
+		inv.failCharge(err)
+		return nil, false, nil, err
+	}
+	buf := cb.b[:size]
+	// Only a clean EOF completes the body: io.ReadFull would conflate the
+	// transport's own io.ErrUnexpectedEOF (a response cut short of its
+	// declared length) with a short read.
+	lr := io.LimitReader(resp.Body, int64(ceiling))
+	n := 0
+	for n < size && err == nil {
+		var k int
+		k, err = lr.Read(buf[n:])
+		n += k
+	}
+	if err == io.EOF {
+		err = nil
+	}
+	if err == nil && n == size && size < ceiling {
+		// More bytes than the declared length: a framing violation the
+		// transport did not catch. Refuse rather than grow.
+		err = errors.New("fetch response longer than its declared length")
+	}
+	if err != nil {
+		cb.release()
+		return nil, false, nil, err
+	}
+	data := buf[:n]
+	truncated := n > p.maxFetchResp
 	if truncated {
 		data = data[:p.maxFetchResp]
 	}
+	return data, truncated, cb.c, nil
+}
 
-	inv, _ := parent.Value(invCtxKey{}).(*invocation)
-	if inv != nil {
-		inv.lastFetch = data
-		inv.lastFetchTruncated = truncated
+// fetchBody serves a charged request-body copy to the fetch transport. Every
+// reader it hands out (the body and any GetBody replays) is counted until
+// closed, so the copy is refunded only once the transport, which may close a
+// request body asynchronously after RoundTrip returns, no longer reads it.
+type fetchBody struct {
+	data   []byte
+	mu     sync.Mutex
+	open_  int
+	sealed bool
+	idle   chan struct{}
+}
+
+func (fb *fetchBody) open() io.ReadCloser {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	fb.open_++
+	return &fetchBodyReader{fb: fb, r: bytes.NewReader(fb.data)}
+}
+
+func (fb *fetchBody) reopen() (io.ReadCloser, error) {
+	fb.mu.Lock()
+	sealed := fb.sealed
+	fb.mu.Unlock()
+	if sealed {
+		return nil, errors.New("fetch request body no longer available")
 	}
+	return fb.open(), nil
+}
 
-	return resp.StatusCode, data, nil
+func (fb *fetchBody) closed() {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	fb.open_--
+	if fb.open_ == 0 && fb.sealed {
+		close(fb.idle)
+	}
+}
+
+// waitClosed seals the body against new readers and waits up to grace for
+// every reader to close. It reports whether they all did.
+func (fb *fetchBody) waitClosed(grace time.Duration) bool {
+	fb.mu.Lock()
+	if !fb.sealed {
+		fb.sealed = true
+		if fb.open_ == 0 {
+			close(fb.idle)
+		}
+	}
+	fb.mu.Unlock()
+	t := time.NewTimer(grace)
+	defer t.Stop()
+	select {
+	case <-fb.idle:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
+type fetchBodyReader struct {
+	fb     *fetchBody
+	mu     sync.Mutex
+	r      *bytes.Reader
+	closed bool
+}
+
+func (r *fetchBodyReader) Read(b []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return 0, errors.New("fetch request body closed")
+	}
+	return r.r.Read(b)
+}
+
+func (r *fetchBodyReader) Close() error {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	r.closed, r.r = true, nil
+	r.mu.Unlock()
+	r.fb.closed()
+	return nil
 }
 
 // dialer matches net.Dialer's DialContext method so dialValidatedIPs can be

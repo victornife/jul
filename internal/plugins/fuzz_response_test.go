@@ -30,7 +30,7 @@ func FuzzResponsePhase(f *testing.F) {
 	f.Add(599, "Trailer", "X-T", []byte("t"), true, "set-status")
 	f.Add(302, "Location", "/x", []byte(strings.Repeat("z", 300)), false, "headers")
 
-	m, err := NewManager(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	m, err := NewManager(Options{Inspection: testGovernor(f), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		f.Fatal(err)
 	}

@@ -373,6 +373,33 @@ request-only, v2 request-only, v2 metadata, v2 body read, v2 body replace.
 | Body-state and return-code values | Extensible (new values) |
 | `max_response_body` reuse and 4 KiB / 64 KiB bounds | Bounds may be raised by configuration in a later additive change |
 
+## Amendment — Host allocations charged to the inspection governor (#700, ADR 0032 slice I2)
+
+[ADR 0032](0032-aggregate-inspection-resource-governor.md) puts every plugin request under one
+process-wide byte budget. This amendment states how that interacts with §8 and §10. It does not
+change any host-function signature, return code or the ABI identity of either `jul-abi/v1` or
+`jul-abi/v2`.
+
+1. **Ownership.** The host allocations a guest causes are charged to the request's inspection lease
+   before they are allocated: the prepared request body, `write_response_body` growth,
+   `set_request_state`, `fetch` request copies and responses, and `resp_body_replace` copies. The
+   lease, not the instance, owns them. Trap, discard, reinstantiation and `max_invocations`
+   retirement therefore neither leak nor refund them early. The response-subscription buffer of
+   §10 is not charged yet (ADR 0032 slice I4).
+2. **Refusal is an overload, not a guest fault.** When a host function cannot obtain its charge it
+   returns an existing failure code (`set_request_state` and `resp_body_replace` return `INVALID`,
+   `fetch` returns `-4`; `write_response_body` has no result), and the invocation is failed with the
+   refusal. Whatever the guest then does — continues, ignores the
+   return value, or traps — the client receives ADR 0032's `503` with `Retry-After: 1` (gRPC
+   `UNAVAILABLE`), not §8's `500 plugin error`, and the failure is counted as an invocation `error`,
+   not in `jul_plugin_panics_total`. The instance is discarded as in §8.
+3. **Request-body preparation (#699)** gains two outcomes before any instance is acquired: `503`
+   for an exhausted budget and `408` for an expired `[global.inspection].body_timeout`. Existing
+   preparation failures keep their `500`.
+4. **§10 sizing.** Request-side host buffers are bounded together by `max_buffered_bytes` in
+   `enforce` mode. Guest linear memory, compiled modules and idle instances remain static terms
+   sized by `max_instances × memory_limit`; there is no dynamic guest-memory charge.
+
 ## Related
 
 - [docs/abi.md](../abi.md) — the canonical v1/v2 compatibility document.

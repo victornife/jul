@@ -206,6 +206,21 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   [the I5 review](docs/reviews/2026-11-12-700-i5-assessment-tooling-baselines.md).
   Assessment tooling only: no runtime behaviour change and no A1–A18 acceptance.
 
+- Partial #700 I2 (ADR 0032): the WASM plugin request path now uses the
+  process inspection governor. A plugin chain holds one request lease through
+  the downstream handler; prepared request bodies, `fetch` copies and
+  responses, request state, and generated or replacement bodies are charged
+  before allocation. An exhausted budget answers `503` with `Retry-After: 1`
+  (gRPC `UNAVAILABLE`) without running the guest or the origin; observe mode
+  records would-reject decisions instead. `global.inspection.body_timeout`
+  (default `60s`, `0s` disables) now bounds body-reading plugin uploads with
+  `408` (gRPC `DEADLINE_EXCEEDED`); plugin retirement aborts a read in
+  progress. `/api/v1/status` reports `request_path_integration = "partial"`.
+  New throttled overload and contained-guest-failure warnings carry bounded
+  fields only. WAF charging and evaluation slots (I3) and response
+  subscriptions (I4) are not governed yet. See
+  [plugins.md](docs/plugins.md#inspection-governor).
+
 - Explicit route and backend cutover cache behavior (`reload_policy = "retain" |
   "invalidate"` in `[cache]` and `[servers.locations.cache_policy]`, #624 /
   `CACHE-OPS-04`, #620,

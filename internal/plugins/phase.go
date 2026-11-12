@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"jul/internal/inspection"
 	"jul/internal/respwriter"
 )
 
@@ -150,6 +151,8 @@ type responseLayer struct {
 	hookRan bool
 	final   int
 	failed  bool
+	// overloaded answers the failure as inspection overload (ADR 0032 §5).
+	overloaded bool
 }
 
 func (l *responseLayer) Header() http.Header { return l.parent.Header() }
@@ -275,13 +278,15 @@ func (l *responseLayer) finish() {
 		if len(view.body) > 0 {
 			_, _ = l.parent.Write(view.body)
 		}
+		view.dropReplacement()
 	case layerDiscard:
 		l.writeFinal()
 	case layerUpgraded:
 		if !l.hookRan {
 			// Already committed: an error is counted by invokeResponse and
 			// there is nothing left to change.
-			_, _, _ = l.run(bodyUpgraded, nil, true)
+			view, _, _ := l.run(bodyUpgraded, nil, true)
+			view.dropReplacement()
 		}
 	}
 }
@@ -294,7 +299,10 @@ func (l *responseLayer) decide(state uint32, body []byte) (*responseView, bool) 
 	switch {
 	case err != nil:
 		l.final, l.failed = http.StatusInternalServerError, true
-		if errors.Is(err, errInstanceLimit) {
+		switch {
+		case inspection.IsOverload(err):
+			l.final, l.overloaded = http.StatusServiceUnavailable, true
+		case errors.Is(err, errInstanceLimit):
 			l.final = http.StatusServiceUnavailable
 		}
 	case res == responseReject:
@@ -305,6 +313,7 @@ func (l *responseLayer) decide(state uint32, body []byte) (*responseView, bool) 
 	default:
 		return view, true
 	}
+	view.dropReplacement()
 	l.state = layerDiscard
 	l.cancel()
 	return view, false
@@ -330,6 +339,11 @@ func (l *responseLayer) writeFinal() {
 	}
 	for k, v := range l.entry {
 		h[k] = append([]string(nil), v...)
+	}
+	if l.overloaded {
+		l.state = layerPassthrough
+		inspection.WriteOverloaded(l.parent, l.req)
+		return
 	}
 	var body []byte
 	if l.failed {

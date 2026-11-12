@@ -54,7 +54,13 @@ type fakeLoc struct {
 }
 
 type fakeConfig struct {
-	Admin     struct{ Listen string }
+	Admin  struct{ Listen string }
+	Global struct {
+		Inspection struct {
+			MaxBuffered string `toml:"max_buffered_bytes"`
+			Mode        string
+		}
+	}
 	Upstreams []struct {
 		Name    string
 		Servers []struct{ Address string }
@@ -72,7 +78,9 @@ type fakeConfig struct {
 
 // fakeJul implements `version-key init`, `check` and `serve`. FAKE_JUL_MODE
 // selects controlled misbehaviour: exit-at-startup, never-ready,
-// ignore-term, crash-after-1s and http500.
+// ignore-term, crash-after-1s, http500 and accept-all-reloads (a reload below
+// the 64 MiB fake route minimum is otherwise refused, as Jul refuses one
+// below the compiled minimum).
 func fakeJul(args []string) int {
 	mode := os.Getenv("FAKE_JUL_MODE")
 	switch args[0] {
@@ -100,7 +108,7 @@ func fakeJul(args []string) int {
 		return 4
 	}
 	cfgPath := args[2]
-	var reloads atomic.Int64
+	var reloads, refused atomic.Int64
 	load := func() (*fakeConfig, error) {
 		b, err := os.ReadFile(cfgPath)
 		if err != nil {
@@ -131,7 +139,23 @@ func fakeJul(args []string) int {
 			}
 			if r.URL.Path == "/metrics" {
 				fmt.Fprintf(w, "# HELP fake\ngo_goroutines 7\ngo_memstats_heap_inuse_bytes 1048576\ngo_memstats_heap_alloc_bytes 524288\n")
-				fmt.Fprintf(w, "jul_reload_total{outcome=\"success\"} %d\njul_inspection_bytes 0\njul_inspection_leases 0\n", reloads.Load())
+				fmt.Fprintf(w, "jul_reload_total{outcome=\"applied_live\",source=\"sighup\"} %d\n", reloads.Load())
+				fmt.Fprintf(w, "jul_reload_total{outcome=\"not_applied\",source=\"sighup\"} %d\n", refused.Load())
+				leases := 0
+				if mode == "leak-lease" {
+					leases = 1
+				}
+				fmt.Fprintf(w, "jul_inspection_leases %d\njul_inspection_bytes{class=\"base\"} 0\njul_inspection_bytes{class=\"buffer\"} 0\njul_inspection_bytes{class=\"waf_state\"} 0\n", leases)
+				fmt.Fprintf(w, "jul_inspection_evaluations{state=\"active\"} 0\njul_inspection_evaluations{state=\"waiting\"} 0\n")
+				return
+			}
+			if r.URL.Path == "/api/v1/status" {
+				in := cur.Load().Global.Inspection
+				mode := in.Mode
+				if mode == "" {
+					mode = "enforce"
+				}
+				fmt.Fprintf(w, `{"inspection":{"effective":{"mode":%q,"max_buffered_bytes":%d}}}`, mode, fakeMiB(in.MaxBuffered))
 				return
 			}
 			_, _ = io.WriteString(w, "heap profile")
@@ -161,7 +185,12 @@ func fakeJul(args []string) int {
 	signal.Notify(sig, syscall.SIGHUP, syscall.SIGTERM)
 	for s := range sig {
 		if s == syscall.SIGHUP {
-			if c, err := load(); err == nil {
+			c, err := load()
+			switch {
+			case err != nil:
+			case c.Global.Inspection.MaxBuffered != "" && fakeMiB(c.Global.Inspection.MaxBuffered) < 64<<20 && mode != "accept-all-reloads":
+				refused.Add(1)
+			default:
 				cur.Store(c)
 				reloads.Add(1)
 			}
@@ -178,6 +207,11 @@ func fakeJul(args []string) int {
 		return 0
 	}
 	return 0
+}
+
+func fakeMiB(s string) uint64 {
+	n, _ := strconv.ParseUint(strings.TrimSuffix(s, "m"), 10, 64)
+	return n << 20
 }
 
 func fakeServe(w http.ResponseWriter, r *http.Request, cfg *fakeConfig, origin, mode string) {
@@ -199,7 +233,11 @@ func fakeServe(w http.ResponseWriter, r *http.Request, cfg *fakeConfig, origin, 
 	body, _ := io.ReadAll(r.Body)
 	waf := loc.WAF != nil && loc.WAF.Enabled
 	wasm := len(loc.Plugins) > 0
-	if (waf && bytes.Contains(body, []byte(wafReqMark))) || (wasm && bytes.Contains(body, []byte(wasmReqMark))) {
+	pa := cfg.Plugins["inspect-a"].Config
+	nobody := wasm && pa["state_bytes"] != ""
+	subscribed := wasm && pa["subscribe"] == "true"
+	if (waf && bytes.Contains(body, []byte(wafReqMark))) || (wasm && !nobody && bytes.Contains(body, []byte(wasmReqMark))) ||
+		(nobody && r.Header.Get("X-Assess-Wasm-Block") != "") {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -219,9 +257,12 @@ func fakeServe(w http.ResponseWriter, r *http.Request, cfg *fakeConfig, origin, 
 		status, hdr, resp = http.StatusOK, http.Header{}, b
 	} else {
 		req, _ := http.NewRequestWithContext(r.Context(), r.Method, "http://"+origin+r.URL.RequestURI(), bytes.NewReader(body))
-		if wasm {
-			name := cfg.Plugins["inspect-a"].Config["name"]
-			req.Header.Set("X-Assess-"+name+"-Req-Len", strconv.Itoa(len(body)))
+		switch {
+		case nobody:
+			req.Header.Set("X-Assess-"+pa["name"]+"-State", pa["state_bytes"])
+			req.Header.Set("X-Assess-b-State", pa["state_bytes"])
+		case wasm:
+			req.Header.Set("X-Assess-"+pa["name"]+"-Req-Len", strconv.Itoa(len(body)))
 			req.Header.Set("X-Assess-b-Req-Len", strconv.Itoa(len(body)))
 		}
 		or, err := http.DefaultClient.Do(req)
@@ -241,14 +282,17 @@ func fakeServe(w http.ResponseWriter, r *http.Request, cfg *fakeConfig, origin, 
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-	for _, k := range []string{"X-Origin-Req-Len", "X-Echo-A-Req-Len", "X-Echo-B-Req-Len", "Cache-Control"} {
+	for _, k := range []string{"X-Origin-Req-Len", "X-Echo-A-Req-Len", "X-Echo-B-Req-Len", "X-Echo-A-State", "X-Echo-B-State", "Cache-Control"} {
 		if v := hdr.Get(k); v != "" {
 			w.Header().Set(k, v)
 		}
 	}
-	if wasm {
-		name := cfg.Plugins["inspect-a"].Config["name"]
-		w.Header().Set("X-Assess-"+name+"-Resp", strconv.Itoa(len(resp)))
+	switch {
+	case nobody:
+		w.Header().Set("X-Assess-"+pa["name"]+"-Resp", "state-"+pa["state_bytes"])
+		w.Header().Set("X-Assess-b-Resp", "state-"+pa["state_bytes"])
+	case subscribed:
+		w.Header().Set("X-Assess-"+pa["name"]+"-Resp", strconv.Itoa(len(resp)))
 		w.Header().Set("X-Assess-b-Resp", strconv.Itoa(len(resp)))
 	}
 	w.Header().Set("Content-Length", strconv.Itoa(len(resp)))

@@ -156,7 +156,7 @@ config_authority = "managed"
 
 ### `[global.inspection]`
 
-These process-wide settings configure the I1 inspection-governor foundation:
+These process-wide settings configure the inspection governor:
 the [runnable example](../examples/inspection-governor/jul.toml) passes
 `jul check -config examples/inspection-governor/jul.toml`.
 
@@ -184,10 +184,17 @@ complete limit set without recreating the governor or resetting its counters;
 automatic slots resolve against the candidate `worker_threads` value, or the
 startup `GOMAXPROCS` when worker threads are `auto`.
 
-**I1 does not yet enforce these limits on live requests.** The status API marks
-request-path integration as `pending`; no live WAF/plugin request acquires a
-lease or evaluation slot, and `body_timeout` is not applied. `mode = "enforce"`
-is therefore configured policy, not production traffic protection.
+**Only the plugin request path is governed so far.** The status API marks
+request-path integration as `partial`. A route with WASM plugins holds one
+lease for the whole request, charges prepared bodies, fetch results,
+per-request state and generated or replaced bodies before allocating them, and
+in `enforce` mode answers saturation with `503` plus `Retry-After: 1` and a
+stalled body upload with `408` once `body_timeout` has passed since the first
+read. `observe` mode counts the same decisions without refusing. WAF request
+state, evaluation slots, response-subscription buffers and the response-header
+gate are not governed yet, so `mode = "enforce"` does not protect WAF-only
+routes. See [Plugins](plugins.md#inspection-governor) for the exact
+behaviour.
 
 `jul check`, startup, reload and admin apply compute each inspected route's
 worst-case single-request charge from the compiled WAF limits, plugin limits

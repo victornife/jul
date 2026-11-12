@@ -30,7 +30,9 @@ import (
 // Target addresses the Jul listeners of one run.
 type Target struct {
 	Port, TLSPort int
-	WASM          bool
+	// Fixture is the plugin fixture in front of the routes; "" means no
+	// plugins (the none and waf variants).
+	Fixture string
 	// Roots trusts the certificate Jul serves; the TLS clients verify against it.
 	Roots *x509.CertPool
 }
@@ -217,7 +219,7 @@ func newRequest(ctx context.Context, method, url string, body io.Reader, n int) 
 }
 
 // Do performs one workload request and verifies it completely.
-func Do(ctx context.Context, c *Client, w Workload, body []byte, wasm bool) Outcome {
+func Do(ctx context.Context, c *Client, w Workload, body []byte, fixture string) Outcome {
 	path := w.Path
 	if w.UniqueKey {
 		path += fmt.Sprintf("&k=%d", keySeq.Add(1))
@@ -255,18 +257,32 @@ func Do(ctx context.Context, c *Client, w Workload, body []byte, wasm bool) Outc
 			o.Class = "error:body-" + strings.TrimPrefix(o.Class, "error:")
 		}
 	case resp.StatusCode/100 != 2:
-		o.Class = "status:" + strconv.Itoa(resp.StatusCode)
+		o.Class = StatusClass(resp, got)
 	default:
 		o.Class = "ok"
-		if why := Verify(resp, got, w, len(body), wasm, c.Proto); why != "" {
+		if why := Verify(resp, got, w, len(body), fixture, c.Proto); why != "" {
 			o.Class = "unverified:" + why
 		}
 	}
 	return o
 }
 
+// OverloadClass is a 503 carrying exactly the inspection governor's overload
+// answer (ADR 0032 §5: Retry-After: 1 and the inspection_overloaded reason),
+// distinct from instance-pool or admission 503s (plan v3).
+const OverloadClass = "status:503-inspection-overloaded"
+
+// StatusClass classifies a non-2xx response.
+func StatusClass(resp *http.Response, got []byte) string {
+	if resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "1" &&
+		strings.TrimSpace(string(got)) == "inspection_overloaded" {
+		return OverloadClass
+	}
+	return "status:" + strconv.Itoa(resp.StatusCode)
+}
+
 // Verify checks protocol, complete content and origin/plugin canaries.
-func Verify(resp *http.Response, got []byte, w Workload, bodyLen int, wasm bool, proto string) string {
+func Verify(resp *http.Response, got []byte, w Workload, bodyLen int, fixture string, proto string) string {
 	if want := map[string]int{"h1": 1, "h2": 2, "h3": 3}[proto]; resp.ProtoMajor != want {
 		return "proto " + resp.Proto
 	}
@@ -280,7 +296,27 @@ func Verify(resp *http.Response, got []byte, w Workload, bodyLen int, wasm bool,
 	if w.WantEcho && bodyLen > 0 && h.Get("X-Origin-Req-Len") != strconv.Itoa(bodyLen) {
 		return "origin-req-len " + h.Get("X-Origin-Req-Len")
 	}
-	if wasm {
+	echoed := w.WantEcho && bodyLen > 0
+	switch fixture {
+	case "":
+	case FixtureRequestOnly:
+		if echoed && h.Get("X-Echo-A-Req-Len") != strconv.Itoa(bodyLen) {
+			return "a-req-len " + h.Get("X-Echo-A-Req-Len")
+		}
+		if echoed && h.Get("X-Echo-B-Req-Len") != strconv.Itoa(bodyLen) {
+			return "b-req-len " + h.Get("X-Echo-B-Req-Len")
+		}
+	case FixtureNoBody:
+		if v := h.Get("X-Assess-b-Resp"); v != "state-4096" {
+			return "b-resp " + v
+		}
+		if v := firstHeader(h, "X-Assess-a-Resp", "X-Assess-a1-Resp", "X-Assess-a2-Resp"); v != "state-4096" {
+			return "a-resp " + v
+		}
+		if h.Get("X-Echo-A-State") != "4096" || h.Get("X-Echo-B-State") != "4096" {
+			return "state-echo " + h.Get("X-Echo-A-State") + "/" + h.Get("X-Echo-B-State")
+		}
+	default:
 		if h.Get("X-Assess-a-Resp") == "" && h.Get("X-Assess-a1-Resp") == "" && h.Get("X-Assess-a2-Resp") == "" {
 			return "missing a-resp"
 		}
@@ -478,16 +514,19 @@ func Drive(ctx context.Context, t Target, w Workload, from, end time.Time) (Clas
 			// drain under their own timeout and are verified, so the window
 			// is never cut by cancelling the client.
 			for ctx.Err() == nil && time.Now().Before(end) {
-				o := Do(ctx, c, w, body, t.WASM)
+				o := Do(ctx, c, w, body, t.Fixture)
 				if ctx.Err() != nil && o.Class != "ok" {
 					o.Class = "unfinished"
 				}
 				mu.Lock()
 				outs = append(outs, o)
 				mu.Unlock()
-				if w.Interval > 0 {
-					wait := min(w.Interval.D(), time.Until(end))
-					sleepCtx(ctx, wait)
+				wait := w.Interval.D()
+				if w.HonorRetryAfter && o.Class == OverloadClass {
+					wait = max(wait, time.Second)
+				}
+				if wait > 0 {
+					sleepCtx(ctx, min(wait, time.Until(end)))
 				}
 			}
 		})
@@ -505,12 +544,13 @@ type Canary struct {
 }
 
 // RunCanaries checks clean traffic and every enabled policy.
-func RunCanaries(t Target, waf, wasm bool) []Canary {
+func RunCanaries(t Target, waf bool) []Canary {
 	c, err := NewClient("h1", t, 1, 10*time.Second)
 	if err != nil {
 		return []Canary{{Name: "client", Status: -1}}
 	}
 	defer c.Close()
+	blockHeader := false
 	do := func(name, method, path string, body []byte, want int) Canary {
 		var rd io.Reader
 		if body != nil {
@@ -518,6 +558,9 @@ func RunCanaries(t Target, waf, wasm bool) []Canary {
 		}
 		st := -1
 		if req, err := newRequest(context.Background(), method, c.Base+path, rd, len(body)); err == nil {
+			if blockHeader {
+				req.Header.Set("X-Assess-Wasm-Block", "1")
+			}
 			if resp, err := c.HTTP.Do(req); err == nil {
 				_, _ = io.Copy(io.Discard, resp.Body)
 				_ = resp.Body.Close()
@@ -533,7 +576,9 @@ func RunCanaries(t Target, waf, wasm bool) []Canary {
 			do("waf-response-body", "GET", "/proxy/echo?resp=4096&canary=waf", nil, 403),
 			do("waf-static-response-clean", "GET", "/static/page.html", nil, 200))
 	}
-	if wasm {
+	if t.Fixture != "" {
+		// inspect-nobody cannot see the body, so its canary is a header.
+		blockHeader = t.Fixture == FixtureNoBody
 		out = append(out,
 			do("wasm-request-body", "POST", "/proxy/echo?resp=4096", ItemsBody(2048, wasmReqMark), 403),
 			do("wasm-on-static", "POST", "/static/page.html", ItemsBody(2048, wasmReqMark), 403))
