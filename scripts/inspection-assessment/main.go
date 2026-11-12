@@ -412,6 +412,11 @@ func summarizeCmd(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// LoadRuns guarantees one profile and envelope across runs, so the first decides eligibility.
+	if len(pairs) > 0 && len(runs) > 0 && (!runs[0].Manifest.Profile.AcceptanceEligible || runs[0].Manifest.Envelope.Mode != "required") {
+		return fmt.Errorf("-compare needs acceptance-eligible runs in a required envelope; profile %s with envelope %q is smoke evidence only",
+			runs[0].Manifest.Profile.Name, runs[0].Manifest.Envelope.Mode)
+	}
 	var ps [][2]string
 	for _, p := range pairs {
 		a, b, ok := strings.Cut(p, ":")

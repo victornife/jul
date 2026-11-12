@@ -368,6 +368,10 @@ Both fixes are in `21cb2440`. No archived run, verdict or comparison is affected
 
 A lint-only error-string change is also in `21cb2440`.
 
+After the independent review, `summarize -compare` was hardened to refuse runs that are not
+qualification-profile runs with a required envelope. All archived comparisons meet both
+conditions, and their summaries regenerate unchanged.
+
 ## Limitations
 
 - **Single host.** One WSL2 arm64 machine, with one interleaved campaign per target. These are

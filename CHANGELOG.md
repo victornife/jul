@@ -198,6 +198,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   actual-size R3 usage; configured `enforce` mode is not runtime protection. See [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
   for the R3 contract and remaining implementation slices.
 
+- Maintained inspection assessment tooling for #700 (ADR 0032 slice I5):
+  `scripts/inspection-assessment/` and the `examples/plugins/inspect-load`
+  guest replace the archived #695/#699/#700 instruments, with verified goodput,
+  envelope checks, checksummed evidence and deterministic summaries. Baselines
+  for `858590dc` and post-I1 main are in
+  [the I5 review](docs/reviews/2026-11-12-700-i5-assessment-tooling-baselines.md).
+  Assessment tooling only: no runtime behaviour change and no A1–A18 acceptance.
+
 - Explicit route and backend cutover cache behavior (`reload_policy = "retain" |
   "invalidate"` in `[cache]` and `[servers.locations.cache_policy]`, #624 /
   `CACHE-OPS-04`, #620,

@@ -566,15 +566,21 @@ func TestCalibrateAndCommands(t *testing.T) {
 		t.Error("verify command")
 	}
 	rep := filepath.Join(t.TempDir(), "report")
-	if Main([]string{"summarize", "-out", rep, "-compare", "base:main", dir}, io.Discard, io.Discard) != 0 {
+	if Main([]string{"summarize", "-out", rep, "-compare", "base:main", dir}, io.Discard, io.Discard) == 0 {
+		t.Error("-compare accepted quick-profile runs without an envelope")
+	}
+	eligible := writeRun(t, func(m *Manifest, _ *RunResult) {
+		m.Profile, m.Envelope = Profiles["qualification"], DefaultEnvelope
+	})
+	if Main([]string{"summarize", "-out", rep, "-compare", "base:main", eligible}, io.Discard, io.Discard) != 0 {
 		t.Fatal("summarize")
 	}
 	md, _ := os.ReadFile(filepath.Join(rep, "summary.md"))
 	out.Reset()
-	if Main([]string{"summarize", dir}, &out, io.Discard) != 0 || out.String() != string(md) {
+	if Main([]string{"summarize", eligible}, &out, io.Discard) != 0 || out.String() != string(md) {
 		t.Error("summary markdown is not reproducible")
 	}
-	if Main([]string{"summarize", "-compare", "nocolon", dir}, io.Discard, io.Discard) == 0 {
+	if Main([]string{"summarize", "-compare", "nocolon", eligible}, io.Discard, io.Discard) == 0 {
 		t.Error("bad -compare accepted")
 	}
 	fx := t.TempDir()

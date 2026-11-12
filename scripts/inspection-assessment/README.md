@@ -86,6 +86,8 @@ Use these flags to check that the harness itself detects failures:
 - `-watchdog D` bounds a cell.
 
 A run with a fault never qualifies for comparison: `summarize` refuses to mix it with clean runs.
+`summarize -compare` also refuses runs that are not qualification-profile runs with a required
+envelope, so smoke and unconstrained runs never receive a verdict.
 
 ## Profiles and suites
 
