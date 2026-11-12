@@ -33,6 +33,7 @@ go build -tags wasmplugins -o jul ./cmd/jul
 | [`egress-check/`](egress-check) | Middleware: guarded outbound `Fetch` to an allow-listed host, reports `X-Egress-Status` (needs `fetch = true`) |
 | [`testguest-panic/`](testguest-panic) | Panics on invocation — used by the panic-isolation test |
 | [`testguest-loop/`](testguest-loop) | Infinite loop — used by the timeout-isolation test |
+| [`inspect-load/`](inspect-load) | **v2 assessment fixture, not a security control.** Scans request and response bodies and reports evidence headers for [`scripts/inspection-assessment`](../../scripts/inspection-assessment/README.md) |
 
 ## Build
 

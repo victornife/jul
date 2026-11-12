@@ -1,0 +1,176 @@
+{
+  "scenario": "s11l-arg-amplification-low-h1",
+  "scenario_sha256": "654da774c28908337a3a5f3e28255daef812d1dcffca29eabe44b88eccfe2407",
+  "comparison": "record",
+  "variant": "waf",
+  "target": "base",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T01:31:14.380564507Z",
+  "ended": "2026-11-12T01:31:49.891793114Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "d450e6199031f95dd63cb9487370692e456c1eb4d7d28155dbd543498322466f",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-724199-554588697.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 32
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "c1",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 1,
+          "window_seconds": 10,
+          "attempts": 51,
+          "verified": 51,
+          "verified_in_window": 50,
+          "goodput_rps": 5,
+          "goodput_bytes_per_second": 20480,
+          "classes": {
+            "ok": 51
+          },
+          "p50_ms": 191.87,
+          "p95_ms": 219.829,
+          "p99_ms": 229.576,
+          "max_ms": 242.574,
+          "crossed_in_from_warmup": 1,
+          "outstanding_at_window_end": 1,
+          "response_protos": {
+            "HTTP/1.1": 51
+          },
+          "connections_dialled": 1
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.515,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    },
+    {
+      "name": "c2",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 2,
+          "window_seconds": 10,
+          "attempts": 93,
+          "verified": 93,
+          "verified_in_window": 91,
+          "goodput_rps": 9.1,
+          "goodput_bytes_per_second": 37273.6,
+          "classes": {
+            "ok": 93
+          },
+          "p50_ms": 214.017,
+          "p95_ms": 250.036,
+          "p99_ms": 261.764,
+          "max_ms": 276.532,
+          "crossed_in_from_warmup": 2,
+          "outstanding_at_window_end": 2,
+          "response_protos": {
+            "HTTP/1.1": 93
+          },
+          "connections_dialled": 2
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.992,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 360050688,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 387747840,
+  "heap_inuse_after_two_gcs": 60579840,
+  "heap_alloc_after_two_gcs": 45191416,
+  "rss_after_two_gcs": 302481408,
+  "counter_deltas": {
+    "waf_tx_all": 181,
+    "waf_tx_body_limit": 0,
+    "waf_tx_pass": 0
+  },
+  "unavailable_metrics": [
+    "plugin_invocations",
+    "plugin_invocations_ok",
+    "plugin_resp_invocations",
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_success",
+    "reload_failure",
+    "transport_retired"
+  ],
+  "samples": 70
+}

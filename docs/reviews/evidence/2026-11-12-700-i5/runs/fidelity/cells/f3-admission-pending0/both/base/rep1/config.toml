@@ -1,0 +1,175 @@
+[global]
+log_level = "warn"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:35985"
+token = "assessment-695-token-not-a-secret"
+pprof = true
+console = false
+
+[[upstreams]]
+name = "origin"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:43257" }]
+
+[[upstreams]]
+name = "limited"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:43257" }]
+  [upstreams.resilience]
+  max_active_requests = 8
+  max_pending_requests = 0
+  pending_timeout = "2s"
+
+[plugins.inspect-a]
+path = "/tmp/il.wasm"
+abi = "jul-abi/v2"
+config = { name = "a", read_body = "true", subscribe = "true" }
+
+[plugins.inspect-b]
+path = "/tmp/il.wasm"
+abi = "jul-abi/v2"
+config = { name = "b", read_body = "true", subscribe = "true", replace = "true" }
+
+
+[[servers]]
+listen = "127.0.0.1:39007"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/proxy/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admitted/" }
+  proxy_pass = "http://limited"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/cached/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "/tmp/jul-inspection-fixtures-4003650741/www"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+[[servers]]
+listen = "127.0.0.1:41675"
+server_names = ["localhost"]
+  [servers.tls]
+  enabled = true
+  cert = "/home/victornf/jul-700-i5/testdata/tls/localhost.crt"
+  key = "/home/victornf/jul-700-i5/testdata/tls/localhost.key"
+  [servers.http3]
+  enabled = true
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/proxy/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admitted/" }
+  proxy_pass = "http://limited"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/cached/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "/tmp/jul-inspection-fixtures-4003650741/www"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''

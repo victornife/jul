@@ -1,0 +1,77 @@
+[global]
+log_level = "warn"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:38633"
+token = "assessment-695-token-not-a-secret"
+pprof = true
+console = false
+
+[[upstreams]]
+name = "origin"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:43257" }]
+
+[[upstreams]]
+name = "limited"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:43257" }]
+  [upstreams.resilience]
+  max_active_requests = 8
+  max_pending_requests = 16
+  pending_timeout = "2s"
+
+
+[[servers]]
+listen = "127.0.0.1:36631"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/proxy/" }
+  proxy_pass = "http://origin"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admitted/" }
+  proxy_pass = "http://limited"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/cached/" }
+  proxy_pass = "http://origin"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "/tmp/jul-inspection-fixtures-4003650741/www"
+
+[[servers]]
+listen = "127.0.0.1:33051"
+server_names = ["localhost"]
+  [servers.tls]
+  enabled = true
+  cert = "/home/victornf/jul-700-i5/testdata/tls/localhost.crt"
+  key = "/home/victornf/jul-700-i5/testdata/tls/localhost.key"
+  [servers.http3]
+  enabled = true
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/proxy/" }
+  proxy_pass = "http://origin"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admitted/" }
+  proxy_pass = "http://limited"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/cached/" }
+  proxy_pass = "http://origin"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "/tmp/jul-inspection-fixtures-4003650741/www"

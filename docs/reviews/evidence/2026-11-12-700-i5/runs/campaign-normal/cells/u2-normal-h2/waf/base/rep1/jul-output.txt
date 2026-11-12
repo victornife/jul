@@ -1,0 +1,4 @@
+time=2026-11-12T01:36:52.337+01:00 level=WARN msg="waf rule matched" rule_id=1695101 path=/proxy/echo query_omitted=true mode=block phase=2 severity=unknown
+time=2026-11-12T01:36:52.342+01:00 level=WARN msg="waf rule matched" rule_id=1695102 path=/proxy/echo query_omitted=true mode=block phase=4 severity=unknown
+time=2026-11-12T01:37:27.546+01:00 level=WARN msg="waf rule matched" rule_id=1695101 path=/proxy/echo query_omitted=true mode=block phase=2 severity=unknown
+time=2026-11-12T01:37:27.550+01:00 level=WARN msg="waf rule matched" rule_id=1695102 path=/proxy/echo query_omitted=true mode=block phase=4 severity=unknown

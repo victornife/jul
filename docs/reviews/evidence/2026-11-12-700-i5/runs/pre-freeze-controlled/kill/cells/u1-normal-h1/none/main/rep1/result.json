@@ -1,0 +1,91 @@
+{
+  "scenario": "u1-normal-h1",
+  "scenario_sha256": "60df74b24d3d3a1404bcc046ceec299370ec6dff7030aa7c6602253c13b8df6e",
+  "comparison": "throughput",
+  "variant": "none",
+  "target": "main",
+  "rep": 1,
+  "profile": "quick",
+  "started": "2026-11-12T00:11:32.545063766Z",
+  "ended": "2026-11-12T00:11:38.693817826Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class load: error:refused ×42558",
+    "phase load class load: error:reset ×4"
+  ],
+  "config_sha256": "8c3dd79e3cad432097f0a10e21e86e2039c0318c841c991e607497470c5792ae",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-706062-573986666.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 32
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 4,
+          "window_seconds": 3,
+          "attempts": 50440,
+          "verified": 7878,
+          "verified_in_window": 7878,
+          "goodput_rps": 2626,
+          "goodput_bytes_per_second": 172097536,
+          "classes": {
+            "error:refused": 42558,
+            "error:reset": 4,
+            "ok": 7878
+          },
+          "p50_ms": 0.799,
+          "p95_ms": 1.706,
+          "p99_ms": 3.995,
+          "max_ms": 11.504,
+          "crossed_in_from_warmup": 4,
+          "outstanding_at_window_end": 4,
+          "response_protos": {
+            "HTTP/1.1": 7878
+          },
+          "connections_dialled": 4,
+          "error_samples": {
+            "error:refused": "Post \"http://127.0.0.1:43995/proxy/echo?resp=65536\": dial tcp 127.0.0.1:43995: connect: connection refused",
+            "error:reset": "Post \"http://127.0.0.1:43995/proxy/echo?resp=65536\": read tcp 127.0.0.1:54618-\u003e127.0.0.1:43995: read: connection reset by peer"
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 36982784,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 64237568,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "rss_after_two_gcs": null,
+  "samples": 7
+}

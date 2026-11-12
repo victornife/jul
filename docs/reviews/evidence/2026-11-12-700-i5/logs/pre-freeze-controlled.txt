@@ -1,0 +1,39 @@
+== success: -scenario u1-normal-h1,u2-normal-h2 -variants none,wasm -reps 1
+2026-11-12T00:10:02Z u1-normal-h1/none/main rep1: state=completed valid=true correct=true load/load=3911.7rps(11739/11739) cpu=0.47
+2026-11-12T00:10:11Z u1-normal-h1/wasm/main rep1: state=completed valid=true correct=true load/load=644.7rps(1936/1936) cpu=0.66
+2026-11-12T00:10:17Z u2-normal-h2/none/main rep1: state=completed valid=true correct=true load/load=2363.3rps(7094/7094) cpu=0.56
+2026-11-12T00:10:26Z u2-normal-h2/wasm/main rep1: state=completed valid=true correct=true load/load=585.3rps(1758/1758) cpu=0.64
+run success: complete, 4 results in /home/victornf/jul-i5-evidence/controlled/success
+exit=0
+/home/victornf/jul-i5-evidence/controlled/success: verified
+verify=0
+== truncate: -scenario u1-normal-h1 -variants none -reps 1 -fault truncate
+2026-11-12T00:10:33Z u1-normal-h1/none/main rep1: state=completed valid=true correct=false load/load=0.0rps(0/15660) cpu=0.52 findings=phase load class load: unverified:resp-len 32768!=65536 ×15660
+run truncate: complete, 1 results in /home/victornf/jul-i5-evidence/controlled/truncate
+exit=0
+/home/victornf/jul-i5-evidence/controlled/truncate: verified
+verify=0
+== corrupt: -scenario u2-normal-h2 -variants none -reps 1 -fault corrupt
+2026-11-12T00:10:39Z u2-normal-h2/none/main rep1: state=completed valid=true correct=false load/load=0.0rps(0/7159) cpu=0.55 findings=phase load class load: unverified:resp-content ×7159
+run corrupt: complete, 1 results in /home/victornf/jul-i5-evidence/controlled/corrupt
+exit=0
+/home/victornf/jul-i5-evidence/controlled/corrupt: verified
+verify=0
+== stall: -scenario u1-normal-h1 -variants none -reps 1 -fault stall
+2026-11-12T00:11:32Z u1-normal-h1/none/main rep1: state=completed valid=false correct=false load/load=0.0rps(0/0) cpu=0.00 invalid=phase load class load: no attempt started inside the window findings=canary clean-proxy: status -1 want 200; canary clean-proxy: status -1 want 200
+run stall: complete, 1 results in /home/victornf/jul-i5-evidence/controlled/stall
+exit=0
+/home/victornf/jul-i5-evidence/controlled/stall: verified
+verify=0
+== kill: -scenario u1-normal-h1 -variants none -reps 1 -kill-jul-after 3s
+2026-11-12T00:11:38Z u1-normal-h1/none/main rep1: state=completed valid=true correct=false load/load=2626.0rps(7878/50440) findings=jul exited during the run: signal killed; phase load class load: error:refused ×42558; phase load class load: error:reset ×4
+run kill: complete, 1 results in /home/victornf/jul-i5-evidence/controlled/kill
+exit=0
+/home/victornf/jul-i5-evidence/controlled/kill: verified
+verify=0
+== hung: -scenario u1-normal-h1 -variants none -reps 1 -watchdog 5s
+2026-11-12T00:11:45Z u1-normal-h1/none/main rep1: state=completed valid=true correct=true load/load=3624.0rps(10875/10875) cpu=0.43
+run hung: complete, 1 results in /home/victornf/jul-i5-evidence/controlled/hung
+exit=0
+/home/victornf/jul-i5-evidence/controlled/hung: verified
+verify=0

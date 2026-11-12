@@ -1,0 +1,224 @@
+{
+  "scenario": "s8-slow-clients-h1",
+  "scenario_sha256": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b",
+  "comparison": "record",
+  "variant": "both",
+  "target": "base",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T01:28:24.572017038Z",
+  "ended": "2026-11-12T01:29:14.070453302Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "phase load class slow: status:500 ×1"
+  ],
+  "config_sha256": "beb3d39488769e36cdf598bd574dc561857c07d7e52605e5ee24734b9b64c641",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-724199-742278632.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 32
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "slow",
+          "proto": "h1",
+          "concurrency": 96,
+          "window_seconds": 20,
+          "attempts": 100,
+          "verified": 99,
+          "verified_in_window": 3,
+          "goodput_rps": 0.15,
+          "goodput_bytes_per_second": 614.4,
+          "classes": {
+            "ok": 99,
+            "status:500": 1
+          },
+          "p50_ms": 13315.04,
+          "p95_ms": 13315.04,
+          "p99_ms": 13315.04,
+          "max_ms": 13362.635,
+          "crossed_in_from_warmup": 96,
+          "outstanding_at_window_end": 96,
+          "response_protos": {
+            "HTTP/1.1": 100
+          },
+          "connections_dialled": 96
+        },
+        {
+          "workload": "slow-cancel",
+          "proto": "h1",
+          "concurrency": 32,
+          "window_seconds": 20,
+          "attempts": 320,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "client-cancel": 320
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 32,
+          "outstanding_at_window_end": 32,
+          "response_protos": {},
+          "connections_dialled": 416,
+          "expected_classes": [
+            "client-cancel"
+          ],
+          "error_samples": {
+            "client-cancel": "Post \"http://127.0.0.1:46487/proxy/echo?resp=4096\": context deadline exceeded"
+          }
+        },
+        {
+          "workload": "probe",
+          "proto": "h1",
+          "concurrency": 4,
+          "window_seconds": 20,
+          "attempts": 495,
+          "verified": 495,
+          "verified_in_window": 491,
+          "goodput_rps": 24.55,
+          "goodput_bytes_per_second": 100556.8,
+          "classes": {
+            "ok": 495
+          },
+          "p50_ms": 26.806,
+          "p95_ms": 898.039,
+          "p99_ms": 2620.492,
+          "max_ms": 3401.042,
+          "crossed_in_from_warmup": 4,
+          "outstanding_at_window_end": 4,
+          "response_protos": {
+            "HTTP/1.1": 495
+          },
+          "connections_dialled": 4
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.993,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 762109952,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 789508096,
+  "heap_inuse_after_two_gcs": 126910464,
+  "heap_alloc_after_two_gcs": 104008744,
+  "rss_after_two_gcs": 200314880,
+  "counter_deltas": {
+    "plugin_invocations": 2583,
+    "plugin_invocations_ok": 0,
+    "plugin_resp_invocations": 2572,
+    "waf_tx_all": 1288,
+    "waf_tx_body_limit": 0,
+    "waf_tx_pass": 0
+  },
+  "unavailable_metrics": [
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_success",
+    "reload_failure",
+    "transport_retired"
+  ],
+  "samples": 57
+}

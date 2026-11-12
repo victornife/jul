@@ -42,6 +42,7 @@ coverage.txt
 /jul-new.exe
 /burn-in-load.exe
 /burn-in-load-test.exe
+/scripts/inspection-assessment/inspection-assessment
 
 # Stray root node_modules — the Console's real deps live in
 # internal/admin/ui/node_modules (ignored by that dir's .gitignore).

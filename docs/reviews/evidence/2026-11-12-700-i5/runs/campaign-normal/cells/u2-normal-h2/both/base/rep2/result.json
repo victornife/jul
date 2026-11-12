@@ -1,0 +1,168 @@
+{
+  "scenario": "u2-normal-h2",
+  "scenario_sha256": "28d1c65f72807f8b55998ff11b45c38e8bd78c39f53d80c3367aae8655dca082",
+  "comparison": "throughput",
+  "variant": "both",
+  "target": "base",
+  "rep": 2,
+  "profile": "qualification",
+  "started": "2026-11-12T00:58:54.937405435Z",
+  "ended": "2026-11-12T00:59:32.471561981Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "4b4b1e2765ae98ae7b25de5b4dbb95ebb71a5716e3b65348dce9dbb1865ae11b",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-710878-99758132.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 32
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 1,
+          "window_seconds": 20,
+          "attempts": 198,
+          "verified": 198,
+          "verified_in_window": 197,
+          "goodput_rps": 9.85,
+          "goodput_bytes_per_second": 645529.6,
+          "classes": {
+            "ok": 198
+          },
+          "p50_ms": 98.868,
+          "p95_ms": 121.671,
+          "p99_ms": 135.543,
+          "max_ms": 189.69,
+          "crossed_in_from_warmup": 1,
+          "outstanding_at_window_end": 1,
+          "response_protos": {
+            "HTTP/2.0": 198
+          },
+          "connections_dialled": 1
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.504,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 210550784,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 239529984,
+  "heap_inuse_after_two_gcs": 101842944,
+  "heap_alloc_after_two_gcs": 83844840,
+  "rss_after_two_gcs": 166993920,
+  "counter_deltas": {
+    "plugin_invocations": 518,
+    "plugin_invocations_ok": 0,
+    "plugin_resp_invocations": 510,
+    "waf_tx_all": 257,
+    "waf_tx_body_limit": 0,
+    "waf_tx_pass": 0
+  },
+  "unavailable_metrics": [
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_success",
+    "reload_failure",
+    "transport_retired"
+  ],
+  "samples": 72
+}

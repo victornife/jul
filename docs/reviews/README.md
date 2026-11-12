@@ -26,6 +26,7 @@ durable, promoted to an [ADR](../adr/).
 
 | Date | Review | Scope |
 | --- | --- | --- |
+| 2026-11-12 | [#700 I5 inspection assessment tooling and baselines](2026-11-12-700-i5-assessment-tooling-baselines.md) | Maintained `scripts/inspection-assessment/` tooling, frozen plan and a bounded baseline campaign for `858590dc` (go1.27.3 and go1.27.4) and post-I1 `363d6cd4`, with fidelity smokes; measurement evidence only, no A1–A18 criterion satisfied |
 | 2026-11-09 | [#695 aggregate WAF/WASM inspection resource and admission assessment](2026-11-09-695-waf-wasm-resource-assessment.md) ([predeclared plan](2026-11-09-695-waf-wasm-assessment-plan.md)) | Source-traced control matrix and measured runs on one 2 vCPU / 768 MiB envelope; disposition B with follow-ups `#697`–`#700`; not a capacity, SLA, GA or soak claim |
 | 2026-11-10 | [#699 plugin request-body preparation bounded revalidation](2026-11-10-699-plugin-body-preparation-revalidation.md) | Before/after single-client slow-upload reproducer and a bounded A/B subset of the #695 harness for preparing plugin request bodies before instance acquisition; #695 and #697/#698 evidence unchanged; #700 aggregate limits reported, not fixed; not an aggregate recertification |
 | 2026-11-10 | [#697/#698 WAF fix bounded revalidation](2026-11-10-697-698-waf-fix-revalidation.md) | Before/after reproducers and a bounded A/B subset of the #695 harness for the argument-limit guard and `response_body_check`; #695 evidence unchanged; not an aggregate recertification |

@@ -1,0 +1,163 @@
+{
+  "scenario": "f4-stalled-body",
+  "scenario_sha256": "d159c35cab43609da6ee4261605d0a6d901884f13a87b62863818f91d8aa79ed",
+  "comparison": "record",
+  "variant": "none",
+  "target": "base",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T01:39:20.830928354Z",
+  "ended": "2026-11-12T01:40:54.466472584Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "046cedf9b2321576b03d114b93081a1a8f8c12f3efb6bc8aa81e2bbff8ab907c",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-724199-846285454.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 38
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "f4": [
+    {
+      "proto": "h1",
+      "mode": "stall",
+      "warmup_class": "ok",
+      "upload_class": "error:timeout",
+      "upload_seconds": 20.001,
+      "watchdog_fired": true,
+      "sibling_class": "ok",
+      "sibling_ms": 1.534,
+      "sibling_proto": "HTTP/1.1",
+      "connections_dialled": 2,
+      "connections_expected": 2,
+      "sibling_shared_connection": false
+    },
+    {
+      "proto": "h1",
+      "mode": "slow",
+      "warmup_class": "ok",
+      "upload_class": "status",
+      "upload_status": 200,
+      "upload_seconds": 7.562,
+      "watchdog_fired": false,
+      "sibling_class": "ok",
+      "sibling_ms": 1.373,
+      "sibling_proto": "HTTP/1.1",
+      "connections_dialled": 2,
+      "connections_expected": 2,
+      "sibling_shared_connection": false
+    },
+    {
+      "proto": "h2",
+      "mode": "stall",
+      "warmup_class": "ok",
+      "upload_class": "error:timeout",
+      "upload_seconds": 20.001,
+      "watchdog_fired": true,
+      "sibling_class": "ok",
+      "sibling_ms": 2.223,
+      "sibling_proto": "HTTP/2.0",
+      "connections_dialled": 1,
+      "connections_expected": 1,
+      "sibling_shared_connection": true
+    },
+    {
+      "proto": "h2",
+      "mode": "slow",
+      "warmup_class": "ok",
+      "upload_class": "status",
+      "upload_status": 200,
+      "upload_seconds": 8.013,
+      "watchdog_fired": false,
+      "sibling_class": "ok",
+      "sibling_ms": 2.055,
+      "sibling_proto": "HTTP/2.0",
+      "connections_dialled": 1,
+      "connections_expected": 1,
+      "sibling_shared_connection": true
+    },
+    {
+      "proto": "h3",
+      "mode": "stall",
+      "warmup_class": "ok",
+      "upload_class": "error:timeout",
+      "upload_seconds": 20.001,
+      "watchdog_fired": true,
+      "sibling_class": "ok",
+      "sibling_ms": 2.308,
+      "sibling_proto": "HTTP/3.0",
+      "connections_dialled": 1,
+      "connections_expected": 1,
+      "sibling_shared_connection": true
+    },
+    {
+      "proto": "h3",
+      "mode": "slow",
+      "warmup_class": "ok",
+      "upload_class": "status",
+      "upload_status": 200,
+      "upload_seconds": 7.562,
+      "watchdog_fired": false,
+      "sibling_class": "ok",
+      "sibling_ms": 2.018,
+      "sibling_proto": "HTTP/3.0",
+      "connections_dialled": 1,
+      "connections_expected": 1,
+      "sibling_shared_connection": true
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 21671936,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 49364992,
+  "heap_inuse_after_two_gcs": 9109504,
+  "heap_alloc_after_two_gcs": 6601680,
+  "rss_after_two_gcs": 41938944,
+  "counter_deltas": {
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_pass": 0
+  },
+  "unavailable_metrics": [
+    "plugin_invocations",
+    "plugin_invocations_ok",
+    "plugin_resp_invocations",
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_success",
+    "reload_failure",
+    "transport_retired"
+  ],
+  "samples": 188
+}
