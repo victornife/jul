@@ -13,6 +13,8 @@ import (
 	"testing"
 	"testing/iotest"
 
+	"github.com/tetratelabs/wazero"
+
 	"jul/internal/inspection"
 )
 
@@ -278,4 +280,50 @@ func (r *chunkReader) Read(p []byte) (int, error) {
 	copy(p, r.data[r.off:r.off+n])
 	r.off += n
 	return n, nil
+}
+
+// shrinkHook is a charge that runs onShrink whenever a resize refunds bytes.
+type shrinkHook struct {
+	n        uint64
+	onShrink func()
+}
+
+func (c *shrinkHook) Resize(n uint64) error {
+	if n < c.n {
+		c.onShrink()
+	}
+	c.n = n
+	return nil
+}
+
+func (c *shrinkHook) Release() error { c.n = 0; return nil }
+
+// TestAppendResponseDropsOldArrayBeforeRefund: when the generated response
+// grows, the invocation's own reference already points to the new array at
+// the moment the old array's charge is refunded.
+func TestAppendResponseDropsOldArrayBeforeRefund(t *testing.T) {
+	r := wazero.NewRuntime(t.Context())
+	t.Cleanup(func() { _ = r.Close(t.Context()) })
+	mod, err := r.Instantiate(t.Context(), append(append([]byte(nil), wasmHeader...), wasmSection(5, [][]byte{{0x00, 0x01}})...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mod.Memory().Write(0, []byte("abcdefgh")) {
+		t.Fatal("seed guest memory")
+	}
+	inv := &invocation{maxRespBody: 1 << 10, respBody: make([]byte, 0, 4)}
+	first := &inv.respBody[:1][0]
+	shrinks := 0
+	inv.respCharge = &shrinkHook{n: 4, onShrink: func() {
+		shrinks++
+		if &inv.respBody[:1][0] == first {
+			t.Fatal("old array refunded while the invocation still references it")
+		}
+	}}
+	if !inv.appendResponse(mod, 0, 3) || !inv.appendResponse(mod, 3, 5) {
+		t.Fatal("in-bounds append refused")
+	}
+	if inv.err != nil || string(inv.respBody) != "abcdefgh" || shrinks != 1 {
+		t.Fatalf("err=%v body=%q shrinks=%d", inv.err, inv.respBody, shrinks)
+	}
 }

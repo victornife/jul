@@ -73,10 +73,12 @@ func (s *Set) Middleware(name string) middleware.Middleware {
 			}
 			action, inv, err := p.invoke(r.Context(), w, r)
 			if err != nil {
+				undoPluginHeaders(w, r, inv)
 				writePluginError(w, r, err)
 				return
 			}
 			if action == 1 { // Continue
+				r = continueWithJournal(r, inv)
 				inv.releaseResponse()
 				if inv.sub >= 0 {
 					// The subscription reads the state after the action;
@@ -151,6 +153,7 @@ func (s *Set) Handler(name string) http.Handler {
 		}
 		_, inv, err := p.invoke(r.Context(), w, r)
 		if err != nil {
+			undoPluginHeaders(w, r, inv)
 			writePluginError(w, r, err)
 			return
 		}

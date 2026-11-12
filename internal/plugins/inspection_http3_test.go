@@ -6,12 +6,15 @@
 package plugins
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 )
 
@@ -22,14 +25,20 @@ func h3Server(t *testing.T, h http.Handler) (*http.Client, string, func() bool) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &http3.Server{Handler: h, TLSConfig: certs.TLS}
+	// sameConn counts the QUIC connections the server accepted, so a
+	// transport that silently redialled cannot pass for connection reuse.
+	var conns atomic.Int64
+	srv := &http3.Server{Handler: h, TLSConfig: certs.TLS,
+		ConnContext: func(ctx context.Context, _ *quic.Conn) context.Context {
+			conns.Add(1)
+			return ctx
+		}}
 	served := make(chan struct{})
 	go func() { defer close(served); _ = srv.Serve(pc) }()
 	tr := &http3.Transport{TLSClientConfig: certs.Client().Transport.(*http.Transport).TLSClientConfig.Clone()}
 	t.Cleanup(func() { _ = tr.Close(); _ = srv.Close(); <-served; _ = pc.Close() })
-	// Every result is checked for proto 3; a stream deadline that reset the
-	// QUIC connection would fail the sibling and follow-up requests.
-	return &http.Client{Transport: tr, Timeout: 10 * time.Second}, "https://" + pc.LocalAddr().String(), func() bool { return true }
+	return &http.Client{Transport: tr, Timeout: 10 * time.Second}, "https://" + pc.LocalAddr().String(),
+		func() bool { return conns.Load() == 1 }
 }
 
 func TestInspectionOutcomesOverH3(t *testing.T) {

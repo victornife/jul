@@ -214,8 +214,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   (gRPC `UNAVAILABLE`) without running the guest or the origin; observe mode
   records would-reject decisions instead. `global.inspection.body_timeout`
   (default `60s`, `0s` disables) now bounds body-reading plugin uploads with
-  `408` (gRPC `DEADLINE_EXCEEDED`); plugin retirement aborts a read in
-  progress. `/api/v1/status` reports `request_path_integration = "partial"`.
+  `408` (gRPC `DEADLINE_EXCEEDED`); a writer that cannot apply or refuses the
+  deadline fails closed with `500`, and plugin retirement aborts a read in
+  progress. Headers a plugin set before a failed call (for example
+  `Content-Encoding`) are removed from the error response. `/api/v1/status` reports `request_path_integration = "partial"`.
   New throttled overload and contained-guest-failure warnings carry bounded
   fields only. WAF charging and evaluation slots (I3) and response
   subscriptions (I4) are not governed yet. See

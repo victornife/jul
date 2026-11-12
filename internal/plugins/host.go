@@ -80,6 +80,10 @@ type invocation struct {
 	resp             *responseView
 	addedHeaderBytes int
 
+	// journal records the response headers this request-phase call set, so
+	// a failed request can undo them (see headerJournal).
+	journal headerJournal
+
 	// lease is the request's inspection lease. The charges below cover the
 	// host arrays the invocation holds (ADR 0032 slice I2); each is released
 	// after the array's last reference is dropped, or by the lease close.
@@ -249,7 +253,7 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if inv == nil {
 			return
 		}
-		inv.w.Header().Set(readStr(m, namePtr, nameLen), readStr(m, valPtr, valLen))
+		inv.setResponseHeader(readStr(m, namePtr, nameLen), readStr(m, valPtr, valLen))
 	})
 
 	exp("read_request_body", func(ctx context.Context, m api.Module, buf, limit uint32) uint32 {

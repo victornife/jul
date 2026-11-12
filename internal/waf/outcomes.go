@@ -22,6 +22,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/middleware"
+	"jul/internal/reqdeadline"
 )
 
 type detectionOnlyInterrupter interface {
@@ -679,6 +680,12 @@ func (i *wafResponseInterceptor) ReadFrom(r io.Reader) (int64, error) {
 // also let callers flush or write around response inspection.
 func (i *wafResponseInterceptor) SetReadDeadline(t time.Time) error {
 	return http.NewResponseController(i.w).SetReadDeadline(t)
+}
+
+// SupportsReadDeadline reports whether SetReadDeadline reaches a writer that
+// applies it, so a deadline owner does not mistake the forwarder for support.
+func (i *wafResponseInterceptor) SupportsReadDeadline() bool {
+	return reqdeadline.WriterSupports(i.w)
 }
 
 func (i *wafResponseInterceptor) Flush() {

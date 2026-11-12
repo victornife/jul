@@ -32,6 +32,7 @@ var (
 	hfFetch     = hostFn{"fetch", 8, 1}
 	hfState     = hostFn{"set_request_state", 2, 1}
 	hfSubscribe = hostFn{"subscribe_response", 1, 1}
+	hfRespHdr   = hostFn{"set_response_header", 4, 0}
 )
 
 // hostGuest assembles a module importing fns from abi's host module, with

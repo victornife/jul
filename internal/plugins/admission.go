@@ -74,6 +74,16 @@ func newChargedBuf(charge chargeFunc, capacity int) (*chargedBuf, error) {
 // and the old array's charge is refunded only after the buffer's reference
 // to it is dropped. On failure the buffer is unchanged and still charged.
 func (cb *chargedBuf) grow(newCap int) error {
+	if err := cb.growHeld(newCap); err != nil {
+		return err
+	}
+	return cb.settle()
+}
+
+// growHeld is grow without the refund: it leaves the old and new arrays both
+// charged, so a caller holding another reference to the old array can drop it
+// before calling settle.
+func (cb *chargedBuf) growHeld(newCap int) error {
 	old := cap(cb.b)
 	if newCap <= old {
 		return nil
@@ -88,7 +98,13 @@ func (cb *chargedBuf) grow(newCap int) error {
 	nb := make([]byte, len(cb.b), newCap)
 	copy(nb, cb.b)
 	cb.b = nb
-	return cb.c.Resize(uint64(newCap))
+	return nil
+}
+
+// settle refunds everything above the buffer's current capacity. Every other
+// reference to an array the buffer has replaced must already be gone.
+func (cb *chargedBuf) settle() error {
+	return cb.c.Resize(uint64(cap(cb.b)))
 }
 
 // release drops the buffer and then refunds its charge. It is idempotent.
@@ -202,11 +218,17 @@ func (inv *invocation) appendResponse(m api.Module, ptr, n uint32) (inBounds boo
 			inv.respBody, inv.respCharge = cb.b, cb.c
 		} else {
 			cb := chargedBuf{b: inv.respBody, c: inv.respCharge}
-			if err := cb.grow(newCap); err != nil {
+			if err := cb.growHeld(newCap); err != nil {
 				inv.failCharge(err)
 				return true
 			}
+			// The invocation's reference to the old array goes before its
+			// charge is refunded.
 			inv.respBody = cb.b
+			if err := cb.settle(); err != nil {
+				inv.failCharge(err)
+				return true
+			}
 		}
 	}
 	inv.respBody = append(inv.respBody, view...)

@@ -32,12 +32,8 @@ type ipResolver interface {
 
 // fetchBodyCloseGrace bounds how long a fetch waits, after its response was
 // read and its context cancelled, for the transport to close every reader of
-// the charged request-body copy before the host call returns.
+// the charged request-body copy. A reader still open then is revoked.
 var fetchBodyCloseGrace = 2 * time.Second
-
-// fetchHeldWaiterEnded is a test hook, called when a late-close waiter ends
-// with its request instead of the transport closing the copy.
-var fetchHeldWaiterEnded = func() {}
 
 // doFetch performs a guarded outbound HTTP request for a plugin holding the
 // fetch capability. It enforces the allow-list, an SSRF address guard, a
@@ -45,7 +41,8 @@ var fetchHeldWaiterEnded = func() {}
 // fall outside the same guards.
 //
 // body is the charged copy of the guest's request body (nil for none); doFetch
-// owns it and refunds it once the transport has closed every reader of it.
+// owns it and refunds it before returning, once no reader it handed to the
+// transport can reach it: every reader has closed, or the rest are revoked.
 // The response is read into a buffer charged to inv's lease before it is
 // allocated; inv retains it for fetch_read until the call ends.
 func (p *plugin) doFetch(parent context.Context, inv *invocation, method, rawURL string, body *chargedBuf) (int, []byte, error) {
@@ -54,26 +51,12 @@ func (p *plugin) doFetch(parent context.Context, inv *invocation, method, rawURL
 		fb = &fetchBody{data: body.b, idle: make(chan struct{})}
 	}
 	defer func() {
-		if fb != nil && !fb.waitClosed(fetchBodyCloseGrace) {
+		if fb != nil && !fb.waitClosed(fetchBodyCloseGrace, parent.Done()) {
+			fb.revoke()
 			if p.log != nil {
-				p.log.Warn("plugin: fetch request body still held by the transport after the call; refunding at lease close",
+				p.log.Warn("plugin: fetch request body still held by the transport after the call; its readers were revoked",
 					"name", p.name)
 			}
-			// The waiter ends with the request: a copy still held then stays
-			// charged until the lease closes, which refunds it.
-			var reqDone <-chan struct{}
-			if inv != nil && inv.r != nil {
-				reqDone = inv.r.Context().Done()
-			}
-			go func(c *chargedBuf) {
-				select {
-				case <-fb.idle:
-					c.release()
-				case <-reqDone:
-					fetchHeldWaiterEnded()
-				}
-			}(body)
-			return
 		}
 		body.release()
 	}()
@@ -181,50 +164,63 @@ func (p *plugin) readFetchResponse(inv *invocation, resp *http.Response) ([]byte
 }
 
 // fetchBody serves a charged request-body copy to the fetch transport. Every
-// reader it hands out (the body and any GetBody replays) is counted until
-// closed, so the copy is refunded only once the transport, which may close a
-// request body asynchronously after RoundTrip returns, no longer reads it.
+// reader it hands out (the body and any GetBody replays) is tracked until
+// closed. The transport may close a request body asynchronously after
+// RoundTrip returns; a reader it still holds when the call ends is revoked,
+// so the copy is unreachable from it before the copy is refunded.
 type fetchBody struct {
-	data   []byte
-	mu     sync.Mutex
-	open_  int
-	sealed bool
-	idle   chan struct{}
+	data    []byte
+	mu      sync.Mutex
+	readers map[*fetchBodyReader]struct{}
+	sealed  bool
+	idle    chan struct{}
 }
 
 func (fb *fetchBody) open() io.ReadCloser {
 	fb.mu.Lock()
 	defer fb.mu.Unlock()
-	fb.open_++
-	return &fetchBodyReader{fb: fb, r: bytes.NewReader(fb.data)}
+	return fb.openLocked()
 }
 
+func (fb *fetchBody) openLocked() *fetchBodyReader {
+	r := &fetchBodyReader{fb: fb, r: bytes.NewReader(fb.data)}
+	if fb.readers == nil {
+		fb.readers = make(map[*fetchBodyReader]struct{})
+	}
+	fb.readers[r] = struct{}{}
+	return r
+}
+
+// reopen serves a GetBody replay. Sealing and opening are one step, so a
+// replay can never start from a revoked, emptied copy.
 func (fb *fetchBody) reopen() (io.ReadCloser, error) {
 	fb.mu.Lock()
-	sealed := fb.sealed
-	fb.mu.Unlock()
-	if sealed {
+	defer fb.mu.Unlock()
+	if fb.sealed {
 		return nil, errors.New("fetch request body no longer available")
 	}
-	return fb.open(), nil
+	return fb.openLocked(), nil
 }
 
-func (fb *fetchBody) closed() {
+func (fb *fetchBody) closed(r *fetchBodyReader) {
 	fb.mu.Lock()
 	defer fb.mu.Unlock()
-	fb.open_--
-	if fb.open_ == 0 && fb.sealed {
+	if _, ok := fb.readers[r]; !ok {
+		return
+	}
+	delete(fb.readers, r)
+	if len(fb.readers) == 0 && fb.sealed {
 		close(fb.idle)
 	}
 }
 
-// waitClosed seals the body against new readers and waits up to grace for
-// every reader to close. It reports whether they all did.
-func (fb *fetchBody) waitClosed(grace time.Duration) bool {
+// waitClosed seals the body against new readers and waits up to grace, or
+// until done, for every reader to close. It reports whether they all did.
+func (fb *fetchBody) waitClosed(grace time.Duration, done <-chan struct{}) bool {
 	fb.mu.Lock()
 	if !fb.sealed {
 		fb.sealed = true
-		if fb.open_ == 0 {
+		if len(fb.readers) == 0 {
 			close(fb.idle)
 		}
 	}
@@ -235,22 +231,51 @@ func (fb *fetchBody) waitClosed(grace time.Duration) bool {
 	case <-fb.idle:
 		return true
 	case <-t.C:
+	case <-done:
+	}
+	select {
+	case <-fb.idle:
+		return true
+	default:
 		return false
 	}
 }
 
+// revoke detaches the copy from every reader still open. A Read in progress
+// finishes its copy first; later reads fail. Afterwards no reader, and no
+// GetBody replay, can reach the copy, so it can be refunded while the
+// transport still holds the readers.
+func (fb *fetchBody) revoke() {
+	fb.mu.Lock()
+	fb.sealed, fb.data = true, nil
+	open := make([]*fetchBodyReader, 0, len(fb.readers))
+	for r := range fb.readers {
+		open = append(open, r)
+	}
+	fb.mu.Unlock()
+	for _, r := range open {
+		r.mu.Lock()
+		r.r, r.revoked = nil, true
+		r.mu.Unlock()
+	}
+}
+
 type fetchBodyReader struct {
-	fb     *fetchBody
-	mu     sync.Mutex
-	r      *bytes.Reader
-	closed bool
+	fb      *fetchBody
+	mu      sync.Mutex
+	r       *bytes.Reader
+	closed  bool
+	revoked bool
 }
 
 func (r *fetchBodyReader) Read(b []byte) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed {
+	switch {
+	case r.closed:
 		return 0, errors.New("fetch request body closed")
+	case r.revoked:
+		return 0, errors.New("fetch request body revoked after the call")
 	}
 	return r.r.Read(b)
 }
@@ -263,7 +288,7 @@ func (r *fetchBodyReader) Close() error {
 	}
 	r.closed, r.r = true, nil
 	r.mu.Unlock()
-	r.fb.closed()
+	r.fb.closed(r)
 	return nil
 }
 

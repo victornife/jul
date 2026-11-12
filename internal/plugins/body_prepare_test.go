@@ -971,8 +971,8 @@ func TestPreparationPreservesTrailers(t *testing.T) {
 }
 
 // A response writer without read-deadline support cannot have its body read
-// ended by retirement: the warning is logged, and the request still fails as
-// retired, without a guest call, once its client finishes.
+// ended by a deadline: the warning is logged, the read is interrupted by
+// closing its body, and the request fails as retired without a guest call.
 func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
 	m, hooks := bodyManager(t)
 	s := buildSet(t, m, map[string]config.PluginConfig{"g": bodyGuestConfig(ABIJulV1, guestEcho)})
@@ -989,8 +989,12 @@ func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
 	if !strings.Contains(logs.String(), "read deadline unsupported") {
 		t.Fatalf("missing warning; log: %s", logs.String())
 	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("retirement left the upload blocked")
+	}
 	_ = pw.Close()
-	<-done
 	if reason := hooks.awaitFail(t); reason != bodyFailRetired || rec.Code != 500 {
 		t.Fatalf("reason=%s status=%d", reason, rec.Code)
 	}

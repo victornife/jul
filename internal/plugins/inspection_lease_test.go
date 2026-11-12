@@ -255,12 +255,17 @@ type deadlineWriter struct {
 	mu   sync.Mutex
 	body *stallBody
 	sets []time.Time
+	// refuse makes the writer expose SetReadDeadline but reject it.
+	refuse bool
 }
 
 func (w *deadlineWriter) SetReadDeadline(t time.Time) error {
 	w.mu.Lock()
 	w.sets = append(w.sets, t)
 	w.mu.Unlock()
+	if w.refuse {
+		return http.ErrNotSupported
+	}
 	if !t.IsZero() && !t.After(time.Now()) {
 		w.body.fail(os.ErrDeadlineExceeded)
 	}
@@ -304,12 +309,19 @@ func (b *stallBody) Read(p []byte) (int, error) {
 	}
 }
 
-func (b *stallBody) Close() error { return nil }
+// Close ends a pending read, as closing a server request body does on HTTP/2
+// and HTTP/3.
+func (b *stallBody) Close() error {
+	b.fail(http.ErrBodyReadAfterClose)
+	return nil
+}
 
 // TestBodyDeadlineOutcomes: an enforced body_timeout aborts a stalled upload
 // with 408 (H1 Connection: close) before any guest runs; observe lets it
 // finish and counts would_timeout once; 0s arms nothing; and a writer
-// without read-deadline support fails closed only in enforce mode.
+// without read-deadline support fails closed only in enforce mode. A writer
+// that exposes SetReadDeadline but refuses it also fails closed with 500, and
+// the stalled upload is interrupted rather than left blocked.
 func TestBodyDeadlineOutcomes(t *testing.T) {
 	const timeout = 50 * time.Millisecond
 	type tc struct {
@@ -317,17 +329,19 @@ func TestBodyDeadlineOutcomes(t *testing.T) {
 		mode      inspection.Mode
 		timeout   time.Duration
 		supported bool
+		refuse    bool
 		code      int
 		metrics   []string
 	}
 	cases := []tc{
-		{"enforce timeout", inspection.Enforce, timeout, true, http.StatusRequestTimeout, []string{"h1/timeout"}},
-		{"observe would_timeout", inspection.Observe, timeout, true, http.StatusOK, []string{"h1/would_timeout"}},
-		{"disabled", inspection.Enforce, 0, true, http.StatusOK, nil},
-		{"enforce unsupported", inspection.Enforce, timeout, false, http.StatusInternalServerError, []string{"h1/unsupported"}},
+		{"enforce timeout", inspection.Enforce, timeout, true, false, http.StatusRequestTimeout, []string{"h1/timeout"}},
+		{"observe would_timeout", inspection.Observe, timeout, true, false, http.StatusOK, []string{"h1/would_timeout"}},
+		{"disabled", inspection.Enforce, 0, true, false, http.StatusOK, nil},
+		{"enforce unsupported", inspection.Enforce, timeout, false, false, http.StatusInternalServerError, []string{"h1/unsupported"}},
 		// Observe counts the missing capability and, independently, the read
 		// that outlasted the unapplied body_timeout (ADR 0032 observe table).
-		{"observe unsupported", inspection.Observe, timeout, false, http.StatusOK, []string{"h1/unsupported", "h1/would_timeout"}},
+		{"observe unsupported", inspection.Observe, timeout, false, false, http.StatusOK, []string{"h1/unsupported", "h1/would_timeout"}},
+		{"enforce refused abort", inspection.Enforce, timeout, true, true, http.StatusInternalServerError, []string{"h1/unsupported"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -340,13 +354,13 @@ func TestBodyDeadlineOutcomes(t *testing.T) {
 			r := httptest.NewRequest(http.MethodPost, "/", nil)
 			r.Body, r.ContentLength = body, -1
 			var w http.ResponseWriter = httptest.NewRecorder()
-			dw := &deadlineWriter{ResponseRecorder: w.(*httptest.ResponseRecorder), body: body}
+			dw := &deadlineWriter{ResponseRecorder: w.(*httptest.ResponseRecorder), body: body, refuse: c.refuse}
 			if c.supported {
 				w = dw
 			}
 			// A supported writer's upload stalls until the deadline aborts it;
 			// otherwise it completes after the timeout has passed.
-			if c.code != http.StatusRequestTimeout {
+			if c.code != http.StatusRequestTimeout && !c.refuse {
 				go func() { time.Sleep(2 * timeout); close(body.release) }()
 			}
 			s.Middleware("r")(echoNext(&hits)).ServeHTTP(w, r)
@@ -440,6 +454,81 @@ func TestHostOverloadWinsOverProvokedTrap(t *testing.T) {
 			}
 			assertDrained(t, gov)
 		})
+	}
+}
+
+// TestOverloadDiscardsPluginResponseHeaders: response headers a request-phase
+// guest set for the response it meant to produce (here Content-Encoding: gzip)
+// are undone before the replacement 503, including those set by an outer
+// plugin that continued, while headers set by other middleware keep their
+// values. A real client that negotiates gzip must read the plain 503.
+func TestOverloadDiscardsPluginResponseHeaders(t *testing.T) {
+	data := map[int32][]byte{64: []byte("Content-Encoding"), 96: []byte("gzip"), 128: []byte("Vary")}
+	setHeaders := seq(call(0, 64, 16, 96, 4), call(0, 128, 4, 96, 4))
+	for _, abi := range bothABIs {
+		for _, tc := range []struct {
+			name  string
+			chain func(s *Set, next http.Handler) http.Handler
+		}{
+			{"handler", func(s *Set, _ http.Handler) http.Handler { return s.Handler("fail") }},
+			{"middleware", func(s *Set, next http.Handler) http.Handler { return s.Middleware("fail")(next) }},
+			{"outer plugin continued", func(s *Set, next http.Handler) http.Handler {
+				return s.Middleware("enc")(s.Middleware("fail")(next))
+			}},
+			// Only the outer plugin set the headers: the inner failure must
+			// undo them through the inherited journal.
+			{"outer plugin only", func(s *Set, next http.Handler) http.Handler {
+				return s.Middleware("enc")(s.Middleware("quiet")(next))
+			}},
+		} {
+			t.Run(abi+"/"+tc.name, func(t *testing.T) {
+				fail := hostGuest{abi: abi, fns: []hostFn{hfRespHdr, hfWriteBody, hfStatus}, pages: 3, data: data,
+					body: seq(setHeaders, call(2, 201), call(1, 0, 100000), i32c(0))}
+				quiet := hostGuest{abi: abi, fns: []hostFn{hfRespHdr, hfWriteBody, hfStatus}, pages: 3,
+					body: seq(call(2, 201), call(1, 0, 100000), i32c(0))}
+				enc := hostGuest{abi: abi, fns: []hostFn{hfRespHdr}, data: data, body: seq(setHeaders, i32c(1))}
+				m, _, gov, _ := govManager(t, limitsWith(1000))
+				big := func(pc *config.PluginConfig) { pc.MaxResponseBody = config.Size(1 << 20) }
+				s := buildSet(t, m, map[string]config.PluginConfig{
+					"fail": fail.config(big), "quiet": quiet.config(big), "enc": enc.config(),
+				})
+				var hits atomic.Int64
+				h := tc.chain(s, echoNext(&hits))
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Vary", "Origin")
+					h.ServeHTTP(w, r)
+				}))
+				defer srv.Close()
+				resp, err := srv.Client().Get(srv.URL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, err := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if err != nil {
+					t.Fatalf("client could not read the 503 body: %v", err)
+				}
+				if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "1" {
+					t.Fatalf("status %d", resp.StatusCode)
+				}
+				if !resp.Uncompressed && resp.Header.Get("Content-Encoding") != "" {
+					t.Fatalf("Content-Encoding %q survived", resp.Header.Get("Content-Encoding"))
+				}
+				if resp.Uncompressed {
+					t.Fatal("client decoded the plain 503 as gzip")
+				}
+				if got := resp.Header.Values("Vary"); len(got) != 1 || got[0] != "Origin" {
+					t.Fatalf("Vary = %v, want the middleware's [Origin]", got)
+				}
+				if !strings.Contains(string(body), inspection.ReasonOverloaded) {
+					t.Fatalf("body %q", body)
+				}
+				if hits.Load() != 0 {
+					t.Fatal("overloaded request reached the origin")
+				}
+				assertDrained(t, gov)
+			})
+		}
 	}
 }
 

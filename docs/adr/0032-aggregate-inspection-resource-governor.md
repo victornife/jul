@@ -477,7 +477,9 @@ unconditional bound on total process memory, and no verdict below claims one.
      deadline answers `408`. Other deadline-related read errors keep their existing outcomes.
    - **Unsupported aborts terminate safely.** Capability is decided when the body phase starts,
      before any read and without setting a deadline. Enforce mode fails closed with `500` before
-     reading. No read is left blocked on a deadline that cannot be applied.
+     reading. No read is left blocked on a deadline that cannot be applied. A writer that has the
+     method but refuses the abort at expiry is also `unsupported`: the read is ended by closing
+     the request body and the request fails closed with `500`, not `408`.
    - **Isolation and accounting are unchanged.** H2 and H3 abort only the affected stream. Charges
      are held until the blocked read and represented work actually end.
    - The guarantee covers Jul's own setters and the upload-admission phase. net/http itself clears

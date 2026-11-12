@@ -165,6 +165,8 @@ func (p *plugin) prepareRequestBody(w http.ResponseWriter, inv *invocation) ([]b
 	}
 	defer done()
 	limits := p.gov.Limits()
+	// If the writer refuses an abort, closing the body ends the read instead.
+	owner.InterruptWith(r.Body)
 	if err := owner.BeginBodyRead(limits.BodyTimeout, limits.Mode == inspection.Observe, p.gov.RecordBodyTimeout); err != nil {
 		owner.EndBodyRead()
 		if errors.Is(err, reqdeadline.ErrUnsupported) {
@@ -173,9 +175,13 @@ func (p *plugin) prepareRequestBody(w http.ResponseWriter, inv *invocation) ([]b
 		return nil, fmt.Errorf("plugin: read request body: %w", err)
 	}
 	cb, err := readBounded(r.Body, r.ContentLength, p.maxReqBody, leaseCharger(inv.lease))
-	if owner.EndBodyRead() {
+	switch owner.EndBodyRead() {
+	case reqdeadline.BodyTimedOut:
 		cb.release()
 		return nil, inspection.ErrBodyTimeout
+	case reqdeadline.BodyUnsupported:
+		cb.release()
+		return nil, inspection.ErrDeadlineUnsupported
 	}
 	if err != nil {
 		if errors.Is(err, errBodyTooLarge) || inspection.IsOverload(err) {
@@ -261,8 +267,8 @@ func (p *plugin) abortPreparations() {
 		}
 	}
 	if unsupported > 0 && p.log != nil {
-		// The read then ends only with its client or a server read_timeout;
-		// the request still fails as retired and never reaches a guest.
+		// The read is interrupted by closing its body instead; the request
+		// still fails as retired and never reaches a guest.
 		p.log.Warn("plugin retired while request bodies were arriving; read deadline unsupported by the response writer",
 			"plugin", p.name, "requests", unsupported)
 	}

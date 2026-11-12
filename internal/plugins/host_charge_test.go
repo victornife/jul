@@ -8,6 +8,7 @@ package plugins
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -212,9 +213,15 @@ func TestGuestIgnoringFetchRefusalGets503(t *testing.T) {
 type holdingTransport struct {
 	release chan struct{}
 	done    chan struct{}
+	held    chan io.ReadCloser
+}
+
+func newHoldingTransport() *holdingTransport {
+	return &holdingTransport{release: make(chan struct{}), done: make(chan struct{}), held: make(chan io.ReadCloser, 1)}
 }
 
 func (h *holdingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	h.held <- r.Body
 	go func() {
 		<-h.release
 		_ = r.Body.Close()
@@ -223,11 +230,26 @@ func (h *holdingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return &http.Response{StatusCode: 200, ContentLength: 2, Body: io.NopCloser(strings.NewReader("ok")), Request: r}, nil
 }
 
-// TestFetchBodyCopyHeldPastGraceRefundsOnLateClose: a request copy the
-// transport still holds after the grace stays charged (it is reachable),
-// is refunded once the transport closes it, and cannot be replayed after
-// the call.
-func TestFetchBodyCopyHeldPastGraceRefundsOnLateClose(t *testing.T) {
+// assertRevoked checks that a request-body reader the transport still holds
+// can no longer reach the refunded copy.
+func assertRevoked(t *testing.T, body io.ReadCloser) {
+	t.Helper()
+	if n, err := body.Read(make([]byte, 8)); n != 0 || err == nil {
+		t.Fatalf("held reader read %d bytes, err %v, after the copy was refunded", n, err)
+	}
+	r := body.(*fetchBodyReader)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.r != nil || r.fb.data != nil {
+		t.Fatal("held reader still references the refunded copy")
+	}
+}
+
+// TestFetchBodyHeldPastGraceIsRevokedBeforeRefund: a request copy the
+// transport still holds after the grace is revoked, so no reader can reach
+// it, and only then refunded, before the host call returns. A late close
+// afterwards is harmless.
+func TestFetchBodyHeldPastGraceIsRevokedBeforeRefund(t *testing.T) {
 	old := fetchBodyCloseGrace
 	fetchBodyCloseGrace = 10 * time.Millisecond
 	t.Cleanup(func() { fetchBodyCloseGrace = old })
@@ -235,7 +257,7 @@ func TestFetchBodyCopyHeldPastGraceRefundsOnLateClose(t *testing.T) {
 	lease, ctx, _, _ := g.AcquireLease(t.Context())
 	defer lease.Close()
 	inv := &invocation{lease: lease}
-	ht := &holdingTransport{release: make(chan struct{}), done: make(chan struct{})}
+	ht := newHoldingTransport()
 	p := fetchPlugin("unused", 1000)
 	p.client = &http.Client{Transport: ht}
 	body, err := copyGuest(inv.chargeFn(), []byte(strings.Repeat("q", 64)))
@@ -245,39 +267,32 @@ func TestFetchBodyCopyHeldPastGraceRefundsOnLateClose(t *testing.T) {
 	if _, _, err := p.doFetch(ctx, inv, "POST", "http://origin.test/", body); err != nil {
 		t.Fatal(err)
 	}
-	// 64-byte copy still held by the transport + 3-byte response.
-	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 64+3 {
-		t.Fatalf("live %d after grace, want the held copy and the response", got)
+	// Only the 3-byte response remains; the held copy is revoked and refunded.
+	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 3 {
+		t.Fatalf("live %d after the call, want only the response", got)
 	}
+	assertRevoked(t, <-ht.held)
 	close(ht.release)
 	<-ht.done
-	deadline := time.Now().Add(5 * time.Second)
-	for g.Snapshot().Usage[inspection.BufferBytes] != 3 {
-		if time.Now().After(deadline) {
-			t.Fatalf("late close did not refund the copy: live %d", g.Snapshot().Usage[inspection.BufferBytes])
-		}
-		time.Sleep(time.Millisecond)
-	}
 	inv.endCall()
 	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 0 {
 		t.Fatalf("leaked %d", got)
 	}
 }
 
-// TestFetchBodyHeldWaiterEndsWithRequest: a transport that never closes the
-// copy does not keep the waiter goroutine alive past the request; the copy
-// stays charged until the lease closes.
-func TestFetchBodyHeldWaiterEndsWithRequest(t *testing.T) {
-	oldGrace, oldHook := fetchBodyCloseGrace, fetchHeldWaiterEnded
-	fetchBodyCloseGrace = 10 * time.Millisecond
-	ended := make(chan struct{})
-	fetchHeldWaiterEnded = func() { close(ended) }
-	t.Cleanup(func() { fetchBodyCloseGrace, fetchHeldWaiterEnded = oldGrace, oldHook })
+// TestFetchBodyHeldAtCancelIsRevoked: cancelling the request while the
+// transport holds the copy ends the wait at once; the copy is revoked and
+// refunded before the call returns, so the lease close that follows finds
+// nothing reachable still charged.
+func TestFetchBodyHeldAtCancelIsRevoked(t *testing.T) {
+	old := fetchBodyCloseGrace
+	fetchBodyCloseGrace = time.Hour
+	t.Cleanup(func() { fetchBodyCloseGrace = old })
 	g := testGovernor(t)
-	lease, ctx, _, _ := g.AcquireLease(t.Context())
-	reqCtx, cancel := context.WithCancel(ctx)
-	inv := &invocation{lease: lease, r: httptest.NewRequest("GET", "/", nil).WithContext(reqCtx)}
-	ht := &holdingTransport{release: make(chan struct{}), done: make(chan struct{})}
+	lease, leaseCtx, _, _ := g.AcquireLease(t.Context())
+	ctx, cancel := context.WithCancel(leaseCtx)
+	inv := &invocation{lease: lease}
+	ht := newHoldingTransport()
 	defer close(ht.release)
 	p := fetchPlugin("unused", 1000)
 	p.client = &http.Client{Transport: ht}
@@ -285,25 +300,32 @@ func TestFetchBodyHeldWaiterEndsWithRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := p.doFetch(ctx, inv, "POST", "http://origin.test/", body); err != nil {
-		t.Fatal(err)
-	}
-	inv.endCall()
-	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 64 {
-		t.Fatalf("live %d, want the held copy", got)
-	}
+	type result struct{ err error }
+	res := make(chan result, 1)
+	go func() {
+		_, _, err := p.doFetch(ctx, inv, "POST", "http://origin.test/", body)
+		res <- result{err}
+	}()
+	held := <-ht.held
 	cancel()
 	select {
-	case <-ended:
+	case r := <-res:
+		if r.err != nil && !errors.Is(r.err, context.Canceled) {
+			t.Fatalf("doFetch: %v", r.err)
+		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("waiter outlived its request")
+		t.Fatal("cancellation did not end the wait for the held copy")
 	}
-	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 64 {
-		t.Fatalf("live %d: the request end must not refund a copy the transport still holds", got)
-	}
-	_ = lease.Close()
+	inv.endCall()
 	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 0 {
-		t.Fatalf("lease close leaked %d", got)
+		t.Fatalf("live %d after the call: the held copy must be revoked and refunded", got)
+	}
+	assertRevoked(t, held)
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 0 {
+		t.Fatalf("lease close left %d", got)
 	}
 }
 
@@ -317,10 +339,22 @@ func TestFetchBodyRefusesReplayAfterSeal(t *testing.T) {
 	if _, err := r.Read(make([]byte, 1)); err == nil {
 		t.Fatal("read from a closed reader")
 	}
-	if !fb.waitClosed(time.Second) {
+	if !fb.waitClosed(time.Second, nil) {
 		t.Fatal("no open readers, yet not idle")
 	}
 	if _, err := fb.reopen(); err == nil {
 		t.Fatal("replay after seal")
+	}
+	// A revoked copy serves neither its open readers nor a replay.
+	fb2 := &fetchBody{data: []byte("abc"), idle: make(chan struct{})}
+	held := fb2.open()
+	fb2.revoke()
+	assertRevoked(t, held)
+	if _, err := fb2.reopen(); err == nil {
+		t.Fatal("replay after revoke")
+	}
+	_ = held.Close()
+	if !fb2.waitClosed(time.Second, nil) {
+		t.Fatal("closing the revoked reader did not leave the body idle")
 	}
 }

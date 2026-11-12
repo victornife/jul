@@ -102,9 +102,14 @@ transport writer, before any wrapper, and stored in the request context.
   so no callback touches a completed writer. Callbacks run under the mutex that `End` takes.
 - **Observe mode.** No abort. Expiry counts `would_timeout` once per request.
 - **`body_timeout = 0s`.** No timer. Server deadlines and aborts still apply.
-- **Unsupported.** The raw writer, walked like `ResponseController`, lacks `SetReadDeadline`. In
+- **Unsupported.** The raw writer, walked like `ResponseController`, lacks `SetReadDeadline`, or a
+  forwarding writer reports through `SupportsReadDeadline` that it does not reach one. In
   enforce mode with a timeout, the request fails with `500` and `unsupported`. In observe mode it is
-  recorded and the request continues. When there is no owner in the context (outside the server, e.g.
+  recorded and the request continues. A writer that has the method but refuses the abort when the
+  deadline expires (for example with `http.ErrNotSupported`) is also `unsupported`, not `timeout`:
+  the owner closes the request body to end the blocked read, and `EndBodyRead` reports
+  `BodyUnsupported`, so the request fails with `500`. A refused retirement abort closes the body the
+  same way. No future or zero deadline is ever set to probe support. When there is no owner in the context (outside the server, e.g.
   in tests), the plugin builds a local owner from its own writer via the narrow `SetReadDeadline`
   forwarding the WAF interceptor already provides. No wrapper gains `Unwrap`.
 - **Reload.** Limits (`Mode`, `BodyTimeout`) are snapshotted at `BeginBodyRead`. Later publishes
@@ -208,13 +213,24 @@ this section governs.
 - **Stream abort.** `triggerStreamAbort` (#699 retirement) is unchanged. It applies the past
   per-stream read deadline directly rather than through `reqdeadline.Owner.Abort`. The owner
   records retirement as sticky, so a later `EndBodyRead` cannot admit the body.
-- **Fetch request copy (R1).** At most one copy is live per invocation. The fixed grace is
-  `fetchBodyCloseGrace` = 2 s. A copy still held by the transport after the grace stays charged
-  and is refunded when the transport closes it, or at lease close if that comes first (a release
-  after close is a no-op). The goroutine waiting for that late close ends with the request. A
-  copy the transport still holds then stays charged until the lease closes. Tests:
-  `TestFetchBodyCopyHeldPastGraceRefundsOnLateClose`, `TestFetchBodyHeldWaiterEndsWithRequest`
-  and `TestFetchBodyRefusesReplayAfterSeal`.
+- **Fetch request copy (R1).** At most one copy is live per invocation, and it never outlives the
+  `fetch` call. After the response is read, the call waits up to `fetchBodyCloseGrace` = 2 s, or
+  until the request ends if that is sooner, for the transport to close every reader it opened.
+  Any reader still open is then revoked: the host drops the copy from the body and from each
+  reader, under the reader's lock, so a later `Read` fails and cannot reach the array. Only then
+  is the charge refunded. A replay (`GetBody`) after the seal or revocation is refused. Tests:
+  `TestFetchBodyHeldPastGraceIsRevokedBeforeRefund`, `TestFetchBodyHeldAtCancelIsRevoked` and
+  `TestFetchBodyRefusesReplayAfterSeal`. (Before the external review in section 4, a held copy
+  stayed reachable by the transport after its lease refunded it.)
+- **Generated-response growth.** `appendResponse` grows into a new charged array while both
+  arrays stay charged, points `inv.respBody` at the new array, and only then refunds the old
+  capacity (`TestAppendResponseDropsOldArrayBeforeRefund`).
+- **Request-phase header undo.** `set_response_header` (v1 and v2) journals each header's value
+  before the first plugin set it. When a request-phase call fails (overload `503`, `408`, `500`),
+  the headers set by that plugin, and by outer plugins that continued (carried in the request
+  context), are restored before the replacement response is written. Headers from other
+  middleware keep their values, and compression sets `Content-Encoding` only when it compresses
+  (`TestOverloadDiscardsPluginResponseHeaders`, both ABIs, real HTTP client negotiating gzip).
 - **Fetch read.** A manual read loop replaces `io.ReadFull`. A response cut short of its declared
   length (`io.ErrUnexpectedEOF` from the transport) is therefore an error, not a short success.
   This was found and fixed during implementation (`TestFetchResponseChargeBySize/cut_short`).
@@ -234,11 +250,11 @@ this section governs.
 | --- | --- |
 | Lease entry and lifetime | `inspection_lease_test.go`: `TestRequestLeaseSpansChainAndDownstream`, `TestRequestLeaseClosesOnEveryOutcome`, `TestMissingLeaseIsAnInvariantFailure` |
 | Body boundaries, growth, fuzz | `admission_test.go`: `TestChargedBufGrowHoldsBothArrays`, `TestChargedBufOverflowIsRefused`, `TestNextBodyCap`, `TestReadBoundedRefusedAtEveryStep`, `TestReadBoundedDeclaredLengths`, `FuzzReadBoundedCharged`; existing `body_prepare_test.go` (#699) |
-| Host functions | `host_charge_test.go` (fetch sizes, repeated fetch, refusal, ignored refusal, grace path); `TestGeneratedResponseChargedAndBounded`, `TestRequestStateOverwriteKeepsOneCharge`, `TestResponseReplacementOverloadIsDelivered`, `TestHostOverloadWinsOverProvokedTrap` |
+| Host functions | `host_charge_test.go` (fetch sizes, repeated fetch, refusal, ignored refusal, held-copy revocation at the grace and at cancellation); `TestGeneratedResponseChargedAndBounded`, `TestAppendResponseDropsOldArrayBeforeRefund`, `TestRequestStateOverwriteKeepsOneCharge`, `TestResponseReplacementOverloadIsDelivered`, `TestHostOverloadWinsOverProvokedTrap`, `TestOverloadDiscardsPluginResponseHeaders` |
 | Overload | `TestLeaseAdmissionOverloadDoesNoWork`, `TestBodyChargeOverloadMidRead`, `TestOverloadGRPCMapping`, `TestConcurrentChargesStayWithinBudget` |
 | Pool and guest lifecycle | `TestInstanceWaitHoldsLeaseAndBody`, `TestRetirementAbortIsStickyAndAttributed`; existing `instance_limit_test.go`, `v2_lifecycle_test.go` |
-| Deadline owner | `internal/reqdeadline/owner_test.go` (16 tests, including the barrier race `TestRacingAbortExpiryCompletionAndEnd`) |
-| Protocols and siblings | `TestInspectionOutcomesOverH1H2`, `TestInspectionOutcomesOverH3`, `TestServeInspectionDeadlineThroughFullStack` |
+| Deadline owner | `internal/reqdeadline/owner_test.go` (18 tests, including the barrier race `TestRacingAbortExpiryCompletionAndEnd` and the refused-abort cases `TestRefusedAbortFailsClosed` and `TestRefusedRetirementAbortInterruptsRead`); `TestWAFInterceptorReportsReadDeadlineSupport`; the `enforce refused abort` case of `TestBodyDeadlineOutcomes` |
+| Protocols and siblings | `TestInspectionOutcomesOverH1H2`, `TestInspectionOutcomesOverH3` (both count accepted connections, so connection reuse after the timeout and overload cases is asserted, not assumed), `TestServeInspectionDeadlineThroughFullStack` |
 | Reload | `TestPublishedLimitsGovernNewDecisionsOnly`; existing `TestReloadKeepsPreparingRequestOnItsGeneration`, `TestV2ReloadUnderLoadAndChurnQuiesces` |
 | Observe | `TestObserveMatchesEnforceDecisions`, `TestBodyDeadlineOutcomes`, `TestObserveRecordsWouldTimeoutOnceWithoutAbort` |
 | Error taxonomy and redaction | `internal/inspection/respond_test.go`, `internal/app/inspection_log_test.go`, `TestContainedTrapLogIsBoundedAndThrottled`, `TestTrapReasonUsesOnlyPublicExitCodes` |
@@ -416,5 +432,6 @@ c8).
 | Rubber-duck design review | Lifetime, deadline restoration, error classification (before coding) | R1–R6 (section 1.10); the deadline finding led to ADR §6 amendment 8 (maintainer decision) |
 | Rubber-duck harness review | Plan v3 changes (two rounds) | Unexercised budget churn, drain gauges and reload cadence were fixed; the final round found no blocking issue |
 | Code review agent | Full I2 diff at `b1a670fe` | No significant issue |
-| Security review agent | Full I2 diff at `b1a670fe` | No vulnerability found. One robustness note was fixed in `e1c6357c`: the late fetch-body waiter goroutine could outlive a request whose transport never closes the body. It now also ends with the request context; the copy stays charged until lease close (`TestFetchBodyHeldWaiterEndsWithRequest`) |
+| Security review agent | Full I2 diff at `b1a670fe` | No vulnerability found. One robustness note was fixed in `e1c6357c`: the late fetch-body waiter goroutine could outlive a request whose transport never closes the body. It now also ends with the request context; the copy stays charged until lease close (`TestFetchBodyHeldWaiterEndsWithRequest`). Superseded by the external review below: the waiter is gone, and a held copy is revoked before its refund |
 | Code review agent | #709 fixes `a8be1417` and `2a9ced55` (locking, outcome reporting, upgrade ordering, regression tests) | One data race fixed before push: `Hijack` re-read `upgradedBack` after unlocking while `markClosed` could clear it. It now reads it once under the lock. The regression tests passed 200 times under `-race -cpu 1,2,8` |
+| External review | I2 head `49669720` (implementation, tests, ADR amendment, this report, 50 evidence checksums) | Five findings, all still present at `d83a7274` because the #709 commits touched none of the affected files, and all fixed in the next commit. (1) A fetch copy held by the transport past the grace was refunded at lease close while the transport could still read it; held readers are now revoked before the refund (R1 above). (2) A writer that has `SetReadDeadline` but refuses the abort left the read blocked and answered `408`; it is now `unsupported`, the read is interrupted and the answer is `500`. (3) Request-phase plugin headers such as `Content-Encoding: gzip` survived the overload `503`; they are now undone. (4) `appendResponse` refunded the old capacity before `inv.respBody` dropped it. (5) The H3 `sameConn` check always passed; it now counts QUIC connections. Each new test was confirmed to fail with its fix reverted. The reviewer's other conclusions stand: WAF and response accounting remain later slices, and the unsaturated performance criterion stays inconclusive |

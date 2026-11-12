@@ -320,7 +320,7 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		name, ok1 := v2str(inv, m, namePtr, nameLen)
 		val, ok2 := v2str(inv, m, valPtr, valLen)
 		if ok1 && ok2 {
-			inv.w.Header().Set(name, val)
+			inv.setResponseHeader(name, val)
 		}
 	})
 

@@ -118,7 +118,7 @@ func TestExpiryAbortsOnceAndNeverSetsAFutureDeadline(t *testing.T) {
 	}
 	mt.fire()
 	mt.fire() // a duplicate callback must not double count
-	if !o.EndBodyRead() {
+	if o.EndBodyRead() != BodyTimedOut {
 		t.Fatal("EndBodyRead = false after enforced expiry")
 	}
 	onlyPast(t, fw.applied(), 1)
@@ -136,7 +136,7 @@ func TestSuccessfulArrivalTouchesNoTransportDeadline(t *testing.T) {
 	if err := o.BeginBodyRead(time.Minute, false, nil); err != nil {
 		t.Fatal(err)
 	}
-	if o.EndBodyRead() {
+	if o.EndBodyRead() != BodyComplete {
 		t.Fatal("EndBodyRead reported a timeout without expiry")
 	}
 	if !mt.stopped {
@@ -185,7 +185,7 @@ func TestDisabledTimeoutArmsNothingButAbortStillWorks(t *testing.T) {
 	if err := o.Abort(); err != nil {
 		t.Fatal(err)
 	}
-	if o.EndBodyRead() {
+	if o.EndBodyRead() != BodyComplete {
 		t.Fatal("abort reported as a body timeout")
 	}
 	onlyPast(t, fw.applied(), 1)
@@ -202,7 +202,7 @@ func TestObserveRecordsWouldTimeoutOnceWithoutAbort(t *testing.T) {
 	}
 	mt.fire()
 	mt.fire()
-	if o.EndBodyRead() {
+	if o.EndBodyRead() != BodyComplete {
 		t.Fatal("observe mode reported an enforced timeout")
 	}
 	onlyPast(t, fw.applied(), 0)
@@ -236,7 +236,7 @@ func TestUnsupportedWriter(t *testing.T) {
 			t.Fatalf("observe BeginBodyRead = %v", err)
 		}
 		mt.fire()
-		if o.EndBodyRead() {
+		if o.EndBodyRead() != BodyComplete {
 			t.Fatal("observe reported timeout")
 		}
 		got := rec.list()
@@ -400,7 +400,7 @@ func TestRealTimerExpires(t *testing.T) {
 	for len(fw.applied()) == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if !o.EndBodyRead() {
+	if o.EndBodyRead() != BodyTimedOut {
 		t.Fatal("real timer did not expire the body phase")
 	}
 	o.End()
@@ -423,7 +423,7 @@ func TestLateCallbackCannotAdmitOverDeadlineRead(t *testing.T) {
 		if observe {
 			want = "h1/would_timeout"
 		}
-		if got == observe {
+		if wantRes := map[bool]BodyResult{false: BodyTimedOut, true: BodyComplete}[observe]; got != wantRes {
 			t.Fatalf("observe=%v: EndBodyRead = %v", observe, got)
 		}
 		if r := rec.list(); len(r) != 1 || r[0] != want {
@@ -453,7 +453,7 @@ func TestCallbackBlockedBehindCompletionDoesNothing(t *testing.T) {
 	o.reading, o.bodyDone = false, true
 	o.mu.Unlock()
 	<-done
-	if o.EndBodyRead() {
+	if o.EndBodyRead() != BodyComplete {
 		t.Fatal("completion reported a timeout")
 	}
 	onlyPast(t, fw.applied(), 0)
@@ -462,18 +462,103 @@ func TestCallbackBlockedBehindCompletionDoesNothing(t *testing.T) {
 	}
 }
 
-func TestRefusedAbortRecordsUnsupported(t *testing.T) {
+// blockingBody models a request body whose Read blocks until Close.
+type blockingBody struct {
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newBlockingBody() *blockingBody { return &blockingBody{closed: make(chan struct{})} }
+
+func (b *blockingBody) Read([]byte) (int, error) {
+	<-b.closed
+	return 0, errors.New("body closed")
+}
+
+func (b *blockingBody) Close() error {
+	b.once.Do(func() { close(b.closed) })
+	return nil
+}
+
+// TestRefusedAbortFailsClosed covers a writer that exposes SetReadDeadline but
+// refuses it: expiry must not report a timeout or leave the read blocked.
+func TestRefusedAbortFailsClosed(t *testing.T) {
 	fw := &fakeWriter{err: http.ErrNotSupported}
 	o, mt, rec := newOwner(t, fw, ProtoH3)
+	body := newBlockingBody()
+	o.InterruptWith(body)
 	if err := o.BeginBodyRead(time.Second, false, nil); err != nil {
 		t.Fatal(err)
 	}
+	read := make(chan error, 1)
+	go func() {
+		_, err := body.Read(make([]byte, 1))
+		read <- err
+	}()
 	mt.fire()
-	if !o.EndBodyRead() {
-		t.Fatal("expiry with a refused abort must still answer as a timeout")
+	select {
+	case <-read:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refused abort left the body read blocked")
 	}
-	if got := rec.list(); len(got) != 2 || got[0] != "h3/timeout" || got[1] != "h3/unsupported" {
+	if got := o.EndBodyRead(); got != BodyUnsupported {
+		t.Fatalf("EndBodyRead = %v, want BodyUnsupported", got)
+	}
+	if got := rec.list(); len(got) != 1 || got[0] != "h3/unsupported" {
 		t.Fatalf("results = %v", got)
+	}
+	onlyPast(t, fw.applied(), 1)
+}
+
+// TestRefusedRetirementAbortInterruptsRead covers a retirement abort on the
+// same writer: the read ends, and a later window is refused.
+func TestRefusedRetirementAbortInterruptsRead(t *testing.T) {
+	fw := &fakeWriter{err: http.ErrNotSupported}
+	o, _, _ := newOwner(t, fw, ProtoH2)
+	body := newBlockingBody()
+	o.InterruptWith(body)
+	if err := o.BeginBodyRead(time.Hour, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Abort(); !errors.Is(err, ErrUnsupported) || !errors.Is(err, http.ErrNotSupported) {
+		t.Fatalf("Abort = %v", err)
+	}
+	select {
+	case <-body.closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refused retirement abort did not interrupt the read")
+	}
+	if got := o.EndBodyRead(); got != BodyComplete {
+		t.Fatalf("EndBodyRead = %v", got)
+	}
+	if err := o.BeginBodyRead(time.Hour, false, nil); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("BeginBodyRead after refused abort = %v", err)
+	}
+	onlyPast(t, fw.applied(), 1)
+}
+
+// forwarder exposes SetReadDeadline but reports whether it reaches a writer
+// that applies it.
+type forwarder struct {
+	fakeWriter
+	supports bool
+}
+
+func (f *forwarder) SupportsReadDeadline() bool { return f.supports }
+
+func TestSupportReporterDecidesSupport(t *testing.T) {
+	if New(&forwarder{}, ProtoH1).Supported() {
+		t.Fatal("a forwarder reporting no support was treated as supported")
+	}
+	if !New(&forwarder{supports: true}, ProtoH1).Supported() {
+		t.Fatal("a forwarder reporting support was rejected")
+	}
+	if WriterSupports(httptest.NewRecorder()) {
+		t.Fatal("a recorder applies no read deadline")
+	}
+	o := New(&forwarder{}, ProtoH1)
+	if err := o.BeginBodyRead(time.Second, false, nil); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("BeginBodyRead = %v", err)
 	}
 }
 

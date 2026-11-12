@@ -18,6 +18,8 @@ package reqdeadline
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -52,6 +54,34 @@ type readDeadliner interface {
 	SetReadDeadline(time.Time) error
 }
 
+// SupportReporter is implemented by a writer that forwards SetReadDeadline to
+// another writer, so the presence of the method alone does not prove that a
+// deadline will be applied. A writer reporting false is treated as having no
+// read deadline at all.
+type SupportReporter interface {
+	SupportsReadDeadline() bool
+}
+
+// WriterSupports reports whether w, or the writer it unwraps to, applies read
+// deadlines. Forwarding writers use it to implement SupportReporter.
+func WriterSupports(w http.ResponseWriter) bool { return findSetter(w) != nil }
+
+// BodyResult is the outcome of a body-arrival window.
+type BodyResult uint8
+
+const (
+	// BodyComplete means no enforced deadline expired; the read's own
+	// result stands.
+	BodyComplete BodyResult = iota
+	// BodyTimedOut means the enforced deadline expired and was applied;
+	// the caller answers 408 whatever the read returned.
+	BodyTimedOut
+	// BodyUnsupported means the enforced deadline expired but the writer
+	// refused the abort; the read was interrupted instead and the caller
+	// fails closed with 500.
+	BodyUnsupported
+)
+
 // Recorder receives each body-arrival result at most once per request.
 type Recorder func(protocol, result string)
 
@@ -74,6 +104,12 @@ type Owner struct {
 
 	ended   bool
 	aborted bool
+	// refused records that the writer rejected an abort.
+	refused bool
+	// interrupt ends the current read when an abort is refused. It is set
+	// only inside a body-arrival window and used at most once.
+	interrupt   io.Closer
+	interrupted bool
 
 	// The body-arrival phase. Its deadline is fixed by the first
 	// BeginBodyRead and never refreshed.
@@ -115,6 +151,9 @@ func ProtocolOf(r *http.Request) string {
 func findSetter(w http.ResponseWriter) readDeadliner {
 	for w != nil {
 		if s, ok := w.(readDeadliner); ok {
+			if r, ok := w.(SupportReporter); ok && !r.SupportsReadDeadline() {
+				return nil
+			}
 			return s
 		}
 		u, ok := w.(interface{ Unwrap() http.ResponseWriter })
@@ -147,26 +186,63 @@ func (o *Owner) Protocol() string { return o.proto }
 
 // Abort ends every current and future body read of this request by applying a
 // past read deadline. It is sticky: nothing the owner does afterwards sets a
-// later deadline. It returns ErrUnsupported when the writer cannot apply the
-// deadline. After End it does nothing and returns ErrEnded.
+// later deadline. When the writer cannot apply the deadline it returns an
+// error matching ErrUnsupported, and a read in progress is interrupted through
+// the closer given to InterruptWith instead. After End it does nothing and
+// returns ErrEnded.
 func (o *Owner) Abort() error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	if o.ended {
+		o.mu.Unlock()
 		return ErrEnded
 	}
-	return o.abortLocked()
+	err := o.abortLocked()
+	c := o.takeInterruptLocked(err)
+	o.mu.Unlock()
+	closeInterrupt(c)
+	return err
 }
 
 func (o *Owner) abortLocked() error {
 	o.aborted = true
 	if o.setter == nil {
+		o.refused = true
 		return ErrUnsupported
 	}
 	// A past deadline never blocks. HTTP/1 sets the connection deadline,
 	// HTTP/2 closes the stream's body pipe directly, and HTTP/3 sets the
 	// stream deadline.
-	return o.setter.SetReadDeadline(pastDeadline)
+	if err := o.setter.SetReadDeadline(pastDeadline); err != nil {
+		o.refused = true
+		return fmt.Errorf("%w: %w", ErrUnsupported, err)
+	}
+	return nil
+}
+
+// InterruptWith registers c to end the current body read if an abort is
+// refused, typically the request body itself: closing it unblocks a pending
+// read on HTTP/2 and HTTP/3. It applies to the window opened by the next
+// BeginBodyRead and is dropped by EndBodyRead. It is called before
+// BeginBodyRead, and c is closed at most once, never under the owner lock.
+func (o *Owner) InterruptWith(c io.Closer) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.interrupt = c
+}
+
+// takeInterruptLocked returns the closer to run after a refused abort, or nil.
+func (o *Owner) takeInterruptLocked(abortErr error) io.Closer {
+	if abortErr == nil || !o.reading || o.interrupted || o.interrupt == nil {
+		return nil
+	}
+	o.interrupted = true
+	return o.interrupt
+}
+
+func closeInterrupt(c io.Closer) {
+	if c != nil {
+		_ = c.Close()
+	}
 }
 
 // Aborted reports whether a sticky abort has been requested.
@@ -205,6 +281,12 @@ func (o *Owner) BeginBodyRead(timeout time.Duration, observe bool, record Record
 		}
 	}
 	o.reading = true
+	if o.aborted && o.refused {
+		// An abort was refused before this window opened, so nothing
+		// would end the read.
+		o.reading = false
+		return ErrUnsupported
+	}
 	if o.timeout <= 0 || o.bodyDone {
 		return nil
 	}
@@ -228,26 +310,34 @@ func (o *Owner) BeginBodyRead(timeout time.Duration, observe bool, record Record
 // fire runs when the body-arrival deadline passes.
 func (o *Owner) fire() {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 	o.timer = nil
 	if o.ended || o.bodyDone || !o.reading || o.expired {
+		o.mu.Unlock()
 		return
 	}
-	o.expireLocked()
+	c := o.takeInterruptLocked(o.expireLocked())
+	o.mu.Unlock()
+	// Closing may wait for the read to return (an HTTP/1 body holds its
+	// lock while reading), so it runs outside the owner lock.
+	closeInterrupt(c)
 }
 
-func (o *Owner) expireLocked() {
+// expireLocked marks the enforced deadline as passed and applies the abort. It
+// returns the abort error when the writer refused it.
+func (o *Owner) expireLocked() error {
 	o.expired = true
 	if o.observe || o.setter == nil {
 		o.recordLocked(recWouldTimeout, ResultWouldTimeout)
-		return
+		return nil
+	}
+	if err := o.abortLocked(); err != nil {
+		// The writer refused the abort, so the deadline cannot be
+		// enforced: the read is interrupted and the request fails closed.
+		o.recordLocked(recUnsupported, ResultUnsupported)
+		return err
 	}
 	o.recordLocked(recTimeout, ResultTimeout)
-	if o.abortLocked() != nil {
-		// The writer refused the abort, so the read is not ended by it.
-		// It still answers 408 when it returns, and the refusal is visible.
-		o.recordLocked(recUnsupported, ResultUnsupported)
-	}
+	return nil
 }
 
 // EndBodyRead closes the window opened by BeginBodyRead and ends the
@@ -256,21 +346,31 @@ func (o *Owner) expireLocked() {
 // running but has not yet taken the owner lock finds the phase done and does
 // nothing. Expiry is judged against the absolute deadline, not only by whether
 // the callback ran, so a delayed callback cannot let an over-deadline read
-// through. It reports whether the enforced deadline expired; the abort is then
-// applied, and the caller answers 408 whatever the read returned.
-func (o *Owner) EndBodyRead() (timedOut bool) {
+// through. When the enforced deadline expired it reports BodyTimedOut, or
+// BodyUnsupported if the writer refused the abort; the caller then answers 408
+// or 500 whatever the read returned.
+func (o *Owner) EndBodyRead() BodyResult {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.reading && !o.bodyDone && !o.expired && o.timeout > 0 && !o.ended && !time.Now().Before(o.deadline) {
-		o.expireLocked()
+		// The read has already returned, so there is nothing to interrupt.
+		_ = o.expireLocked()
 	}
 	o.reading = false
 	o.bodyDone = true
+	o.interrupt = nil
 	if o.timer != nil {
 		o.timer.Stop()
 		o.timer = nil
 	}
-	return o.expired && !o.observe && o.setter != nil
+	switch {
+	case !o.expired || o.observe || o.setter == nil:
+		return BodyComplete
+	case o.refused:
+		return BodyUnsupported
+	default:
+		return BodyTimedOut
+	}
 }
 
 // End marks the request handler as returned. After it, no timer, abort or
