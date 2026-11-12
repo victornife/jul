@@ -1,6 +1,7 @@
 # ADR 0032 — Aggregate inspection resource governor
 
-- **Status:** Accepted — I1 implementation in progress in an unmerged change; I2–I6 remain pending
+- **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling proposed in an unmerged change;
+  I2–I4 and I6 remain pending
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
@@ -1155,7 +1156,7 @@ never contains paths, hosts or bodies.
 
 ### I1 progress
 
-The current unmerged I1 change adds the typed process governor, configuration
+I1 merged through #706 as `a57afa4d`. It adds the typed process governor, configuration
 and generated contracts, process ownership, reload publication, bounded
 metrics, status/CLI projection, and a checksummed lease-scaffolding
 measurement. Status reports configured guest-memory capacity across compiled,
@@ -1166,6 +1167,16 @@ computed from compiled WAF and plugin facts and applied consistently by
 `jul check`, startup, reload and admin apply. Live request paths remain
 untouched: I2–I4 runtime enforcement remains pending, and no request-path
 integration or A1–A18 qualification is claimed.
+
+### I5 progress
+
+An unmerged I5 change promotes the #695, #699 and F3/F4 instruments into
+`scripts/inspection-assessment/` with a frozen plan, verified goodput, an
+envelope check, checksummed run evidence and deterministic summaries. It
+records baselines for `858590dc` and post-I1 main
+(`docs/reviews/2026-11-12-700-i5-assessment-tooling-baselines.md`). F2 is not
+ported because the I1 governor supersedes it. The baselines are measurement
+evidence only: no A1–A18 criterion is satisfied by I5.
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.
