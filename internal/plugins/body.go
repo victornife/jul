@@ -156,7 +156,7 @@ func (p *plugin) prepareRequestBody(w http.ResponseWriter, inv *invocation) ([]b
 	if owner == nil {
 		// Outside the server entry point (tests, embedded handlers) the
 		// owner is local to this read and ends with it.
-		owner = reqdeadline.New(w, reqdeadline.ProtocolOf(r))
+		owner = reqdeadline.NewForRequest(w, r)
 		defer owner.End()
 	}
 	done, err := p.trackPreparation(owner)
@@ -165,7 +165,8 @@ func (p *plugin) prepareRequestBody(w http.ResponseWriter, inv *invocation) ([]b
 	}
 	defer done()
 	limits := p.gov.Limits()
-	// If the writer refuses an abort, closing the body ends the read instead.
+	// If the writer refuses an abort, closing the body ends the read instead
+	// (HTTP/2, HTTP/3); HTTP/1 uses the connection's read deadline.
 	owner.InterruptWith(r.Body)
 	if err := owner.BeginBodyRead(limits.BodyTimeout, limits.Mode == inspection.Observe, p.gov.RecordBodyTimeout); err != nil {
 		owner.EndBodyRead()
@@ -267,8 +268,8 @@ func (p *plugin) abortPreparations() {
 		}
 	}
 	if unsupported > 0 && p.log != nil {
-		// The read is interrupted by closing its body instead; the request
-		// still fails as retired and never reaches a guest.
+		// The read is interrupted through the transport instead; the
+		// request still fails as retired and never reaches a guest.
 		p.log.Warn("plugin retired while request bodies were arriving; read deadline unsupported by the response writer",
 			"plugin", p.name, "requests", unsupported)
 	}

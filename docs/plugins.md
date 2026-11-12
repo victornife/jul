@@ -542,7 +542,7 @@ it. Routes with no plugin take no lease and are not charged.
 | Allocation | Charged | Released |
 | --- | --- | --- |
 | Prepared request body | Its capacity, re-charged before each growth; old and new arrays both stay charged during the copy | When the request ends |
-| `fetch` request-body copy | Its length | When the `fetch` call ends. A reader the transport still holds 2 s after the response, or when the request ends, is revoked first and can no longer read the copy |
+| `fetch` request-body copy | Its length | When the `fetch` call ends. The copy is first detached from every reader, closed or not, and from the request's `GetBody`. A reader the transport still holds 2 s after the response, or when the request ends, is revoked and can no longer read |
 | `fetch` response | `Content-Length + 1` when that is within `max_fetch_response`, otherwise `max_fetch_response + 1`, before reading | At the next `fetch`, or when the call ends |
 | Per-request state (`set_request_state`) | Its length; an overwrite replaces the charge | When the downstream handler returns, if a response callback is subscribed; otherwise before the request continues |
 | Generated response body (`write_response_body`) | Its capacity, before each growth | After the response is written |
@@ -561,7 +561,7 @@ modules and idle instances, which are sized statically (see
 | --- | --- | --- |
 | Budget exhausted at admission, while a body arrives, or in a host call | `503`, `Retry-After: 1`, body `inspection_overloaded`; gRPC `UNAVAILABLE`. No guest or origin call follows | Request continues; `jul_inspection_rejections_total{mode="observe"}` counts each charge enforce would refuse, so one request can count several |
 | Body still arriving after `body_timeout` | `408` (HTTP/1.1 adds `Connection: close`); gRPC `DEADLINE_EXCEEDED` | Request continues; `would_timeout` counted once |
-| Response writer cannot set a read deadline, or refuses the abort when `body_timeout` expires | `500`, `unsupported` counted; a refused abort ends the upload by closing the request body | Request continues; `unsupported` counted |
+| Response writer cannot set a read deadline, or refuses the abort when `body_timeout` expires | `500`, `unsupported` counted; a refused abort still ends the upload, through the connection's read deadline on HTTP/1 and by closing the request body on HTTP/2 and HTTP/3 | Request continues; `unsupported` counted |
 | Plugin limits, guest traps, timeouts, instance exhaustion | Unchanged: `500`, or `503` for instance exhaustion | Unchanged |
 
 A guest cannot avoid an overload by ignoring a host function's error return:

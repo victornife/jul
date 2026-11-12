@@ -15,10 +15,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"weak"
 
 	"jul/internal/config"
 	"jul/internal/inspection"
@@ -240,7 +242,7 @@ func assertRevoked(t *testing.T, body io.ReadCloser) {
 	r := body.(*fetchBodyReader)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.r != nil || r.fb.data != nil {
+	if r.r != nil || (r.fb != nil && r.fb.data != nil) {
 		t.Fatal("held reader still references the refunded copy")
 	}
 }
@@ -326,6 +328,69 @@ func TestFetchBodyHeldAtCancelIsRevoked(t *testing.T) {
 	}
 	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 0 {
 		t.Fatalf("lease close left %d", got)
+	}
+}
+
+// retainingTransport reads the request body to EOF and closes it, as a
+// well-behaved transport does, but keeps the request itself: its closed body
+// reader and its GetBody closure outlive the call.
+type retainingTransport struct{ kept chan *http.Request }
+
+func (rt *retainingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	_ = r.Body.Close()
+	rt.kept <- r
+	return &http.Response{StatusCode: 200, ContentLength: 2, Body: io.NopCloser(strings.NewReader("ok")), Request: r}, nil
+}
+
+// TestFetchBodyClosedNormallyIsDetachedBeforeRefund: when every reader
+// closes in time the copy is still detached before it is refunded, so a
+// transport retaining the closed reader, the request or its GetBody closure
+// cannot keep the refunded array reachable.
+func TestFetchBodyClosedNormallyIsDetachedBeforeRefund(t *testing.T) {
+	g := testGovernor(t)
+	lease, ctx, _, _ := g.AcquireLease(t.Context())
+	defer lease.Close()
+	inv := &invocation{lease: lease}
+	rt := &retainingTransport{kept: make(chan *http.Request, 1)}
+	p := fetchPlugin("unused", 1000)
+	p.client = &http.Client{Transport: rt}
+	body, err := copyGuest(inv.chargeFn(), []byte(strings.Repeat("q", 64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	copyArray := weak.Make(&body.b[0])
+	if _, _, err := p.doFetch(ctx, inv, "POST", "http://origin.test/", body); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 3 {
+		t.Fatalf("live %d after the call, want only the response", got)
+	}
+	kept := <-rt.kept
+	closedReader := kept.Body.(*fetchBodyReader)
+	closedReader.mu.Lock()
+	if closedReader.r != nil || closedReader.fb != nil {
+		closedReader.mu.Unlock()
+		t.Fatal("closed reader still references the copy")
+	}
+	closedReader.mu.Unlock()
+	if _, err := kept.GetBody(); err == nil {
+		t.Fatal("GetBody replayed a refunded copy")
+	}
+	for range 5 {
+		runtime.GC()
+		if copyArray.Value() == nil {
+			break
+		}
+	}
+	if copyArray.Value() != nil {
+		t.Fatal("refunded request copy is still reachable from the retained request")
+	}
+	runtime.KeepAlive(kept)
+	runtime.KeepAlive(closedReader)
+	inv.endCall()
+	if got := g.Snapshot().Usage[inspection.BufferBytes]; got != 0 {
+		t.Fatalf("leaked %d", got)
 	}
 }
 

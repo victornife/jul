@@ -1,0 +1,9 @@
+2026-11-12T11:57:57Z s8-slow-clients-h1/waf/main rep1: state=completed valid=true correct=true load/slow=0.0rps(64/64) load/slow-cancel=0.0rps(0/320) load/probe=1.5rps(34/34) cpu=1.00
+2026-11-12T11:58:41Z s8-slow-clients-h1/wasm/main rep1: state=completed valid=true correct=true load/slow=19.2rps(480/480) load/slow-cancel=0.0rps(0/320) load/probe=1953.4rps(39072/39072) cpu=0.76
+2026-11-12T11:59:39Z s8-slow-clients-h1/both/main rep1: state=completed valid=true correct=false load/slow=0.2rps(100/102) load/slow-cancel=0.0rps(0/320) load/probe=20.8rps(420/420) cpu=1.00 findings=phase load class slow: status:500 ×2
+2026-11-12T12:00:20Z r2-fast-nobody-h1/wasm/main rep1: state=completed valid=true correct=true load/load=2095.6rps(41927/41927) cpu=0.97
+2026-11-12T12:01:01Z s6-static-h2/wasm/main rep1: state=completed valid=true correct=false load/load=226.1rps(4650/4670) cpu=0.98 findings=phase load class load: status:500 ×20
+2026-11-12T12:01:46Z s6-static-h2/both/main rep1: state=completed valid=true correct=false load/load=8.7rps(302/307) cpu=1.00 findings=phase load class load: status:500 ×5
+2026-11-12T12:02:51Z s7-cache-h1/wasm/main rep1: state=completed valid=true correct=false cold/cold=244.2rps(4899/4900) cpu=0.98 warm/warm=278.1rps(5579/5696) cpu=0.99 findings=phase cold class cold: status:500 ×1; phase warm class warm: status:500 ×117
+2026-11-12T12:03:57Z s7-cache-h1/both/main rep1: state=completed valid=true correct=false cold/cold=17.9rps(375/376) cpu=0.99 warm/warm=17.6rps(367/376) cpu=0.99 findings=phase cold class cold: status:500 ×1; phase warm class warm: status:500 ×9
+run ia-envsweep-main: complete, 8 results in /tmp/ia-envsweep-main

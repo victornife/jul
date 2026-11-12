@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -110,6 +111,10 @@ type Owner struct {
 	// only inside a body-arrival window and used at most once.
 	interrupt   io.Closer
 	interrupted bool
+	// conn is the HTTP/1 request's connection, when the server registered it
+	// with ConnContext. It replaces interrupt on HTTP/1, whose body holds its
+	// lock during a blocked read, so closing the body cannot end that read.
+	conn net.Conn
 
 	// The body-arrival phase. Its deadline is fixed by the first
 	// BeginBodyRead and never refreshed.
@@ -132,6 +137,25 @@ type Owner struct {
 // the Proto* labels.
 func New(w http.ResponseWriter, proto string) *Owner {
 	return &Owner{setter: findSetter(w), proto: proto}
+}
+
+// NewForRequest returns New(w, ProtocolOf(r)). On HTTP/1 it also takes the
+// request's connection, if the server registered it with ConnContext, as the
+// transport-level interrupt for a refused abort.
+func NewForRequest(w http.ResponseWriter, r *http.Request) *Owner {
+	o := New(w, ProtocolOf(r))
+	if o.proto == ProtoH1 {
+		o.conn, _ = r.Context().Value(connKey{}).(net.Conn)
+	}
+	return o
+}
+
+type connKey struct{}
+
+// ConnContext records c as the connection of the requests served on it. It
+// has the signature of http.Server.ConnContext; only HTTP/1 owners use it.
+func ConnContext(ctx context.Context, c net.Conn) context.Context {
+	return context.WithValue(ctx, connKey{}, c)
 }
 
 // ProtocolOf returns the protocol label for r.
@@ -224,15 +248,34 @@ func (o *Owner) abortLocked() error {
 // read on HTTP/2 and HTTP/3. It applies to the window opened by the next
 // BeginBodyRead and is dropped by EndBodyRead. It is called before
 // BeginBodyRead, and c is closed at most once, never under the owner lock.
+//
+// An HTTP/1 owner with a registered connection ignores c: a net/http HTTP/1
+// body holds its lock while a read blocks, so closing it waits for the read
+// instead of ending it. The connection's own past read deadline ends the read
+// instead, or closing the connection if it refuses that too. Without a
+// registered connection a refused HTTP/1 abort cannot end a blocked read.
 func (o *Owner) InterruptWith(c io.Closer) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.interrupt = c
 }
 
-// takeInterruptLocked returns the closer to run after a refused abort, or nil.
+// takeInterruptLocked interrupts the current read after a refused abort and
+// returns any closer still to run outside the lock, or nil. The HTTP/1
+// connection deadline is applied under the lock, inside the read window, so
+// it can never reach a later request on the same connection.
 func (o *Owner) takeInterruptLocked(abortErr error) io.Closer {
-	if abortErr == nil || !o.reading || o.interrupted || o.interrupt == nil {
+	if abortErr == nil || !o.reading || o.interrupted {
+		return nil
+	}
+	if o.conn != nil {
+		o.interrupted = true
+		if o.conn.SetReadDeadline(pastDeadline) == nil {
+			return nil
+		}
+		return o.conn
+	}
+	if o.interrupt == nil {
 		return nil
 	}
 	o.interrupted = true
@@ -317,8 +360,7 @@ func (o *Owner) fire() {
 	}
 	c := o.takeInterruptLocked(o.expireLocked())
 	o.mu.Unlock()
-	// Closing may wait for the read to return (an HTTP/1 body holds its
-	// lock while reading), so it runs outside the owner lock.
+	// Closing may block (a TLS close notify), so it runs outside the lock.
 	closeInterrupt(c)
 }
 

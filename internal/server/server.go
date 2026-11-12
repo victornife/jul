@@ -827,6 +827,12 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 // is NOT yet started — connections queue in the kernel backlog until startServing
 // is called. This separation lets doReload stage binds before committing the
 // generation, so no 503 responses are served on a new address during an abort.
+// serverConnContext registers each accepted connection for send timeouts and
+// as the HTTP/1 transport interrupt of the request read-deadline owner.
+func serverConnContext(ctx context.Context, c net.Conn) context.Context {
+	return reqdeadline.ConnContext(respwriter.SendTimeoutContext(ctx, c), c)
+}
+
 func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerEntry, error) {
 	// cv is a configuration view for this bind: a lightweight Server value whose
 	// only purpose is to let the config-reading helper methods (readHeaderTimeout,
@@ -943,7 +949,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		IdleTimeout:       cv.idleTimeout(addr),
 		MaxHeaderBytes:    cv.maxHeaderBytes(addr),
 		ErrorLog:          logthrottle.ServerErrorLog(),
-		ConnContext:       respwriter.SendTimeoutContext,
+		ConnContext:       serverConnContext,
 	}
 	// On a plaintext listener, optionally accept cleartext HTTP/2 (h2c) so
 	// native gRPC clients can connect without TLS. TLS listeners already
@@ -1209,7 +1215,7 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 		// One read-deadline owner per request or stream, on the transport's
 		// own writer (ADR 0032 H6). End runs before the handler returns, so
 		// no inspection timer or abort touches w afterwards.
-		deadlines := reqdeadline.New(w, reqdeadline.ProtocolOf(r))
+		deadlines := reqdeadline.NewForRequest(w, r)
 		defer deadlines.End()
 		ctx = reqdeadline.With(ctx, deadlines)
 

@@ -107,9 +107,14 @@ transport writer, before any wrapper, and stored in the request context.
   enforce mode with a timeout, the request fails with `500` and `unsupported`. In observe mode it is
   recorded and the request continues. A writer that has the method but refuses the abort when the
   deadline expires (for example with `http.ErrNotSupported`) is also `unsupported`, not `timeout`:
-  the owner closes the request body to end the blocked read, and `EndBodyRead` reports
-  `BodyUnsupported`, so the request fails with `500`. A refused retirement abort closes the body the
-  same way. No future or zero deadline is ever set to probe support. When there is no owner in the context (outside the server, e.g.
+  the owner ends the blocked read through the transport, and `EndBodyRead` reports
+  `BodyUnsupported`, so the request fails with `500`. On HTTP/1 the server registers each
+  connection (`reqdeadline.ConnContext`), and the owner applies the same past read deadline to it
+  under its lock inside the read window, closing it only if it refuses too. Closing a net/http
+  HTTP/1 body cannot end the read, because the body holds its lock while a read blocks. On HTTP/2
+  and HTTP/3 the owner closes the request body, which does end the read. A refused retirement
+  abort is handled the same way. Without a registered connection (an embedder's own
+  `http.Server`), a refused HTTP/1 abort still cannot end a blocked read. No future or zero deadline is ever set to probe support. When there is no owner in the context (outside the server, e.g.
   in tests), the plugin builds a local owner from its own writer via the narrow `SetReadDeadline`
   forwarding the WAF interceptor already provides. No wrapper gains `Unwrap`.
 - **Reload.** Limits (`Mode`, `BodyTimeout`) are snapshotted at `BeginBodyRead`. Later publishes
@@ -218,10 +223,14 @@ this section governs.
   until the request ends if that is sooner, for the transport to close every reader it opened.
   Any reader still open is then revoked: the host drops the copy from the body and from each
   reader, under the reader's lock, so a later `Read` fails and cannot reach the array. Only then
-  is the charge refunded. A replay (`GetBody`) after the seal or revocation is refused. Tests:
-  `TestFetchBodyHeldPastGraceIsRevokedBeforeRefund`, `TestFetchBodyHeldAtCancelIsRevoked` and
-  `TestFetchBodyRefusesReplayAfterSeal`. (Before the external review in section 4, a held copy
-  stayed reachable by the transport after its lease refunded it.)
+  is the charge refunded. The copy is detached on every path, including when every reader closed
+  in time: a closed reader drops its body, and the body drops the copy, so a transport that keeps
+  the closed reader, the request or its `GetBody` closure cannot reach the refunded array. A replay
+  (`GetBody`) after the seal or revocation is refused. Tests:
+  `TestFetchBodyHeldPastGraceIsRevokedBeforeRefund`, `TestFetchBodyHeldAtCancelIsRevoked`,
+  `TestFetchBodyClosedNormallyIsDetachedBeforeRefund` (weak pointer and GC) and
+  `TestFetchBodyRefusesReplayAfterSeal`. (Before the external reviews in section 4, a held copy
+  stayed reachable by the transport after its lease refunded it, and then a normally closed one.)
 - **Generated-response growth.** `appendResponse` grows into a new charged array while both
   arrays stay charged, points `inv.respBody` at the new array, and only then refunds the old
   capacity (`TestAppendResponseDropsOldArrayBeforeRefund`).
@@ -250,10 +259,10 @@ this section governs.
 | --- | --- |
 | Lease entry and lifetime | `inspection_lease_test.go`: `TestRequestLeaseSpansChainAndDownstream`, `TestRequestLeaseClosesOnEveryOutcome`, `TestMissingLeaseIsAnInvariantFailure` |
 | Body boundaries, growth, fuzz | `admission_test.go`: `TestChargedBufGrowHoldsBothArrays`, `TestChargedBufOverflowIsRefused`, `TestNextBodyCap`, `TestReadBoundedRefusedAtEveryStep`, `TestReadBoundedDeclaredLengths`, `FuzzReadBoundedCharged`; existing `body_prepare_test.go` (#699) |
-| Host functions | `host_charge_test.go` (fetch sizes, repeated fetch, refusal, ignored refusal, held-copy revocation at the grace and at cancellation); `TestGeneratedResponseChargedAndBounded`, `TestAppendResponseDropsOldArrayBeforeRefund`, `TestRequestStateOverwriteKeepsOneCharge`, `TestResponseReplacementOverloadIsDelivered`, `TestHostOverloadWinsOverProvokedTrap`, `TestOverloadDiscardsPluginResponseHeaders` |
+| Host functions | `host_charge_test.go` (fetch sizes, repeated fetch, refusal, ignored refusal, held-copy revocation at the grace and at cancellation, normally closed copy detached from a retained request); `TestGeneratedResponseChargedAndBounded`, `TestAppendResponseDropsOldArrayBeforeRefund`, `TestRequestStateOverwriteKeepsOneCharge`, `TestResponseReplacementOverloadIsDelivered`, `TestHostOverloadWinsOverProvokedTrap`, `TestOverloadDiscardsPluginResponseHeaders` |
 | Overload | `TestLeaseAdmissionOverloadDoesNoWork`, `TestBodyChargeOverloadMidRead`, `TestOverloadGRPCMapping`, `TestConcurrentChargesStayWithinBudget` |
 | Pool and guest lifecycle | `TestInstanceWaitHoldsLeaseAndBody`, `TestRetirementAbortIsStickyAndAttributed`; existing `instance_limit_test.go`, `v2_lifecycle_test.go` |
-| Deadline owner | `internal/reqdeadline/owner_test.go` (18 tests, including the barrier race `TestRacingAbortExpiryCompletionAndEnd` and the refused-abort cases `TestRefusedAbortFailsClosed` and `TestRefusedRetirementAbortInterruptsRead`); `TestWAFInterceptorReportsReadDeadlineSupport`; the `enforce refused abort` case of `TestBodyDeadlineOutcomes` |
+| Deadline owner | `internal/reqdeadline/owner_test.go` (18 tests, including the barrier race `TestRacingAbortExpiryCompletionAndEnd` and the refused-abort cases `TestRefusedAbortFailsClosed` and `TestRefusedRetirementAbortInterruptsRead`); real HTTP/1 servers stalling a declared 100-byte upload after one byte: `h1_refused_test.go` (expiry, retirement, and the unregistered case that stays blocked), `TestRefusedAbortEndsRealH1Upload` (plugin expiry and retirement) and `TestServerConnContextEndsRefusedH1Read` (server wiring); `TestWAFInterceptorReportsReadDeadlineSupport`; the `enforce refused abort` case of `TestBodyDeadlineOutcomes` |
 | Protocols and siblings | `TestInspectionOutcomesOverH1H2`, `TestInspectionOutcomesOverH3` (both count accepted connections, so connection reuse after the timeout and overload cases is asserted, not assumed), `TestServeInspectionDeadlineThroughFullStack` |
 | Reload | `TestPublishedLimitsGovernNewDecisionsOnly`; existing `TestReloadKeepsPreparingRequestOnItsGeneration`, `TestV2ReloadUnderLoadAndChurnQuiesces` |
 | Observe | `TestObserveMatchesEnforceDecisions`, `TestBodyDeadlineOutcomes`, `TestObserveRecordsWouldTimeoutOnceWithoutAbort` |
@@ -435,3 +444,4 @@ c8).
 | Security review agent | Full I2 diff at `b1a670fe` | No vulnerability found. One robustness note was fixed in `e1c6357c`: the late fetch-body waiter goroutine could outlive a request whose transport never closes the body. It now also ends with the request context; the copy stays charged until lease close (`TestFetchBodyHeldWaiterEndsWithRequest`). Superseded by the external review below: the waiter is gone, and a held copy is revoked before its refund |
 | Code review agent | #709 fixes `a8be1417` and `2a9ced55` (locking, outcome reporting, upgrade ordering, regression tests) | One data race fixed before push: `Hijack` re-read `upgradedBack` after unlocking while `markClosed` could clear it. It now reads it once under the lock. The regression tests passed 200 times under `-race -cpu 1,2,8` |
 | External review | I2 head `49669720` (implementation, tests, ADR amendment, this report, 50 evidence checksums) | Five findings, all still present at `d83a7274` because the #709 commits touched none of the affected files, and all fixed in the next commit. (1) A fetch copy held by the transport past the grace was refunded at lease close while the transport could still read it; held readers are now revoked before the refund (R1 above). (2) A writer that has `SetReadDeadline` but refuses the abort left the read blocked and answered `408`; it is now `unsupported`, the read is interrupted and the answer is `500`. (3) Request-phase plugin headers such as `Content-Encoding: gzip` survived the overload `503`; they are now undone. (4) `appendResponse` refunded the old capacity before `inv.respBody` dropped it. (5) The H3 `sameConn` check always passed; it now counts QUIC connections. Each new test was confirmed to fail with its fix reverted. The reviewer's other conclusions stand: WAF and response accounting remain later slices, and the unsaturated performance criterion stays inconclusive |
+| External re-review | I2 head `092ddbcc` | Fixes (3), (4) and (5) and the #709 changes accepted. Three items remained, all fixed in the next commit. (A) The refused-abort fallback closed the request body, which cannot end a real HTTP/1 read: net/http's body holds its lock while the read blocks, and `Close` needs it. The reviewer's stalled 100-byte upload stayed blocked until the client left. The server now registers each HTTP/1 connection, and a refused abort applies the past read deadline to it. Real HTTP/1 tests cover expiry and retirement. (B) A normally closed fetch reader kept the copy reachable through its body, as did the request's `GetBody` closure, after the refund. The copy is now detached on every path. (C) `SHA256SUMS` listed `attachments/pre-freeze-envsweep-main-console.log`, which the repository's `*.log` ignore rule had kept out of the commit. It is now committed unchanged, and `sha256sum -c` passes on a clean checkout. The new tests fail with their fix reverted: without the registration, the HTTP/1 tests stay blocked |

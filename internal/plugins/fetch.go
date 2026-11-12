@@ -41,8 +41,9 @@ var fetchBodyCloseGrace = 2 * time.Second
 // fall outside the same guards.
 //
 // body is the charged copy of the guest's request body (nil for none); doFetch
-// owns it and refunds it before returning, once no reader it handed to the
-// transport can reach it: every reader has closed, or the rest are revoked.
+// owns it and refunds it before returning, once nothing it handed to the
+// transport can reach it: the copy is detached from the fetchBody, every
+// reader and the GetBody closure on every path, including normal closure.
 // The response is read into a buffer charged to inv's lease before it is
 // allocated; inv retains it for fetch_read until the call ends.
 func (p *plugin) doFetch(parent context.Context, inv *invocation, method, rawURL string, body *chargedBuf) (int, []byte, error) {
@@ -51,9 +52,13 @@ func (p *plugin) doFetch(parent context.Context, inv *invocation, method, rawURL
 		fb = &fetchBody{data: body.b, idle: make(chan struct{})}
 	}
 	defer func() {
-		if fb != nil && !fb.waitClosed(fetchBodyCloseGrace, parent.Done()) {
+		if fb != nil {
+			allClosed := fb.waitClosed(fetchBodyCloseGrace, parent.Done())
+			// Detach on every path: a closed reader, the request or its
+			// GetBody closure can outlive the call and must not keep the
+			// copy reachable once it is refunded.
 			fb.revoke()
-			if p.log != nil {
+			if !allClosed && p.log != nil {
 				p.log.Warn("plugin: fetch request body still held by the transport after the call; its readers were revoked",
 					"name", p.name)
 			}
@@ -166,8 +171,9 @@ func (p *plugin) readFetchResponse(inv *invocation, resp *http.Response) ([]byte
 // fetchBody serves a charged request-body copy to the fetch transport. Every
 // reader it hands out (the body and any GetBody replays) is tracked until
 // closed. The transport may close a request body asynchronously after
-// RoundTrip returns; a reader it still holds when the call ends is revoked,
-// so the copy is unreachable from it before the copy is refunded.
+// RoundTrip returns; when the call ends the copy is detached from the body,
+// from any reader still open (which is revoked) and from closed readers, so
+// nothing the transport retains can reach it once it is refunded.
 type fetchBody struct {
 	data    []byte
 	mu      sync.Mutex
@@ -286,9 +292,10 @@ func (r *fetchBodyReader) Close() error {
 		r.mu.Unlock()
 		return nil
 	}
-	r.closed, r.r = true, nil
+	fb := r.fb
+	r.closed, r.r, r.fb = true, nil, nil
 	r.mu.Unlock()
-	r.fb.closed(r)
+	fb.closed(r)
 	return nil
 }
 
