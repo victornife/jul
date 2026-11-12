@@ -8,6 +8,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"text/template"
 )
 
@@ -55,6 +56,16 @@ type ConfigParams struct {
 	ReadTimeout       string
 	BodyTimeout       string
 	MaxPending        int
+	// Plan v3: the plugin fixture (FixtureFull when empty), the inspect-nobody
+	// guest path, and explicit [global.inspection] mode and budget.
+	Fixture        string
+	PluginNoBody   string
+	InspectionMode string
+	MaxBuffered    string
+	// PluginTimeout and PluginMaxInstances set both request-only plugins'
+	// per-invocation timeout and live instance cap (the guest-pool static term).
+	PluginTimeout      string
+	PluginMaxInstances int
 }
 
 // VariantFlags maps a variant to its inspection layers.
@@ -65,11 +76,16 @@ func VariantFlags(v string) (waf, wasm bool) {
 const configTemplate = `[global]
 log_level = "warn"
 {{- $budget := and .Adapter.GlobalInspection .WAF .Adapter.WAFBudget}}
-{{- if or $budget .BodyTimeout}}
+{{- if or $budget .BodyTimeout .MaxBuffered .InspectionMode}}
 
 [global.inspection]
-{{- if $budget}}
+{{- if .MaxBuffered}}
+max_buffered_bytes = "{{.MaxBuffered}}"
+{{- else if $budget}}
 max_buffered_bytes = "{{.Adapter.WAFBudget}}"
+{{- end}}
+{{- if .InspectionMode}}
+mode = "{{.InspectionMode}}"
 {{- end}}
 {{- if .BodyTimeout}}
 body_timeout = "{{.BodyTimeout}}"
@@ -102,7 +118,31 @@ servers = [{ address = "{{.Origin}}" }]
   max_active_requests = 8
   max_pending_requests = {{.MaxPending}}
   pending_timeout = "2s"
-{{if .WASM}}
+{{if .WASM}}{{if eq .Fixture "nobody"}}
+[plugins.inspect-a]
+path = "{{.PluginNoBody}}"
+abi = "jul-abi/v2"
+config = { name = "{{.NameA}}", state_bytes = "4096" }
+
+[plugins.inspect-b]
+path = "{{.PluginNoBody}}"
+abi = "jul-abi/v2"
+config = { name = "b", state_bytes = "4096" }
+{{else if eq .Fixture "request-only"}}
+[plugins.inspect-a]
+path = "{{.Plugin}}"
+abi = "jul-abi/v2"{{if .PluginTimeout}}
+timeout = "{{.PluginTimeout}}"{{end}}{{if .PluginMaxInstances}}
+max_instances = {{.PluginMaxInstances}}{{end}}
+config = { name = "{{.NameA}}", read_body = "true" }
+
+[plugins.inspect-b]
+path = "{{.Plugin}}"
+abi = "jul-abi/v2"{{if .PluginTimeout}}
+timeout = "{{.PluginTimeout}}"{{end}}{{if .PluginMaxInstances}}
+max_instances = {{.PluginMaxInstances}}{{end}}
+config = { name = "b", read_body = "true" }
+{{else}}
 [plugins.inspect-a]
 path = "{{.Plugin}}"
 abi = "jul-abi/v2"
@@ -112,7 +152,7 @@ config = { name = "{{.NameA}}", read_body = "true", subscribe = "true" }
 path = "{{.Plugin}}"
 abi = "jul-abi/v2"
 config = { name = "b", read_body = "true", subscribe = "true", replace = "true" }
-{{end}}
+{{end}}{{end}}
 {{define "locs"}}
   [[servers.locations]]
   match = { type = "exact", path = "/healthz" }
@@ -187,6 +227,21 @@ func RenderConfig(p ConfigParams) ([]byte, error) {
 	}
 	if p.BodyTimeout != "" && !p.Adapter.GlobalInspection {
 		return nil, fmt.Errorf("adapter %s cannot express [global.inspection].body_timeout", p.Adapter.Name)
+	}
+	if (p.MaxBuffered != "" || p.InspectionMode != "") && !p.Adapter.GlobalInspection {
+		return nil, fmt.Errorf("adapter %s cannot express [global.inspection] mode or max_buffered_bytes", p.Adapter.Name)
+	}
+	if p.Fixture == "" {
+		p.Fixture = FixtureFull
+	}
+	if !slices.Contains(Fixtures, p.Fixture) {
+		return nil, fmt.Errorf("unknown plugin fixture %q", p.Fixture)
+	}
+	if (p.PluginTimeout != "" || p.PluginMaxInstances != 0) && p.Fixture != FixtureRequestOnly {
+		return nil, fmt.Errorf("plugin timeout and max_instances are only rendered for the %s fixture", FixtureRequestOnly)
+	}
+	if p.WASM && p.Fixture == FixtureNoBody && p.PluginNoBody == "" {
+		return nil, fmt.Errorf("fixture %s needs the inspect-nobody guest", FixtureNoBody)
 	}
 	if p.NameA == "" {
 		p.NameA = "a"

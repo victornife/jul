@@ -1,0 +1,1 @@
+/home/victornf/jul-i2-evidence/frozen/i2-p1-none-repeat/cells/p1-large-body-plugin-h1/none/main/rep1/config.toml is valid (structural + runtime)

@@ -1,0 +1,190 @@
+{
+  "scenario": "p2o-saturation-plugin-observe-h1",
+  "scenario_sha256": "31e90a41363b814f48cfe107c06a91fbac5fd7da29b76e118b9b88064bcf469c",
+  "comparison": "record",
+  "variant": "wasm",
+  "target": "cand",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T11:07:04.624693753Z",
+  "ended": "2026-11-12T11:07:45.445910315Z",
+  "state": "completed",
+  "valid": false,
+  "invalid_reasons": [
+    "unexercised: inspection_rejected_observe unavailable"
+  ],
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class load: error:eof ×136",
+    "phase load class load: error:other ×7",
+    "phase load class load: error:refused ×967004",
+    "phase load class load: error:reset ×59",
+    "phase load class probe: error:refused ×16017",
+    "phase load class probe: error:reset ×2",
+    "exercise check: inspection_rejected_enforce unavailable",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "38e41da2e73d5575e5078cd1bc8b8bc6d68c63d4f8f842470c53e2b79d3dbdcc",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-937261-345198032.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 41
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 160,
+          "window_seconds": 20,
+          "attempts": 967206,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:eof": 136,
+            "error:other": 7,
+            "error:refused": 967004,
+            "error:reset": 59
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 160,
+          "outstanding_at_window_end": 160,
+          "response_protos": {},
+          "connections_dialled": 212,
+          "error_samples": {
+            "error:eof": "Post \"http://127.0.0.1:45507/proxy/echo?resp=4096\u0026delay=5000\": EOF",
+            "error:other": "Post \"http://127.0.0.1:45507/proxy/echo?resp=4096\u0026delay=5000\": write tcp 127.0.0.1:39242-\u003e127.0.0.1:45507: use of closed network connection",
+            "error:refused": "Post \"http://127.0.0.1:45507/proxy/echo?resp=4096\u0026delay=5000\": dial tcp 127.0.0.1:45507: connect: connection refused",
+            "error:reset": "Post \"http://127.0.0.1:45507/proxy/echo?resp=4096\u0026delay=5000\": read tcp 127.0.0.1:34730-\u003e127.0.0.1:45507: read: connection reset by peer"
+          },
+          "outcome_latency_ms": {
+            "error:eof": {
+              "n": 136,
+              "p50": 1500.76,
+              "p95": 2905.245,
+              "p99": 3163.456,
+              "max": 3747.517
+            },
+            "error:other": {
+              "n": 7,
+              "p50": 8.418,
+              "p95": 11.193,
+              "p99": 11.193,
+              "max": 11.376
+            },
+            "error:refused": {
+              "n": 967004,
+              "p50": 1.682,
+              "p95": 7.326,
+              "p99": 12.078,
+              "max": 249.562
+            },
+            "error:reset": {
+              "n": 59,
+              "p50": 14.017,
+              "p95": 213.06,
+              "p99": 216.859,
+              "max": 250.743
+            }
+          }
+        },
+        {
+          "workload": "probe",
+          "proto": "h1",
+          "concurrency": 2,
+          "window_seconds": 20,
+          "attempts": 17799,
+          "verified": 1780,
+          "verified_in_window": 1780,
+          "goodput_rps": 89,
+          "goodput_bytes_per_second": 364544,
+          "classes": {
+            "error:refused": 16017,
+            "error:reset": 2,
+            "ok": 1780
+          },
+          "p50_ms": 1.665,
+          "p95_ms": 5.396,
+          "p99_ms": 75.559,
+          "max_ms": 361.058,
+          "crossed_in_from_warmup": 2,
+          "outstanding_at_window_end": 2,
+          "response_protos": {
+            "HTTP/1.1": 1780
+          },
+          "connections_dialled": 3,
+          "error_samples": {
+            "error:refused": "Post \"http://127.0.0.1:45507/proxy/echo?resp=4096\": dial tcp 127.0.0.1:45507: connect: connection refused",
+            "error:reset": "Post \"http://127.0.0.1:45507/proxy/echo?resp=4096\": read tcp 127.0.0.1:33354-\u003e127.0.0.1:45507: read: connection reset by peer"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 16017,
+              "p50": 1.047,
+              "p95": 6.709,
+              "p99": 10.936,
+              "max": 80.976
+            },
+            "error:reset": {
+              "n": 2,
+              "p50": 133.827,
+              "p95": 133.827,
+              "p99": 133.827,
+              "max": 193.73
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 772775936,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 790368256,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "heap_after_two_gcs_unavailable": "jul exited during the run",
+  "rss_after_two_gcs": null,
+  "samples": 19
+}

@@ -1,0 +1,1 @@
+/tmp/ia-envsweep/cells/f4-stalled-body/wasm/cand/rep1/config.toml is valid (structural + runtime)

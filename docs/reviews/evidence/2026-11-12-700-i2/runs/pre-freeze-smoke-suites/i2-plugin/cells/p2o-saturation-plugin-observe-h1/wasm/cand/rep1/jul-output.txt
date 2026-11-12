@@ -1,0 +1,1 @@
+time=2026-11-12T12:22:24.736+01:00 level=WARN msg="inspection budget saturated; observe mode would reject" class=bytes mode=observe max_buffered_bytes=134217728

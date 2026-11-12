@@ -16,6 +16,7 @@ import (
 	"github.com/tetratelabs/wazero/api"
 
 	"jul/internal/egress"
+	"jul/internal/inspection"
 )
 
 // maxRequestBodyBuffer caps how much of a request body the host buffers so a
@@ -78,6 +79,18 @@ type invocation struct {
 	state            []byte
 	resp             *responseView
 	addedHeaderBytes int
+
+	// journal records the response headers this request-phase call set, so
+	// a failed request can undo them (see headerJournal).
+	journal headerJournal
+
+	// lease is the request's inspection lease. The charges below cover the
+	// host arrays the invocation holds (ADR 0032 slice I2); each is released
+	// after the array's last reference is dropped, or by the lease close.
+	lease       *inspection.Lease
+	respCharge  byteCharge
+	stateCharge byteCharge
+	fetchCharge byteCharge
 }
 
 type invCtxKey struct{}
@@ -240,7 +253,7 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if inv == nil {
 			return
 		}
-		inv.w.Header().Set(readStr(m, namePtr, nameLen), readStr(m, valPtr, valLen))
+		inv.setResponseHeader(readStr(m, namePtr, nameLen), readStr(m, valPtr, valLen))
 	})
 
 	exp("read_request_body", func(ctx context.Context, m api.Module, buf, limit uint32) uint32 {
@@ -260,15 +273,12 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		if inv == nil {
 			return
 		}
-		if len(inv.respBody)+int(n) > inv.maxRespBody {
-			inv.err = errRespTooLarge
+		if uint64(len(inv.respBody))+uint64(n) > uint64(inv.maxRespBody) {
+			inv.fail(errRespTooLarge)
 			return
 		}
-		data, ok := readMem(m, ptr, n)
-		if !ok {
-			return
-		}
-		inv.respBody = append(inv.respBody, data...)
+		// jul-abi/v1 ignores an out-of-bounds range, as before.
+		inv.appendResponse(m, ptr, n)
 	})
 
 	exp("set_response_status", func(ctx context.Context, m api.Module, code uint32) {
@@ -300,6 +310,12 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 			return -2
 		}
 		key := kvNamespace + readStr(m, keyPtr, keyLen)
+		if _, ok := m.Memory().Read(valPtr, valLen); !ok {
+			return -1
+		}
+		if int64(valLen) > int64(p.kvMaxBytes) {
+			return -3 // over the namespace quota; refused before copying
+		}
 		val, ok := readMem(m, valPtr, valLen)
 		if !ok {
 			return -1
@@ -320,8 +336,12 @@ func registerJulHostModule(ctx context.Context, r wazero.Runtime, p *plugin) err
 		}
 		method := readStr(m, methodPtr, methodLen)
 		rawURL := readStr(m, urlPtr, urlLen)
-		body, _ := readMem(m, bodyPtr, bodyLen)
-		status, respBody, err := p.doFetch(ctx, method, rawURL, body)
+		// jul-abi/v1 sends an empty body for an out-of-bounds range, as before.
+		body, _, ok := inv.guestCopy(m, bodyPtr, bodyLen)
+		if !ok && inv.err != nil {
+			return -4
+		}
+		status, respBody, err := p.doFetch(ctx, inv, method, rawURL, body)
 		if err != nil {
 			code, reason := fetchFailure(err)
 			inv.log.Warn("plugin: fetch failed", "name", p.name, "reason", reason)

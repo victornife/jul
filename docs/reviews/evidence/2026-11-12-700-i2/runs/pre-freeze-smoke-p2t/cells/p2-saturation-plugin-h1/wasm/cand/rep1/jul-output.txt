@@ -1,0 +1,3 @@
+time=2026-11-12T12:14:44.688+01:00 level=WARN msg="inspection budget saturated; request rejected" class=bytes mode=enforce max_buffered_bytes=134217728
+time=2026-11-12T12:14:54.877+01:00 level=WARN msg="inspection budget saturated; request rejected" class=bytes mode=enforce max_buffered_bytes=134217728
+time=2026-11-12T12:15:05.083+01:00 level=WARN msg="inspection budget saturated; request rejected" class=bytes mode=enforce max_buffered_bytes=134217728

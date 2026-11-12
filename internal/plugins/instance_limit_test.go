@@ -41,7 +41,7 @@ func (w *waitLog) count(result string) int {
 
 func limitManager(t *testing.T, waits *waitLog, panics *atomic.Int64) *Manager {
 	t.Helper()
-	m, err := NewManager(Options{
+	m, err := NewManager(Options{Inspection: testGovernor(t),
 		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OnInstanceWait: waits.add,
 		OnPanic:        func(string) { panics.Add(1) },

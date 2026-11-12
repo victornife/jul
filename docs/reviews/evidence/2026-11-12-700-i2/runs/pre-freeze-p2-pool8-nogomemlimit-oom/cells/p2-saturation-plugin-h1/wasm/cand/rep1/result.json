@@ -1,0 +1,154 @@
+{
+  "scenario": "p2-saturation-plugin-h1",
+  "scenario_sha256": "768b89f91d6e08a95e2abf025f4d18611e80bc7b5cca0bda4b96ee5f62e62660",
+  "comparison": "record",
+  "variant": "wasm",
+  "target": "cand",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T11:06:26.459701852Z",
+  "ended": "2026-11-12T11:07:04.623935953Z",
+  "state": "completed",
+  "valid": false,
+  "invalid_reasons": [
+    "unexercised: inspection_rejected_enforce unavailable",
+    "unexercised: class status:503-inspection-overloaded = 0, want at least 1"
+  ],
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class load: error:refused ×1520009",
+    "phase load class probe: error:refused ×29702",
+    "exercise check: inspection_rejected_observe unavailable",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "328cfa9b471116dd4c9c1a3b447c5fd5e06b75b6f066c24138792afbfe37a83b",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-937261-832995400.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 40
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 160,
+          "window_seconds": 20,
+          "attempts": 1520009,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:refused": 1520009
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 160,
+          "outstanding_at_window_end": 0,
+          "response_protos": {},
+          "connections_dialled": 555,
+          "expected_classes": [
+            "status:503-inspection-overloaded"
+          ],
+          "error_samples": {
+            "error:refused": "Post \"http://127.0.0.1:41021/proxy/echo?resp=4096\u0026delay=5000\": dial tcp 127.0.0.1:41021: connect: connection refused"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 1520009,
+              "p50": 1.359,
+              "p95": 5.92,
+              "p99": 9.836,
+              "max": 55.77
+            }
+          }
+        },
+        {
+          "workload": "probe",
+          "proto": "h1",
+          "concurrency": 2,
+          "window_seconds": 20,
+          "attempts": 29702,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:refused": 29702
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 2,
+          "outstanding_at_window_end": 2,
+          "response_protos": {},
+          "connections_dialled": 2,
+          "expected_classes": [
+            "status:503-inspection-overloaded"
+          ],
+          "error_samples": {
+            "error:refused": "Post \"http://127.0.0.1:41021/proxy/echo?resp=4096\": dial tcp 127.0.0.1:41021: connect: connection refused"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 29702,
+              "p50": 0.558,
+              "p95": 4.989,
+              "p99": 8.522,
+              "max": 38.102
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 806735872,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 594767872,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "heap_after_two_gcs_unavailable": "jul exited during the run",
+  "rss_after_two_gcs": null,
+  "samples": 4
+}

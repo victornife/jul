@@ -1,0 +1,293 @@
+{
+  "plan_version": "inspection-assessment-plan/v3",
+  "profile": "qualification",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta, a nonzero governor lease/bytes/evaluation gauge after recovery (plan v3)) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "i2-p1-none-repeat"
+  ],
+  "targets": [
+    {
+      "label": "cand",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i2-builds/bin/jul-b1a670fe-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i2-builds/bin/jul-b1a670fe-go1.27.4",
+        "sha256": "3edee005bc08754283e77c8b6f1688204d24927c2662697f2f82a1eccbf54e73",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+        "sha256": "65a0f8b9d42909b048fe3fe00ecda7dbf17ae28320bdef28bd82a1ea2f0add37",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "cand",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 1858.15,
+        "min_goodput_rps": 1842.4,
+        "max_goodput_rps": 2256.3,
+        "relative_spread": 0.223
+      },
+      "points": [
+        {
+          "run": "i2-p1-none-repeat",
+          "rep": 1,
+          "goodput_rps": 1858.15,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.967,
+          "peak_cg_memory_bytes": 58732544,
+          "state": "completed"
+        },
+        {
+          "run": "i2-p1-none-repeat",
+          "rep": 2,
+          "goodput_rps": 2256.3,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.964,
+          "peak_cg_memory_bytes": 58675200,
+          "state": "completed"
+        },
+        {
+          "run": "i2-p1-none-repeat",
+          "rep": 3,
+          "goodput_rps": 1842.4,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.964,
+          "peak_cg_memory_bytes": 57462784,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 2331.65,
+        "min_goodput_rps": 1673.05,
+        "max_goodput_rps": 2751.65,
+        "relative_spread": 0.463
+      },
+      "points": [
+        {
+          "run": "i2-p1-none-repeat",
+          "rep": 1,
+          "goodput_rps": 2751.65,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.955,
+          "peak_cg_memory_bytes": 62574592,
+          "state": "completed"
+        },
+        {
+          "run": "i2-p1-none-repeat",
+          "rep": 2,
+          "goodput_rps": 1673.05,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.964,
+          "peak_cg_memory_bytes": 59121664,
+          "state": "completed"
+        },
+        {
+          "run": "i2-p1-none-repeat",
+          "rep": 3,
+          "goodput_rps": 2331.65,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.963,
+          "peak_cg_memory_bytes": 60461056,
+          "state": "completed"
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "cand",
+      "run": "i2-p1-none-repeat",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 37227,
+      "verified_in_window": 37163,
+      "goodput_rps": 1858.15,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 80.881,
+      "outcomes": "ok ×37227"
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "cand",
+      "run": "i2-p1-none-repeat",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 45190,
+      "verified_in_window": 45126,
+      "goodput_rps": 2256.3,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 69.452,
+      "outcomes": "ok ×45190"
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "cand",
+      "run": "i2-p1-none-repeat",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 36912,
+      "verified_in_window": 36848,
+      "goodput_rps": 1842.4,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 94.978,
+      "outcomes": "ok ×36912"
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "main",
+      "run": "i2-p1-none-repeat",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 55097,
+      "verified_in_window": 55033,
+      "goodput_rps": 2751.65,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 58.328,
+      "outcomes": "ok ×55097"
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "main",
+      "run": "i2-p1-none-repeat",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 33525,
+      "verified_in_window": 33461,
+      "goodput_rps": 1673.05,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 89.187,
+      "outcomes": "ok ×33525"
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "main",
+      "run": "i2-p1-none-repeat",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 46697,
+      "verified_in_window": 46633,
+      "goodput_rps": 2331.65,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 62.744,
+      "outcomes": "ok ×46697"
+    }
+  ],
+  "failed_or_invalid_runs": null,
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

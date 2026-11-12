@@ -1,0 +1,1 @@
+/tmp/ia-rep-cand-1/cells/s6-static-h2/wasm/cand/rep1/config.toml is valid (structural + runtime)

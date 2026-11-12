@@ -261,7 +261,7 @@ type upgradedSession struct {
 	deadlineChangedCh       chan struct{}
 	closeSentToClient       bool
 	closeReceivedFromClient bool
-	handshakeCompleted      atomic.Bool
+	handshakeCompleted      *atomic.Bool
 	forceClosed             atomic.Bool
 	closedCh                chan struct{}
 	closeOnce               sync.Once
@@ -277,6 +277,8 @@ func newUpgradedSession(ex *ActiveExchange, conn net.Conn, brw *bufio.ReadWriter
 		isWebSocket:       isWS,
 		deadlineChangedCh: make(chan struct{}, 1),
 		closedCh:          make(chan struct{}),
+		// Shared with the exchange, which keeps only this flag after close.
+		handshakeCompleted: new(atomic.Bool),
 	}
 	s.cond = sync.NewCond(&s.mu)
 	// Seed buffered bytes that bufio.Reader may already hold after the HTTP request header.
@@ -326,10 +328,6 @@ func (s *upgradedSession) clientConn() net.Conn {
 
 func (s *upgradedSession) clientReadWriter() *bufio.ReadWriter {
 	return s.wrappedRW
-}
-
-func (s *upgradedSession) completedCleanHandshake() bool {
-	return s.handshakeCompleted.Load()
 }
 
 func (s *upgradedSession) waitClosed() {

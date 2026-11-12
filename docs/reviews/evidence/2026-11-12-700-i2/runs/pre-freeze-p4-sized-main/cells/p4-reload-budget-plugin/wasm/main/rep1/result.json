@@ -1,0 +1,211 @@
+{
+  "scenario": "p4-reload-budget-plugin",
+  "scenario_sha256": "16ec1084b1bca510de6d28c48f5b6d4bcff14e91145679900c6205a5462df7d6",
+  "comparison": "record",
+  "variant": "wasm",
+  "target": "main",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T12:25:48.597540679Z",
+  "ended": "2026-11-12T12:26:51.914898595Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "reload 8: no jul_reload_total sighup outcome within 10s",
+    "jul exited during the run: signal killed",
+    "phase load class load: error:eof ×10",
+    "phase load class load: error:refused ×1104824",
+    "phase load class load: error:reset ×6",
+    "phase load class inflight: error:eof ×16",
+    "phase load class inflight: error:refused ×982127",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "e60d6dbf596f0e11a8c24ef08f56a9381bd58d37bc850c95a0281c5b6d029f88",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-957875-118230988.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "gomemlimit_env": "480MiB",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 50
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 40,
+          "attempts": 1125463,
+          "verified": 20623,
+          "verified_in_window": 20623,
+          "goodput_rps": 515.575,
+          "goodput_bytes_per_second": 33788723.2,
+          "classes": {
+            "error:eof": 10,
+            "error:refused": 1104824,
+            "error:reset": 6,
+            "ok": 20623
+          },
+          "p50_ms": 7.703,
+          "p95_ms": 28.225,
+          "p99_ms": 49.886,
+          "max_ms": 157.103,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 15,
+          "response_protos": {
+            "HTTP/1.1": 20623
+          },
+          "connections_dialled": 16,
+          "error_samples": {
+            "error:eof": "Post \"http://127.0.0.1:45317/proxy/echo?resp=65536\": EOF",
+            "error:refused": "Post \"http://127.0.0.1:45317/proxy/echo?resp=65536\": dial tcp 127.0.0.1:45317: connect: connection refused",
+            "error:reset": "Post \"http://127.0.0.1:45317/proxy/echo?resp=65536\": read tcp 127.0.0.1:45328-\u003e127.0.0.1:45317: read: connection reset by peer"
+          },
+          "outcome_latency_ms": {
+            "error:eof": {
+              "n": 10,
+              "p50": 96.905,
+              "p95": 97.312,
+              "p99": 97.312,
+              "max": 108.224
+            },
+            "error:refused": {
+              "n": 1104824,
+              "p50": 0.26,
+              "p95": 0.945,
+              "p99": 1.612,
+              "max": 41.651
+            },
+            "error:reset": {
+              "n": 6,
+              "p50": 95.135,
+              "p95": 100.709,
+              "p99": 100.709,
+              "max": 107.321
+            }
+          }
+        },
+        {
+          "workload": "inflight",
+          "proto": "h2",
+          "concurrency": 16,
+          "window_seconds": 40,
+          "attempts": 982207,
+          "verified": 32,
+          "verified_in_window": 32,
+          "goodput_rps": 0.8,
+          "goodput_bytes_per_second": 52428.8,
+          "classes": {
+            "error:eof": 16,
+            "error:refused": 982127,
+            "error:stream-reset": 32,
+            "ok": 32
+          },
+          "p50_ms": 3033.391,
+          "p95_ms": 3052.751,
+          "p99_ms": 3053.793,
+          "max_ms": 3061.67,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/2.0": 32
+          },
+          "connections_dialled": 11,
+          "expected_classes": [
+            "error:stream-reset"
+          ],
+          "error_samples": {
+            "error:eof": "Post \"https://localhost:36619/proxy/echo?resp=65536\u0026delay=3000\": unexpected EOF",
+            "error:refused": "Post \"https://localhost:36619/proxy/echo?resp=65536\u0026delay=3000\": dial tcp 127.0.0.1:36619: connect: connection refused",
+            "error:stream-reset": "Post \"https://localhost:36619/proxy/echo?resp=65536\u0026delay=3000\": stream error: stream ID 79; INTERNAL_ERROR; received from peer"
+          },
+          "outcome_latency_ms": {
+            "error:eof": {
+              "n": 16,
+              "p50": 2535.425,
+              "p95": 2564.235,
+              "p99": 2564.235,
+              "max": 2580.241
+            },
+            "error:refused": {
+              "n": 982127,
+              "p50": 0.294,
+              "p95": 1.041,
+              "p99": 1.889,
+              "max": 95.357
+            },
+            "error:stream-reset": {
+              "n": 32,
+              "p50": 2306.499,
+              "p95": 2449.964,
+              "p99": 2450.002,
+              "max": 2450.074
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "reloads": [
+    "t+2.0s reload 1 nameA=a2 rule=1695111 broken=false max_buffered=128m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=134217728",
+    "t+4.3s reload 2 nameA=a1 rule=1695101 broken=false max_buffered=256m mode=observe outcome=applied_live effective=mode=observe max_buffered_bytes=268435456",
+    "t+6.5s reload 3 nameA=a2 rule=1695111 broken=false max_buffered=512m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=536870912",
+    "t+9.0s reload 4 nameA=a1 rule=1695101 broken=false max_buffered=256m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=268435456",
+    "t+11.2s reload 5 nameA=a2 rule=1695111 broken=false max_buffered=1m mode= outcome=not_applied effective=mode=enforce max_buffered_bytes=268435456",
+    "t+13.4s reload 6 nameA=a1 rule=1695101 broken=false max_buffered=256m mode=observe outcome=applied_live effective=mode=observe max_buffered_bytes=268435456",
+    "t+15.8s reload 7 nameA=a2 rule=1695111 broken=false max_buffered=512m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=536870912",
+    "t+18.2s reload 8 nameA=a1 rule=1695101 broken=false max_buffered=256m mode= outcome= effective= ack_error=no jul_reload_total sighup outcome within 10s",
+    "t+30.2s reload 9 nameA=a2 rule=1695111 broken=false max_buffered=128m mode= error=os: process already finished",
+    "t+32.2s reload 10 nameA=a1 rule=1695101 broken=false max_buffered=256m mode=observe error=os: process already finished",
+    "t+34.2s reload 11 nameA=a2 rule=1695111 broken=false max_buffered=512m mode= error=os: process already finished",
+    "t+36.2s reload 12 nameA=a1 rule=1695101 broken=false max_buffered=256m mode= error=os: process already finished",
+    "t+38.2s reload 13 nameA=a2 rule=1695111 broken=false max_buffered=128m mode= error=os: process already finished",
+    "t+40.2s reload 14 nameA=a1 rule=1695101 broken=false max_buffered=256m mode=observe error=os: process already finished",
+    "t+42.2s reload 15 nameA=a2 rule=1695111 broken=false max_buffered=512m mode= error=os: process already finished",
+    "t+44.3s reload 16 nameA=a1 rule=1695101 broken=false max_buffered=256m mode= error=os: process already finished"
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 749187072,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 766709760,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "heap_after_two_gcs_unavailable": "jul exited during the run",
+  "rss_after_two_gcs": null,
+  "samples": 38
+}

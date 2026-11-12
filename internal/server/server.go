@@ -25,6 +25,7 @@ import (
 	"jul/internal/lifecycle"
 	"jul/internal/logthrottle"
 	"jul/internal/redact"
+	"jul/internal/reqdeadline"
 	"jul/internal/respwriter"
 	"jul/internal/upstream"
 	"jul/internal/versionid"
@@ -819,6 +820,12 @@ func (s *Server) bindFrom(addr string, cfg *config.Config) error {
 	return nil
 }
 
+// serverConnContext registers each accepted connection for send timeouts and
+// as the HTTP/1 transport interrupt of the request read-deadline owner.
+func serverConnContext(ctx context.Context, c net.Conn) context.Context {
+	return reqdeadline.ConnContext(respwriter.SendTimeoutContext(ctx, c), c)
+}
+
 // buildListenerEntry creates a listenerEntry for addr using cfg for all
 // bind-time settings: TLS, mTLS, h2c, HTTP/3, timeouts and header limits.
 // The connection cap is listener-owned but live policy, initialized from cfg and
@@ -942,7 +949,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		IdleTimeout:       cv.idleTimeout(addr),
 		MaxHeaderBytes:    cv.maxHeaderBytes(addr),
 		ErrorLog:          logthrottle.ServerErrorLog(),
-		ConnContext:       respwriter.SendTimeoutContext,
+		ConnContext:       serverConnContext,
 	}
 	// On a plaintext listener, optionally accept cleartext HTTP/2 (h2c) so
 	// native gRPC clients can connect without TLS. TLS listeners already
@@ -1205,6 +1212,12 @@ func (s *Server) dynamicHandler(addr string) http.Handler {
 		// this generation open instead of escaping its accounting.
 		ctx = background.WithLease(ctx, g)
 		ctx = respwriter.WithExchangeRegistry(ctx, s.exchanges, g.genID)
+		// One read-deadline owner per request or stream, on the transport's
+		// own writer (ADR 0032 H6). End runs before the handler returns, so
+		// no inspection timer or abort touches w afterwards.
+		deadlines := reqdeadline.NewForRequest(w, r)
+		defer deadlines.End()
+		ctx = reqdeadline.With(ctx, deadlines)
 
 		s.mu.Lock()
 		entry := s.listeners[addr]

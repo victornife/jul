@@ -1,0 +1,103 @@
+[global]
+log_level = "warn"
+
+[global.inspection]
+max_buffered_bytes = "128m"
+mode = "observe"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:43111"
+token = "assessment-695-token-not-a-secret"
+pprof = true
+console = false
+
+[[upstreams]]
+name = "origin"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:35979" }]
+
+[[upstreams]]
+name = "limited"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:35979" }]
+  [upstreams.resilience]
+  max_active_requests = 8
+  max_pending_requests = 16
+  pending_timeout = "2s"
+
+[plugins.inspect-a]
+path = "/home/victornf/jul-i2-builds/bin/inspect-load.wasm"
+abi = "jul-abi/v2"
+timeout = "2s"
+max_instances = 4
+config = { name = "a", read_body = "true" }
+
+[plugins.inspect-b]
+path = "/home/victornf/jul-i2-builds/bin/inspect-load.wasm"
+abi = "jul-abi/v2"
+timeout = "2s"
+max_instances = 4
+config = { name = "b", read_body = "true" }
+
+
+[[servers]]
+listen = "127.0.0.1:37043"
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/proxy/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admitted/" }
+  proxy_pass = "http://limited"
+  plugins = ["inspect-a", "inspect-b"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/cached/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "/tmp/jul-inspection-fixtures-656353198/www"
+  plugins = ["inspect-a", "inspect-b"]
+
+[[servers]]
+listen = "127.0.0.1:46271"
+server_names = ["localhost"]
+  [servers.tls]
+  enabled = true
+  cert = "/home/victornf/jul-700-i2/testdata/tls/localhost.crt"
+  key = "/home/victornf/jul-700-i2/testdata/tls/localhost.key"
+  [servers.http3]
+  enabled = true
+
+  [[servers.locations]]
+  match = { type = "exact", path = "/healthz" }
+  return = 204
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/proxy/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/admitted/" }
+  proxy_pass = "http://limited"
+  plugins = ["inspect-a", "inspect-b"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/cached/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/static/" }
+  root = "/tmp/jul-inspection-fixtures-656353198/www"
+  plugins = ["inspect-a", "inspect-b"]

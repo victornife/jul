@@ -123,6 +123,7 @@ type Manifest struct {
 	Targets      []TargetIdentity  `json:"targets"`
 	Harness      BinaryIdentity    `json:"harness"`
 	Guest        *Artifact         `json:"guest,omitempty"`
+	GuestNoBody  *Artifact         `json:"guest_nobody,omitempty"`
 	StaticPage   Artifact          `json:"static_page"`
 	TLS          Artifact          `json:"tls_certificate"`
 	Fault        string            `json:"controlled_fault,omitempty"`

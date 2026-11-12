@@ -1,0 +1,9 @@
+time=2026-11-12T15:19:06.767+01:00 level=WARN msg="waf rule matched" rule_id=1695101 path=/proxy/echo query_omitted=true mode=block phase=2 severity=unknown
+time=2026-11-12T15:19:06.773+01:00 level=WARN msg="waf rule matched" rule_id=1695102 path=/proxy/echo query_omitted=true mode=block phase=4 severity=unknown
+time=2026-11-12T15:19:07.064+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
+time=2026-11-12T15:19:07.065+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T15:19:17.235+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T15:19:19.039+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout
+time=2026-11-12T15:19:33.555+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=timeout
+time=2026-11-12T15:19:45.291+01:00 level=WARN msg="waf rule matched" rule_id=1695101 path=/proxy/echo query_omitted=true mode=block phase=2 severity=unknown
+time=2026-11-12T15:19:45.296+01:00 level=WARN msg="waf rule matched" rule_id=1695102 path=/proxy/echo query_omitted=true mode=block phase=4 severity=unknown

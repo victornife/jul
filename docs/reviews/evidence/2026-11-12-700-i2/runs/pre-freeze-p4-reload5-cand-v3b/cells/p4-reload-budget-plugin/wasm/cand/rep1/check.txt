@@ -1,0 +1,1 @@
+/home/victornf/jul-i2-evidence/prefreeze-p4-reload5-cand-v3b/cells/p4-reload-budget-plugin/wasm/cand/rep1/config.toml is valid (structural + runtime)

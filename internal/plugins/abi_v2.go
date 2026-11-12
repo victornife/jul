@@ -115,6 +115,19 @@ type responseView struct {
 	bodyState  uint32
 	committed  bool
 	replaced   bool
+	// replCharge covers a guest replacement body while body holds it; the
+	// response layer releases it once the body is written or discarded.
+	replCharge byteCharge
+}
+
+// dropReplacement drops a guest replacement body and refunds it. The
+// original body is owned by the response layer and is not touched.
+func (v *responseView) dropReplacement() {
+	if v == nil || v.replCharge == nil {
+		return
+	}
+	v.body = nil
+	releaseCharge(&v.replCharge)
 }
 
 // forbiddenResponseHeaders are framing/hop-by-hop names a guest can never set
@@ -307,7 +320,7 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		name, ok1 := v2str(inv, m, namePtr, nameLen)
 		val, ok2 := v2str(inv, m, valPtr, valLen)
 		if ok1 && ok2 {
-			inv.w.Header().Set(name, val)
+			inv.setResponseHeader(name, val)
 		}
 	})
 
@@ -328,12 +341,12 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		if inv == nil || !requestOnly(inv) {
 			return
 		}
-		if len(inv.respBody)+int(n) > inv.maxRespBody {
+		if uint64(len(inv.respBody))+uint64(n) > uint64(inv.maxRespBody) {
 			inv.fail(errRespTooLarge)
 			return
 		}
-		if data, ok := v2read(inv, m, ptr, n); ok {
-			inv.respBody = append(inv.respBody, data...)
+		if !inv.appendResponse(m, ptr, n) {
+			inv.fail(errGuestMemory)
 		}
 	})
 
@@ -381,8 +394,20 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 			return -1
 		}
 		key, ok1 := v2str(inv, m, keyPtr, keyLen)
+		if !ok1 {
+			return -1
+		}
+		if _, ok := m.Memory().Read(valPtr, valLen); !ok {
+			inv.fail(errGuestMemory)
+			return -1
+		}
+		// The KV copy is persistent memory under the namespace quota, not a
+		// request allocation; a value over the quota is refused uncopied.
+		if int64(valLen) > int64(p.kvMaxBytes) {
+			return -3
+		}
 		val, ok2 := v2read(inv, m, valPtr, valLen)
-		if !ok1 || !ok2 {
+		if !ok2 {
 			return -1
 		}
 		if !p.kvSet(kvNamespace+key, val) {
@@ -401,11 +426,17 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		}
 		method, ok1 := v2str(inv, m, methodPtr, methodLen)
 		rawURL, ok2 := v2str(inv, m, urlPtr, urlLen)
-		body, ok3 := v2read(inv, m, bodyPtr, bodyLen)
-		if !ok1 || !ok2 || !ok3 {
+		if !ok1 || !ok2 {
 			return -4
 		}
-		status, respBody, err := p.doFetch(ctx, method, rawURL, body)
+		body, inBounds, ok3 := inv.guestCopy(m, bodyPtr, bodyLen)
+		if !inBounds {
+			inv.fail(errGuestMemory)
+		}
+		if !ok3 {
+			return -4
+		}
+		status, respBody, err := p.doFetch(ctx, inv, method, rawURL, body)
 		if err != nil {
 			code, reason := fetchFailure(err)
 			inv.log.Warn("plugin: fetch failed", "name", p.name, "reason", reason)
@@ -464,11 +495,13 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		if n > maxRequestState {
 			return codeTooLarge
 		}
-		data, ok := v2read(inv, m, ptr, n)
-		if !ok {
+		if !inv.setState(m, ptr, n) {
+			inv.fail(errGuestMemory)
 			return codeInvalid
 		}
-		inv.state = data
+		if inv.err != nil {
+			return codeInvalid
+		}
 		return codeOK
 	})
 
@@ -619,11 +652,16 @@ func registerJulV2HostModule(ctx context.Context, r wazero.Runtime, p *plugin) e
 		if uint64(n) > uint64(inv.maxRespBody) {
 			return codeTooLarge
 		}
-		data, ok := v2read(inv, m, ptr, n)
+		if _, ok := m.Memory().Read(ptr, n); !ok {
+			inv.fail(errGuestMemory)
+			return codeInvalid
+		}
+		inv.resp.dropReplacement()
+		cb, _, ok := inv.guestCopy(m, ptr, n)
 		if !ok {
 			return codeInvalid
 		}
-		inv.resp.body = data
+		inv.resp.body, inv.resp.replCharge = cb.b, cb.c
 		inv.resp.replaced = true
 		return codeOK
 	})

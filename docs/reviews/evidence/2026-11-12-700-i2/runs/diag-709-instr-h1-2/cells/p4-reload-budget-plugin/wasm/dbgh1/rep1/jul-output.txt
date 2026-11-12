@@ -1,0 +1,76 @@
+DBG709 heap=106MiB gen(made=1 closed=0 gc=0) plugin(made=2 closed=0 gc=0)
+DBG709 heap=231MiB plugin(made=6 closed=2 gc=0) gen(made=3 closed=1 gc=1)
+DBG709 heap=128MiB plugin(made=6 closed=4 gc=3) gen(made=3 closed=2 gc=2)
+time=2026-11-12T18:30:04.614+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=d9efb788dfcc7455
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=86b9eb85bda251a7
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=0b4671b048aaa71b
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=023cd246ada7cd5d
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=8da561f53698fcc4
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=133864ee4187af50
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=63fe0ca69dd2fc5d
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=11a29362a33cef4c
+time=2026-11-12T18:30:04.616+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=0a6e8a7dde0fc8cc
+time=2026-11-12T18:30:04.617+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=73aba25bb0067405
+time=2026-11-12T18:30:04.617+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=68c569beef31d735
+time=2026-11-12T18:30:04.617+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=908d0286e1a88405
+time=2026-11-12T18:30:04.617+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=31d8861b86ccb14a
+time=2026-11-12T18:30:04.617+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=1a01809b511d8076
+time=2026-11-12T18:30:04.617+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=cf0bc5739d026a0e
+time=2026-11-12T18:30:04.617+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=ff10a003fe8f8da2
+DBG709 heap=89MiB plugin(made=10 closed=8 gc=8) gen(made=5 closed=4 gc=4)
+DBG709 heap=85MiB plugin(made=10 closed=8 gc=8) gen(made=5 closed=4 gc=4)
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=91bc4c104825edb1
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=3456750f46dd5e8d
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=3f3e5252e68700c2
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=64a436b81def6a2c
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=cdfc2621bc10d792
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=3eb70c7cd758fcfa
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=3c72a90c49a4ed9b
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=4bed6871db7f6224
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=c3f3c0a98e4a0d2c
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=54cb8c2c896abbf8
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=085d1178671f670b
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=22b365625f96232b
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=873b0fd68d370536
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=504db85691806ee8
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=639747a2a01a1217
+time=2026-11-12T18:30:09.878+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=f5b4c4e23bece3e5
+DBG709 heap=147MiB plugin(made=14 closed=12 gc=11) gen(made=7 closed=6 gc=6)
+DBG709 heap=240MiB plugin(made=16 closed=12 gc=11) gen(made=8 closed=6 gc=6)
+time=2026-11-12T18:30:15.173+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=83820f771f389252
+time=2026-11-12T18:30:15.174+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=7862fc4bd95191cb
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=d0fd69de5b0ba087
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=62bdb7d426eb87db
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=397fcce955cb60cf
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=bacc28657449d8d9
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=096f043c25f2ce9f
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=1b4c1ffb7d3f8c5a
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=e016622ff059116a
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=66d20b5fefed6134
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=dc7971d725205143
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=612449d83e3d8a6a
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=8192c680958c59bd
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=11f81d701e83ea4f
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=2e46a021d6e1bde5
+time=2026-11-12T18:30:15.175+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=519da75512e595dc
+DBG709 heap=94MiB plugin(made=18 closed=16 gc=16) gen(made=9 closed=8 gc=8)
+time=2026-11-12T18:30:19.436+01:00 level=ERROR msg="reload aborted" stage=prepare error="prepare: build: inspection: [global.inspection].max_buffered_bytes is 1048576 B but route servers[0].locations[1] (127.0.0.1:33245 /proxy/) needs at least 103825411 B for one worst-case request (plugin generated responses 50331648 B, plugin response buffers 50331648 B, plugin request bodies 3145731 B, base 16384 B); raise max_buffered_bytes, lower that route's plugin or WAF limits, or use mode = \"observe\" while sizing" reload_id=""
+time=2026-11-12T18:30:19.735+01:00 level=ERROR msg="reload aborted" stage=prepare error="prepare: build: inspection: [global.inspection].max_buffered_bytes is 1048576 B but route servers[0].locations[1] (127.0.0.1:33245 /proxy/) needs at least 103825411 B for one worst-case request (plugin generated responses 50331648 B, plugin response buffers 50331648 B, plugin request bodies 3145731 B, base 16384 B); raise max_buffered_bytes, lower that route's plugin or WAF limits, or use mode = \"observe\" while sizing" reload_id=""
+DBG709 heap=87MiB gen(made=9 closed=8 gc=8) plugin(made=22 closed=20 gc=20)
+DBG709 heap=94MiB plugin(made=22 closed=20 gc=20) gen(made=9 closed=8 gc=8)
+DBG709 heap=197MiB plugin(made=26 closed=22 gc=20) gen(made=11 closed=9 gc=9)
+DBG709 heap=137MiB plugin(made=26 closed=24 gc=23) gen(made=11 closed=10 gc=10)
+DBG709 heap=160MiB plugin(made=30 closed=26 gc=26) gen(made=13 closed=11 gc=11)
+DBG709 heap=143MiB plugin(made=32 closed=28 gc=28) gen(made=14 closed=12 gc=12)
+time=2026-11-12T18:30:36.419+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=7bbfb1471b350be9
+time=2026-11-12T18:30:36.419+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=dda1e344d08c14dc
+time=2026-11-12T18:30:36.420+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=9866880dcf796772
+time=2026-11-12T18:30:36.420+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=3eaab33139eaf58c
+time=2026-11-12T18:30:36.421+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=70c25a17749b1631
+time=2026-11-12T18:30:36.421+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="context canceled" request_id=a4f38737f3375013
+DBG709 heap=115MiB plugin(made=34 closed=32 gc=31) gen(made=15 closed=14 gc=14)
+DBG709 heap=115MiB plugin(made=34 closed=32 gc=31) gen(made=15 closed=14 gc=14)
+DBG709 heap=114MiB plugin(made=34 closed=32 gc=31) gen(made=15 closed=14 gc=14)
+DBG709 heap=115MiB gen(made=15 closed=14 gc=14) plugin(made=34 closed=32 gc=31)
+DBG709 heap=115MiB gen(made=15 closed=14 gc=14) plugin(made=34 closed=32 gc=31)
+DBG709 heap=114MiB plugin(made=34 closed=32 gc=31) gen(made=15 closed=14 gc=14)

@@ -1,0 +1,1 @@
+/tmp/ia-p1s/cells/p1-large-body-plugin-h1/wasm/cand/rep1/config.toml is valid (structural + runtime)

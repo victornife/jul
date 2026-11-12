@@ -1,0 +1,1 @@
+/tmp/ia-smoke-suites/i2-plugin/cells/p4-reload-budget-plugin/wasm/cand/rep1/config.toml is valid (structural + runtime)

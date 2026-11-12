@@ -1,0 +1,506 @@
+{
+  "plan_version": "inspection-assessment-plan/v3",
+  "profile": "qualification",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta, a nonzero governor lease/bytes/evaluation gauge after recovery (plan v3)) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "i2-p4-709fix"
+  ],
+  "targets": [
+    {
+      "label": "cand2",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i2-builds/bin/jul-a8be1417-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i2-builds/bin/jul-a8be1417-go1.27.4",
+        "sha256": "8700867efe534b056ec515297796b1088e9f18985e542de370dca4906071572d",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+      "binary": {
+        "path": "/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4",
+        "sha256": "65a0f8b9d42909b048fe3fe00ecda7dbf17ae28320bdef28bd82a1ea2f0add37",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "cand2",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 1,
+        "median_goodput_rps": 2193.35,
+        "min_goodput_rps": 1882.95,
+        "max_goodput_rps": 2342.075,
+        "relative_spread": 0.209
+      },
+      "points": [
+        {
+          "run": "i2-p4-709fix",
+          "rep": 1,
+          "goodput_rps": 2342.075,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.946,
+          "peak_cg_memory_bytes": 525275136,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: error:body-eof ×2"
+          ]
+        },
+        {
+          "run": "i2-p4-709fix",
+          "rep": 2,
+          "goodput_rps": 2193.35,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.939,
+          "peak_cg_memory_bytes": 525697024,
+          "state": "completed"
+        },
+        {
+          "run": "i2-p4-709fix",
+          "rep": 3,
+          "goodput_rps": 1882.95,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.945,
+          "peak_cg_memory_bytes": 523771904,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class inflight: error:body-stream-reset ×1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 1,
+        "median_goodput_rps": 1803.875,
+        "min_goodput_rps": 1411.975,
+        "max_goodput_rps": 1987.75,
+        "relative_spread": 0.319
+      },
+      "points": [
+        {
+          "run": "i2-p4-709fix",
+          "rep": 1,
+          "goodput_rps": 1411.975,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.957,
+          "peak_cg_memory_bytes": 700448768,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: error:reset ×1"
+          ]
+        },
+        {
+          "run": "i2-p4-709fix",
+          "rep": 2,
+          "goodput_rps": 1987.75,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.954,
+          "peak_cg_memory_bytes": 690114560,
+          "state": "completed"
+        },
+        {
+          "run": "i2-p4-709fix",
+          "rep": 3,
+          "goodput_rps": 1803.875,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.961,
+          "peak_cg_memory_bytes": 709775360,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: error:reset ×1"
+          ]
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "cand2",
+      "run": "i2-p4-709fix",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 93701,
+      "verified_in_window": 93683,
+      "goodput_rps": 2342.075,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 22.505,
+      "outcomes": "error:body-eof ×2, ok ×93699",
+      "outcome_latency_ms": {
+        "error:body-eof": {
+          "n": 2,
+          "p50": 14.219,
+          "p95": 14.219,
+          "p99": 14.219,
+          "max": 31.069
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "cand2",
+      "run": "i2-p4-709fix",
+      "rep": 1,
+      "phase": "load",
+      "class": "inflight",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 224,
+      "verified_in_window": 144,
+      "goodput_rps": 3.6,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 3043.564,
+      "outcomes": "error:stream-reset ×64, ok ×160",
+      "outcome_latency_ms": {
+        "error:stream-reset": {
+          "n": 64,
+          "p50": 2234.269,
+          "p95": 2867.76,
+          "p99": 2878.336,
+          "max": 2880.991
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "cand2",
+      "run": "i2-p4-709fix",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 87750,
+      "verified_in_window": 87734,
+      "goodput_rps": 2193.35,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 24.887,
+      "outcomes": "ok ×87750"
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "cand2",
+      "run": "i2-p4-709fix",
+      "rep": 2,
+      "phase": "load",
+      "class": "inflight",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 224,
+      "verified_in_window": 146,
+      "goodput_rps": 3.65,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 3057.808,
+      "outcomes": "error:stream-reset ×62, ok ×162",
+      "outcome_latency_ms": {
+        "error:stream-reset": {
+          "n": 62,
+          "p50": 2216.451,
+          "p95": 2989.349,
+          "p99": 3026.525,
+          "max": 3026.725
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "cand2",
+      "run": "i2-p4-709fix",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 75334,
+      "verified_in_window": 75318,
+      "goodput_rps": 1882.95,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 29.829,
+      "outcomes": "ok ×75334"
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "cand2",
+      "run": "i2-p4-709fix",
+      "rep": 3,
+      "phase": "load",
+      "class": "inflight",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 224,
+      "verified_in_window": 148,
+      "goodput_rps": 3.7,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 3059.119,
+      "outcomes": "error:body-stream-reset ×1, error:stream-reset ×59, ok ×164",
+      "outcome_latency_ms": {
+        "error:body-stream-reset": {
+          "n": 1,
+          "p50": 3013.347,
+          "p95": 3013.347,
+          "p99": 3013.347,
+          "max": 3013.347
+        },
+        "error:stream-reset": {
+          "n": 59,
+          "p50": 2266.7,
+          "p95": 3013.136,
+          "p99": 3013.459,
+          "max": 3013.465
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "main",
+      "run": "i2-p4-709fix",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 56496,
+      "verified_in_window": 56479,
+      "goodput_rps": 1411.975,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 61.511,
+      "outcomes": "error:reset ×1, ok ×56495",
+      "outcome_latency_ms": {
+        "error:reset": {
+          "n": 1,
+          "p50": 11.694,
+          "p95": 11.694,
+          "p99": 11.694,
+          "max": 11.694
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "main",
+      "run": "i2-p4-709fix",
+      "rep": 1,
+      "phase": "load",
+      "class": "inflight",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 240,
+      "verified_in_window": 144,
+      "goodput_rps": 3.6,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 3147.633,
+      "outcomes": "error:stream-reset ×80, ok ×160",
+      "outcome_latency_ms": {
+        "error:stream-reset": {
+          "n": 80,
+          "p50": 2252.884,
+          "p95": 2643.618,
+          "p99": 2644.617,
+          "max": 2644.972
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "main",
+      "run": "i2-p4-709fix",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 79526,
+      "verified_in_window": 79510,
+      "goodput_rps": 1987.75,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 34.421,
+      "outcomes": "ok ×79526"
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "main",
+      "run": "i2-p4-709fix",
+      "rep": 2,
+      "phase": "load",
+      "class": "inflight",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 224,
+      "verified_in_window": 144,
+      "goodput_rps": 3.6,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 3116.849,
+      "outcomes": "error:stream-reset ×64, ok ×160",
+      "outcome_latency_ms": {
+        "error:stream-reset": {
+          "n": 64,
+          "p50": 2121.816,
+          "p95": 2999.483,
+          "p99": 3024.038,
+          "max": 3024.246
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "main",
+      "run": "i2-p4-709fix",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 72172,
+      "verified_in_window": 72155,
+      "goodput_rps": 1803.875,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 36.745,
+      "outcomes": "error:reset ×1, ok ×72171",
+      "outcome_latency_ms": {
+        "error:reset": {
+          "n": 1,
+          "p50": 0.569,
+          "p95": 0.569,
+          "p99": 0.569,
+          "max": 0.569
+        }
+      }
+    },
+    {
+      "scenario": "p4-reload-budget-plugin",
+      "variant": "wasm",
+      "target": "main",
+      "run": "i2-p4-709fix",
+      "rep": 3,
+      "phase": "load",
+      "class": "inflight",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 224,
+      "verified_in_window": 144,
+      "goodput_rps": 3.6,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 3069.941,
+      "outcomes": "error:stream-reset ×64, ok ×160",
+      "outcome_latency_ms": {
+        "error:stream-reset": {
+          "n": 64,
+          "p50": 2255.051,
+          "p95": 2975.754,
+          "p99": 2982.184,
+          "max": 2982.353
+        }
+      }
+    }
+  ],
+  "failed_or_invalid_runs": [
+    "i2-p4-709fix p4-reload-budget-plugin/wasm/cand2 rep1: runtime-finding: phase load class load: error:body-eof ×2",
+    "i2-p4-709fix p4-reload-budget-plugin/wasm/cand2 rep3: runtime-finding: phase load class inflight: error:body-stream-reset ×1",
+    "i2-p4-709fix p4-reload-budget-plugin/wasm/main rep1: runtime-finding: phase load class load: error:reset ×1",
+    "i2-p4-709fix p4-reload-budget-plugin/wasm/main rep3: runtime-finding: phase load class load: error:reset ×1"
+  ],
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

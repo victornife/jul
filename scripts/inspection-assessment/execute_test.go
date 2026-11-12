@@ -302,3 +302,145 @@ func TestExecuteReloadChurnRecordsEveryReload(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestExecutePluginFixtures(t *testing.T) {
+	for _, tc := range []struct{ scenario, header string }{
+		{"p3-nobody-plugin-h1", "guest_nobody"},
+		{"p1-large-body-plugin-h1", ""},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			c := testCell(t, tc.scenario, "wasm")
+			for i := range c.Scenario.Phases {
+				for j := range c.Scenario.Phases[i].Workloads {
+					c.Scenario.Phases[i].Workloads[j].Concurrency = 2
+				}
+			}
+			opt := testOptions(t, c)
+			opt.Targets = opt.Targets[1:]
+			if tc.header != "" {
+				opt.GuestNoBody = opt.Guest
+			}
+			m, err := Execute(context.Background(), opt, "", &bytes.Buffer{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := readResult(t, opt.Out, m.Results[0])
+			if r.Failure != "" || len(r.Invalid) > 0 {
+				t.Fatalf("failure %q invalid %v", r.Failure, r.Invalid)
+			}
+			for _, cn := range append(r.PreCanaries, r.PostCanaries...) {
+				if !cn.OK {
+					t.Errorf("canary %+v", cn)
+				}
+			}
+			for _, ph := range r.Phases {
+				for _, cl := range ph.Classes {
+					if cl.Verified == 0 || cl.Verified != cl.Classes["ok"] || len(cl.Classes) != 1 {
+						t.Errorf("%s: verified %d classes %v", cl.Workload, cl.Verified, cl.Classes)
+					}
+				}
+			}
+			if (m.GuestNoBody != nil) != (tc.header != "") {
+				t.Errorf("guest_nobody identity %+v", m.GuestNoBody)
+			}
+			if err := VerifyRun(opt.Out); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+}
+
+func TestExecuteBudgetChurnAcknowledgesReloads(t *testing.T) {
+	old := reloadEveryTest
+	reloadEveryTest = 300 * time.Millisecond
+	t.Cleanup(func() { reloadEveryTest = old })
+	for _, mode := range []string{"", "accept-all-reloads"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			t.Setenv("FAKE_JUL_MODE", mode)
+			c := testCell(t, "p4-reload-budget-plugin", "wasm")
+			c.Scenario.Phases[0].Measure = Dur(3500 * time.Millisecond)
+			opt := testOptions(t, c)
+			opt.Targets = opt.Targets[1:]
+			m, err := Execute(context.Background(), opt, "", &bytes.Buffer{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := readResult(t, opt.Out, m.Results[0])
+			if len(r.Reloads) < 5 {
+				t.Fatalf("reloads %v", r.Reloads)
+			}
+			got := strings.Join(r.Reloads, "|")
+			for _, want := range []string{
+				"reload 1 nameA=a2 rule=1695111 broken=false max_buffered=128m mode= outcome=applied_live effective=mode=enforce max_buffered_bytes=134217728",
+				"max_buffered=256m mode=observe outcome=applied_live effective=mode=observe max_buffered_bytes=268435456",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("reloads missing %q: %v", want, r.Reloads)
+				}
+			}
+			five := r.Reloads[4]
+			findings := strings.Join(r.Findings, "|")
+			if mode == "" {
+				if !strings.Contains(five, "max_buffered=1m mode= outcome=not_applied effective=mode=enforce max_buffered_bytes=268435456") || !r.Correct {
+					t.Errorf("refused reload 5 %q findings %v", five, r.Findings)
+				}
+				return
+			}
+			if !strings.Contains(findings, "reload 5: outcome applied_live effective mode=enforce max_buffered_bytes=1048576, want not_applied effective mode=enforce max_buffered_bytes=268435456") {
+				t.Errorf("an accepted inadmissible reload must be a finding: %v", r.Findings)
+			}
+		})
+	}
+}
+
+func TestExecuteBudgetChurnRequiresStepsAndDrain(t *testing.T) {
+	old := reloadEveryTest
+	reloadEveryTest = 300 * time.Millisecond
+	t.Cleanup(func() { reloadEveryTest = old })
+	for _, tc := range []struct {
+		mode    string
+		measure time.Duration
+		invalid string
+		finding string
+	}{
+		{"", 1200 * time.Millisecond, "budget reloads acknowledged, want at least 5", ""},
+		{"leak-lease", 3500 * time.Millisecond, "", "governor not drained after recovery: jul_inspection_leases = 1"},
+	} {
+		t.Run("mode="+tc.mode, func(t *testing.T) {
+			t.Setenv("FAKE_JUL_MODE", tc.mode)
+			c := testCell(t, "p4-reload-budget-plugin", "wasm")
+			c.Scenario.Phases[0].Measure = Dur(tc.measure)
+			opt := testOptions(t, c)
+			opt.Targets = opt.Targets[1:]
+			m, err := Execute(context.Background(), opt, "", &bytes.Buffer{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := readResult(t, opt.Out, m.Results[0])
+			invalid, findings := strings.Join(r.Invalid, "|"), strings.Join(r.Findings, "|")
+			if tc.invalid != "" && (r.Valid || !strings.Contains(invalid, tc.invalid)) {
+				t.Errorf("valid=%v invalid=%v, want %q", r.Valid, r.Invalid, tc.invalid)
+			}
+			if tc.finding != "" && (!r.Valid || r.Correct || !strings.Contains(findings, tc.finding)) {
+				t.Errorf("valid=%v correct=%v findings=%v, want %q", r.Valid, r.Correct, r.Findings, tc.finding)
+			}
+		})
+	}
+}
+
+func TestExecuteUnexercisedSaturationIsInvalid(t *testing.T) {
+	c := testCell(t, "p2-saturation-plugin-h1", "wasm")
+	c.Scenario.Phases[0].Measure = Dur(time.Second)
+	c.Scenario.Phases[0].Workloads[0].Concurrency = 2
+	opt := testOptions(t, c)
+	opt.Targets = opt.Targets[1:]
+	m, err := Execute(context.Background(), opt, "", &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := readResult(t, opt.Out, m.Results[0])
+	got := strings.Join(r.Invalid, "|")
+	if r.Valid || !strings.Contains(got, "unexercised: inspection_rejected_enforce unavailable") || !strings.Contains(got, "unexercised: class "+OverloadClass+" = 0, want at least 1") {
+		t.Errorf("a run that never saturated must be invalid: valid=%v %v findings=%v", r.Valid, r.Invalid, r.Findings)
+	}
+}

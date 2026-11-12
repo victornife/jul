@@ -76,3 +76,28 @@ func TestWAFInterceptorForwardsReadDeadline(t *testing.T) {
 		})
 	}
 }
+
+// The interceptor's SetReadDeadline is a forwarder, so it reports support
+// only when the writer it wraps applies read deadlines (ADR 0032 H6).
+func TestWAFInterceptorReportsReadDeadlineSupport(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/", nil)
+	ic, _ := newWAFResponseInterceptor(httptest.NewRecorder(), r, nil, http.StatusForbidden, nil, nil)
+	if ic.SupportsReadDeadline() {
+		t.Fatal("interceptor over a recorder claimed read-deadline support")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ic, _ := newWAFResponseInterceptor(w, r, nil, http.StatusForbidden, nil, nil)
+		if !ic.SupportsReadDeadline() {
+			w.WriteHeader(http.StatusTeapot)
+		}
+	}))
+	defer srv.Close()
+	resp, err := srv.Client().Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode == http.StatusTeapot {
+		t.Fatal("interceptor over the HTTP/1 transport writer reported no read-deadline support")
+	}
+}

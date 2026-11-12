@@ -73,8 +73,16 @@ func (o *Origin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("Content-Type", "text/html")
 	h.Set("X-Origin-Req-Len", strconv.FormatInt(n, 10))
-	h.Set("X-Echo-A-Req-Len", r.Header.Get("X-Assess-a-Req-Len"))
+	h.Set("X-Echo-A-Req-Len", firstHeader(r.Header, "X-Assess-a-Req-Len", "X-Assess-a1-Req-Len", "X-Assess-a2-Req-Len"))
 	h.Set("X-Echo-B-Req-Len", r.Header.Get("X-Assess-b-Req-Len"))
+	// Plan v3 state echoes are only added when present, so the responses of
+	// the earlier fixtures are unchanged.
+	if v := firstHeader(r.Header, "X-Assess-a-State", "X-Assess-a1-State", "X-Assess-a2-State"); v != "" {
+		h.Set("X-Echo-A-State", v)
+	}
+	if v := r.Header.Get("X-Assess-b-State"); v != "" {
+		h.Set("X-Echo-B-State", v)
+	}
 	if strings.HasPrefix(r.URL.Path, "/cached/") {
 		h.Set("Cache-Control", "public, max-age=300")
 	} else {
@@ -100,4 +108,15 @@ func (o *Origin) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	h.Set("Content-Length", strconv.Itoa(len(body)))
 	_, _ = w.Write(body)
+}
+
+// firstHeader returns the first non-empty value among names (the reload
+// scenarios rename inspect-a between a, a1 and a2).
+func firstHeader(h http.Header, names ...string) string {
+	for _, n := range names {
+		if v := h.Get(n); v != "" {
+			return v
+		}
+	}
+	return ""
 }

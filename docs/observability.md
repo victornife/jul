@@ -199,13 +199,13 @@ metric dimension rather than request-handling behavior.
 | `jul_http_requests_total` | Counter | `code`, `host`, `method` | Released `v1.32.0` | Total HTTP requests handled, labeled by method, host, and status code. |
 | `jul_http_response_compressed_total` | Counter | `encoding` | Released `v1.32.0` | Responses compressed by the edge, labeled by content coding. |
 | `jul_inspection_abandoned_evaluations` | Gauge | — | Merged / release pending | Evaluations still running after their request context ended. |
-| `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected-body receive timeout outcomes (`timeout`, `would_timeout`, `unsupported`); no body integration is active in I1. |
-| `jul_inspection_bytes` | Gauge | `class` | Merged / release pending | Process-wide charged bytes (`base`, `buffer`, `waf_state`); WAF state is an estimate, not a measured heap bound. Request paths are not yet integrated. |
+| `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected request-body receive outcomes (`timeout`, `would_timeout`, `unsupported`); counted once per request by body-reading plugins (I2), not yet by the WAF. |
+| `jul_inspection_bytes` | Gauge | `class` | Merged / release pending | Process-wide charged bytes (`base`, `buffer`, `waf_state`); WAF state is an estimate, not a measured heap bound. Plugin request paths charge `base` and `buffer`; WAF paths are not yet integrated. |
 | `jul_inspection_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide inspection byte ceiling. |
 | `jul_inspection_evaluations` | Gauge | `state` | Merged / release pending | Active and waiting process-wide inspection evaluations. |
 | `jul_inspection_evaluations_limit` | Gauge | — | Merged / release pending | Effective process-wide inspection evaluation slot limit. |
-| `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor; remains zero until later request-path integration. |
-| `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state and evaluation slots. |
+| `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor; one per request through a plugin chain (WAF-only routes not yet integrated). |
+| `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state and evaluation slots. Enforce stops a request at its first rejection; observe continues and counts every later refused charge too. |
 | `jul_inspection_unslotted_logging_total` | Counter | — | Merged / release pending | Phase-5 logging evaluations that proceeded without a slot; phase-5 integration is pending. |
 | `jul_listener_conns` | Gauge | — | Released `v1.32.0` | Current concurrent connections across all listeners. |
 | `jul_managed_apply_finalization_errors_total` | Counter | `component` | Released `v2.0.0` | Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded. |
@@ -263,15 +263,26 @@ Metric labels must remain bounded and must never contain request paths, queries,
 client identity, destination URLs, raw errors, or secrets. See the
 [cardinality policy and operator playbook](core-http.md#label-cardinality-policy).
 
-### Inspection governor foundation (#700 I1)
+### Inspection governor (#700 I1, I2)
 
-The inspection families are added to the metrics contract, but I1 only
-publishes configured limits and the process-owned governor snapshot. No live
-WAF or plugin request path acquires a lease, buffer charge or evaluation slot;
-therefore zero usage and zero rejection counters do not demonstrate that
-traffic is protected. The `enforce` configuration value is not a request-path
-enforcement claim in this slice. Body-timeout and unslotted-logging counters
-remain idle until their later integration points are implemented.
+I1 publishes configured limits and the process-owned governor snapshot. Since
+I2, the WASM plugin request path is governed: a plugin chain acquires one
+lease, charges its request-side host allocations (`base`, `buffer`) before
+making them, records `bytes` rejections (enforce `503`, or observe
+would-reject), and reports body-arrival outcomes in
+`jul_inspection_body_timeouts_total`. The WAF does not yet acquire leases,
+WAF-state charges or evaluation slots (I3), and plugin response-subscription
+buffers are not charged (I4). Zero WAF usage therefore does not demonstrate
+that WAF traffic is protected, and the unslotted-logging and
+abandoned-evaluation series stay idle. See
+[plugins.md](plugins.md#inspection-governor) for the governed allocations.
+
+Throttled warnings accompany rejections (`inspection budget saturated;
+request rejected`, or `…; observe mode would reject`, at most one per 10 s with
+`class`, `mode` and `max_buffered_bytes` only) and contained guest failures
+(`plugin guest failure contained; request answered 500`, at most one per 10 s
+per plugin with a bounded `reason`). Neither carries bodies, URLs, headers or
+raw errors.
 
 `waf_state` is a calibrated estimate rather than measured retained heap. The
 lease base reservation is based on a checksummed

@@ -125,6 +125,9 @@ type Hooks struct {
 	OnRejection    func(reason Outcome, mode Mode)
 	OnQueueAbandon func()
 	OnUnslotted    func()
+	// OnBodyTimeout receives inspection body-arrival results (ADR 0032 H6):
+	// protocol h1, h2 or h3; result timeout, would_timeout or unsupported.
+	OnBodyTimeout func(protocol, result string)
 }
 
 type Governor struct {
@@ -164,6 +167,21 @@ func (g *Governor) PublishLimits(limits Limits) error {
 	g.grantWaitersLocked()
 	g.mu.Unlock()
 	return nil
+}
+
+// Limits returns the published limits that govern new decisions.
+func (g *Governor) Limits() Limits {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.limits
+}
+
+// RecordBodyTimeout reports one body-arrival result to the OnBodyTimeout hook.
+// The caller records each result at most once per request.
+func (g *Governor) RecordBodyTimeout(protocol, result string) {
+	if g != nil && g.hooks.OnBodyTimeout != nil {
+		g.hooks.OnBodyTimeout(protocol, result)
+	}
 }
 
 type Snapshot struct {
@@ -257,6 +275,16 @@ func (g *Governor) AcquireLease(ctx context.Context) (*Lease, context.Context, b
 	g.mu.Unlock()
 
 	return lease, context.WithValue(ctx, contextKey{}, lease), true, nil
+}
+
+// LeaseFrom returns the request lease carried by ctx, or nil. Nested layers
+// use it to charge the outer layer's lease; only that layer closes it.
+func LeaseFrom(ctx context.Context) *Lease {
+	if ctx == nil {
+		return nil
+	}
+	lease, _ := ctx.Value(contextKey{}).(*Lease)
+	return lease
 }
 
 type Lease struct {

@@ -1,0 +1,1 @@
+/tmp/ia-smoke-suites/i2-plugin/cells/p3-nobody-plugin-h1/wasm/cand/rep1/config.toml is valid (structural + runtime)

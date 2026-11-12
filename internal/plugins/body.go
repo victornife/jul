@@ -11,9 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
-	"time"
+
+	"jul/internal/inspection"
+	"jul/internal/reqdeadline"
 )
 
 // errPluginClosed fails a request that reaches a plugin whose generation has
@@ -32,9 +35,6 @@ const (
 	bodyFailCanceled  = "canceled"
 	bodyFailRetired   = "retired"
 )
-
-// pastDeadline aborts a blocked body read when a plugin is retired.
-var pastDeadline = time.Unix(1, 0)
 
 // preparedBody is the request body after a plugin prepared it: the complete,
 // bounded bytes, replayed downstream. Close still closes the original body so
@@ -69,46 +69,77 @@ const initialBodyBuffer = 32 << 10
 // readBounded reads r to EOF, failing with errBodyTooLarge once more than
 // limit bytes arrive regardless of any declared length. The buffer grows only
 // as data arrives; an unverified sizeHint (Content-Length within the limit)
-// just stops growth from overshooting the declared length.
-func readBounded(r io.Reader, sizeHint int64, limit int) ([]byte, error) {
-	want := limit + 1
-	if sizeHint >= 0 && sizeHint <= int64(limit) {
+// just stops growth from overshooting the declared length. Every capacity is
+// charged through charge before it is allocated (ADR 0032 §4); on failure the
+// buffer is dropped and refunded once the read has returned. On success the
+// caller owns the returned buffer and its charge.
+func readBounded(r io.Reader, sizeHint int64, limit int, charge chargeFunc) (*chargedBuf, error) {
+	if limit < 0 || limit == math.MaxInt {
+		return nil, errBodyTooLarge
+	}
+	ceiling := limit + 1
+	want := ceiling
+	known := sizeHint >= 0 && sizeHint <= int64(limit)
+	if known {
 		want = int(sizeHint) + 1
 	}
-	buf := make([]byte, 0, min(512, want))
-	if sizeHint >= 0 && sizeHint <= int64(limit) {
-		buf = make([]byte, 0, min(initialBodyBuffer, want))
+	initial := min(512, want)
+	if known {
+		initial = min(initialBodyBuffer, want)
 	}
-	lr := &io.LimitedReader{R: r, N: int64(limit) + 1}
+	cb, err := newChargedBuf(charge, initial)
+	if err != nil {
+		return nil, err
+	}
+	lr := &io.LimitedReader{R: r, N: int64(ceiling)}
 	for {
-		if len(buf) == cap(buf) {
-			n := 2 * cap(buf)
-			if cap(buf) < want && n > want {
-				n = want
+		if len(cb.b) == cap(cb.b) {
+			if err := cb.grow(nextBodyCap(cap(cb.b), want, ceiling)); err != nil {
+				cb.release()
+				return nil, err
 			}
-			buf = append(make([]byte, 0, min(n, limit+1)), buf...)
 		}
-		k, err := lr.Read(buf[len(buf):cap(buf)])
-		buf = buf[:len(buf)+k]
+		k, err := lr.Read(cb.b[len(cb.b):cap(cb.b)])
+		cb.b = cb.b[:len(cb.b)+k]
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
+			cb.release()
 			return nil, err
 		}
 	}
-	if len(buf) > limit {
+	if len(cb.b) > limit {
+		cb.release()
 		return nil, errBodyTooLarge
 	}
-	return buf, nil
+	return cb, nil
+}
+
+// nextBodyCap doubles c without overflow, stopping once at the declared
+// length (want) and never exceeding ceiling (limit+1).
+func nextBodyCap(c, want, ceiling int) int {
+	n := ceiling
+	if c <= ceiling/2 {
+		n = 2 * c
+	}
+	if c < want && n > want {
+		n = want
+	}
+	return max(n, c)
 }
 
 // prepareRequestBody returns r's complete body within this plugin's
 // max_request_body before any instance is acquired, so upload arrival is
 // bounded by the transport, not the guest call timeout (#699). A body already
 // prepared by an earlier plugin in the chain and not yet consumed is reused
-// without copying, subject to this plugin's own limit.
-func (p *plugin) prepareRequestBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+// without copying or charging again, subject to this plugin's own limit.
+//
+// The read runs inside the inspection body-arrival phase of the request's
+// deadline owner (ADR 0032 H6), and its buffer is charged to the request
+// lease, which keeps the prepared body charged until the lease closes.
+func (p *plugin) prepareRequestBody(w http.ResponseWriter, inv *invocation) ([]byte, error) {
+	r := inv.r
 	if r.Body == nil || r.Body == http.NoBody {
 		return nil, nil
 	}
@@ -121,28 +152,57 @@ func (p *plugin) prepareRequestBody(w http.ResponseWriter, r *http.Request) ([]b
 	if r.ContentLength > int64(p.maxReqBody) {
 		return nil, errBodyTooLarge
 	}
-	done, err := p.trackPreparation(w)
+	owner := reqdeadline.From(r.Context())
+	if owner == nil {
+		// Outside the server entry point (tests, embedded handlers) the
+		// owner is local to this read and ends with it.
+		owner = reqdeadline.NewForRequest(w, r)
+		defer owner.End()
+	}
+	done, err := p.trackPreparation(owner)
 	if err != nil {
 		return nil, err
 	}
-	data, err := readBounded(r.Body, r.ContentLength, p.maxReqBody)
-	done()
+	defer done()
+	limits := p.gov.Limits()
+	// If the writer refuses an abort, closing the body ends the read instead
+	// (HTTP/2, HTTP/3); HTTP/1 uses the connection's read deadline.
+	owner.InterruptWith(r.Body)
+	if err := owner.BeginBodyRead(limits.BodyTimeout, limits.Mode == inspection.Observe, p.gov.RecordBodyTimeout); err != nil {
+		owner.EndBodyRead()
+		if errors.Is(err, reqdeadline.ErrUnsupported) {
+			return nil, inspection.ErrDeadlineUnsupported
+		}
+		return nil, fmt.Errorf("plugin: read request body: %w", err)
+	}
+	cb, err := readBounded(r.Body, r.ContentLength, p.maxReqBody, leaseCharger(inv.lease))
+	switch owner.EndBodyRead() {
+	case reqdeadline.BodyTimedOut:
+		cb.release()
+		return nil, inspection.ErrBodyTimeout
+	case reqdeadline.BodyUnsupported:
+		cb.release()
+		return nil, inspection.ErrDeadlineUnsupported
+	}
 	if err != nil {
-		if errors.Is(err, errBodyTooLarge) {
+		if errors.Is(err, errBodyTooLarge) || inspection.IsOverload(err) {
 			return nil, err
 		}
 		return nil, fmt.Errorf("plugin: read request body: %w", err)
 	}
-	r.Body = newPreparedBody(data, r.Body)
-	r.ContentLength = int64(len(data))
-	return data, nil
+	// The prepared body keeps cb's array and its charge until the lease
+	// closes: downstream handlers and later plugins read it.
+	r.Body = newPreparedBody(cb.b, r.Body)
+	r.ContentLength = int64(len(cb.b))
+	return cb.b, nil
 }
 
 // prepare runs preparation for a request-phase invocation and attributes a
 // failure to one closed reason. A failed or abandoned preparation never
-// acquires an instance or invokes the guest.
+// acquires an instance or invokes the guest. Governor and deadline outcomes
+// are counted by the inspection metrics, not as body-preparation failures.
 func (p *plugin) prepare(ctx context.Context, w http.ResponseWriter, inv *invocation) error {
-	data, err := p.prepareRequestBody(w, inv.r)
+	data, err := p.prepareRequestBody(w, inv)
 	if err == nil && p.closed.Load() {
 		err = errPluginClosed
 	}
@@ -157,6 +217,8 @@ func (p *plugin) prepare(ctx context.Context, w http.ResponseWriter, inv *invoca
 	switch {
 	case errors.Is(err, errBodyTooLarge):
 		reason = bodyFailTooLarge
+	case errors.Is(err, inspection.ErrBodyTimeout), errors.Is(err, inspection.ErrDeadlineUnsupported), inspection.IsOverload(err):
+		return err
 	case p.closed.Load():
 		reason, err = bodyFailRetired, errPluginClosed
 	case errors.Is(err, os.ErrDeadlineExceeded):
@@ -169,44 +231,45 @@ func (p *plugin) prepare(ctx context.Context, w http.ResponseWriter, inv *invoca
 	return err
 }
 
-// trackPreparation registers w's request as reading its body for this plugin
-// until done is called, so close can abort the read through the request's
-// own read deadline. That deadline is per request on HTTP/1 and per stream on
-// HTTP/2 and HTTP/3; the connection is never closed for it.
-func (p *plugin) trackPreparation(w http.ResponseWriter) (done func(), err error) {
-	rc := http.NewResponseController(w)
+// trackPreparation registers the request's deadline owner as reading its body
+// for this plugin until done is called, so close can abort the read. The
+// owner applies the abort to the request's own read deadline: per request on
+// HTTP/1 and per stream on HTTP/2 and HTTP/3; the connection is never closed
+// for it. The abort is sticky, and once the request handler has returned the
+// owner ignores it, so no ResponseWriter is used after its request ended.
+func (p *plugin) trackPreparation(o *reqdeadline.Owner) (done func(), err error) {
 	p.prepMu.Lock()
 	defer p.prepMu.Unlock()
 	if p.closed.Load() {
 		return nil, errPluginClosed
 	}
 	if p.preparing == nil {
-		p.preparing = make(map[*http.ResponseController]struct{})
+		p.preparing = make(map[*reqdeadline.Owner]int)
 	}
-	p.preparing[rc] = struct{}{}
+	p.preparing[o]++
 	return func() {
 		p.prepMu.Lock()
-		delete(p.preparing, rc)
+		if p.preparing[o]--; p.preparing[o] <= 0 {
+			delete(p.preparing, o)
+		}
 		p.prepMu.Unlock()
 	}, nil
 }
 
-// abortPreparations marks p closed and ends every body read in progress. It
-// holds prepMu while setting deadlines so no request's ResponseWriter is used
-// after its preparation has returned.
+// abortPreparations marks p closed and aborts every body read in progress.
 func (p *plugin) abortPreparations() {
 	p.prepMu.Lock()
 	defer p.prepMu.Unlock()
 	p.closed.Store(true)
 	unsupported := 0
-	for rc := range p.preparing {
-		if rc.SetReadDeadline(pastDeadline) != nil {
+	for o := range p.preparing {
+		if errors.Is(o.Abort(), reqdeadline.ErrUnsupported) {
 			unsupported++
 		}
 	}
 	if unsupported > 0 && p.log != nil {
-		// The read then ends only with its client or a server read_timeout;
-		// the request still fails as retired and never reaches a guest.
+		// The read is interrupted through the transport instead; the
+		// request still fails as retired and never reaches a guest.
 		p.log.Warn("plugin retired while request bodies were arriving; read deadline unsupported by the response writer",
 			"plugin", p.name, "requests", unsupported)
 	}

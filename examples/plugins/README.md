@@ -34,6 +34,7 @@ go build -tags wasmplugins -o jul ./cmd/jul
 | [`testguest-panic/`](testguest-panic) | Panics on invocation — used by the panic-isolation test |
 | [`testguest-loop/`](testguest-loop) | Infinite loop — used by the timeout-isolation test |
 | [`inspect-load/`](inspect-load) | **v2 assessment fixture, not a security control.** Scans request and response bodies and reports evidence headers for [`scripts/inspection-assessment`](../../scripts/inspection-assessment/README.md) |
+| [`inspect-nobody/`](inspect-nobody) | **v2 assessment fixture, not a security control.** Never imports `read_request_body`; stores request state and subscribes to response headers only, for the #700 I2 non-body cells of [`scripts/inspection-assessment`](../../scripts/inspection-assessment/README.md) |
 
 ## Build
 

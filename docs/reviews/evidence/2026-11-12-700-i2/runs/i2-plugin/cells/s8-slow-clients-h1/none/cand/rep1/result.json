@@ -1,0 +1,204 @@
+{
+  "scenario": "s8-slow-clients-h1",
+  "scenario_sha256": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b",
+  "comparison": "record",
+  "variant": "none",
+  "target": "cand",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-12T14:07:52.995251004Z",
+  "ended": "2026-11-12T14:08:31.030065936Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "3f98cf3bcbb17413905ce634df0a353dfef414176884e406b348bc73b9db6993",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-992400-11791505.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 53
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "slow",
+          "proto": "h1",
+          "concurrency": 96,
+          "window_seconds": 20,
+          "attempts": 480,
+          "verified": 480,
+          "verified_in_window": 384,
+          "goodput_rps": 19.2,
+          "goodput_bytes_per_second": 78643.2,
+          "classes": {
+            "ok": 480
+          },
+          "p50_ms": 3925.127,
+          "p95_ms": 3928.212,
+          "p99_ms": 3929.997,
+          "max_ms": 3933.288,
+          "crossed_in_from_warmup": 96,
+          "outstanding_at_window_end": 96,
+          "response_protos": {
+            "HTTP/1.1": 480
+          },
+          "connections_dialled": 96
+        },
+        {
+          "workload": "slow-cancel",
+          "proto": "h1",
+          "concurrency": 32,
+          "window_seconds": 20,
+          "attempts": 320,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "client-cancel": 320
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 32,
+          "outstanding_at_window_end": 32,
+          "response_protos": {},
+          "connections_dialled": 416,
+          "expected_classes": [
+            "client-cancel"
+          ],
+          "error_samples": {
+            "client-cancel": "Post \"http://127.0.0.1:37487/proxy/echo?resp=4096\": context deadline exceeded"
+          },
+          "outcome_latency_ms": {
+            "client-cancel": {
+              "n": 320,
+              "p50": 2000.321,
+              "p95": 2001.189,
+              "p99": 2001.548,
+              "max": 2001.901
+            }
+          }
+        },
+        {
+          "workload": "probe",
+          "proto": "h1",
+          "concurrency": 4,
+          "window_seconds": 20,
+          "attempts": 143362,
+          "verified": 143362,
+          "verified_in_window": 143358,
+          "goodput_rps": 7167.9,
+          "goodput_bytes_per_second": 29359718.4,
+          "classes": {
+            "ok": 143362
+          },
+          "p50_ms": 0.481,
+          "p95_ms": 0.95,
+          "p99_ms": 1.941,
+          "max_ms": 13.642,
+          "crossed_in_from_warmup": 4,
+          "outstanding_at_window_end": 4,
+          "response_protos": {
+            "HTTP/1.1": 143362
+          },
+          "connections_dialled": 4
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.559,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 53698560,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 78852096,
+  "heap_inuse_after_two_gcs": 11010048,
+  "heap_alloc_after_two_gcs": 7158192,
+  "rss_after_two_gcs": 67690496,
+  "counter_deltas": {
+    "inspection_body_timeout": 0,
+    "inspection_body_unsupported": 0,
+    "inspection_body_would_timeout": 0,
+    "inspection_rejected_enforce": 0,
+    "inspection_rejected_observe": 0,
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_clean": 0,
+    "waf_tx_inspection_error": 0
+  },
+  "unavailable_metrics": [
+    "plugin_invocations",
+    "plugin_invocations_error",
+    "plugin_panics",
+    "plugin_resp_invocations",
+    "plugin_resp_error",
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_applied",
+    "reload_not_applied",
+    "transport_retired"
+  ],
+  "inspection_foundation_series_after": {
+    "jul_inspection_abandoned_evaluations": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"would_timeout\"}": 0,
+    "jul_inspection_bytes_limit": 268435456,
+    "jul_inspection_bytes{class=\"base\"}": 0,
+    "jul_inspection_bytes{class=\"buffer\"}": 0,
+    "jul_inspection_bytes{class=\"waf_state\"}": 0,
+    "jul_inspection_evaluations_limit": 2,
+    "jul_inspection_evaluations{state=\"active\"}": 0,
+    "jul_inspection_evaluations{state=\"waiting\"}": 0,
+    "jul_inspection_leases": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"waf_state\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"waf_state\"}": 0,
+    "jul_inspection_unslotted_logging_total": 0
+  },
+  "samples": 76
+}

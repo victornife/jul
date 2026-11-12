@@ -1,0 +1,40 @@
+[
+  {
+    "scenario": "cal-normal-h3",
+    "variant": "wasm",
+    "target": "base",
+    "chosen_concurrency": 2,
+    "steps": [
+      {
+        "concurrency": 1,
+        "cpu_fraction": 0.493,
+        "all_verified": true,
+        "goodput_rps": 163.4
+      },
+      {
+        "concurrency": 2,
+        "cpu_fraction": 0.635,
+        "all_verified": true,
+        "goodput_rps": 314.3
+      },
+      {
+        "concurrency": 4,
+        "cpu_fraction": 0.833,
+        "all_verified": true,
+        "goodput_rps": 533.1
+      },
+      {
+        "concurrency": 8,
+        "cpu_fraction": 0.939,
+        "all_verified": true,
+        "goodput_rps": 578.6
+      },
+      {
+        "concurrency": 16,
+        "cpu_fraction": 0.932,
+        "all_verified": true,
+        "goodput_rps": 523.7
+      }
+    ]
+  }
+]

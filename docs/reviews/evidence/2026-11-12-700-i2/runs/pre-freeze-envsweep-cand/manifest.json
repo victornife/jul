@@ -1,0 +1,183 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "ia-envsweep",
+  "started": "2026-11-12T11:37:07.059948641Z",
+  "ended": "2026-11-12T11:56:42.718462157Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v3",
+  "plan_sha256": "f8e5899ec8e705d122be1dc1da2733250dbf9afc6aefe9f4566f190b8595b846",
+  "interpretation_sha256": "a65f6713b1ee1d1d660023e79af7e598be198fb6c0ce959d426646887de530dc",
+  "profile": {
+    "name": "qualification",
+    "acceptance_eligible": true,
+    "warmup": "5s",
+    "measure": "20s",
+    "recovery": "10s",
+    "reload_measure": "40s",
+    "reload_recovery": "15s",
+    "step_warmup": "2s",
+    "f3_duration": "20s",
+    "f4_client_limit": "20s",
+    "description": "the archived #695/#700 windows; eligible as acceptance evidence only inside the verified envelope"
+  },
+  "repetitions": 1,
+  "selection": [
+    "r1-slow-upload-c16-h1/wasm",
+    "s8-slow-clients-h1/none",
+    "s8-slow-clients-h1/waf",
+    "s8-slow-clients-h1/wasm",
+    "s8-slow-clients-h1/both",
+    "r2-fast-nobody-h1/none",
+    "r2-fast-nobody-h1/wasm",
+    "s6-static-h2/none",
+    "s6-static-h2/wasm",
+    "s6-static-h2/both",
+    "s7-cache-h1/none",
+    "s7-cache-h1/wasm",
+    "s7-cache-h1/both",
+    "p3-nobody-plugin-h1/none",
+    "p3-nobody-plugin-h1/wasm",
+    "p4-reload-budget-plugin/wasm",
+    "f4-stalled-body/none",
+    "f4-stalled-body/wasm",
+    "f4-stalled-body/both",
+    "f4-body-deadline-5s/none",
+    "f4-body-deadline-5s/wasm",
+    "f4-body-deadline-5s/both"
+  ],
+  "scenario_sha256": {
+    "f4-body-deadline-5s/both": "95be4355c4d60dc203f2222d135399557ce60fd1203795218030cac4b4545dcc",
+    "f4-body-deadline-5s/none": "95be4355c4d60dc203f2222d135399557ce60fd1203795218030cac4b4545dcc",
+    "f4-body-deadline-5s/wasm": "95be4355c4d60dc203f2222d135399557ce60fd1203795218030cac4b4545dcc",
+    "f4-stalled-body/both": "99112fb757c2b4bfa4533065abe31c758b28343a59fd2566b28c4be71bc8bc1a",
+    "f4-stalled-body/none": "99112fb757c2b4bfa4533065abe31c758b28343a59fd2566b28c4be71bc8bc1a",
+    "f4-stalled-body/wasm": "99112fb757c2b4bfa4533065abe31c758b28343a59fd2566b28c4be71bc8bc1a",
+    "p3-nobody-plugin-h1/none": "4129446f1c0d5fbd48a8c4889e00923c2eb564023d45dcbe5a5f36e698fe57f7",
+    "p3-nobody-plugin-h1/wasm": "4129446f1c0d5fbd48a8c4889e00923c2eb564023d45dcbe5a5f36e698fe57f7",
+    "p4-reload-budget-plugin/wasm": "69e6837521b707cca775e29148fa1688e1d480536584ac68574aa5dd1214f7c0",
+    "r1-slow-upload-c16-h1/wasm": "475677fe3da9b1cc710fc08ddbd27855d030445b9be274e0d185834f16ed873f",
+    "r2-fast-nobody-h1/none": "a8f6afafdeb454e7a1db1b2eb7a8c6d9c3c610c3b6c7cb02288f8a62dedeae7d",
+    "r2-fast-nobody-h1/wasm": "a8f6afafdeb454e7a1db1b2eb7a8c6d9c3c610c3b6c7cb02288f8a62dedeae7d",
+    "s6-static-h2/both": "59df9ec76e7141c149a2736f5dfe19e3aee2783385eeef1e42c9e43d3874e8d3",
+    "s6-static-h2/none": "59df9ec76e7141c149a2736f5dfe19e3aee2783385eeef1e42c9e43d3874e8d3",
+    "s6-static-h2/wasm": "59df9ec76e7141c149a2736f5dfe19e3aee2783385eeef1e42c9e43d3874e8d3",
+    "s7-cache-h1/both": "d58cc1c21fadd71d9d80bd2c017fde14ed291abf9a944a6585e00d063a71a8ef",
+    "s7-cache-h1/none": "d58cc1c21fadd71d9d80bd2c017fde14ed291abf9a944a6585e00d063a71a8ef",
+    "s7-cache-h1/wasm": "d58cc1c21fadd71d9d80bd2c017fde14ed291abf9a944a6585e00d063a71a8ef",
+    "s8-slow-clients-h1/both": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b",
+    "s8-slow-clients-h1/none": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b",
+    "s8-slow-clients-h1/waf": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b",
+    "s8-slow-clients-h1/wasm": "9aee399b14961bead94fb25efb66eb3eed1b67a3f5cfeefa729f0d2370f5081b"
+  },
+  "targets": [
+    {
+      "label": "cand",
+      "adapter": "current",
+      "path": "/tmp/jul-i2-wip",
+      "binary": {
+        "path": "/tmp/jul-i2-wip",
+        "sha256": "2eba4cc66b52cb9476fb2e433072b48afc5b5b8ce05edb38cb5e802fecfe0f8e",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "true",
+          "vcs.revision": "d8d0520b1b57ef8c0df08e8902b407856f2d47cd",
+          "vcs.time": "2026-11-12T08:26:43Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/tmp/ia-wip",
+    "sha256": "41190c8190df1c023916d89bb95798eeced2c2b2fd75e542e1eda09efe34d0f7",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "CGO_ENABLED": "1",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux",
+      "vcs": "git",
+      "vcs.modified": "true",
+      "vcs.revision": "d8d0520b1b57ef8c0df08e8902b407856f2d47cd",
+      "vcs.time": "2026-11-12T08:26:43Z"
+    }
+  },
+  "guest": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-load.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a"
+  },
+  "guest_nobody": {
+    "path": "/home/victornf/jul-i2-builds/bin/inspect-nobody.wasm",
+    "sha256": "5df6763d8a9fc4ff15d0931376cade46f6d50238fcde412d0a341400f3afa22e"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/jul-700-i2/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 6,
+    "kernel": "6.18.54.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "required",
+    "jul_cpus": "0,1",
+    "cpu_quota": "200%",
+    "memory_max": "768M",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "4-9",
+    "jul": "0,1",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/r1-slow-upload-c16-h1/wasm/cand/rep1/result.json",
+    "cells/s8-slow-clients-h1/none/cand/rep1/result.json",
+    "cells/s8-slow-clients-h1/waf/cand/rep1/result.json",
+    "cells/s8-slow-clients-h1/wasm/cand/rep1/result.json",
+    "cells/s8-slow-clients-h1/both/cand/rep1/result.json",
+    "cells/r2-fast-nobody-h1/none/cand/rep1/result.json",
+    "cells/r2-fast-nobody-h1/wasm/cand/rep1/result.json",
+    "cells/s6-static-h2/none/cand/rep1/result.json",
+    "cells/s6-static-h2/wasm/cand/rep1/result.json",
+    "cells/s6-static-h2/both/cand/rep1/result.json",
+    "cells/s7-cache-h1/none/cand/rep1/result.json",
+    "cells/s7-cache-h1/wasm/cand/rep1/result.json",
+    "cells/s7-cache-h1/both/cand/rep1/result.json",
+    "cells/p3-nobody-plugin-h1/none/cand/rep1/result.json",
+    "cells/p3-nobody-plugin-h1/wasm/cand/rep1/result.json",
+    "cells/p4-reload-budget-plugin/wasm/cand/rep1/result.json",
+    "cells/f4-stalled-body/none/cand/rep1/result.json",
+    "cells/f4-stalled-body/wasm/cand/rep1/result.json",
+    "cells/f4-stalled-body/both/cand/rep1/result.json",
+    "cells/f4-body-deadline-5s/none/cand/rep1/result.json",
+    "cells/f4-body-deadline-5s/wasm/cand/rep1/result.json",
+    "cells/f4-body-deadline-5s/both/cand/rep1/result.json"
+  ],
+  "interrupted": false
+}

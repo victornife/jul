@@ -92,7 +92,7 @@ func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.Inspe
 		ActiveEvaluations:               snapshot.ActiveEvaluations,
 		WaitingEvaluations:              snapshot.WaitingEvaluations,
 		Draining:                        snapshot.Draining,
-		RequestPathIntegration:          "pending",
+		RequestPathIntegration:          "partial",
 		BaseChargeBytes:                 limits.BaseChargeBytes,
 		BaseChargeScope:                 "governor lease/context scaffolding only; excludes request buffers, plugin/WAF state, protocol and process memory",
 		PluginGuestMaxBytes:             guestMaxBytes,

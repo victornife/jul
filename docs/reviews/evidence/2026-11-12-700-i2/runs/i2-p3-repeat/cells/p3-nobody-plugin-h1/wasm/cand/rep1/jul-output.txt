@@ -1,0 +1,1 @@
+time=2026-11-12T16:50:48.461+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=timeout

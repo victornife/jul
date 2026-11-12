@@ -1,0 +1,184 @@
+== 2026-11-12T12:55:32Z i2-normal: -profile qualification -suite i2-normal -reps 3 -target base:baseline-858590dc:/home/victornf/jul-i5-builds/bin/jul-858590dc-go1.27.3 -target main:current:/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4 -target cand:current:/home/victornf/jul-i2-builds/bin/jul-b1a670fe-go1.27.4
+2026-11-12T12:56:08Z u1-normal-h1/none/base rep1: state=completed valid=true correct=true load/load=6096.9rps(121955/121955) cpu=0.63
+2026-11-12T12:56:44Z u1-normal-h1/none/main rep1: state=completed valid=true correct=true load/load=3549.8rps(71011/71011) cpu=0.65
+2026-11-12T12:57:19Z u1-normal-h1/none/cand rep1: state=completed valid=true correct=true load/load=4855.4rps(97122/97122) cpu=0.63
+2026-11-12T12:57:56Z u1-normal-h1/waf/base rep1: state=completed valid=true correct=true load/load=9.3rps(188/188) cpu=0.50
+2026-11-12T12:58:33Z u1-normal-h1/waf/main rep1: state=completed valid=true correct=true load/load=9.7rps(194/194) cpu=0.50
+2026-11-12T12:59:09Z u1-normal-h1/waf/cand rep1: state=completed valid=true correct=true load/load=7.8rps(156/156) cpu=0.51
+2026-11-12T12:59:47Z u1-normal-h1/wasm/base rep1: state=completed valid=true correct=true load/load=462.2rps(9247/9247) cpu=0.64
+2026-11-12T13:00:26Z u1-normal-h1/wasm/main rep1: state=completed valid=true correct=true load/load=408.0rps(8162/8162) cpu=0.64
+2026-11-12T13:01:05Z u1-normal-h1/wasm/cand rep1: state=completed valid=true correct=true load/load=418.8rps(8377/8377) cpu=0.64
+2026-11-12T13:01:43Z u1-normal-h1/both/base rep1: state=completed valid=true correct=true load/load=8.1rps(162/162) cpu=0.50
+2026-11-12T13:02:23Z u1-normal-h1/both/main rep1: state=completed valid=true correct=true load/load=7.4rps(149/149) cpu=0.51
+2026-11-12T13:03:03Z u1-normal-h1/both/cand rep1: state=completed valid=true correct=true load/load=8.1rps(163/163) cpu=0.50
+2026-11-12T13:03:39Z u1b-normal-h1-none-c8/none/base rep1: state=completed valid=true correct=true load/load=4785.2rps(95712/95712) cpu=0.60
+2026-11-12T13:04:14Z u1b-normal-h1-none-c8/none/main rep1: state=completed valid=true correct=true load/load=3778.8rps(75584/75584) cpu=0.61
+2026-11-12T13:04:50Z u1b-normal-h1-none-c8/none/cand rep1: state=completed valid=true correct=true load/load=5358.1rps(107168/107168) cpu=0.59
+2026-11-12T13:05:25Z u2-normal-h2/none/base rep1: state=completed valid=true correct=true load/load=2194.2rps(43899/43899) cpu=0.62
+2026-11-12T13:06:01Z u2-normal-h2/none/main rep1: state=completed valid=true correct=true load/load=2313.5rps(46286/46286) cpu=0.62
+2026-11-12T13:06:36Z u2-normal-h2/none/cand rep1: state=completed valid=true correct=true load/load=2440.1rps(48818/48818) cpu=0.62
+2026-11-12T13:07:13Z u2-normal-h2/waf/base rep1: state=completed valid=true correct=true load/load=9.5rps(191/191) cpu=0.50
+2026-11-12T13:07:49Z u2-normal-h2/waf/main rep1: state=completed valid=true correct=true load/load=10.1rps(203/203) cpu=0.51
+2026-11-12T13:08:26Z u2-normal-h2/waf/cand rep1: state=completed valid=true correct=true load/load=10.2rps(204/204) cpu=0.50
+2026-11-12T13:09:02Z u2-normal-h2/wasm/base rep1: state=completed valid=true correct=true load/load=510.9rps(10219/10219) cpu=0.64
+2026-11-12T13:09:41Z u2-normal-h2/wasm/main rep1: state=completed valid=true correct=true load/load=432.9rps(8661/8661) cpu=0.65
+2026-11-12T13:10:19Z u2-normal-h2/wasm/cand rep1: state=completed valid=true correct=true load/load=517.5rps(10352/10352) cpu=0.63
+2026-11-12T13:10:57Z u2-normal-h2/both/base rep1: state=completed valid=true correct=true load/load=9.7rps(194/194) cpu=0.50
+2026-11-12T13:11:36Z u2-normal-h2/both/main rep1: state=completed valid=true correct=true load/load=9.9rps(199/199) cpu=0.51
+2026-11-12T13:12:15Z u2-normal-h2/both/cand rep1: state=completed valid=true correct=true load/load=9.9rps(199/199) cpu=0.50
+2026-11-12T13:12:51Z u10-normal-h3/none/base rep1: state=completed valid=true correct=true load/load=3026.7rps(60549/60549) cpu=0.63
+2026-11-12T13:13:26Z u10-normal-h3/none/main rep1: state=completed valid=true correct=true load/load=1777.2rps(35559/35559) cpu=0.65
+2026-11-12T13:14:02Z u10-normal-h3/none/cand rep1: state=completed valid=true correct=true load/load=2277.6rps(45567/45567) cpu=0.64
+2026-11-12T13:14:39Z u10-normal-h3/wasm/base rep1: state=completed valid=true correct=true load/load=465.9rps(9320/9320) cpu=0.61
+2026-11-12T13:15:17Z u10-normal-h3/wasm/main rep1: state=completed valid=true correct=true load/load=469.9rps(9400/9400) cpu=0.61
+2026-11-12T13:15:56Z u10-normal-h3/wasm/cand rep1: state=completed valid=true correct=true load/load=450.9rps(9019/9019) cpu=0.62
+2026-11-12T13:16:33Z u10-normal-h3/both/base rep1: state=completed valid=true correct=true load/load=9.8rps(197/197) cpu=0.50
+2026-11-12T13:17:12Z u10-normal-h3/both/main rep1: state=completed valid=true correct=true load/load=9.7rps(195/195) cpu=0.50
+2026-11-12T13:17:51Z u10-normal-h3/both/cand rep1: state=completed valid=true correct=true load/load=10.0rps(201/201) cpu=0.50
+2026-11-12T13:18:27Z u1-normal-h1/none/base rep2: state=completed valid=true correct=true load/load=6629.1rps(132596/132596) cpu=0.62
+2026-11-12T13:19:02Z u1-normal-h1/none/main rep2: state=completed valid=true correct=true load/load=4529.1rps(90599/90599) cpu=0.64
+2026-11-12T13:19:38Z u1-normal-h1/none/cand rep2: state=completed valid=true correct=true load/load=5962.6rps(119268/119268) cpu=0.62
+2026-11-12T13:20:14Z u1-normal-h1/waf/base rep2: state=completed valid=true correct=true load/load=9.1rps(183/183) cpu=0.50
+2026-11-12T13:20:51Z u1-normal-h1/waf/main rep2: state=completed valid=true correct=true load/load=10.2rps(204/204) cpu=0.50
+2026-11-12T13:21:27Z u1-normal-h1/waf/cand rep2: state=completed valid=true correct=true load/load=10.1rps(202/202) cpu=0.50
+2026-11-12T13:22:04Z u1-normal-h1/wasm/base rep2: state=completed valid=true correct=true load/load=604.0rps(12083/12083) cpu=0.63
+2026-11-12T13:22:42Z u1-normal-h1/wasm/main rep2: state=completed valid=true correct=true load/load=538.7rps(10776/10776) cpu=0.63
+2026-11-12T13:23:21Z u1-normal-h1/wasm/cand rep2: state=completed valid=true correct=true load/load=560.8rps(11217/11217) cpu=0.63
+2026-11-12T13:23:59Z u1-normal-h1/both/base rep2: state=completed valid=true correct=true load/load=9.0rps(181/181) cpu=0.50
+2026-11-12T13:24:38Z u1-normal-h1/both/main rep2: state=completed valid=true correct=true load/load=9.9rps(199/199) cpu=0.50
+2026-11-12T13:25:17Z u1-normal-h1/both/cand rep2: state=completed valid=true correct=true load/load=9.8rps(196/196) cpu=0.50
+2026-11-12T13:25:52Z u1b-normal-h1-none-c8/none/base rep2: state=completed valid=true correct=true load/load=6071.4rps(121434/121434) cpu=0.60
+2026-11-12T13:26:28Z u1b-normal-h1-none-c8/none/main rep2: state=completed valid=true correct=true load/load=4083.6rps(81679/81679) cpu=0.61
+2026-11-12T13:27:03Z u1b-normal-h1-none-c8/none/cand rep2: state=completed valid=true correct=true load/load=5282.1rps(105651/105651) cpu=0.60
+2026-11-12T13:27:39Z u2-normal-h2/none/base rep2: state=completed valid=true correct=true load/load=2487.7rps(49770/49770) cpu=0.62
+2026-11-12T13:28:14Z u2-normal-h2/none/main rep2: state=completed valid=true correct=true load/load=2300.8rps(46031/46031) cpu=0.62
+2026-11-12T13:28:50Z u2-normal-h2/none/cand rep2: state=completed valid=true correct=true load/load=2382.1rps(47658/47658) cpu=0.62
+2026-11-12T13:29:26Z u2-normal-h2/waf/base rep2: state=completed valid=true correct=true load/load=9.4rps(189/189) cpu=0.50
+2026-11-12T13:30:03Z u2-normal-h2/waf/main rep2: state=completed valid=true correct=true load/load=10.1rps(202/202) cpu=0.51
+2026-11-12T13:30:39Z u2-normal-h2/waf/cand rep2: state=completed valid=true correct=true load/load=10.2rps(206/206) cpu=0.50
+2026-11-12T13:31:16Z u2-normal-h2/wasm/base rep2: state=completed valid=true correct=true load/load=548.8rps(10977/10977) cpu=0.64
+2026-11-12T13:31:54Z u2-normal-h2/wasm/main rep2: state=completed valid=true correct=true load/load=555.2rps(11106/11106) cpu=0.64
+2026-11-12T13:32:32Z u2-normal-h2/wasm/cand rep2: state=completed valid=true correct=true load/load=458.9rps(9180/9180) cpu=0.65
+2026-11-12T13:33:10Z u2-normal-h2/both/base rep2: state=completed valid=true correct=true load/load=9.8rps(197/197) cpu=0.50
+2026-11-12T13:33:49Z u2-normal-h2/both/main rep2: state=completed valid=true correct=true load/load=9.9rps(200/200) cpu=0.50
+2026-11-12T13:34:28Z u2-normal-h2/both/cand rep2: state=completed valid=true correct=true load/load=9.9rps(199/199) cpu=0.51
+2026-11-12T13:35:04Z u10-normal-h3/none/base rep2: state=completed valid=true correct=true load/load=2910.4rps(58224/58224) cpu=0.63
+2026-11-12T13:35:39Z u10-normal-h3/none/main rep2: state=completed valid=true correct=true load/load=2132.1rps(42657/42657) cpu=0.66
+2026-11-12T13:36:15Z u10-normal-h3/none/cand rep2: state=completed valid=true correct=true load/load=2530.3rps(50623/50623) cpu=0.64
+2026-11-12T13:36:52Z u10-normal-h3/wasm/base rep2: state=completed valid=true correct=true load/load=476.8rps(9538/9538) cpu=0.62
+2026-11-12T13:37:30Z u10-normal-h3/wasm/main rep2: state=completed valid=true correct=true load/load=502.9rps(10061/10061) cpu=0.61
+2026-11-12T13:38:09Z u10-normal-h3/wasm/cand rep2: state=completed valid=true correct=true load/load=410.8rps(8217/8217) cpu=0.62
+2026-11-12T13:38:46Z u10-normal-h3/both/base rep2: state=completed valid=true correct=true load/load=9.9rps(199/199) cpu=0.50
+2026-11-12T13:39:25Z u10-normal-h3/both/main rep2: state=completed valid=true correct=true load/load=9.8rps(198/198) cpu=0.50
+2026-11-12T13:40:04Z u10-normal-h3/both/cand rep2: state=completed valid=true correct=true load/load=9.8rps(197/197) cpu=0.50
+2026-11-12T13:40:40Z u1-normal-h1/none/base rep3: state=completed valid=true correct=true load/load=6614.6rps(132307/132307) cpu=0.63
+2026-11-12T13:41:15Z u1-normal-h1/none/main rep3: state=completed valid=true correct=true load/load=4256.9rps(85155/85155) cpu=0.64
+2026-11-12T13:41:51Z u1-normal-h1/none/cand rep3: state=completed valid=true correct=true load/load=5698.2rps(113981/113981) cpu=0.63
+2026-11-12T13:42:27Z u1-normal-h1/waf/base rep3: state=completed valid=true correct=true load/load=9.8rps(197/197) cpu=0.50
+2026-11-12T13:43:04Z u1-normal-h1/waf/main rep3: state=completed valid=true correct=true load/load=10.3rps(207/207) cpu=0.50
+2026-11-12T13:43:40Z u1-normal-h1/waf/cand rep3: state=completed valid=true correct=true load/load=9.8rps(198/198) cpu=0.51
+2026-11-12T13:44:17Z u1-normal-h1/wasm/base rep3: state=completed valid=true correct=true load/load=619.1rps(12384/12384) cpu=0.63
+2026-11-12T13:44:55Z u1-normal-h1/wasm/main rep3: state=completed valid=true correct=true load/load=607.5rps(12151/12151) cpu=0.63
+2026-11-12T13:45:33Z u1-normal-h1/wasm/cand rep3: state=completed valid=true correct=true load/load=499.1rps(9983/9983) cpu=0.64
+2026-11-12T13:46:11Z u1-normal-h1/both/base rep3: state=completed valid=true correct=true load/load=9.9rps(200/200) cpu=0.50
+2026-11-12T13:46:50Z u1-normal-h1/both/main rep3: state=completed valid=true correct=true load/load=10.0rps(201/201) cpu=0.50
+2026-11-12T13:47:29Z u1-normal-h1/both/cand rep3: state=completed valid=true correct=true load/load=9.8rps(197/197) cpu=0.50
+2026-11-12T13:48:05Z u1b-normal-h1-none-c8/none/base rep3: state=completed valid=true correct=true load/load=5849.4rps(116996/116996) cpu=0.60
+2026-11-12T13:48:40Z u1b-normal-h1-none-c8/none/main rep3: state=completed valid=true correct=true load/load=4090.1rps(81808/81808) cpu=0.61
+2026-11-12T13:49:16Z u1b-normal-h1-none-c8/none/cand rep3: state=completed valid=true correct=true load/load=4726.2rps(94532/94532) cpu=0.61
+2026-11-12T13:49:51Z u2-normal-h2/none/base rep3: state=completed valid=true correct=true load/load=2615.0rps(52316/52316) cpu=0.62
+2026-11-12T13:50:27Z u2-normal-h2/none/main rep3: state=completed valid=true correct=true load/load=2275.4rps(45524/45524) cpu=0.63
+2026-11-12T13:51:02Z u2-normal-h2/none/cand rep3: state=completed valid=true correct=true load/load=2334.1rps(46697/46697) cpu=0.63
+2026-11-12T13:51:39Z u2-normal-h2/waf/base rep3: state=completed valid=true correct=true load/load=9.4rps(189/189) cpu=0.51
+2026-11-12T13:52:15Z u2-normal-h2/waf/main rep3: state=completed valid=true correct=true load/load=10.2rps(204/204) cpu=0.50
+2026-11-12T13:52:52Z u2-normal-h2/waf/cand rep3: state=completed valid=true correct=true load/load=10.1rps(202/202) cpu=0.50
+2026-11-12T13:53:28Z u2-normal-h2/wasm/base rep3: state=completed valid=true correct=true load/load=516.5rps(10332/10332) cpu=0.65
+2026-11-12T13:54:07Z u2-normal-h2/wasm/main rep3: state=completed valid=true correct=true load/load=455.8rps(9117/9117) cpu=0.65
+2026-11-12T13:54:45Z u2-normal-h2/wasm/cand rep3: state=completed valid=true correct=true load/load=547.9rps(10960/10960) cpu=0.64
+2026-11-12T13:55:23Z u2-normal-h2/both/base rep3: state=completed valid=true correct=true load/load=9.9rps(199/199) cpu=0.50
+2026-11-12T13:56:02Z u2-normal-h2/both/main rep3: state=completed valid=true correct=true load/load=9.8rps(196/196) cpu=0.51
+2026-11-12T13:56:41Z u2-normal-h2/both/cand rep3: state=completed valid=true correct=true load/load=9.8rps(198/198) cpu=0.50
+2026-11-12T13:57:16Z u10-normal-h3/none/base rep3: state=completed valid=true correct=true load/load=2876.4rps(57544/57544) cpu=0.62
+2026-11-12T13:57:52Z u10-normal-h3/none/main rep3: state=completed valid=true correct=true load/load=2044.6rps(40908/40908) cpu=0.65
+2026-11-12T13:58:27Z u10-normal-h3/none/cand rep3: state=completed valid=true correct=true load/load=2563.3rps(51283/51283) cpu=0.63
+2026-11-12T13:59:04Z u10-normal-h3/wasm/base rep3: state=completed valid=true correct=true load/load=476.8rps(9538/9538) cpu=0.62
+2026-11-12T13:59:43Z u10-normal-h3/wasm/main rep3: state=completed valid=true correct=true load/load=484.9rps(9699/9699) cpu=0.61
+2026-11-12T14:00:21Z u10-normal-h3/wasm/cand rep3: state=completed valid=true correct=true load/load=462.1rps(9244/9244) cpu=0.61
+2026-11-12T14:00:59Z u10-normal-h3/both/base rep3: state=completed valid=true correct=true load/load=9.6rps(192/192) cpu=0.50
+2026-11-12T14:01:38Z u10-normal-h3/both/main rep3: state=completed valid=true correct=true load/load=9.3rps(188/188) cpu=0.50
+2026-11-12T14:02:17Z u10-normal-h3/both/cand rep3: state=completed valid=true correct=true load/load=8.0rps(161/161) cpu=0.51
+2026-11-12T14:02:52Z u1b-normal-h1-none-c8/none/base rep4: state=completed valid=true correct=true load/load=3949.6rps(78999/78999) cpu=0.61
+2026-11-12T14:03:28Z u1b-normal-h1-none-c8/none/main rep4: state=completed valid=true correct=true load/load=4983.6rps(99680/99680) cpu=0.60
+2026-11-12T14:04:04Z u1b-normal-h1-none-c8/none/cand rep4: state=completed valid=true correct=true load/load=4891.4rps(97837/97837) cpu=0.61
+2026-11-12T14:04:39Z u1b-normal-h1-none-c8/none/base rep5: state=completed valid=true correct=true load/load=4621.9rps(92447/92447) cpu=0.61
+2026-11-12T14:05:15Z u1b-normal-h1-none-c8/none/main rep5: state=completed valid=true correct=true load/load=5469.4rps(109397/109397) cpu=0.60
+2026-11-12T14:05:50Z u1b-normal-h1-none-c8/none/cand rep5: state=completed valid=true correct=true load/load=5255.1rps(105109/105109) cpu=0.61
+run i2-normal: complete, 114 results in /home/victornf/jul-i2-evidence/frozen/i2-normal
+exit=0
+/home/victornf/jul-i2-evidence/frozen/i2-normal: verified
+verify=0
+== 2026-11-12T14:05:50Z i2-plugin: -profile qualification -suite i2-plugin -target main:current:/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4 -target cand:current:/home/victornf/jul-i2-builds/bin/jul-b1a670fe-go1.27.4
+2026-11-12T14:06:33Z r1-slow-upload-c16-h1/wasm/main rep1: state=completed valid=true correct=true load/slow=3.2rps(80/80) load/probe=1762.2rps(35249/35249) cpu=0.80
+2026-11-12T14:07:14Z r1-slow-upload-c16-h1/wasm/cand rep1: state=completed valid=true correct=true load/slow=3.2rps(80/80) load/probe=2250.1rps(45005/45005) cpu=0.74
+2026-11-12T14:07:52Z s8-slow-clients-h1/none/main rep1: state=completed valid=true correct=true load/slow=19.2rps(480/480) load/slow-cancel=0.0rps(0/320) load/probe=6149.3rps(122990/122990) cpu=0.57
+2026-11-12T14:08:31Z s8-slow-clients-h1/none/cand rep1: state=completed valid=true correct=true load/slow=19.2rps(480/480) load/slow-cancel=0.0rps(0/320) load/probe=7167.9rps(143362/143362) cpu=0.56
+2026-11-12T14:09:19Z s8-slow-clients-h1/waf/main rep1: state=completed valid=true correct=true load/slow=0.1rps(98/98) load/slow-cancel=0.0rps(0/320) load/probe=28.2rps(568/568) cpu=0.99
+2026-11-12T14:10:10Z s8-slow-clients-h1/waf/cand rep1: state=completed valid=true correct=true load/slow=0.2rps(100/100) load/slow-cancel=0.0rps(0/320) load/probe=24.9rps(501/501) cpu=1.00
+2026-11-12T14:10:52Z s8-slow-clients-h1/wasm/main rep1: state=completed valid=true correct=true load/slow=19.2rps(480/480) load/slow-cancel=0.0rps(0/320) load/probe=2115.3rps(42311/42311) cpu=0.72
+2026-11-12T14:11:33Z s8-slow-clients-h1/wasm/cand rep1: state=completed valid=true correct=true load/slow=19.2rps(480/480) load/slow-cancel=0.0rps(0/320) load/probe=2345.4rps(46913/46913) cpu=0.71
+2026-11-12T14:12:25Z s8-slow-clients-h1/both/main rep1: state=completed valid=true correct=true load/slow=0.1rps(98/98) load/slow-cancel=0.0rps(0/320) load/probe=25.4rps(512/512) cpu=1.00
+2026-11-12T14:13:22Z s8-slow-clients-h1/both/cand rep1: state=completed valid=true correct=false load/slow=0.1rps(99/99) load/slow-cancel=0.0rps(0/320) load/probe=21.6rps(434/435) cpu=0.99 findings=phase load class probe: status:500 ×1
+2026-11-12T14:13:57Z r2-fast-nobody-h1/none/main rep1: state=completed valid=true correct=true load/load=9134.5rps(182707/182707) cpu=0.72
+2026-11-12T14:14:33Z r2-fast-nobody-h1/none/cand rep1: state=completed valid=true correct=true load/load=9920.5rps(198427/198427) cpu=0.75
+2026-11-12T14:15:12Z r2-fast-nobody-h1/wasm/main rep1: state=completed valid=true correct=true load/load=3245.4rps(64924/64924) cpu=0.96
+2026-11-12T14:15:51Z r2-fast-nobody-h1/wasm/cand rep1: state=completed valid=true correct=true load/load=3575.2rps(71519/71519) cpu=0.95
+2026-11-12T14:16:27Z s6-static-h2/none/main rep1: state=completed valid=true correct=true load/load=1158.4rps(23296/23296) cpu=0.63
+2026-11-12T14:17:02Z s6-static-h2/none/cand rep1: state=completed valid=true correct=true load/load=1050.1rps(21130/21130) cpu=0.63
+2026-11-12T14:17:41Z s6-static-h2/wasm/main rep1: state=completed valid=true correct=false load/load=385.2rps(7832/7835) cpu=0.97 findings=phase load class load: status:500 ×3
+2026-11-12T14:18:19Z s6-static-h2/wasm/cand rep1: state=completed valid=true correct=false load/load=403.4rps(8197/8199) cpu=0.97 findings=phase load class load: status:500 ×2
+2026-11-12T14:19:03Z s6-static-h2/both/main rep1: state=completed valid=true correct=false load/load=12.9rps(384/388) cpu=1.00 findings=phase load class load: status:500 ×4
+2026-11-12T14:19:45Z s6-static-h2/both/cand rep1: state=completed valid=true correct=false load/load=13.9rps(406/410) cpu=0.99 findings=phase load class load: status:500 ×4
+2026-11-12T14:20:46Z s7-cache-h1/none/main rep1: state=completed valid=true correct=true cold/cold=2292.3rps(45861/45861) cpu=0.68 warm/warm=2830.1rps(56617/56617) cpu=0.42
+2026-11-12T14:21:47Z s7-cache-h1/none/cand rep1: state=completed valid=true correct=true cold/cold=1865.2rps(37317/37317) cpu=0.66 warm/warm=4712.2rps(94258/94258) cpu=0.43
+2026-11-12T14:22:50Z s7-cache-h1/wasm/main rep1: state=completed valid=true correct=false cold/cold=375.6rps(7529/7529) cpu=0.99 warm/warm=376.3rps(7542/7584) cpu=0.99 findings=phase warm class warm: status:500 ×42
+2026-11-12T14:23:54Z s7-cache-h1/wasm/cand rep1: state=completed valid=true correct=false cold/cold=330.6rps(6628/6628) cpu=0.99 warm/warm=352.4rps(7062/7110) cpu=1.00 findings=phase warm class warm: status:500 ×48
+2026-11-12T14:25:00Z s7-cache-h1/both/main rep1: state=completed valid=true correct=false cold/cold=18.1rps(377/377) cpu=0.99 warm/warm=18.1rps(378/380) cpu=0.99 findings=phase warm class warm: status:500 ×2
+2026-11-12T14:26:06Z s7-cache-h1/both/cand rep1: state=completed valid=true correct=false cold/cold=14.8rps(311/313) cpu=1.00 warm/warm=17.3rps(362/367) cpu=0.99 findings=phase cold class cold: status:500 ×2; phase warm class warm: status:500 ×5
+2026-11-12T14:26:41Z p1-large-body-plugin-h1/none/main rep1: state=completed valid=true correct=true load/load=2968.4rps(59433/59433) cpu=0.96
+2026-11-12T14:27:17Z p1-large-body-plugin-h1/none/cand rep1: state=completed valid=true correct=true load/load=1773.7rps(35538/35538) cpu=0.97
+2026-11-12T14:27:56Z p1-large-body-plugin-h1/wasm/main rep1: state=completed valid=true correct=false load/load=150.1rps(3065/3085) cpu=0.98 findings=phase load class load: status:500 ×20
+2026-11-12T14:28:35Z p1-large-body-plugin-h1/wasm/cand rep1: state=completed valid=true correct=false load/load=158.1rps(3225/3247) cpu=0.98 findings=phase load class load: status:500 ×22
+2026-11-12T14:29:15Z p2-saturation-plugin-h1/wasm/main rep1: state=completed valid=false correct=true load/load=24.0rps(640/640) load/probe=1891.4rps(37830/37830) cpu=0.68 invalid=unexercised: inspection_rejected_enforce = 0, want at least 1; unexercised: class status:503-inspection-overloaded = 0, want at least 1
+2026-11-12T14:29:55Z p2-saturation-plugin-h1/wasm/cand rep1: state=completed valid=true correct=true load/load=19.9rps(532/1071) load/probe=1787.3rps(35748/35748) cpu=0.67
+2026-11-12T14:30:35Z p2o-saturation-plugin-observe-h1/wasm/main rep1: state=completed valid=false correct=true load/load=24.0rps(640/640) load/probe=2134.0rps(42682/42682) cpu=0.66 invalid=unexercised: inspection_rejected_observe = 0, want at least 1
+2026-11-12T14:31:16Z p2o-saturation-plugin-observe-h1/wasm/cand rep1: state=completed valid=true correct=true load/load=24.0rps(640/640) load/probe=1574.2rps(31486/31486) cpu=0.70
+2026-11-12T14:31:57Z p2h-saturation-hostile-h1/wasm/main rep1: state=completed valid=false correct=true load/load=24.0rps(640/640) load/probe=1848.5rps(36972/36972) cpu=0.67 invalid=unexercised: inspection_rejected_enforce = 0, want at least 1; unexercised: class status:503-inspection-overloaded = 0, want at least 1
+2026-11-12T14:32:35Z p2h-saturation-hostile-h1/wasm/cand rep1: state=completed valid=false correct=false load/load=0.0rps(0/1704801) load/probe=0.0rps(0/32469) invalid=unexercised: inspection_rejected_enforce unavailable; unexercised: class status:503-inspection-overloaded = 0, want at least 1 findings=jul exited during the run: signal killed; phase load class load: error:refused ×1704801; phase load class probe: error:refused ×32469; oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)
+2026-11-12T14:33:11Z p3-nobody-plugin-h1/none/main rep1: state=completed valid=true correct=true load/load=2928.9rps(58595/58595) load/load=3177.2rps(63561/63561) cpu=0.71
+2026-11-12T14:33:46Z p3-nobody-plugin-h1/none/cand rep1: state=completed valid=true correct=true load/load=3133.1rps(62678/62678) load/load=3408.8rps(68193/68193) cpu=0.72
+2026-11-12T14:34:25Z p3-nobody-plugin-h1/wasm/main rep1: state=completed valid=true correct=false load/load=1646.8rps(32952/32953) load/load=1695.3rps(33922/33922) cpu=0.96 findings=phase load class load: status:500 ×1
+2026-11-12T14:35:05Z p3-nobody-plugin-h1/wasm/cand rep1: state=completed valid=true correct=false load/load=1695.0rps(33916/33918) load/load=1753.0rps(35077/35077) cpu=0.95 findings=phase load class load: status:500 ×2
+2026-11-12T14:36:13Z p4-reload-budget-plugin/wasm/main rep1: state=completed valid=true correct=false load/load=1151.1rps(46060/46061) load/inflight=3.6rps(160/240) cpu=0.96 findings=phase load class load: error:body-eof ×1
+2026-11-12T14:37:20Z p4-reload-budget-plugin/wasm/cand rep1: state=completed valid=true correct=true load/load=1593.6rps(63760/63760) load/inflight=4.0rps(176/224) cpu=0.95
+run i2-plugin: complete, 42 results in /home/victornf/jul-i2-evidence/frozen/i2-plugin
+exit=0
+/home/victornf/jul-i2-evidence/frozen/i2-plugin: verified
+verify=0
+== 2026-11-12T14:37:20Z i2-deadline: -profile qualification -suite i2-deadline -target main:current:/home/victornf/jul-i2-builds/bin/jul-d8d0520b-go1.27.4 -target cand:current:/home/victornf/jul-i2-builds/bin/jul-b1a670fe-go1.27.4
+2026-11-12T14:38:54Z f4-stalled-body/none/main rep1: state=completed valid=true correct=true h1/stall:upload=error:timeout(20.0s) sibling=ok(2ms) dials=2 h1/slow:upload=ok(7.6s) sibling=ok(2ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(2ms) dials=1 h2/slow:upload=ok(8.0s) sibling=ok(2ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=1 h3/slow:upload=ok(7.6s) sibling=ok(2ms) dials=1
+2026-11-12T14:40:28Z f4-stalled-body/none/cand rep1: state=completed valid=true correct=true h1/stall:upload=error:timeout(20.0s) sibling=ok(2ms) dials=2 h1/slow:upload=ok(7.6s) sibling=ok(1ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(2ms) dials=1 h2/slow:upload=ok(8.0s) sibling=ok(2ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(2ms) dials=1 h3/slow:upload=ok(7.6s) sibling=ok(2ms) dials=1
+2026-11-12T14:42:06Z f4-stalled-body/wasm/main rep1: state=completed valid=true correct=true h1/stall:upload=error:timeout(20.0s) sibling=ok(7ms) dials=2 h1/slow:upload=ok(7.6s) sibling=ok(3ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=1 h2/slow:upload=ok(8.0s) sibling=ok(8ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(4ms) dials=1 h3/slow:upload=ok(8.0s) sibling=ok(4ms) dials=1
+2026-11-12T14:43:43Z f4-stalled-body/wasm/cand rep1: state=completed valid=true correct=true h1/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=2 h1/slow:upload=ok(7.6s) sibling=ok(5ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=1 h2/slow:upload=ok(8.0s) sibling=ok(7ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(4ms) dials=1 h3/slow:upload=ok(8.0s) sibling=ok(4ms) dials=1
+2026-11-12T14:45:23Z f4-stalled-body/both/main rep1: state=completed valid=true correct=true h1/stall:upload=error:timeout(20.0s) sibling=ok(8ms) dials=2 h1/slow:upload=ok(7.6s) sibling=ok(7ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(6ms) dials=1 h2/slow:upload=ok(8.1s) sibling=ok(10ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(8ms) dials=1 h3/slow:upload=ok(8.1s) sibling=ok(8ms) dials=1
+2026-11-12T14:47:03Z f4-stalled-body/both/cand rep1: state=completed valid=true correct=true h1/stall:upload=error:timeout(20.0s) sibling=ok(8ms) dials=2 h1/slow:upload=ok(7.7s) sibling=ok(11ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(7ms) dials=1 h2/slow:upload=ok(8.1s) sibling=ok(6ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(6ms) dials=1 h3/slow:upload=ok(8.1s) sibling=ok(6ms) dials=1
+2026-11-12T14:48:14Z f4-body-deadline-5s/none/main rep1: state=completed valid=true correct=true h1/stall:upload=error:timeout(20.0s) sibling=ok(2ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(2ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=1
+2026-11-12T14:49:24Z f4-body-deadline-5s/none/cand rep1: state=completed valid=true correct=true h1/stall:upload=error:other(20.0s) sibling=ok(4ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=1
+2026-11-12T14:50:38Z f4-body-deadline-5s/wasm/main rep1: state=completed valid=true correct=false h1/stall:upload=error:timeout(20.0s) sibling=ok(3ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(4ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(5ms) dials=1 findings=f4 h1/stall: upload error:timeout after 20.0 s (client-watchdog): expected 408 from body_timeout 5 s within 4.5–8.0 s; f4 h2/stall: upload error:timeout after 20.0 s (client-watchdog): expected 408 from body_timeout 5 s within 4.5–8.0 s; f4 h3/stall: upload error:timeout after 20.0 s (client-watchdog): expected 408 from body_timeout 5 s within 4.5–8.0 s
+2026-11-12T14:51:09Z f4-body-deadline-5s/wasm/cand rep1: state=completed valid=true correct=true h1/stall:upload=status:408(5.0s) sibling=ok(4ms) dials=2 h2/stall:upload=status:408(5.0s) sibling=ok(3ms) dials=1 h3/stall:upload=status:408(5.0s) sibling=ok(4ms) dials=1
+2026-11-12T14:52:28Z f4-body-deadline-5s/both/main rep1: state=completed valid=true correct=false h1/stall:upload=error:timeout(20.0s) sibling=ok(11ms) dials=2 h2/stall:upload=error:timeout(20.0s) sibling=ok(7ms) dials=1 h3/stall:upload=error:timeout(20.0s) sibling=ok(6ms) dials=1 findings=f4 h1/stall: upload error:timeout after 20.0 s (client-watchdog): expected 408 from body_timeout 5 s within 4.5–8.0 s; f4 h2/stall: upload error:timeout after 20.0 s (client-watchdog): expected 408 from body_timeout 5 s within 4.5–8.0 s; f4 h3/stall: upload error:timeout after 20.0 s (client-watchdog): expected 408 from body_timeout 5 s within 4.5–8.0 s
+2026-11-12T14:52:57Z f4-body-deadline-5s/both/cand rep1: state=completed valid=true correct=true h1/stall:upload=status:408(5.0s) sibling=ok(6ms) dials=2 h2/stall:upload=status:408(5.0s) sibling=ok(6ms) dials=1 h3/stall:upload=status:408(5.0s) sibling=ok(7ms) dials=1
+run i2-deadline: complete, 12 results in /home/victornf/jul-i2-evidence/frozen/i2-deadline
+exit=0
+/home/victornf/jul-i2-evidence/frozen/i2-deadline: verified
+verify=0
+== 2026-11-12T14:52:57Z done

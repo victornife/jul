@@ -1,0 +1,1 @@
+/home/victornf/jul-i2-evidence/frozen/i2-normal-supplement/cells/u2-normal-h2/wasm/main/rep3/config.toml is valid (structural + runtime)

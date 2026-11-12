@@ -1,0 +1,1 @@
+/tmp/ia-smoke-suites/i2-plugin/cells/s6-static-h2/none/cand/rep1/config.toml is valid (structural + runtime)

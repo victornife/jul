@@ -206,6 +206,26 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   [the I5 review](docs/reviews/2026-11-12-700-i5-assessment-tooling-baselines.md).
   Assessment tooling only: no runtime behaviour change and no A1–A18 acceptance.
 
+- Partial #700 I2 (ADR 0032): the WASM plugin request path now uses the
+  process inspection governor. A plugin chain holds one request lease through
+  the downstream handler; prepared request bodies, `fetch` copies and
+  responses, request state, and generated or replacement bodies are charged
+  before allocation. An exhausted budget answers `503` with `Retry-After: 1`
+  (gRPC `UNAVAILABLE`; on HTTP/1 the connection is closed rather than draining
+  an unread upload) without running the guest or the origin; observe mode
+  records would-reject decisions instead. `global.inspection.body_timeout`
+  (default `60s`, `0s` disables) now bounds body-reading plugin uploads with
+  `408` (gRPC `DEADLINE_EXCEEDED`); a writer that cannot apply or refuses the
+  deadline fails closed with `500`, as does an HTTP/1 request on an embedder's
+  server that does not register connections with `reqdeadline.ConnContext`
+  (before the body is read, closing the connection); plugin retirement aborts
+  a read in progress. Headers a plugin set before a failed call (for example
+  `Content-Encoding`) are removed from the error response. `/api/v1/status` reports `request_path_integration = "partial"`.
+  New throttled overload and contained-guest-failure warnings carry bounded
+  fields only. WAF charging and evaluation slots (I3) and response
+  subscriptions (I4) are not governed yet. See
+  [plugins.md](docs/plugins.md#inspection-governor).
+
 - Explicit route and backend cutover cache behavior (`reload_policy = "retain" |
   "invalidate"` in `[cache]` and `[servers.locations.cache_policy]`, #624 /
   `CACHE-OPS-04`, #620,
@@ -449,6 +469,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   over its `max_request_body` answers `500` even on a branch that would not have
   read it. Concurrent body-reading requests × `max_request_body` is no longer
   limited by `max_instances`; an aggregate bound remains #700.
+
+- Reloads no longer keep retired handler generations in memory (#709). The
+  exchange registry's retirement history kept each closed exchange's request
+  context, and for 101 upgrades its upstream leg. That pinned the old
+  generation, including plugin instances and guest memory, for up to 32
+  further reloads. Under frequent reloads with WASM plugins, this could
+  exhaust memory with no inspection bytes held. Responses and streams aborted
+  by retirement still end with a client-visible error, as designed.
 
 - Route selectors now count declaration order across matching server blocks
   (#643). Console edits use the projection revision. Old cross-block selectors

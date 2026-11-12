@@ -1,0 +1,3 @@
+time=2026-11-12T12:54:52.155+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="read inbound request body: unexpected EOF" request_id=f6974670ef1ac426
+time=2026-11-12T12:55:12.160+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="read inbound request body: stream error: stream ID 3; CANCEL" request_id=642e21b05eeb265c
+time=2026-11-12T12:55:32.167+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="read inbound request body: H3 error (0x0)" request_id=00a12e1157c27794

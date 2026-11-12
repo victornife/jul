@@ -228,9 +228,11 @@ Two fields exist for clients that poll or retry:
   limits, current charged classes, leases, active/waiting evaluations and the
   draining state. A configured slot value of `0` remains visible as `0` while
   the effective object reports its resolved count. Its
-  `request_path_integration` is `pending` in I1: `enforce` mode is not evidence
-  that request traffic is gated, and zero usage does not mean traffic is
-  protected. `base_charge_bytes` and `base_charge_scope` describe the measured
+  `request_path_integration` is `partial`: live plugin request paths acquire
+  leases and charge their buffers, but WAF request state, evaluation slots and
+  response-side buffering are not governed yet. `enforce` mode is therefore
+  not evidence that WAF traffic is gated, and zero usage does not mean traffic
+  is protected. `base_charge_bytes` and `base_charge_scope` describe the measured
   governor/context scaffolding only. `configured.max_response_header_bytes`
   and `effective.max_response_header_bytes` report the complete accounted
   response-header ceiling used for the R3 worst-case term; runtime will reserve

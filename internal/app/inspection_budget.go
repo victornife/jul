@@ -122,7 +122,7 @@ func CheckInspectionBudget(ctx context.Context, c *config.Config) (warning error
 	err = config.PreflightClone(c, func(clone *config.Config) error {
 		pluginFacts := func(string) (inspection.PluginFacts, bool) { return inspection.PluginFacts{}, false }
 		if len(clone.Plugins) > 0 && plugins.Compiled {
-			mgr, err := plugins.NewManager(plugins.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+			mgr, err := plugins.NewManager(plugins.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), MetadataOnly: true})
 			if err != nil {
 				return fmt.Errorf("plugins: %w", err)
 			}

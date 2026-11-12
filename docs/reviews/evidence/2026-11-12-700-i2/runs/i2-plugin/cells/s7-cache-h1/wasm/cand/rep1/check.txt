@@ -1,0 +1,1 @@
+/home/victornf/jul-i2-evidence/frozen/i2-plugin/cells/s7-cache-h1/wasm/cand/rep1/config.toml is valid (structural + runtime)

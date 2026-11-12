@@ -1,0 +1,1 @@
+time=2026-11-12T12:19:04.983+01:00 level=ERROR msg="proxy upstream error" upstream=origin path=/proxy/echo status=499 error="read inbound request body: unexpected EOF" request_id=b0b16ff1315556fa

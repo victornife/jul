@@ -61,19 +61,38 @@ func (s *Set) Middleware(name string) middleware.Middleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The outermost inspecting layer owns the request lease and
+			// holds it through the whole downstream handler and its
+			// synchronous response callbacks (ADR 0032 §4).
+			lease, r, owner, ok := p.requestLease(w, r)
+			if !ok {
+				return
+			}
+			if owner {
+				defer lease.Close()
+			}
 			action, inv, err := p.invoke(r.Context(), w, r)
 			if err != nil {
-				writePluginError(w, err)
+				undoPluginHeaders(w, r, inv)
+				writePluginError(w, r, err)
 				return
 			}
 			if action == 1 { // Continue
+				r = continueWithJournal(r, inv)
+				inv.releaseResponse()
 				if inv.sub >= 0 {
+					// The subscription reads the state after the action;
+					// it stays charged until the downstream chain returns.
+					defer inv.releaseState()
 					r = subscribe(r, p, uint32(inv.sub), inv.state)
+				} else {
+					inv.releaseState()
 				}
 				next.ServeHTTP(w, r)
 				return
 			}
 			inv.flush() // Stop: the guest produced the response.
+			inv.releaseAll()
 		})
 	}
 }
@@ -125,18 +144,42 @@ func (s *Set) Handler(name string) http.Handler {
 		return nil
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lease, r, owner, ok := p.requestLease(w, r)
+		if !ok {
+			return
+		}
+		if owner {
+			defer lease.Close()
+		}
 		_, inv, err := p.invoke(r.Context(), w, r)
 		if err != nil {
-			writePluginError(w, err)
+			undoPluginHeaders(w, r, inv)
+			writePluginError(w, r, err)
 			return
 		}
 		inv.flush()
+		inv.releaseAll()
 	})
 }
 
-// writePluginError answers a failed plugin call: 503 with Retry-After when
-// every instance max_instances allows stayed busy (#506), else 500.
-func writePluginError(w http.ResponseWriter, err error) {
+// writePluginError answers a failed plugin call. Inspection outcomes keep
+// their ADR 0032 responses: overload is 503 with Retry-After (gRPC
+// UNAVAILABLE), an expired body-arrival deadline is 408 (gRPC
+// DEADLINE_EXCEEDED). Exhausted instances are 503 with Retry-After (#506);
+// everything else, including an unsupported required read deadline, is 500.
+func writePluginError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case inspection.IsOverload(err):
+		inspection.WriteOverloaded(w, r)
+		return
+	case errors.Is(err, inspection.ErrBodyTimeout):
+		inspection.WriteBodyTimeout(w, r)
+		return
+	case errors.Is(err, inspection.ErrDeadlineUnsupported) && r.ProtoMajor < 2:
+		// The body is left unread and nothing bounds an HTTP/1 read here,
+		// so close the connection instead of letting net/http drain it.
+		w.Header().Set("Connection", "close")
+	}
 	if errors.Is(err, errInstanceLimit) {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "plugin busy", http.StatusServiceUnavailable)

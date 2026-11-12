@@ -157,6 +157,8 @@ func runCmd(args []string, stdout, stderr io.Writer) error {
 	originCPUs := fs.String("origin-cpus", "2,3", "CPUs the origin is pinned to (outside the envelope)")
 	guest := fs.String("guest", "", "inspect-load.wasm (required for wasm/both variants)")
 	guestSrc := fs.String("guest-source", "", "inspect-load source directory, for provenance")
+	guestNoBody := fs.String("guest-nobody", "", "inspect-nobody.wasm (required for wasm/both variants of the nobody fixture)")
+	guestNoBodySrc := fs.String("guest-nobody-source", "", "inspect-nobody source directory, for provenance")
 	cert := fs.String("cert", "testdata/tls/localhost.crt", "TLS certificate")
 	key := fs.String("key", "testdata/tls/localhost.key", "TLS key")
 	fault := fs.String("fault", "", "controlled runner validation: origin fault truncate | corrupt | stall")
@@ -211,16 +213,26 @@ func runCmd(args []string, stdout, stderr io.Writer) error {
 			if c.Scenario.BodyTimeout != "" && !Adapters[s.Adapter].GlobalInspection {
 				return fmt.Errorf("scenario %s needs [global.inspection].body_timeout, which adapter %s (target %s) cannot express", c.Scenario.ID, s.Adapter, s.Label)
 			}
+			if (c.Scenario.MaxBuffered != "" || c.Scenario.InspectionMode != "") && !Adapters[s.Adapter].GlobalInspection {
+				return fmt.Errorf("scenario %s needs [global.inspection] mode or max_buffered_bytes, which adapter %s (target %s) cannot express", c.Scenario.ID, s.Adapter, s.Label)
+			}
 		}
 	}
-	needGuest := false
+	needGuest, needNoBody := false, false
 	for _, c := range cells {
 		if _, wasm := VariantFlags(c.Variant); wasm {
-			needGuest = true
+			if FixtureOf(c.Scenario) == FixtureNoBody {
+				needNoBody = true
+			} else {
+				needGuest = true
+			}
 		}
 	}
 	if needGuest && *guest == "" {
 		return errors.New("-guest is required for wasm/both variants")
+	}
+	if needNoBody && *guestNoBody == "" {
+		return errors.New("-guest-nobody is required for wasm/both variants of the nobody fixture")
 	}
 	self, err := os.Executable()
 	if err != nil {
@@ -231,7 +243,7 @@ func runCmd(args []string, stdout, stderr io.Writer) error {
 	opt := RunOptions{Out: *out, Profile: *profile, Fault: *fault, Targets: specs, Cells: cells, Reps: *reps, Env: env,
 		OriginCPUs: *originCPUs, KillJulAfter: *killAfter, Watchdog: *watchdog, Startup: *startup, SampleEvery: 500 * time.Millisecond,
 		Sys: hostSys, Self: self}
-	for _, p := range []*string{guest, cert, key} {
+	for _, p := range []*string{guest, guestNoBody, cert, key} {
 		if *p != "" {
 			if *p, err = filepath.Abs(*p); err != nil {
 				return err
@@ -239,6 +251,7 @@ func runCmd(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 	opt.Guest, opt.Cert, opt.Key = *guest, *cert, *key
+	opt.GuestNoBody, opt.GuestNoBodySource = *guestNoBody, *guestNoBodySrc
 	m, err := Execute(ctx, opt, *guestSrc, stderr)
 	if err != nil {
 		return err
@@ -297,6 +310,14 @@ func Execute(ctx context.Context, opt RunOptions, guestSrc string, log io.Writer
 			g.SourceSHA, _ = TreeSHA(guestSrc)
 		}
 		m.Guest = &g
+	}
+	if opt.GuestNoBody != "" {
+		g := Artifact{Path: opt.GuestNoBody, Source: opt.GuestNoBodySource}
+		g.SHA256, _ = fileSHA(opt.GuestNoBody)
+		if opt.GuestNoBodySource != "" {
+			g.SourceSHA, _ = TreeSHA(opt.GuestNoBodySource)
+		}
+		m.GuestNoBody = &g
 	}
 	for _, c := range opt.Cells {
 		m.Selection = append(m.Selection, c.Scenario.ID+"/"+c.Variant)

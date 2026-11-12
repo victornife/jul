@@ -160,7 +160,7 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 		i.ActiveEvaluations != 2 || i.WaitingEvaluations != 1 {
 		t.Fatalf("inspection usage = %+v", i)
 	}
-	if i.RequestPathIntegration != "pending" || i.BaseChargeBytes != inspection.BaseChargeBytes ||
+	if i.RequestPathIntegration != "partial" || i.BaseChargeBytes != inspection.BaseChargeBytes ||
 		!strings.Contains(i.BaseChargeScope, "excludes") {
 		t.Fatalf("inspection delivery boundary = %+v", i)
 	}

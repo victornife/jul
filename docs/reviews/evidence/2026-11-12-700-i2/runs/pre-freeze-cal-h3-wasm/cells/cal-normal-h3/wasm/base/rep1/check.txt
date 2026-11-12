@@ -1,0 +1,1 @@
+/home/victornf/jul-i2-evidence/prefreeze-cal-h3-wasm/cells/cal-normal-h3/wasm/base/rep1/config.toml is valid (structural + runtime)

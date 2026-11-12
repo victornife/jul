@@ -27,6 +27,7 @@ import (
 	"github.com/tetratelabs/wazero"
 
 	"jul/internal/config"
+	"jul/internal/reqdeadline"
 )
 
 // bodyGuestMode selects what a hand-assembled body guest's handle_request does.
@@ -209,7 +210,7 @@ func (h *bodyHooks) awaitFail(t *testing.T) string {
 func bodyManager(t *testing.T) (*Manager, *bodyHooks) {
 	t.Helper()
 	h := &bodyHooks{results: map[string]int{}, failed: make(chan string, 16)}
-	m, err := NewManager(Options{
+	m, err := NewManager(Options{Inspection: testGovernor(t),
 		Logger:               slog.New(slog.NewTextHandler(io.Discard, nil)),
 		OnInvocation:         h.invoked,
 		OnPanic:              func(string) { h.mu.Lock(); h.panics++; h.mu.Unlock() },
@@ -739,28 +740,35 @@ func TestReloadKeepsPreparingRequestOnItsGeneration(t *testing.T) {
 }
 
 func TestReadBoundedSizingAndPreparedBody(t *testing.T) {
-	b, err := readBounded(strings.NewReader("12345"), 5, 8)
+	rb := func(r io.Reader, hint int64, limit int) ([]byte, error) {
+		cb, err := readBounded(r, hint, limit, freeCharge)
+		if err != nil {
+			return nil, err
+		}
+		return cb.b, nil
+	}
+	b, err := rb(strings.NewReader("12345"), 5, 8)
 	if err != nil || string(b) != "12345" || cap(b) != 6 {
 		t.Fatalf("known length: %q cap=%d err=%v, want exact capacity 6", b, cap(b), err)
 	}
-	if b, err = readBounded(strings.NewReader("12345"), 100, 8); err != nil || string(b) != "12345" {
+	if b, err = rb(strings.NewReader("12345"), 100, 8); err != nil || string(b) != "12345" {
 		t.Fatalf("hint over limit: %q %v", b, err)
 	}
 	big := strings.Repeat("q", 3000)
-	if b, err = readBounded(strings.NewReader(big), -1, 4096); err != nil || string(b) != big {
+	if b, err = rb(strings.NewReader(big), -1, 4096); err != nil || string(b) != big {
 		t.Fatalf("unknown length growth: len=%d %v", len(b), err)
 	}
-	if _, err = readBounded(strings.NewReader(big), -1, 2999); !errors.Is(err, errBodyTooLarge) {
+	if _, err = rb(strings.NewReader(big), -1, 2999); !errors.Is(err, errBodyTooLarge) {
 		t.Fatalf("limit+1: %v", err)
 	}
 	// A declared length is not trusted for allocation: before any byte
 	// arrives the buffer offered to the body is at most initialBodyBuffer.
 	probe := &firstReadCap{}
-	if _, err = readBounded(probe, 1<<20, 1<<20); err != nil || probe.n > initialBodyBuffer {
+	if _, err = rb(probe, 1<<20, 1<<20); err != nil || probe.n > initialBodyBuffer {
 		t.Fatalf("declared 1 MiB: first read offered %d bytes (err %v), want <= %d", probe.n, err, initialBodyBuffer)
 	}
 	known := strings.Repeat("k", 100<<10)
-	if b, err = readBounded(strings.NewReader(known), int64(len(known)), 1<<20); err != nil || string(b) != known || cap(b) != len(known)+1 {
+	if b, err = rb(strings.NewReader(known), int64(len(known)), 1<<20); err != nil || string(b) != known || cap(b) != len(known)+1 {
 		t.Fatalf("known 100 KiB: len=%d cap=%d %v, want growth to stop at the declared length", len(b), cap(b), err)
 	}
 	orig := &countingBody{r: strings.NewReader("")}
@@ -790,6 +798,9 @@ func netServer(t *testing.T, h http.Handler, h2 bool, readTimeout time.Duration)
 	t.Helper()
 	srv := httptest.NewUnstartedServer(h)
 	srv.Config.ReadTimeout = readTimeout
+	// Register connections as Jul's server does, so HTTP/1 deadlines are
+	// enforceable.
+	srv.Config.ConnContext = reqdeadline.ConnContext
 	var conns atomic.Int64
 	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
 		if st == http.StateNew {
@@ -963,9 +974,10 @@ func TestPreparationPreservesTrailers(t *testing.T) {
 	}
 }
 
-// A response writer without read-deadline support cannot have its body read
-// ended by retirement: the warning is logged, and the request still fails as
-// retired, without a guest call, once its client finishes.
+// An HTTP/2 response writer without read-deadline support cannot have its body
+// read ended by a deadline: the warning is logged, the read is interrupted by
+// closing its body (which, unlike an HTTP/1 body, ends a blocked read), and
+// the request fails as retired without a guest call.
 func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
 	m, hooks := bodyManager(t)
 	s := buildSet(t, m, map[string]config.PluginConfig{"g": bodyGuestConfig(ABIJulV1, guestEcho)})
@@ -973,6 +985,7 @@ func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
 	s.plugins["g"].log = slog.New(slog.NewTextHandler(&logs, nil))
 	pr, pw := io.Pipe()
 	req := httptest.NewRequest(http.MethodPost, "/p", pr)
+	req.Proto, req.ProtoMajor, req.ProtoMinor = "HTTP/2.0", 2, 0
 	rec := httptest.NewRecorder()
 	done := make(chan struct{})
 	go func() { s.Handler("g").ServeHTTP(rec, req); close(done) }()
@@ -982,8 +995,12 @@ func TestRetirementWithoutReadDeadlineSupportIsLogged(t *testing.T) {
 	if !strings.Contains(logs.String(), "read deadline unsupported") {
 		t.Fatalf("missing warning; log: %s", logs.String())
 	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("retirement left the upload blocked")
+	}
 	_ = pw.Close()
-	<-done
 	if reason := hooks.awaitFail(t); reason != bodyFailRetired || rec.Code != 500 {
 		t.Fatalf("reason=%s status=%d", reason, rec.Code)
 	}

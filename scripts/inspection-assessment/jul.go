@@ -36,6 +36,9 @@ type Envelope struct {
 	CPUQuota   string `json:"cpu_quota"`
 	MemoryMax  string `json:"memory_max"`
 	GOMAXPROCS int    `json:"gomaxprocs"`
+	// GoMemLimit is the scenario's GOMEMLIMIT ("" means unset). Plan v3 sets
+	// it only where a scenario records the ADR 0032 sizing recommendation.
+	GoMemLimit string `json:"gomemlimit,omitempty"`
 }
 
 // DefaultEnvelope is the ADR 0032 assessment envelope.
@@ -50,6 +53,7 @@ type Effective struct {
 	CPUQuotaCPUs  float64  `json:"cpu_quota_cpus,omitempty"`
 	CPUsAllowed   string   `json:"cpus_allowed_list,omitempty"`
 	GOMAXPROCS    string   `json:"gomaxprocs_env,omitempty"`
+	GoMemLimit    string   `json:"gomemlimit_env,omitempty"`
 	Verified      bool     `json:"verified"`
 	Problems      []string `json:"problems,omitempty"`
 	OOMScope      string   `json:"oom_scope,omitempty"`
@@ -157,6 +161,7 @@ func (s Sys) VerifyEnvelope(pid int, want Envelope) Effective {
 	}
 	e.CPUsAllowed = s.status(pid)["Cpus_allowed_list"]
 	e.GOMAXPROCS = s.environ(pid, "GOMAXPROCS")
+	e.GoMemLimit = s.environ(pid, "GOMEMLIMIT")
 	e.OOMScope = filepath.Dir(cg)
 	e.ParentOOMKill = kv(readKV(filepath.Join(e.OOMScope, "memory.events")), "oom_kill")
 	if want.Mode != "required" {
@@ -175,6 +180,7 @@ func (s Sys) VerifyEnvelope(pid int, want Envelope) Effective {
 	check(e.CPUQuotaCPUs == quota/100, fmt.Sprintf("cpu.max is %q, want %.2f CPUs", e.CPUMax, quota/100))
 	check(e.CPUsAllowed == expandCPUs(want.CPUs), fmt.Sprintf("Cpus_allowed_list is %q, want %q", e.CPUsAllowed, expandCPUs(want.CPUs)))
 	check(e.GOMAXPROCS == strconv.Itoa(want.GOMAXPROCS), fmt.Sprintf("GOMAXPROCS is %q, want %d", e.GOMAXPROCS, want.GOMAXPROCS))
+	check(e.GoMemLimit == want.GoMemLimit, fmt.Sprintf("GOMEMLIMIT is %q, want %q", e.GoMemLimit, want.GoMemLimit))
 	e.Verified = len(e.Problems) == 0
 	return e
 }
@@ -233,6 +239,11 @@ func parseSize(s string) (int64, error) {
 // Launch builds the command that starts Jul inside the envelope.
 func Launch(env Envelope, unit, jul, cfg, tmp string) *exec.Cmd {
 	args := []string{"env", "GOMAXPROCS=" + strconv.Itoa(env.GOMAXPROCS), "TMPDIR=" + tmp}
+	if env.GoMemLimit != "" {
+		args = append(args, "GOMEMLIMIT="+env.GoMemLimit)
+	} else {
+		args = append(args[:1], append([]string{"-u", "GOMEMLIMIT"}, args[1:]...)...)
+	}
 	if env.Mode == "required" {
 		args = append([]string{"systemd-run", "--user", "--scope", "--quiet", "--unit=" + unit,
 			"-p", "CPUQuota=" + env.CPUQuota, "-p", "MemoryMax=" + env.MemoryMax, "-p", "MemorySwapMax=0", "--"}, args...)
@@ -462,6 +473,12 @@ var CounterMetrics = []struct {
 	{"reload_applied", "jul_reload_total", []string{`outcome="applied_live"`}},
 	{"reload_not_applied", "jul_reload_total", []string{`outcome="not_applied"`}},
 	{"transport_retired", "jul_transport_retired_total", nil},
+	// Plan v3 (I2): governor decisions and inspection body deadlines.
+	{"inspection_rejected_enforce", "jul_inspection_rejections_total", []string{`mode="enforce"`}},
+	{"inspection_rejected_observe", "jul_inspection_rejections_total", []string{`mode="observe"`}},
+	{"inspection_body_timeout", "jul_inspection_body_timeouts_total", []string{`result="timeout"`}},
+	{"inspection_body_would_timeout", "jul_inspection_body_timeouts_total", []string{`result="would_timeout"`}},
+	{"inspection_body_unsupported", "jul_inspection_body_timeouts_total", []string{`result="unsupported"`}},
 }
 
 // Scrape returns the admin exposition as series -> value.

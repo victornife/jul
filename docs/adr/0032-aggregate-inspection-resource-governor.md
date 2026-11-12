@@ -1,7 +1,7 @@
 # ADR 0032 — Aggregate inspection resource governor
 
-- **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling proposed in an unmerged change;
-  I2–I4 and I6 remain pending
+- **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
+  proposed in an unmerged change; I3, I4 and I6 remain pending
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
@@ -457,6 +457,44 @@ unconditional bound on total process memory, and no verdict below claims one.
    - Whether every wrapper in Jul's chain forwards `SetReadDeadline` to the quic-go writer is
      **unverified**. It is acceptance item A10.
 
+8. **Amendment, 2026-11-12: no record and restore (maintainer decision, I2).** Item 5's
+   record-and-restore mechanism is replaced. Go's HTTP/2 server arms each stream's `read_timeout`
+   timer inside the transport and provides no getter, so the server deadline cannot be recorded
+   without approximating it. Restoring it would also need a zero or later deadline, and a zero
+   deadline removes the deadline. The replacement keeps the intended policy:
+   - **Jul never sets a future read deadline, and never clears or restores one.** During a normal
+     body arrival, transport deadlines stay as the transport installed them. The `body_timeout` is an
+     owner timer (`internal/reqdeadline`). When it expires, the owner applies a sticky abort, which
+     is a past read deadline on the request's own stream (H2, H3) or connection (H1). A successful
+     arrival only stops the timer. The effective deadline is still the earliest of the server
+     deadline, `body_timeout` and any abort, and a stricter server deadline is never extended.
+   - **Completion and expiry are synchronised.** Stopping the timer is not enough. An
+     already-running callback that finds the phase complete or the handler returned does nothing,
+     and never touches a writer after the handler returns. Completion checks the absolute expiry
+     itself, so a delayed callback cannot let a late upload succeed.
+   - **Failure attribution is preserved.** A body timeout, an existing server timeout, a
+     retirement abort and client cancellation stay distinguishable. Only an expired inspection
+     deadline answers `408`. Other deadline-related read errors keep their existing outcomes.
+   - **Unsupported aborts terminate safely.** Capability is decided when the body phase starts,
+     before any read and without setting a deadline. Enforce mode fails closed with `500` before
+     reading. No read is left blocked on a deadline that cannot be applied. A writer that has the
+     method but refuses the abort at expiry is also `unsupported`, and the request fails closed with
+     `500`, not `408`. The read is still ended: on H1 by the same past read deadline applied to
+     the request's connection, which the server registers, and closed only if it refuses too. On
+     H2 and H3 the request body is closed. Closing an H1 body cannot end a blocked read, so an H1
+     request whose connection is not registered (an embedder's own `http.Server` without
+     `reqdeadline.ConnContext`) is `unsupported` before any read: `500` in enforce mode.
+   - **Isolation and accounting are unchanged.** H2 and H3 abort only the affected stream. Charges
+     are held until the blocked read and represented work actually end.
+   - The guarantee covers Jul's own setters and the upload-admission phase. net/http itself clears
+     the H1 connection deadline when it starts its post-EOF background read and on hijack. The
+     owner's logical abort and expiry state are authoritative whatever the transport deadline then
+     is, and an upgraded session owns its hijacked connection.
+   - Public configuration and protocol behaviour are unchanged. Wrappers still forward only
+     `SetReadDeadline` (item 5), and the integration tests in A6, A7 and A10 still apply.
+     Decision 8 and the unit-test list read "a retirement abort cannot be undone by completion,
+     expiry or any later setter" under this amendment.
+
 ### 7. H7 — re-run the complete affected matrix
 
 1. **Proposal and benefit.** s8, s11 and the r-series detect regressions and establish protection.
@@ -704,8 +742,8 @@ can evaluate rules. Jul's call sites are in `internal/waf/outcomes.go`.
 
 | Event | Client | gRPC | Reason or outcome | Body handling |
 | --- | --- | --- | --- | --- |
-| Admission (`base` or first `buffer` charge) fails | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (metric reason `bytes`) | Not read. H1: Go discards up to 256 KiB, then closes the connection. H2/H3: stream reset; siblings unaffected |
-| A growth charge fails mid-body | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`bytes`) | Partial body dropped; charge released |
+| Admission (`base` or first `buffer` charge) fails | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (metric reason `bytes`) | Not read. H1: the response carries `Connection: close`, so net/http does not first drain the unread body, which a stalled upload would delay indefinitely (amended in I2 review; the original text assumed the drain was bounded). H2/H3: stream reset; siblings unaffected |
+| A growth charge fails mid-body | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`bytes`) | Partial body dropped; charge released. H1: `Connection: close`, as above |
 | Worst-case `waf_state` reservation fails before a phase | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`waf_state`) | Slot released first. The phase does not run, so its amplification never happens. The transaction is closed on its owning goroutine. The request is not forwarded, so no verdict is skipped |
 | Slot wait times out, the queue is full, or no slot is free while unread request-body data remains (phases 1–4) | `503`, `Retry-After: 1` | `UNAVAILABLE` | `inspection_overloaded` (`evaluation`) | Any charged body is released. An unread body is handled as for admission failure |
 | Plugin response buffer charge fails | Existing subscription policy for `bodyTooLarge` (ADR 0020) | — | `jul_plugin_response_body_unavailable_total{reason="budget"}` | Passthrough or fail-closed per subscription |
@@ -1170,7 +1208,7 @@ integration or A1–A18 qualification is claimed.
 
 ### I5 progress
 
-An unmerged I5 change promotes the #695, #699 and F3/F4 instruments into
+I5 merged through #708 as `d8d0520b`. It promotes the #695, #699 and F3/F4 instruments into
 `scripts/inspection-assessment/` with a frozen plan, verified goodput, an
 envelope check, checksummed run evidence and deterministic summaries. It
 records baselines for `858590dc` and post-I1 main
@@ -1181,6 +1219,31 @@ over-10% regression after added repetitions (the uninspected H1 cell remains
 inconclusive through noise). On both runtimes, reload churn and single-connection
 admission with WAF and plugins were OOM-killed, and stalled bodies ended only at
 the client's limit; these are the baselines I2–I4 must change.
+
+### I2 progress
+
+An unmerged I2 change (based on `d8d0520b`) integrates the plugin request path:
+one lease per plugin chain held through the downstream handler, prepared
+bodies grown by charge-before-allocate, request-side host copies (`fetch`,
+request state, generated and replacement bodies) charged with ownership
+transfer, fail-fast `503`/`UNAVAILABLE`, and `body_timeout` through
+`internal/reqdeadline` with the §6 amendment 8 timer and sticky abort. WAF
+paths (I3) and response-subscription buffers (I4) are untouched, so no
+A1–A18 criterion is claimed. Design, test matrix, measurements and reviews:
+`docs/reviews/2026-11-12-700-i2-plugin-request-path.md`.
+
+Measurement under harness plan v3 covers several behaviours:
+
+- plugin-only saturation delivering `503` while probes progress;
+- the observe equivalent;
+- `408` at a 5 s `body_timeout` on H1, H2 and H3, with healthy siblings;
+- the drain after reload and budget churn.
+
+The unsaturated 10% rule found no pooled failure but stayed inconclusive because of host noise.
+That makes throughput an I6 validation gap. Peaks above 576 MiB in the plugin cells come from
+static guest pools or from ungoverned socket buffers (§10). They do not come from governed bytes.
+The I2 PR also fixes a pre-existing retention of retired handler generations under reload churn
+(#709). With the fix, the p4 reload cell peaks at about 500 MiB.
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.
@@ -1232,7 +1295,8 @@ Unit and race tests cover:
 - growth charging of old and new arrays, and no refund on slice shortening;
 - cumulative R1–R4 reservations with `ARGS_GET`, `ARGS_POST` and `ResponseArgs` each at
   `ArgumentLimit`;
-- the deadline owner, where a retirement abort wins over a concurrent restore (race test);
+- the deadline owner, where a retirement abort wins over concurrent completion or expiry (race
+  test; H6 item 8 replaced restore);
 - observe decisions for each control;
 - nested leases;
 - FIFO waits with abandonment;
@@ -1290,7 +1354,7 @@ The review also required these contracts to be settled in the ADR. This revision
 7. **Observe behaviour** is defined for each control, with no governor-driven `503`, `408` or `500`
    (§7).
 8. **Deadline ownership.** Wrappers forward `SetReadDeadline` narrowly, without `Unwrap`, and a
-   retirement abort cannot be undone by a restore (H6).
+   retirement abort cannot be undone (H6; restore replaced by the 2026-11-12 amendment, H6 item 8).
 
 ## Related
 
