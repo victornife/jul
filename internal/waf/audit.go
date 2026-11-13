@@ -240,16 +240,10 @@ type auditConfig struct {
 // pattern. A writer that is not Jul's adapter, or a formatter other than
 // Native or JSON, is unsupported (ADR 0032 writer contract).
 func compiledAuditConfig(w coraza.WAF) (auditConfig, error) {
-	engine, err := compiledEngine(w)
+	ptr, err := addressableEngine(w)
 	if err != nil {
 		return auditConfig{}, err
 	}
-	if !engine.CanAddr() {
-		return auditConfig{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: unaddressable engine in %T", w)
-	}
-	// engine was reached through an unexported field, so re-derive a
-	// pointer that may call methods.
-	ptr := reflect.NewAt(engine.Type(), unsafe.Pointer(engine.UnsafeAddr()))
 	getter := ptr.MethodByName("AuditLogWriter")
 	re := ptr.Elem().FieldByName("AuditLogRelevantStatus")
 	if !getter.IsValid() || getter.Type().NumIn() != 0 || getter.Type().NumOut() != 1 ||
@@ -270,6 +264,37 @@ func compiledAuditConfig(w coraza.WAF) (auditConfig, error) {
 	}
 	cfg.writer = aw
 	return cfg, nil
+}
+
+// addressableEngine returns a method-callable pointer to the compiled engine.
+func addressableEngine(w coraza.WAF) (reflect.Value, error) {
+	engine, err := compiledEngine(w)
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	if !engine.CanAddr() {
+		return reflect.Value{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: unaddressable engine in %T", w)
+	}
+	// engine was reached through an unexported field, so re-derive a
+	// pointer that may call methods.
+	return reflect.NewAt(engine.Type(), unsafe.Pointer(engine.UnsafeAddr())), nil
+}
+
+// closeAuditWriter closes the compiled audit writer, whatever its type:
+// Coraza's own Close leaves the audit log file open.
+func closeAuditWriter(w coraza.WAF) error {
+	ptr, err := addressableEngine(w)
+	if err != nil {
+		return nil
+	}
+	getter := ptr.MethodByName("AuditLogWriter")
+	if !getter.IsValid() || getter.Type().NumIn() != 0 || getter.Type().NumOut() != 1 {
+		return nil
+	}
+	if out, ok := getter.Call(nil)[0].Interface().(io.Closer); ok && out != nil {
+		return out.Close()
+	}
+	return nil
 }
 
 // innerTx returns Coraza's transaction struct behind Jul's wrappers.

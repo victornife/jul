@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
+	"github.com/corazawaf/coraza/v3/types"
 
 	"jul/internal/config"
 )
@@ -163,11 +164,58 @@ func TestWAFReservationsCoverMeasuredAllocation(t *testing.T) {
 
 func calibrateShape(t *testing.T, fw *Firewall, r *http.Request) {
 	t.Helper()
-	tx := fw.waf.NewTransaction()
-	defer func() { _ = tx.Close() }()
 	uri := r.URL.RequestURI()
 	_, _, h := requestHeaderShape(r, uri)
 	r1Worst := r1Estimate(min(fw.argumentLimit(), queryPairs(r.URL.RawQuery)), h)
+	var body []byte
+	if r.Body != nil {
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r.Body)
+		body = buf.Bytes()
+	}
+	// Retained heap is deterministic per transaction; other goroutines can
+	// only add to a sample, so the smallest of a few fresh runs is used.
+	var (
+		tx             types.Transaction
+		phase1, phase2 uint64
+		bTotal         uint64
+	)
+	for range 3 {
+		ctx, p1, p2, bt := measureRequestPhases(t, fw, r, uri, body)
+		if tx == nil || p1+p2 < phase1+phase2 {
+			if tx != nil {
+				_ = tx.Close()
+			}
+			tx, phase1, phase2, bTotal = ctx, p1, p2, bt
+		} else {
+			_ = ctx.Close()
+		}
+	}
+	defer func() { _ = tx.Close() }()
+	n1, ok := argsHeld(tx, true)
+	if !ok {
+		t.Fatal("transaction state unavailable")
+	}
+	if r1 := r1Estimate(n1, h); phase1 > r1 || r1 > r1Worst {
+		t.Errorf("phase 1 retained %d B; R1 = %d B (worst %d B)", phase1, r1, r1Worst)
+	}
+	r2Worst := r2Estimate(fw.argumentLimit(), uint64(len(body)))
+	n, _ := argsHeld(tx, false)
+	// Reservations are cumulative (ADR 0032 §4): phase-2 rules matching
+	// ARGS_GET or headers retain state under R1's terms.
+	r1 := r1Estimate(n1, h)
+	if r2 := r2Estimate(n, bTotal); phase1+phase2 > r1+r2 || r2 > r2Worst {
+		t.Errorf("phases 1-2 retained %d B; R1 + R2 = %d B (R2 worst %d B)", phase1+phase2, r1+r2, r2Worst)
+	}
+	calibrateAudit(t, fw, tx, r, uri, bTotal)
+}
+
+// measureRequestPhases runs phases 1 and 2 on a fresh transaction and
+// returns it with the heap each phase retained. Phase-1 ARGS_GET counts are
+// read later from the returned transaction.
+func measureRequestPhases(t *testing.T, fw *Firewall, r *http.Request, uri string, body []byte) (types.Transaction, uint64, uint64, uint64) {
+	t.Helper()
+	tx := fw.waf.NewTransaction()
 	phase1 := retained(func() {
 		tx.ProcessConnection("192.0.2.1", 1234, "", 0)
 		tx.ProcessURI(uri, r.Method, r.Proto)
@@ -179,22 +227,7 @@ func calibrateShape(t *testing.T, fw *Firewall, r *http.Request) {
 		tx.AddRequestHeader("Host", r.Host)
 		tx.ProcessRequestHeaders()
 	})
-	n1, ok := argsHeld(tx, true)
-	if !ok {
-		t.Fatal("transaction state unavailable")
-	}
-	if r1 := r1Estimate(n1, h); phase1 > r1 || r1 > r1Worst {
-		t.Errorf("phase 1 retained %d B; R1 = %d B (worst %d B)", phase1, r1, r1Worst)
-	}
-
-	var body []byte
-	if r.Body != nil {
-		var buf bytes.Buffer
-		_, _ = buf.ReadFrom(r.Body)
-		body = buf.Bytes()
-	}
 	bTotal := uint64(len(body))
-	r2Worst := r2Estimate(fw.argumentLimit(), bTotal)
 	phase2 := retained(func() {
 		if len(body) > 0 {
 			if _, _, err := tx.WriteRequestBody(body); err != nil {
@@ -206,13 +239,13 @@ func calibrateShape(t *testing.T, fw *Firewall, r *http.Request) {
 			t.Fatal(err)
 		}
 	})
-	n, _ := argsHeld(tx, false)
-	// Reservations are cumulative (ADR 0032 §4): phase-2 rules matching
-	// ARGS_GET or headers retain state under R1's terms.
-	r1 := r1Estimate(n1, h)
-	if r2 := r2Estimate(n, bTotal); phase1+phase2 > r1+r2 || r2 > r2Worst {
-		t.Errorf("phases 1-2 retained %d B; R1 + R2 = %d B (R2 worst %d B)", phase1+phase2, r1+r2, r2Worst)
-	}
+	return tx, phase1, phase2, bTotal
+}
+
+// calibrateAudit checks ARGS_PATH and the audit construction and format
+// estimates on a transaction that has completed phases 1 and 2.
+func calibrateAudit(t *testing.T, fw *Firewall, tx types.Transaction, r *http.Request, uri string, bTotal uint64) {
+	t.Helper()
 	s, _ := txState(tx)
 	if p := s.Variables().ArgsPath().FindAll(); len(p) != 0 {
 		t.Errorf("ARGS_PATH holds %d entries; R1 assumes none", len(p))

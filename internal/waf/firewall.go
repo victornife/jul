@@ -375,7 +375,7 @@ func (f *Firewall) Close() error {
 	if f.closed != nil && !f.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	return errors.Join(closeWAF(f.waf), f.audit.writer.Close())
+	return closeWAF(f.waf)
 }
 
 // IsClosed reports whether Close has been called on f.
@@ -393,10 +393,11 @@ func closeWAF(w coraza.WAF) error {
 	if cw, ok := w.(*clientAddrWAF); ok {
 		w = cw.WAF
 	}
+	err := closeAuditWriter(w)
 	if closer, ok := w.(io.Closer); ok {
-		return closer.Close()
+		err = errors.Join(err, closer.Close())
 	}
-	return nil
+	return err
 }
 
 // rootFS selects the filesystem the SecLang parser resolves Include directives
