@@ -1010,7 +1010,7 @@ func TestLoggingNeverRefusedAfterCancellation(t *testing.T) {
 		if snap.UnslottedLogging != 1 || unslottedHook != 1 || snap.WaitingEvaluations != 0 {
 			t.Fatalf("policy %d: unslotted=%d hook=%d waiting=%d", policy, snap.UnslottedLogging, unslottedHook, snap.WaitingEvaluations)
 		}
-		if snap.Rejections != ([3][2]uint64{}) || rejectionHook != 0 {
+		if snap.Rejections != ([rejectionReasons][2]uint64{}) || rejectionHook != 0 {
 			t.Fatalf("policy %d: phase-5 overflow recorded as rejection: %v hook=%d", policy, snap.Rejections, rejectionHook)
 		}
 		if err := holder.Release(); err != nil {
@@ -1111,7 +1111,7 @@ func TestLoggingWaitCancelledMidWaitRunsUnslotted(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := g.Snapshot()
-	if snap.UnslottedLogging != 1 || snap.WaitingEvaluations != 0 || snap.Rejections != ([3][2]uint64{}) {
+	if snap.UnslottedLogging != 1 || snap.WaitingEvaluations != 0 || snap.Rejections != ([rejectionReasons][2]uint64{}) {
 		t.Fatalf("snapshot after cancelled logging wait = %+v", snap)
 	}
 	if err := holder.Release(); err != nil {
@@ -1133,7 +1133,7 @@ func TestLoggingWaitExpiryRunsUnslottedWithoutRejection(t *testing.T) {
 	if token != nil || outcome != Unslotted || err != nil {
 		t.Fatalf("expired logging wait = (%v, %s, %v)", token, outcome, err)
 	}
-	if snap := g.Snapshot(); snap.Rejections != ([3][2]uint64{}) || snap.UnslottedLogging != 1 {
+	if snap := g.Snapshot(); snap.Rejections != ([rejectionReasons][2]uint64{}) || snap.UnslottedLogging != 1 {
 		t.Fatalf("snapshot = %+v", snap)
 	}
 	if err := holder.Release(); err != nil {
@@ -1155,14 +1155,11 @@ func TestLoggingObserveNeverWaitsOrRecordsWouldReject(t *testing.T) {
 	cancel()
 	for _, c := range []context.Context{context.Background(), ctx} {
 		token, outcome, err := g.AcquireLoggingEvaluation(c, lease, LoggingWait)
-		if token == nil || outcome != Acquired || err != nil {
+		if token != nil || outcome != Unslotted || err != nil {
 			t.Fatalf("observe logging = (%v, %s, %v)", token, outcome, err)
 		}
-		if err := token.Release(); err != nil {
-			t.Fatal(err)
-		}
 	}
-	if snap := g.Snapshot(); snap.Rejections != ([3][2]uint64{}) || snap.UnslottedLogging != 0 {
+	if snap := g.Snapshot(); snap.Rejections != ([rejectionReasons][2]uint64{}) || snap.UnslottedLogging != 2 || snap.ActiveEvaluations != 1 {
 		t.Fatalf("observe snapshot = %+v", snap)
 	}
 	if err := holder.Release(); err != nil {
@@ -1170,6 +1167,54 @@ func TestLoggingObserveNeverWaitsOrRecordsWouldReject(t *testing.T) {
 	}
 	if err := lease.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestObserveLoggingParityWithEnforce is the ADR 0032 observe-parity case: with
+// slots = 1, a phase-5 overflow followed by phase 1–4 work reports the same
+// decisions in observe as in enforce.
+func TestObserveLoggingParityWithEnforce(t *testing.T) {
+	type decision struct {
+		logging, later Outcome
+		rejections     [rejectionReasons][2]uint64
+	}
+	run := func(mode Mode) decision {
+		g := newTestGovernor(t, testLimits(mode, 1, 0, 100, 1), Hooks{})
+		lease := acquireTestLease(t, g)
+		holder, _, err := g.TryEvaluation(context.Background(), lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		logging, loggingOutcome, err := g.AcquireLoggingEvaluation(context.Background(), lease, LoggingTry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := holder.Release(); err != nil {
+			t.Fatal(err)
+		}
+		later, laterOutcome, err := g.TryEvaluation(context.Background(), lease)
+		if err != nil {
+			t.Fatalf("%s: later phase = %s, %v", mode, laterOutcome, err)
+		}
+		snap := g.Snapshot()
+		if logging != nil {
+			_ = logging.Release()
+		}
+		if err := later.Release(); err != nil {
+			t.Fatal(err)
+		}
+		if err := lease.Close(); err != nil {
+			t.Fatal(err)
+		}
+		var rejections [rejectionReasons][2]uint64
+		for reason := range snap.Rejections {
+			rejections[reason][0] = snap.Rejections[reason][0] + snap.Rejections[reason][1]
+		}
+		return decision{loggingOutcome, laterOutcome, rejections}
+	}
+	enforce, observe := run(Enforce), run(Observe)
+	if enforce != observe || observe.logging != Unslotted || observe.later != Acquired {
+		t.Fatalf("enforce %+v != observe %+v", enforce, observe)
 	}
 }
 

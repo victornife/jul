@@ -226,6 +226,23 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   subscriptions (I4) are not governed yet. See
   [plugins.md](docs/plugins.md#inspection-governor).
 
+- Partial #700 I3a (ADR 0032): the WAF request path now uses the process
+  inspection governor. The WAF reuses an outer plugin lease or creates one,
+  reserves the fixed audit term before the Coraza transaction exists, and runs
+  phases 1 and 2 under evaluation slots with calibrated worst-case
+  `waf_state` reservations. Jul's own body read loop keeps the
+  `SecRequestBodyLimitAction` semantics, honours `body_timeout` (`408`) and
+  charges its 32 KiB buffer, which raises the minimum fitting
+  `max_inspection_bytes` (default fit 258,654,208 bytes). An overload before
+  the transaction answers `503` without a WAF outcome; one after it records
+  the new `inspection_refused` outcome. Under a governor only Jul's `serial`
+  audit writer with the Native or JSON formatter is accepted; a record over
+  budget is dropped (`budget`) while phase-5 rules still run, and a write that
+  hangs for 5 s is abandoned but stays charged until it returns. A hijacked
+  upgrade or CONNECT ends WAF transaction ownership when it commits. Response
+  paths (I4) are not governed yet. See
+  [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md#i3a-progress).
+
 - Explicit route and backend cutover cache behavior (`reload_policy = "retain" |
   "invalidate"` in `[cache]` and `[servers.locations.cache_policy]`, #624 /
   `CACHE-OPS-04`, #620,

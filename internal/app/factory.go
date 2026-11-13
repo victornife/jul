@@ -65,7 +65,7 @@ type HandlerFactory struct {
 	PluginMgr        *plugins.Manager
 	GenRes           *GenerationResources
 	RT               *Runtime                // Tracer.Middleware, ACME
-	Inspection       *inspection.Governor    // process-owned; handed to future request-path integrations
+	Inspection       *inspection.Governor    // process-owned; shared by the plugin and WAF request paths
 	Versions         *versionid.Context      // private effective-version context (#649)
 	WAFInvestigation *waf.InvestigationStore // bounded WAF transaction investigation buffer (#632)
 
@@ -786,6 +786,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 					},
 					Versions:      f.Versions,
 					Investigation: invStore,
+					Governor:      f.Inspection,
 				})
 				if err != nil {
 					return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)

@@ -159,7 +159,7 @@ func TestInspectionLimitsPublishWithReloadAndPreserveProcessGovernor(t *testing.
 	if err := lease.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := governor.Snapshot(); got.ActiveLeases != 0 || got.Usage != [3]uint64{} {
+	if got := governor.Snapshot(); got.ActiveLeases != 0 || got.Usage != ([len(got.Usage)]uint64{}) {
 		t.Fatalf("lease did not drain after reload: %+v", got)
 	}
 }

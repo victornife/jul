@@ -221,7 +221,7 @@ func limitsWith(extra uint64, mut ...func(*inspection.Limits)) inspection.Limits
 func assertDrained(t *testing.T, g *inspection.Governor) {
 	t.Helper()
 	s := g.Snapshot()
-	if s.ActiveLeases != 0 || s.Usage != [3]uint64{} {
+	if s.ActiveLeases != 0 || s.Usage != ([len(s.Usage)]uint64{}) {
 		t.Fatalf("governor not drained: leases=%d usage=%v", s.ActiveLeases, s.Usage)
 	}
 }

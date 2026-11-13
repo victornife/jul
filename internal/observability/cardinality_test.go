@@ -170,6 +170,7 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveInspectionRejection("bytes", "enforce")
 	m.ObserveInspectionBodyTimeout("h1", "timeout")
 	m.ObserveInspectionUnslottedLogging()
+	m.ObserveInspectionAuditDrop("budget")
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Cache", "HIT")
 		w.WriteHeader(http.StatusOK)

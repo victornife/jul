@@ -32,7 +32,8 @@ var (
 // IsOverload reports whether err is a governor byte refusal that the client
 // must see as inspection overload (503). Observe mode never returns one.
 func IsOverload(err error) bool {
-	return IsOutcome(err, ByteSaturated) || IsOutcome(err, WAFStateSaturated) || IsOutcome(err, EvaluationSaturated)
+	return IsOutcome(err, ByteSaturated) || IsOutcome(err, WAFStateSaturated) ||
+		IsOutcome(err, EvaluationSaturated) || IsOutcome(err, AuditSaturated)
 }
 
 // WriteOverloaded answers an inspection overload: 503 with Retry-After: 1,

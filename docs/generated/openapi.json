@@ -4317,7 +4317,7 @@
           {
             "name": "outcome",
             "in": "query",
-            "description": "Filter by transaction outcome (matched_observed, interrupted_request, interrupted_response, rejected_body_limit, inspection_error).",
+            "description": "Filter by transaction outcome (matched_observed, interrupted_request, interrupted_response, rejected_body_limit, inspection_error, inspection_refused).",
             "schema": {
               "type": "string"
             }
@@ -11403,6 +11403,44 @@
                 "type": "integer",
                 "format": "int64"
               },
+              "audit_output": {
+                "type": "object",
+                "properties": {
+                  "abandoned_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "abandoned_calls": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "drops": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "in_flight_calls": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_calls": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "abandoned_bytes",
+                  "abandoned_calls",
+                  "drops",
+                  "in_flight_calls",
+                  "max_bytes",
+                  "max_calls"
+                ],
+                "additionalProperties": false
+              },
               "base_charge_bytes": {
                 "type": "integer",
                 "format": "int64"
@@ -11515,6 +11553,10 @@
               "usage": {
                 "type": "object",
                 "properties": {
+                  "audit_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
                   "base_bytes": {
                     "type": "integer",
                     "format": "int64"
@@ -11529,6 +11571,7 @@
                   }
                 },
                 "required": [
+                  "audit_bytes",
                   "base_bytes",
                   "buffer_bytes",
                   "waf_state_bytes"
@@ -11543,6 +11586,7 @@
             "required": [
               "active_evaluations",
               "active_leases",
+              "audit_output",
               "base_charge_bytes",
               "base_charge_scope",
               "configured",

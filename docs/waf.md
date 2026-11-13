@@ -407,7 +407,7 @@ uncompressed body.
 | Metric | Type | Labels | Meaning |
 | ------ | ---- | ------ | ------- |
 | `jul_waf_events_total` | counter | `action`, `rule` | A rule that logs matched. `action` is the configured policy mode (`block` or `detect`); `rule` is the matched rule ID |
-| `jul_waf_transactions_total` | counter | `mode`, `outcome` | Final outcome of each WAF-inspected HTTP transaction: `clean`, `matched_observed`, `interrupted_request`, `interrupted_response`, `rejected_body_limit`, or `inspection_error` |
+| `jul_waf_transactions_total` | counter | `mode`, `outcome` | Final outcome of each WAF-inspected HTTP transaction: `clean`, `matched_observed`, `interrupted_request`, `interrupted_response`, `rejected_body_limit`, `inspection_error`, or `inspection_refused` |
 | `jul_waf_investigation_events_total` | counter | `result` | Bounded WAF investigation buffer collection events: `recorded`, `truncated`, `dropped`, or `sampled_out` |
 
 `jul_waf_events_total` reflects **logged rule matches** (standard ModSecurity

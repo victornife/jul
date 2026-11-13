@@ -20,6 +20,7 @@ import (
 	"log/slog"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/versionid"
 )
 
@@ -34,8 +35,8 @@ type Hooks struct {
 	// OnTransaction is invoked once per completed WAF transaction with the
 	// policy mode ("block" or "detect") and actual outcome (OutcomeClean,
 	// OutcomeMatchedObserved, OutcomeInterruptedRequest,
-	// OutcomeInterruptedResponse, OutcomeRejectedBodyLimit, or
-	// OutcomeInspectionError) (#632-A).
+	// OutcomeInterruptedResponse, OutcomeRejectedBodyLimit,
+	// OutcomeInspectionError, or OutcomeInspectionRefused) (#632-A, #700).
 	OnTransaction func(mode, outcome string)
 	// OnInvestigationEvent is invoked when a non-clean transaction event is
 	// processed by the bounded investigation buffer (InvestigationRecorded,
@@ -49,6 +50,11 @@ type Options struct {
 	Hooks         Hooks
 	Versions      *versionid.Context
 	Investigation *InvestigationStore
+	// Governor is the process inspection governor (ADR 0032). When set,
+	// every transaction is admitted, slotted and charged through it and
+	// only Jul's audit writer and formatters are accepted. Nil keeps the
+	// legacy ungoverned behaviour (budget probes, tests).
+	Governor *inspection.Governor
 }
 
 // Enabled reports whether any WAF policy is turned on in the configuration —

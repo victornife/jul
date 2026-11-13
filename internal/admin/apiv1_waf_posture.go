@@ -30,7 +30,7 @@ func v1WAFEventParameters() []ExternalParameter {
 		{Name: "trace_id", In: "query", Type: "string", Description: "Filter by untrusted trace correlation hint."},
 		{Name: "route_id", In: "query", Type: "string", Description: "Filter by durable route_id."},
 		{Name: "path", In: "query", Type: "string", Description: "Filter by sanitized path prefix or exact match."},
-		{Name: "outcome", In: "query", Type: "string", Description: "Filter by transaction outcome (matched_observed, interrupted_request, interrupted_response, rejected_body_limit, inspection_error)."},
+		{Name: "outcome", In: "query", Type: "string", Description: "Filter by transaction outcome (matched_observed, interrupted_request, interrupted_response, rejected_body_limit, inspection_error, inspection_refused)."},
 		{Name: "rule_id", In: "query", Type: "integer", Description: "Filter by matched or interrupting rule_id."},
 		{Name: "limit", In: "query", Type: "integer", Description: "Maximum number of events to return (1..256, default 50)."},
 	}
@@ -54,7 +54,8 @@ func (s *Server) handleV1WAFEvents(w http.ResponseWriter, r *http.Request) {
 	if filter.Outcome != "" {
 		switch filter.Outcome {
 		case waf.OutcomeClean, waf.OutcomeMatchedObserved, waf.OutcomeInterruptedRequest,
-			waf.OutcomeInterruptedResponse, waf.OutcomeRejectedBodyLimit, waf.OutcomeInspectionError:
+			waf.OutcomeInterruptedResponse, waf.OutcomeRejectedBodyLimit, waf.OutcomeInspectionError,
+			waf.OutcomeInspectionRefused:
 		default:
 			writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInvalidRequest,
 				"Unsupported WAF transaction outcome %q.", filter.Outcome))
