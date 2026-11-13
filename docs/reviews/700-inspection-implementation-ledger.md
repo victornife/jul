@@ -103,10 +103,18 @@ review completed with no actionable findings. A subsequent review of PR #714 hea
 requested two bounded design corrections: I2b must own and test a true limits-only guest-capacity
 publication path, and A19 must cover pre-existing spool reservations when observe changes to
 enforce without a numeric limit change. The amendment now specifies both, including their
-acceptance cases. The separately requested concurrency/protocol reviewer did
-not return a result during this checkpoint. A direct review of admission ordering, cap updates,
-reload overlap, queue/slot behavior and H1/H2/H3 failure semantics found no additional design
-gap; this is not an implementation test or merge approval.
+acceptance cases.
+
+An earlier direct pass over admission ordering, cap updates, reload overlap, queue/slot behavior
+and H1/H2/H3 failure semantics found no additional design gap. It is superseded as a
+completeness claim: the separately requested concurrency/protocol reviewer returned later, on
+head `29eca6aa`, and reported further potential gaps. These include an unspecified process-scope
+owner and release point for guest and spool charges; an undefined R5 lifetime for upgrades,
+streams and CONNECT; no recovery policy for a hung synchronous audit writer; and a default-enforce
+gate that cites A1–A18 but not A19–A22. These findings are **unverified** and are not resolved by
+this checkpoint. They are recorded for maintainer triage into later checkpoints or a follow-up
+design revision, not added to this PR's scope. None of these reviews is an implementation test or
+merge approval.
 
 | Check | Result |
 | --- | --- |
