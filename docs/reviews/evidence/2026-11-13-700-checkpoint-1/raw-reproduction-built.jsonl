@@ -1,0 +1,10 @@
+{"go_version":"go1.27.4","goarch":"arm64","gomaxprocs":2,"goos":"darwin","kind":"environment"}
+{"grew_to_max":true,"growth_past_max_rejected":true,"heap_alloc_delta_bytes":67135592,"initial_bytes_per_instance":65536,"instances":4,"kind":"guest","max_bytes_per_instance":16777216,"pages_per_instance":256}
+{"after_close":{"body_count":0,"body_bytes":0,"multipart_count":0,"multipart_bytes":0},"after_process":{"body_count":1,"body_bytes":262308,"multipart_count":1,"multipart_bytes":262144},"after_write":{"body_count":1,"body_bytes":262308,"multipart_count":0,"multipart_bytes":0},"case":"spill_and_file","file_parts":1,"kind":"storage","payload_bytes_per_part":262144,"request_bytes":262308,"sectmpdir_entries":0}
+{"after_close":{"body_count":0,"body_bytes":0,"multipart_count":0,"multipart_bytes":0},"after_process":{"body_count":0,"body_bytes":0,"multipart_count":32,"multipart_bytes":0},"after_write":{"body_count":0,"body_bytes":0,"multipart_count":0,"multipart_bytes":0},"case":"empty_files","file_parts":32,"kind":"storage","payload_bytes_per_part":0,"request_bytes":4371,"sectmpdir_entries":0}
+{"audit_bytes":707,"contains_body":false,"kind":"audit","logging_total_alloc_bytes":83144,"parts":"ABFHZ","repetition":1,"request_bytes":262144}
+{"audit_bytes":713,"contains_body":false,"kind":"audit","logging_total_alloc_bytes":8144,"parts":"ABFHZ","repetition":2,"request_bytes":262144}
+{"audit_bytes":708,"contains_body":false,"kind":"audit","logging_total_alloc_bytes":8128,"parts":"ABFHZ","repetition":3,"request_bytes":262144}
+{"audit_bytes":262858,"contains_body":true,"kind":"audit","logging_total_alloc_bytes":2248200,"parts":"ABCFHZ","repetition":1,"request_bytes":262144}
+{"audit_bytes":262851,"contains_body":true,"kind":"audit","logging_total_alloc_bytes":2247984,"parts":"ABCFHZ","repetition":2,"request_bytes":262144}
+{"audit_bytes":262851,"contains_body":true,"kind":"audit","logging_total_alloc_bytes":2248184,"parts":"ABCFHZ","repetition":3,"request_bytes":262144}

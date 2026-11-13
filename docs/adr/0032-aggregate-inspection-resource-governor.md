@@ -1,7 +1,8 @@
 # ADR 0032 — Aggregate inspection resource governor
 
 - **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
-  proposed in an unmerged change; I3, I4 and I6 remain pending
+  merged (#710, `c8bba7f2`); I3, I4 and I6 remain pending. The 2026-11-13 expansion below is
+  **proposed**, not accepted or implemented.
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
@@ -557,6 +558,10 @@ unconditional bound on total process memory, and no verdict below claims one.
   - The chain order is unchanged.
 
 ### 3. Counter classes and acquisition order
+
+> **Proposed correction, 2026-11-13:** the historical phase-5 row and “No reservation”
+> paragraph below do not account for audit-record construction. The proposed R5 contract in the
+> dated amendment supersedes them if accepted; the original assertions are retained for history.
 
 | Order | Class | Unit | Kind | Wait |
 | --- | --- | --- | --- | --- |
@@ -1181,7 +1186,309 @@ never contains paths, hosts or bodies.
   under saturation, are unmeasured (A13, A18).
 - **Feasibility measurements** are single or double repetitions, with c1 noise of 2.3–4.6/s.
 
+## Proposed amendment — 2026-11-13: inspection-owned storage, guest capacity and audit pressure
+
+This amendment is a **proposal for checkpoint 1**. It does not change current configuration,
+runtime behavior, metrics or qualification. On acceptance its specific corrections supersede
+conflicting historical statements in §§3, 4, 7–11 and the original slice table; all other accepted
+decisions and A1–A18 remain in force. In particular, keep the process owner, the existing
+`enforce` default, `256m` byte ceiling, auto evaluation slots, `1s` queue timeout, absolute `60s`
+body timeout (`0s` disables it) and `64k` response-header ceiling. No final size or A1–A22
+qualification is claimed. The original §5 statement that abandoned work cannot accumulate
+beyond the slot count applies only to slotted calls, not unslotted phase 5.
+
+### Source boundaries and evidence
+
+| Boundary | Pinned-source finding | Design consequence |
+| --- | --- | --- |
+| Coraza v3.8.1 temp files | `internal/corazawaf/body_buffer.go` calls `os.CreateTemp` and copies the buffered prefix on spill; `internal/bodyprocessors/multipart.go` separately creates and writes an upload file per file part. `SecTmpDir` is accepted but ignored by `internal/seclang/directives.go`. The body processor sets `REQBODY_ERROR`, evaluates phase 2 and returns a nil error on a parser I/O error. | The pinned public API does **not** provide the required file-creation/write interception or preserve a typed parser I/O result for Jul. A reader wrapper, `SecTmpDir`, `REQBODY_ERROR` rules, free-space polling or post-write counting cannot establish fail-closed quota/error handling. |
+| Static roots | Jul's static handler opens an operator-configured `os.Root` and serves regular files under it; Coraza temp names are ordinary non-hidden names. | The owned spool root and all upload destinations must be provably disjoint from every static-served tree in every serving/candidate generation. Canonical and symlink aliases must be checked; ambiguous identity fails validation. |
+| Audit phase | `Transaction.ProcessLogging` evaluates phase 5 and then invokes `AuditLog()` and a writer. Part C performs `io.ReadAll` and converts the body to a string before the writer sees it; the audit transaction exposes mutable collections, and `tx.Close()` resets them before pooling. A custom writer can retain the record after `Write` returns. | R1–R4 and a slot alone do not prove phase-5 coverage. Reserve R5 before a transaction can require irrevocable phase-5 work, and pass only an immutable detached snapshot to writers; no writer may retain a pooled transaction graph. |
+| wazero v1.12.0 | `WithMemoryLimitPages` sets a maximum per memory; no pre-growth admission callback is established. The pinned decoder permits at most one memory per module. Jul eagerly instantiates one module per plugin in Prepare and retains idle modules. | Reserve the effective page-rounded ceiling for each starting/live instance **before** instantiation. Do not poll `Memory.Size` as admission. Revalidate the one-memory assumption on an engine upgrade. |
+
+[Checkpoint-1 probes](../reviews/evidence/2026-11-13-700-checkpoint-1/README.md) show a
+262,308-byte multipart request simultaneously occupying a 262,308-byte body spill and a
+262,144-byte file, 32 empty files from a 4,371-byte request, and approximately 2.25 MB of
+cumulative `ProcessLogging` allocations for one 256 KiB part-C audit. A synthetic multipart
+file-create failure sets `REQBODY_ERROR` but returns neither a parser error nor a phase-2
+interruption; a rule on a later multipart field therefore does not block. A retained audit record
+also observes changed arguments after `tx.Close()` and transaction reuse. Four 16 MiB guest
+ceilings could grow to their limits. These are small, unconstrained macOS probes, not a Linux
+envelope or a universal bound. The historical I2 p1/p2 sized-pool cells each have only one
+repetition; p1 contains guest-500 findings. They do not establish production defaults.
+
+### Normative ownership and admission inventory
+
+All counters below belong to the same process-owned authority but retain their own units; bytes,
+files and slots are never added into one “total resource” number. “Reserve” means a logical
+admission charge, not a measurement of RSS. The lifecycle, mode, status and test rules following
+the table apply to every applicable row.
+
+| Resource and owner | Unit; reserve before consumption | Release / remaining boundary | Owner checkpoint |
+| --- | --- | --- | --- |
+| Lease and dynamic plugin/WAF host buffers | `base` and `buffer` bytes under `max_buffered_bytes`; the first actual inspection layer creates one lease, reused by nested layers. Charge capacity before allocation/growth/copy, including old and new arrays. | The creating layer closes only after downstream work, response callbacks and all represented aliases are gone. Transport readers are detached/revoked as in #710. | I2 merged; I3a/I4 complete remaining paths |
+| WAF transaction state | Cumulative `waf_state` **estimated** bytes R1–R4; reserve each phase's worst case before its Coraza call while holding the slot, then true down only as calibrated. `B_total` includes spilled input. | Hold until the synchronous work has returned and the owning goroutine closes the transaction. Cancellation or a reset is not a refund. `ARGS_PATH` remains empty unless its term and tests change. | I3a request, I4 response |
+| Phase-5 rules, audit construction and output | New `audit` **estimated reservation** R5, charged against the same `max_buffered_bytes`, not a second limit or an addition outside the accounted total. Reserve the complete per-transaction worst case before creating/entering a WAF transaction and before any response can make refusal impossible. | Retain through slotted or unslotted `ProcessLogging` and until the last record/formatter/writer/transport alias is gone. A blocked writer retains the reservation. Closing a request lease cannot refund an asynchronously retained record. | I3a request and I4 response calibration; exact R5 proof is blocked below |
+| WAF execution | Process `slots`, one per synchronous rule-evaluating call, including implicit evaluations in body writes. No network read is performed while holding one. | Release only on actual return. Phases 1–4 try-acquire while request data is unread, otherwise use the existing bounded FIFO. Phase 5 never skips rules: it uses the same eligibility rule, but visibly runs unslotted if no slot is obtained. It is not strictly bounded by the slot count. | I3a/I4 |
+| Guest instances | Process `guest_capacity` bytes: the effective `WithMemoryLimitPages` ceiling, in 64 KiB pages, for **each** starting, idle, busy or closing instance across candidate/current/retiring generations. This is neither actual guest allocation nor RSS. | Reserve before instantiation and `_initialize`; reuse a pooled instance without another reservation. Release exactly once only after the module/runtime has stopped and no owner can use its memory. A failed close remains accounted and visible. | I2b |
+| Compiled rules/modules and transaction pools | Generation-owned compiled state and process/GC-retained pool capacity; configured capacity, calibrated estimates or observations where available, **not** a guest or request reservation. | Retire only after actual generation users and resources finish; a reset pooled transaction can retain backing arrays. Unmeasured baseline is unavailable, not zero. | Existing lifecycle; A9/A15 and I6b |
+| Body spill and multipart files | Process `spool` logical reserved bytes and file count, independent of the request lease. Before every supported create, reserve a file; before a write/growth, reserve its possible resulting extent, including buffered-prefix copies and simultaneously retained multipart files. | A file remains charged through open handles, unlink/close, partial writes and failed cleanup. Refund only after all Jul-owned handles/aliases are closed and removal is confirmed. Crash leftovers are reconciled before new reservations. | I3b, blocked on the integration boundary below |
+| Audit output and other persistent storage | The configured audit sink's durable files/remote destination and other Jul-owned storage categories are separate external boundaries, not inspection spool and not bounded by R5. | Their configured owners, retention and I/O health remain responsible; a spool quota is not a filesystem-wide or durable-audit quota. tmpfs and page cache can still count against a cgroup. | Existing sink/storage owners; I6a exposes the distinction |
+
+Acquisition has no governor wait cycle: create/reuse the request lease, reserve R5 before WAF
+transaction creation, and acquire each dynamic byte or spool reservation fail-fast before its
+consumer. A rule-evaluating call acquires a slot before its R1–R4 term; reservations taken while
+holding a slot never wait. For a guest, reuse an idle instance, or take the existing local plugin
+slot, try the global guest reservation, then instantiate; on refusal release the local slot. The
+existing bounded local-instance wait holds no global guest reservation. No governor mutex is held
+across engine work, file I/O, a module close or an audit write. A synchronous blocked audit sink can
+occupy slots and force phase-5 overflow, but cannot create an unbounded waiter queue.
+
+### R5: admission before phase 5 becomes unavoidable
+
+The previous assertion that phase 5 needs no reservation is withdrawn by this proposal. For each
+effective WAF policy, Prepare must derive an overflow-checked `R5_max` from the maximum reachable
+phase-5 rules, audit parts and formatters, including dynamic `ctl` changes, bounded request and
+response bodies, headers, file metadata, matched-rule messages, escaping/serialization copies and
+writer retention. `R5_max` is included **once** in the WAF route's single-request minimum in
+addition to R1–R4 and buffer terms. It must not be double-counted as a separate additive total.
+Its phase-5 rule allowance still applies when audit output is off if logging rules can run.
+
+The exact components and coefficients are **blocked** pending pinned-engine, supported-rule and
+writer calibration in I3a/I4. The part-C sample above is a counterexample to zero; it is not a
+safe multiplier. Coraza's audit object can retain references to transaction-owned mutable
+collections. In the probe, a writer retained its `AuditLog`, `tx.Close()` returned that
+transaction to the pool, and a later transaction's argument became visible through the old
+record. A writer can also return while retaining or asynchronously consuming the object, so
+reserving until `Write` returns is not an ownership proof.
+
+Before calling a writer, the supported integration must create an immutable, bounded snapshot
+whose fields and backing storage no longer alias the transaction, request/response buffers,
+collections or other pooled state. The snapshot and every synchronous formatter copy are covered
+by R5. Writers may receive only that snapshot; an asynchronous sink may enqueue only an immutable
+serialized buffer under a separately bounded sink-queue owner, not a Coraza transaction or audit
+object. A sink without bounded queue ownership must write synchronously. A custom writer that
+cannot satisfy this contract is unsupported in a protected profile in both modes until an
+explicitly reviewed adapter exists; registration by name is not evidence that it is safe.
+Asynchronous request-body readers or transports without a revocation/completion signal are
+likewise unsupported for a protection claim. Their configurations must be rejected in `enforce`
+and reported explicitly unavailable/unprotected in `observe`, never treated as measured zero.
+
+No post-serialization check, truncation, skipped phase-5 rule or assumption that `Write` returning
+means aliases are gone is an acceptable substitute. If immutable detachment and bounded output
+ownership cannot be established with the pinned API, an upstream integration change is a
+blocking prerequisite.
+
+If R5 cannot be reserved, reject before a Coraza transaction is created: `503`,
+`Retry-After: 1`, `inspection_overloaded`, or native gRPC `UNAVAILABLE`, with bounded reason
+`audit`. Once a transaction has entered Coraza, phase 5 runs even on early exit, cancellation,
+slot saturation or a blocked sink. I3a must preserve this ordering in every error path. A
+compiled minimum exceeding the unchanged 256 MiB default is an explicit validation/migration
+issue, not a reason to silently raise that default. The former 246.6 MiB default-route figure
+does not include R5 and must be recalculated before WAF enforcement ships.
+
+### Spool integration and persistent ownership
+
+**Required integration, not present today:** a reviewed, maintainable public Coraza integration
+must hand Jul ownership of *both* body-buffer and multipart temporary-file creation, every
+write/extent change, close and removal, including errors and transaction identity. It must make
+quota refusal distinguishable from physical I/O errors all the way back through implicit
+evaluation and multipart parsing. Coraza v3.8.1 can swallow a body-processor error: it sets
+`REQBODY_ERROR`, evaluates phase 2 and returns a nil error. Jul's current wrapper treats only a
+returned error or interruption as a processing failure, then invokes the origin. A generated
+security rule is not a substitute: the marker may be set after the multipart parser has stopped,
+and arbitrary supported rules need not reject it. The archived probe demonstrates a file-create
+failure with no returned error/interruption and no match on a later multipart field.
+
+The integration must surface quota refusals and physical file I/O/cleanup failures as typed,
+out-of-band results to Jul before origin forwarding; never infer or suppress them from a SecRule,
+generic `REQBODY_ERROR`, or HTTP status. In protected profiles, a quota refusal maps to governed
+overload, and a physical create/write/close error fails inspection closed with an explicit 500
+before forwarding. This applies in `observe` too: observe never bypasses physical failure.
+Malformed-body and configured size-limit behavior remain separately classified and preserve their
+accepted semantics. A failure discovered after response commitment cannot replace the response;
+the record must identify partial delivery, abort further inspection work and retain cleanup debt.
+It may be an upstream change or another reviewed supported boundary with equivalent proof; a
+private reflection hook, undocumented fork or post-write audit is not sufficient. Response body
+buffers currently use an in-memory limit equal to their total limit, but any future spill through
+the common buffer must use the same boundary. I3b cannot claim protection until this dependency
+and fail-closed behavior are tested on the pinned version.
+
+The process owns a private, instance-specific root, not the shared OS temporary directory.
+Creation must be exclusive, permissions restrictive, directory identity stable, and file operations
+protected against symlink/path substitution and collisions on each supported platform. A
+cross-process exclusive owner lock prevents two Jul instances from independently claiming the
+same root. The root and every effective upload directory must also be disjoint from all static
+file-serving roots across the current, candidate and retiring generations. Compare canonical
+directory identity and ancestry, not only raw strings; resolve or reject symlink aliases. A path
+whose relationship cannot be proved on a supported platform is invalid. Revalidate this invariant
+before Publish whenever a reload changes either the spool or any static root. This prevents
+ordinary non-hidden `body*`/`crzmp*` files from becoming reachable via a static route or directory
+listing. Entries are attributable to this instance; no scan or removal of unrelated content is
+allowed. Before admissions after restart, reconcile every attributable leftover and count it
+until confirmed closed/removed. unclassifiable entries, failed reconciliation or unsupported
+locking make protection unavailable and fail closed in a protected profile, not zero usage.
+Use bounded cleanup concurrency and a bounded queue/sweep; a failure stays charged as cleanup debt
+and is observable. A missing directory, `ENOSPC`, permissions or close/remove failure is not
+silently converted into quota success. Logical quota excludes inode/block rounding and other
+processes, and cannot promise physical free space or bound same-user external file handles.
+Jul-owned descriptors must not leak to child processes.
+
+`SecUploadKeepFiles On` and `RelevantOnly` are **unsupported in protected profiles**, in both
+inspection modes, until a separately bounded persistent-upload owner exists: reject them at
+configuration validation rather than delete retained data or refund it at transaction close.
+An explicit `SecUploadDir` outside the owned root is likewise rejected, never silently redirected.
+The historically ignored `SecTmpDir` is not a spool setting. Migration must identify these
+directives and offer actionable choices; it must not claim that durable upload or audit retention
+has been implemented.
+
+`spool_dir` is startup-only. A change requires stopping the old owner and explicitly reconciling
+its root before switching, including after a crash. A durable, cross-platform way to discover a
+previous root after an out-of-band config change is **not yet established**; I3b must provide a
+reviewed durable locator/transition or a verifiable offline migration protocol that refuses
+startup when the previous identity cannot be reconciled. Operator instructions alone cannot
+prove that no old root was forgotten. This is a blocking prerequisite for cross-root protection.
+Prepare/rollback within a running process cannot move files or reset counters.
+
+### Proposed public controls and defaults
+
+These are proposed `[global.inspection]` names, using existing `Size` and TOML conventions:
+
+| Field | Type and validation | Effective default / migration |
+| --- | --- | --- |
+| `max_guest_capacity_bytes` | Positive `Size`; aggregate sum of effective per-instance page ceilings, overflow checked. `0`/unlimited is not a protected configuration. | **Blocked:** choose a finite omitted-field default from representative, overlap-aware measurements before I2b ships. In `enforce`, the configured cap must at least fit one eager instance of each candidate plugin; `observe` warns. Offline `jul check` uses compiled metadata only, never instantiates a guest. |
+| `max_spool_bytes` | Positive `Size`; process-wide logical file-extent reservation across all generations and owned roots in the transition. | **Blocked:** choose a finite omitted-field default after representative spill/multipart and filesystem-headroom measurements. |
+| `max_spool_files` | Positive integer; counts zero-byte and nonzero files, including cleanup debt. Overflow or invalid values fail validation. | **Blocked:** choose a finite omitted-field default after representative file-count measurements. A byte ceiling is not a substitute. |
+| `spool_dir` | Absolute operator-controlled directory path; validate private ownership, secure operations and exclusive identity. No request-derived path or path label. | **Blocked:** select a portable stable default/locator and migration mechanism; no silent shared-temp fallback. A path change is restart-required. |
+
+Until supported defaults are selected, the future protected profile requires explicit positive
+limits and a safe directory, with a precise error rather than an implicit unlimited value.
+For scale only, `64m` guest capacity fits the four 16 MiB probe instances, and `1m` plus 64 files
+fits each individual storage probe. These are **not production recommendations**: they do not
+cover generation overlap or representative concurrency. Existing deployments need release notes,
+`jul check`/preview diagnostics and explicit sizing guidance before any new enforcement is
+enabled. Profiles without the relevant compiled capability or configured feature report
+`not_applicable`; they do not fabricate an enforced zero.
+
+I2b deliberately uses **fail-fast refusal, not idle eviction**: an idle instance remains charged
+and may monopolize the cap. A new instance for another plugin or candidate can therefore fail
+even when all currently reserved instances are idle. Reuse an existing idle instance where
+possible; otherwise operators size the cap for expected concurrent pools **and** candidate/old
+generation overlap, or lower per-plugin `max_instances` and retire unused generations. Never
+evict a busy instance or depend on `sync.Pool` for module closure. This is a documented
+compatibility/availability trade-off, not fairness.
+
+### Control-mode and failure contract
+
+Inspection `observe` is independent of WAF `detect`; WAF rule outcomes and existing body, parser,
+plugin and server-timeout semantics remain intact in all four combinations.
+
+| Control or failure | `enforce` | `observe` |
+| --- | --- | --- |
+| Existing `base`/`buffer`, R1–R4, slots and body deadline | Existing §7 behavior and error mapping. | Existing would-reject/timeout behavior; no new governor-driven 503, 408 or 500. |
+| R5 audit reservation | Refuse before transaction creation with governor 503/`UNAVAILABLE`; phase 5 is never refused for an admitted transaction. | Charge and record each would-refuse decision; continue phase 5 and audit. |
+| Spool bytes or file count | Before create/growth, fail-fast governor 503/`UNAVAILABLE`, reason `spool_bytes` or `spool_files`; do not forward partial input. | Count would-refuse decisions and continue **only** if real filesystem operations succeed. |
+| Guest capacity | Before new instance creation, governor 503/`UNAVAILABLE`, reason `guest_capacity`; eager candidate failure aborts Prepare and leaves the old generation serving. Existing local instance-limit behavior stays distinct. | Track full reservations and would-refuse decisions; instantiate without a governor cap. Real guest failures are unchanged. |
+| Physical spool I/O, unsafe/unavailable ownership or unsupported retained uploads | Never bypass inspection. A typed create/write I/O failure before commitment is a WAF inspection error with `500`, not quota saturation; cleanup after commitment records debt/failure and cannot rewrite the response. Unsafe ownership/unsupported directives fail configuration validation. Coraza body-processor I/O failures must be surfaced out-of-band before forwarding; `REQBODY_ERROR` or a missing phase-2 interruption alone is insufficient. | The same physical and configuration failures apply; observe is not a filesystem or security bypass. |
+| Mutable or asynchronously retained audit record | Only immutable transaction-detached snapshots may reach writers; unsupported retaining writers are rejected in protected profiles. Any queued serialized output has a distinct bounded owner. | Same safety contract; observe cannot make an unsafe alias or unbounded queue safe. |
+
+H1 refusals preserve #710's `Connection: close` behavior for unread bodies; H2/H3 affect only the
+stream. If a response is already committed, record/abort according to the existing partial-response
+or upgrade contract rather than claim a replacement 503. The timer-only deadline owner, fetch-reader
+revocation, plugin-header rollback, generation-retention fix #709, ADR 0020 subscription behavior
+and rule 900001 remain unchanged.
+
+### Lifecycle, status and operability
+
+- **Prepare:** compile and validate effective facts without changing published limits. At startup,
+  use the candidate limits. During reload, candidate eager instances and files reserve against the
+  **currently published** process limits; a candidate cannot borrow its proposed increase before
+  Publish. If necessary, publish an increase in a separate limits-only reload first. Failure or
+  cancellation tears down the candidate and releases only resources actually gone; the old
+  generation continues. Offline checking compiles metadata only.
+- **Publish / decrease / mode change:** atomically publish limits. Existing reservations survive;
+  enforce admits no acquisition that would exceed the new limit, while existing usage may drain
+  above it. Observe continues to account without enforcing. A transition from observe to enforce
+  can therefore begin over limit and reports draining. Rollback is another Publish, not a reset.
+- **Retire / shutdown / restart:** old generations keep charges until their work and aliases finish.
+  Do not revive #709's closed-exchange references. Shutdown performs bounded cleanup and leaves
+  unreleased files discoverable for startup reconciliation; neither cancellation nor process
+  exit proves that a persistent file was removed. Directory migration follows the separate
+  explicit boundary above.
+- **Canonical source:** the process snapshot feeds `/api/v1/status` and its CLI, then the existing
+  `/api/runtime/overview` projection. Preserve current `request_path_integration = "partial"`
+  until the relevant paths actually ship. Add separate implementation state
+  `not_applicable|not_implemented|available|unavailable|error`, pressure state
+  `below_limit|at_limit|over_limit|unknown`, and an enforce-only draining indication per control.
+  Below a limit does not promise that the next request fits. Missing, stale or uncalibrated values
+  are unavailable, never measured zero.
+- **Metric proposal:** extend `jul_inspection_bytes{class}` with `audit` and
+  `jul_inspection_rejections_total{reason,mode}` with `audit`, `spool_bytes`, `spool_files` and
+  `guest_capacity`. Add `jul_inspection_spool_bytes`/`jul_inspection_spool_files` gauges with
+  bounded `state=reserved|cleanup_debt` (debt is a **subset**, not additive), corresponding
+  `_limit` gauges, `jul_inspection_spool_failures_total{operation}` with a closed operation enum,
+  `jul_inspection_guest_capacity_bytes` and `_limit`, and
+  `jul_inspection_guest_instances{state=starting|idle|busy|closing}`. Starting/closing tokens
+  count as reserved even if not yet/no longer live. Existing `plugin_guest_max_bytes` remains
+  configured potential across unclosed generations; it is not actual memory or the new reservation.
+  Counts are decisions, not unique rejected requests. No path, request, identity, raw error or
+  generation label is allowed.
+- **Storage headroom:** extend the existing closed `jul_storage_bytes` category set with
+  `inspection_spool`; filesystem free space is advisory and separate from logical quota usage.
+  Project actual write health without a duplicate semantic counter. A blocked or failed audit
+  sink remains an existing sink-health boundary, not a durable-audit guarantee.
+- **Permissions and UX:** status aggregates require existing `status:read`; a limiting route's
+  identifying details require `config:read`, otherwise return a redacted indication rather than
+  an equality oracle. Reuse the server-owned, permission-safe explanations of #625 and actual
+  producer signals for #628 without claiming either broader issue complete. I6a adds the existing
+  Overview disclosure, editor/authority behavior and bounded browser-local trends; no new
+  notification service or frontend policy engine.
+
+### Checkpoint mapping and acceptance extensions
+
+The original I3 is split into **I3a** (request/evaluation/R5 request calibration) and new **I3b**
+(spool). **I2b** is new guest-capacity work. I6 is split into **I6a** (operability/documentation)
+and **I6b** (integrated qualification, a later prompt). Schedule I3a → I4 → I3b → I2b → I6a after
+this amendment is accepted; this order does not make the guest mechanism technically dependent on
+the WAF parser. The [checkpoint ledger](../reviews/700-inspection-implementation-ledger.md)
+records actual state and blockers.
+
+| Checkpoint | Required focused evidence before merge |
+| --- | --- |
+| I3a / I4 | R1–R5 calibration for supported request/response shapes, audit parts and writer aliases; immutable-record verification across `tx.Close()` and pool reuse; bounded synchronous/async sink ownership; implicit phases, blocked sink and unslotted phase 5; real H1/H2/H3 refusal and sibling isolation; no early refund. |
+| I3b | Concurrent prefix spill plus multipart duplication, zero-byte files, partial writes, typed create/write/close/remove faults, cancellation, retained-directive rejection, static-root overlap/symlink aliases across reload, restart reconciliation, limits/modes and generation overlap on supported filesystems. |
+| I2b | Real guest eager/start failure, idle/busy pools, exact/over-capacity and concurrent instantiation, cancellation, traps, close failures, reload/rollback and limit decrease, including candidate and retired generations. |
+| I6a | Real producer/API/CLI/Console states, permissions and file-owned mode, missing/stale/observe/draining states, bounded trends, actual alert handoff and accessible responsive interaction. |
+| I6b | Run the preserved full matrix and new criteria with the corrected baseline and recorded identities; do not infer acceptance from checkpoint tests or this probe. |
+
+The A9 reload case additionally records compiled/static baselines, candidate and retiring guest
+reservations and spool debt without resetting or multiplying any limit. A15 additionally records
+post-burst pool/compiled-generation retention, guest instances and spool debt, distinguishing
+logical drainage from heap, RSS and physical filesystem effects. Their existing thresholds remain
+unchanged. Add the following unused identifiers:
+
+| # | Case | Pass condition |
+| --- | --- | --- |
+| A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing debt draining after a decrease; no early refund, unsafe deletion or partial inspection. Observe reports would-refuse while real I/O failures remain visible. Owned leftovers are reconciled before admission. |
+| A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. |
+| A21 | Phase-5 audit pressure and blocked output | R5 is reserved before transaction entry, covers the supported calibrated request/response audit construction and immutable detached record, and remains owned through the last bounded output alias; transaction reuse cannot mutate a prior record. Phase-5 rules are never skipped and saturation cannot deadlock. Unsupported unbounded policies do not receive a protection claim. |
+| A22 | Operational usability and migration | API, CLI and Console agree with real producer state and permissions; units and unavailable/observe/draining/debt states are truthful; defaults, directive and directory migration are actionable; alerts use real bounded signals and do not claim a general notification or audit product. |
+
+The common A1–A18 conditions remain: corrected baseline `858590dc`, at least three repetitions,
+2 vCPU/768 MiB/no swap and `GOMAXPROCS=2`, peak below 576 MiB where specified, and the 10%
+unsaturated throughput rule. Noise remains inconclusive, never a pass.
+
+### Explicit non-goals
+
+This proposal does not add hard whole-process/RSS isolation, kernel/socket accounting, general
+bandwidth or rate policing, a generic filesystem quota service, arbitrary Coraza CPU preemption, an
+embedded time-series database, a notification platform, automatic memory tuning, or a general
+durable WAF audit product.
+
 ## Implementation slices
+
+The original slice names and dependencies below are retained as history; the proposed split and
+current sequencing are in the dated amendment above.
 
 | Slice | Content | Depends on |
 | --- | --- | --- |
@@ -1202,9 +1509,9 @@ unclosed plugin generations, distinguishes it from live instance counts, and
 leaves actual guest allocation and uncalibrated evaluation headroom explicitly
 unknown. The route-aware minimum-budget rule (§Minimum-budget rule) is
 computed from compiled WAF and plugin facts and applied consistently by
-`jul check`, startup, reload and admin apply. Live request paths remain
-untouched: I2–I4 runtime enforcement remains pending, and no request-path
-integration or A1–A18 qualification is claimed.
+`jul check`, startup, reload and admin apply. At the I1 merge, live request paths were still
+untouched. I2 subsequently integrated plugin request paths; WAF and response integration and
+A1–A18 qualification remain pending.
 
 ### I5 progress
 
@@ -1222,7 +1529,8 @@ the client's limit; these are the baselines I2–I4 must change.
 
 ### I2 progress
 
-An unmerged I2 change (based on `d8d0520b`) integrates the plugin request path:
+I2 merged through #710 as `c8bba7f2c1b6c312aa215f8576014a513710775b` from reviewed head
+`7d7a607b0b054e4655f14d61e57d3bf8ee9fa423`. It integrates the plugin request path:
 one lease per plugin chain held through the downstream handler, prepared
 bodies grown by charge-before-allocate, request-side host copies (`fetch`,
 request state, generated and replacement bodies) charged with ownership
