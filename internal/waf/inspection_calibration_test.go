@@ -128,7 +128,7 @@ func calibrationShapes(argLimit int) []calibrationShape {
 // bodies spilled to disk, partial processing, both orders of audit parts H
 // and K, and ARGS_PATH asserted empty so R1 needs no term for it.
 func TestWAFReservationsCoverMeasuredAllocation(t *testing.T) {
-	if testing.Short() {
+	if testing.Short() || raceEnabled {
 		t.Skip("allocation calibration")
 	}
 	for _, c := range []struct {

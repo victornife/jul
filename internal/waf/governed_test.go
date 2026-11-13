@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -491,10 +492,19 @@ func TestGovernedWAFHijackEndsTransactionOwnership(t *testing.T) {
 				defer conn.Close()
 				// The tunnel is still open: ownership must already be over.
 				seen <- observed{g.Snapshot(), rec.get()}
+				if tc.released {
+					// A committed exchange bypasses the transaction entirely.
+					w.WriteHeader(http.StatusOK)
+					if _, err := w.Write([]byte("x")); err != http.ErrHijacked {
+						t.Errorf("write after hijack = %v, want ErrHijacked", err)
+					}
+					_ = http.NewResponseController(w).Flush()
+				}
 				_, _ = brw.WriteString("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n")
 				_ = brw.Flush()
 			})))
 			srv.Config.ConnContext = reqdeadline.ConnContext
+			srv.Config.ErrorLog = log.New(io.Discard, "", 0)
 			srv.Start()
 			defer srv.Close()
 			conn, err := net.Dial("tcp", srv.Listener.Addr().String())
