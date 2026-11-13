@@ -12,11 +12,11 @@ qualification, soak or maturity change.
 | --- | --- |
 | Starting `main` | `c8bba7f2c1b6c312aa215f8576014a513710775b` (verified #710 merge) |
 | Checkpoint 1 | **Active**: design amendment, feasibility evidence and ledger; no later runtime implementation |
-| Design PR / head | #714 is open and ready for review; no GitHub review submission was present at the last status check. The two bounded ADR corrections requested on head `1cd75931` and the delayed concurrency/protocol findings are addressed in this revision; the current head and hosted checks are authoritative on GitHub. No merge is requested. |
+| Design PR / head | #714: the maintainer's re-review of `04372313` requested two wording corrections, addressed in this revision, and asked for a merge once current-head hosted checks are green. The merge commit is authoritative on GitHub. |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`) and I2 #710 (`c8bba7f2`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Confirm the revised PR head's hosted checks and review state, then await the maintainer's decision; do not merge |
+| Exact next action | After #714 merges with green hosted checks, start checkpoint 2 (I3a) from the merged `main` |
 
 ## Checkpoint schedule and dependencies
 
@@ -118,7 +118,7 @@ A20/A21 rows):
 | Finding | Confirmed against | Proposal resolution and owner |
 | --- | --- | --- |
 | B1 — no process-scope owner for guest/spool charges | `ByteClass` has only `base`/`buffer`/`waf_state` | Process-scope tickets independent of request leases, released only after confirmed close/removal; I2b/I3b |
-| B2 — R5 lifetime for upgrades, streams and CONNECT | Deferred `ProcessLogging` and hijack tracking in `outcomes.go` | Phase 5, snapshot detachment and R5/`waf_state` release at the commit point; many-tunnel test; I3a/I4 |
+| B2 — R5 lifetime for upgrades, streams and CONNECT | Deferred `ProcessLogging` and hijack tracking in `outcomes.go` | Phase 5, snapshot detachment and release of transaction ownership (slot, `waf_state`, transaction-scoped R5) at the commit point; pending audit output stays charged to its owner; many-tunnel test; I3a/I4 |
 | B3 — hung synchronous audit writer | ADR "nothing deadlocks" and R5/output rows | Named supported adapters, `SecAuditLog*` rejection, writer deadline with bounded charged abandonment, A21 recovery; "no wait cycle" wording; I3a/I4 |
 | B4 — enforce/default gate omits A19–A22 | ADR status note, §7, §10, decision 1, amendment preamble | Gate extended per control (R5→A21, spool→A19, guest→A20, operability→A22) |
 | N1 — unserialized limit publication | No publish serialization or version in the reload path | One serialized, versioned publisher; stale candidates re-prepare or fail; race tests; I2b/I3b |
@@ -128,7 +128,7 @@ A20/A21 rows):
 | N5 — engine-off R5 | Early return in `outcomes.go` | No R5, or release before return; I3a |
 | N6 — sub-page `memory_limit` | `runtime.go:591-595` turns 0 pages into 256 | Reject positive values below 64 KiB; report effective ceiling; I2b |
 | N7 — generation charge owner | — | Tickets record generation; I2b/I3b |
-| N8 — reconciliation/cleanup bounds | — | Startup sweep before admission, fixed cleanup queue, fail closed when full; I3b |
+| N8 — reconciliation/cleanup bounds | — | Startup sweep before admission; fixed cleanup queue; enforce refuses when full, observe keeps debt for a bounded periodic sweep; I3b |
 | N9 — WAF-only `body_timeout` | `schema.go:353`; no H3 deadline forwarding traced | §10 item 4 scoped to plugin routes until I3a proves WAF-only and H3 |
 | N10 — R5 during FIFO wait | — | Waiter cap × `R5_max` in sizing; A18 exercise |
 | N11 — async queue owner | — | Single bounded process-scope queue under R5; deferred refund; I3a |
@@ -138,8 +138,18 @@ A20/A21 rows):
 
 Engine behaviors the reviewer could not verify (whether the pinned `ProcessLogging` writer call is
 synchronous, built-in writer deadlines and `Module.Close` blocking) are explicitly assigned to
-I3a/I2b verification rather than assumed. None of these reviews is an implementation test or
-merge approval.
+I3a/I2b verification rather than assumed.
+
+The maintainer's re-review of head `04372313` confirmed these resolutions and requested two
+wording corrections, now incorporated. First, abandoning a hung writer releases the slot when the
+Coraza call returns, but the retained audit charge stays visible until the writer actually
+returns. Likewise, long-lived exchanges release transaction ownership while pending output stays
+charged. A21 now drains counters to baseline only after that real completion. Second, saturation
+of the `abandoned_audit` set and of the spool cleanup queue now has separate per-mode behavior.
+Enforce refuses. Observe admits, records would-refuse decisions and uses a bounded fallback:
+counted audit drops, or retained spool debt with a bounded periodic sweep. Both modes require
+saturation tests. Physical I/O and ownership failures stay fail-closed in both modes. None of
+these reviews is an implementation test.
 
 | Check | Result |
 | --- | --- |
