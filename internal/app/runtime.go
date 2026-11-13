@@ -110,6 +110,7 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 			AuditBytes:           snapshot.Usage[inspection.AuditBytes],
 			AuditAbandonedCalls:  snapshot.AuditOutput.Abandoned,
 			AuditAbandonedBytes:  snapshot.AuditOutput.AbandonedBytes,
+			CommittedOverruns:    snapshot.CommittedOverruns,
 			MaxBytes:             snapshot.Limits.MaxBytes,
 			ActiveLeases:         snapshot.ActiveLeases,
 			ActiveEvaluations:    snapshot.ActiveEvaluations,

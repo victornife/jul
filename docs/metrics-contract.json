@@ -350,7 +350,7 @@
     {
       "name": "jul_inspection_audit_drops_total",
       "type": "counter",
-      "help": "WAF audit records not handed to their writer because the bounded audit-output set was full.",
+      "help": "WAF audit records not handed to their writer: the bounded audit-output set was full (abandoned_full) or the record's R5 charge was refused (budget).",
       "labels": [
         "reason"
       ],
@@ -379,6 +379,13 @@
       "name": "jul_inspection_bytes_limit",
       "type": "gauge",
       "help": "Configured process-wide inspection byte ceiling.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_committed_overruns_total",
+      "type": "counter",
+      "help": "Non-refusable inspection charges (already-admitted work whose inputs outgrew their reservation) that exceeded the byte ceiling.",
       "labels": [],
       "state": "merged_release_pending"
     },
@@ -893,7 +900,7 @@
     {
       "name": "jul_waf_transactions_total",
       "type": "counter",
-      "help": "Web-application-firewall inspected HTTP transactions, labeled by policy mode (block/detect) and final outcome (clean/matched_observed/interrupted_request/interrupted_response/rejected_body_limit/inspection_error).",
+      "help": "Web-application-firewall inspected HTTP transactions, labeled by policy mode (block/detect) and final outcome (clean/matched_observed/interrupted_request/interrupted_response/rejected_body_limit/inspection_error/inspection_refused).",
       "labels": [
         "mode",
         "outcome"

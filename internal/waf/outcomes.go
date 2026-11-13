@@ -7,6 +7,7 @@ package waf
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/corazawaf/coraza/v3/experimental"
@@ -197,6 +200,22 @@ type bodyReadCloser struct {
 	io.Closer
 }
 
+// txBodyReader reads the transaction's inspected body buffer and records
+// when it is drained: until then the buffer is still the transaction's, so
+// ownership cannot end at a hijack.
+type txBodyReader struct {
+	r       io.Reader
+	drained atomic.Bool
+}
+
+func (t *txBodyReader) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if err == io.EOF {
+		t.drained.Store(true)
+	}
+	return n, err
+}
+
 func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.Handler, route RouteAttribution, genFn func() uint64) {
 	startTime := time.Now().UTC()
 	// Strip any client- or outer-supplied WAF event header so only a genuine
@@ -204,11 +223,20 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	r.Header.Del(HeaderWAFEvent)
 	w.Header().Del(HeaderWAFEvent)
 
-	tx := f.newTransaction(r)
-	if tx.IsRuleEngineOff() {
-		_ = tx.Close()
-		next.ServeHTTP(w, r)
+	// Admission (lease reuse or creation, R5) precedes the transaction:
+	// once it exists, phase 5 can no longer be refused (ADR 0032 R5).
+	a, r, admitted, ok := f.admit(w, r)
+	if !ok {
 		return
+	}
+	endLease := sync.OnceFunc(admitted)
+	defer endLease()
+
+	tx := f.newTransaction(r)
+	if a.governed() && f.audit.writer.hasOutput() {
+		a.txID = tx.ID()
+		a.audit = &auditTxCtx{gov: a.gov, lease: a.lease}
+		auditCtxs.Store(a.txID, a.audit)
 	}
 
 	var (
@@ -222,6 +250,7 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		partialResponseDelivered bool
 		hijacked                 bool
 		responseInterrupted      bool
+		ic                       *wafResponseInterceptor
 		phases                   = make([]string, 0, 5)
 	)
 
@@ -243,100 +272,141 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		supportHeaderEmitted = true
 	}
 
-	defer func() {
-		addPhase("logging")
-		tx.ProcessLogging()
+	// refuse answers a governor refusal or body-arrival failure after the
+	// transaction exists; phase 5 still runs in the deferred logging.
+	refuse := func(err error) {
+		outcome = OutcomeInspectionRefused
+		errorCategory, clientStatus = refusal(err)
+		writeAdmissionError(w, r, err)
+	}
 
-		it := tx.Interruption()
-		detIt := detectionOnlyInterruption(tx)
-		rules, totalMatched, matchesTruncated := extractMatchedRules(tx.MatchedRules(), it, detIt)
-
-		wouldInterrupt := false
-		interruptedAction := ""
-		interruptedRuleID := 0
-		if it != nil {
-			wouldInterrupt = true
-			interruptedAction = it.Action
-			interruptedRuleID = it.RuleID
-		} else if detIt != nil {
-			wouldInterrupt = true
-			interruptedAction = detIt.Action
-			interruptedRuleID = detIt.RuleID
+	// collect copies the response interceptor's observations.
+	collect := func() {
+		originStatus = ic.originStatus
+		clientStatus = ic.flushedStatus
+		if clientStatus == 0 {
+			clientStatus = ic.statusCode
 		}
+		partialResponseDelivered = ic.partialDelivered && (ic.responseInterrupted || ic.errCategory != "")
+		hijacked = ic.isHijacked
+		responseInterrupted = ic.responseInterrupted
+		if ic.errCategory != "" && errorCategory == "" {
+			errorCategory = ic.errCategory
+		}
+	}
 
-		if outcome == "" {
-			switch {
-			case responseInterrupted:
-				if isBodyLimitInterruption(it) {
-					outcome = OutcomeRejectedBodyLimit
-					if errorCategory == "" {
-						errorCategory = "response_body_limit"
+	// finish runs phase 5, records the outcome and ends transaction
+	// ownership. It runs once: at a hijack commit point or on return.
+	var finishOnce sync.Once
+	var committed atomic.Bool
+	var txBody *txBodyReader
+	finish := func() {
+		finishOnce.Do(func() {
+			addPhase("logging")
+			status := clientStatus
+			if it := tx.Interruption(); it != nil {
+				status = it.Status
+			}
+			f.prepareAudit(tx, a, w.Header(), ic, status)
+			endLogging := a.logging()
+			tx.ProcessLogging()
+			endLogging()
+
+			it := tx.Interruption()
+			detIt := detectionOnlyInterruption(tx)
+			rules, totalMatched, matchesTruncated := extractMatchedRules(tx.MatchedRules(), it, detIt)
+
+			wouldInterrupt := false
+			interruptedAction := ""
+			interruptedRuleID := 0
+			if it != nil {
+				wouldInterrupt = true
+				interruptedAction = it.Action
+				interruptedRuleID = it.RuleID
+			} else if detIt != nil {
+				wouldInterrupt = true
+				interruptedAction = detIt.Action
+				interruptedRuleID = detIt.RuleID
+			}
+
+			if outcome == "" {
+				switch {
+				case responseInterrupted:
+					if isBodyLimitInterruption(it) {
+						outcome = OutcomeRejectedBodyLimit
+						if errorCategory == "" {
+							errorCategory = "response_body_limit"
+						}
+					} else {
+						outcome = OutcomeInterruptedResponse
 					}
-				} else {
-					outcome = OutcomeInterruptedResponse
+				case errorCategory != "":
+					outcome = OutcomeInspectionError
+				case totalMatched > 0 || detIt != nil:
+					outcome = OutcomeMatchedObserved
+				default:
+					outcome = OutcomeClean
 				}
-			case errorCategory != "":
-				outcome = OutcomeInspectionError
-			case totalMatched > 0 || detIt != nil:
-				outcome = OutcomeMatchedObserved
-			default:
-				outcome = OutcomeClean
 			}
-		}
 
-		if f.opts.Hooks.OnTransaction != nil {
-			f.opts.Hooks.OnTransaction(f.info.Mode, outcome)
-		}
+			if f.opts.Hooks.OnTransaction != nil {
+				f.opts.Hooks.OnTransaction(f.info.Mode, outcome)
+			}
 
-		if outcome != OutcomeClean && f.opts.Investigation != nil && f.opts.Investigation.Enabled() {
-			if eventID == "" {
-				eventID = f.opts.Investigation.NewEventID()
+			if outcome != OutcomeClean && f.opts.Investigation != nil && f.opts.Investigation.Enabled() {
+				if eventID == "" {
+					eventID = f.opts.Investigation.NewEventID()
+				}
+				var genID uint64
+				if genFn != nil {
+					genID = genFn()
+				}
+				ev := TransactionEvent{
+					EventID:                  eventID,
+					Time:                     startTime,
+					Outcome:                  outcome,
+					Mode:                     f.info.Mode,
+					WouldInterrupt:           wouldInterrupt,
+					InterruptedAction:        interruptedAction,
+					InterruptedRuleID:        interruptedRuleID,
+					ClientStatus:             clientStatus,
+					OriginReached:            originReached,
+					OriginStatus:             originStatus,
+					PartialResponseDelivered: partialResponseDelivered,
+					Hijacked:                 hijacked,
+					PhasesEvaluated:          phases,
+					Method:                   r.Method,
+					Host:                     resolveTransactionHost(r, route),
+					Path:                     r.URL.Path,
+					QueryOmitted:             r.URL.RawQuery != "" || r.URL.Fragment != "",
+					Route:                    route,
+					Generation:               genID,
+					PolicyDigest:             f.info.PolicyDigest,
+					ExternalDigest:           f.info.ExternalDigest,
+					CRSVersion:               f.info.CRSVersion,
+					Paranoia:                 f.info.Paranoia,
+					MatchedRules:             rules,
+					TotalMatchedRules:        totalMatched,
+					MatchesTruncated:         matchesTruncated,
+					SupportHeaderEmitted:     supportHeaderEmitted,
+					RequestIDHint:            middleware.RequestIDFrom(r.Context()),
+					TraceIDHint:              middleware.TraceIDFrom(r.Context()),
+					ErrorCategory:            errorCategory,
+				}
+				if res, ok := f.opts.Investigation.Record(ev); ok && f.opts.Hooks.OnInvestigationEvent != nil {
+					f.opts.Hooks.OnInvestigationEvent(res)
+				}
 			}
-			var genID uint64
-			if genFn != nil {
-				genID = genFn()
-			}
-			ev := TransactionEvent{
-				EventID:                  eventID,
-				Time:                     startTime,
-				Outcome:                  outcome,
-				Mode:                     f.info.Mode,
-				WouldInterrupt:           wouldInterrupt,
-				InterruptedAction:        interruptedAction,
-				InterruptedRuleID:        interruptedRuleID,
-				ClientStatus:             clientStatus,
-				OriginReached:            originReached,
-				OriginStatus:             originStatus,
-				PartialResponseDelivered: partialResponseDelivered,
-				Hijacked:                 hijacked,
-				PhasesEvaluated:          phases,
-				Method:                   r.Method,
-				Host:                     resolveTransactionHost(r, route),
-				Path:                     r.URL.Path,
-				QueryOmitted:             r.URL.RawQuery != "" || r.URL.Fragment != "",
-				Route:                    route,
-				Generation:               genID,
-				PolicyDigest:             f.info.PolicyDigest,
-				ExternalDigest:           f.info.ExternalDigest,
-				CRSVersion:               f.info.CRSVersion,
-				Paranoia:                 f.info.Paranoia,
-				MatchedRules:             rules,
-				TotalMatchedRules:        totalMatched,
-				MatchesTruncated:         matchesTruncated,
-				SupportHeaderEmitted:     supportHeaderEmitted,
-				RequestIDHint:            middleware.RequestIDFrom(r.Context()),
-				TraceIDHint:              middleware.TraceIDFrom(r.Context()),
-				ErrorCategory:            errorCategory,
-			}
-			if res, ok := f.opts.Investigation.Record(ev); ok && f.opts.Hooks.OnInvestigationEvent != nil {
-				f.opts.Hooks.OnInvestigationEvent(res)
-			}
-		}
 
-		_ = tx.Close()
-	}()
+			_ = tx.Close()
+			// Only now is the transaction state unreachable.
+			a.release()
+		})
+	}
+	defer finish()
 
-	// Phase 1: connection, URI, request headers.
+	// Phase 1: connection, URI, request headers. ProcessURI parses ARGS_GET,
+	// so the slot and R1 are taken before it and held through phase 1.
 	addPhase("request_headers")
 	var client string
 	var cport int
@@ -344,22 +414,37 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		client = r.RemoteAddr[:idx]
 		cport, _ = strconv.Atoi(r.RemoteAddr[idx+1:])
 	}
-	tx.ProcessConnection(client, cport, "", 0)
-	tx.ProcessURI(requestTargetURI(r), r.Method, r.Proto)
-	for k, vr := range r.Header {
-		for _, v := range vr {
-			tx.AddRequestHeader(k, v)
+	uri := requestTargetURI(r)
+	var h uint64
+	a.reqHeaderCount, a.reqHeaderBytes, h = requestHeaderShape(r, uri)
+	a.uri, a.host, a.client = len(uri), len(r.Host), len(client)
+	r1Worst := r1Estimate(min(f.argumentLimit(), queryPairs(r.URL.RawQuery)), h)
+	var phase1 *types.Interruption
+	if err := a.evaluate(a.drained, func() error { return a.reserveState(&a.r1, &a.r1Amount, r1Worst) }, func() {
+		tx.ProcessConnection(client, cport, "", 0)
+		tx.ProcessURI(uri, r.Method, r.Proto)
+		for k, vr := range r.Header {
+			for _, v := range vr {
+				tx.AddRequestHeader(k, v)
+			}
 		}
+		if r.Host != "" {
+			tx.AddRequestHeader("Host", r.Host)
+			tx.SetServerName(r.Host)
+		}
+		for _, te := range r.TransferEncoding {
+			tx.AddRequestHeader("Transfer-Encoding", te)
+		}
+		phase1 = tx.ProcessRequestHeaders()
+	}); err != nil {
+		refuse(err)
+		return
 	}
-	if r.Host != "" {
-		tx.AddRequestHeader("Host", r.Host)
-		tx.SetServerName(r.Host)
-	}
-	for _, te := range r.TransferEncoding {
-		tx.AddRequestHeader("Transfer-Encoding", te)
+	if n, ok := argsHeld(tx, true); ok {
+		a.trueDown(a.r1, &a.r1Amount, r1Estimate(n, h))
 	}
 
-	if it := tx.ProcessRequestHeaders(); it != nil {
+	if it := phase1; it != nil {
 		outcome = OutcomeInterruptedRequest
 		clientStatus = interruptionStatus(it, f.info.BlockStatus)
 		mintSupportHeader(w.Header())
@@ -367,12 +452,23 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		return
 	}
 
-	// Phase 2: request body buffering and inspection.
+	// Phase 2: request body buffering and inspection. Jul's read loop
+	// replaces ReadRequestBodyFrom so no slot is held while reading the
+	// network (ADR 0032 §3).
 	addPhase("request_body")
-	if tx.IsRequestBodyAccessible() && r.Body != nil && r.Body != http.NoBody {
+	phase2 := false
+	// A phase-1 ctl:ruleEngine=Off makes Coraza ignore body writes, so the
+	// body is forwarded untouched, as ReadRequestBodyFrom did.
+	if tx.IsRequestBodyAccessible() && !tx.IsRuleEngineOff() && r.Body != nil && r.Body != http.NoBody {
 		origBody := r.Body
-		it, _, err := tx.ReadRequestBodyFrom(origBody)
-		if err != nil {
+		res, ran := f.readRequestBody(w, r, tx, a)
+		phase2 = ran
+		a.bodyBytes = uint64(max(res.written, 0))
+		if res.admission != nil {
+			refuse(res.admission)
+			return
+		}
+		if err := errors.Join(res.readErr, res.writeErr); err != nil {
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
 				outcome = OutcomeRejectedBodyLimit
@@ -387,7 +483,7 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			w.WriteHeader(clientStatus)
 			return
 		}
-		if it != nil {
+		if it := res.it; it != nil {
 			if isBodyLimitInterruption(it) {
 				outcome = OutcomeRejectedBodyLimit
 				errorCategory = "request_body_limit"
@@ -408,13 +504,34 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			w.WriteHeader(clientStatus)
 			return
 		}
-		r.Body = bodyReadCloser{
-			Reader: io.MultiReader(rbr, origBody),
-			Closer: origBody,
+		txBody = &txBodyReader{r: rbr}
+		body := io.MultiReader(txBody, origBody)
+		if len(res.leftover) > 0 {
+			body = io.MultiReader(txBody, bytes.NewReader(res.leftover), origBody)
 		}
+		r.Body = bodyReadCloser{Reader: body, Closer: origBody}
 	}
 
-	it, err := tx.ProcessRequestBody()
+	var (
+		it  *types.Interruption
+		err error
+	)
+	if phase2 {
+		// Phase 2 already ran inside the write that reached the limit;
+		// this call returns without evaluating.
+		it, err = tx.ProcessRequestBody()
+	} else {
+		r2Worst := r2Estimate(f.argumentLimit(), a.bodyBytes)
+		if aerr := a.evaluate(a.drained, func() error { return a.reserveState(&a.r2, &a.r2Amount, r2Worst) }, func() {
+			it, err = tx.ProcessRequestBody()
+		}); aerr != nil {
+			refuse(aerr)
+			return
+		}
+	}
+	if n, ok := argsHeld(tx, false); ok {
+		a.trueDown(a.r2, &a.r2Amount, r2Estimate(n, a.bodyBytes))
+	}
 	if err != nil && it == nil {
 		outcome = OutcomeInspectionError
 		errorCategory = "request_body_process_error"
@@ -441,21 +558,29 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 
 	// Request passed WAF phases 1 & 2; invoke the inner handler / origin.
 	originReached = true
-	ic, wrappedWriter := newWAFResponseInterceptor(w, r, tx, f.info.BlockStatus, addPhase, mintSupportHeader)
+	var wrappedWriter http.ResponseWriter
+	ic, wrappedWriter = newWAFResponseInterceptor(w, r, tx, f.info.BlockStatus, addPhase, mintSupportHeader)
+	// A hijack commits the exchange: Jul stops inspecting it, so phase 5
+	// runs and transaction ownership ends there rather than lasting for the
+	// life of the connection (ADR 0032, long-lived exchanges).
+	// An undrained inspected body still reads the transaction's buffer, so
+	// that (rare) hijack keeps ownership until the handler returns.
+	ic.onCommit = func() bool {
+		if txBody != nil && !txBody.drained.Load() {
+			return false
+		}
+		committed.Store(true)
+		collect()
+		finish()
+		endLease()
+		return true
+	}
 	next.ServeHTTP(wrappedWriter, r)
+	if committed.Load() {
+		return
+	}
 	_ = ic.finishResponse()
-
-	originStatus = ic.originStatus
-	clientStatus = ic.flushedStatus
-	if clientStatus == 0 {
-		clientStatus = ic.statusCode
-	}
-	partialResponseDelivered = ic.partialDelivered && (ic.responseInterrupted || ic.errCategory != "")
-	hijacked = ic.isHijacked
-	responseInterrupted = ic.responseInterrupted
-	if ic.errCategory != "" && errorCategory == "" {
-		errorCategory = ic.errCategory
-	}
+	collect()
 }
 
 func resolveTransactionHost(r *http.Request, route RouteAttribution) string {
@@ -493,6 +618,9 @@ func (h *wafHijackerTracker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return conn, rw, err
 	}
 	h.interceptor.isHijacked = true
+	if h.interceptor.onCommit != nil && h.interceptor.onCommit() {
+		h.interceptor.committed = true
+	}
 	return conn, rw, nil
 }
 
@@ -514,6 +642,12 @@ type wafResponseInterceptor struct {
 	allowFlushing                 bool
 	responseInterrupted           bool
 	errCategory                   string
+	// respBodyBytes counts response bytes handed to Coraza (audit part E).
+	respBodyBytes uint64
+	// onCommit ends transaction ownership at a hijack; once committed the
+	// transaction is closed (and may be pooled), so it is never touched.
+	onCommit  func() bool
+	committed bool
 }
 
 type wafWrappedResponseWriter interface {
@@ -575,6 +709,10 @@ func (i *wafResponseInterceptor) Header() http.Header {
 }
 
 func (i *wafResponseInterceptor) WriteHeader(statusCode int) {
+	if i.committed {
+		i.w.WriteHeader(statusCode)
+		return
+	}
 	if i.wroteHeader {
 		return
 	}
@@ -621,6 +759,9 @@ func (i *wafResponseInterceptor) WriteHeader(statusCode int) {
 }
 
 func (i *wafResponseInterceptor) Write(b []byte) (int, error) {
+	if i.committed {
+		return i.w.Write(b)
+	}
 	if i.tx.IsInterrupted() {
 		return len(b), nil
 	}
@@ -634,6 +775,9 @@ func (i *wafResponseInterceptor) Write(b []byte) (int, error) {
 	if i.tx.IsResponseBodyAccessible() && i.tx.IsResponseBodyProcessable() && !i.wroteBufferedBodyToDownstream {
 		i.addPhase("response_body")
 		it, n, err := i.tx.WriteResponseBody(b)
+		if n > 0 {
+			i.respBodyBytes += uint64(n)
+		}
 		if it != nil {
 			i.responseInterrupted = true
 			i.cleanHeaders()
@@ -689,6 +833,9 @@ func (i *wafResponseInterceptor) SupportsReadDeadline() bool {
 }
 
 func (i *wafResponseInterceptor) Flush() {
+	if i.committed {
+		return
+	}
 	if !i.wroteHeader {
 		i.WriteHeader(http.StatusOK)
 	}

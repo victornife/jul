@@ -19,6 +19,7 @@ type InspectionMetricsSnapshot struct {
 	AbandonedEvaluations                  uint64
 	AuditAbandonedCalls                   uint64
 	AuditAbandonedBytes                   uint64
+	CommittedOverruns                     uint64
 }
 
 type inspectionCollector struct {
@@ -35,6 +36,7 @@ type inspectionCollector struct {
 	abandoned        prometheus.Gauge
 	auditDrops       *prometheus.CounterVec
 	auditAbandoned   *prometheus.GaugeVec
+	committedOverrun *prometheus.Desc
 }
 
 func newInspectionCollector() *inspectionCollector {
@@ -77,12 +79,14 @@ func newInspectionCollector() *inspectionCollector {
 		}),
 		auditDrops: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_inspection_audit_drops_total",
-			Help: "WAF audit records not handed to their writer because the bounded audit-output set was full.",
+			Help: "WAF audit records not handed to their writer: the bounded audit-output set was full (abandoned_full) or the record's R5 charge was refused (budget).",
 		}, []string{"reason"}),
 		auditAbandoned: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_inspection_audit_abandoned",
 			Help: "WAF audit writer calls abandoned at their deadline that have not returned, and their record bytes still charged under the audit class.",
 		}, []string{"measure"}),
+		committedOverrun: prometheus.NewDesc("jul_inspection_committed_overruns_total",
+			"Non-refusable inspection charges (already-admitted work whose inputs outgrew their reservation) that exceeded the byte ceiling.", nil, nil),
 	}
 	for _, class := range []string{"base", "buffer", "waf_state", "audit"} {
 		c.bytes.WithLabelValues(class)
@@ -95,7 +99,9 @@ func newInspectionCollector() *inspectionCollector {
 			c.rejections.WithLabelValues(reason, mode)
 		}
 	}
-	c.auditDrops.WithLabelValues("abandoned_full")
+	for _, reason := range []string{"abandoned_full", "budget"} {
+		c.auditDrops.WithLabelValues(reason)
+	}
 	for _, measure := range []string{"calls", "bytes"} {
 		c.auditAbandoned.WithLabelValues(measure)
 	}
@@ -119,9 +125,11 @@ func (c *inspectionCollector) Describe(ch chan<- *prometheus.Desc) {
 	c.abandoned.Describe(ch)
 	c.auditDrops.Describe(ch)
 	c.auditAbandoned.Describe(ch)
+	ch <- c.committedOverrun
 }
 
 func (c *inspectionCollector) Collect(ch chan<- prometheus.Metric) {
+	var overruns uint64
 	if source := c.source.Load(); source != nil && *source != nil {
 		s := (*source)()
 		c.bytes.WithLabelValues("base").Set(float64(s.BaseBytes))
@@ -136,7 +144,9 @@ func (c *inspectionCollector) Collect(ch chan<- prometheus.Metric) {
 		c.evaluations.WithLabelValues("waiting").Set(float64(s.WaitingEvaluations))
 		c.evaluationsLimit.Set(float64(s.EvaluationLimit))
 		c.abandoned.Set(float64(s.AbandonedEvaluations))
+		overruns = s.CommittedOverruns
 	}
+	ch <- prometheus.MustNewConstMetric(c.committedOverrun, prometheus.CounterValue, float64(overruns))
 	c.bytes.Collect(ch)
 	c.bytesLimit.Collect(ch)
 	c.leases.Collect(ch)
@@ -177,7 +187,7 @@ func (m *Metrics) ObserveInspectionBodyTimeout(protocol, result string) {
 }
 
 func (m *Metrics) ObserveInspectionAuditDrop(reason string) {
-	if m != nil && m.inspection != nil && reason == "abandoned_full" {
+	if m != nil && m.inspection != nil && (reason == "abandoned_full" || reason == "budget") {
 		m.inspection.auditDrops.WithLabelValues(reason).Inc()
 	}
 }

@@ -18,6 +18,16 @@ import (
 const (
 	// WAFStateBaseBytes is the fixed per-transaction term of R1.
 	WAFStateBaseBytes uint64 = 64 << 10
+	// WAFR5FixedBytes is the fixed R5 charge held from before transaction
+	// creation through phase 5: ProcessLogging's own rule evaluation and
+	// bookkeeping (about 8 KiB measured with CRS and the audit engine off).
+	// The audit record itself is charged separately before it is built and
+	// is droppable, so it is not part of the route minimum.
+	WAFR5FixedBytes uint64 = 64 << 10
+	// WAFReadBufferBytes caps the scratch buffer of Jul's WAF request-body
+	// read loop, which replaces Coraza's ReadRequestBodyFrom and coexists
+	// with the buffered body while the upload arrives.
+	WAFReadBufferBytes uint64 = 32 << 10
 	// WAFArgumentBytes is the per-argument term of R1, R2 and R4.
 	WAFArgumentBytes uint64 = 56 << 10
 	// WAFByteFactor multiplies header, body and response bytes in R1–R4.
@@ -225,6 +235,7 @@ func RouteMinimum(route RouteFacts, baseBytes, maxResponseHeaderBytes uint64) (R
 			return overflow("WAF limits")
 		}
 		s.add("WAF request buffer", reqBuf)
+		s.add("WAF request read buffer", min(WAFReadBufferBytes, w.RequestBodyLimit))
 		s.add("WAF R1 (headers, ARGS_GET)", WAFStateBaseBytes)
 		s.add("WAF R1 (headers, ARGS_GET)", args)
 		s.add("WAF R1 (headers, ARGS_GET)", r1h)
@@ -237,6 +248,7 @@ func RouteMinimum(route RouteFacts, baseBytes, maxResponseHeaderBytes uint64) (R
 		s.add("WAF R4 (response body, ResponseArgs)", args)
 		s.add("WAF R4 (response body, ResponseArgs)", r4b)
 		s.add("WAF response buffer", respBuf)
+		s.add("WAF R5 (phase-5 logging, fixed)", WAFR5FixedBytes)
 	}
 	if !s.ok {
 		return overflow("route chain")

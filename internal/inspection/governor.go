@@ -136,8 +136,8 @@ type Hooks struct {
 	// protocol h1, h2 or h3; result timeout, would_timeout or unsupported.
 	OnBodyTimeout func(protocol, result string)
 	// OnAuditDrop receives an audit record that was not handed to its
-	// writer because the bounded audit-output set was full; reason is
-	// AuditDropAbandonedFull.
+	// writer: AuditDropAbandonedFull when the bounded audit-output set was
+	// full, AuditDropBudget when its R5 record charge was refused.
 	OnAuditDrop func(reason string)
 }
 
@@ -153,6 +153,8 @@ type Governor struct {
 	rejections [rejectionReasons][2]uint64
 	abandoned  uint64
 	unslotted  uint64
+	// committedOverruns counts committed charges that exceeded the ceiling.
+	committedOverruns uint64
 
 	audit auditOutput
 }
@@ -210,6 +212,9 @@ type Snapshot struct {
 	// AuditOutput is the bounded audit-output set: writes in flight, writes
 	// abandoned at their deadline and still charged, and dropped records.
 	AuditOutput AuditOutputSnapshot
+	// CommittedOverruns counts non-refusable charges (ChargeCommitted) that
+	// exceeded the ceiling.
+	CommittedOverruns uint64
 }
 
 func (g *Governor) Snapshot() Snapshot {
@@ -226,6 +231,7 @@ func (g *Governor) Snapshot() Snapshot {
 		UnslottedLogging:     g.unslotted,
 		Rejections:           g.rejections,
 		AuditOutput:          g.auditSnapshotLocked(),
+		CommittedOverruns:    g.committedOverruns,
 	}
 }
 
@@ -343,6 +349,20 @@ func (l *Lease) detachLocked(c *Charge) {
 // remain held while a replacement allocation is built; release the old charge
 // only after references to that allocation have been dropped.
 func (l *Lease) Charge(class ByteClass, amount uint64) (*Charge, error) {
+	return l.charge(class, amount, false)
+}
+
+// ChargeCommitted records bytes whose allocation can no longer be refused,
+// because the work that allocates them has already been admitted and must
+// run (for example an audit record whose phase-5 inputs grew after its
+// estimate was reserved). It never refuses: in both modes the bytes are
+// charged, and an amount beyond the ceiling counts a committed overrun
+// rather than a rejection, so the debt stays visible until released.
+func (l *Lease) ChargeCommitted(class ByteClass, amount uint64) (*Charge, error) {
+	return l.charge(class, amount, true)
+}
+
+func (l *Lease) charge(class ByteClass, amount uint64, committed bool) (*Charge, error) {
 	if l == nil || l.g == nil || class >= byteClassCount || class == BaseBytes {
 		return nil, &AdmissionError{Outcome: InvalidAccounting}
 	}
@@ -354,6 +374,19 @@ func (l *Lease) Charge(class ByteClass, amount uint64) (*Charge, error) {
 	}
 	wouldExceed := amount > 0 && !g.canChargeLocked(amount)
 	reason := class.saturation()
+	if committed && wouldExceed {
+		if !addTo(&g.usage[class], amount) {
+			g.mu.Unlock()
+			return nil, &AdmissionError{Outcome: InvalidAccounting}
+		}
+		if g.committedOverruns < math.MaxUint64 {
+			g.committedOverruns++
+		}
+		charge := &Charge{lease: l, class: class, amount: amount}
+		l.attachLocked(charge)
+		g.mu.Unlock()
+		return charge, nil
+	}
 	if g.limits.Mode == Enforce && wouldExceed {
 		g.noteRejectionLocked(reason)
 		hook := g.hooks.OnRejection

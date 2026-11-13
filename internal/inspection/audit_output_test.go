@@ -138,3 +138,48 @@ func TestAuditOutputByteBound(t *testing.T) {
 	}
 	half.Finish()
 }
+
+func TestChargeCommittedNeverRefusesAndCountsOverrun(t *testing.T) {
+	for _, mode := range []Mode{Enforce, Observe} {
+		t.Run(string(mode), func(t *testing.T) {
+			var rejections int
+			g := newTestGovernor(t, testLimits(mode, 1, 0, 1000, 1), Hooks{
+				OnRejection: func(Outcome, Mode) { rejections++ },
+			})
+			lease := acquireTestLease(t, g)
+			c, err := lease.ChargeCommitted(AuditBytes, 5000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snap := g.Snapshot()
+			if snap.Usage[AuditBytes] != 5000 || snap.CommittedOverruns != 1 || rejections != 0 {
+				t.Fatalf("usage=%d overruns=%d rejections=%d", snap.Usage[AuditBytes], snap.CommittedOverruns, rejections)
+			}
+			if _, err := lease.ChargeCommitted(AuditBytes, 0); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Release(); err != nil {
+				t.Fatal(err)
+			}
+			if err := lease.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if snap := g.Snapshot(); snap.Usage[AuditBytes] != 0 || snap.CommittedOverruns != 1 {
+				t.Fatalf("after release: usage=%d overruns=%d", snap.Usage[AuditBytes], snap.CommittedOverruns)
+			}
+		})
+	}
+}
+
+func TestNoteAuditDropBudget(t *testing.T) {
+	var reasons []string
+	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 4<<20, 1), Hooks{
+		OnAuditDrop: func(r string) { reasons = append(reasons, r) },
+	})
+	g.NoteAuditDrop(AuditDropBudget)
+	var nilGov *Governor
+	nilGov.NoteAuditDrop(AuditDropBudget)
+	if snap := g.Snapshot(); snap.AuditOutput.Drops != 1 || len(reasons) != 1 || reasons[0] != AuditDropBudget {
+		t.Fatalf("drops=%d reasons=%v", snap.AuditOutput.Drops, reasons)
+	}
+}

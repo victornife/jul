@@ -57,6 +57,10 @@ func (b *preparedBody) WriteTo(w io.Writer) (int64, error) { return b.rd.WriteTo
 
 func (b *preparedBody) Close() error { return b.orig.Close() }
 
+// InspectionPrepared reports that the network body was read completely, so
+// an inner inspecting layer (the WAF) may wait for an evaluation slot.
+func (b *preparedBody) InspectionPrepared() bool { return true }
+
 // unread reports that nothing has consumed the replay yet, so a later plugin
 // in the chain can use data as the complete body without copying it.
 func (b *preparedBody) unread() bool { return b.rd.Len() == len(b.data) }

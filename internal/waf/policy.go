@@ -36,6 +36,10 @@ const (
 	OutcomeInterruptedResponse = "interrupted_response"
 	OutcomeRejectedBodyLimit   = "rejected_body_limit"
 	OutcomeInspectionError     = "inspection_error"
+	// OutcomeInspectionRefused: the inspection governor refused the
+	// transaction after it was created (overload 503, body-arrival
+	// timeout 408, unsupported deadline 500).
+	OutcomeInspectionRefused = "inspection_refused"
 )
 
 // Closed investigation-buffer collection outcomes (#632-A, ADR 0031 §5.1).

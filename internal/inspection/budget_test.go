@@ -82,11 +82,13 @@ func TestRouteMinimumWAFTerms(t *testing.T) {
 	args := WAFArgumentBytes * 1000
 	want := BaseChargeBytes +
 		2*(128<<10) + // request buffer, in-memory limit
+		WAFReadBufferBytes + // Jul's read-loop scratch buffer
 		WAFStateBaseBytes + args + 48*(1<<20+4096) + // R1
 		args + 48*(128<<10) + // R2 uses B_total = request body limit
 		48*testHeaderCeiling + // R3
 		args + 48*(512<<10) + // R4
-		2*(512<<10) // response buffer
+		2*(512<<10) + // response buffer
+		WAFR5FixedBytes // R5 fixed
 	if req.Bytes != want {
 		t.Fatalf("WAF route = %d, want %d (%s)", req.Bytes, want, req.Describe())
 	}

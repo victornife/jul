@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"mime"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -61,6 +62,10 @@ type Firewall struct {
 	assets      []ExternalAssetRecord
 	facts       inspection.WAFFacts
 	closed      *atomic.Bool
+	// state is the compiled engine configuration the request path sizes
+	// reservations and its read loop from.
+	state engineState
+	audit auditConfig
 }
 
 // New builds a Firewall from a WAF policy. It assembles the SecLang directive
@@ -127,6 +132,26 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		_ = closeWAF(w)
 		return nil, err
 	}
+	// Audit part J resolves MIME types; load Go's process-wide table now
+	// rather than inside a governed record's construction.
+	_ = mime.TypeByExtension(".txt")
+	audit, err := compiledAuditConfig(w)
+	if err != nil && opts.Governor != nil {
+		_ = closeWAF(w)
+		return nil, err
+	}
+	probe := w.NewTransaction()
+	if _, ok := innerTx(probe); !ok && opts.Governor != nil {
+		_ = probe.Close()
+		_ = closeWAF(w)
+		return nil, fmt.Errorf("waf: incompatible coraza transaction layout (%T)", probe)
+	}
+	if _, err := readTxAuditState(probe); err != nil && opts.Governor != nil {
+		_ = probe.Close()
+		_ = closeWAF(w)
+		return nil, err
+	}
+	_ = probe.Close()
 	// Wrap the engine so rules see Jul's canonical client address rather than
 	// Coraza's own parse of RemoteAddr (see clientaddr.go).
 	state.argumentLimitGuard = cfg.CRSEnabled && activeRuleIDs[config.WAFArgumentLimitGuardRuleID]
@@ -141,6 +166,8 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		policySum:   polSum,
 		assets:      rec.externalAssets(),
 		closed:      &atomic.Bool{},
+		state:       state,
+		audit:       audit,
 	}, nil
 }
 
@@ -594,6 +621,9 @@ type engineState struct {
 	requestBodyLimit         int64
 	requestBodyInMemoryLimit int64
 	responseBodyLimit        int64
+	// requestBodyLimitReject: SecRequestBodyLimitAction Reject, so a write
+	// that reaches the limit is refused without evaluating phase 2.
+	requestBodyLimitReject bool
 }
 
 // compiledEngineState reads the authoritative compiled response-body and
@@ -622,6 +652,11 @@ func compiledEngineState(w coraza.WAF) (engineState, error) {
 		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing body-limit settings on %T", w)
 	}
 	st.requestBodyLimit = reqLimit.Int()
+	action := engine.FieldByName("RequestBodyLimitAction")
+	if !action.IsValid() || action.Type() != reflect.TypeOf(types.BodyLimitActionReject) {
+		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing request body limit action on %T", w)
+	}
+	st.requestBodyLimitReject = types.BodyLimitAction(action.Int()) == types.BodyLimitActionReject
 	st.responseBodyLimit = respLimit.Int()
 	if !inMemory.IsNil() {
 		st.requestBodyInMemoryLimit = inMemory.Elem().Int()

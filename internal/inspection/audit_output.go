@@ -14,6 +14,10 @@ const AuditOutputMaxEntries = 64
 // to its writer because the bounded audit-output set was full.
 const AuditDropAbandonedFull = "abandoned_full"
 
+// AuditDropBudget is the drop reason of a record whose R5 construction or
+// formatting charge was refused in enforce mode. Phase-5 rules still ran.
+const AuditDropBudget = "budget"
+
 // auditOutputMinBytes is the floor of the audit-output byte bound.
 const auditOutputMinBytes = 1 << 20
 
@@ -29,7 +33,8 @@ type AuditOutputSnapshot struct {
 	// MaxEntries and MaxBytes are the set's fixed bounds.
 	MaxEntries uint64
 	MaxBytes   uint64
-	// Drops counts records not handed to the writer because the set was full.
+	// Drops counts records not handed to the writer: the set was full, or
+	// the record's R5 charge was refused.
 	Drops uint64
 }
 
@@ -185,4 +190,21 @@ func (w *AuditWrite) Finish() {
 	a.abandoned--
 	a.abandonedBytes -= w.bytes
 	subtractFrom(&g.usage[AuditBytes], w.bytes)
+}
+
+// NoteAuditDrop counts an audit record that is not built or not handed to
+// its writer for reason (AuditDropBudget).
+func (g *Governor) NoteAuditDrop(reason string) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	if g.audit.drops < math.MaxUint64 {
+		g.audit.drops++
+	}
+	hook := g.hooks.OnAuditDrop
+	g.mu.Unlock()
+	if hook != nil {
+		hook(reason)
+	}
 }

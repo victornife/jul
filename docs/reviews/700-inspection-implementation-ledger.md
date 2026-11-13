@@ -12,18 +12,18 @@ qualification, soak or maturity change.
 | --- | --- |
 | Starting `main` | `16d982586ad1c964bda95ff3f5a55dc3b3fedcc0` (verified #714 merge) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
-| Checkpoint 2 | **Active**: I3a WAF request accounting on `feat/700-inspection-waf-i3a`; PR not yet opened |
+| Checkpoint 2 | **In review**: I3a WAF request accounting on `feat/700-inspection-waf-i3a`; see [I3a implementation record](#i3a-implementation-record) |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`) and I2 #710 (`c8bba7f2`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Implement I3a (WAF lease reuse, Jul read loop, slotted calls, R1/R2/R5 reservations), review it independently and open its PR |
+| Exact next action | Merge the I3a PR after green hosted checks, then start I4 (response paths) on a fresh branch |
 
 ## Checkpoint schedule and dependencies
 
 | Checkpoint | Scope / status | Actual prerequisite and next owner |
 | --- | --- | --- |
 | 1 — design | Merged (#714, `16d98258`); amendment accepted | None |
-| 2 — I3a | Active: WAF request accounting, slots, request/audit calibration | Accepted amendment, I1/I2 and a defensible R5 bound/writer ownership; implementation owner |
+| 2 — I3a | In review: WAF request accounting, slots, request/audit calibration | Accepted amendment, I1/I2 and a defensible R5 bound/writer ownership; implementation owner |
 | 3 — I4 | Not started: WAF and plugin response paths, response audit calibration | I3a and the accepted response/header contract; implementation owner |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
 | 5 — I2b | Not started: process-wide per-live-instance guest-capacity admission; #711 | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
@@ -162,6 +162,27 @@ these reviews is an implementation test.
 | `sha256sum -c SHA256SUMS` for this checkpoint and referenced I1/I5/I2 evidence | Passed in the working tree and from a clean worktree; referenced I1/I5/I2 evidence checksums also passed. The final candidate is rechecked before publication. |
 | Full local `go vet ./...`, `go test ./...`, CGO WAF, race and platform lanes | Not run locally or blocked by the Xcode license as recorded above; do not infer hosted results from these local checks. |
 | Hosted checks for PR #714 at code head `e535350b` | 56 successful, two expected website deployment/availability skips, zero failures or pending checks ([run](https://github.com/victornife/jul/actions/runs/43427860229)). The preceding head's coverage-gate failure was fixed by storing standalone probes as `.go.txt`; the gate itself was not changed. |
+
+## I3a implementation record
+
+I3a is described normatively in ADR 0032 "I3a progress". It resolves these design-review items:
+
+| Item | I3a resolution and test |
+| --- | --- |
+| D1 / R5 before the transaction | Fixed R5 reserved before `NewTransaction`; construction estimate reserved (or the audit engine turned off) before `ProcessLogging`. `TestGovernedWAFRefusesBeforeTransaction`, `TestGovernedWAFDropsAuditRecordOverBudget` |
+| D10 / audit aliasing | Jul `serial` writer formats a detached copy; only Native/JSON formatters and this writer are accepted when governed. `TestGovernedWAFAbandonsBlockedAuditWriter` (immutable record after pool reuse), `TestGovernedWAFRejectsUnsupportedAuditWriter` |
+| B2 / long-lived exchanges | An H1 hijack ends transaction ownership and the WAF lease at the commit point; an undrained inspected body keeps it until the handler returns. `TestGovernedWAFHijackEndsTransactionOwnership`. Non-hijack commit points move to I4 |
+| B3 / hung writer | 5 s write deadline; the abandoned write stays charged until it returns. `TestGovernedWAFAbandonsBlockedAuditWriter` |
+| N4 / observe slots | Observe admits on saturation with parity accounting. `TestGovernedWAFSlotSaturation` |
+| N5 / engine off | The dead engine-off early return is removed: Jul always appends `SecRuleEngine On` or `DetectionOnly`; per-transaction `ctl:ruleEngine=Off` still builds the record, so R5 stays |
+| N9 / WAF `body_timeout` | Governed WAF body reads run under the arrival deadline (408; unenforceable → 500). `TestGovernedWAFSlowBodyTimesOut`, H1/H2 cells in `governed_protocol_test.go`. The WAF H3 cell is measured in I6b |
+| N11 / async queue | Not applicable: the only accepted writer is synchronous with charged abandonment |
+| Calibration | `TestWAFReservationsCoverMeasuredAllocation` (Coraza v3.8.1, CRS v4.25.0): retained R1/R2 heap, audit construction and Native/JSON formatting within estimates. Fixed the H-before-K `ErrorLog` bound and the first-use MIME-table allocation |
+
+The new WAF outcome `inspection_refused` is added to the metrics contract, admin filters and
+docs. The route minimum gains the 32 KiB WAF read buffer (default fit 258,654,208 B). Deferred to
+I4: R3/R4, response buffer and calibration, and the non-hijack long-lived commit points. No A1–A22
+acceptance is claimed.
 
 ## Handoff rules
 

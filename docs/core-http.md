@@ -490,7 +490,7 @@ Labels fall into three classes by what bounds them:
 | `jul_security_posture_findings` | `area`, `severity` | fixed (`7 × 2`) |
 | `jul_security_evidence_state` | `producer`, `state` | fixed (`4 × 5`) |
 | `jul_waf_serving_routes` | `state` | fixed (`block`/`detect`/`disabled_override`/`unprotected`) |
-| `jul_waf_transactions_total` | `mode`, `outcome` | fixed (`block`/`detect`) × fixed (`clean`/`matched_observed`/`interrupted_request`/`interrupted_response`/`rejected_body_limit`/`inspection_error`) |
+| `jul_waf_transactions_total` | `mode`, `outcome` | fixed (`block`/`detect`) × fixed (`clean`/`matched_observed`/`interrupted_request`/`interrupted_response`/`rejected_body_limit`/`inspection_error`/`inspection_refused`) |
 | `jul_egress_decisions_total` | `subsystem`, `result`, `reason` | fixed subsystem/result/reason enums |
 | `jul_egress_dns_answers_total` | `subsystem`, `result` | fixed subsystem/result enums |
 | `jul_upstream_backends_healthy` | `pool` | configured pools |
@@ -524,10 +524,10 @@ Labels fall into three classes by what bounds them:
 | `jul_inspection_bytes` | `class` | `base`/`buffer`/`waf_state`/`audit` |
 | `jul_inspection_evaluations` | `state` | `active`/`waiting` |
 | `jul_inspection_rejections_total` | `reason`, `mode` | `bytes`/`waf_state`/`evaluation`/`audit` × `enforce`/`observe` |
-| `jul_inspection_audit_drops_total` | `reason` | `abandoned_full` |
+| `jul_inspection_audit_drops_total` | `reason` | `abandoned_full`, `budget` |
 | `jul_inspection_audit_abandoned` | `measure` | `calls`/`bytes` |
 | `jul_inspection_body_timeouts_total` | `protocol`, `result` | `h1`/`h2`/`h3` × `timeout`/`would_timeout`/`unsupported` |
-| `jul_inspection_leases`, `jul_inspection_bytes_limit`, `jul_inspection_evaluations_limit`, `jul_inspection_unslotted_logging_total`, `jul_inspection_abandoned_evaluations` | — | single series each |
+| `jul_inspection_leases`, `jul_inspection_bytes_limit`, `jul_inspection_evaluations_limit`, `jul_inspection_unslotted_logging_total`, `jul_inspection_abandoned_evaluations`, `jul_inspection_committed_overruns_total` | — | single series each |
 | `jul_listener_conns` | — | single series |
 | `jul_http3_connections` | — | single series |
 | `jul_http3_altsvc_transitions_total` | `to` | `advertise`/`clear` |

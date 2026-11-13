@@ -381,7 +381,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}, []string{"action", "rule"}),
 		wafTransactions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_waf_transactions_total",
-			Help: "Web-application-firewall inspected HTTP transactions, labeled by policy mode (block/detect) and final outcome (clean/matched_observed/interrupted_request/interrupted_response/rejected_body_limit/inspection_error).",
+			Help: "Web-application-firewall inspected HTTP transactions, labeled by policy mode (block/detect) and final outcome (clean/matched_observed/interrupted_request/interrupted_response/rejected_body_limit/inspection_error/inspection_refused).",
 		}, []string{"mode", "outcome"}),
 		wafInvestigationEvents: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_waf_investigation_events_total",
@@ -1063,7 +1063,7 @@ func (m *Metrics) ObserveWAFServingRoutes(blockRoutes, detectRoutes, disabledOve
 		m.wafProtectionChanges.WithLabelValues(tr).Add(0)
 	}
 	for _, mode := range []string{"block", "detect"} {
-		for _, out := range []string{"clean", "matched_observed", "interrupted_request", "interrupted_response", "rejected_body_limit", "inspection_error"} {
+		for _, out := range []string{"clean", "matched_observed", "interrupted_request", "interrupted_response", "rejected_body_limit", "inspection_error", "inspection_refused"} {
 			m.wafTransactions.WithLabelValues(mode, out).Add(0)
 		}
 	}

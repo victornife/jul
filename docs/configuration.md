@@ -199,10 +199,10 @@ behaviour.
 `jul check`, startup, reload and admin apply compute each inspected route's
 worst-case single-request charge from the compiled WAF limits, plugin limits
 and imports, and the listener's `max_header_bytes`. A shortfall names the route
-and its largest terms. The default CRS route needs about 246.6 MiB; with
-otherwise default limits, a WAF `request_body_limit` above about 329 KiB needs a
-larger `max_buffered_bytes` (1 MiB needs about 288.6 MiB), as does a default
-WAF route that also runs a response-generating plugin (about 270.6 MiB). Raise the budget,
+and its largest terms. The default CRS route needs about 246.7 MiB; with
+otherwise default limits, a WAF `request_body_limit` above 327 KiB needs a
+larger `max_buffered_bytes` (1 MiB needs about 288.7 MiB), as does a default
+WAF route that also runs a response-generating plugin (about 270.7 MiB). Raise the budget,
 lower that route's limits, or use `mode = "observe"` while sizing. Actual-size
 R3 reservations remain pending, and the 64 KiB ceiling is a compatibility
 policy default, not an experimentally established optimum. See

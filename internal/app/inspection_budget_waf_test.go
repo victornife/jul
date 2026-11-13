@@ -59,7 +59,7 @@ func TestDefaultWAFRouteFitsDefaultBudget(t *testing.T) {
 	}
 	commit()
 	minimum, route, ok := f.InspectionRequirement(genID)
-	if !ok || minimum != 258555904 || !strings.Contains(route, "servers[0].locations[0]") {
+	if !ok || minimum != 258654208 || !strings.Contains(route, "servers[0].locations[0]") {
 		t.Fatalf("requirement = %d %q %v", minimum, route, ok)
 	}
 	limits, err := inspection.LimitsFromConfig(cfg, 1)
@@ -76,7 +76,7 @@ func TestDefaultWAFRouteFitsDefaultBudget(t *testing.T) {
 // handler build that startup, reload and admin apply share; observe warns.
 func TestWAFRouteAboveDefaultBudget(t *testing.T) {
 	enforce := wafBudgetConfig(t, "enforce", "1m")
-	if _, err := CheckInspectionBudget(context.Background(), enforce); err == nil || !strings.Contains(err.Error(), "needs at least 302596096 B") {
+	if _, err := CheckInspectionBudget(context.Background(), enforce); err == nil || !strings.Contains(err.Error(), "needs at least 302694400 B") {
 		t.Fatalf("check err = %v", err)
 	}
 	f, cleanup := minimalFactory(t)
@@ -98,7 +98,7 @@ func TestWAFRouteAboveDefaultBudget(t *testing.T) {
 		t.Fatalf("observe Prepare: %v", err)
 	}
 	commit()
-	if minimum, _, ok := f.InspectionRequirement(genID); !ok || minimum != 302596096 {
+	if minimum, _, ok := f.InspectionRequirement(genID); !ok || minimum != 302694400 {
 		t.Fatalf("observe requirement = %d %v", minimum, ok)
 	}
 }

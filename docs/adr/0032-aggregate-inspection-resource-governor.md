@@ -882,6 +882,7 @@ no lease and needs nothing, so an uninspected configuration has no minimum.
 | Plugin fetch | `fetch = true` and `fetch` imported | `max_fetch_response + 1` plus the guest memory limit |
 | Plugin response subscription | A jul-abi/v2 middleware exporting `handle_response` | `2 × max_response_body`, or `3 ×` when it imports `resp_body_replace` |
 | WAF request buffer | A WAF guards the route | `2 × min(in-memory limit, request body limit)`, or `2 ×` the request body limit when the in-memory limit is unknown |
+| WAF request read buffer | A WAF guards the route | `min(32 KiB, request body limit)`: the scratch buffer of Jul's request-body read loop (I3a) |
 | R1 | A WAF guards the route | `64 KiB + 56 KiB × ArgumentLimit + 48 × (H + 4 KiB)`, where `H` is the listener's `max_header_bytes` (default 1 MiB) and 4 KiB is Go's header slack |
 | R2 | A WAF guards the route | `56 KiB × ArgumentLimit + 48 ×` request body limit |
 | R3 | A WAF guards the route | `48 × max_response_header_bytes` |
@@ -911,11 +912,11 @@ no lease and needs nothing, so an uninspected configuration has no minimum.
   (a log line, stderr, or `warnings` in `jul check -json`).
 - **Default fit.** Jul's default CRS route (128 KiB request body limit, 128 KiB in-memory limit,
   512 KiB response body limit, `ArgumentLimit` 1000, 1 MiB request headers, 64 KiB response-header
-  ceiling) needs 258,555,904 B (about 246.6 MiB), which fits the 256 MiB default with about 9.4 MiB
-  of headroom. With otherwise default limits, a WAF `request_body_limit` above 336,896 B (about
-  329 KiB) exceeds the default budget: 1 MiB needs 302,596,096 B. Adding a plugin that imports
-  `write_response_body` (default 8 MiB response body, 24 MiB charged) to a default WAF route needs
-  283,721,728 B. Several shipped WAF configurations therefore set `max_buffered_bytes = "512m"`
+  ceiling) needs 258,654,208 B (about 246.7 MiB, including the 64 KiB fixed R5 term and the
+  32 KiB read buffer added in I3a), which fits the 256 MiB default with about 9.3 MiB of headroom.
+  With otherwise default limits, a WAF `request_body_limit` above 334,848 B (327 KiB) exceeds the
+  default budget: 1 MiB needs 302,694,400 B. Adding a plugin that imports `write_response_body`
+  (default 8 MiB response body, 24 MiB charged) to a default WAF route needs 283,820,032 B. Several shipped WAF configurations therefore set `max_buffered_bytes = "512m"`
   explicitly; whether the default itself should change remains an I6 acceptance question.
 - **Scope.** The rule guarantees that one worst-case request on any route can be admitted. It does
   not size concurrency; that is the runtime budget's job.
@@ -1191,8 +1192,9 @@ and guest capacity under the 2026-11-13 proposed amendment, by A19–A22):
   arguments) is bounded only through slots. Its live peak per slot in the envelope is unmeasured
   (A1).
 - **Combined plugin and WAF behaviour in the envelope** is unmeasured (A4).
-- **Uncalibrated shapes.** Spill, mixed query and body arguments, and partial processing are not
-  yet calibrated (I3).
+- **Calibrated request shapes.** I3a calibrates spill, mixed query and body arguments at
+  `ArgumentLimit`, partial processing and large headers (see I3a progress). Response shapes are
+  calibrated in I4.
 - **Phase-5 slotting cost.** Its contention under unsaturated load, and how often phase 5 overflows
   under saturation, are unmeasured (A13, A18).
 - **Feasibility measurements** are single or double repetitions, with c1 noise of 2.3–4.6/s.
@@ -1272,9 +1274,9 @@ writer retention. `R5_max` is included **once** in the WAF route's single-reques
 addition to R1–R4 and buffer terms. It must not be double-counted as a separate additive total.
 Its phase-5 rule allowance still applies when audit output is off if logging rules can run.
 
-The exact components and coefficients are **blocked** pending pinned-engine, supported-rule and
-writer calibration in I3a/I4. The part-C sample above is a counterexample to zero; it is not a
-safe multiplier. Coraza's audit object can retain references to transaction-owned mutable
+The request-side components and coefficients are calibrated in I3a (see I3a progress); the
+response-side ones remain **blocked** pending calibration in I4. The part-C sample above is a
+counterexample to zero; it is not a safe multiplier. Coraza's audit object can retain references to transaction-owned mutable
 collections. In the probe, a writer retained its `AuditLog`, `tx.Close()` returned that
 transaction to the pool, and a later transaction's argument became visible through the old
 record. A writer can also return while retaining or asynchronously consuming the object, so
@@ -1304,8 +1306,8 @@ If R5 cannot be reserved, reject before a Coraza transaction is created: `503`,
 `audit`. Once a transaction has entered Coraza, phase 5 runs even on early exit, cancellation,
 slot saturation or a blocked sink. I3a must preserve this ordering in every error path. A
 compiled minimum exceeding the unchanged 256 MiB default is an explicit validation/migration
-issue, not a reason to silently raise that default. The former 246.6 MiB default-route figure
-does not include R5 and must be recalculated before WAF enforcement ships.
+issue, not a reason to silently raise that default. The pre-I3a 258,555,904-byte default-route figure
+excluded R5; I3a recalculates it (see the I3a decisions below).
 
 ### Spool integration and persistent ownership
 
@@ -1588,8 +1590,9 @@ normative for the owning checkpoints and do not change current runtime behavior.
   above.
 - **Migration minimum (I3a).** The recalculated route minimum, including R5, is validated at
   startup and reload: in `enforce` a configured `max_buffered_bytes` below it refuses startup or
-  the reload; in `observe` it warns. The former 246.6 MiB (258,555,904-byte) default-route figure
-  excludes R5 and is not that minimum.
+  the reload; in `observe` it warns. The pre-I3a 258,555,904-byte default-route figure
+  excluded R5; the recalculated figure is 258,654,208 B (the 64 KiB fixed R5 term plus I3a's
+  32 KiB request read buffer).
 
 ### Checkpoint mapping and acceptance extensions
 
@@ -1700,6 +1703,72 @@ That makes throughput an I6 validation gap. Peaks above 576 MiB in the plugin ce
 static guest pools or from ungoverned socket buffers (§10). They do not come from governed bytes.
 The I2 PR also fixes a pre-existing retention of retired handler generations under reload churn
 (#709). With the fix, the p4 reload cell peaks at about 500 MiB.
+
+### I3a progress
+
+I3a integrates the WAF request path (`internal/waf/admission.go`, `audit.go`, `outcomes.go`).
+
+- **Admission order.** The WAF reuses an outer lease or creates one, then reserves the fixed R5
+  term (64 KiB) before `NewTransaction`, so a refusal there leaves no Coraza transaction and no
+  WAF outcome. Once the transaction exists, phase 5 always runs.
+- **Slots and reservations.** Phase 1 (from `ProcessURI` through `ProcessRequestHeaders`) and
+  phase 2 each take a slot and reserve their worst case first, then true down to the held
+  `ARGS_GET`/`ARGS_POST` counts. A slot waits (bounded) only when the body has already been read,
+  by an outer plugin or the read loop; otherwise it is try-acquired. Phase 5 uses the
+  never-refused logging slot. Refusals after the transaction exists record the new WAF outcome
+  `inspection_refused`, and the origin is not called.
+- **Read loop.** Jul's loop replaces `ReadRequestBodyFrom` with the same limit semantics
+  (`Reject` → 413 without evaluating; `ProcessPartial` → implicit phase 2 on the write that
+  reaches the limit, under its own slot and worst-case R2, with the unread remainder forwarded
+  unchanged). Its 32 KiB scratch buffer is charged before allocation and added to the route
+  minimum. When governed, the body read runs under the `body_timeout` arrival deadline
+  (408; an unenforceable deadline fails closed with 500).
+- **Audit writer.** Jul registers its own `serial` writer, the only supported writer under a
+  governor; `concurrent`, `https` and any other writer, or a formatter other than Native and
+  JSON, are rejected at build time. That leaves no asynchronous sink, so the async-queue items
+  do not apply. Before `ProcessLogging`, Jul either turns the transaction's audit engine off
+  (no writer output) or reserves the construction estimate. A refusal drops the record (reason
+  `budget`) but phase-5 rules still run. The writer charges the format estimate before
+  formatting and hands a detached, formatted copy to an I/O goroutine with a 5 s deadline.
+  An abandoned write stays charged until the goroutine returns. A test checks that a record
+  abandoned mid-write is unchanged after its pooled transaction is reused.
+- **Calibration.** `TestWAFReservationsCoverMeasuredAllocation` drives Coraza v3.8.1 with
+  CRS v4.25.0 over query, large-header, urlencoded, mixed-at-`ArgumentLimit`, JSON, XML,
+  multipart and raw requests. It runs them with audit parts H before K and K before H, a 1 KiB
+  in-memory limit (spill), and `ProcessPartial`. It asserts that:
+  - retained heap after phase 1 is within R1, and after phases 1–2 within R1 + R2 (cumulative:
+    phase-2 rules matching `ARGS_GET` and headers retain state under R1's terms);
+  - `ARGS_PATH` is empty;
+  - audit construction and Native/JSON formatting allocations stay within their estimates.
+
+  Two findings changed the estimator:
+  - Coraza fills a K entry's `ErrorLog` only when H precedes K in `SecAuditLogParts`. Only that
+    order is quadratic, so the bound now follows the part order.
+  - `ErrorLog` allocates about 4.8× its length, so its bound now uses the exact truncated and
+    quoted fields with a factor of 6.
+
+  Part J's first use initialises Go's process-wide MIME table (about 0.7 MiB), so `New` loads it
+  once instead of inside a governed record. With 1000 matching arguments, a full-parts record can
+  exceed 2 GiB. R5 then refuses and drops it rather than building it.
+- **Engine off.** A Jul policy cannot compile with the rule engine off: Jul appends
+  `SecRuleEngine On` or `DetectionOnly` after every directive. A per-transaction
+  `ctl:ruleEngine=Off` skips phase-5 rules, but Coraza still builds the audit record, so R5
+  stays reserved. Coraza ignores body writes after that `ctl`, so Jul skips its read loop and
+  forwards the body untouched; any bytes Coraza does not take are forwarded, never dropped.
+- **Protocols.** Real-server tests cover overload (503 with the reason body) and `body_timeout`
+  (408) on H1 and H2, with the H2 connection kept and an uninspected sibling served. The WAF
+  H3 cell uses the same `reqdeadline` owner and overload writer as I2's harness-measured H3
+  path; its integrated measurement belongs to I6b.
+- **Hijack commit point.** An H1 hijack (101 upgrade, CONNECT) is a commit point: phase 5 runs,
+  the outcome is recorded and transaction ownership and the WAF's lease end inside `Hijack`,
+  while the tunnel is still open. Later writes bypass the closed transaction. One narrow
+  exception: if the handler hijacks without draining the inspected body, that body is still
+  read from the transaction's buffer, so ownership ends when the handler returns. A test checks
+  both cases on a real server.
+- **Deferred to I4.** R3/R4 and the response buffer, response calibration, and the
+  non-hijack commit points (SSE and streamed responses, streaming gRPC, H2/H3 extended
+  CONNECT). Until then those exchanges keep the WAF's lease until the handler returns (the
+  pre-I3a behaviour, now charged).
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.
