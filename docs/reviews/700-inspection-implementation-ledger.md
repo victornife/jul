@@ -12,11 +12,11 @@ qualification, soak or maturity change.
 | --- | --- |
 | Starting `main` | `16d982586ad1c964bda95ff3f5a55dc3b3fedcc0` (verified #714 merge) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
-| Checkpoint 2 | **In review**: I3a WAF request accounting on `feat/700-inspection-waf-i3a`; see [I3a implementation record](#i3a-implementation-record) |
+| Checkpoint 2 | **In review**: I3a WAF request accounting, PR #715 on `feat/700-inspection-waf-i3a`; see [I3a implementation record](#i3a-implementation-record) |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`) and I2 #710 (`c8bba7f2`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Merge the I3a PR after green hosted checks, then start I4 (response paths) on a fresh branch |
+| Exact next action | Merge #715 after green hosted checks, then start I4 (response paths) on a fresh branch |
 
 ## Checkpoint schedule and dependencies
 
