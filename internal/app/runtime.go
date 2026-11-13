@@ -96,6 +96,7 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 		},
 		OnUnslotted:   b.Metrics.ObserveInspectionUnslottedLogging,
 		OnBodyTimeout: b.Metrics.ObserveInspectionBodyTimeout,
+		OnAuditDrop:   b.Metrics.ObserveInspectionAuditDrop,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize inspection governor: %w", err)
@@ -106,6 +107,9 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 			BaseBytes:            snapshot.Usage[inspection.BaseBytes],
 			BufferBytes:          snapshot.Usage[inspection.BufferBytes],
 			WAFStateBytes:        snapshot.Usage[inspection.WAFStateBytes],
+			AuditBytes:           snapshot.Usage[inspection.AuditBytes],
+			AuditAbandonedCalls:  snapshot.AuditOutput.Abandoned,
+			AuditAbandonedBytes:  snapshot.AuditOutput.AbandonedBytes,
 			MaxBytes:             snapshot.Limits.MaxBytes,
 			ActiveLeases:         snapshot.ActiveLeases,
 			ActiveEvaluations:    snapshot.ActiveEvaluations,

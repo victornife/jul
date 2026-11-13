@@ -199,6 +199,8 @@ metric dimension rather than request-handling behavior.
 | `jul_http_requests_total` | Counter | `code`, `host`, `method` | Released `v1.32.0` | Total HTTP requests handled, labeled by method, host, and status code. |
 | `jul_http_response_compressed_total` | Counter | `encoding` | Released `v1.32.0` | Responses compressed by the edge, labeled by content coding. |
 | `jul_inspection_abandoned_evaluations` | Gauge | — | Merged / release pending | Evaluations still running after their request context ended. |
+| `jul_inspection_audit_abandoned` | Gauge | `measure` | Merged / release pending | WAF audit writer calls abandoned at their deadline that have not returned (`calls`) and their detached record bytes (`bytes`), which stay charged under the `audit` class until each call returns. |
+| `jul_inspection_audit_drops_total` | Counter | `reason` | Merged / release pending | WAF audit records not handed to their writer because the bounded audit-output set was full (`abandoned_full`). Phase-5 rules still ran. |
 | `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected request-body receive outcomes (`timeout`, `would_timeout`, `unsupported`); counted once per request by body-reading plugins (I2), not yet by the WAF. |
 | `jul_inspection_bytes` | Gauge | `class` | Merged / release pending | Process-wide charged bytes (`base`, `buffer`, `waf_state`); WAF state is an estimate, not a measured heap bound. Plugin request paths charge `base` and `buffer`; WAF paths are not yet integrated. |
 | `jul_inspection_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide inspection byte ceiling. |

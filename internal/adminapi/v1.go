@@ -34,6 +34,7 @@ type InspectionStatus struct {
 	Configured                      InspectionConfiguredLimits `json:"configured"`
 	Effective                       InspectionEffectiveLimits  `json:"effective"`
 	Usage                           InspectionUsage            `json:"usage"`
+	AuditOutput                     InspectionAuditOutput      `json:"audit_output"`
 	ActiveLeases                    uint64                     `json:"active_leases"`
 	ActiveEvaluations               uint64                     `json:"active_evaluations"`
 	WaitingEvaluations              uint64                     `json:"waiting_evaluations"`
@@ -78,6 +79,19 @@ type InspectionUsage struct {
 	BaseBytes     uint64 `json:"base_bytes"`
 	BufferBytes   uint64 `json:"buffer_bytes"`
 	WAFStateBytes uint64 `json:"waf_state_bytes"`
+	AuditBytes    uint64 `json:"audit_bytes"`
+}
+
+// InspectionAuditOutput reports the bounded WAF audit-output set: writer calls
+// in flight, calls abandoned at their deadline whose record bytes stay charged
+// until they return, the fixed bounds, and records dropped while it was full.
+type InspectionAuditOutput struct {
+	InFlightCalls  uint64 `json:"in_flight_calls"`
+	AbandonedCalls uint64 `json:"abandoned_calls"`
+	AbandonedBytes uint64 `json:"abandoned_bytes"`
+	MaxCalls       uint64 `json:"max_calls"`
+	MaxBytes       uint64 `json:"max_bytes"`
+	Drops          uint64 `json:"drops"`
 }
 
 // AuthorityState is the configuration-authority projection every state-reporting response carries.

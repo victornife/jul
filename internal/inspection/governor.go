@@ -27,6 +27,10 @@ const (
 	BaseBytes ByteClass = iota
 	BufferBytes
 	WAFStateBytes
+	// AuditBytes is R5: phase-5 rule work, audit-record construction and
+	// output, reserved before the WAF transaction exists (ADR 0032
+	// amendment, "R5").
+	AuditBytes
 	byteClassCount
 )
 
@@ -38,6 +42,8 @@ func (c ByteClass) String() string {
 		return "buffer"
 	case WAFStateBytes:
 		return "waf_state"
+	case AuditBytes:
+		return "audit"
 	default:
 		return "unknown"
 	}
@@ -52,6 +58,7 @@ const (
 	ByteSaturated       Outcome = "bytes"
 	WAFStateSaturated   Outcome = "waf_state"
 	EvaluationSaturated Outcome = "evaluation"
+	AuditSaturated      Outcome = "audit"
 	QueueExhausted      Outcome = "queue_exhausted"
 	WaitExpired         Outcome = "wait_expired"
 	Cancelled           Outcome = "cancelled"
@@ -128,6 +135,10 @@ type Hooks struct {
 	// OnBodyTimeout receives inspection body-arrival results (ADR 0032 H6):
 	// protocol h1, h2 or h3; result timeout, would_timeout or unsupported.
 	OnBodyTimeout func(protocol, result string)
+	// OnAuditDrop receives an audit record that was not handed to its
+	// writer because the bounded audit-output set was full; reason is
+	// AuditDropAbandonedFull.
+	OnAuditDrop func(reason string)
 }
 
 type Governor struct {
@@ -139,9 +150,11 @@ type Governor struct {
 	active  uint64
 	waiters []*evaluationWaiter
 
-	rejections [3][2]uint64
+	rejections [rejectionReasons][2]uint64
 	abandoned  uint64
 	unslotted  uint64
+
+	audit auditOutput
 }
 
 func New(limits Limits, hooks Hooks) (*Governor, error) {
@@ -193,7 +206,10 @@ type Snapshot struct {
 	Draining             bool
 	AbandonedEvaluations uint64
 	UnslottedLogging     uint64
-	Rejections           [3][2]uint64
+	Rejections           [rejectionReasons][2]uint64
+	// AuditOutput is the bounded audit-output set: writes in flight, writes
+	// abandoned at their deadline and still charged, and dropped records.
+	AuditOutput AuditOutputSnapshot
 }
 
 func (g *Governor) Snapshot() Snapshot {
@@ -209,6 +225,7 @@ func (g *Governor) Snapshot() Snapshot {
 		AbandonedEvaluations: g.abandoned,
 		UnslottedLogging:     g.unslotted,
 		Rejections:           g.rejections,
+		AuditOutput:          g.auditSnapshotLocked(),
 	}
 }
 
@@ -336,10 +353,7 @@ func (l *Lease) Charge(class ByteClass, amount uint64) (*Charge, error) {
 		return nil, &AdmissionError{Outcome: LeaseClosed}
 	}
 	wouldExceed := amount > 0 && !g.canChargeLocked(amount)
-	reason := ByteSaturated
-	if class == WAFStateBytes {
-		reason = WAFStateSaturated
-	}
+	reason := class.saturation()
 	if g.limits.Mode == Enforce && wouldExceed {
 		g.noteRejectionLocked(reason)
 		hook := g.hooks.OnRejection
@@ -485,10 +499,7 @@ func (c *Charge) Resize(amount uint64) error {
 	if amount > c.amount {
 		delta := amount - c.amount
 		wouldExceed := !g.canChargeLocked(delta)
-		reason := ByteSaturated
-		if c.class == WAFStateBytes {
-			reason = WAFStateSaturated
-		}
+		reason := c.class.saturation()
 		if g.limits.Mode == Enforce && wouldExceed {
 			g.noteRejectionLocked(reason)
 			hook := g.hooks.OnRejection
@@ -674,7 +685,15 @@ func (g *Governor) acquireEvaluation(ctx context.Context, lease *Lease, allowWai
 	}
 	timeout := g.limits.EvaluationQueueTimeout
 	if g.limits.Mode == Observe {
-		wouldReject := !logging && (g.active >= uint64(g.limits.EvaluationSlots) || len(g.waiters) > 0)
+		saturated := g.active >= uint64(g.limits.EvaluationSlots) || len(g.waiters) > 0
+		if logging && saturated {
+			// Enforce would overflow this phase-5 call (it cannot wait in
+			// observe, where no FIFO forms). Report it unslotted so it does
+			// not inflate the active count later phase 1–4 decisions use.
+			g.mu.Unlock()
+			return nil, EvaluationSaturated, &AdmissionError{Outcome: EvaluationSaturated}
+		}
+		wouldReject := !logging && saturated
 		if g.active == math.MaxUint64 || lease.evaluations == math.MaxUint64 {
 			g.mu.Unlock()
 			return nil, InvalidAccounting, &AdmissionError{Outcome: InvalidAccounting}
@@ -902,15 +921,36 @@ func (g *Governor) canChargeLocked(amount uint64) bool {
 	return amount <= g.limits.MaxBytes-total
 }
 
+// Rejection reason indexes of Snapshot.Rejections.
+const (
+	RejectBytes = iota
+	RejectWAFState
+	RejectEvaluation
+	RejectAudit
+	rejectionReasons
+)
+
+// saturation is the refusal reason of a charge on class c.
+func (c ByteClass) saturation() Outcome {
+	switch c {
+	case WAFStateBytes:
+		return WAFStateSaturated
+	case AuditBytes:
+		return AuditSaturated
+	default:
+		return ByteSaturated
+	}
+}
+
 func (g *Governor) noteRejectionLocked(reason Outcome) {
-	index := 0
+	index := RejectBytes
 	switch reason {
 	case WAFStateSaturated:
-		index = 1
+		index = RejectWAFState
 	case EvaluationSaturated:
-		index = 2
-	default:
-		index = 0
+		index = RejectEvaluation
+	case AuditSaturated:
+		index = RejectAudit
 	}
 	modeIndex := 0
 	if g.limits.Mode == Observe {

@@ -130,7 +130,7 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 			BodyTimeout:               60 * time.Second,
 			BaseChargeBytes:           inspection.BaseChargeBytes,
 		},
-		Usage:              [3]uint64{inspection.BaseChargeBytes, 8192, 4096},
+		Usage:              [4]uint64{inspection.BaseChargeBytes, 8192, 4096, 2048},
 		ActiveLeases:       1,
 		ActiveEvaluations:  2,
 		WaitingEvaluations: 1,

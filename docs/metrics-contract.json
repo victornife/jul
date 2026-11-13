@@ -339,6 +339,24 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_inspection_audit_abandoned",
+      "type": "gauge",
+      "help": "WAF audit writer calls abandoned at their deadline that have not returned, and their record bytes still charged under the audit class.",
+      "labels": [
+        "measure"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_audit_drops_total",
+      "type": "counter",
+      "help": "WAF audit records not handed to their writer because the bounded audit-output set was full.",
+      "labels": [
+        "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_inspection_body_timeouts_total",
       "type": "counter",
       "help": "Inspected request-body receive outcomes: enforced timeouts, observe-mode would-timeouts and unsupported read deadlines.",
