@@ -35,7 +35,8 @@
 > **Accepted design record.** This ADR is the implementation contract for #700. Acceptance adds no
 > configuration fields, enforcement or metrics. It does not establish protection, release readiness,
 > a maturity change or soak. Those require implementation slices I1–I6 and the acceptance plan
-> (A1–A18). Until then, current operator guidance in `docs/waf.md`, `docs/plugins.md` and
+> (A1–A18; if the 2026-11-13 proposed amendment is accepted, also A19–A22 for the controls it
+> adds). Until then, current operator guidance in `docs/waf.md`, `docs/plugins.md` and
 > `docs/known-limitations.md` still applies.
 
 ## Context
@@ -490,7 +491,9 @@ unconditional bound on total process memory, and no verdict below claims one.
    - The guarantee covers Jul's own setters and the upload-admission phase. net/http itself clears
      the H1 connection deadline when it starts its post-EOF background read and on hijack. The
      owner's logical abort and expiry state are authoritative whatever the transport deadline then
-     is, and an upgraded session owns its hijacked connection.
+     is, and an upgraded session owns its hijacked connection. When R5 is reserved, its release at
+     the upgrade or stream-commit boundary is defined by the 2026-11-13 proposed amendment
+     ("Long-lived exchanges"), not by the hijacked connection's lifetime.
    - Public configuration and protocol behaviour are unchanged. Wrappers still forward only
      `SetReadDeadline` (item 5), and the integration tests in A6, A7 and A10 still apply.
      Decision 8 and the unit-test list read "a retirement abort cannot be undone by completion,
@@ -608,7 +611,7 @@ can evaluate rules. Jul's call sites are in `internal/waf/outcomes.go`.
 | `ProcessResponseHeaders` (602) | Phase 3 | Acquired | R3 |
 | `WriteResponseBody` (635) | Phase 4, implicitly, under `SecResponseBodyLimitAction ProcessPartial` (the `@coraza.conf-recommended` default), on the write that reaches the response limit | Acquired for any write that can reach the response body limit | R4, for that write |
 | `ProcessResponseBody` (712) | Phase 4; returns early if phase 4 already ran implicitly | Acquired unless phase 4 already ran | R4, unless already held |
-| `ProcessLogging` (247, deferred) | Phase 5 | Phase-5 rule below | None beyond state already held |
+| `ProcessLogging` (247, deferred) | Phase 5 | Phase-5 rule below | None beyond state already held (superseded by R5 in the 2026-11-13 proposed amendment) |
 | `Close` (208, 335) | None; returns the transaction to the pool | — | Releases all `waf_state` |
 
 - **Rule.** Jul holds a slot and the phase's reservation around *every* call that may evaluate
@@ -630,10 +633,13 @@ can evaluate rules. Jul's call sites are in `internal/waf/outcomes.go`.
     of leases, and the counter makes them visible for sizing.
   - **Audit output.** The slot also covers the audit-log write inside `ProcessLogging`. An audit
     sink that blocks therefore holds slots. Phases 1–4 then try-acquire, or wait and time out, per the
-    rule above, ending in `evaluation` rejections, and phase 5 overflows. Nothing deadlocks, because no slot holder waits on the governor
-    (A18 includes a blocked audit writer).
+    rule above, ending in `evaluation` rejections, and phase 5 overflows. There is no governor wait
+    cycle, because no slot holder waits on the governor (A18 includes a blocked audit writer). This
+    is not a liveness guarantee: a writer that never returns holds its slot and charges
+    indefinitely; the 2026-11-13 proposed amendment adds a writer deadline and abandonment rule.
   - **No reservation.** Phase 5 parses no new collection and takes no new reservation. Its transient
-    working set is bounded through the slot, or by leases when it overflows.
+    working set is bounded through the slot, or by leases when it overflows. (Superseded by R5 in
+    the 2026-11-13 proposed amendment; the probe there shows phase-5 audit allocation is not zero.)
 
 ### 4. Byte accounting rules
 
@@ -928,7 +934,8 @@ no lease and needs nothing, so an uninspected configuration has no minimum.
 | Existing outcomes: WAF interruptions, WAF `413`, plugin `500`s, `read_timeout`, ADR 0017 admission | Unchanged | Unchanged |
 
 **Enforcement is the default.** Without it, #700's protection is opt-in and the shipped default stays
-exposed. The default applies once implementation acceptance (A1–A18) passes, and the 256 MiB value
+exposed. The default applies once implementation acceptance (A1–A18, plus A19–A22 for any control
+added by the 2026-11-13 proposed amendment) passes, and the 256 MiB value
 itself must be validated by A1–A4.
 
 **Compatibility:**
@@ -1026,7 +1033,8 @@ never contains paths, hosts or bodies.
 
 ### 10. Guarantee and exclusions
 
-**Guaranteed in `mode = "enforce"`**, once implemented and verified by A1–A18:
+**Guaranteed in `mode = "enforce"`**, once implemented and verified by A1–A18 (and, for R5, spool
+and guest capacity under the 2026-11-13 proposed amendment, by A19–A22):
 
 1. Governed (logical) bytes stay at or below `max_buffered_bytes`. The only exception is work
    already charged when the limit is lowered, which may drain above the new limit (§8). Growth
@@ -1049,7 +1057,9 @@ never contains paths, hosts or bodies.
    `evaluation_queue_timeout`. Plugin-instance waiters are bounded by leases and each waits at most
    one call timeout.
 4. With `body_timeout > 0`, every inspection body-arrival phase ends within `body_timeout`, per
-   stream, on H1, H2 and H3.
+   stream, on H1, H2 and H3. Today this is applied on plugin routes only; WAF-only routes are
+   covered once I3a ships the Jul-owned request-body read loop, and I3a must prove the H3 path
+   (including deadline forwarding through Jul's HTTP/3 wrappers) before this item is claimed.
 5. A charge is released only when the request can no longer reach the represented memory and
    the work is finished. Reload never multiplies capacity.
 
@@ -1191,10 +1201,13 @@ never contains paths, hosts or bodies.
 This amendment is a **proposal for checkpoint 1**. It does not change current configuration,
 runtime behavior, metrics or qualification. On acceptance its specific corrections supersede
 conflicting historical statements in §§3, 4, 7–11 and the original slice table; all other accepted
-decisions and A1–A18 remain in force. In particular, keep the process owner, the existing
-`enforce` default, `256m` byte ceiling, auto evaluation slots, `1s` queue timeout, absolute `60s`
-body timeout (`0s` disables it) and `64k` response-header ceiling. No final size or A1–A22
-qualification is claimed. The original §5 statement that abandoned work cannot accumulate
+decisions and A1–A18 remain in force, and A19–A22 are added. In particular, keep the process owner,
+the existing `enforce` default, `256m` byte ceiling, auto evaluation slots, `1s` queue timeout,
+absolute `60s` body timeout (`0s` disables it) and `64k` response-header ceiling. The `enforce`
+guarantee and default gate cover a new control (R5, spool, guest capacity) only once its own
+criterion passes: R5 → A21, spool → A19, guest capacity → A20, operability → A22. Until defaults
+are chosen, spool and guest enforcement require explicit limits. No final size is chosen and no
+A1–A22 criterion is claimed as passed. The original §5 statement that abandoned work cannot accumulate
 beyond the slot count applies only to slotted calls, not unslotted phase 5.
 
 ### Source boundaries and evidence
@@ -1233,7 +1246,7 @@ the table apply to every applicable row.
 | Guest instances | Process `guest_capacity` bytes: the effective `WithMemoryLimitPages` ceiling, in 64 KiB pages, for **each** starting, idle, busy or closing instance across candidate/current/retiring generations. This is neither actual guest allocation nor RSS. | Reserve before instantiation and `_initialize`; reuse a pooled instance without another reservation. Release exactly once only after the module/runtime has stopped and no owner can use its memory. A failed close remains accounted and visible. | I2b |
 | Compiled rules/modules and transaction pools | Generation-owned compiled state and process/GC-retained pool capacity; configured capacity, calibrated estimates or observations where available, **not** a guest or request reservation. | Retire only after actual generation users and resources finish; a reset pooled transaction can retain backing arrays. Unmeasured baseline is unavailable, not zero. | Existing lifecycle; A9/A15 and I6b |
 | Body spill and multipart files | Process `spool` logical reserved bytes and file count, independent of the request lease. Before every supported create, reserve a file; before a write/growth, reserve its possible resulting extent, including buffered-prefix copies and simultaneously retained multipart files. | A file remains charged through open handles, unlink/close, partial writes and failed cleanup. Refund only after all Jul-owned handles/aliases are closed and removal is confirmed. Crash leftovers are reconciled before new reservations. | I3b, blocked on the integration boundary below |
-| Audit output and other persistent storage | The configured audit sink's durable files/remote destination and other Jul-owned storage categories are separate external boundaries, not inspection spool and not bounded by R5. | Their configured owners, retention and I/O health remain responsible; a spool quota is not a filesystem-wide or durable-audit quota. tmpfs and page cache can still count against a cgroup. | Existing sink/storage owners; I6a exposes the distinction |
+| Audit output and other persistent storage | R5 covers in-process audit construction, the detached snapshot, synchronous formatter copies and any serialized buffer until its ownership is transferred. The configured sink's durable files/remote destination and other Jul-owned storage categories are separate external boundaries, not inspection spool and not bounded by R5. | Their configured owners, retention and I/O health remain responsible; a spool quota is not a filesystem-wide or durable-audit quota. tmpfs and page cache can still count against a cgroup. | Existing sink/storage owners; I6a exposes the distinction |
 
 Acquisition has no governor wait cycle: create/reuse the request lease, reserve R5 before WAF
 transaction creation, and acquire each dynamic byte or spool reservation fail-fast before its
@@ -1242,7 +1255,10 @@ holding a slot never wait. For a guest, reuse an idle instance, or take the exis
 slot, try the global guest reservation, then instantiate; on refusal release the local slot. The
 existing bounded local-instance wait holds no global guest reservation. No governor mutex is held
 across engine work, file I/O, a module close or an audit write. A synchronous blocked audit sink can
-occupy slots and force phase-5 overflow, but cannot create an unbounded waiter queue.
+occupy slots and force phase-5 overflow, but cannot create an unbounded waiter queue; the writer
+deadline below bounds how long it can hold them. An admitted transaction's R5 remains reserved
+while it waits in the evaluation FIFO, so the waiter cap (`16 × slots`) times `R5_max` is part of
+the sizing budget and A18 must exercise it.
 
 ### R5: admission before phase 5 becomes unavoidable
 
@@ -1309,7 +1325,8 @@ overload, and a physical create/write/close error fails inspection closed with a
 before forwarding. This applies in `observe` too: observe never bypasses physical failure.
 Malformed-body and configured size-limit behavior remain separately classified and preserve their
 accepted semantics. A failure discovered after response commitment cannot replace the response;
-the record must identify partial delivery, abort further inspection work and retain cleanup debt.
+the record must identify partial delivery, stop further phase 1–4 evaluation (phase 5 still runs)
+and retain cleanup debt.
 It may be an upstream change or another reviewed supported boundary with equivalent proof; a
 private reflection hook, undocumented fork or post-write audit is not sufficient. Response body
 buffers currently use an in-memory limit equal to their total limit, but any future spill through
@@ -1330,7 +1347,8 @@ listing. Entries are attributable to this instance; no scan or removal of unrela
 allowed. Before admissions after restart, reconcile every attributable leftover and count it
 until confirmed closed/removed. unclassifiable entries, failed reconciliation or unsupported
 locking make protection unavailable and fail closed in a protected profile, not zero usage.
-Use bounded cleanup concurrency and a bounded queue/sweep; a failure stays charged as cleanup debt
+Use bounded cleanup concurrency and a bounded queue/sweep, as specified under "Spool cleanup and
+reconciliation" below; a failure stays charged as cleanup debt
 and is observable. A missing directory, `ENOSPC`, permissions or close/remove failure is not
 silently converted into quota success. Logical quota excludes inode/block rounding and other
 processes, and cannot promise physical free space or bound same-user external file handles.
@@ -1395,8 +1413,9 @@ plugin and server-timeout semantics remain intact in all four combinations.
 | Mutable or asynchronously retained audit record | Only immutable transaction-detached snapshots may reach writers; unsupported retaining writers are rejected in protected profiles. Any queued serialized output has a distinct bounded owner. | Same safety contract; observe cannot make an unsafe alias or unbounded queue safe. |
 
 H1 refusals preserve #710's `Connection: close` behavior for unread bodies; H2/H3 affect only the
-stream. If a response is already committed, record/abort according to the existing partial-response
-or upgrade contract rather than claim a replacement 503. The timer-only deadline owner, fetch-reader
+stream. If a response is already committed, record the partial delivery and stop further phase 1–4
+evaluation rather than claim a replacement 503; upgrades, streams and CONNECT follow "Long-lived
+exchanges" below. The timer-only deadline owner, fetch-reader
 revocation, plugin-header rollback, generation-retention fix #709, ADR 0020 subscription behavior
 and rule 900001 remain unchanged.
 
@@ -1452,6 +1471,94 @@ and rule 900001 remain unchanged.
   Overview disclosure, editor/authority behavior and bounded browser-local trends; no new
   notification service or frontend policy engine.
 
+### Concurrency, ownership and protocol rules
+
+These rules close gaps found by the delayed concurrency/protocol review of this proposal. They are
+normative for the owning checkpoints and do not change current runtime behavior.
+
+- **Process-scope reservation tickets (I2b, I3b).** `guest_capacity` and spool reservations are not
+  request-lease byte classes; the current `ByteClass` set (`base`, `buffer`, `waf_state`) is
+  unchanged, and R5 is the only new lease class. The governor issues a distinct process-scope
+  ticket per reserved guest instance or spool file, owned by the plugin pool or spool owner, never
+  by a request `Lease`. Closing a lease never refunds a ticket. A guest ticket is released once,
+  after `Module.Close` returns success and the instance is unreachable; a spool ticket after every
+  Jul-owned handle is closed and removal is confirmed. A failed close/remove keeps the ticket
+  charged and visible as debt. Each ticket records its generation; the generation's charge is the
+  sum of its live tickets, so candidate teardown releases only tickets whose resource is
+  confirmed gone and never alters the old generation's charge. Tests: an instance idle when its
+  request ends, a file still open when its request ends, close failure, and candidate teardown.
+- **Guest instance states (I2b).** Each instance is `starting`, `idle`, `busy`, `closing`, `closed`
+  or `failed_retained`. Reserve before `starting`; an instantiation trap, `_initialize` failure,
+  timeout or request cancellation moves it to `closing`, and the ticket is released only from
+  `closed`. A close failure moves it to `failed_retained`, which stays charged and reported.
+  Request cancellation is propagated into instantiation (today `newInstance` uses
+  `context.Background` with `instantiateTimeout`, and `discard` ignores the `Close` error, so
+  I2b changes both). Tests: close failure, instantiate trap, timeout and cancellation.
+- **Effective guest ceiling (I2b).** A positive `memory_limit` below one 64 KiB page currently
+  rounds to 0 pages and then to the 256-page (16 MiB) default, so a 32 KiB setting reserves 512×
+  the configured value. Before I2b ships, a positive `memory_limit` below 64 KiB is a validation
+  error, and other values report the effective page-rounded ceiling that is reserved.
+  `GuestCapacityStats` keeps reporting configured potential; I6a adds the reservation view
+  (reserved bytes and instances by state) used by A22.
+- **Serialized limit publication (I2b, I3b).** Every limits publish — startup, full reload,
+  limits-only publication and rollback — goes through one serialized publisher that stamps a
+  monotonically increasing limits version. A candidate records the version it prepared against;
+  its Publish re-checks that version under the publisher and re-prepares or fails on mismatch, so
+  a concurrent decrease cannot be overwritten by a stale candidate and an increase is never
+  borrowed early. Tests: a decrease during Prepare, an increase during candidate warm-up, and a
+  rollback racing a reload.
+- **Observe accounting parity (I3a).** Observe's would-reject decisions must match what enforce
+  would do. A phase-5 call that would overflow in enforce is counted as unslotted in observe and
+  does not inflate the active-slot count used for later phase 1–4 decisions; today the observe
+  path increments `active` for phase-5 tokens. On an observe→enforce transition, slots already
+  held remain held and count against the enforced limit; new acquisitions follow enforce rules.
+  Test: with `slots = 1`, an observe sequence of phase-5 overflow followed by phase 1–4 work
+  reports the same would-reject decisions as enforce.
+- **Engine off (I3a).** When the rule engine is off, no R5 is reserved; if R5 was reserved before
+  the engine state is known, it is released before the early return. Test: an engine-off route
+  holds no R5 after the request.
+- **Refusal classification (I3a, I3b, I2b).** The new reasons `audit`, `spool_bytes`,
+  `spool_files` and `guest_capacity` are governor overload, classified by the same overload
+  classifier as today's byte, `waf_state` and `evaluation` saturation (`IsOverload` /
+  `WriteOverloaded` are extended): `503`, `Retry-After: 1`, `inspection_overloaded`, H1
+  `Connection: close` for an unread body, H2/H3 stream-local, native gRPC `UNAVAILABLE`.
+  `guest_capacity` stays distinct from the existing local "plugin busy" outcome. Each reason has a
+  per-protocol test.
+- **Long-lived exchanges (I3a, I4).** For a 101/WebSocket upgrade, SSE or streaming response,
+  streaming gRPC and CONNECT (H1, H2 extended CONNECT and H3), the request is inspected and then
+  commits to a long-lived exchange. At the point where Jul stops inspecting the exchange — the
+  upgrade/CONNECT commit, or for a streamed response the end of its last inspected phase or the
+  decision not to inspect its body — Jul runs phase 5, detaches the
+  immutable snapshot, completes or transfers its output, and releases R5 and the transaction's
+  `waf_state`; R5 is never held for the life of a hijacked connection or stream. Any output still
+  pending is owned by the bounded output queue below. Test: many concurrent long-lived tunnels do
+  not consume R5 or `waf_state` budget after their commit point.
+- **Audit writers (I3a, I4).** The supported writers are named, Jul-owned adapters reviewed under
+  the snapshot contract; Coraza's built-in writers (for example the serial, concurrent and HTTPS
+  writers) are unsupported in protected profiles until an adapter for each is reviewed.
+  `SecAuditLog*` directives that select a writer type, format or storage are rejected in
+  protected profiles unless they select a supported adapter. A synchronous writer runs under a
+  bounded deadline. On expiry, the writer call is abandoned and counted, its snapshot ownership is
+  moved to a bounded `abandoned_audit` set that stays charged against R5 until the call actually
+  returns, and admission refuses with reason `audit` when that set is full. Whether Coraza's
+  pinned `ProcessLogging` writer call is synchronous, and each writer's own deadline behavior, are
+  verified in I3a rather than assumed.
+- **Async output queue (I3a).** A sink that serializes and enqueues owns a single process-scope
+  queue with a fixed byte and entry bound, charged under the R5 class until dequeued and written.
+  A full queue is a counted drop or synchronous wait under the writer deadline, never unbounded
+  growth. If the request lease closes while serialization is still in progress, the R5 refund is
+  deferred until ownership has been transferred to the queue.
+- **Spool cleanup and reconciliation (I3b).** The spool owner runs one reconciliation sweep at
+  startup before admission and a bounded cleanup worker pool afterwards. Cleanup requests go into a
+  fixed-capacity queue; when it is full the file stays charged as debt and new spool admissions
+  fail closed with reason `spool_files` rather than enqueue unbounded work. The startup sweep
+  enumerates only the owned root, attributes each entry by the instance's naming and lock, and
+  refuses admission until every attributable entry is closed/removed or counted as debt.
+- **Migration minimum (I3a).** The recalculated route minimum, including R5, is validated at
+  startup and reload: in `enforce` a configured `max_buffered_bytes` below it refuses startup or
+  the reload; in `observe` it warns. The former 246.6 MiB (258,555,904-byte) default-route figure
+  excludes R5 and is not that minimum.
+
 ### Checkpoint mapping and acceptance extensions
 
 The original I3 is split into **I3a** (request/evaluation/R5 request calibration) and new **I3b**
@@ -1463,10 +1570,10 @@ records actual state and blockers.
 
 | Checkpoint | Required focused evidence before merge |
 | --- | --- |
-| I3a / I4 | R1–R5 calibration for supported request/response shapes, audit parts and writer aliases; immutable-record verification across `tx.Close()` and pool reuse; bounded synchronous/async sink ownership; implicit phases, blocked sink and unslotted phase 5; real H1/H2/H3 refusal and sibling isolation; no early refund. |
-| I3b | Concurrent prefix spill plus multipart duplication, zero-byte files, partial writes, typed create/write/close/remove faults, cancellation, retained-directive rejection, static-root overlap/symlink aliases across reload, restart reconciliation, limits/modes and generation overlap on supported filesystems; observe-to-enforce with an unchanged ceiling and pre-existing over-limit reservations. |
-| I2b | Real guest eager/start failure, idle/busy pools, exact/over-capacity and concurrent instantiation, cancellation, traps, close failures, reload/rollback and limit decrease, including candidate and retired generations; a true limits-only cap increase that does not rebuild or instantiate guests, validates limits-only changes and publishes atomically, including failure atomicity and the old-cap warm-up counterexample. |
-| I6a | Real producer/API/CLI/Console states, permissions and file-owned mode, missing/stale/observe/draining states, bounded trends, actual alert handoff and accessible responsive interaction. |
+| I3a / I4 | R1–R5 calibration for supported request/response shapes, audit parts and writer aliases; immutable-record verification across `tx.Close()` and pool reuse; bounded synchronous/async sink ownership; implicit phases, blocked sink and unslotted phase 5; real H1/H2/H3 refusal and sibling isolation; no early refund. Also: writer deadline and abandonment, unsupported-writer directive rejection, R5 release at the upgrade/stream/CONNECT commit point with a many-tunnel test, R5 held across the evaluation FIFO wait, engine-off R5, observe/enforce slot parity with `slots = 1`, per-reason overload classification on each protocol, WAF-only `body_timeout` including H3, and the startup/reload migration minimum. |
+| I3b | Concurrent prefix spill plus multipart duplication, zero-byte files, partial writes, typed create/write/close/remove faults, cancellation, retained-directive rejection, static-root overlap/symlink aliases across reload, restart reconciliation, limits/modes and generation overlap on supported filesystems; observe-to-enforce with an unchanged ceiling and pre-existing over-limit reservations. Also: process-scope spool tickets that survive request-lease close, a full cleanup queue failing closed, and serialized limit publication races. |
+| I2b | Real guest eager/start failure, idle/busy pools, exact/over-capacity and concurrent instantiation, cancellation, traps, close failures, reload/rollback and limit decrease, including candidate and retired generations; a true limits-only cap increase that does not rebuild or instantiate guests, validates limits-only changes and publishes atomically, including failure atomicity and the old-cap warm-up counterexample. Also: process-scope guest tickets with the instance state machine, `failed_retained` after a close failure, cancellation propagated into instantiation, sub-page `memory_limit` rejection, and limit-version races (decrease during Prepare, increase during warm-up, rollback racing reload). |
+| I6a | Real producer/API/CLI/Console states, permissions and file-owned mode, missing/stale/observe/draining states, bounded trends, actual alert handoff and accessible responsive interaction, including the guest reservation view distinct from configured potential. |
 | I6b | Run the preserved full matrix and new criteria with the corrected baseline and recorded identities; do not infer acceptance from checkpoint tests or this probe. |
 
 The A9 reload case additionally records compiled/static baselines, candidate and retiring guest
@@ -1478,11 +1585,12 @@ unchanged. Add the following unused identifiers:
 | # | Case | Pass condition |
 | --- | --- | --- |
 | A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing reservations/debt draining after a decrease or an observe-to-enforce transition, including when the numerical ceiling is unchanged; after either transition, no new acquisition may exceed the enforced ceiling. No early refund, unsafe deletion or partial inspection. Observe reports would-refuse while real I/O failures remain visible. Owned leftovers are reconciled before admission. Test observe-to-enforce with existing over-limit bytes/files and verify new acquisitions are refused. |
-| A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. |
-| A21 | Phase-5 audit pressure and blocked output | R5 is reserved before transaction entry, covers the supported calibrated request/response audit construction and immutable detached record, and remains owned through the last bounded output alias; transaction reuse cannot mutate a prior record. Phase-5 rules are never skipped and saturation cannot deadlock. Unsupported unbounded policies do not receive a protection claim. |
+| A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. A failed close stays charged; concurrent limit publications never let a stale candidate overwrite a newer limit. |
+| A21 | Phase-5 audit pressure and blocked output | R5 is reserved before transaction entry, covers the supported calibrated request/response audit construction and immutable detached record, and remains owned through the last bounded output alias; transaction reuse cannot mutate a prior record. Phase-5 rules are never skipped and saturation cannot create a governor wait cycle. A hung writer is abandoned at its deadline with abandoned work bounded and charged; after the writer unblocks or is abandoned, slot, R5 and queue counters return to baseline. Long-lived exchanges release R5 at their commit point. Unsupported unbounded policies do not receive a protection claim. |
 | A22 | Operational usability and migration | API, CLI and Console agree with real producer state and permissions; units and unavailable/observe/draining/debt states are truthful; defaults, directive and directory migration are actionable; alerts use real bounded signals and do not claim a general notification or audit product. |
 
-The common A1–A18 conditions remain: corrected baseline `858590dc`, at least three repetitions,
+The common A1–A18 conditions remain and also apply to A19–A22: corrected baseline `858590dc`, at
+least three repetitions,
 2 vCPU/768 MiB/no swap and `GOMAXPROCS=2`, peak below 576 MiB where specified, and the 10%
 unsaturated throughput rule. Noise remains inconclusive, never a pass.
 
@@ -1649,7 +1757,8 @@ Recorded 2026-11-10 from the maintainer's review of #704. They form part of the 
 the ADR was accepted on 2026-11-10 when #704 merged. Decisions 1 and 2 still carry their stated
 validation conditions.
 
-1. **Default mode: `enforce`**, once implementation acceptance (A1–A18) passes. `observe` is an
+1. **Default mode: `enforce`**, once implementation acceptance (A1–A18) passes; the 2026-11-13
+   proposed amendment extends this gate to A19–A22 for the controls it adds. `observe` is an
    explicit migration option, not a default for a release. The architecture is accepted; the exact
    256 MiB default still needs validation (A1–A4).
 2. **`body_timeout`: absolute, 60 s default, explicit `0s` disables it.** It is an initial safety

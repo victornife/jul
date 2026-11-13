@@ -12,7 +12,7 @@ qualification, soak or maturity change.
 | --- | --- |
 | Starting `main` | `c8bba7f2c1b6c312aa215f8576014a513710775b` (verified #710 merge) |
 | Checkpoint 1 | **Active**: design amendment, feasibility evidence and ledger; no later runtime implementation |
-| Design PR / head | #714 is open and ready for review; no GitHub review submission was present at the last status check. The two bounded ADR corrections requested on head `1cd75931` are addressed in this revision; the current head and hosted checks are authoritative on GitHub. No merge is requested. |
+| Design PR / head | #714 is open and ready for review; no GitHub review submission was present at the last status check. The two bounded ADR corrections requested on head `1cd75931` and the delayed concurrency/protocol findings are addressed in this revision; the current head and hosted checks are authoritative on GitHub. No merge is requested. |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`) and I2 #710 (`c8bba7f2`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
@@ -69,7 +69,7 @@ diff and relevant owners; their findings and resolution belong below.
 | D1 — phase-5 pressure | High: Coraza `transaction.go:1431,1540` can construct and copy a request-body audit record after response commitment; a writer-only limit is too late. HTTPS output may retain a transport reader. | R5 is reserved before transaction entry and retained through final alias release; exact coefficients and unsupported writers are blocking decisions. The checkpoint-1 part-C probe reproduces additional allocations; I3a/I4 must prove the bound and lifecycle. |
 | D2 — hidden file creation | High: Coraza `body_buffer.go:78` and `multipart.go:120` write outside a Jul reader wrapper, and `SecTmpDir` is ignored. | Require a reviewed public integration before I3b, plus explicit restart/directory ownership. The spill probe reproduces simultaneous copies. |
 | D3 — file-count exhaustion | High: Coraza `multipart.go:120` creates a file per part, so byte-only accounting admits many zero-byte files. | Separate file-count reservation before creation; the 32-empty-file probe reproduces the counterexample. |
-| D4 — generation capacity multiplication | High: `internal/plugins/runtime.go:450` instantiates during Prepare and idle pools survive while other generations serve. | One process reservation per starting/live instance across candidates and retiring generations; failure tears down only candidate resources. I2b must test overlap and failure. |
+| D4 — generation capacity multiplication | High: `internal/plugins/runtime.go:574` instantiates during Prepare and idle pools survive while other generations serve. | One process reservation per starting/live instance across candidates and retiring generations; failure tears down only candidate resources. I2b must test overlap and failure. |
 | D5 — idle monopolization | Medium: `internal/plugins/runtime.go:48` retains idle modules; an idle pool can hold the entire new cap and prevent another plugin from starting. | Deliberately fail fast, expose the condition and document pool/cap/overlap sizing; no busy eviction. I2b must test the policy. |
 | D6 — lost storage debt | High: Coraza `body_buffer.go:165` closes and removes its file; an outstanding handle or a root change after a crash can leave physical storage while counters appear zero. | Keep tokens until Jul-owned handles close and removal succeeds; reconcile owned leftovers. Cross-root durable discovery remains an explicit I3b blocker; I3b must inject cleanup and restart failures. |
 | D7 — misleading operator signals | Medium: a status-only viewer can infer sensitive route configuration, or observe mode/free disk can appear as enforced quota. `docs/admin-api.md:176` and `internal/observability/storage_metrics.go:60` show the distinct current permission and filesystem-capacity contracts. | Permission-gated route details, separate unavailable/observe/pressure states and separate logical quota vs advisory filesystem headroom; I6a must test permissions and unavailable states. |
@@ -108,12 +108,37 @@ acceptance cases.
 An earlier direct pass over admission ordering, cap updates, reload overlap, queue/slot behavior
 and H1/H2/H3 failure semantics found no additional design gap. It is superseded as a
 completeness claim: the separately requested concurrency/protocol reviewer returned later, on
-head `29eca6aa`, and reported further potential gaps. These include an unspecified process-scope
-owner and release point for guest and spool charges; an undefined R5 lifetime for upgrades,
-streams and CONNECT; no recovery policy for a hung synchronous audit writer; and a default-enforce
-gate that cites A1–A18 but not A19–A22. These findings are **unverified** and are not resolved by
-this checkpoint. They are recorded for maintainer triage into later checkpoints or a follow-up
-design revision, not added to this PR's scope. None of these reviews is an implementation test or
+head `29eca6aa`, with four blocking and fourteen non-blocking findings. Each was checked against
+current source (`internal/inspection/governor.go`, `respond.go`, `internal/plugins/runtime.go`,
+`internal/waf/outcomes.go`, `internal/config/schema.go`, `internal/server/inspection_limits.go`)
+and the ADR text, and each is now **resolved in the proposal** by a normative rule and an owning
+checkpoint test (ADR "Concurrency, ownership and protocol rules" and the extended checkpoint and
+A20/A21 rows):
+
+| Finding | Confirmed against | Proposal resolution and owner |
+| --- | --- | --- |
+| B1 — no process-scope owner for guest/spool charges | `ByteClass` has only `base`/`buffer`/`waf_state` | Process-scope tickets independent of request leases, released only after confirmed close/removal; I2b/I3b |
+| B2 — R5 lifetime for upgrades, streams and CONNECT | Deferred `ProcessLogging` and hijack tracking in `outcomes.go` | Phase 5, snapshot detachment and R5/`waf_state` release at the commit point; many-tunnel test; I3a/I4 |
+| B3 — hung synchronous audit writer | ADR "nothing deadlocks" and R5/output rows | Named supported adapters, `SecAuditLog*` rejection, writer deadline with bounded charged abandonment, A21 recovery; "no wait cycle" wording; I3a/I4 |
+| B4 — enforce/default gate omits A19–A22 | ADR status note, §7, §10, decision 1, amendment preamble | Gate extended per control (R5→A21, spool→A19, guest→A20, operability→A22) |
+| N1 — unserialized limit publication | No publish serialization or version in the reload path | One serialized, versioned publisher; stale candidates re-prepare or fail; race tests; I2b/I3b |
+| N2 — instance close/cancel | `runtime.go:717-733` uses `context.Background` and ignores `Close` errors | Instance state machine with `failed_retained`, cancellation propagation; I2b |
+| N3 — refusal classification | `IsOverload` covers only byte, `waf_state` and evaluation | New reasons classified as governor overload per protocol; `guest_capacity` distinct from plugin busy |
+| N4 — observe slot inflation | `governor.go:677` observe path counts phase-5 tokens as active | Observe/enforce parity and transition carryover; `slots = 1` test; I3a |
+| N5 — engine-off R5 | Early return in `outcomes.go` | No R5, or release before return; I3a |
+| N6 — sub-page `memory_limit` | `runtime.go:591-595` turns 0 pages into 256 | Reject positive values below 64 KiB; report effective ceiling; I2b |
+| N7 — generation charge owner | — | Tickets record generation; I2b/I3b |
+| N8 — reconciliation/cleanup bounds | — | Startup sweep before admission, fixed cleanup queue, fail closed when full; I3b |
+| N9 — WAF-only `body_timeout` | `schema.go:353`; no H3 deadline forwarding traced | §10 item 4 scoped to plugin routes until I3a proves WAF-only and H3 |
+| N10 — R5 during FIFO wait | — | Waiter cap × `R5_max` in sizing; A18 exercise |
+| N11 — async queue owner | — | Single bounded process-scope queue under R5; deferred refund; I3a |
+| N12 — "abort further inspection work" | ADR spool section | Now "stop further phase 1–4 evaluation (phase 5 still runs)" |
+| N13 — §3 says phase 5 needs no reservation | ADR §3 table and bullet | Marked superseded by R5 |
+| N14 — stale ledger claims and D4 line | This ledger | This paragraph supersedes them; D4 cites `runtime.go:574` |
+
+Engine behaviors the reviewer could not verify (whether the pinned `ProcessLogging` writer call is
+synchronous, built-in writer deadlines and `Module.Close` blocking) are explicitly assigned to
+I3a/I2b verification rather than assumed. None of these reviews is an implementation test or
 merge approval.
 
 | Check | Result |
