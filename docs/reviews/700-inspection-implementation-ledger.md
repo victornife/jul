@@ -98,9 +98,9 @@ The independent ownership/security review found three High-severity design gaps 
 I/O error and continue phase 2 without Jul seeing a failure; and a writer can retain an audit
 record whose mutable transaction collections are reset and reused. All three are in scope.
 They were reproduced or confirmed against Jul and pinned Coraza source, corrected in the proposal,
-and assigned explicit implementation tests below. The independent concurrency/protocol and final
-whole-checkpoint reviews are still pending; no merge recommendation or independent approval is
-implied until those complete.
+and assigned explicit implementation tests below. The final whole-checkpoint review completed
+with no actionable findings. The independent concurrency/protocol review remains pending; no
+merge recommendation or complete independent approval is implied until it concludes.
 
 | Check | Result |
 | --- | --- |
@@ -110,7 +110,7 @@ implied until those complete.
 | Focused inspection/WAF/plugin and instrument `go vet`; focused spill, guest-statistics and logging tests | Passed with CGO disabled; exact selectors and flags are recorded in the PR. |
 | `make format-check`; `CGO_ENABLED=0 GOMAXPROCS=1 GOFLAGS=-p=1 make generated-check`; `make config-check` with the same Go environment and a private `TMPDIR` | Passed. |
 | `CGO_ENABLED=0 GOMAXPROCS=1 GOFLAGS=-p=1 python3 scripts/docs-check.py` | Final pass: 2,720 passed, zero failed. |
-| `sha256sum -c SHA256SUMS` for this checkpoint and referenced I1/I5/I2 evidence | Passed in the working tree; verify the exact candidate from a clean worktree before publication. |
+| `sha256sum -c SHA256SUMS` for this checkpoint and referenced I1/I5/I2 evidence | Passed in the working tree and from a clean worktree at candidate `ac9f707c`; referenced I1/I5/I2 evidence checksums also passed. |
 | Full local `go vet ./...`, `go test ./...`, CGO WAF, race and platform lanes; current-head hosted CI | Not run locally or pending; do not infer a hosted result from the local checks. |
 
 ## Handoff rules
