@@ -52,7 +52,7 @@ it. ADRs are amended rather than rewritten; superseded reasoning stays visible.
 | [0029](0029-route-scoped-cache-policy-and-vary-guards.md) | Route-scoped cache policy, request-cookie bypass, and Vary transformation guards | Accepted — #623 / #672 | 2026-10-29 |
 | [0030](0030-cache-purge-recovery-latency-and-cutover.md) | Durable incomplete-purge recovery, large-purge latency bounds, purge outcomes, and route/backend cutover | Accepted — Beta/unreleased (#667, #666, #668, #624) | 2026-10-30 |
 | [0031](0031-waf-operations-posture-isolation-and-alerting.md) | WAF operations, trustworthy transaction outcomes, narrow tuning, posture review, isolation matrix, and external security alerting | Accepted — #629 and #628-B merged/verified, Beta/unreleased; #628-A open | 2026-11-02 |
-| [0032](0032-aggregate-inspection-resource-governor.md) | Aggregate inspection resource governor: process-wide WAF/WASM byte and evaluation bounds, body-arrival deadlines | Accepted — #700 design; not implemented | 2026-11-10 |
+| [0032](0032-aggregate-inspection-resource-governor.md) | Aggregate inspection resource governor: process-wide WAF/WASM byte and evaluation bounds, body-arrival deadlines | Accepted — I1/I2/I5 merged; later slices and the 2026-11-13 amendment remain pending | 2026-11-10 |
 
 ## Reading order
 

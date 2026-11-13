@@ -1,0 +1,51 @@
+{
+  "schema": "inspection-checkpoint-feasibility/v1",
+  "date_utc": "2026-11-13",
+  "base_revision": "c8bba7f2c1b6c312aa215f8576014a513710775b",
+  "source_note": "The checksummed instrument was added on top of the base; go.mod and go.sum were unchanged.",
+  "instrument": "instruments/boundaries.go.txt",
+  "review_instrument": "instruments/ownership.go.txt",
+  "platform": {
+    "go_version": "go1.27.4",
+    "goos": "darwin",
+    "goarch": "arm64",
+    "cgo_enabled": 0,
+    "gomaxprocs": 2,
+    "envelope": "unconstrained shared macOS host; no Linux cgroup qualification envelope"
+  },
+  "dependencies": {
+    "github.com/corazawaf/coraza/v3": "v3.8.1",
+    "github.com/tetratelabs/wazero": "v1.12.0"
+  },
+  "executions": [
+    {
+      "raw": "raw-results.jsonl",
+      "command": "cp docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go.txt docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go && CGO_ENABLED=0 GOMAXPROCS=2 JUL_PROBE_TMP=<session-files> go run ./docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go",
+      "binary": "go run temporary executable; binary hash not captured"
+    },
+    {
+      "raw": "raw-built-results.jsonl",
+      "build_command": "cp docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go.txt docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o <session-files>/cp1-boundaries ./docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go",
+      "command": "GOMAXPROCS=2 JUL_PROBE_TMP=<session-files> <session-files>/cp1-boundaries",
+      "binary_sha256": "d8623c502cddbd647012bda0eb7d37b205eadd83c3afdc71f18b89a7c72865ec"
+    },
+    {
+      "raw": "raw-reproduction-go-run.jsonl",
+      "command": "cp docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go.txt docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go && CGO_ENABLED=0 GOMAXPROCS=2 JUL_PROBE_TMP=<private-probe-dir> go run ./docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go",
+      "binary": "go run temporary executable; binary hash not captured",
+      "purpose": "Verify the documented private-directory reproduction recipe"
+    },
+    {
+      "raw": "raw-reproduction-built.jsonl",
+      "build_command": "cp docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go.txt docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go && CGO_ENABLED=0 go build -trimpath -buildvcs=false -o <private-probe-dir>/jul-700-boundaries ./docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go",
+      "command": "GOMAXPROCS=2 JUL_PROBE_TMP=<private-probe-dir> <private-probe-dir>/jul-700-boundaries",
+      "binary_sha256": "d8623c502cddbd647012bda0eb7d37b205eadd83c3afdc71f18b89a7c72865ec",
+      "purpose": "Verify the documented private-directory reproduction recipe"
+    },
+    {
+      "raw": "raw-ownership-results.jsonl",
+      "command": "cp docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go.txt docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go && CGO_ENABLED=0 JUL_PROBE_TMP=<private-probe-dir> go run ./docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go",
+      "purpose": "Exercise static spool-file serving, parser file-create failure, and audit writer retention on darwin/arm64 as an unprivileged user"
+    }
+  ]
+}
