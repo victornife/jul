@@ -1,8 +1,9 @@
 # ADR 0032 — Aggregate inspection resource governor
 
 - **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
-  merged (#710, `c8bba7f2`); I3, I4 and I6 remain pending. The 2026-11-13 expansion below is
-  **proposed**, not accepted or implemented.
+  merged (#710, `c8bba7f2`); I3, I4 and I6 remain pending. The 2026-11-13 amendment below was
+  accepted by the maintainer when #714 merged as `16d98258` from head `faf3ead4`; it is not yet
+  implemented.
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
@@ -1196,10 +1197,11 @@ and guest capacity under the 2026-11-13 proposed amendment, by A19–A22):
   under saturation, are unmeasured (A13, A18).
 - **Feasibility measurements** are single or double repetitions, with c1 noise of 2.3–4.6/s.
 
-## Proposed amendment — 2026-11-13: inspection-owned storage, guest capacity and audit pressure
+## Accepted amendment — 2026-11-13: inspection-owned storage, guest capacity and audit pressure
 
-This amendment is a **proposal for checkpoint 1**. It does not change current configuration,
-runtime behavior, metrics or qualification. On acceptance its specific corrections supersede
+This amendment was proposed in checkpoint 1 and **accepted** when #714 merged (`16d98258`, head
+`faf3ead4`). Acceptance alone does not change current configuration, runtime behavior, metrics or
+qualification; the implementation checkpoints do. Its specific corrections supersede
 conflicting historical statements in §§3, 4, 7–11 and the original slice table; all other accepted
 decisions and A1–A18 remain in force, and A19–A22 are added. In particular, keep the process owner,
 the existing `enforce` default, `256m` byte ceiling, auto evaluation slots, `1s` queue timeout,

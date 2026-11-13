@@ -2,7 +2,7 @@
 
 This is the single continuation record for the inspection-governor checkpoints. The accepted
 authority is [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md); its
-2026-11-13 expansion is **proposed** until its design PR is merged. Historical reports and
+2026-11-13 amendment was **accepted** when #714 merged as `16d98258`. Historical reports and
 measurements retain their original identities. Merged source is not a published release,
 qualification, soak or maturity change.
 
@@ -10,20 +10,20 @@ qualification, soak or maturity change.
 
 | Item | State |
 | --- | --- |
-| Starting `main` | `c8bba7f2c1b6c312aa215f8576014a513710775b` (verified #710 merge) |
-| Checkpoint 1 | **Active**: design amendment, feasibility evidence and ledger; no later runtime implementation |
-| Design PR / head | #714: the maintainer's re-review of `04372313` requested two wording corrections, addressed in this revision, and asked for a merge once current-head hosted checks are green. The merge commit is authoritative on GitHub. |
+| Starting `main` | `16d982586ad1c964bda95ff3f5a55dc3b3fedcc0` (verified #714 merge) |
+| Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
+| Checkpoint 2 | **Active**: I3a WAF request accounting on `feat/700-inspection-waf-i3a`; PR not yet opened |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`) and I2 #710 (`c8bba7f2`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | After #714 merges with green hosted checks, start checkpoint 2 (I3a) from the merged `main` |
+| Exact next action | Implement I3a (WAF lease reuse, Jul read loop, slotted calls, R1/R2/R5 reservations), review it independently and open its PR |
 
 ## Checkpoint schedule and dependencies
 
 | Checkpoint | Scope / status | Actual prerequisite and next owner |
 | --- | --- | --- |
-| 1 — design | Active; proposed ADR amendment, evidence and this ledger | Independent reviews, validation and design PR; maintainer accepts or requests changes |
-| 2 — I3a | Not started: WAF request accounting, slots, request/audit calibration | Accepted amendment, I1/I2 and a defensible R5 bound/writer ownership; implementation owner |
+| 1 — design | Merged (#714, `16d98258`); amendment accepted | None |
+| 2 — I3a | Active: WAF request accounting, slots, request/audit calibration | Accepted amendment, I1/I2 and a defensible R5 bound/writer ownership; implementation owner |
 | 3 — I4 | Not started: WAF and plugin response paths, response audit calibration | I3a and the accepted response/header contract; implementation owner |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
 | 5 — I2b | Not started: process-wide per-live-instance guest-capacity admission; #711 | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
