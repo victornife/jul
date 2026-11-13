@@ -1405,9 +1405,15 @@ and rule 900001 remain unchanged.
 - **Prepare:** compile and validate effective facts without changing published limits. At startup,
   use the candidate limits. During reload, candidate eager instances and files reserve against the
   **currently published** process limits; a candidate cannot borrow its proposed increase before
-  Publish. If necessary, publish an increase in a separate limits-only reload first. Failure or
-  cancellation tears down the candidate and releases only resources actually gone; the old
-  generation continues. Offline checking compiles metadata only.
+  Publish. A full reload cannot be used to raise the cap when candidate warm-up itself needs the
+  increase. I2b must provide a genuine limits-only publication path for this case: accept only
+  changes confined to validated limits, do not rebuild the plugin set or instantiate replacement
+  guests, and atomically publish the validated limits. Validation or publication failure leaves
+  the old limits and generation unchanged. Candidates may use an increase only after that
+  publication succeeds; they never borrow an unpublished increase. I2b must test this path,
+  including a cap increase blocked by old-cap guest warm-up and failure atomicity. Failure or
+  cancellation of a full candidate tears it down and releases only resources actually gone; the
+  old generation continues. Offline checking compiles metadata only.
 - **Publish / decrease / mode change:** atomically publish limits. Existing reservations survive;
   enforce admits no acquisition that would exceed the new limit, while existing usage may drain
   above it. Observe continues to account without enforcing. A transition from observe to enforce
@@ -1458,8 +1464,8 @@ records actual state and blockers.
 | Checkpoint | Required focused evidence before merge |
 | --- | --- |
 | I3a / I4 | R1–R5 calibration for supported request/response shapes, audit parts and writer aliases; immutable-record verification across `tx.Close()` and pool reuse; bounded synchronous/async sink ownership; implicit phases, blocked sink and unslotted phase 5; real H1/H2/H3 refusal and sibling isolation; no early refund. |
-| I3b | Concurrent prefix spill plus multipart duplication, zero-byte files, partial writes, typed create/write/close/remove faults, cancellation, retained-directive rejection, static-root overlap/symlink aliases across reload, restart reconciliation, limits/modes and generation overlap on supported filesystems. |
-| I2b | Real guest eager/start failure, idle/busy pools, exact/over-capacity and concurrent instantiation, cancellation, traps, close failures, reload/rollback and limit decrease, including candidate and retired generations. |
+| I3b | Concurrent prefix spill plus multipart duplication, zero-byte files, partial writes, typed create/write/close/remove faults, cancellation, retained-directive rejection, static-root overlap/symlink aliases across reload, restart reconciliation, limits/modes and generation overlap on supported filesystems; observe-to-enforce with an unchanged ceiling and pre-existing over-limit reservations. |
+| I2b | Real guest eager/start failure, idle/busy pools, exact/over-capacity and concurrent instantiation, cancellation, traps, close failures, reload/rollback and limit decrease, including candidate and retired generations; a true limits-only cap increase that does not rebuild or instantiate guests, validates limits-only changes and publishes atomically, including failure atomicity and the old-cap warm-up counterexample. |
 | I6a | Real producer/API/CLI/Console states, permissions and file-owned mode, missing/stale/observe/draining states, bounded trends, actual alert handoff and accessible responsive interaction. |
 | I6b | Run the preserved full matrix and new criteria with the corrected baseline and recorded identities; do not infer acceptance from checkpoint tests or this probe. |
 
@@ -1471,7 +1477,7 @@ unchanged. Add the following unused identifiers:
 
 | # | Case | Pass condition |
 | --- | --- | --- |
-| A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing debt draining after a decrease; no early refund, unsafe deletion or partial inspection. Observe reports would-refuse while real I/O failures remain visible. Owned leftovers are reconciled before admission. |
+| A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing reservations/debt draining after a decrease or an observe-to-enforce transition, including when the numerical ceiling is unchanged; after either transition, no new acquisition may exceed the enforced ceiling. No early refund, unsafe deletion or partial inspection. Observe reports would-refuse while real I/O failures remain visible. Owned leftovers are reconciled before admission. Test observe-to-enforce with existing over-limit bytes/files and verify new acquisitions are refused. |
 | A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. |
 | A21 | Phase-5 audit pressure and blocked output | R5 is reserved before transaction entry, covers the supported calibrated request/response audit construction and immutable detached record, and remains owned through the last bounded output alias; transaction reuse cannot mutate a prior record. Phase-5 rules are never skipped and saturation cannot deadlock. Unsupported unbounded policies do not receive a protection claim. |
 | A22 | Operational usability and migration | API, CLI and Console agree with real producer state and permissions; units and unavailable/observe/draining/debt states are truthful; defaults, directive and directory migration are actionable; alerts use real bounded signals and do not claim a general notification or audit product. |

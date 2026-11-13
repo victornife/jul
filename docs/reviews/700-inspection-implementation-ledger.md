@@ -12,11 +12,11 @@ qualification, soak or maturity change.
 | --- | --- |
 | Starting `main` | `c8bba7f2c1b6c312aa215f8576014a513710775b` (verified #710 merge) |
 | Checkpoint 1 | **Active**: design amendment, feasibility evidence and ledger; no later runtime implementation |
-| Design PR / head | Not yet opened; the PR's current head and checks will be the authoritative exact identity |
+| Design PR / head | #714 is open and ready for review; no GitHub review submission was present at the last status check. The two bounded ADR corrections requested on head `1cd75931` are addressed in this revision; the current head and hosted checks are authoritative on GitHub. No merge is requested. |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`) and I2 #710 (`c8bba7f2`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Complete independent review and verification of the design diff, publish its focused PR, then stop at the maintainer's merge boundary |
+| Exact next action | Confirm the revised PR head's hosted checks and review state, then await the maintainer's decision; do not merge |
 
 ## Checkpoint schedule and dependencies
 
@@ -98,8 +98,12 @@ The independent ownership/security review found three High-severity design gaps 
 I/O error and continue phase 2 without Jul seeing a failure; and a writer can retain an audit
 record whose mutable transaction collections are reset and reused. All three are in scope.
 They were reproduced or confirmed against Jul and pinned Coraza source, corrected in the proposal,
-and assigned explicit implementation tests below. The independent final whole-checkpoint review
-completed with no actionable findings. The separately requested concurrency/protocol reviewer did
+and assigned explicit implementation tests below. The earlier independent final whole-checkpoint
+review completed with no actionable findings. A subsequent review of PR #714 head `1cd75931`
+requested two bounded design corrections: I2b must own and test a true limits-only guest-capacity
+publication path, and A19 must cover pre-existing spool reservations when observe changes to
+enforce without a numeric limit change. The amendment now specifies both, including their
+acceptance cases. The separately requested concurrency/protocol reviewer did
 not return a result during this checkpoint. A direct review of admission ordering, cap updates,
 reload overlap, queue/slot behavior and H1/H2/H3 failure semantics found no additional design
 gap; this is not an implementation test or merge approval.
