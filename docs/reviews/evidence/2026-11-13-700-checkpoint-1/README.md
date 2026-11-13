@@ -15,6 +15,10 @@ inspection and targeted cleanup.
 
 ```sh
 probe_tmp=$(mktemp -d /tmp/jul-700-probe.XXXXXX)
+cp docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go.txt \
+  docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go
+cp docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go.txt \
+  docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go
 CGO_ENABLED=0 GOMAXPROCS=2 JUL_PROBE_TMP="$probe_tmp" \
   go run ./docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go
 
@@ -24,6 +28,8 @@ sha256sum "$probe_tmp/jul-700-boundaries"
 GOMAXPROCS=2 JUL_PROBE_TMP="$probe_tmp" "$probe_tmp/jul-700-boundaries"
 CGO_ENABLED=0 JUL_PROBE_TMP="$probe_tmp" \
   go run ./docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go
+rm docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/boundaries.go \
+  docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go
 rm "$probe_tmp/jul-700-boundaries"
 rmdir "$probe_tmp"
 ```
@@ -36,8 +42,11 @@ directory recipe produced [`raw-reproduction-go-run.jsonl`](raw-reproduction-go-
 user on a Unix-like platform supporting directory mode bits; it deliberately removes write
 permission after Coraza's own startup check. The compiled boundary-probe binary is identified in
 the manifest but is not committed. Runtime allocation measurements are expected to vary.
-`SHA256SUMS` covers the manifest, this README, all results and both exact instruments, but not
-itself:
+The checked-in instruments use `.go.txt` so the repository's production-Go coverage gate does
+not mistake standalone evidence programs for uncovered runtime code. Copy each temporarily to
+its original `.go` path inside the repository before invoking Go so internal-package imports
+remain valid, then remove the copies. `SHA256SUMS` covers the manifest, this README, all results
+and both exact instruments, but not itself:
 
 ```sh
 (cd docs/reviews/evidence/2026-11-13-700-checkpoint-1 && sha256sum -c SHA256SUMS)
