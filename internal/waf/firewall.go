@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -363,7 +364,8 @@ func (f *Firewall) RouteMiddleware(route RouteAttribution, genFn func() uint64) 
 	}
 }
 
-// Close releases cached memoizer resources owned by the Coraza engine. It is
+// Close releases cached memoizer resources owned by the Coraza engine and
+// closes the audit log file, which Coraza's Close leaves open. It is
 // idempotent so verification, evaluation, and generational teardown paths can
 // close safely.
 func (f *Firewall) Close() error {
@@ -373,7 +375,7 @@ func (f *Firewall) Close() error {
 	if f.closed != nil && !f.closed.CompareAndSwap(false, true) {
 		return nil
 	}
-	return closeWAF(f.waf)
+	return errors.Join(closeWAF(f.waf), f.audit.writer.Close())
 }
 
 // IsClosed reports whether Close has been called on f.

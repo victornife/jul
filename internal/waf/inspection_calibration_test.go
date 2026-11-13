@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -138,7 +139,7 @@ func TestWAFReservationsCoverMeasuredAllocation(t *testing.T) {
 		{"spill", "SecAuditLogParts ABCIJDEFHKZ\nSecRequestBodyInMemoryLimit 1024", 1 << 20},
 		{"partial", "SecAuditLogParts ABCIJDEFHKZ\nSecRequestBodyLimitAction ProcessPartial", 4096},
 	} {
-		cfg := config.WAFConfig{Enabled: true, CRSEnabled: true, InlineRules: "SecAuditEngine On\nSecAuditLog /dev/null\n" + c.rules}
+		cfg := config.WAFConfig{Enabled: true, CRSEnabled: true, InlineRules: "SecAuditEngine On\nSecAuditLog " + os.DevNull + "\n" + c.rules}
 		applyTestDefaults(&cfg)
 		cfg.RequestBodyLimit = config.Size(c.limit)
 		fw, err := New(context.Background(), cfg, Options{})
@@ -256,7 +257,7 @@ func calibrateShape(t *testing.T, fw *Firewall, r *http.Request) {
 
 func jsonFormatter(t *testing.T) plugintypes.AuditLogFormatter {
 	t.Helper()
-	cfg := config.WAFConfig{Enabled: true, InlineRules: "SecAuditLog /dev/null\nSecAuditLogFormat JSON"}
+	cfg := config.WAFConfig{Enabled: true, InlineRules: "SecAuditLog " + os.DevNull + "\nSecAuditLogFormat JSON"}
 	applyTestDefaults(&cfg)
 	fw, err := New(context.Background(), cfg, Options{})
 	if err != nil {

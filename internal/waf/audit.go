@@ -56,6 +56,8 @@ type auditWriter struct {
 	mu        sync.Mutex
 	out       io.Writer
 	closer    io.Closer
+	closeOnce sync.Once
+	closeErr  error
 	formatter plugintypes.AuditLogFormatter
 	kind      formatterKind
 }
@@ -107,15 +109,14 @@ func (w *auditWriter) hasOutput() bool {
 	return w != nil && w.out != nil && w.formatter != nil
 }
 
+// Close closes the target file. It does not take mu: an abandoned write may
+// hold it indefinitely, and closing the file is what unblocks or fails it.
 func (w *auditWriter) Close() error {
-	if w.closer == nil {
+	if w == nil || w.closer == nil {
 		return nil
 	}
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	err := w.closer.Close()
-	w.closer = nil
-	return err
+	w.closeOnce.Do(func() { w.closeErr = w.closer.Close() })
+	return w.closeErr
 }
 
 func (w *auditWriter) Write(al plugintypes.AuditLog) error {

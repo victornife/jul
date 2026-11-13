@@ -8,6 +8,7 @@ package waf
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -296,6 +297,14 @@ func TestGovernedWAFWritesAuditRecord(t *testing.T) {
 				t.Fatalf("audit record not written: %v %q", err, out)
 			}
 			assertDrained(t, g)
+			// Close releases the file handle (Windows cannot remove an open file).
+			f := fw.audit.writer.closer.(*os.File)
+			if err := fw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.Write([]byte("x")); !errors.Is(err, os.ErrClosed) {
+				t.Fatalf("audit file still open after Close: %v", err)
+			}
 		})
 	}
 }
