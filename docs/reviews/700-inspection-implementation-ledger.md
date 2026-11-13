@@ -113,7 +113,8 @@ gap; this is not an implementation test or merge approval.
 | `make format-check`; `CGO_ENABLED=0 GOMAXPROCS=1 GOFLAGS=-p=1 make generated-check`; `make config-check` with the same Go environment and a private `TMPDIR` | Passed. |
 | `CGO_ENABLED=0 GOMAXPROCS=1 GOFLAGS=-p=1 python3 scripts/docs-check.py` | Final pass: 2,720 passed, zero failed. |
 | `sha256sum -c SHA256SUMS` for this checkpoint and referenced I1/I5/I2 evidence | Passed in the working tree and from a clean worktree; referenced I1/I5/I2 evidence checksums also passed. The final candidate is rechecked before publication. |
-| Full local `go vet ./...`, `go test ./...`, CGO WAF, race and platform lanes; current-head hosted CI | Not run locally or pending; do not infer a hosted result from the local checks. |
+| Full local `go vet ./...`, `go test ./...`, CGO WAF, race and platform lanes | Not run locally or blocked by the Xcode license as recorded above; do not infer hosted results from these local checks. |
+| Hosted checks for PR #714 at code head `e535350b` | 56 successful, two expected website deployment/availability skips, zero failures or pending checks ([run](https://github.com/victornife/jul/actions/runs/43427860229)). The preceding head's coverage-gate failure was fixed by storing standalone probes as `.go.txt`; the gate itself was not changed. |
 
 ## Handoff rules
 
