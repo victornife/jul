@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tetratelabs/wazero"
+
 	"jul/internal/config"
 )
 
@@ -59,6 +61,65 @@ func assertNoSlotLeak(t *testing.T, p *plugin) {
 	t.Helper()
 	if live, idle := len(p.slots), len(p.pool); live != idle {
 		t.Fatalf("live slots = %d with %d idle instances and no call in flight: slot leak", live, idle)
+	}
+}
+
+func TestInstanceStartRespectsRequestCancellation(t *testing.T) {
+	ctx := context.Background()
+	r := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().WithCloseOnContextDone(true))
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	defer func() {
+		close(unblock)
+		_ = r.Close(ctx)
+	}()
+	_, err := r.NewHostModuleBuilder("test").NewFunctionBuilder().WithFunc(func(ctx context.Context) {
+		close(entered)
+		select {
+		case <-ctx.Done():
+		case <-unblock:
+		}
+	}).Export("wait").Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Minimal module whose start function calls the blocking host import.
+	wasm := []byte{
+		0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+		0x02, 0x0d, 0x01, 0x04, 't', 'e', 's', 't', 0x04, 'w', 'a', 'i', 't', 0x00, 0x00,
+		0x03, 0x02, 0x01, 0x00,
+		0x08, 0x01, 0x01,
+		0x0a, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0b,
+	}
+	compiled, err := r.CompileModule(ctx, wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &plugin{runtime: r, compiled: compiled, slots: make(chan struct{}, 1)}
+	requestCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.acquire(requestCtx)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest start did not reach the host barrier")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("instance start succeeded after cancellation")
+		}
+		if len(p.slots) != 0 {
+			t.Fatal("canceled instance start retained a local slot")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("instance start did not stop after request cancellation")
 	}
 }
 

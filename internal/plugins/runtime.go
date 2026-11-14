@@ -699,7 +699,7 @@ func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
 	}
 	select {
 	case p.slots <- struct{}{}:
-		return p.newInstance()
+		return p.newInstance(ctx)
 	default:
 	}
 	wait := time.NewTimer(p.timeout)
@@ -710,7 +710,7 @@ func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
 		return pm, nil
 	case p.slots <- struct{}{}:
 		p.onWait(p.name, instanceWaitAcquired)
-		return p.newInstance()
+		return p.newInstance(ctx)
 	case <-ctx.Done():
 	case <-wait.C:
 	}
@@ -721,13 +721,20 @@ func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
 	return nil, errInstanceLimit
 }
 
-// newInstance instantiates a module for a slot the caller already holds,
-// returning the slot if instantiation fails.
-func (p *plugin) newInstance() (*pooledModule, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), instantiateTimeout)
+// newInstance instantiates a module for a slot the caller already holds.
+// A canceled successful start retains its slot if closing the module fails.
+func (p *plugin) newInstance(parent context.Context) (*pooledModule, error) {
+	ctx, cancel := context.WithTimeout(parent, instantiateTimeout)
 	defer cancel()
 	mod, err := p.instantiate(ctx)
 	if err != nil {
+		p.freeSlot()
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		if closeErr := mod.Close(context.Background()); closeErr != nil {
+			return nil, errors.Join(err, fmt.Errorf("close canceled plugin instance: %w", closeErr))
+		}
 		p.freeSlot()
 		return nil, err
 	}
