@@ -1015,7 +1015,7 @@
       "go_field": "PluginConfig.MemoryLimit",
       "path": "plugins.<name>.memory_limit",
       "kind": "size",
-      "constraint": "non-negative",
+      "constraint": "zero, or at least 64 KiB; rounded down to whole 64 KiB pages with a maximum effective ceiling of 4 GiB",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always"
     },

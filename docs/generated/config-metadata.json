@@ -1942,11 +1942,11 @@
         "wasm_plugins"
       ],
       "value_kind": "size",
-      "constraint": "non-negative",
+      "constraint": "zero, or at least 64 KiB; rounded down to whole 64 KiB pages with a maximum effective ceiling of 4 GiB",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always",
       "default": "16m",
-      "description": "MemoryLimit caps the guest's linear memory",
+      "description": "MemoryLimit caps the guest's linear memory, rounded down to whole 64 KiB pages",
       "anchor": "plugins-x-memory_limit"
     },
     "plugins.*.path": {

@@ -11,6 +11,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Plugin `memory_limit` values below one 64 KiB WebAssembly page are now
+  rejected instead of silently selecting the 16 MiB default. Limits whose
+  page-rounded value exceeds 4 GiB are also rejected before wazero can panic.
+
 - Require Go 1.27.4 for current source builds, including the upstream
   `net/http` fix for [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
   The root and example modules, CI/release toolchain and Docker builder are

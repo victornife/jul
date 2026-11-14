@@ -103,7 +103,7 @@ plugins = ["header-inject"]             # middleware for every location here
 | `type` | `middleware` (default) or `handler` |
 | `abi` | `jul-abi/v1` (default) or `jul-abi/v2`; must match the SDK the module was built with, checked before Publish. See [abi.md](abi.md#selecting-an-abi) |
 | `config` | String map handed to the guest as a JSON object via `get_config` |
-| `memory_limit` | Guest linear-memory ceiling (default 16 MiB) |
+| `memory_limit` | Guest linear-memory ceiling (default 16 MiB); positive values must be at least 64 KiB and are rounded down to whole 64 KiB pages, with an effective maximum of 4 GiB |
 | `timeout` | Deadline for a single invocation (default 100ms) |
 | `kv` | Grant the key/value store host functions (namespaced per plugin) |
 | `kv_max_entries` / `kv_max_bytes` | Per-plugin KV quota (defaults 1024 keys / 1 MiB); a `kv_set` past either is rejected |

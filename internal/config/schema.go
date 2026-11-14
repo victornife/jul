@@ -137,7 +137,9 @@ type PluginConfig struct {
 	// Config is an arbitrary string map handed to the guest as a JSON object via
 	// the get_config host function.
 	Config map[string]string `toml:"config"`
-	// MemoryLimit caps the guest's linear memory. Zero applies a 16 MiB default.
+	// MemoryLimit caps the guest's linear memory, rounded down to whole 64 KiB
+	// pages. Positive values must be at least one page, with a maximum
+	// effective ceiling of 4 GiB. Zero applies a 16 MiB default.
 	MemoryLimit Size `toml:"memory_limit"`
 	// Timeout bounds a single guest invocation. Zero applies a 100ms default.
 	Timeout Duration `toml:"timeout"`

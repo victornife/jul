@@ -30,7 +30,7 @@ import (
 )
 
 // wasmPageSize is the WebAssembly linear-memory page size (64 KiB).
-const wasmPageSize = 1 << 16
+const wasmPageSize = config.PluginMemoryPageSize
 
 // instantiateTimeout bounds module instantiation (running the guest's
 // _initialize), independent of the much shorter per-request call timeout.
@@ -469,7 +469,10 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		}
 	}
 
-	p, pages := newPluginLimits(name, pc)
+	p, pages, err := newPluginLimits(name, pc)
+	if err != nil {
+		return nil, err
+	}
 	p.identity = module.Identity
 	p.pool = make(chan *pooledModule, poolCapacity)
 	p.capKV = pc.KV
@@ -587,8 +590,11 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 // newPluginLimits returns a plugin carrying only the configuration-derived
 // fields that size its inspection charge, and the guest memory limit in
 // pages. compilePlugin and InspectionFacts share it so both report the same
-// limits.
-func newPluginLimits(name string, pc config.PluginConfig) (*plugin, uint32) {
+// limits and reject invalid values.
+func newPluginLimits(name string, pc config.PluginConfig) (*plugin, uint32, error) {
+	if err := config.ValidatePluginMemoryLimit(pc.MemoryLimit); err != nil {
+		return nil, 0, err
+	}
 	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
 	if pages == 0 {
 		pages = 256 // 16 MiB
@@ -603,7 +609,7 @@ func newPluginLimits(name string, pc config.PluginConfig) (*plugin, uint32) {
 		maxReqBody:       sizeOr(pc.MaxRequestBody, maxRequestBodyBuffer),
 		maxRespBody:      sizeOr(pc.MaxResponseBody, maxResponseBodyBuffer),
 		maxFetchResp:     sizeOr(pc.MaxFetchResponse, 1<<20),
-	}, pages
+	}, pages, nil
 }
 
 // InspectionFacts returns every declared plugin's inspection facts without
@@ -631,7 +637,10 @@ func (m *Manager) inspectPlugin(ctx context.Context, name string, pc config.Plug
 	if err != nil {
 		return inspection.PluginFacts{}, err
 	}
-	p, pages := newPluginLimits(name, pc)
+	p, pages, err := newPluginLimits(name, pc)
+	if err != nil {
+		return inspection.PluginFacts{}, err
+	}
 	if _, ok := abiRegistry[p.abi]; !ok {
 		return inspection.PluginFacts{}, fmt.Errorf("unknown ABI %q", p.abi)
 	}

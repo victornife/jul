@@ -1899,7 +1899,7 @@ kv = true
 | `path` / `inline` | Module source — supply exactly one |
 | `type` | `middleware` (wraps a handler) or `handler` (terminal location action) |
 | `config` | String map handed to the guest as JSON via `get_config` |
-| `memory_limit` | Guest linear-memory ceiling (default 16 MiB) |
+| `memory_limit` | Guest linear-memory ceiling (default 16 MiB); positive values must be at least 64 KiB and are rounded down to whole 64 KiB pages, with an effective maximum of 4 GiB |
 | `timeout` | Deadline for a single invocation; guest is torn down on overrun (default 100ms) |
 | `kv` | Grant the key/value store host functions (namespaced per plugin) |
 | `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the listed hosts |

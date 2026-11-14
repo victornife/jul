@@ -68,6 +68,46 @@ func TestInspectionFactsDoesNotInstantiate(t *testing.T) {
 	}
 }
 
+func TestPluginBuildAndInspectionRejectInvalidMemoryLimit(t *testing.T) {
+	for name, limit := range map[string]config.Size{
+		"sub-page": 32 << 10,
+		"over-max": (1 << 32) + (1 << 16),
+		"overflow": 1 << 48,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := map[string]config.PluginConfig{"invalid": {
+				Path: testdataDir + "header-inject.wasm", Type: "middleware", MemoryLimit: limit,
+			}}
+			m := testManager(t)
+			if set, err := m.Build(context.Background(), cfg); err == nil {
+				_ = set.Close()
+				t.Fatal("Build accepted an invalid memory limit")
+			} else if !strings.Contains(err.Error(), "memory_limit") {
+				t.Fatalf("Build error = %v, want memory_limit error", err)
+			}
+			if _, err := m.InspectionFacts(context.Background(), cfg); err == nil {
+				t.Fatal("InspectionFacts accepted an invalid memory limit")
+			} else if !strings.Contains(err.Error(), "memory_limit") {
+				t.Fatalf("InspectionFacts error = %v, want memory_limit error", err)
+			}
+		})
+	}
+}
+
+func TestInspectionFactsRoundsMaximumMemoryLimit(t *testing.T) {
+	cfg := map[string]config.PluginConfig{"p": {
+		Path: testdataDir + "header-inject.wasm", Type: "middleware",
+		MemoryLimit: (1 << 32) + (1 << 16) - 1,
+	}}
+	facts, err := testManager(t).InspectionFacts(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := facts["p"].MemoryLimit, uint64(1<<32); got != want {
+		t.Fatalf("effective memory limit = %d, want %d", got, want)
+	}
+}
+
 // Build and InspectionFacts share module reading, limits and ABI negotiation,
 // so they must report identical facts for every fixture shape.
 func TestInspectionFactsMatchBuild(t *testing.T) {
@@ -76,6 +116,7 @@ func TestInspectionFactsMatchBuild(t *testing.T) {
 		"redact":  {Path: testdataDir + "v2-redact.wasm", Type: "middleware", ABI: config.PluginABIV2, MaxResponseBody: config.Size(2 << 20)},
 		"handler": {Path: testdataDir + "v2-status-header.wasm", Type: "handler", ABI: config.PluginABIV2},
 		"v1":      {Path: testdataDir + "header-inject.wasm", Type: "middleware"},
+		"rounded": {Path: testdataDir + "header-inject.wasm", Type: "middleware", MemoryLimit: (16 << 20) + 1},
 	}
 	m := testManager(t)
 	set, err := m.Build(context.Background(), cfg)
@@ -92,6 +133,9 @@ func TestInspectionFactsMatchBuild(t *testing.T) {
 		if !ok || facts[name] != built {
 			t.Errorf("%s: inspected %+v, built %+v", name, facts[name], built)
 		}
+	}
+	if got, want := facts["rounded"].MemoryLimit, uint64(16<<20); got != want {
+		t.Errorf("rounded effective memory limit = %d, want %d", got, want)
 	}
 }
 

@@ -944,13 +944,13 @@
           },
           "memory_limit": {
             "default": "16m",
-            "description": "MemoryLimit caps the guest's linear memory",
+            "description": "MemoryLimit caps the guest's linear memory, rounded down to whole 64 KiB pages",
             "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
             "type": "string",
             "x-jul-capability": [
               "wasm_plugins"
             ],
-            "x-jul-constraint": "non-negative"
+            "x-jul-constraint": "zero, or at least 64 KiB; rounded down to whole 64 KiB pages with a maximum effective ceiling of 4 GiB"
           },
           "path": {
             "description": "Path is the filesystem path to the .wasm module",

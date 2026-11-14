@@ -1676,7 +1676,7 @@ MaxResponseBody caps the response body a guest may accumulate.
 
 ## `plugins.*.memory_limit` {#plugins-x-memory_limit}
 
-MemoryLimit caps the guest's linear memory.
+MemoryLimit caps the guest's linear memory, rounded down to whole 64 KiB pages.
 
 | | |
 | --- | --- |
@@ -1686,7 +1686,7 @@ MemoryLimit caps the guest's linear memory.
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
 | Default | 16m |
-| Constraint | non-negative |
+| Constraint | zero, or at least 64 KiB; rounded down to whole 64 KiB pages with a maximum effective ceiling of 4 GiB |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
 

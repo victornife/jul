@@ -409,6 +409,41 @@ func TestValidatePluginsValid(t *testing.T) {
 	}
 }
 
+func TestValidatePluginMemoryLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit Size
+		valid bool
+	}{
+		{"default", 0, true},
+		{"negative", -1, false},
+		{"one byte", 1, false},
+		{"below one page", (1 << 16) - 1, false},
+		{"one page", 1 << 16, true},
+		{"partial second page", (1 << 16) + 1, true},
+		{"maximum effective pages", (1 << 32) + (1 << 16) - 1, true},
+		{"above maximum effective pages", (1 << 32) + (1 << 16), false},
+		{"page count overflows uint32", 1 << 48, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Servers: []ServerConfig{{Listen: ":80"}},
+				Plugins: map[string]PluginConfig{
+					"p": {Path: "../../testdata/plugins/header-inject.wasm", Type: "middleware", MemoryLimit: tt.limit},
+				},
+			}
+			err := Validate(cfg)
+			if tt.valid && err != nil {
+				t.Fatalf("Validate() = %v, want success", err)
+			}
+			if !tt.valid && (err == nil || !strings.Contains(err.Error(), "memory_limit")) {
+				t.Fatalf("Validate() = %v, want memory_limit error", err)
+			}
+		})
+	}
+}
+
 func TestValidatePluginsErrors(t *testing.T) {
 	good := "../../testdata/plugins/header-inject.wasm"
 	cases := map[string]*Config{
