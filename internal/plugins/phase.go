@@ -268,11 +268,9 @@ func (l *responseLayer) finish() {
 	}
 	switch l.state {
 	case layerBuffering:
-		body := l.bufferBytes()
-		view, ok := l.decide(bodyAvailable, body)
+		view, ok := l.decide(bodyAvailable, l.bufferBytes())
 		if !ok {
 			view.body = nil
-			body = nil
 			l.releaseBuffer()
 			l.writeFinal()
 			return
@@ -293,7 +291,6 @@ func (l *responseLayer) finish() {
 		}
 		view.dropReplacement()
 		view.body = nil
-		body = nil
 		l.releaseBuffer()
 	case layerDiscard:
 		l.releaseBuffer()
@@ -452,6 +449,7 @@ func (l *responseLayer) unavailableForBudget() {
 	view, ok := l.decideWithReason(bodyTooLarge, nil, "budget")
 	if !ok {
 		l.writeFinal()
+		l.state = layerDiscard
 		return
 	}
 	l.parent.WriteHeader(view.status)
@@ -461,10 +459,8 @@ func (l *responseLayer) unavailableForBudget() {
 }
 
 func (l *responseLayer) forwardWithoutBody(p []byte, reason string) (int, error) {
-	buffered := l.bufferBytes()
 	view, ok := l.decideWithReason(bodyTooLarge, nil, reason)
 	if !ok {
-		buffered = nil
 		l.releaseBuffer()
 		return len(p), nil
 	}
@@ -472,14 +468,18 @@ func (l *responseLayer) forwardWithoutBody(p []byte, reason string) (int, error)
 	l.state = layerPassthrough
 	view.body = nil
 	view.dropReplacement()
-	if len(buffered) > 0 {
-		if _, err := l.parent.Write(buffered); err != nil {
-			buffered = nil
-			l.releaseBuffer()
-			return 0, err
+	writeErr := func() error {
+		buffered := l.bufferBytes()
+		if len(buffered) == 0 {
+			return nil
 		}
+		_, err := l.parent.Write(buffered)
+		return err
+	}()
+	if writeErr != nil {
+		l.releaseBuffer()
+		return 0, writeErr
 	}
-	buffered = nil
 	l.releaseBuffer()
 	return l.parent.Write(p)
 }

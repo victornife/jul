@@ -296,6 +296,137 @@ func TestResponsePhaseBufferBudgetReportsUnavailableWithoutTruncating(t *testing
 	if snap := g.Snapshot(); snap.ActiveLeases != 0 || snap.Usage != ([len(snap.Usage)]uint64{}) {
 		t.Fatalf("response buffer charge leaked: %+v", snap)
 	}
+
+	rejected := serve(chainFor(s, act(http.StatusOK, body, "Content-Length", strconv.Itoa(len(body))), "p"),
+		req(http.MethodGet, "/", "X-Op", "reject", "X-Mode", "body"))
+	if rejected.Code != http.StatusBadGateway || rejected.Body.Len() != 0 {
+		t.Fatalf("rejected budget-unavailable response = %d %q, want empty 502", rejected.Code, rejected.Body.String())
+	}
+}
+
+func TestResponsePhaseBufferGrowthBudgetReportsUnavailableWithoutTruncating(t *testing.T) {
+	limits := testLimits()
+	limits.MaxBytes = 2*limits.BaseChargeBytes + 1<<20
+	g, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, hooks := v2ManagerWithGovernor(t, nil, g)
+	s := buildSet(t, m, map[string]config.PluginConfig{"p": v2cfg()})
+	filler, _, _, err := g.AcquireLease(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = filler.Close() }()
+
+	first, second := strings.Repeat("a", 1024), strings.Repeat("b", 1024)
+	h := chainFor(s, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, first)
+		var used uint64
+		for _, amount := range g.Snapshot().Usage {
+			used += amount
+		}
+		if _, err := filler.Charge(inspection.BufferBytes, limits.MaxBytes-used-1); err != nil {
+			t.Errorf("occupy remaining response budget: %v", err)
+		}
+		_, _ = io.WriteString(w, second)
+	}), "p")
+	rec := serve(h, req(http.MethodGet, "/", "X-Op", "echo", "X-Mode", "body"))
+	if rec.Code != http.StatusOK || rec.Body.String() != first+second {
+		t.Fatalf("growth-refused response = %d, body length %d", rec.Code, rec.Body.Len())
+	}
+	if rec.Header().Get("X-Body-State") != "3" || rec.Header().Get("X-Body-RC") != "-4" {
+		t.Fatalf("guest did not receive an unavailable body state: %v", rec.Header())
+	}
+	if hooks.count(hooks.noBody, "budget") != 1 {
+		t.Fatalf("no-body budget metric count = %d, want 1", hooks.count(hooks.noBody, "budget"))
+	}
+	_ = filler.Close()
+	if snapshot := g.Snapshot(); snapshot.ActiveLeases != 0 || snapshot.Usage != ([len(snapshot.Usage)]uint64{}) {
+		t.Fatalf("growth-refused response charges did not drain: %+v", snapshot)
+	}
+}
+
+func TestChargedBufferRequiresLeaseAndRejectsNegativeCapacity(t *testing.T) {
+	if _, err := leaseCharger(nil)(1); err != errNoLease {
+		t.Fatalf("nil-lease charge error = %v, want %v", err, errNoLease)
+	}
+	if _, err := newChargedBuf(nil, 1); err != errNoLease {
+		t.Fatalf("nil charger error = %v, want %v", err, errNoLease)
+	}
+	if _, err := newChargedBuf(freeCharge, -1); err != errChargeOverflow {
+		t.Fatalf("negative-capacity error = %v, want %v", err, errChargeOverflow)
+	}
+}
+
+func TestResponseLayerInitialBufferChargeFailureFailsClosed(t *testing.T) {
+	parent := httptest.NewRecorder()
+	l := responseLayerForTest(parent, func(uint64) (byteCharge, error) {
+		return nil, &inspection.AdmissionError{Outcome: inspection.InvalidAccounting}
+	})
+	l.Header().Set("Content-Length", "4")
+	l.WriteHeader(http.StatusOK)
+	if l.state != layerDiscard || !l.failed {
+		t.Fatalf("initial charge failure state = %v failed=%v, want failed discard", l.state, l.failed)
+	}
+	l.finish()
+	if parent.Code != http.StatusInternalServerError || parent.Body.String() != "plugin error\n" {
+		t.Fatalf("initial charge failure response = %d %q", parent.Code, parent.Body.String())
+	}
+}
+
+type failingResizeCharge struct{}
+
+func (failingResizeCharge) Resize(uint64) error {
+	return &inspection.AdmissionError{Outcome: inspection.InvalidAccounting}
+}
+
+func (failingResizeCharge) Release() error { return nil }
+
+func TestResponseLayerGrowthAccountingFailureFailsClosed(t *testing.T) {
+	parent := httptest.NewRecorder()
+	l := responseLayerForTest(parent, func(uint64) (byteCharge, error) {
+		return failingResizeCharge{}, nil
+	})
+	if n, err := l.Write([]byte("a")); n != 1 || err != nil {
+		t.Fatalf("initial write = (%d, %v), want (1, nil)", n, err)
+	}
+	if n, err := l.Write([]byte("b")); n != 1 || err != nil {
+		t.Fatalf("write after failed growth = (%d, %v), want (1, nil)", n, err)
+	}
+	l.finish()
+	if parent.Code != http.StatusInternalServerError || parent.Body.String() != "plugin error\n" {
+		t.Fatalf("growth accounting failure response = %d %q", parent.Code, parent.Body.String())
+	}
+}
+
+func TestResponseLayerGrowBufferHonorsMaximumAndContentLength(t *testing.T) {
+	var charged uint64
+	l := responseLayerForTest(httptest.NewRecorder(), func(n uint64) (byteCharge, error) {
+		charged = n
+		return &fakeCharge{n: n}, nil
+	})
+	l.Header().Set("Content-Length", "8")
+	if err := l.growBuffer(4); err != nil {
+		t.Fatal(err)
+	}
+	if charged != 8 || cap(l.buf.b) != 8 {
+		t.Fatalf("preallocated capacity = %d, charge = %d, want 8", cap(l.buf.b), charged)
+	}
+	l.releaseBuffer()
+	if err := l.growBuffer(17); err != errRespTooLarge {
+		t.Fatalf("oversized growth error = %v, want %v", err, errRespTooLarge)
+	}
+}
+
+func responseLayerForTest(parent http.ResponseWriter, charge chargeFunc) *responseLayer {
+	return &responseLayer{
+		parent: parent,
+		req:    httptest.NewRequest(http.MethodGet, "/", nil),
+		sub:    subscription{mode: responseModeBody, p: &plugin{maxRespBody: 16}},
+		cancel: func() {},
+		charge: charge,
+	}
 }
 
 func TestResponsePointPanicReleasesBufferedResponseCharge(t *testing.T) {
