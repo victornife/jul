@@ -162,6 +162,228 @@ func TestWAFReservationsCoverMeasuredAllocation(t *testing.T) {
 	}
 }
 
+func TestWAFResponseReservationsCoverMeasuredAllocation(t *testing.T) {
+	if testing.Short() || raceEnabled {
+		t.Skip("allocation calibration")
+	}
+	shapes := []struct {
+		name, mime string
+		headers    http.Header
+		body       []byte
+		limit      int
+	}{
+		{
+			name: "repeated-auth-and-cookie-headers",
+			headers: func() http.Header {
+				h := make(http.Header)
+				for i := 0; i < 128; i++ {
+					h.Add("Set-Cookie", fmt.Sprintf("session-%d=%s; Path=/; HttpOnly", i, strings.Repeat("s", 192)))
+				}
+				for i := 0; i < 32; i++ {
+					h.Add("WWW-Authenticate", fmt.Sprintf("Bearer realm=%q", strings.Repeat("r", 384)))
+				}
+				return h
+			}(),
+			body:  []byte(strings.Repeat("response ", 1024)),
+			limit: 128 << 10,
+		},
+		{
+			name: "urlencoded-parser",
+			mime: "application/x-www-form-urlencoded",
+			body: func() []byte {
+				var b strings.Builder
+				for i := 0; i < 1500; i++ {
+					fmt.Fprintf(&b, "field%d=%s&", i, strings.Repeat("v", 24))
+				}
+				return []byte(b.String())
+			}(),
+			limit: 128 << 10,
+		},
+		{
+			name:  "urlencoded-partial",
+			mime:  "application/x-www-form-urlencoded",
+			body:  []byte(strings.Repeat("field=1&", 1024)),
+			limit: 4 << 10,
+		},
+		{
+			name: "json-parser",
+			mime: "application/json",
+			body: func() []byte {
+				var b strings.Builder
+				b.WriteString(`{"items":[`)
+				for i := 0; i < 500; i++ {
+					if i > 0 {
+						b.WriteByte(',')
+					}
+					fmt.Fprintf(&b, `{"field%d":"%s"}`, i, strings.Repeat("j", 64))
+				}
+				b.WriteString("]}")
+				return []byte(b.String())
+			}(),
+			limit: 128 << 10,
+		},
+	}
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			rules := strings.Join([]string{
+				"SecAuditEngine On",
+				"SecAuditLog " + os.DevNull,
+				"SecAuditLogParts ABCIJDEFHKZ",
+				"SecResponseBodyAccess On",
+				"SecResponseBodyMimeType application/json application/x-www-form-urlencoded text/plain",
+				fmt.Sprintf("SecResponseBodyLimit %d", shape.limit),
+				"SecResponseBodyLimitAction ProcessPartial",
+			}, "\n")
+			cfg := config.WAFConfig{
+				Enabled:           true,
+				CRSEnabled:        true,
+				ResponseBodyCheck: true,
+				InlineRules:       rules,
+			}
+			applyTestDefaults(&cfg)
+			fw, err := New(context.Background(), cfg, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = fw.Close() }()
+
+			uri := "/response?mode=calibration"
+			r := httptest.NewRequest(http.MethodGet, uri, nil)
+			r.Header.Set("Accept", "text/plain")
+			r.Header.Set("User-Agent", "jul-response-calibration")
+			headers := make(http.Header, len(shape.headers)+2)
+			for key, values := range shape.headers {
+				headers[key] = append([]string(nil), values...)
+			}
+			headers.Set("Content-Type", shape.mime)
+			headers.Set("Content-Length", fmt.Sprint(len(shape.body)))
+			var (
+				tx                        types.Transaction
+				phase3, phase4, bodyBytes uint64
+			)
+			for range 3 {
+				candidate, p3, p4, consumed := measureResponsePhases(t, fw, r, headers, shape.body)
+				if tx == nil || p3+p4 < phase3+phase4 {
+					if tx != nil {
+						_ = tx.Close()
+					}
+					tx, phase3, phase4, bodyBytes = candidate, p3, p4, consumed
+				} else {
+					_ = candidate.Close()
+				}
+			}
+			defer func() { _ = tx.Close() }()
+
+			headerBytes := responseHeaderShape(headers)
+			r3 := r3Estimate(headerBytes)
+			args, ok := responseArgsHeld(tx)
+			if !ok {
+				t.Fatal("transaction response state unavailable")
+			}
+			r4 := r4Estimate(args, bodyBytes)
+			if phase3 > r3 || phase4 > r4 || phase3+phase4 > r3+r4 {
+				t.Errorf("response phases retained %d B (R3 %d B) + %d B (R4 %d B)", phase3, r3, phase4, r4)
+			}
+			if shape.limit < len(shape.body) && bodyBytes != uint64(shape.limit) {
+				t.Errorf("partial response processed %d B, want %d B", bodyBytes, shape.limit)
+			}
+			calibrateResponseAudit(t, fw, tx, r, headers, bodyBytes)
+		})
+	}
+}
+
+func measureResponsePhases(t *testing.T, fw *Firewall, r *http.Request, headers http.Header, body []byte) (types.Transaction, uint64, uint64, uint64) {
+	t.Helper()
+	tx := fw.waf.NewTransaction()
+	tx.ProcessConnection("192.0.2.1", 1234, "", 0)
+	tx.ProcessURI(r.URL.RequestURI(), r.Method, r.Proto)
+	for k, values := range r.Header {
+		for _, value := range values {
+			tx.AddRequestHeader(k, value)
+		}
+	}
+	tx.AddRequestHeader("Host", r.Host)
+	tx.ProcessRequestHeaders()
+	tx.ProcessRequestBody()
+
+	phase3 := retained(func() {
+		for k, values := range headers {
+			for _, value := range values {
+				tx.AddResponseHeader(k, value)
+			}
+		}
+		tx.ProcessResponseHeaders(http.StatusOK, r.Proto)
+	})
+	var (
+		consumed int
+		err      error
+	)
+	phase4 := retained(func() {
+		_, consumed, err = tx.WriteResponseBody(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if consumed == len(body) {
+			_, err = tx.ProcessResponseBody()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	return tx, phase3, phase4, uint64(consumed)
+}
+
+func calibrateResponseAudit(t *testing.T, fw *Firewall, tx types.Transaction, r *http.Request, headers http.Header, bodyBytes uint64) {
+	t.Helper()
+	st, err := readTxAuditState(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqHeaderCount, reqHeaderBytes, _ := requestHeaderShape(r, r.URL.RequestURI())
+	pre := auditPrecheck{
+		parts:          st.parts,
+		reqHeaderCount: reqHeaderCount,
+		reqHeaderBytes: reqHeaderBytes,
+		respBodyBytes:  bodyBytes,
+		uri:            len(r.URL.RequestURI()),
+		host:           len(r.Host),
+		client:         len("192.0.2.1"),
+		txID:           len(tx.ID()),
+		matched:        tx.MatchedRules(),
+	}
+	for k, values := range headers {
+		for _, value := range values {
+			pre.respHeaderCount++
+			pre.respHeaderBytes += uint64(len(k) + len(value))
+		}
+	}
+	inner, ok := innerTx(tx)
+	if !ok {
+		t.Fatal("inner transaction unavailable")
+	}
+	var al plugintypes.AuditLog
+	built := allocated(func() {
+		al = inner.Addr().MethodByName("AuditLog").Call(nil)[0].Interface().(plugintypes.AuditLog)
+	})
+	shape := measureAuditRecord(al)
+	if est := constructionEstimate(pre); built > est || built > shape.construction {
+		t.Errorf("response audit construction allocated %d B; estimate %d B, measured bound %d B", built, est, shape.construction)
+	}
+	for kind, formatter := range map[formatterKind]plugintypes.AuditLogFormatter{
+		formatterNative: fw.audit.writer.formatter,
+		formatterJSON:   jsonFormatter(t),
+	} {
+		if formatter == nil || kind != classifyFormatter(formatter) {
+			t.Fatalf("formatter %T not classified as %d", formatter, kind)
+		}
+		var out []byte
+		used := allocated(func() { out, _ = formatter.Format(al) })
+		if estimate := formatEstimate(shape, kind); used > estimate || uint64(len(out)) > estimate {
+			t.Errorf("response formatter %d allocated %d B (output %d B); estimate %d B", kind, used, len(out), estimate)
+		}
+	}
+}
+
 func calibrateShape(t *testing.T, fw *Firewall, r *http.Request) {
 	t.Helper()
 	uri := r.URL.RequestURI()

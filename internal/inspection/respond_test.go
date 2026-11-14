@@ -51,3 +51,14 @@ func TestInspectionResponses(t *testing.T) {
 		})
 	}
 }
+
+func TestEvaluationQueueRefusalsAreOverload(t *testing.T) {
+	for _, outcome := range []Outcome{EvaluationSaturated, QueueExhausted, WaitExpired} {
+		if !IsOverload(&AdmissionError{Outcome: outcome}) {
+			t.Errorf("%s is not classified as overload", outcome)
+		}
+	}
+	if IsOverload(&AdmissionError{Outcome: Cancelled}) {
+		t.Fatal("cancellation must not be reported as overload")
+	}
+}

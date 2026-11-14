@@ -24,6 +24,7 @@ import (
 	"github.com/corazawaf/coraza/v3/types"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/middleware"
 	"jul/internal/reqdeadline"
 )
@@ -274,10 +275,11 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 
 	// refuse answers a governor refusal or body-arrival failure after the
 	// transaction exists; phase 5 still runs in the deferred logging.
-	refuse := func(err error) {
+	refuse := func(err error) int {
 		outcome = OutcomeInspectionRefused
-		errorCategory, clientStatus = refusal(err)
-		writeAdmissionError(w, r, err)
+		errorCategory, _ = refusal(err)
+		clientStatus = writeAdmissionError(w, r, err)
+		return clientStatus
 	}
 
 	// collect copies the response interceptor's observations.
@@ -292,6 +294,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		responseInterrupted = ic.responseInterrupted
 		if ic.errCategory != "" && errorCategory == "" {
 			errorCategory = ic.errCategory
+		}
+		if ic.admissionRefused && outcome == "" {
+			outcome = OutcomeInspectionRefused
 		}
 	}
 
@@ -403,7 +408,12 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			a.release()
 		})
 	}
-	defer finish()
+	defer func() {
+		if ic != nil {
+			collect()
+		}
+		finish()
+	}()
 
 	// Phase 1: connection, URI, request headers. ProcessURI parses ARGS_GET,
 	// so the slot and R1 are taken before it and held through phase 1.
@@ -505,6 +515,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			return
 		}
 		txBody = &txBodyReader{r: rbr}
+		if origBody == http.NoBody || r.ContentLength == 0 || (res.written == 0 && len(res.leftover) == 0) {
+			txBody.drained.Store(true)
+		}
 		body := io.MultiReader(txBody, origBody)
 		if len(res.leftover) > 0 {
 			body = io.MultiReader(txBody, bytes.NewReader(res.leftover), origBody)
@@ -560,11 +573,15 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	originReached = true
 	var wrappedWriter http.ResponseWriter
 	ic, wrappedWriter = newWAFResponseInterceptor(w, r, tx, f.info.BlockStatus, addPhase, mintSupportHeader)
-	// A hijack commits the exchange: Jul stops inspecting it, so phase 5
-	// runs and transaction ownership ends there rather than lasting for the
-	// life of the connection (ADR 0032, long-lived exchanges).
+	ic.admission = a
+	ic.onAdmissionFailure = refuse
+	ic.responseBodyLimit = f.state.responseBodyLimit
+	ic.responseBodyLimitReject = f.state.responseBodyLimitReject
+	ic.argumentLimit = f.argumentLimit()
+	// A hijack or an unbuffered response commit point ends transaction
+	// ownership once inspection is complete (ADR 0032, long-lived exchanges).
 	// An undrained inspected body still reads the transaction's buffer, so
-	// that (rare) hijack keeps ownership until the handler returns.
+	// ownership remains until that buffer is drained or the handler returns.
 	ic.onCommit = func() bool {
 		if txBody != nil && !txBody.drained.Load() {
 			return false
@@ -626,6 +643,7 @@ func (h *wafHijackerTracker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 type wafResponseInterceptor struct {
 	w                             http.ResponseWriter
+	req                           *http.Request
 	tx                            types.Transaction
 	proto                         string
 	blockStatus                   int
@@ -641,9 +659,17 @@ type wafResponseInterceptor struct {
 	isHijacked                    bool
 	allowFlushing                 bool
 	responseInterrupted           bool
+	responseFailed                bool
+	admissionRefused              bool
+	phase4Evaluated               bool
 	errCategory                   string
 	// respBodyBytes counts response bytes handed to Coraza (audit part E).
-	respBodyBytes uint64
+	respBodyBytes           uint64
+	admission               *wafAdmission
+	onAdmissionFailure      func(error) int
+	responseBodyLimit       int64
+	responseBodyLimitReject bool
+	argumentLimit           uint64
 	// onCommit ends transaction ownership at a hijack; once committed the
 	// transaction is closed (and may be pooled), so it is never touched.
 	onCommit  func() bool
@@ -669,6 +695,7 @@ func newWAFResponseInterceptor(
 ) (*wafResponseInterceptor, http.ResponseWriter) {
 	ic := &wafResponseInterceptor{
 		w:                 w,
+		req:               r,
 		tx:                tx,
 		proto:             r.Proto,
 		blockStatus:       blockStatus,
@@ -713,6 +740,9 @@ func (i *wafResponseInterceptor) WriteHeader(statusCode int) {
 		i.w.WriteHeader(statusCode)
 		return
 	}
+	if i.responseFailed {
+		return
+	}
 	if i.wroteHeader {
 		return
 	}
@@ -730,15 +760,50 @@ func (i *wafResponseInterceptor) WriteHeader(statusCode int) {
 	// Prevent an upstream from forging a WAF event support header.
 	i.w.Header().Del(HeaderWAFEvent)
 
-	i.addPhase("response_headers")
-	for k, vv := range i.w.Header() {
-		for _, v := range vv {
-			i.tx.AddResponseHeader(k, v)
+	headerBytes := responseHeaderShape(i.w.Header())
+	headerLimit := uint64(config.InspectionDefaultMaxResponseHeaderBytes)
+	mode := inspection.Enforce
+	if i.admission != nil {
+		headerLimit = i.admission.maxResponseHeaderBytes()
+		if i.admission.governed() {
+			mode = i.admission.mode
+			if headerBytes > headerLimit {
+				if err := i.admission.gov.RecordRejection(inspection.WAFStateSaturated, mode); err != nil {
+					i.failAdmission(err)
+					return
+				}
+			}
 		}
+	}
+	if headerBytes > headerLimit && mode != inspection.Observe {
+		i.failResponseHeaderLimit()
+		return
 	}
 
 	i.statusCode = statusCode
-	if it := i.tx.ProcessResponseHeaders(statusCode, i.proto); it != nil {
+	var it *types.Interruption
+	process := func() {
+		i.addPhase("response_headers")
+		for k, values := range i.w.Header() {
+			for _, value := range values {
+				i.tx.AddResponseHeader(k, value)
+			}
+		}
+		it = i.tx.ProcessResponseHeaders(statusCode, i.proto)
+	}
+	var admissionErr error
+	if i.admission != nil {
+		admissionErr = i.admission.evaluate(i.admission.drained, func() error {
+			return i.admission.reserveState(&i.admission.r3, &i.admission.r3Amount, r3Estimate(headerBytes))
+		}, process)
+	} else {
+		process()
+	}
+	if admissionErr != nil {
+		i.failAdmission(admissionErr)
+		return
+	}
+	if it != nil {
 		i.responseInterrupted = true
 		i.cleanHeaders()
 		i.w.Header().Set("Content-Length", "0")
@@ -758,25 +823,137 @@ func (i *wafResponseInterceptor) WriteHeader(statusCode int) {
 	}
 }
 
+func (i *wafResponseInterceptor) responseBufferLimit() uint64 {
+	if i.responseBodyLimit <= 0 {
+		return 0
+	}
+	limit := txResponseBodyLimit(i.tx, i.responseBodyLimit)
+	if limit <= 0 {
+		return 0
+	}
+	return min(uint64(i.responseBodyLimit), uint64(limit))
+}
+
+func (i *wafResponseInterceptor) responseBufferWriteBytes(b []byte) uint64 {
+	limit := i.responseBufferLimit()
+	if i.respBodyBytes >= limit {
+		return 0
+	}
+	return min(uint64(len(b)), limit-i.respBodyBytes)
+}
+
+func (i *wafResponseInterceptor) responseWriteReachesLimit(b []byte) bool {
+	limit := i.responseBufferLimit()
+	if limit == 0 {
+		return true
+	}
+	return i.respBodyBytes >= limit || uint64(len(b)) >= limit-i.respBodyBytes
+}
+
+func (i *wafResponseInterceptor) trueDownResponseState() {
+	if i.admission == nil || !i.admission.governed() || i.admission.r4 == nil {
+		return
+	}
+	if args, ok := responseArgsHeld(i.tx); ok {
+		i.admission.trueDown(i.admission.r4, &i.admission.r4Amount, r4Estimate(args, i.respBodyBytes))
+	}
+}
+
+func (i *wafResponseInterceptor) failAdmission(err error) {
+	i.responseFailed = true
+	i.admissionRefused = true
+	i.errCategory, i.statusCode = refusal(err)
+	if i.isWriteHeaderFlush {
+		i.statusCode = i.flushedStatus
+		panic(http.ErrAbortHandler)
+	}
+	i.cleanHeaders()
+	var status int
+	if i.onAdmissionFailure != nil {
+		status = i.onAdmissionFailure(err)
+	} else {
+		status = writeAdmissionError(i.w, i.req, err)
+	}
+	i.statusCode = status
+	i.flushedStatus = status
+	i.isWriteHeaderFlush = true
+}
+
+func (i *wafResponseInterceptor) failResponseHeaderLimit() {
+	i.responseFailed = true
+	i.errCategory = "response_header_limit"
+	i.cleanHeaders()
+	i.w.Header().Set("Content-Length", "0")
+	i.statusCode = http.StatusInternalServerError
+	i.flushWriteHeader()
+}
+
+func (i *wafResponseInterceptor) commitAfterInspection() {
+	if !i.committed && i.onCommit != nil && i.onCommit() {
+		i.committed = true
+	}
+}
+
 func (i *wafResponseInterceptor) Write(b []byte) (int, error) {
 	if i.committed {
 		return i.w.Write(b)
+	}
+	if i.responseFailed {
+		return len(b), nil
 	}
 	if i.tx.IsInterrupted() {
 		return len(b), nil
 	}
 	if !i.wroteHeader {
 		i.WriteHeader(http.StatusOK)
+		if i.responseFailed {
+			return len(b), nil
+		}
 		if i.tx.IsInterrupted() {
 			return len(b), nil
 		}
 	}
 
 	if i.tx.IsResponseBodyAccessible() && i.tx.IsResponseBodyProcessable() && !i.wroteBufferedBodyToDownstream {
-		i.addPhase("response_body")
-		it, n, err := i.tx.WriteResponseBody(b)
+		potential := i.responseBufferWriteBytes(b)
+		if i.admission != nil && potential > 0 {
+			if err := i.admission.chargeBuffer(satMul(2, potential)); err != nil {
+				i.failAdmission(err)
+				return len(b), nil
+			}
+		}
+		var (
+			it  *types.Interruption
+			n   int
+			err error
+		)
+		process := func() {
+			i.addPhase("response_body")
+			it, n, err = i.tx.WriteResponseBody(b)
+		}
+		reachesLimit := i.responseWriteReachesLimit(b)
+		var admissionErr error
+		if i.admission != nil && reachesLimit && !i.responseBodyLimitReject {
+			r4Bytes := min(i.responseBufferLimit(), satAdd(i.respBodyBytes, uint64(len(b))))
+			admissionErr = i.admission.evaluate(i.admission.drained, func() error {
+				return i.admission.reserveState(&i.admission.r4, &i.admission.r4Amount, r4Estimate(i.argumentLimit, r4Bytes))
+			}, process)
+		} else {
+			process()
+		}
+		if admissionErr != nil {
+			i.failAdmission(admissionErr)
+			return len(b), nil
+		}
 		if n > 0 {
 			i.respBodyBytes += uint64(n)
+		}
+		if err == nil && uint64(max(n, 0)) < potential && i.admission != nil {
+			i.admission.refundBuffer(satMul(2, potential-uint64(max(n, 0))))
+		}
+		if reachesLimit && !i.responseBodyLimitReject && err == nil {
+			i.phase4Evaluated = true
+			i.trueDownResponseState()
 		}
 		if it != nil {
 			i.responseInterrupted = true
@@ -803,6 +980,9 @@ func (i *wafResponseInterceptor) Write(b []byte) (int, error) {
 		if n2 > 0 {
 			i.partialDelivered = true
 		}
+		if i.allowFlushing {
+			i.commitAfterInspection()
+		}
 		return n + n2, err
 	}
 
@@ -810,6 +990,9 @@ func (i *wafResponseInterceptor) Write(b []byte) (int, error) {
 	n, err := i.w.Write(b)
 	if n > 0 {
 		i.partialDelivered = true
+	}
+	if i.allowFlushing {
+		i.commitAfterInspection()
 	}
 	return n, err
 }
@@ -833,7 +1016,16 @@ func (i *wafResponseInterceptor) SupportsReadDeadline() bool {
 }
 
 func (i *wafResponseInterceptor) Flush() {
+	if i.isHijacked {
+		return
+	}
 	if i.committed {
+		if fl, ok := i.w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		return
+	}
+	if i.responseFailed {
 		return
 	}
 	if !i.wroteHeader {
@@ -844,11 +1036,12 @@ func (i *wafResponseInterceptor) Flush() {
 		if fl, ok := i.w.(http.Flusher); ok {
 			fl.Flush()
 		}
+		i.commitAfterInspection()
 	}
 }
 
 func (i *wafResponseInterceptor) finishResponse() error {
-	if i.isHijacked {
+	if i.isHijacked || i.responseFailed {
 		return nil
 	}
 	if i.tx.IsInterrupted() {
@@ -862,8 +1055,30 @@ func (i *wafResponseInterceptor) finishResponse() error {
 	}
 
 	if i.tx.IsResponseBodyAccessible() && i.tx.IsResponseBodyProcessable() && !i.wroteBufferedBodyToDownstream {
-		i.addPhase("response_body")
-		it, err := i.tx.ProcessResponseBody()
+		var (
+			it  *types.Interruption
+			err error
+		)
+		if !i.phase4Evaluated {
+			process := func() {
+				i.addPhase("response_body")
+				it, err = i.tx.ProcessResponseBody()
+			}
+			if i.admission != nil {
+				worst := r4Estimate(i.argumentLimit, i.respBodyBytes)
+				if admissionErr := i.admission.evaluate(i.admission.drained, func() error {
+					return i.admission.reserveState(&i.admission.r4, &i.admission.r4Amount, worst)
+				}, process); admissionErr != nil {
+					i.failAdmission(admissionErr)
+					return nil
+				}
+			} else {
+				process()
+			}
+			if err == nil {
+				i.trueDownResponseState()
+			}
+		}
 		if err != nil {
 			i.errCategory = "response_body_process_error"
 			i.statusCode = http.StatusInternalServerError

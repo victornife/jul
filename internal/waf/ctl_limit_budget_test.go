@@ -59,7 +59,6 @@ func TestCtlBodyLimitRaiseCannotExceedCompiledBuffers(t *testing.T) {
 	if facts.RequestBodyLimit != compiled || facts.ResponseBodyLimit != compiled {
 		t.Fatalf("facts = %+v, want compiled limits %d", facts, compiled)
 	}
-
 	payload := bytes.Repeat([]byte("a"), 4*compiled)
 	start := func(t *testing.T, w coraza.WAF) types.Transaction {
 		t.Helper()
@@ -72,6 +71,14 @@ func TestCtlBodyLimitRaiseCannotExceedCompiledBuffers(t *testing.T) {
 			t.Fatalf("unexpected interruption: %+v", it)
 		}
 		return tx
+	}
+	raisedTx := start(t, raisedWAF)
+	if got := txResponseBodyLimit(raisedTx, 0); got != raised {
+		t.Fatalf("response ctl limit = %d, want %d", got, raised)
+	}
+	ic := &wafResponseInterceptor{tx: raisedTx, responseBodyLimit: compiled}
+	if got := ic.responseBufferLimit(); got != compiled || !ic.responseWriteReachesLimit(make([]byte, compiled)) {
+		t.Fatalf("response admission limit = %d, reaches compiled limit=%v, want %d/true", got, ic.responseWriteReachesLimit(make([]byte, compiled)), compiled)
 	}
 	stored := func(r io.Reader, err error) int {
 		if err != nil {

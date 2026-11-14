@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/respwriter"
 )
 
@@ -67,9 +68,13 @@ func (h *respHooks) count(m map[string]int, k string) int {
 }
 
 func v2Manager(t *testing.T, kv KVStore) (*Manager, *respHooks) {
+	return v2ManagerWithGovernor(t, kv, testGovernor(t))
+}
+
+func v2ManagerWithGovernor(t *testing.T, kv KVStore, governor *inspection.Governor) (*Manager, *respHooks) {
 	t.Helper()
 	h := &respHooks{results: map[string]int{}, noBody: map[string]int{}, reqs: map[string]int{}}
-	m, err := NewManager(Options{Inspection: testGovernor(t),
+	m, err := NewManager(Options{Inspection: governor,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		KV:     kv,
 		OnInvocation: func(_, result string, _ time.Duration) {
@@ -243,6 +248,7 @@ func TestResponsePhaseBodyUnavailableReasons(t *testing.T) {
 			_, _ = io.WriteString(w, long[10:])
 		}), "3", "too_large", long},
 	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			before := hooks.count(hooks.noBody, tc.label)
@@ -263,6 +269,106 @@ func TestResponsePhaseBodyUnavailableReasons(t *testing.T) {
 	serve(chainFor(s, act(200, "x"), "p"), req(http.MethodGet, "/", "X-Op", "echo"))
 	if len(hooks.noBody) != before {
 		t.Fatal("metadata subscription counted as body unavailable")
+	}
+}
+
+func TestResponsePhaseBufferBudgetReportsUnavailableWithoutTruncating(t *testing.T) {
+	limits := testLimits()
+	limits.MaxBytes = limits.BaseChargeBytes + 4096
+	g, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, hooks := v2ManagerWithGovernor(t, nil, g)
+	s := buildSet(t, m, map[string]config.PluginConfig{"p": v2cfg()})
+	body := strings.Repeat("x", 8192)
+	rec := serve(chainFor(s, act(http.StatusOK, body, "Content-Length", strconv.Itoa(len(body))), "p"),
+		req(http.MethodGet, "/", "X-Op", "echo", "X-Mode", "body"))
+	if rec.Code != http.StatusOK || rec.Body.String() != body {
+		t.Fatalf("budget-unavailable response = %d, body length %d", rec.Code, rec.Body.Len())
+	}
+	if rec.Header().Get("X-Body-State") != "3" || rec.Header().Get("X-Body-RC") != "-4" {
+		t.Fatalf("guest did not receive an unavailable body state: %v", rec.Header())
+	}
+	if hooks.count(hooks.noBody, "budget") != 1 {
+		t.Fatalf("budget unavailable metric count = %d, want 1", hooks.count(hooks.noBody, "budget"))
+	}
+	if snap := g.Snapshot(); snap.ActiveLeases != 0 || snap.Usage != ([len(snap.Usage)]uint64{}) {
+		t.Fatalf("response buffer charge leaked: %+v", snap)
+	}
+}
+
+func TestResponsePointPanicReleasesBufferedResponseCharge(t *testing.T) {
+	g := testGovernor(t)
+	m, _ := v2ManagerWithGovernor(t, nil, g)
+	s := buildSet(t, m, map[string]config.PluginConfig{"p": v2cfg()})
+	lease, ctx, owner, err := g.AcquireLease(context.Background())
+	if err != nil || !owner {
+		t.Fatalf("acquire outer lease: owner=%v err=%v", owner, err)
+	}
+	h := chainFor(s, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "5")
+		_, _ = io.WriteString(w, "hello")
+		panic("origin failure")
+	}), "p")
+	req := req(http.MethodGet, "/", "X-Op", "echo", "X-Mode", "body").WithContext(ctx)
+	func() {
+		defer func() {
+			if got := recover(); got != "origin failure" {
+				t.Fatalf("panic = %v, want origin failure", got)
+			}
+		}()
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	if snapshot := g.Snapshot(); snapshot.ActiveLeases != 1 || snapshot.Usage[inspection.BufferBytes] != 0 {
+		t.Fatalf("response buffer charge outlived its layer: %+v", snapshot)
+	}
+	if err := lease.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertDrained(t, g)
+}
+
+type resizeRefusingCharge struct {
+	n        uint64
+	released bool
+}
+
+func (c *resizeRefusingCharge) Resize(n uint64) error {
+	if n > c.n {
+		return &inspection.AdmissionError{Outcome: inspection.ByteSaturated}
+	}
+	c.n = n
+	return nil
+}
+
+func (c *resizeRefusingCharge) Release() error {
+	c.released = true
+	c.n = 0
+	return nil
+}
+
+func TestResponseLayerBufferGrowthRefusalRetainsOldBufferCharge(t *testing.T) {
+	charge := &resizeRefusingCharge{}
+	l := &responseLayer{
+		parent: httptest.NewRecorder(),
+		sub:    subscription{p: &plugin{maxRespBody: 16}},
+		charge: func(n uint64) (byteCharge, error) { charge.n = n; return charge, nil },
+	}
+	if err := l.growBuffer(4); err != nil {
+		t.Fatal(err)
+	}
+	l.buf.b = append(l.buf.b, "data"...)
+	if err := l.growBuffer(8); !inspection.IsOverload(err) {
+		t.Fatalf("growth error = %v, want budget refusal", err)
+	}
+	if got := string(l.buf.b); got != "data" || charge.n != 4 {
+		t.Fatalf("refused growth changed old allocation: body=%q charged=%d", got, charge.n)
+	}
+	l.releaseBuffer()
+	if !charge.released {
+		t.Fatal("buffer charge was not released")
 	}
 }
 

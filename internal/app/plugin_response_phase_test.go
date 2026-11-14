@@ -39,6 +39,7 @@ func buildV2Handler(t *testing.T, backend string, p config.PluginConfig, mutate 
 	t.Helper()
 	f, cleanup := minimalFactory(t)
 	t.Cleanup(cleanup)
+	f.Inspection = f.RT.Inspection
 	cfg := &config.Config{
 		Plugins: map[string]config.PluginConfig{"p": p},
 		Servers: []config.ServerConfig{{

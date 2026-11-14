@@ -115,6 +115,378 @@ func TestGovernedWAFChargesAndReleasesTransaction(t *testing.T) {
 	assertDrained(t, g)
 }
 
+func TestGovernedWAFResponseHeaderCeilingModes(t *testing.T) {
+	for _, mode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+		t.Run(string(mode), func(t *testing.T) {
+			limits := governedLimits(mode)
+			limits.MaxResponseHeaderBytes = 128
+			g := newGovernor(t, limits)
+			fw := governedFirewall(t, config.WAFConfig{}, g, Hooks{})
+			reached := false
+			h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				reached = true
+				w.Header().Set("Content-Type", "text/plain")
+				w.Header().Set("X-Large", strings.Repeat("x", 256))
+				_, _ = io.WriteString(w, "response")
+			}))
+
+			rr := httptest.NewRecorder()
+			h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+			if mode == inspection.Enforce {
+				if rr.Code != http.StatusInternalServerError || rr.Body.Len() != 0 || rr.Header().Get("X-Large") != "" {
+					t.Fatalf("enforce response = %d %v %q, want empty 500", rr.Code, rr.Header(), rr.Body.String())
+				}
+			} else if rr.Code != http.StatusOK || rr.Body.String() != "response" || rr.Header().Get("X-Large") == "" {
+				t.Fatalf("observe response = %d %v %q, want original 200 response", rr.Code, rr.Header(), rr.Body.String())
+			}
+			if !reached {
+				t.Fatal("origin handler was not reached")
+			}
+			snapshot := g.Snapshot()
+			modeIndex := 0
+			if mode == inspection.Observe {
+				modeIndex = 1
+			}
+			if snapshot.Rejections[inspection.RejectWAFState][modeIndex] != 1 {
+				t.Fatalf("response-header rejection not counted in %s mode: %+v", mode, snapshot.Rejections)
+			}
+			assertDrained(t, g)
+		})
+	}
+}
+
+func TestResponseHeaderShapeCountsEveryOccurrence(t *testing.T) {
+	h := http.Header{"X-Test": {"a", "bc"}}
+	if got, want := responseHeaderShape(h), uint64(2*(len("X-Test")+64)+len("a")+len("bc")); got != want {
+		t.Fatalf("response header shape = %d, want %d", got, want)
+	}
+}
+
+func TestGovernedWAFResponseHeaderLimitUsesAdmissionSnapshot(t *testing.T) {
+	limits := governedLimits(inspection.Enforce)
+	limits.MaxResponseHeaderBytes = 128
+	g := newGovernor(t, limits)
+	fw := governedFirewall(t, config.WAFConfig{}, g, Hooks{})
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		next := limits
+		next.MaxResponseHeaderBytes = 1 << 20
+		if err := g.PublishLimits(next); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("X-Large", strings.Repeat("x", 256))
+		_, _ = io.WriteString(w, "response")
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rr.Code != http.StatusInternalServerError || rr.Body.Len() != 0 {
+		t.Fatalf("in-flight request used newly published header ceiling: %d %q", rr.Code, rr.Body.String())
+	}
+	assertDrained(t, g)
+}
+
+func TestGovernedWAFR3ReservationRefusalIs503(t *testing.T) {
+	limits := governedLimits(inspection.Enforce)
+	limits.MaxBytes = 64 << 20
+	g := newGovernor(t, limits)
+	fw := governedFirewall(t, config.WAFConfig{}, g, Hooks{})
+	filler, _, _, err := g.AcquireLease(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reached := false
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		var used uint64
+		for _, amount := range g.Snapshot().Usage {
+			used += amount
+		}
+		if _, err := filler.Charge(inspection.BufferBytes, limits.MaxBytes-used-1024); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "origin body")
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	if !reached || rr.Code != http.StatusServiceUnavailable || rr.Header().Get("Retry-After") != "1" {
+		t.Fatalf("R3 reservation refusal = %d %v reached=%v, want 503 Retry-After: 1", rr.Code, rr.Header(), reached)
+	}
+	if rr.Body.String() != "inspection_overloaded\n" {
+		t.Fatalf("R3 refusal body = %q", rr.Body.String())
+	}
+	_ = filler.Close()
+	assertDrained(t, g)
+}
+
+func TestGovernedWAFChargesResponseBufferAndR3R4(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	fw := governedFirewall(t, config.WAFConfig{
+		ResponseBodyCheck: true,
+		InlineRules: strings.Join([]string{
+			`SecResponseBodyAccess On`,
+			`SecResponseBodyMimeType text/plain`,
+			`SecResponseBodyLimit 16`,
+			`SecResponseBodyLimitAction ProcessPartial`,
+		}, "\n"),
+	}, g, Hooks{})
+	body := "0123456789abcdef"
+	var during inspection.Snapshot
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, body)
+		during = g.Snapshot()
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rr.Code != http.StatusOK || rr.Body.String() != body {
+		t.Fatalf("response = %d %q, want unchanged 200 body", rr.Code, rr.Body.String())
+	}
+	r3Min := r3Estimate(responseHeaderShape(http.Header{"Content-Type": {"text/plain"}}))
+	r4Min := r4Estimate(0, uint64(len(body)))
+	if during.Usage[inspection.WAFStateBytes] < r3Min+r4Min || during.Usage[inspection.BufferBytes] < 2*uint64(len(body)) {
+		t.Fatalf("response reservations missing: usage=%v, want R3+R4 >= %d and buffer >= %d", during.Usage, r3Min+r4Min, 2*len(body))
+	}
+	assertDrained(t, g)
+}
+
+func TestGovernedWAFExplicitResponseBodyEvaluationIsCharged(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	var during inspection.Snapshot
+	fw := governedFirewall(t, config.WAFConfig{
+		ResponseBodyCheck: true,
+		InlineRules: strings.Join([]string{
+			`SecResponseBodyAccess On`,
+			`SecResponseBodyMimeType text/plain`,
+			`SecResponseBodyLimit 16`,
+			`SecResponseBodyLimitAction ProcessPartial`,
+		}, "\n"),
+	}, g, Hooks{OnTransaction: func(string, string) { during = g.Snapshot() }})
+	body := "short"
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, body)
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rr.Code != http.StatusOK || rr.Body.String() != body {
+		t.Fatalf("response = %d %q, want unchanged 200 body", rr.Code, rr.Body.String())
+	}
+	r3Min := r3Estimate(responseHeaderShape(http.Header{"Content-Type": {"text/plain"}}))
+	r4Min := r4Estimate(0, uint64(len(body)))
+	if during.Usage[inspection.WAFStateBytes] < r3Min+r4Min || during.Usage[inspection.BufferBytes] < 2*uint64(len(body)) {
+		t.Fatalf("explicit response reservations missing: usage=%v, want R3+R4 >= %d and buffer >= %d", during.Usage, r3Min+r4Min, 2*len(body))
+	}
+	assertDrained(t, g)
+}
+
+func TestGovernedWAFResponseBodyEvaluationSlotRefusal(t *testing.T) {
+	limits := governedLimits(inspection.Enforce)
+	limits.EvaluationQueueTimeout = 5 * time.Millisecond
+	g := newGovernor(t, limits)
+	fw := governedFirewall(t, config.WAFConfig{
+		ResponseBodyCheck: true,
+		InlineRules: strings.Join([]string{
+			`SecResponseBodyAccess On`,
+			`SecResponseBodyMimeType text/plain`,
+			`SecResponseBodyLimit 16`,
+			`SecResponseBodyLimitAction ProcessPartial`,
+		}, "\n"),
+	}, g, Hooks{})
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		lease := inspection.LeaseFrom(r.Context())
+		token, _, err := g.TryEvaluation(r.Context(), lease)
+		if err != nil {
+			t.Errorf("occupy evaluation slot: %v", err)
+			return
+		}
+		_, _ = io.WriteString(w, "0123456789abcdef")
+		_ = token.Release()
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rr.Code != http.StatusServiceUnavailable || rr.Header().Get("Retry-After") != "1" {
+		t.Fatalf("R4 slot refusal = %d %v, want 503 Retry-After: 1", rr.Code, rr.Header())
+	}
+	if g.Snapshot().Rejections[inspection.RejectEvaluation][0] != 1 {
+		t.Fatalf("R4 slot refusal not counted: %+v", g.Snapshot().Rejections)
+	}
+	assertDrained(t, g)
+}
+
+func TestWAFAdmissionFailureAfterCommitAbortsWithoutReplacementStatus(t *testing.T) {
+	rr := httptest.NewRecorder()
+	rr.WriteHeader(http.StatusOK)
+	ic := &wafResponseInterceptor{
+		w:                  rr,
+		req:                httptest.NewRequest(http.MethodGet, "/", nil),
+		statusCode:         http.StatusOK,
+		flushedStatus:      http.StatusOK,
+		isWriteHeaderFlush: true,
+	}
+	func() {
+		defer func() {
+			if got := recover(); got != http.ErrAbortHandler {
+				t.Fatalf("panic = %v, want http.ErrAbortHandler", got)
+			}
+		}()
+		ic.failAdmission(&inspection.AdmissionError{Outcome: inspection.ByteSaturated})
+	}()
+	if rr.Code != http.StatusOK || rr.Body.Len() != 0 || ic.flushedStatus != http.StatusOK {
+		t.Fatalf("committed response was replaced: code=%d body=%q flushed=%d", rr.Code, rr.Body.String(), ic.flushedStatus)
+	}
+}
+
+func TestGovernedWAFSSECommitReleasesTransactionWhileHandlerContinues(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	fw := governedFirewall(t, config.WAFConfig{}, g, Hooks{})
+	flushed := make(chan inspection.Snapshot, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHandler()
+	done := make(chan struct{})
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		flushed <- g.Snapshot()
+		<-release
+		_, _ = io.WriteString(w, "data: next\n\n")
+		w.(http.Flusher).Flush()
+	}))
+	rr := &flushCountRecorder{ResponseRecorder: httptest.NewRecorder()}
+	go func() {
+		defer close(done)
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/", nil))
+	}()
+	during := <-flushed
+	if during.ActiveLeases != 0 || during.ActiveEvaluations != 0 ||
+		during.Usage[inspection.WAFStateBytes] != 0 || during.Usage[inspection.AuditBytes] != 0 {
+		t.Fatalf("stream retained WAF transaction ownership after commit: %+v", during)
+	}
+	releaseHandler()
+	<-done
+	if rr.Code != http.StatusOK || rr.Body.String() != "data: next\n\n" {
+		t.Fatalf("continued SSE response = %d %q", rr.Code, rr.Body.String())
+	}
+	if rr.flushes != 2 {
+		t.Fatalf("downstream flushes = %d, want initial and continued stream flush", rr.flushes)
+	}
+	assertDrained(t, g)
+}
+
+func TestGovernedWAFSSECommitRetainsUnreadInspectedRequestBody(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	fw := governedFirewall(t, config.WAFConfig{CRSEnabled: true}, g, Hooks{})
+	flushed := make(chan inspection.Snapshot, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHandler()
+	done := make(chan struct{})
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush()
+		flushed <- g.Snapshot()
+		<-release
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("a=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rr := httptest.NewRecorder()
+	go func() {
+		defer close(done)
+		h.ServeHTTP(rr, req)
+	}()
+	during := <-flushed
+	if during.ActiveLeases != 1 || during.Usage[inspection.WAFStateBytes] == 0 ||
+		during.Usage[inspection.AuditBytes] == 0 {
+		t.Fatalf("stream released an unread inspected request body: %+v", during)
+	}
+	releaseHandler()
+	<-done
+	assertDrained(t, g)
+}
+
+type blockedWriteResponseWriter struct {
+	header  http.Header
+	entered chan []byte
+	release <-chan struct{}
+	status  int
+}
+
+func (w *blockedWriteResponseWriter) Header() http.Header { return w.header }
+
+func (w *blockedWriteResponseWriter) WriteHeader(status int) { w.status = status }
+
+func (w *blockedWriteResponseWriter) Write(p []byte) (int, error) {
+	w.entered <- append([]byte(nil), p...)
+	<-w.release
+	return len(p), nil
+}
+
+func TestGovernedWAFRetainsChargesDuringDownstreamBackpressure(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	fw := governedFirewall(t, config.WAFConfig{
+		ResponseBodyCheck: true,
+		InlineRules: strings.Join([]string{
+			`SecResponseBodyAccess On`,
+			`SecResponseBodyMimeType text/plain`,
+			`SecResponseBodyLimit 1024`,
+			`SecResponseBodyLimitAction ProcessPartial`,
+		}, "\n"),
+	}, g, Hooks{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseWriter := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseWriter()
+	writer := &blockedWriteResponseWriter{
+		header:  make(http.Header),
+		entered: make(chan []byte, 1),
+		release: release,
+	}
+	done := make(chan struct{})
+	body := "bounded response awaiting downstream"
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, body)
+	}))
+	go func() {
+		defer close(done)
+		h.ServeHTTP(writer, httptest.NewRequest(http.MethodGet, "/", nil))
+	}()
+	select {
+	case got := <-writer.entered:
+		if string(got) != body {
+			t.Fatalf("downstream body = %q, want %q", got, body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("buffered WAF response did not reach the blocked downstream writer")
+	}
+	during := g.Snapshot()
+	if during.ActiveLeases != 1 || during.Usage[inspection.WAFStateBytes] == 0 ||
+		during.Usage[inspection.BufferBytes] < 2*uint64(len(body)) {
+		t.Fatalf("WAF released response ownership while downstream was blocked: %+v", during)
+	}
+	releaseWriter()
+	<-done
+	if writer.status != http.StatusOK {
+		t.Fatalf("downstream status = %d, want 200", writer.status)
+	}
+	assertDrained(t, g)
+}
+
+type flushCountRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+}
+
+func (r *flushCountRecorder) Flush() {
+	r.flushes++
+	r.ResponseRecorder.Flush()
+}
+
 func TestGovernedWAFReusesOuterLease(t *testing.T) {
 	g := newGovernor(t, governedLimits(inspection.Enforce))
 	fw := governedFirewall(t, config.WAFConfig{CRSEnabled: true}, g, Hooks{})
@@ -313,6 +685,7 @@ func TestGovernedWAFWritesAuditRecord(t *testing.T) {
 func TestGovernedWAFDropsAuditRecordOverBudget(t *testing.T) {
 	limits := governedLimits(inspection.Enforce)
 	limits.MaxBytes = 256 << 20
+	limits.MaxResponseHeaderBytes = 2 << 20
 	var drops []string
 	g, err := inspection.New(limits, inspection.Hooks{OnAuditDrop: func(reason string) { drops = append(drops, reason) }})
 	if err != nil {
@@ -325,13 +698,13 @@ func TestGovernedWAFDropsAuditRecordOverBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Leave room for the transaction's remaining work but not for an
-		// audit record carrying a 1 MiB response header (part F).
+		// Leave room for R3 and the transaction's remaining work, but not
+		// for an audit record carrying a 1 MiB response header (part F).
 		var used uint64
 		for _, u := range g.Snapshot().Usage {
 			used += u
 		}
-		if _, err := filler.Charge(inspection.BufferBytes, limits.MaxBytes-used-(256<<10)); err != nil {
+		if _, err := filler.Charge(inspection.BufferBytes, limits.MaxBytes-used-(50<<20)); err != nil {
 			t.Error(err)
 		}
 		w.Header().Set("X-Pad", strings.Repeat("p", 1<<20))

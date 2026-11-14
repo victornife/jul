@@ -90,11 +90,17 @@ func responsePoint(next http.Handler) http.Handler {
 		entry := w.Header().Clone()
 		layers := make([]*responseLayer, len(c.subs))
 		cur := w
+		charge := leaseCharger(leaseFrom(r.Context()))
 		for i, s := range c.subs {
-			l := &responseLayer{parent: cur, req: r, sub: s, cancel: cancel, entry: entry}
+			l := &responseLayer{parent: cur, req: r, sub: s, cancel: cancel, entry: entry, charge: charge}
 			layers[i] = l
 			cur = respwriter.Wrap(l, cur)
 		}
+		defer func() {
+			for _, l := range layers {
+				l.releaseBuffer()
+			}
+		}()
 		serveInner(next, cur, inner, layers)
 		for i := len(layers) - 1; i >= 0; i-- {
 			layers[i].finish()
@@ -147,7 +153,8 @@ type responseLayer struct {
 
 	state   layerState
 	status  int
-	buf     []byte
+	buf     *chargedBuf
+	charge  chargeFunc
 	hookRan bool
 	final   int
 	failed  bool
@@ -175,7 +182,13 @@ func (l *responseLayer) WriteHeader(code int) {
 	if state == bodyAvailable {
 		l.state = layerBuffering
 		if n, err := strconv.Atoi(l.Header().Get("Content-Length")); err == nil && n > 0 {
-			l.buf = make([]byte, 0, n)
+			if err := l.growBuffer(n); err != nil {
+				if inspection.IsOverload(err) {
+					l.unavailableForBudget()
+				} else {
+					l.failBuffer()
+				}
+			}
 		}
 		return
 	}
@@ -191,24 +204,21 @@ func (l *responseLayer) Write(p []byte) (int, error) {
 		l.WriteHeader(http.StatusOK)
 		return l.Write(p)
 	case layerBuffering:
-		if len(l.buf)+len(p) <= l.sub.p.maxRespBody {
-			l.buf = append(l.buf, p...)
-			return len(p), nil
-		}
-		view, ok := l.decide(bodyTooLarge, nil)
-		buffered := l.buf
-		l.buf = nil
-		if !ok {
-			return len(p), nil
-		}
-		l.parent.WriteHeader(view.status)
-		l.state = layerPassthrough
-		if len(buffered) > 0 {
-			if _, err := l.parent.Write(buffered); err != nil {
-				return 0, err
+		used := l.bufferLen()
+		if len(p) <= l.sub.p.maxRespBody-used {
+			if err := l.growBuffer(used + len(p)); err != nil {
+				if inspection.IsOverload(err) {
+					return l.forwardWithoutBody(p, "budget")
+				}
+				l.failBuffer()
+				return len(p), nil
 			}
+			if l.buf != nil {
+				l.buf.b = append(l.buf.b, p...)
+			}
+			return len(p), nil
 		}
-		return l.parent.Write(p)
+		return l.forwardWithoutBody(p, "")
 	case layerPassthrough:
 		return l.parent.Write(p)
 	case layerDiscard:
@@ -243,7 +253,7 @@ func (l *responseLayer) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	conn, rw, err := h.Hijack()
 	if err == nil {
 		l.state = layerUpgraded
-		l.buf = nil
+		l.releaseBuffer()
 		if l.status == 0 {
 			l.status = http.StatusSwitchingProtocols
 		}
@@ -258,9 +268,12 @@ func (l *responseLayer) finish() {
 	}
 	switch l.state {
 	case layerBuffering:
-		view, ok := l.decide(bodyAvailable, l.buf)
-		l.buf = nil
+		body := l.bufferBytes()
+		view, ok := l.decide(bodyAvailable, body)
 		if !ok {
+			view.body = nil
+			body = nil
+			l.releaseBuffer()
 			l.writeFinal()
 			return
 		}
@@ -279,7 +292,11 @@ func (l *responseLayer) finish() {
 			_, _ = l.parent.Write(view.body)
 		}
 		view.dropReplacement()
+		view.body = nil
+		body = nil
+		l.releaseBuffer()
 	case layerDiscard:
+		l.releaseBuffer()
 		l.writeFinal()
 	case layerUpgraded:
 		if !l.hookRan {
@@ -295,7 +312,11 @@ func (l *responseLayer) finish() {
 // deliver the (mutated) response, or false after switching to layerDiscard:
 // the action is cancelled and finish writes the rejection or failure.
 func (l *responseLayer) decide(state uint32, body []byte) (*responseView, bool) {
-	view, res, err := l.run(state, body, false)
+	return l.decideWithReason(state, body, "")
+}
+
+func (l *responseLayer) decideWithReason(state uint32, body []byte, reason string) (*responseView, bool) {
+	view, res, err := l.runWithReason(state, body, false, reason)
 	switch {
 	case err != nil:
 		l.final, l.failed = http.StatusInternalServerError, true
@@ -320,10 +341,17 @@ func (l *responseLayer) decide(state uint32, body []byte) (*responseView, bool) 
 }
 
 func (l *responseLayer) run(state uint32, body []byte, committed bool) (*responseView, uint32, error) {
+	return l.runWithReason(state, body, committed, "")
+}
+
+func (l *responseLayer) runWithReason(state uint32, body []byte, committed bool, reason string) (*responseView, uint32, error) {
 	l.hookRan = true
 	p := l.sub.p
 	if l.sub.mode == responseModeBody && state != bodyAvailable {
-		p.onNoBody(p.name, bodyStateLabel(state))
+		if reason == "" {
+			reason = bodyStateLabel(state)
+		}
+		p.onNoBody(p.name, reason)
 	}
 	view := &responseView{origStatus: l.status, status: l.status, header: l.Header(), body: body, bodyState: state, committed: committed}
 	res, err := p.invokeResponse(l.req.Context(), l.req, view, l.sub.state)
@@ -333,6 +361,7 @@ func (l *responseLayer) run(state uint32, body []byte, committed bool) (*respons
 // writeFinal replaces the action's response: the header map returns to what it
 // was before the action ran, and the status/body are the rejection or failure.
 func (l *responseLayer) writeFinal() {
+	l.releaseBuffer()
 	h := l.Header()
 	for k := range h {
 		delete(h, k)
@@ -360,6 +389,99 @@ func (l *responseLayer) writeFinal() {
 	if len(body) > 0 {
 		_, _ = l.parent.Write(body)
 	}
+}
+
+func (l *responseLayer) bufferLen() int {
+	if l.buf == nil {
+		return 0
+	}
+	return len(l.buf.b)
+}
+
+func (l *responseLayer) bufferBytes() []byte {
+	if l.buf == nil {
+		return nil
+	}
+	return l.buf.b
+}
+
+func (l *responseLayer) growBuffer(need int) error {
+	if need <= 0 {
+		return nil
+	}
+	if need > l.sub.p.maxRespBody {
+		return errRespTooLarge
+	}
+	if l.buf == nil {
+		capacity := need
+		if n, err := strconv.Atoi(l.Header().Get("Content-Length")); err == nil && n > capacity && n <= l.sub.p.maxRespBody {
+			capacity = n
+		}
+		cb, err := newChargedBuf(l.charge, capacity)
+		if err != nil {
+			return err
+		}
+		l.buf = cb
+		return nil
+	}
+	oldCap := cap(l.buf.b)
+	if need <= oldCap {
+		return nil
+	}
+	newCap := min(max(need, 2*oldCap), l.sub.p.maxRespBody)
+	return l.buf.grow(newCap)
+}
+
+func (l *responseLayer) releaseBuffer() {
+	if l.buf == nil {
+		return
+	}
+	l.buf.release()
+	l.buf = nil
+}
+
+func (l *responseLayer) failBuffer() {
+	l.failed = true
+	l.final = http.StatusInternalServerError
+	l.state = layerDiscard
+	l.cancel()
+	l.releaseBuffer()
+}
+
+func (l *responseLayer) unavailableForBudget() {
+	view, ok := l.decideWithReason(bodyTooLarge, nil, "budget")
+	if !ok {
+		l.writeFinal()
+		return
+	}
+	l.parent.WriteHeader(view.status)
+	l.state = layerPassthrough
+	view.body = nil
+	view.dropReplacement()
+}
+
+func (l *responseLayer) forwardWithoutBody(p []byte, reason string) (int, error) {
+	buffered := l.bufferBytes()
+	view, ok := l.decideWithReason(bodyTooLarge, nil, reason)
+	if !ok {
+		buffered = nil
+		l.releaseBuffer()
+		return len(p), nil
+	}
+	l.parent.WriteHeader(view.status)
+	l.state = layerPassthrough
+	view.body = nil
+	view.dropReplacement()
+	if len(buffered) > 0 {
+		if _, err := l.parent.Write(buffered); err != nil {
+			buffered = nil
+			l.releaseBuffer()
+			return 0, err
+		}
+	}
+	buffered = nil
+	l.releaseBuffer()
+	return l.parent.Write(p)
 }
 
 // classifyResponse is the single body-eligibility function (ADR 0020 §5). It

@@ -10,21 +10,22 @@ qualification, soak or maturity change.
 
 | Item | State |
 | --- | --- |
-| Starting `main` | `16d982586ad1c964bda95ff3f5a55dc3b3fedcc0` (verified #714 merge) |
+| Starting `main` | `def419f509d80a6718f4dabf29f210e8a0dbb6b3` (verified #715 merge) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
-| Checkpoint 2 | **In review**: I3a WAF request accounting, PR #715 on `feat/700-inspection-waf-i3a`; see [I3a implementation record](#i3a-implementation-record) |
-| Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`) and I2 #710 (`c8bba7f2`) merged |
+| Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
+| Checkpoint 3 | **In progress**: I4 response accounting on `feat/700-inspection-waf-i4`; implementation, calibration and focused regressions are complete |
+| Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Merge #715 after green hosted checks, then start I4 (response paths) on a fresh branch |
+| Exact next action | Publish the completed I4 checkpoint for review, then wait for hosted checks before advancing |
 
 ## Checkpoint schedule and dependencies
 
 | Checkpoint | Scope / status | Actual prerequisite and next owner |
 | --- | --- | --- |
 | 1 — design | Merged (#714, `16d98258`); amendment accepted | None |
-| 2 — I3a | In review: WAF request accounting, slots, request/audit calibration | Accepted amendment, I1/I2 and a defensible R5 bound/writer ownership; implementation owner |
-| 3 — I4 | Not started: WAF and plugin response paths, response audit calibration | I3a and the accepted response/header contract; implementation owner |
+| 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration remains I4 |
+| 3 — I4 | In progress: WAF and plugin response paths, response audit calibration | I3a and the accepted response/header contract; implementation owner |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
 | 5 — I2b | Not started: process-wide per-live-instance guest-capacity admission; #711 | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
@@ -180,13 +181,51 @@ I3a is described normatively in ADR 0032 "I3a progress". It resolves these desig
 | Calibration | `TestWAFReservationsCoverMeasuredAllocation` (Coraza v3.8.1, CRS v4.25.0): retained R1/R2 heap, audit construction and Native/JSON formatting within estimates. Fixed the H-before-K `ErrorLog` bound and the first-use MIME-table allocation |
 
 The new WAF outcome `inspection_refused` is added to the metrics contract, admin filters and
-docs. The route minimum gains the 32 KiB WAF read buffer (default fit 258,654,208 B). Deferred to
-I4: R3/R4, response buffer and calibration, and the non-hijack long-lived commit points. No A1–A22
+docs. The route minimum gains the 32 KiB WAF read buffer (default fit 258,654,208 B). I4 now owns
+R3/R4, response buffering, response calibration and non-hijack long-lived commit points. No A1–A22
 acceptance is claimed.
+
+## I4 implementation record
+
+I4 is in progress on `feat/700-inspection-waf-i4`; this record describes unmerged work, not a
+released or qualified control.
+
+- Plugin response-subscription buffers charge capacity before allocation and growth. On budget
+  refusal the existing ABI-v2 unavailable-body state reports reason `budget`, then preserves the
+  complete original response rather than passing a truncated body.
+- The WAF charges its response buffer before Coraza writes, reserves cumulative R3/R4 around
+  phase-3/phase-4 evaluation, and measures decoded response-header occurrences as name + value +
+  64 bytes. Enforce-mode header-ceiling overflow returns an empty 500; reservation and bounded
+  evaluation-queue refusal use overload handling. Observe records would-reject and continues.
+  Response-body accounting uses the compiled ceiling even if a transaction ctl raises its limit.
+  A refusal after commit aborts the stream without claiming a replacement status.
+- Focused tests cover initial and growth budget refusal, exact original-body passthrough, enforce
+  and observe header behavior, R3/R4 and response-buffer charges, implicit/explicit phase 4,
+  evaluation saturation, admission limit snapshots and compiled response-body ceilings.
+- `TestWAFResponseReservationsCoverMeasuredAllocation` now calibrates R3/R4 retained state, Native
+  and JSON response-audit construction/formatting, URL-encoded and JSON response parsing,
+  ProcessPartial, and repeated `Set-Cookie`/`WWW-Authenticate` headers. Non-hijack commit tests
+  cover continued SSE writes and transaction release, H2/H3 sibling reuse, and native gRPC
+  streaming; empty request bodies release ownership without waiting for a nonexistent drain.
+- Full-stack tests under `wasmplugins && waf` exercise the production WAF/plugin order, transformed
+  response inspection, backpressure charge retention, client-disconnect cleanup, and a phase-1 H2
+  rejection while the request body remains open.
+
+| Validation command | Result |
+| --- | --- |
+| `CGO_ENABLED=0 go test -tags waf -count=1 -run '^TestWAFResponseReservationsCoverMeasuredAllocation$' ./internal/waf/` | Passed |
+| `CGO_ENABLED=0 go test -tags 'wasmplugins waf grpc http3' -count=1 ./internal/app/ ./internal/plugins/ ./internal/waf/ ./internal/inspection/` | Passed; response calibration, full-stack ordering/backpressure/disconnect, and H1/H2/H3 plus gRPC response paths |
+| `go test -race -tags 'wasmplugins waf grpc http3' -count=1 ./internal/app/ ./internal/plugins/ ./internal/waf/ ./internal/inspection/` | Passed |
+| `go vet -tags 'wasmplugins waf grpc http3' ./internal/app/ ./internal/plugins/ ./internal/waf/ ./internal/inspection/` | Passed |
+| `go build -tags 'wasmplugins waf grpc http3' ./cmd/jul` | Passed |
+
+The extended CONNECT cell is not applicable under Jul's documented protocol boundary (ADR 0018
+§17). I4 implementation and focused validation are complete; hosted checks and review remain
+required before merge. These tests are not I6b qualification or A1–A22 acceptance.
 
 ## Handoff rules
 
-After the design PR merges, verify its actual merge SHA and current `main`, update this ledger and
-start I3a on a fresh focused branch. If it is not merged, remain at checkpoint 1. Do not mark
-I3b, I2b or I6a implemented merely because their designs or tracking issues exist; do not close
-#700/#62 or claim final acceptance before I6b.
+I3a is merged as #715. I4 is being implemented on a fresh focused branch; update this ledger with
+its final validation and merge state before starting I3b. Do not mark I3b, I2b or I6a implemented
+merely because their designs or tracking issues exist; do not close #700/#62 or claim final
+acceptance before I6b.
