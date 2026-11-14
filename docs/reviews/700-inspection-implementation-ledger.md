@@ -10,15 +10,15 @@ qualification, soak or maturity change.
 
 | Item | State |
 | --- | --- |
-| Starting `main` | `d06538cecc1398b6e8bf6302b553f873cd44e941` (verified #717 merge, after I4) |
+| Starting `main` | `d151989435e49493d02ea895dce25b7125f3e2e8` (verified #718 merge, after I4) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
-| Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below |
+| Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below; the blocker update merged as #718 |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Resolve and review the I3b integration and ownership prerequisites; investigate I2b independently without claiming I3b protection |
+| Exact next action | Resolve and review the I3b integration and ownership prerequisites; continue I2b independently without claiming either protection |
 
 ## Checkpoint schedule and dependencies
 
@@ -28,7 +28,7 @@ qualification, soak or maturity change.
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Investigation: process-wide per-live-instance guest-capacity admission; #711; runtime implementation not yet started | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
+| 5 — I2b | Active: preliminary memory-limit and startup-cancellation fixes; process-wide guest-capacity admission remains unimplemented; #711 | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
@@ -247,9 +247,24 @@ The recommended next step is a reviewed public engine integration with per-trans
 and typed storage outcomes, followed by the ADR's filesystem, lifecycle and protocol tests.
 No upstream change has been submitted, and no logical spool quota is claimed.
 
+## I2b preliminary work
+
+The independent I2b branch includes `bea7ef8b`, which rejects sub-page plugin memory limits and
+effective limits above 4 GiB, and `8c4ec5f1`, which propagates request cancellation into on-demand
+guest startup and closes an instance that finishes starting after cancellation. A deterministic
+host barrier reproduced the cancellation failure before the fix. On macOS arm64 with Go 1.27.4,
+the config and plugin tests passed with `wasmplugins` and with `waf wasmplugins`; plugin vet,
+the generated-contract check, config-contract tests, docs-check (2,721 checks), focused lifecycle
+race tests and 25 repeated cancellation race tests also passed.
+
+These are prerequisites, not global guest-capacity admission. Process-scope tickets, full instance
+lifecycle and retained-close ownership, versioned and limits-only publication, finite defaults,
+integration tests and adversarial checkpoint reviews remain outstanding. No I2b PR or A20
+acceptance is claimed.
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b is blocked as described above; continue
-independent I2b investigation while preserving the scheduled checkpoint merge order. Do not mark
+independent I2b implementation while preserving the scheduled checkpoint merge order. Do not mark
 I3b, I2b or I6a implemented merely because their designs or tracking issues exist; do not close
 #700/#62 or claim final acceptance before I6b.
