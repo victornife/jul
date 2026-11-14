@@ -29,11 +29,26 @@ var (
 	ErrDeadlineUnsupported = errors.New("inspection: request read deadline unsupported")
 )
 
-// IsOverload reports whether err is a governor byte refusal that the client
-// must see as inspection overload (503). Observe mode never returns one.
+// IsOverload reports whether err is a governor admission refusal. HTTP clients
+// receive 503; native gRPC clients receive UNAVAILABLE. Observe mode never
+// returns one.
 func IsOverload(err error) bool {
 	return IsOutcome(err, ByteSaturated) || IsOutcome(err, WAFStateSaturated) ||
-		IsOutcome(err, EvaluationSaturated) || IsOutcome(err, AuditSaturated)
+		IsOutcome(err, EvaluationSaturated) || IsOutcome(err, QueueExhausted) ||
+		IsOutcome(err, WaitExpired) || IsOutcome(err, AuditSaturated)
+}
+
+// IsGRPCRequest reports whether r is a native gRPC request over HTTP/2 or
+// HTTP/3. gRPC-Web uses HTTP status codes and is intentionally excluded.
+func IsGRPCRequest(r *http.Request) bool {
+	if r == nil || r.ProtoMajor < 2 {
+		return false
+	}
+	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil {
+		return false
+	}
+	return mt == "application/grpc" || (strings.HasPrefix(mt, "application/grpc+") && !strings.HasPrefix(mt, "application/grpc-web"))
 }
 
 // WriteOverloaded answers an inspection overload: 503 with Retry-After: 1,
@@ -69,14 +84,7 @@ func WriteBodyTimeout(w http.ResponseWriter, r *http.Request) {
 // isGRPC matches gRPC over HTTP/2 or HTTP/3, not gRPC-Web, whose clients read
 // the HTTP status.
 func isGRPC(r *http.Request) bool {
-	if r == nil || r.ProtoMajor < 2 {
-		return false
-	}
-	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil {
-		return false
-	}
-	return mt == "application/grpc" || (strings.HasPrefix(mt, "application/grpc+") && !strings.HasPrefix(mt, "application/grpc-web"))
+	return IsGRPCRequest(r)
 }
 
 // writeGRPCStatus sends a trailers-only gRPC response: the status travels in

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,6 +51,32 @@ func wafProtoServer(t *testing.T, fw *Firewall, h2 bool) (*http.Client, string, 
 	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(w, r.Body) })
 	mux.Handle("/w", fw.Middleware()(echo))
 	mux.Handle("/other", echo)
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Config.ConnContext = reqdeadline.ConnContext
+	var conns atomic.Int64
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	if h2 {
+		srv.EnableHTTP2 = true
+		srv.StartTLS()
+	} else {
+		srv.Start()
+	}
+	t.Cleanup(srv.Close)
+	return srv.Client(), srv.URL, &conns
+}
+
+func wafResponseProtoServer(t *testing.T, fw *Firewall, h2 bool) (*http.Client, string, *atomic.Int64) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.Handle("/w", fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Large", strings.Repeat("x", 256))
+		_, _ = io.WriteString(w, "must not be delivered")
+	})))
+	mux.HandleFunc("/other", func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(w, r.Body) })
 	srv := httptest.NewUnstartedServer(mux)
 	srv.Config.ConnContext = reqdeadline.ConnContext
 	var conns atomic.Int64
@@ -138,6 +165,127 @@ func TestGovernedWAFOutcomesOverH1H2(t *testing.T) {
 			}
 			if p.major == 2 && conns.Load() != 1 {
 				t.Fatalf("a stream deadline closed the shared H2 connection (%d connections)", conns.Load())
+			}
+			waitDrained(t, g)
+		})
+	}
+}
+
+func TestGovernedWAFSSECommitReleasesH2TransactionAndPreservesSibling(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	fw := governedFirewall(t, config.WAFConfig{}, g, Hooks{})
+	flushed := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHandler()
+
+	mux := http.NewServeMux()
+	mux.Handle("/events", fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		flushed <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = io.WriteString(w, "data: next\n\n")
+		w.(http.Flusher).Flush()
+	})))
+	mux.HandleFunc("/other", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "sibling")
+	})
+	srv := httptest.NewUnstartedServer(mux)
+	srv.EnableHTTP2 = true
+	srv.Config.ConnContext = reqdeadline.ConnContext
+	var conns atomic.Int64
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	client := srv.Client()
+
+	type result struct {
+		resp *http.Response
+		err  error
+	}
+	event := make(chan result, 1)
+	go func() {
+		resp, err := client.Get(srv.URL + "/events")
+		event <- result{resp: resp, err: err}
+	}()
+	select {
+	case <-flushed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("event stream did not flush response headers")
+	}
+	var response result
+	select {
+	case response = <-event:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client did not receive streaming response headers")
+	}
+	if response.err != nil {
+		t.Fatal(response.err)
+	}
+	defer response.resp.Body.Close()
+	if response.resp.ProtoMajor != 2 || response.resp.StatusCode != http.StatusOK {
+		t.Fatalf("stream response = HTTP/%d %d", response.resp.ProtoMajor, response.resp.StatusCode)
+	}
+	during := g.Snapshot()
+	if during.ActiveLeases != 0 || during.ActiveEvaluations != 0 ||
+		during.Usage[inspection.WAFStateBytes] != 0 || during.Usage[inspection.AuditBytes] != 0 {
+		t.Fatalf("H2 stream retained WAF transaction ownership after flush: %+v", during)
+	}
+
+	sibling, err := client.Get(srv.URL + "/other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	siblingBody, err := io.ReadAll(sibling.Body)
+	_ = sibling.Body.Close()
+	if err != nil || sibling.StatusCode != http.StatusOK || string(siblingBody) != "sibling" {
+		t.Fatalf("H2 sibling = %d %q, err=%v", sibling.StatusCode, siblingBody, err)
+	}
+	if conns.Load() != 1 {
+		t.Fatalf("stream blocked H2 connection reuse: %d connections", conns.Load())
+	}
+
+	releaseHandler()
+	body, err := io.ReadAll(response.resp.Body)
+	if err != nil || string(body) != "data: next\n\n" {
+		t.Fatalf("continued H2 stream = %q, err=%v", body, err)
+	}
+	waitDrained(t, g)
+}
+
+func TestGovernedWAFResponseHeaderCeilingOverH1H2(t *testing.T) {
+	for _, p := range []struct {
+		name  string
+		major int
+	}{{"h1", 1}, {"h2", 2}} {
+		t.Run(p.name, func(t *testing.T) {
+			limits := governedLimits(inspection.Enforce)
+			limits.MaxResponseHeaderBytes = 128
+			g := newGovernor(t, limits)
+			fw := governedFirewall(t, config.WAFConfig{}, g, Hooks{})
+			client, base, conns := wafResponseProtoServer(t, fw, p.major == 2)
+
+			r := protoPost(client, base+"/w", strings.NewReader("a=1"))
+			if r.err != nil || r.status != http.StatusInternalServerError || r.major != p.major || r.body != "" {
+				t.Fatalf("oversized response: %+v", r)
+			}
+			if r := protoPost(client, base+"/other", strings.NewReader("sibling")); r.err != nil ||
+				r.status != http.StatusOK || r.major != p.major || r.body != "sibling" {
+				t.Fatalf("sibling after response rejection: %+v", r)
+			}
+			if conns.Load() != 1 {
+				t.Fatalf("response rejection did not preserve connection reuse: %d connections", conns.Load())
 			}
 			waitDrained(t, g)
 		})

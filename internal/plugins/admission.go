@@ -41,6 +41,9 @@ type chargeFunc func(n uint64) (byteCharge, error)
 // leaseCharger returns a chargeFunc on lease's buffer class.
 func leaseCharger(lease *inspection.Lease) chargeFunc {
 	return func(n uint64) (byteCharge, error) {
+		if lease == nil {
+			return nil, errNoLease
+		}
 		c, err := lease.Charge(inspection.BufferBytes, n)
 		if err != nil {
 			return nil, err
@@ -61,6 +64,9 @@ type chargedBuf struct {
 func newChargedBuf(charge chargeFunc, capacity int) (*chargedBuf, error) {
 	if capacity < 0 {
 		return nil, errChargeOverflow
+	}
+	if charge == nil {
+		return nil, errNoLease
 	}
 	c, err := charge(uint64(capacity))
 	if err != nil {

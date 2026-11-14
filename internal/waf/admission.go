@@ -16,6 +16,7 @@ import (
 	"github.com/corazawaf/coraza/v3/experimental/plugins/plugintypes"
 	"github.com/corazawaf/coraza/v3/types"
 
+	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/reqdeadline"
 )
@@ -28,19 +29,22 @@ const readBufferBytes = int(inspection.WAFReadBufferBytes)
 // §3, §4 and the R5 amendment). With no governor every method is a no-op and
 // the transaction runs ungoverned, as before the governor existed.
 type wafAdmission struct {
-	gov   *inspection.Governor
-	lease *inspection.Lease
-	ctx   context.Context
-	mode  inspection.Mode
+	gov    *inspection.Governor
+	lease  *inspection.Lease
+	ctx    context.Context
+	limits inspection.Limits
+	mode   inspection.Mode
 
-	r1, r2    *inspection.Charge
-	r1Amount  uint64
-	r2Amount  uint64
-	buf       *inspection.Charge
-	bufAmount uint64
-	charges   []*inspection.Charge
-	audit     *auditTxCtx
-	txID      string
+	r1, r2, r3, r4 *inspection.Charge
+	r1Amount       uint64
+	r2Amount       uint64
+	r3Amount       uint64
+	r4Amount       uint64
+	buf            *inspection.Charge
+	bufAmount      uint64
+	charges        []*inspection.Charge
+	audit          *auditTxCtx
+	txID           string
 
 	// Request shape known before phase 5, for the audit-record estimate.
 	reqHeaderCount, reqHeaderBytes uint64
@@ -85,7 +89,8 @@ func (f *Firewall) admit(w http.ResponseWriter, r *http.Request) (a *wafAdmissio
 		r = r.WithContext(ctx)
 		done = func() { _ = lease.Close() }
 	}
-	a.gov, a.lease, a.ctx, a.mode = gov, lease, r.Context(), gov.Limits().Mode
+	limits := gov.Limits()
+	a.gov, a.lease, a.ctx, a.limits, a.mode = gov, lease, r.Context(), limits, limits.Mode
 	if f.audit.writer.hasOutput() {
 		if err := gov.AdmitAuditOutput(); err != nil {
 			writeAdmissionError(w, r, err)
@@ -103,12 +108,20 @@ func (f *Firewall) admit(w http.ResponseWriter, r *http.Request) (a *wafAdmissio
 
 // writeAdmissionError answers a governor refusal or a body-arrival failure
 // with the shared inspection responses (ADR 0032 §5).
-func writeAdmissionError(w http.ResponseWriter, r *http.Request, err error) {
+func writeAdmissionError(w http.ResponseWriter, r *http.Request, err error) int {
 	switch {
 	case inspection.IsOverload(err):
 		inspection.WriteOverloaded(w, r)
+		if inspection.IsGRPCRequest(r) {
+			return http.StatusOK
+		}
+		return http.StatusServiceUnavailable
 	case errors.Is(err, inspection.ErrBodyTimeout):
 		inspection.WriteBodyTimeout(w, r)
+		if inspection.IsGRPCRequest(r) {
+			return http.StatusOK
+		}
+		return http.StatusRequestTimeout
 	default:
 		if r.ProtoMajor < 2 {
 			// The body may be unread and nothing bounds an HTTP/1 read
@@ -116,6 +129,7 @@ func writeAdmissionError(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Connection", "close")
 		}
 		http.Error(w, "inspection error", http.StatusInternalServerError)
+		return http.StatusInternalServerError
 	}
 }
 
@@ -134,6 +148,15 @@ func refusal(err error) (category string, status int) {
 }
 
 func (a *wafAdmission) governed() bool { return a != nil && a.gov != nil }
+
+func (a *wafAdmission) maxResponseHeaderBytes() uint64 {
+	if a.governed() {
+		if n := a.limits.MaxResponseHeaderBytes; n > 0 {
+			return n
+		}
+	}
+	return uint64(config.InspectionDefaultMaxResponseHeaderBytes)
+}
 
 func (a *wafAdmission) charge(class inspection.ByteClass, n uint64) (*inspection.Charge, error) {
 	if !a.governed() {
@@ -272,7 +295,7 @@ func (a *wafAdmission) release() {
 	if a.audit != nil {
 		a.audit.release()
 	}
-	for _, c := range []*inspection.Charge{a.r1, a.r2, a.buf} {
+	for _, c := range []*inspection.Charge{a.r1, a.r2, a.r3, a.r4, a.buf} {
 		if c != nil {
 			_ = c.Release()
 		}
@@ -280,7 +303,7 @@ func (a *wafAdmission) release() {
 	for _, c := range a.charges {
 		_ = c.Release()
 	}
-	a.r1, a.r2, a.buf, a.charges = nil, nil, nil, nil
+	a.r1, a.r2, a.r3, a.r4, a.buf, a.charges = nil, nil, nil, nil, nil, nil
 }
 
 // requestHeaderShape returns the header entries and bytes Jul adds to the
@@ -301,6 +324,16 @@ func requestHeaderShape(r *http.Request, uri string) (count, bytes, h uint64) {
 		bytes += uint64(len("Transfer-Encoding") + len(te))
 	}
 	return count, bytes, bytes + uint64(len(uri)+len(r.Host))
+}
+
+func responseHeaderShape(h http.Header) uint64 {
+	var n uint64
+	for name, values := range h {
+		for _, value := range values {
+			n = satAdd(n, uint64(len(name)), uint64(len(value)), 64)
+		}
+	}
+	return n
 }
 
 // queryPairs bounds the ARGS_GET entries ProcessURI can parse.
@@ -339,6 +372,14 @@ func r2Estimate(args, bTotal uint64) uint64 {
 	return satAdd(satMul(inspection.WAFArgumentBytes, args), satMul(inspection.WAFByteFactor, bTotal))
 }
 
+func r3Estimate(headerBytes uint64) uint64 {
+	return satMul(inspection.WAFByteFactor, headerBytes)
+}
+
+func r4Estimate(args, responseBytes uint64) uint64 {
+	return satAdd(satMul(inspection.WAFArgumentBytes, args), satMul(inspection.WAFByteFactor, responseBytes))
+}
+
 // txState exposes Coraza's experimental transaction state behind Jul's
 // wrappers. If it is unavailable, reservations stay at their worst case.
 func txState(tx types.Transaction) (plugintypes.TransactionState, bool) {
@@ -365,6 +406,28 @@ func argsHeld(tx types.Transaction, get bool) (uint64, bool) {
 		return uint64(len(v.ArgsGet().FindAll())), true
 	}
 	return uint64(len(v.ArgsPost().FindAll())), true
+}
+
+func responseArgsHeld(tx types.Transaction) (uint64, bool) {
+	s, ok := txState(tx)
+	if !ok {
+		return 0, false
+	}
+	return uint64(len(s.Variables().ResponseArgs().FindAll())), true
+}
+
+// txResponseBodyLimit returns the effective per-transaction limit after
+// phase 3, falling back to the compiled limit if the Coraza wrapper changes.
+func txResponseBodyLimit(tx types.Transaction, fallback int64) int64 {
+	v, ok := innerTx(tx)
+	if !ok {
+		return fallback
+	}
+	f := v.FieldByName("ResponseBodyLimit")
+	if !f.IsValid() || f.Kind() != reflect.Int64 {
+		return fallback
+	}
+	return f.Int()
 }
 
 // txRequestBodyLimit is the transaction's effective request body limit after
@@ -412,9 +475,8 @@ func (f *Firewall) readRequestBody(w http.ResponseWriter, r *http.Request, tx ty
 			owner = reqdeadline.NewForRequest(w, r)
 			defer owner.End()
 		}
-		limits := a.gov.Limits()
 		owner.InterruptWith(r.Body)
-		if err := owner.BeginBodyRead(limits.BodyTimeout, limits.Mode == inspection.Observe, a.gov.RecordBodyTimeout); err != nil {
+		if err := owner.BeginBodyRead(a.limits.BodyTimeout, a.limits.Mode == inspection.Observe, a.gov.RecordBodyTimeout); err != nil {
 			owner.EndBodyRead()
 			res.admission = inspection.ErrDeadlineUnsupported
 			if !errors.Is(err, reqdeadline.ErrUnsupported) {

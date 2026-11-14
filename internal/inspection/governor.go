@@ -976,6 +976,32 @@ func (c ByteClass) saturation() Outcome {
 }
 
 func (g *Governor) noteRejectionLocked(reason Outcome) {
+	g.noteRejectionForModeLocked(reason, g.limits.Mode)
+}
+
+// RecordRejection records a bounded policy rejection or observe-mode
+// would-reject decision made at a boundary outside the governor's byte and
+// slot acquisitions.
+func (g *Governor) RecordRejection(reason Outcome, mode Mode) error {
+	if g == nil || (mode != Enforce && mode != Observe) {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	switch reason {
+	case ByteSaturated, WAFStateSaturated, EvaluationSaturated, AuditSaturated:
+	default:
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	g.mu.Lock()
+	g.noteRejectionForModeLocked(reason, mode)
+	hook := g.hooks.OnRejection
+	g.mu.Unlock()
+	if hook != nil {
+		hook(reason, mode)
+	}
+	return nil
+}
+
+func (g *Governor) noteRejectionForModeLocked(reason Outcome, mode Mode) {
 	index := RejectBytes
 	switch reason {
 	case WAFStateSaturated:
@@ -986,7 +1012,7 @@ func (g *Governor) noteRejectionLocked(reason Outcome) {
 		index = RejectAudit
 	}
 	modeIndex := 0
-	if g.limits.Mode == Observe {
+	if mode == Observe {
 		modeIndex = 1
 	}
 	if g.rejections[index][modeIndex] < math.MaxUint64 {

@@ -626,7 +626,8 @@ type engineState struct {
 	responseBodyLimit        int64
 	// requestBodyLimitReject: SecRequestBodyLimitAction Reject, so a write
 	// that reaches the limit is refused without evaluating phase 2.
-	requestBodyLimitReject bool
+	requestBodyLimitReject  bool
+	responseBodyLimitReject bool
 }
 
 // compiledEngineState reads the authoritative compiled response-body and
@@ -656,10 +657,13 @@ func compiledEngineState(w coraza.WAF) (engineState, error) {
 	}
 	st.requestBodyLimit = reqLimit.Int()
 	action := engine.FieldByName("RequestBodyLimitAction")
-	if !action.IsValid() || action.Type() != reflect.TypeOf(types.BodyLimitActionReject) {
-		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing request body limit action on %T", w)
+	responseAction := engine.FieldByName("ResponseBodyLimitAction")
+	if !action.IsValid() || action.Type() != reflect.TypeOf(types.BodyLimitActionReject) ||
+		!responseAction.IsValid() || responseAction.Type() != reflect.TypeOf(types.BodyLimitActionReject) {
+		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing body limit actions on %T", w)
 	}
 	st.requestBodyLimitReject = types.BodyLimitAction(action.Int()) == types.BodyLimitActionReject
+	st.responseBodyLimitReject = types.BodyLimitAction(responseAction.Int()) == types.BodyLimitActionReject
 	st.responseBodyLimit = respLimit.Int()
 	if !inMemory.IsNil() {
 		st.requestBodyInMemoryLimit = inMemory.Elem().Int()

@@ -1,9 +1,11 @@
 # ADR 0032 — Aggregate inspection resource governor
 
 - **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
-  merged (#710, `c8bba7f2`); I3, I4 and I6 remain pending. The 2026-11-13 amendment below was
-  accepted by the maintainer when #714 merged as `16d98258` from head `faf3ead4`; it is not yet
-  implemented.
+  merged (#710, `c8bba7f2`); I3a merged (#715, `def419f5`); I4 is in progress on
+  `feat/700-inspection-waf-i4` (PR #716, hosted checks pending); I3b and I6 remain pending. The
+  2026-11-13 amendment below was accepted when #714 merged as `16d98258` from head `faf3ead4`;
+  implementation remains incomplete
+  until the scheduled checkpoints and qualification gates pass.
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
@@ -862,11 +864,11 @@ continues without a new governor-driven 500 or 503. Actual R3 reservations use
 the measured response charge, never the configured maximum.
 
 The 64 KiB default is an initial compatibility-sensitive policy, not an
-experimentally established optimum. Before shipping the response-path
+experimentally established optimum. The unmerged I4 branch now implements the
+R3 runtime check and reservation, but before shipping this response-path
 enforcement, qualify representative responses, especially repeated
-`Set-Cookie` fields and authentication flows. The R3 runtime check and
-reservation are a separate response-path prerequisite in I4; no live request
-path is claimed in I1.
+`Set-Cookie` fields and authentication flows, and complete the remaining I4
+protocol and ownership tests. This is not a release or qualification claim.
 
 **Route minimum.** Each route's static worst-case single-request charge is the
 sum of the terms below, and `max_buffered_bytes` must be at least the largest
@@ -1417,9 +1419,10 @@ plugin and server-timeout semantics remain intact in all four combinations.
 | Mutable or asynchronously retained audit record | Only immutable transaction-detached snapshots may reach writers; unsupported retaining writers are rejected in protected profiles. Any queued serialized output has a distinct bounded owner. | Same safety contract; observe cannot make an unsafe alias or unbounded queue safe. |
 
 H1 refusals preserve #710's `Connection: close` behavior for unread bodies; H2/H3 affect only the
-stream. If a response is already committed, record the partial delivery and stop further phase 1–4
-evaluation rather than claim a replacement 503; upgrades, streams and CONNECT follow "Long-lived
-exchanges" below. The timer-only deadline owner, fetch-reader
+stream. If a response is already committed, abort the affected stream using the existing fail-closed
+abort semantics, retain the actual committed client status and partial-delivery signal, and stop
+further phase 1–4 evaluation rather than claim a replacement 503; upgrades, streams and CONNECT
+follow "Long-lived exchanges" below. The timer-only deadline owner, fetch-reader
 revocation, plugin-header rollback, generation-retention fix #709, ADR 0020 subscription behavior
 and rule 900001 remain unchanged.
 
@@ -1687,8 +1690,8 @@ bodies grown by charge-before-allocate, request-side host copies (`fetch`,
 request state, generated and replacement bodies) charged with ownership
 transfer, fail-fast `503`/`UNAVAILABLE`, and `body_timeout` through
 `internal/reqdeadline` with the §6 amendment 8 timer and sticky abort. WAF
-paths (I3) and response-subscription buffers (I4) are untouched, so no
-A1–A18 criterion is claimed. Design, test matrix, measurements and reviews:
+paths were completed in I3a; response-subscription buffers are being implemented in I4 on an
+unmerged branch, so no A1–A18 criterion is claimed. Design, test matrix, measurements and reviews:
 `docs/reviews/2026-11-12-700-i2-plugin-request-path.md`.
 
 Measurement under harness plan v3 covers several behaviours:
@@ -1765,10 +1768,17 @@ I3a integrates the WAF request path (`internal/waf/admission.go`, `audit.go`, `o
   exception: if the handler hijacks without draining the inspected body, that body is still
   read from the transaction's buffer, so ownership ends when the handler returns. A test checks
   both cases on a real server.
-- **Deferred to I4.** R3/R4 and the response buffer, response calibration, and the
-  non-hijack commit points (SSE and streamed responses, streaming gRPC, H2/H3 extended
-  CONNECT). Until then those exchanges keep the WAF's lease until the handler returns (the
-  pre-I3a behaviour, now charged).
+- **I4 in progress.** R3/R4 and the response buffer are implemented on the unmerged I4 branch
+  with response-state/parser/partial and response-audit calibration. Non-hijack commit points
+  release transaction ownership after inspection for flushed SSE over H2/H3 and native streaming
+  gRPC; tests also verify H2/H3 sibling connection reuse. A nested production-chain test verifies
+  WAF inspection of plugin-transformed output, retained charges under downstream backpressure,
+  cleanup after client disconnect, and an early H2 WAF decision with the request body still open.
+  An undrained inspected transaction body still retains ownership. Extended CONNECT is not
+  applicable: Jul supports HTTP/1.1 Upgrade only and does not advertise RFC 8441/9220, per
+  ADR 0018 §17. The I4 response-side matrix covers H1/H2/H3 rejection and streaming, early H1/H2/H3
+  responses, and native gRPC status/trailers; the integrated H3 request-deadline measurement remains
+  an I6b gate.
 
 Each slice follows the repository coverage, race, profile, generated-contract, security-review and
 Console gates that apply to its diff.

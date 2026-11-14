@@ -348,6 +348,61 @@ func TestQueueTimeoutAndLimitDecrease(t *testing.T) {
 	}
 }
 
+func TestRecordRejectionTracksReasonAndMode(t *testing.T) {
+	type rejection struct {
+		reason Outcome
+		index  int
+	}
+	rejections := []rejection{
+		{reason: ByteSaturated, index: RejectBytes},
+		{reason: WAFStateSaturated, index: RejectWAFState},
+		{reason: EvaluationSaturated, index: RejectEvaluation},
+		{reason: AuditSaturated, index: RejectAudit},
+	}
+	modes := []Mode{Enforce, Observe}
+	var calls int
+	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 100, 10), Hooks{
+		OnRejection: func(Outcome, Mode) { calls++ },
+	})
+	for _, mode := range modes {
+		for _, rejection := range rejections {
+			if err := g.RecordRejection(rejection.reason, mode); err != nil {
+				t.Fatalf("RecordRejection(%s, %s): %v", rejection.reason, mode, err)
+			}
+		}
+	}
+	snapshot := g.Snapshot()
+	for _, rejection := range rejections {
+		for modeIndex := range modes {
+			if got := snapshot.Rejections[rejection.index][modeIndex]; got != 1 {
+				t.Errorf("rejection count for %s/mode %d = %d, want 1", rejection.reason, modeIndex, got)
+			}
+		}
+	}
+	if calls != len(rejections)*len(modes) {
+		t.Fatalf("rejection hooks = %d, want %d", calls, len(rejections)*len(modes))
+	}
+}
+
+func TestRecordRejectionRejectsInvalidInputs(t *testing.T) {
+	var nilGovernor *Governor
+	if err := nilGovernor.RecordRejection(ByteSaturated, Enforce); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("nil-governor error = %v, want invalid accounting", err)
+	}
+	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 100, 10), Hooks{})
+	for _, tc := range []struct {
+		reason Outcome
+		mode   Mode
+	}{
+		{reason: ByteSaturated, mode: Mode("invalid")},
+		{reason: Cancelled, mode: Enforce},
+	} {
+		if err := g.RecordRejection(tc.reason, tc.mode); !IsOutcome(err, InvalidAccounting) {
+			t.Errorf("RecordRejection(%s, %s) = %v, want invalid accounting", tc.reason, tc.mode, err)
+		}
+	}
+}
+
 func TestQueueCapacityAndZeroWait(t *testing.T) {
 	var abandoned atomic.Uint64
 	g := newTestGovernor(t, testLimits(Enforce, 1, 10*time.Second, 100, 1), Hooks{
