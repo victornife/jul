@@ -13,11 +13,11 @@ qualification, soak or maturity change.
 | Starting `main` | `def419f509d80a6718f4dabf29f210e8a0dbb6b3` (verified #715 merge) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
-| Checkpoint 3 | **In review**: I4 response accounting, PR #716 on `feat/700-inspection-waf-i4`; implementation, calibration and focused regressions are complete; hosted checks pending |
+| Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Complete #716 hosted checks and review before merging and advancing to I3b |
+| Exact next action | I4 is complete; stop here as requested. I3b remains the next scheduled checkpoint and has not started |
 
 ## Checkpoint schedule and dependencies
 
@@ -25,7 +25,7 @@ qualification, soak or maturity change.
 | --- | --- | --- |
 | 1 — design | Merged (#714, `16d98258`); amendment accepted | None |
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration remains I4 |
-| 3 — I4 | In progress: WAF and plugin response paths, response audit calibration | I3a and the accepted response/header contract; implementation owner |
+| 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
 | 5 — I2b | Not started: process-wide per-live-instance guest-capacity admission; #711 | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
@@ -187,7 +187,7 @@ acceptance is claimed.
 
 ## I4 implementation record
 
-I4 is in progress on `feat/700-inspection-waf-i4`; this record describes unmerged work, not a
+I4 was merged in #716 as `daa06bdc` from head `d879cba9`; this record describes merged source, not a
 released or qualified control.
 
 - Plugin response-subscription buffers charge capacity before allocation and growth. On budget
@@ -220,12 +220,12 @@ released or qualified control.
 | `go build -tags 'wasmplugins waf grpc http3' ./cmd/jul` | Passed |
 
 The extended CONNECT cell is not applicable under Jul's documented protocol boundary (ADR 0018
-§17). I4 implementation and focused validation are complete; #716 hosted checks are pending, and
-review remains required before merge. These tests are not I6b qualification or A1–A22 acceptance.
+§17). I4 implementation and focused validation are complete; all required #716 hosted checks passed
+before merge. These tests are not I6b qualification or A1–A22 acceptance.
 
 ## Handoff rules
 
-I3a is merged as #715. I4 is being implemented on a fresh focused branch; update this ledger with
-its final validation and merge state before starting I3b. Do not mark I3b, I2b or I6a implemented
-merely because their designs or tracking issues exist; do not close #700/#62 or claim final
-acceptance before I6b.
+I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b is the next scheduled checkpoint but was not
+started; stop after I4 until directed otherwise. Do not mark I3b, I2b or I6a implemented merely
+because their designs or tracking issues exist; do not close #700/#62 or claim final acceptance
+before I6b.
