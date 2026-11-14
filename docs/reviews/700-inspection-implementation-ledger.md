@@ -13,11 +13,11 @@ qualification, soak or maturity change.
 | Starting `main` | `def419f509d80a6718f4dabf29f210e8a0dbb6b3` (verified #715 merge) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
-| Checkpoint 3 | **In progress**: I4 response accounting on `feat/700-inspection-waf-i4`; implementation, calibration and focused regressions are complete |
+| Checkpoint 3 | **In review**: I4 response accounting, PR #716 on `feat/700-inspection-waf-i4`; implementation, calibration and focused regressions are complete; hosted checks pending |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Publish the completed I4 checkpoint for review, then wait for hosted checks before advancing |
+| Exact next action | Complete #716 hosted checks and review before merging and advancing to I3b |
 
 ## Checkpoint schedule and dependencies
 
@@ -220,8 +220,8 @@ released or qualified control.
 | `go build -tags 'wasmplugins waf grpc http3' ./cmd/jul` | Passed |
 
 The extended CONNECT cell is not applicable under Jul's documented protocol boundary (ADR 0018
-§17). I4 implementation and focused validation are complete; hosted checks and review remain
-required before merge. These tests are not I6b qualification or A1–A22 acceptance.
+§17). I4 implementation and focused validation are complete; #716 hosted checks are pending, and
+review remains required before merge. These tests are not I6b qualification or A1–A22 acceptance.
 
 ## Handoff rules
 

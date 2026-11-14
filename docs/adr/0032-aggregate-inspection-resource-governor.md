@@ -2,8 +2,9 @@
 
 - **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
   merged (#710, `c8bba7f2`); I3a merged (#715, `def419f5`); I4 is in progress on
-  `feat/700-inspection-waf-i4`; I3b and I6 remain pending. The 2026-11-13 amendment below was
-  accepted when #714 merged as `16d98258` from head `faf3ead4`; implementation remains incomplete
+  `feat/700-inspection-waf-i4` (PR #716, hosted checks pending); I3b and I6 remain pending. The
+  2026-11-13 amendment below was accepted when #714 merged as `16d98258` from head `faf3ead4`;
+  implementation remains incomplete
   until the scheduled checkpoints and qualification gates pass.
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
