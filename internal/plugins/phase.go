@@ -448,8 +448,6 @@ func (l *responseLayer) failBuffer() {
 func (l *responseLayer) unavailableForBudget() {
 	view, ok := l.decideWithReason(bodyTooLarge, nil, "budget")
 	if !ok {
-		l.writeFinal()
-		l.state = layerDiscard
 		return
 	}
 	l.parent.WriteHeader(view.status)
