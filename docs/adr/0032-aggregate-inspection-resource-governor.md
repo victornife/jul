@@ -1,8 +1,8 @@
 # ADR 0032 — Aggregate inspection resource governor
 
 - **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
-  merged (#710, `c8bba7f2`); I3a merged (#715, `def419f5`); I4 is in progress on
-  `feat/700-inspection-waf-i4` (PR #716, hosted checks pending); I3b and I6 remain pending. The
+  merged (#710, `c8bba7f2`); I3a merged (#715, `def419f5`); I4 merged (#716, `daa06bdc`);
+  I3b is blocked and I2b and I6 remain pending. The
   2026-11-13 amendment below was accepted when #714 merged as `16d98258` from head `faf3ead4`;
   implementation remains incomplete
   until the scheduled checkpoints and qualification gates pass.
@@ -1247,7 +1247,7 @@ the table apply to every applicable row.
 | --- | --- | --- | --- |
 | Lease and dynamic plugin/WAF host buffers | `base` and `buffer` bytes under `max_buffered_bytes`; the first actual inspection layer creates one lease, reused by nested layers. Charge capacity before allocation/growth/copy, including old and new arrays. | The creating layer closes only after downstream work, response callbacks and all represented aliases are gone. Transport readers are detached/revoked as in #710. | I2 merged; I3a/I4 complete remaining paths |
 | WAF transaction state | Cumulative `waf_state` **estimated** bytes R1–R4; reserve each phase's worst case before its Coraza call while holding the slot, then true down only as calibrated. `B_total` includes spilled input. | Hold until the synchronous work has returned and the owning goroutine closes the transaction. Cancellation or a reset is not a refund. `ARGS_PATH` remains empty unless its term and tests change. | I3a request, I4 response |
-| Phase-5 rules, audit construction and output | New `audit` **estimated reservation** R5, charged against the same `max_buffered_bytes`, not a second limit or an addition outside the accounted total. Reserve the complete per-transaction worst case before creating/entering a WAF transaction and before any response can make refusal impossible. | Retain through slotted or unslotted `ProcessLogging`, formatting and synchronous writer completion. Detach the immutable snapshot before transaction reset/pool reuse. If serialized bytes are asynchronously queued, transfer ownership to a distinct bounded queue; unsupported aliases cannot be refunded or claimed covered. Closing a request lease cannot refund an unowned retained record. | I3a request and I4 response calibration; exact R5 proof is blocked below |
+| Phase-5 rules, audit construction and output | New `audit` **estimated reservation** R5, charged against the same `max_buffered_bytes`, not a second limit or an addition outside the accounted total. Reserve the complete per-transaction worst case before creating/entering a WAF transaction and before any response can make refusal impossible. | Retain through slotted or unslotted `ProcessLogging`, formatting and synchronous writer completion. Detach the immutable snapshot before transaction reset/pool reuse. If serialized bytes are asynchronously queued, transfer ownership to a distinct bounded queue; unsupported aliases cannot be refunded or claimed covered. Closing a request lease cannot refund an unowned retained record. | I3a request and I4 response calibration; integrated A21 qualification remains pending |
 | WAF execution | Process `slots`, one per synchronous rule-evaluating call, including implicit evaluations in body writes. No network read is performed while holding one. | Release only on actual return. Phases 1–4 try-acquire while request data is unread, otherwise use the existing bounded FIFO. Phase 5 never skips rules: it uses the same eligibility rule, but visibly runs unslotted if no slot is obtained. It is not strictly bounded by the slot count. | I3a/I4 |
 | Guest instances | Process `guest_capacity` bytes: the effective `WithMemoryLimitPages` ceiling, in 64 KiB pages, for **each** starting, idle, busy or closing instance across candidate/current/retiring generations. This is neither actual guest allocation nor RSS. | Reserve before instantiation and `_initialize`; reuse a pooled instance without another reservation. Release exactly once only after the module/runtime has stopped and no owner can use its memory. A failed close remains accounted and visible. | I2b |
 | Compiled rules/modules and transaction pools | Generation-owned compiled state and process/GC-retained pool capacity; configured capacity, calibrated estimates or observations where available, **not** a guest or request reservation. | Retire only after actual generation users and resources finish; a reset pooled transaction can retain backing arrays. Unmeasured baseline is unavailable, not zero. | Existing lifecycle; A9/A15 and I6b |
@@ -1276,8 +1276,8 @@ writer retention. `R5_max` is included **once** in the WAF route's single-reques
 addition to R1–R4 and buffer terms. It must not be double-counted as a separate additive total.
 Its phase-5 rule allowance still applies when audit output is off if logging rules can run.
 
-The request-side components and coefficients are calibrated in I3a (see I3a progress); the
-response-side ones remain **blocked** pending calibration in I4. The part-C sample above is a
+The request-side components and coefficients were calibrated in I3a and the response-side ones in
+I4; these focused calibrations are not integrated A21 qualification. The part-C sample above is a
 counterexample to zero; it is not a safe multiplier. Coraza's audit object can retain references to transaction-owned mutable
 collections. In the probe, a writer retained its `AuditLog`, `tx.Close()` returned that
 transaction to the pool, and a later transaction's argument became visible through the old
@@ -1768,8 +1768,8 @@ I3a integrates the WAF request path (`internal/waf/admission.go`, `audit.go`, `o
   exception: if the handler hijacks without draining the inspected body, that body is still
   read from the transaction's buffer, so ownership ends when the handler returns. A test checks
   both cases on a real server.
-- **I4 in progress.** R3/R4 and the response buffer are implemented on the unmerged I4 branch
-  with response-state/parser/partial and response-audit calibration. Non-hijack commit points
+- **I4 merged.** #716 (`daa06bdc`) implemented R3/R4 and the response buffer with
+  response-state/parser/partial and response-audit calibration. Non-hijack commit points
   release transaction ownership after inspection for flushed SSE over H2/H3 and native streaming
   gRPC; tests also verify H2/H3 sibling connection reuse. A nested production-chain test verifies
   WAF inspection of plugin-transformed output, retained charges under downstream backpressure,

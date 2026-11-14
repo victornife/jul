@@ -10,24 +10,25 @@ qualification, soak or maturity change.
 
 | Item | State |
 | --- | --- |
-| Starting `main` | `def419f509d80a6718f4dabf29f210e8a0dbb6b3` (verified #715 merge) |
+| Starting `main` | `d06538cecc1398b6e8bf6302b553f873cd44e941` (verified #717 merge, after I4) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
+| Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | I4 is complete; stop here as requested. I3b remains the next scheduled checkpoint and has not started |
+| Exact next action | Resolve and review the I3b integration and ownership prerequisites; investigate I2b independently without claiming I3b protection |
 
 ## Checkpoint schedule and dependencies
 
 | Checkpoint | Scope / status | Actual prerequisite and next owner |
 | --- | --- | --- |
 | 1 — design | Merged (#714, `16d98258`); amendment accepted | None |
-| 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration remains I4 |
+| 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Not started: process-wide per-live-instance guest-capacity admission; #711 | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
+| 5 — I2b | Investigation: process-wide per-live-instance guest-capacity admission; #711; runtime implementation not yet started | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
@@ -38,10 +39,10 @@ resources.
 
 ## Resolved recommendations and explicit blockers
 
-- **Audit:** the proposed R5 reservation precedes WAF transaction entry and covers phase-5 rule
-  work, record construction and any retained writer/transport aliases. It is charged once under
-  the existing byte ceiling. Exact policy-specific terms, formatter coverage and alias ownership
-  remain **blocked** pending I3a/I4 calibration or a reviewed upstream boundary.
+- **Audit:** the R5 reservation precedes WAF transaction entry and covers phase-5 rule work,
+  record construction and supported writer ownership. It is charged once under the existing byte
+  ceiling. I3a/I4 provide focused calibration and writer handling; integrated A21 qualification
+  remains pending.
 - **Storage:** the pinned Coraza API calls `os.CreateTemp` directly for both body spill and
   multipart files; `SecTmpDir` is ignored. The design requires a supported public interception
   boundary and does not claim that polling, `WithRootFS`, an incoming-byte counter or a private
@@ -223,9 +224,32 @@ The extended CONNECT cell is not applicable under Jul's documented protocol boun
 §17). I4 implementation and focused validation are complete; all required #716 hosted checks passed
 before merge. These tests are not I6b qualification or A1–A22 acceptance.
 
+## I3b prerequisite verification
+
+On 2026-11-14, starting from `d06538ce`, the pinned Coraza v3.8.1 and upstream `main` at
+`674ec708bc2c52380397db39f81387b67286ef1a` still call `os.CreateTemp` independently for body
+spill and multipart files. The public WAF configuration does not expose a common file lifecycle
+owner or a typed parser I/O result. The experimental body-processor registry alone does not
+intercept the body buffer. An upstream integration or another reviewed supported boundary must
+cover create, write/extent, close and removal for both paths and carry quota versus physical
+errors to Jul before origin forwarding; neither `WithRootFS` nor post-write counting proves this.
+
+The existing [ownership probe](evidence/2026-11-13-700-checkpoint-1/README.md), rerun with
+`CGO_ENABLED=0 JUL_PROBE_TMP="$probe_tmp" go run docs/reviews/evidence/2026-11-13-700-checkpoint-1/instruments/ownership.go`
+after the documented temporary copy, again returned no interruption or error on a multipart
+create failure while `REQBODY_ERROR` was `1`; the normal request was denied with 403. The probe's
+static exposure and audit-alias controls also reproduced. Its nine archived checksums passed;
+`CGO_ENABLED=0 go test -tags waf -count=1 -run '^TestAssessmentRequestBodySpill$' ./internal/waf/`
+passed. This is a prerequisite recheck, not I3b implementation or A19 acceptance.
+
+The safe root/migration locator and representative finite defaults remain separate blockers.
+The recommended next step is a reviewed public engine integration with per-transaction ownership
+and typed storage outcomes, followed by the ADR's filesystem, lifecycle and protocol tests.
+No upstream change has been submitted, and no logical spool quota is claimed.
+
 ## Handoff rules
 
-I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b is the next scheduled checkpoint but was not
-started; stop after I4 until directed otherwise. Do not mark I3b, I2b or I6a implemented merely
-because their designs or tracking issues exist; do not close #700/#62 or claim final acceptance
-before I6b.
+I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b is blocked as described above; continue
+independent I2b investigation while preserving the scheduled checkpoint merge order. Do not mark
+I3b, I2b or I6a implemented merely because their designs or tracking issues exist; do not close
+#700/#62 or claim final acceptance before I6b.
