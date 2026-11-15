@@ -9,7 +9,161 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"jul/internal/config"
 )
+
+func TestGuestStateNames(t *testing.T) {
+	want := []string{"starting", "idle", "busy", "closing", "failed_retained"}
+	got := GuestStateNames()
+	if len(got) != len(want) {
+		t.Fatalf("guest state names = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("guest state names = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestCheckGuestCapacityMinimum(t *testing.T) {
+	plugins := map[string]config.PluginConfig{
+		"one": {MemoryLimit: config.Size(config.PluginMemoryPageSize)},
+		"two": {MemoryLimit: config.Size(2 * config.PluginMemoryPageSize)},
+	}
+	limits := testLimits(Enforce, 1, 0, 100, 1)
+	limits.MaxGuestCapacityBytes = 3 * config.PluginMemoryPageSize
+	if warning, err := CheckGuestCapacityMinimum(limits, plugins); warning != nil || err != nil {
+		t.Fatalf("exact minimum = warning %v, error %v", warning, err)
+	}
+
+	limits.MaxGuestCapacityBytes--
+	limits.Mode = Observe
+	if warning, err := CheckGuestCapacityMinimum(limits, plugins); warning == nil || err != nil {
+		t.Fatalf("observe shortfall = warning %v, error %v", warning, err)
+	}
+	limits.Mode = Enforce
+	if warning, err := CheckGuestCapacityMinimum(limits, plugins); warning != nil || err == nil {
+		t.Fatalf("enforce shortfall = warning %v, error %v", warning, err)
+	}
+
+	limits.MaxGuestCapacityBytes = 0
+	if warning, err := CheckGuestCapacityMinimum(limits, plugins); warning != nil || err != nil {
+		t.Fatalf("unlimited capacity = warning %v, error %v", warning, err)
+	}
+	plugins["invalid"] = config.PluginConfig{MemoryLimit: -1}
+	if _, err := CheckGuestCapacityMinimum(limits, plugins); err == nil {
+		t.Fatal("invalid plugin memory limit was accepted")
+	}
+}
+
+func TestGuestTicketResolveTeardown(t *testing.T) {
+	var nilTicket *GuestTicket
+	if err := nilTicket.ResolveTeardown(nil); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("nil ticket teardown = %v", err)
+	}
+	if err := nilTicket.Transition(GuestIdle); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("nil ticket transition = %v", err)
+	}
+
+	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 100, 1), Hooks{})
+	orphan := &GuestTicket{g: g, generation: 1, amount: 1, state: GuestStarting}
+	if err := orphan.ResolveTeardown(nil); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("untracked ticket teardown = %v", err)
+	}
+	succeeded, err := g.ReserveGuestCapacity(1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := succeeded.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := succeeded.ResolveTeardown(nil); err != nil {
+		t.Fatalf("duplicate confirmed teardown: %v", err)
+	}
+
+	failed, err := g.ReserveGuestCapacity(2, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("runtime close failed")
+	if err := failed.ResolveTeardown(closeErr); err != nil {
+		t.Fatal(err)
+	}
+	if err := failed.ResolveTeardown(closeErr); err != nil {
+		t.Fatalf("retained teardown retry: %v", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 20 || got.Instances[GuestFailedRetained] != 1 {
+		t.Fatalf("failed teardown debt = %+v", got)
+	}
+	if err := failed.Transition(GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := failed.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || got.Instances[GuestFailedRetained] != 0 {
+		t.Fatalf("confirmed retry did not release capacity: %+v", got)
+	}
+}
+
+func TestReserveGuestCapacityRejectsInvalidAndOverflow(t *testing.T) {
+	var nilGovernor *Governor
+	if _, err := nilGovernor.ReserveGuestCapacity(1, 1); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("nil governor reservation = %v", err)
+	}
+
+	var rejections atomic.Int64
+	g := newTestGovernor(t, testLimits(Observe, 1, 0, 100, 1), Hooks{
+		OnRejection: func(reason Outcome, mode Mode) {
+			if reason == GuestCapacitySaturated && mode == Observe {
+				rejections.Add(1)
+			}
+		},
+	})
+	for _, args := range [][2]uint64{{0, 1}, {1, 0}} {
+		if _, err := g.ReserveGuestCapacity(args[0], args[1]); !IsOutcome(err, InvalidAccounting) {
+			t.Fatalf("invalid reservation %v = %v", args, err)
+		}
+	}
+
+	ticket, err := g.ReserveGuestCapacity(1, math.MaxUint64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := g.Snapshot()
+	limits := snapshot.Limits
+	limits.MaxGuestCapacityBytes = 1
+	if err := g.PublishLimitsIfVersion(snapshot.LimitsVersion, limits); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.ReserveGuestCapacity(2, 1); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("overflowing observe reservation = %v", err)
+	}
+	if rejections.Load() != 1 {
+		t.Fatalf("observe rejection hooks = %d, want 1", rejections.Load())
+	}
+	if err := ticket.Transition(GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Transition(GuestClosed); err != nil {
+		t.Fatal(err)
+	}
+
+	ticket, err = g.ReserveGuestCapacity(3, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Transition(GuestState(255)); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("invalid guest transition = %v", err)
+	}
+	if err := ticket.Transition(GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Transition(GuestClosed); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestGuestCapacityObserveDebtAndLeaseIndependence(t *testing.T) {
 	limits := testLimits(Observe, 1, 0, 100, 1)

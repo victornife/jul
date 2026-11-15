@@ -411,6 +411,33 @@ func TestGuestCapacityObserveAllowsAndCountsOverLimitGenerations(t *testing.T) {
 	}
 }
 
+func TestGuestHelpersWithoutGovernorAreNoops(t *testing.T) {
+	p := &plugin{}
+	if ticket, err := p.reserveGuest(); ticket != nil || err != nil {
+		t.Fatalf("reserve without governor = %v, %v", ticket, err)
+	}
+	if err := p.transitionGuest(nil, inspection.GuestIdle); err != nil {
+		t.Fatalf("nil-ticket transition = %v", err)
+	}
+	if released, err := p.resolveGuest(nil, nil); !released || err != nil {
+		t.Fatalf("nil-ticket teardown = %v, %v", released, err)
+	}
+	if released, err := p.resolveGuest(nil, errors.New("unconfirmed")); released || err != nil {
+		t.Fatalf("failed nil-ticket teardown = %v, %v", released, err)
+	}
+	if p.hasGuestTickets() {
+		t.Fatal("empty plugin has guest tickets")
+	}
+	p.finishGuestClose()
+	p.discard(nil)
+
+	var nilPlugin *plugin
+	if nilPlugin.hasGuestTickets() {
+		t.Fatal("nil plugin has guest tickets")
+	}
+	nilPlugin.discard(nil)
+}
+
 func TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure(t *testing.T) {
 	g := testGovernor(t)
 	var logs bytes.Buffer
