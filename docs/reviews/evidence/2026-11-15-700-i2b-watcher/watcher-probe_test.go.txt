@@ -59,7 +59,8 @@ func TestOverlayRetainsUnreturnedStartModule(t *testing.T) {
 	p := &plugin{
 		runtime: rt, compiled: compiled, pool: make(chan *pooledModule, 1),
 		slots: make(chan struct{}, 1), gov: g, generation: 1,
-		memoryLimitBytes: 64 << 10, guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
+		memoryLimitBytes: 64 << 10, closeOnContextDone: true,
+		guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
 	}
 	if _, err := p.acquire(ctx); err == nil {
 		t.Fatal("start trap unexpectedly succeeded")
@@ -70,8 +71,8 @@ func TestOverlayRetainsUnreturnedStartModule(t *testing.T) {
 	if string(data) != "65536" {
 		t.Fatalf("watcher-held guest memory = %q, want 65536", data)
 	}
-	if during.ReservedBytes != 64<<10 {
-		t.Errorf("start failure refunded capacity=%d while a runtime watcher still held %s bytes", during.ReservedBytes, data)
+	if during.ReservedBytes != 64<<10 || during.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Errorf("start failure teardown debt = %+v, want the 64 KiB ticket retained", during)
 	}
 }
 

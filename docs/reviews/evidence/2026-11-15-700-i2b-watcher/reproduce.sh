@@ -52,6 +52,9 @@ if go test $race_flag -count=1 -tags wasmplugins -modfile "$scratch/probe.mod" \
 	exit 1
 fi
 cat "$scratch/result.txt"
-grep -Fq 'start failure refunded capacity=0 while a runtime watcher still held 65536 bytes' "$scratch/result.txt"
 grep -Eq 'guest close refunded capacity=0 while [0-9]+ bytes of guest memory remained reachable after GC' "$scratch/result.txt"
-echo "Both expected premature-refund failures were reproduced."
+if grep -Fq 'start failure refunded capacity=' "$scratch/result.txt"; then
+	echo "failed-start retention regression; the follow-up fix did not hold" >&2
+	exit 1
+fi
+echo "Normal-retirement premature refund reproduced; failed-start retention held."

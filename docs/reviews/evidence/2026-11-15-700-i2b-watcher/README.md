@@ -42,9 +42,18 @@ The following SHA-256 values identify the relevant uninstrumented inputs:
 | `go.sum` | `56e780935168239cbc865cd069b82158439445266fb4fdded401144dce0e5600` |
 | wazero v1.12.0 `internal/wasm/module_instance.go` | `4d452fedd22ac86aabaef33545a85fbb52f815f4eec9050efab8fb458fc28c4d` |
 
+The current-code probe was rerun on commit `aa5a8dd3a2aefbf64ca69166339b142fc151f2e8`
+after merging #720, with Go 1.27.4 on macOS arm64:
+
+| Input | SHA-256 |
+| --- | --- |
+| `internal/plugins/runtime.go` | `d9e4b8f8eb5a602ae78519e4c0e66be796d5f44f3e704f4d895e13bcf670ae37` |
+| `go.mod` | `08992991f961b2a5c7cfcb0f05574931cb44c180fad3e0c169e43fa039d96f65` |
+| `go.sum` | `d5d4aacd98cf11a6dcde4397024beb1f4a3fe340f48d54c15db565e3261faf40` |
+
 ## Reproduce
 
-From the measured I2b source tree with wazero v1.12.0 already present in the Go
+From the current I2b source tree with wazero v1.12.0 already present in the Go
 module cache, run:
 
 ```sh
@@ -53,14 +62,14 @@ PROBE_RACE=1 bash docs/reviews/evidence/2026-11-15-700-i2b-watcher/reproduce.sh
 ```
 
 The script copies the pinned dependency into a uniquely named temporary directory,
-applies `wazero-before-select.patch`, overlays the two probe tests, and checks for
-both expected `go test` failures. It does not change repository files or the Go
-module cache. The temporary directory is retained and printed for inspection;
-remove that specific directory after use. A fixed implementation should make the
-script report that the historical blocker needs reassessment, not claim a new
-failure.
+applies `wazero-before-select.patch`, overlays the two probe tests, and checks that
+the failed-start ticket remains charged while normal retirement still refunds too
+early. It does not change repository files or the Go module cache. The temporary
+directory is retained and printed for inspection; remove that specific directory
+after use. If a fix makes both cases pass, the script deliberately exits non-zero
+so the blocker can be reassessed.
 
-`result.txt` is the recorded output from this worktree before publication; final
-source identity and subsequent results are tracked in the programme ledger.
-`race-result.txt` records the same two failing assertions under the race
-detector; no data race was reported in that run.
+`result.txt` and `race-result.txt` preserve the historical pre-fix output, where
+both assertions failed. `current-result.txt` and `current-race-result.txt` record
+the later probe against the published code: failed-start retention holds, while
+normal retirement still fails. No data race was reported in the race-enabled run.
