@@ -11,7 +11,9 @@ qualification, soak or maturity change.
 | Item | State |
 | --- | --- |
 | Starting `main` | `d151989435e49493d02ea895dce25b7125f3e2e8` (verified #718 merge, after I4) |
-| Latest checked `main` | `de2a4433f99a6121ae33ccf30f7b61806c67299f` (#719 dependency updates) |
+| Latest checked `main` | `13126aadf419839560c5a51b2ab155760ca9e8bb` (#720 dependency updates) |
+| Published I2b head | `e2f1a555dbd700f1c05998c13e5b1749de1229fb` (prototype commit `ee55b72d`; latest main merged) |
+| Hosted CI | [Run 43705663340](https://github.com/victornife/jul/actions/runs/43705663340), manually dispatched for the published I2b head; pending |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
@@ -364,6 +366,26 @@ On macOS arm64 with Go 1.27.4, the local worktree before integrating #719 passed
 - `make format-check`, `CGO_ENABLED=0 make config-check`, `make generated-check`,
   `python3 scripts/docs-check.py` (2,722 passed, 0 failed), and `git diff --check`.
 
+## Post-#720 verification on the published branch
+
+The code tests below ran on `aa5a8dd3`; `e2f1a555` adds only the checksummed current-probe
+documentation and raw outputs. `main` was `13126aad` (#720). Environment: macOS arm64, Go 1.27.4,
+CGO enabled unless specified. The full-tag `CI` workflow was manually dispatched against
+`e2f1a555` as run 43705663340 and is still in progress; no merge or PR is requested while I2b is
+blocked.
+
+- `go test -count=1 -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./cmd/jul`: passed.
+- `go test -count=1 ./internal/inspection ./internal/config ./internal/configcontract ./internal/lifecycle ./internal/observability`: passed.
+- `go test -race -count=5 -tags wasmplugins ./internal/plugins -run '^(TestGuestCapacityRetainsFailedInstantiationWithoutModule|TestGuestCapacityStatsIncludesCompilingCandidate|TestGuestCapacityRemainsChargedDuringPoolHandoff|TestGuestCapacityRemainsChargedWhileClosedCallIsRunning|TestGuestRetirementClearsReleasedModuleAlias|TestGuestRetirementWakesCapacityWaiters|TestGuestStartupDoesNotInheritRetainingAllocator|TestGuestStartupRejectsModuleClosedByInitialize)$'`: passed.
+- `go vet -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./internal/config`: passed.
+- `make generated-check && make config-check && python3 scripts/docs-check.py && git diff --check`: passed; 2,727 documentation checks passed, config fixtures loaded, generated artifacts were current.
+- `make format-check`: passed.
+
+The latest security/ownership review found no exploitable security vulnerability; it confirmed the
+normal-retirement watcher gap as an availability/resource-ownership blocker (confidence 9/10).
+An independent concurrency reviewer confirmed earlier pool-handoff and alias corrections on a
+pre-probe diff, but did not review the final diff. A fresh final concurrency review remains pending.
+
 The default PATH's `golangci-lint` was built with Go 1.26 and refused the Go 1.27.4 project;
 the separately installed CI-pinned version produced the targeted result above. A combined
 `CGO_ENABLED=0` run of the affected packages passed except for the macOS observability RSS test:
@@ -372,15 +394,14 @@ suite passed with the default CGO setting; the failed no-CGO run is not reported
 The Linux-only
 assessment harness tests cross-compiled but could not be run on this macOS host; no Linux
 container daemon was available. No load or A20 result is inferred from the focused lifecycle
-tests. Fresh independent ownership/security and concurrency reviews are in progress. These
-checks are interim, not final-head or hosted-CI evidence. The implementation is not merged and
-has no I2b PR. The watcher ownership invariant, A20 qualification and a finite supported default
+tests. The hosted CI run linked above is still pending. The implementation is not merged and has
+no I2b PR. The watcher ownership invariant, A20 qualification and a finite supported default
 remain explicitly blocked;
 do not close #700/#62 or claim final acceptance before I6b.
 
 ## Handoff rules
 
-I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b is blocked as described above; continue
-independent I2b implementation while preserving the scheduled checkpoint merge order. Do not mark
-I3b, I2b or I6a implemented merely because their designs or tracking issues exist; do not close
-#700/#62 or claim final acceptance before I6b.
+I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b are blocked as described above;
+resolve their independent integration/ownership prerequisites before proceeding in schedule order.
+Do not mark I3b, I2b or I6a implemented merely because their designs or tracking issues exist; do
+not close #700/#62 or claim final acceptance before I6b.
