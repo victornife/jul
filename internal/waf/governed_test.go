@@ -170,7 +170,7 @@ func TestGovernedWAFResponseHeaderLimitUsesAdmissionSnapshot(t *testing.T) {
 	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		next := limits
 		next.MaxResponseHeaderBytes = 1 << 20
-		if err := g.PublishLimits(next); err != nil {
+		if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, next); err != nil {
 			t.Error(err)
 		}
 		w.Header().Set("X-Large", strings.Repeat("x", 256))

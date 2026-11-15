@@ -6,6 +6,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -152,6 +153,7 @@ func TestSemanticNoopPreservesGenerationAndResources(t *testing.T) {
 		t.Fatal(err)
 	}
 	ignoredRaw.Global.AccessLog = "${env:JUL_NOOP_SECRET_B}"
+	ignoredRaw.Servers[0].AccessLog = "ignored-server.log"
 	src.set(ignoredRaw, nil)
 	reload <- ReloadRequest{ID: "ignored", Source: ReloadSourceFileWatch, Result: resultCh}
 	ignored := <-resultCh
@@ -164,6 +166,9 @@ func TestSemanticNoopPreservesGenerationAndResources(t *testing.T) {
 	}
 	if ignoredSnapshot.EffectiveConfig.Global.AccessLog != "accepted-noop-secret" {
 		t.Fatal("ignored-only metadata was not adopted")
+	}
+	if ignoredSnapshot.EffectiveConfig.Servers[0].AccessLog != "ignored-server.log" {
+		t.Fatal("ignored server metadata was not adopted")
 	}
 	if CanonicalVersion(ignoredSnapshot.EffectiveConfig) == CanonicalVersion(initialSnapshot.EffectiveConfig) {
 		t.Fatal("ignored-only canonical version did not advance")
@@ -344,6 +349,118 @@ match = { path = "/", type = "prefix" }
 	}
 	if srv.handlers.Load() != initialHandler || factoryCalls.Load() != 1 {
 		t.Fatalf("equivalent source reload replaced resources; handler_same=%t factory_calls=%d", srv.handlers.Load() == initialHandler, factoryCalls.Load())
+	}
+}
+
+func TestReloadDoesNotHideDuplicateUpstreamWeightChange(t *testing.T) {
+	addr := freePort(t)
+	raw := cfgWithReturn(addr, http.StatusOK)
+	raw.Upstreams = []config.UpstreamConfig{{
+		Name:     "backend",
+		Strategy: "weighted_round_robin",
+		Servers: []config.UpstreamServer{
+			{Address: "a.example:80", Weight: 1},
+			{Address: "a.example:80", Weight: 1},
+			{Address: "b.example:80", Weight: 1},
+		},
+	}}
+	initial := normalizedCandidate(t, raw)
+	var factoryCalls atomic.Int64
+	registry := upstream.NewRegistry(upstream.RegistryOptions{})
+	t.Cleanup(registry.CloseAll)
+	factory := func(ctx context.Context, cfg *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		registry.Begin()
+		pool, err := registry.For(ctx, cfg.Upstreams[0], "http")
+		if err != nil {
+			registry.Abort()
+			return nil, 0, nil, nil, err
+		}
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			attempt, err := pool.Pick()
+			if err != nil {
+				http.Error(w, "no backend", http.StatusServiceUnavailable)
+				return
+			}
+			defer pool.Release(attempt.Backend)
+			_, _ = io.WriteString(w, attempt.Address)
+		})
+		generation := uint64(factoryCalls.Add(1))
+		return map[string]http.Handler{addr: handler}, generation,
+			func() (upstream.SnapshotMap, func()) { registry.Commit(); return nil, nil }, registry.Abort, nil
+	}
+	source := &stubSource{cfg: initial.Raw, raw: []byte("persisted")}
+	srv := New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), quietLogger(), factory, source, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	reloads := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reloads, initial.Redaction) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run returned error: %v", err)
+		}
+	})
+	waitForInitialGeneration(t, srv)
+	client := &http.Client{Timeout: 5 * time.Second}
+	distribution := func() map[string]int {
+		t.Helper()
+		counts := make(map[string]int)
+		for range 9 {
+			resp, err := client.Get("http://" + addr + "/")
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if err != nil || resp.StatusCode != http.StatusOK {
+				t.Fatalf("backend selection = %d, %v", resp.StatusCode, err)
+			}
+			counts[string(body)]++
+		}
+		return counts
+	}
+	if got := distribution(); got["a.example:80"] != 6 || got["b.example:80"] != 3 {
+		t.Fatalf("initial distribution = %v, want 6/3", got)
+	}
+	reorderedRaw, err := raw.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reorderedRaw.Upstreams[0].Servers[1], reorderedRaw.Upstreams[0].Servers[2] =
+		reorderedRaw.Upstreams[0].Servers[2], reorderedRaw.Upstreams[0].Servers[1]
+	reordered := normalizedCandidate(t, reorderedRaw)
+	resultCh := make(chan ReloadResult, 1)
+	reloads <- ReloadRequest{
+		ID:                 "equivalent-upstream-reorder",
+		Source:             ReloadSourceAdmin,
+		Candidate:          reordered,
+		ExpectedGeneration: srv.LiveSnapshot().Generation,
+		Result:             resultCh,
+	}
+	if result := <-resultCh; result.Outcome != ReloadNoChange || result.Published {
+		t.Fatalf("reorder reload = %+v, want semantic no-op", result)
+	}
+	nextRaw, err := raw.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRaw.Upstreams[0].Servers[0].Weight = 7
+	next := normalizedCandidate(t, nextRaw)
+	reloads <- ReloadRequest{
+		ID:                 "duplicate-upstream-weight",
+		Source:             ReloadSourceAdmin,
+		Candidate:          next,
+		ExpectedGeneration: srv.LiveSnapshot().Generation,
+		Result:             resultCh,
+	}
+	if result := <-resultCh; result.Outcome != ReloadAppliedLive || !result.Published {
+		t.Fatalf("reload = %+v, want published upstream change", result)
+	}
+	if got := distribution(); got["a.example:80"] != 8 || got["b.example:80"] != 1 {
+		t.Fatalf("new distribution = %v, want 8/1", got)
+	}
+	if got := factoryCalls.Load(); got != 2 {
+		t.Fatalf("handler builds = %d, want initial and replacement", got)
 	}
 }
 

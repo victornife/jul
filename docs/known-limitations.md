@@ -30,12 +30,14 @@ aggregate inspection bound remains
 the I1 foundation publishes process-wide limits, and I2 makes the WASM plugin
 request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
-`body_timeout` bounds body-reading plugin uploads); the WAF path (I3) and
-plugin response-subscription buffers (I4) are not yet governed, so
-configured `enforce` mode does not yet protect WAF traffic.
-The R3 response-header ceiling now has an explicit 64 KiB accounting default,
-but actual response-path reservation/enforcement remains pending. The
-route-aware minimum budget is validated statically from compiled limits, which
+`body_timeout` bounds body-reading plugin uploads). I3a and I4 added WAF
+request/response accounting and plugin response-subscription charges. Spool
+protection remains blocked. The unmerged I2b prototype can refund guest
+capacity while a wazero watcher still retains guest memory, so even a
+configured ceiling is not a reliable bound; omission is unbounded. See the
+[I2b ownership blocker](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
+No integrated resource acceptance is claimed. The route-aware minimum budget
+is validated statically from compiled limits, which
 also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:
 a raised body beyond the compiled limit is refused, not buffered (see
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)).
@@ -683,13 +685,12 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   512 KiB response limit (then partial); other types, including JSON, need an
   explicit `SecResponseBodyMimeType`. The effective policy reports compiled
   settings, not per-transaction `ctl:` changes (#698).
-- **No aggregate WAF inspection enforcement yet.** The process-owned governor
-  gates the WASM plugin request path (I2, unreleased) but not WAF request or
-  response paths (I3/I4). WAF inspection still runs before upstream admission,
-  on cache hits and no-upstream routes, and can continue after client
-  disconnect; configured limits do not protect it. The route-aware minimum budget is
-  validated, but actual response-header reservations remain pending under
-  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)
+- **Inspection protection is not a whole-process bound.** The unreleased I3a
+  and I4 source governs WAF request/response accounting, but spool bytes and
+  files remain unprotected pending I3b. WAF work can continue after client
+  disconnect, with its reservations held until the work finishes. WAF state is
+  a calibrated estimate rather than measured heap, and integrated acceptance
+  remains pending under [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md)
   (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
 
 ---
@@ -710,11 +711,15 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
 - **Plugin concurrency is capped per plugin.** At most `max_instances` module
   instances (default 64) exist per plugin; a call that finds them all busy
   waits one `timeout`, then its request fails with `503` and `Retry-After: 1`
-  (#506). Guest memory is bounded by `max_instances × memory_limit` per plugin name.
+  (#506). Live instances are limited to `max_instances × memory_limit` per
+  plugin name and generation; closed instances can still have retained memory.
   On unreleased `main`, request-side host buffers (prepared bodies, `fetch`
   copies, request state, generated and replacement bodies) are charged to the
   process-wide inspection budget and refused with `503` when it is exhausted;
-  response-subscription buffers are not yet charged (#700 I4).
+  response-subscription buffers are also charged (#700 I4). The unmerged I2b
+  prototype tracks a separate guest-capacity ceiling but can refund it before
+  a wazero watcher releases memory. It is not a reliable aggregate bound, and
+  no finite production default has been approved.
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,

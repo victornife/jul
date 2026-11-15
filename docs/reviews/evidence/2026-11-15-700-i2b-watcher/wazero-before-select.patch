@@ -1,0 +1,26 @@
+--- a/internal/wasm/module_instance.go
++++ b/internal/wasm/module_instance.go
+@@ -7,0 +8,3 @@
++	"os"
++	"strconv"
++	"time"
+@@ -44,0 +47,19 @@
++	if dir := os.Getenv("JUL_GUEST_WATCHER_PROBE"); dir != "" && m.MemoryInstance != nil {
++		data := []byte("ready")
++		if os.Getenv("JUL_GUEST_WATCHER_CAPTURE_MEMORY") == "1" {
++			data = []byte(strconv.Itoa(len(m.MemoryInstance.Buffer)))
++		}
++		if err := os.WriteFile(dir+"/memory", data, 0o600); err != nil {
++			panic(err)
++		}
++		for {
++			_, err := os.Stat(dir + "/release")
++			if err == nil {
++				break
++			}
++			if !os.IsNotExist(err) {
++				panic(err)
++			}
++			time.Sleep(time.Millisecond)
++		}
++	}

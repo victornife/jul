@@ -168,6 +168,7 @@ func exerciseAllMetrics(m *Metrics) {
 		return InspectionMetricsSnapshot{MaxBytes: 256 << 20, EvaluationLimit: 2}
 	})
 	m.ObserveInspectionRejection("bytes", "enforce")
+	m.ObserveInspectionRejection("guest_capacity", "observe")
 	m.ObserveInspectionBodyTimeout("h1", "timeout")
 	m.ObserveInspectionUnslottedLogging()
 	m.ObserveInspectionAuditDrop("budget")

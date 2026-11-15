@@ -1061,9 +1061,9 @@ and guest capacity under the 2026-11-13 proposed amendment, by A19–A22):
    `evaluation_queue_timeout`. Plugin-instance waiters are bounded by leases and each waits at most
    one call timeout.
 4. With `body_timeout > 0`, every inspection body-arrival phase ends within `body_timeout`, per
-   stream, on H1, H2 and H3. Today this is applied on plugin routes only; WAF-only routes are
-   covered once I3a ships the Jul-owned request-body read loop, and I3a must prove the H3 path
-   (including deadline forwarding through Jul's HTTP/3 wrappers) before this item is claimed.
+   stream, on H1, H2 and H3. Plugin and WAF-only body readers apply the deadline since I2 and
+   I3a, respectively. The WAF H3 path, including forwarding through Jul's HTTP/3 wrappers, remains
+   for I6b verification before this item is claimed.
 5. A charge is released only when the request can no longer reach the represented memory and
    the work is finished. Reload never multiplies capacity.
 

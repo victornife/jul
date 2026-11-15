@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- **Unmerged I2b prototype, blocked:** an optional process-wide guest-capacity
+  ceiling tracks starting, idle, busy and retiring WASM instances across
+  generations, and limits-only reloads avoid warming replacement instances.
+  A wazero watcher can retain memory after a reservation is refunded, so the
+  prototype is not a reliable aggregate bound. Omission is unbounded, and no
+  finite production default or integrated acceptance is claimed.
 - Plugin `memory_limit` values below one 64 KiB WebAssembly page are now
   rejected instead of silently selecting the 16 MiB default. Limits whose
   page-rounded value exceeds 4 GiB are also rejected before wazero can panic.

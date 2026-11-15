@@ -68,7 +68,8 @@ max_response_header_bytes = "96k"
 		*roundTrip.Global.Inspection.BodyTimeout != 0 ||
 		roundTrip.Global.Inspection.MaxConcurrentEvaluations != 0 ||
 		roundTrip.Global.Inspection.MaxResponseHeaderBytes == nil ||
-		*roundTrip.Global.Inspection.MaxResponseHeaderBytes != Size(96<<10) {
+		*roundTrip.Global.Inspection.MaxResponseHeaderBytes != Size(96<<10) ||
+		roundTrip.Global.Inspection.MaxGuestCapacityBytes != nil {
 		t.Fatalf("inspection values changed after round-trip: %+v", roundTrip.Global.Inspection)
 	}
 }
@@ -123,6 +124,13 @@ func TestInspectionValidationRejectsInvalidValues(t *testing.T) {
 				c.Global.Inspection.MaxResponseHeaderBytes = sizePointer(-1)
 			},
 			want: "[global.inspection].max_response_header_bytes",
+		},
+		{
+			name: "non-positive guest capacity ceiling",
+			configure: func(c *Config) {
+				c.Global.Inspection.MaxGuestCapacityBytes = sizePointer(0)
+			},
+			want: "[global.inspection].max_guest_capacity_bytes",
 		},
 		{
 			name: "response-header minimum overflow",

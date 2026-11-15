@@ -262,6 +262,18 @@ func ValidatePluginMemoryLimit(limit Size) error {
 	}
 }
 
+// EffectivePluginMemoryPages returns the validated, page-rounded guest ceiling.
+func EffectivePluginMemoryPages(limit Size) (uint32, error) {
+	if err := ValidatePluginMemoryLimit(limit); err != nil {
+		return 0, err
+	}
+	pages := uint32(limit.Bytes() / PluginMemoryPageSize)
+	if pages == 0 {
+		pages = 256
+	}
+	return pages, nil
+}
+
 // validatePlugins checks each [plugins.NAME] declaration: a valid type, exactly
 // one module source (path or inline), a readable path when given, sane limits,
 // and that the fetch capability comes with an allowed-hosts allowlist. Whether

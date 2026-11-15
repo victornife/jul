@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -79,6 +80,10 @@ func inspectionRequirement(c *config.Config, routes []inspection.RouteFacts) (re
 	if err != nil {
 		return req, nil, err
 	}
+	guestWarning, err := inspection.CheckGuestCapacityMinimum(limits, c.Plugins)
+	if err != nil {
+		return req, nil, err
+	}
 	req, err = inspection.MinimumBudget(routes, limits.BaseChargeBytes, limits.MaxResponseHeaderBytes)
 	if err != nil {
 		return req, nil, fmt.Errorf("inspection: %w", err)
@@ -87,9 +92,9 @@ func inspectionRequirement(c *config.Config, routes []inspection.RouteFacts) (re
 		if limits.Mode == inspection.Enforce {
 			return req, nil, fmt.Errorf("inspection: %w", shortfall)
 		}
-		return req, fmt.Errorf("inspection (observe): %w", shortfall), nil
+		return req, errors.Join(guestWarning, fmt.Errorf("inspection (observe): %w", shortfall)), nil
 	}
-	return req, nil, nil
+	return req, guestWarning, nil
 }
 
 func (f *HandlerFactory) publishInspectionRequirement(genID uint64, req inspection.Requirement) {

@@ -11,14 +11,16 @@ qualification, soak or maturity change.
 | Item | State |
 | --- | --- |
 | Starting `main` | `d151989435e49493d02ea895dce25b7125f3e2e8` (verified #718 merge, after I4) |
+| Latest checked `main` | `de2a4433f99a6121ae33ccf30f7b61806c67299f` (#719 dependency updates) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below; the blocker update merged as #718 |
+| Checkpoint 5 | **Blocked**: I2b watcher teardown can retain guest memory after ticket refund; no runtime PR or reliable aggregate protection |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
-| Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Resolve and review the I3b integration and ownership prerequisites; continue I2b independently without claiming either protection |
+| Evidence | [2026-11-15 I2b watcher reproduction](evidence/2026-11-15-700-i2b-watcher/README.md); [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
+| Exact next action | Resolve the I3b integration prerequisites and the I2b wazero watcher-ownership blocker; do not claim either protection |
 
 ## Checkpoint schedule and dependencies
 
@@ -28,7 +30,7 @@ qualification, soak or maturity change.
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Active: preliminary memory-limit and startup-cancellation fixes; process-wide guest-capacity admission remains unimplemented; #711 | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
+| 5 — I2b | Blocked: a wazero watcher can retain guest memory after a capacity refund; preliminary fixes and an unmerged prototype exist, but no runtime PR or protection; #711 | A supported last-alias/interrupt solution, accepted guest design and finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
@@ -247,20 +249,133 @@ The recommended next step is a reviewed public engine integration with per-trans
 and typed storage outcomes, followed by the ADR's filesystem, lifecycle and protocol tests.
 No upstream change has been submitted, and no logical spool quota is claimed.
 
-## I2b preliminary work
+## I2b implementation progress
 
 The independent I2b branch includes `bea7ef8b`, which rejects sub-page plugin memory limits and
 effective limits above 4 GiB, and `8c4ec5f1`, which propagates request cancellation into on-demand
 guest startup and closes an instance that finishes starting after cancellation. A deterministic
-host barrier reproduced the cancellation failure before the fix. On macOS arm64 with Go 1.27.4,
-the config and plugin tests passed with `wasmplugins` and with `waf wasmplugins`; plugin vet,
-the generated-contract check, config-contract tests, docs-check (2,721 checks), focused lifecycle
-race tests and 25 repeated cancellation race tests also passed.
+host barrier reproduced the cancellation failure before the fix.
 
-These are prerequisites, not global guest-capacity admission. Process-scope tickets, full instance
-lifecycle and retained-close ownership, versioned and limits-only publication, finite defaults,
-integration tests and adversarial checkpoint reviews remain outstanding. No I2b PR or A20
-acceptance is claimed.
+The current implementation adds process-wide guest-capacity tickets for each starting/live
+instance, records generation ownership, preserves reservations after failed teardown, and reports
+bounded state and capacity statistics across live and retained plugin owners. Reuse does not
+double-charge. `max_guest_capacity_bytes` remains optional and omission tracks without enforcing;
+no finite production default is approved.
+
+Both limits-only reloads and full candidate reloads now use expected-version publication. The
+limits-only path avoids rebuilding handlers or guest instances, while a stale full candidate fails
+before the serving handler/config commit. Candidate guest startup continues to use only published
+capacity. Ownership, cancellation, overlap, retained-close, saturation, and stale-publication tests
+cover these paths. Enforce validation also requires the proposed cap to fit one eager instance of
+each configured plugin; observe warns instead. This check is compile/metadata-only and runs
+before limits-only publication or candidate warm-up. Starting candidate instances are included in
+the manager's capacity statistics. The operator and generated configuration descriptions also
+distinguish the already-merged WAF/response accounting from still-blocked spool protection.
+The operability pass also corrected stale configuration, metric and ownership descriptions that
+still said WAF-only body reads did not use `body_timeout`; the WAF H3 acceptance remains deferred.
+
+An earlier independent ownership/security pass found no vulnerabilities in its then-current diff.
+The concurrency review found a ticket leak on failed instantiation, a race-prone pool drain, and
+related shutdown accounting/metrics issues. A later security pass found the high-severity reload
+classification issue below. Further lifecycle review reproduced premature refund while a host call
+remained active and loss of the first runtime-close error on a retry. The local fixes retain active
+owners and close errors and add deterministic regressions. An intermediate timeout-retention
+approach failed existing timeout and slot-drain tests and was replaced by isolating startup from
+inherited experimental wazero facilities; the pinned-runtime teardown assumption and compatibility
+consequences still require fresh independent confirmation.
+
+The latest concurrency reviewer checked the pool-handoff correction and cleared-module alias fix
+against the pre-watcher-probe worktree, and found no blocker in those paths. Its review did not
+include the deterministic wazero watcher barrier added afterwards. The barrier supersedes that
+review's non-blocking classification of retained closed memory: the measured live heap alias can
+outlast the refund and violates A20. A second follow-up reviewer failed before completing its
+requested work. A fresh security/ownership review of the final diff is pending; neither earlier
+result is approval of the current blocked head.
+
+| Finding and counterexample | Local correction and regression |
+| --- | --- |
+| **High, confidence 9/10:** keyed lifecycle extraction can miss overlapping-regex order or duplicate route changes. Without a limit change, a security-restricting reload was classified as a no-op; with one, the new config published while the old router still returned `200` rather than `403`. | Require exact equality outside the permitted limits for limits-only publication, and compare server blocks in order for ordinary no-ops. `TestLimitsOnlyReloadDoesNotHideRouteOrderChange` exercises both route changes, with and without a limit change, on a real HTTP server. |
+| **Medium:** keyed upstream extraction can hide a weight change in the first of several identical backend addresses. A weighted-round-robin reload was incorrectly reported as a no-op, leaving traffic distributed 6:3 instead of the configured 8:1. | Compare backend configurations as multisets when assessing serving no-ops. `TestReloadDoesNotHideDuplicateUpstreamWeightChange` uses a real HTTP server and reusable upstream registry, checks the applied distribution and preserves a no-op for equivalent reordering. An isolated overlay removing this comparison reproduces the failure. |
+| A closed runtime could refund guest capacity while a host call still retained guest memory. | Keep the active owner charged until the call returns. `TestGuestCapacityRemainsChargedWhileClosedCallIsRunning` uses a blocked real host call. |
+| A pool recipient could hold a module after removing it from the channel but before marking its ticket busy; retirement treated the ticket as idle and refunded its capacity. | Register acquisitions before receiving a pooled module, retain their capacity during retirement and discard a received instance before releasing ownership. `TestGuestCapacityRemainsChargedDuringPoolHandoff` reproduces the interleaving using the existing wait hook and confirms another candidate is refused; `TestGuestRetirementWakesCapacityWaiters` checks prompt wakeup without changing the existing busy response. |
+| A caller could still hold a released pool wrapper after retirement refunded its ticket, and that wrapper retained the closed module's linear memory. | Clear each drained wrapper's module reference before refunding its ticket. `TestGuestRetirementClearsReleasedModuleAlias` failed with 2,424,832 bytes still reachable before the correction. |
+| A partially built candidate suppressed a previously built plugin's runtime-close error when a later plugin failed, even though its capacity remained charged; generation teardown callers also ignore closer errors. | Return the original build error together with the teardown error, and log non-transient runtime-close failures. `TestFailedGuestCandidateReportsPriorRuntimeCloseFailure` cancels a real two-plugin build, injects a close failure and verifies both errors and retained capacity debt; `TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure` checks the log. |
+| Application shutdown discarded `Manager.Close` errors, including the case where a retained owner still has work in flight. | Log the manager close error in `app.Serve`; shutdown does not block indefinitely waiting for guest work. The retained reservation remains visible while the process is running. |
+| A second runtime close could hide the first error if no ticket retained it. | Preserve the first close result, including when there are no guest tickets. `TestManagerKeepsRuntimeCloseErrorWithoutGuestTickets` covers the retry. |
+| A failed start could inherit an experimental allocator that retains guest memory; `_initialize` could also return an already-closed module as usable. | Isolate startup context values while retaining cancellation and deadlines; reject a closed module. `TestGuestStartupDoesNotInheritRetainingAllocator` and `TestGuestStartupRejectsModuleClosedByInitialize` cover these paths. |
+| Wazero can return no module after a failed start even though teardown is not proven. The previous nil-module path refunded the guest ticket, while a non-nil failed module was closed explicitly. | Treat a nil module on an instantiate error as `errGuestTeardownUnconfirmed`; retain the ticket and instance slot as visible debt. `TestGuestCapacityRetainsFailedInstantiationWithoutModule` exercises a real trapping start. |
+| Configured guest potential was absent from status while a candidate was still compiling, because registration happened only after compile and ABI negotiation. | Track candidate potential before compilation and transfer it atomically to the compiled-plugin set. `TestGuestCapacityStatsIncludesCompilingCandidate` checks potential, live count, and drainage on close. |
+
+Temporary Go overlays of earlier local implementations reproduced the route, active-host-call,
+no-ticket close-retry, retaining-allocator and closed-initialization failures; the same tests pass
+without the overlays. The close-retry test with an existing ticket alone also passed the mutation
+because that ticket already retained the error; the additional no-ticket test exposes the actual
+failure. Removing guest-capacity overload classification independently made the H1, H2 and H3
+enforce tests return `500` instead of `503`; all three pass with it restored. These observations
+are local regression evidence, not an independent approval.
+Before the pool-handoff correction, the new permanent regression failed with 16 MiB refunded during
+the handoff. A separate scheduling-only overlay showed 2,424,832 bytes of guest memory still
+reachable in that state; this is a local observation, not a process-wide memory measurement.
+
+**Blocking ownership finding — high, confidence 9/10.** Pinned wazero v1.12.0's
+`CloseModuleOnCanceledOrTimeout` closes its watcher cancellation channel without waiting for the
+goroutine. `Module.Close` does not clear the module's linear-memory buffer. If the watcher is
+delayed, it can still reach the module while Jul has already refunded its ticket, allowing new
+instances to consume capacity whose previous memory is still retained. This violates A20's
+last-alias condition; it does not depend on guest memory being equivalent to process RSS.
+
+The [dated probe and raw output](evidence/2026-11-15-700-i2b-watcher/README.md) force that
+interleaving by pausing the watcher **before** its original `select`, where the original
+cancellation branch still uses the module. The pre-fix prototype refunded a trapping start's
+64 KiB ticket while the watcher held a module with 64 KiB of linear memory. That nil-module
+failure path is now corrected: production records whether close-on-context-done is enabled and
+retains the ticket/slot if a start returns no module without confirmed teardown.
+`TestGuestCapacityRetainsFailedInstantiationWithoutModule` passes. The pre-fix probe also showed
+a real guest retirement refunding its 16 MiB ceiling while a weak pointer found 2,424,832 bytes
+still reachable after forced GC; normal retirement remains unfixed. Both historical failures
+reproduced with and without `-race`; the race run reported no data race.
+The branch has no established public API to join these watchers, and the same cancellation logic
+was present in the latest upstream source checked on 2026-11-15. Timed sleeps, unsafe access,
+finalizers and disabling guest cancellation are not acceptable substitutes. A reviewed upstream
+fix or another supported solution must establish the last-alias and interruption invariants,
+with failed-start, normal-close, overlap, cancellation and drainage tests. Until then I2b is
+blocked and its configured ceiling and gauges are not a reliable aggregate bound.
+
+On macOS arm64 with Go 1.27.4, the local worktree before integrating #719 passed these checks:
+
+- `go test -count=1 -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./cmd/jul`.
+- `go test -count=1 ./internal/inspection ./internal/config ./internal/configcontract ./internal/lifecycle ./internal/observability` and `CGO_ENABLED=0 go test -count=1 -tags waf ./internal/waf`.
+- `CGO_ENABLED=0 go test -count=1 -tags 'wasmplugins waf grpc http3' ./internal/app ./internal/plugins ./internal/waf ./internal/inspection`: passed, including real H1/H2/H3 guest-capacity refusal and observe-mode behavior, gRPC `UNAVAILABLE`, connection reuse and post-refusal recovery.
+- `go test -race -count=10 -tags wasmplugins ./internal/plugins -run 'TestGuestCapacity|TestGuestStartup|TestManagerKeepsRuntime'`.
+- `go test -count=1 -tags 'wasmplugins waf grpc http3' ./internal/inspection ./internal/plugins ./internal/waf ./internal/server ./internal/app ./internal/config ./internal/configcontract ./internal/lifecycle ./internal/observability`: passed with CGO enabled after the ownership corrections.
+- `go test -race -count=10 -tags wasmplugins ./internal/plugins -run '^(TestFailedGuestCandidateReportsPriorRuntimeCloseFailure|TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure|TestGuestCapacityRemainsChargedDuringPoolHandoff|TestGuestRetirementClearsReleasedModuleAlias|TestGuestRetirementWakesCapacityWaiters|TestGuestCapacityRemainsChargedWhileClosedCallIsRunning|TestGuestCapacityRemainsChargedDuringRetiredStartup|TestInstanceWaitHoldsLeaseAndBody)$'`: passed after the ownership and teardown-logging corrections.
+- `go test -race -tags wasmplugins ./internal/plugins -run '^TestGuestCapacityRemainsChargedDuringPoolHandoff$' -count=10`: passed after adding the overlapping-candidate refusal assertion.
+- `go test -tags wasmplugins ./internal/app -run 'Test.*(Plugin|Inspection)'`: passed after surfacing manager shutdown errors.
+- `go test -count=1 -tags wasmplugins ./internal/plugins -run '^(TestGuestCapacityRetainsFailedInstantiationWithoutModule|TestGuestCapacityStatsIncludesCompilingCandidate|TestCompileUsesTheHashedSnapshot|TestFailedGuestCandidateReportsPriorRuntimeCloseFailure)$'`: passed after retaining uncertain failed starts and reporting candidate potential before compilation.
+- `go test -race -count=5 -tags wasmplugins ./internal/inspection ./internal/server -run 'TestGuestCapacity|TestPublishLimits|TestFullReloadRejectsStaleInspectionVersion|TestLimitsOnly|TestGuestCapacityMinimum'`.
+- `go test -race -count=10 -tags 'wasmplugins http3' ./internal/plugins -run 'TestInspectionOutcomesOverH(1H2|3)/(h1|h2|h3)/guest_capacity'`.
+- `go test -count=1 ./internal/server -run 'TestReloadDoesNotHideDuplicateUpstreamWeightChange|TestLimitsOnlyReloadDoesNotHideRouteOrderChange|TestSemanticNoopPreservesGenerationAndResources|TestCanonicalEquivalentSourceReloadsAreNoChange'` and `go test -race -count=10 ./internal/server -run 'TestReloadDoesNotHideDuplicateUpstreamWeightChange|TestLimitsOnlyReloadDoesNotHideRouteOrderChange'`.
+- `CGO_ENABLED=0 go test -count=1 -tags waf ./internal/waf -run 'TestGovernedWAFSlowBodyTimesOut|TestGovernedWAF.*BodyTimeout|TestGovernedWAF.*Deadline'` and `go test -count=1 ./internal/configcontract ./internal/config`: passed after correcting the timeout descriptions and regenerating their contracts. The first contract-test run expected two schema-description sentences, but the generator intentionally emits only the first; correcting that test expectation made the rerun pass.
+- `go vet -tags wasmplugins ./internal/plugins ./internal/inspection ./internal/server ./internal/app ./internal/config`.
+- `CGO_ENABLED=0 "$HOME/go/bin/golangci-lint" run ./internal/inspection/... ./internal/plugins/... ./internal/server/... ./internal/config/... ./internal/app/... ./internal/observability/...` using the CI-pinned v2.14.0 binary: zero issues.
+- `CGO_ENABLED=0 "$HOME/go/bin/golangci-lint" run ./internal/lifecycle/... ./internal/configcontract/... ./internal/waf/...`: zero issues with the same binary.
+- `CGO_ENABLED=0 go build ./...` and `CGO_ENABLED=0 go build -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./...`.
+- `make format-check`, `CGO_ENABLED=0 make config-check`, `make generated-check`,
+  `python3 scripts/docs-check.py` (2,722 passed, 0 failed), and `git diff --check`.
+
+The default PATH's `golangci-lint` was built with Go 1.26 and refused the Go 1.27.4 project;
+the separately installed CI-pinned version produced the targeted result above. A combined
+`CGO_ENABLED=0` run of the affected packages passed except for the macOS observability RSS test:
+the pinned Prometheus Darwin `!cgo` collector does not implement RSS. The full observability
+suite passed with the default CGO setting; the failed no-CGO run is not reported as green.
+The Linux-only
+assessment harness tests cross-compiled but could not be run on this macOS host; no Linux
+container daemon was available. No load or A20 result is inferred from the focused lifecycle
+tests. Fresh independent ownership/security and concurrency reviews are in progress. These
+checks are interim, not final-head or hosted-CI evidence. The implementation is not merged and
+has no I2b PR. The watcher ownership invariant, A20 qualification and a finite supported default
+remain explicitly blocked;
+do not close #700/#62 or claim final acceptance before I6b.
 
 ## Handoff rules
 

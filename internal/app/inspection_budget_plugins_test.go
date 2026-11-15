@@ -75,3 +75,27 @@ func TestPluginBodyAboveBudget(t *testing.T) {
 		t.Fatalf("observe requirement = %d %v", minimum, ok)
 	}
 }
+
+func TestGuestCapacityChecksEagerMinimumWithoutInstantiation(t *testing.T) {
+	cfg := provisionedInspection(pluginBudgetConfig(t, "enforce"))
+	second := cfg.Plugins["p"]
+	second.MemoryLimit = config.Size(32 << 20)
+	cfg.Plugins["second"] = second
+	capacity := config.Size(47 << 20)
+	cfg.Global.Inspection.MaxGuestCapacityBytes = &capacity
+
+	if warning, err := CheckInspectionBudget(context.Background(), cfg); err == nil || warning != nil ||
+		!strings.Contains(err.Error(), "guest") {
+		t.Fatalf("enforce check: warning=%v err=%v, want guest-capacity error", warning, err)
+	}
+	cfg.Global.Inspection.Mode = "observe"
+	if warning, err := CheckInspectionBudget(context.Background(), cfg); err != nil || warning == nil ||
+		!strings.Contains(warning.Error(), "guest") {
+		t.Fatalf("observe check: warning=%v err=%v, want guest-capacity warning", warning, err)
+	}
+	cfg.Global.Inspection.Mode = "enforce"
+	capacity = 48 << 20
+	if warning, err := CheckInspectionBudget(context.Background(), cfg); err != nil || warning != nil {
+		t.Fatalf("exact-capacity check: warning=%v err=%v", warning, err)
+	}
+}

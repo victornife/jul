@@ -128,6 +128,9 @@ func validateInspectionValues(c InspectionConfig) []error {
 	if c.MaxBufferedBytes != nil && *c.MaxBufferedBytes <= 0 {
 		errs = append(errs, fmt.Errorf("[global.inspection].max_buffered_bytes: must be a positive size"))
 	}
+	if c.MaxGuestCapacityBytes != nil && *c.MaxGuestCapacityBytes <= 0 {
+		errs = append(errs, fmt.Errorf("[global.inspection].max_guest_capacity_bytes: must be a positive size"))
+	}
 	if c.MaxResponseHeaderBytes != nil && *c.MaxResponseHeaderBytes <= 0 {
 		errs = append(errs, fmt.Errorf("[global.inspection].max_response_header_bytes: must be a positive size"))
 	}

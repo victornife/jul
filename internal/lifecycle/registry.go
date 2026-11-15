@@ -299,6 +299,7 @@ func globalEntries() []Entry {
 		hot("global.worker_threads", SubWorkerThreads, "OnReloaded applies the cap with runtime.GOMAXPROCS, restoring the container-aware default for \"auto\""),
 		hot("global.inspection.mode", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
 		hot("global.inspection.max_buffered_bytes", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
+		hot("global.inspection.max_guest_capacity_bytes", SubInspection, "The process-owned governor publishes the guest capacity ceiling during the no-fail reload transaction; live instance reservations persist across reloads and candidates warm against the currently published ceiling."),
 		hot("global.inspection.max_response_header_bytes", SubInspection, "The response-header accounting ceiling publishes atomically with the other process-owned inspection limits."),
 		hot("global.inspection.max_concurrent_evaluations", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),
 		hot("global.inspection.evaluation_queue_timeout", SubInspection, "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."),

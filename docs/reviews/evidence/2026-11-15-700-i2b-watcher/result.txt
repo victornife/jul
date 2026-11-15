@@ -1,0 +1,8 @@
+--- FAIL: TestOverlayRetainsUnreturnedStartModule (0.01s)
+    zz_evidence_watcher_test.go:74: start failure refunded capacity=0 while a runtime watcher still held 65536 bytes
+--- FAIL: TestOverlayRetainsClosedGuestFromWatcher (0.33s)
+    zz_evidence_watcher_test.go:121: guest close refunded capacity=0 while 2424832 bytes of guest memory remained reachable after GC
+FAIL
+FAIL	jul/internal/plugins	1.106s
+FAIL
+Both expected premature-refund failures were reproduced.

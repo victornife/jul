@@ -719,10 +719,12 @@ func TestInstanceWaitHoldsLeaseAndBody(t *testing.T) {
 			case "cancel":
 				cancel()
 			case "retire":
-				s.Close()
+				if err := s.Close(); !errors.Is(err, errGuestWorkInFlight) {
+					t.Fatalf("retire with a busy guest = %v, want in-flight error", err)
+				}
 			}
 			<-done
-			if end != "acquired" && end != "retire" {
+			if end != "acquired" {
 				p.release(busy)
 			}
 			_, _, _, panics, waits := hooks.snapshot()
@@ -737,9 +739,7 @@ func TestInstanceWaitHoldsLeaseAndBody(t *testing.T) {
 				}
 			}
 			assertDrained(t, g)
-			if end != "retire" {
-				assertNoSlotLeak(t, p)
-			}
+			assertNoSlotLeak(t, p)
 		})
 	}
 }
@@ -770,7 +770,7 @@ func TestPublishedLimitsGovernNewDecisionsOnly(t *testing.T) {
 	}()
 	<-entered
 	held := g.Snapshot()
-	if err := g.PublishLimits(limitsWith(100)); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, limitsWith(100)); err != nil {
 		t.Fatal(err)
 	}
 	if got := g.Snapshot(); got.Usage != held.Usage || got.ActiveLeases != 1 {
@@ -780,7 +780,7 @@ func TestPublishedLimitsGovernNewDecisionsOnly(t *testing.T) {
 		t.Fatalf("new request under the smaller budget: %d", got.Code)
 	}
 	obs := limitsWith(100, func(l *inspection.Limits) { l.Mode = inspection.Observe })
-	if err := g.PublishLimits(obs); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, obs); err != nil {
 		t.Fatal(err)
 	}
 	if got := serve(h, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("c"))); got.Code != http.StatusOK {
@@ -791,7 +791,7 @@ func TestPublishedLimitsGovernNewDecisionsOnly(t *testing.T) {
 	if first.Code != http.StatusOK || first.Body.Len() != 2000 {
 		t.Fatalf("admitted request: %d %d", first.Code, first.Body.Len())
 	}
-	if err := g.PublishLimits(limitsWith(1 << 20)); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, limitsWith(1<<20)); err != nil {
 		t.Fatal(err)
 	}
 	if got := serve(h, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("d"))); got.Code != http.StatusOK {

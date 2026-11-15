@@ -260,12 +260,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 469,
-    "schema_leaves": 398,
-    "registry_entries": 398,
+    "schema_paths": 470,
+    "schema_leaves": 399,
+    "registry_entries": 399,
     "startup_consumed": 29,
     "by_class": {
-      "hot_reload": 355,
+      "hot_reload": 356,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 29,
@@ -1371,6 +1371,19 @@
       "class": "hot_reload",
       "subsystem": "inspection",
       "reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.max_guest_capacity_bytes",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "The process-owned governor publishes the guest capacity ceiling during the no-fail reload transaction; live instance reservations persist across reloads and candidates warm against the currently published ceiling.",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

@@ -19,6 +19,7 @@ import (
 	"github.com/tetratelabs/wazero"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 )
 
 type waitLog struct {
@@ -96,7 +97,16 @@ func TestInstanceStartRespectsRequestCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := &plugin{runtime: r, compiled: compiled, slots: make(chan struct{}, 1)}
+	gov := testGovernor(t)
+	p := &plugin{
+		runtime:          r,
+		compiled:         compiled,
+		slots:            make(chan struct{}, 1),
+		gov:              gov,
+		generation:       1,
+		memoryLimitBytes: 64 << 20,
+		guestTickets:     make(map[*inspection.GuestTicket]*guestOwnership),
+	}
 	requestCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	done := make(chan error, 1)
@@ -118,8 +128,33 @@ func TestInstanceStartRespectsRequestCancellation(t *testing.T) {
 		if len(p.slots) != 0 {
 			t.Fatal("canceled instance start retained a local slot")
 		}
+		if got := gov.Snapshot().GuestCapacity; got.ReservedBytes != 0 ||
+			got.Instances != ([inspection.GuestClosed]uint64{}) {
+			t.Fatalf("failed instantiate leaked guest capacity: %+v", got)
+		}
+		if len(p.guestTickets) != 0 {
+			t.Fatalf("failed instantiate retained %d guest tickets", len(p.guestTickets))
+		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("instance start did not stop after request cancellation")
+	}
+}
+
+func TestPluginPanicMetricExcludesAdmissionFailures(t *testing.T) {
+	for name, err := range map[string]error{
+		"guest capacity":     &inspection.AdmissionError{Outcome: inspection.GuestCapacitySaturated},
+		"invalid accounting": &inspection.AdmissionError{Outcome: inspection.InvalidAccounting},
+		"instance limit":     errInstanceLimit,
+		"plugin closed":      errPluginClosed,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if shouldCountPluginPanic(err) {
+				t.Fatalf("shouldCountPluginPanic(%v) = true", err)
+			}
+		})
+	}
+	if !shouldCountPluginPanic(context.DeadlineExceeded) {
+		t.Fatal("guest execution failure was not counted as a plugin panic")
 	}
 }
 
@@ -183,7 +218,7 @@ func TestInstanceCapWaitsThenRejects(t *testing.T) {
 		got <- pm
 	}()
 	time.Sleep(20 * time.Millisecond)
-	p.discard(pm2.mod)
+	p.discard(pm2)
 	pm4 := <-got
 	if pm4 == nil || pm4 == pm2 {
 		t.Fatal("the waiter did not get a fresh instance after a retirement")

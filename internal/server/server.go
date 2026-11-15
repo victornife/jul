@@ -1564,6 +1564,38 @@ func (s *Server) doReload(req ReloadRequest) {
 		return
 	}
 
+	if plan.inspectionLimitsOnly {
+		if err := plan.PublishInspectionLimitsOnly(); err != nil {
+			plan.Abort()
+			result.CompletedAt = time.Now()
+			result.DurationMS = time.Since(plan.start).Milliseconds()
+			result.Outcome = ReloadNotApplied
+			result.FailedPhase = "publish"
+			if errors.Is(reloadCtx.Err(), context.DeadlineExceeded) {
+				result.TimedOut = true
+				result.TimedOutPhase = "publish"
+			}
+			result.Error = "publish: " + err.Error() + "; reload aborted"
+			s.log.Error("inspection limits publication aborted", "error", err, "reload_id", req.ID)
+			return
+		}
+		result.CompletedAt = time.Now()
+		result.DurationMS = time.Since(plan.start).Milliseconds()
+		result.Outcome = ReloadAppliedLive
+		result.Published = true
+		result.ServingVersion = s.LiveSnapshot().EffectiveVersion
+		result.HTTP = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
+		result.Stream = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
+		result.Admin = ReloadSubsystemResult{Status: ReloadSubsystemSkipped}
+		result.PhaseDurations = make(map[string]int64, len(plan.phaseDurations))
+		for k, v := range plan.phaseDurations {
+			result.PhaseDurations[k] = v.Milliseconds()
+		}
+		s.log.Info("inspection limits published without rebuilding handlers",
+			"duration_ms", result.DurationMS, "generation", plan.inspectionGeneration, "reload_id", req.ID)
+		return
+	}
+
 	if plan.ServingChange.NoChange {
 		plan.AdoptMetadata()
 		plan.Abort()

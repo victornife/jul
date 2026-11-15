@@ -4,6 +4,7 @@
 package server
 
 import (
+	"reflect"
 	"strings"
 
 	"jul/internal/config"
@@ -50,11 +51,18 @@ func (p *ReloadPlan) AssessServingChange() error {
 			return err
 		}
 
+		limitsOnly := inspectionLimitsOnlyChanges(classified.Changes) &&
+			inspectionLimitsOnlyConfig(live.EffectiveConfig, p.Candidate.Effective)
 		for _, change := range classified.Changes {
-			if !change.Ignored {
+			if !change.Ignored && !limitsOnly {
 				p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
 				return nil
 			}
+		}
+		if !limitsOnly && (!servingServersEqual(live.EffectiveConfig, p.Candidate.Effective) ||
+			!servingBackendsEqual(live.EffectiveConfig, p.Candidate.Effective)) {
+			p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
+			return nil
 		}
 
 		// A serving no-op exists only relative to an installed generation. This
@@ -90,6 +98,19 @@ func (p *ReloadPlan) AssessServingChange() error {
 			return nil
 		}
 
+		if limitsOnly {
+			if p.s.Inspection == nil {
+				p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
+				return nil
+			}
+			snapshot := p.s.Inspection.Snapshot()
+			p.inspectionLimitsOnly = true
+			p.inspectionLimitsVersion = snapshot.LimitsVersion
+			p.inspectionGeneration = live.Generation
+			p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
+			return nil
+		}
+
 		evidence := ServingEffectiveEqual
 		if len(classified.Changes) > 0 {
 			evidence = ServingIgnoredOnly
@@ -97,6 +118,95 @@ func (p *ReloadPlan) AssessServingChange() error {
 		p.ServingChange = ServingChangeAssessment{NoChange: true, Evidence: evidence}
 		return nil
 	})
+}
+
+func inspectionLimitsOnlyChanges(changes []lifecycle.Change) bool {
+	if len(changes) == 0 {
+		return false
+	}
+	for _, change := range changes {
+		if change.Ignored || !isInspectionLimitPath(change.Path) {
+			return false
+		}
+	}
+	return true
+}
+
+func inspectionLimitsOnlyConfig(current, candidate *config.Config) bool {
+	if current == nil || candidate == nil {
+		return false
+	}
+	// Keyed lifecycle extraction can hide meaningful route order or duplicates.
+	normalized := *candidate
+	normalized.Global.Inspection.Mode = current.Global.Inspection.Mode
+	normalized.Global.Inspection.MaxBufferedBytes = current.Global.Inspection.MaxBufferedBytes
+	normalized.Global.Inspection.MaxGuestCapacityBytes = current.Global.Inspection.MaxGuestCapacityBytes
+	normalized.Global.Inspection.MaxResponseHeaderBytes = current.Global.Inspection.MaxResponseHeaderBytes
+	normalized.Global.Inspection.MaxConcurrentEvaluations = current.Global.Inspection.MaxConcurrentEvaluations
+	normalized.Global.Inspection.EvaluationQueueTimeout = current.Global.Inspection.EvaluationQueueTimeout
+	normalized.Global.Inspection.BodyTimeout = current.Global.Inspection.BodyTimeout
+	return reflect.DeepEqual(current, &normalized)
+}
+
+func servingServersEqual(current, candidate *config.Config) bool {
+	if current == nil || candidate == nil || len(current.Servers) != len(candidate.Servers) {
+		return false
+	}
+	for i := range current.Servers {
+		normalized := candidate.Servers[i]
+		normalized.AccessLog = current.Servers[i].AccessLog
+		normalized.ErrorLog = current.Servers[i].ErrorLog
+		if !reflect.DeepEqual(current.Servers[i], normalized) {
+			return false
+		}
+	}
+	return true
+}
+
+func servingBackendsEqual(current, candidate *config.Config) bool {
+	if current == nil || candidate == nil || len(current.Upstreams) != len(candidate.Upstreams) {
+		return false
+	}
+	byName := make(map[string][]config.UpstreamServer, len(current.Upstreams))
+	for _, pool := range current.Upstreams {
+		if _, exists := byName[pool.Name]; exists {
+			return false
+		}
+		byName[pool.Name] = pool.Servers
+	}
+	for _, pool := range candidate.Upstreams {
+		before, exists := byName[pool.Name]
+		if !exists || len(before) != len(pool.Servers) {
+			return false
+		}
+		delete(byName, pool.Name)
+		counts := make(map[config.UpstreamServer]int, len(before))
+		for _, server := range before {
+			counts[server]++
+		}
+		for _, server := range pool.Servers {
+			if counts[server] == 0 {
+				return false
+			}
+			counts[server]--
+		}
+	}
+	return len(byName) == 0
+}
+
+func isInspectionLimitPath(path string) bool {
+	switch path {
+	case "global.inspection.mode",
+		"global.inspection.max_buffered_bytes",
+		"global.inspection.max_guest_capacity_bytes",
+		"global.inspection.max_response_header_bytes",
+		"global.inspection.max_concurrent_evaluations",
+		"global.inspection.evaluation_queue_timeout",
+		"global.inspection.body_timeout":
+		return true
+	default:
+		return false
+	}
 }
 
 // staticCertificatesUnchanged compares candidate file content with the

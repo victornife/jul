@@ -80,6 +80,13 @@ type ReloadPlan struct {
 
 	// ServingChange is the result of the proof performed before Prepare.
 	ServingChange ServingChangeAssessment
+	// inspectionLimitsOnly is true when the candidate changes only a reviewed
+	// set of process-wide inspection limits and can publish without rebuilding
+	// generation-owned resources.
+	inspectionLimitsOnly    bool
+	inspectionLimitsVersion uint64
+	inspectionGeneration    uint64
+	inspectionLimits        *inspectionLimitsComponent
 
 	// Handlers is the per-listen-address handler tree built by the factory.
 	Handlers map[string]http.Handler
@@ -124,6 +131,46 @@ func (p *ReloadPlan) AdoptMetadata() {
 		p.s.mergeRedactionGen(current.genID, p.Candidate.Redaction, p.Candidate.Effective)
 	}
 	p.publishRuntimeState()
+}
+
+// PublishInspectionLimitsOnly atomically publishes a reviewed limits-only
+// candidate without rebuilding handlers or guest instances. The expected
+// governor version and serving generation prevent stale candidates from
+// overwriting newer live policy.
+func (p *ReloadPlan) PublishInspectionLimitsOnly() error {
+	if !p.inspectionLimitsOnly || p.s.Inspection == nil {
+		return fmt.Errorf("publish inspection limits: plan is not a limits-only publication")
+	}
+	if err := p.ctx.Err(); err != nil {
+		return fmt.Errorf("publish inspection limits: %w", err)
+	}
+	start := time.Now()
+	defer func() { p.phaseDurations["publish"] = time.Since(start) }()
+	live := p.s.LiveSnapshot()
+	if live.Generation != p.inspectionGeneration {
+		return fmt.Errorf("publish inspection limits: serving generation changed from %d to %d", p.inspectionGeneration, live.Generation)
+	}
+	limits, err := inspection.LimitsFromConfig(p.Candidate.Effective, lifecycle.InitialGOMAXPROCS())
+	if err != nil {
+		return fmt.Errorf("prepare inspection limits: %w", err)
+	}
+	if limits, err = p.s.withRouteMinimum(limits, live.Generation); err != nil {
+		return fmt.Errorf("prepare inspection limits: %w", err)
+	}
+	guestWarning, err := inspection.CheckGuestCapacityMinimum(limits, p.Candidate.Effective.Plugins)
+	if err != nil {
+		return fmt.Errorf("prepare inspection limits: %w", err)
+	}
+	if err := p.s.Inspection.PublishLimitsIfVersion(p.inspectionLimitsVersion, limits); err != nil {
+		return fmt.Errorf("publish inspection limits: %w", err)
+	}
+	if guestWarning != nil && p.s.log != nil {
+		p.s.log.Warn("inspection configuration below a minimum", "error", guestWarning)
+	}
+	p.AdoptMetadata()
+	p.PreparedAdmin.Abort()
+	p.published = true
+	return nil
 }
 
 // newReloadPlan creates a plan for reloading raw (unexpanded) config into s.
@@ -226,6 +273,19 @@ func (p *ReloadPlan) Lifecycle() error {
 // It does not commit anything; Publish/Abort must follow.
 func (p *ReloadPlan) Prepare() error {
 	return p.runPhase("prepare", func() error {
+		var inspectionLimitsVersion uint64
+		var candidateLimits inspection.Limits
+		if p.s.Inspection != nil {
+			inspectionLimitsVersion = p.s.Inspection.Snapshot().LimitsVersion
+			var err error
+			candidateLimits, err = inspection.LimitsFromConfig(p.Candidate.Effective, lifecycle.InitialGOMAXPROCS())
+			if err != nil {
+				return fmt.Errorf("prepare inspection limits: %w", err)
+			}
+			if _, err := inspection.CheckGuestCapacityMinimum(candidateLimits, p.Candidate.Effective.Plugins); err != nil {
+				return fmt.Errorf("prepare inspection limits: %w", err)
+			}
+		}
 		if p.PreparedAdmin == nil && p.s.PrepareAdmin != nil {
 			prepared, err := p.s.PrepareAdmin(p.Candidate.Effective.Admin)
 			if err != nil {
@@ -243,14 +303,15 @@ func (p *ReloadPlan) Prepare() error {
 		p.handlerAbort = abort
 
 		if p.s.Inspection != nil {
-			limits, err := inspection.LimitsFromConfig(p.Candidate.Effective, lifecycle.InitialGOMAXPROCS())
+			limits, err := p.s.withRouteMinimum(candidateLimits, p.GenID)
 			if err != nil {
 				return fmt.Errorf("prepare inspection limits: %w", err)
 			}
-			if limits, err = p.s.withRouteMinimum(limits, p.GenID); err != nil {
-				return fmt.Errorf("prepare inspection limits: %w", err)
+			p.inspectionLimits = &inspectionLimitsComponent{
+				governor: p.s.Inspection,
+				limits:   limits,
+				version:  inspectionLimitsVersion,
 			}
-			p.Runtime.add(&inspectionLimitsComponent{governor: p.s.Inspection, limits: limits})
 		}
 
 		certRotation, err := p.s.prepareCertRotation(p.Candidate.Effective)
@@ -323,6 +384,11 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// snapshots from the now-live registry. This guarantees that the published
 	// handler generation carries the backend view of the configuration it
 	// represents, not the previous generation's live state.
+	if p.inspectionLimits != nil {
+		if err := p.inspectionLimits.publish(); err != nil {
+			return nil, fmt.Errorf("publish inspection limits: %w", err)
+		}
+	}
 	snapshots, retirePrev := p.handlerCommit()
 	if p.s.CacheCutoverResult != nil {
 		p.cacheCutover = p.s.CacheCutoverResult(p.GenID)

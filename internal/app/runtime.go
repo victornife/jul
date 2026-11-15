@@ -117,6 +117,9 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 			WaitingEvaluations:   snapshot.WaitingEvaluations,
 			EvaluationLimit:      snapshot.Limits.EvaluationSlots,
 			AbandonedEvaluations: snapshot.AbandonedEvaluations,
+			GuestCapacityBytes:   snapshot.GuestCapacity.ReservedBytes,
+			GuestCapacityLimit:   snapshot.Limits.MaxGuestCapacityBytes,
+			GuestInstances:       snapshot.GuestCapacity.Instances,
 		}
 	})
 

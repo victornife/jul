@@ -174,7 +174,8 @@ max_response_header_bytes = "64k"
 | --- | --- | --- |
 | `mode` | string | `enforce` (default) or `observe`; other values are rejected |
 | `max_buffered_bytes` | size | `256m` (256 MiB); must be positive. In `enforce` mode it must also fit the largest single-request worst-case charge of any inspected (WAF or plugin) route; `observe` only warns. Uninspected configurations have no minimum |
-| `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled |
+| `max_guest_capacity_bytes` | size | Optional positive ceiling on the sum of per-instance linear-memory reservations in the unmerged I2b prototype. It is not a reliable bound while the [watcher ownership blocker](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress) remains. In `enforce`, it must fit one eager instance of every configured plugin; `observe` warns on a shortfall. Omission is unbounded; no finite production default has been selected. Values are reservations, not committed memory or RSS |
+| `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled. Enforce refuses an oversized WAF response before inspection; observe records the decision |
 | `max_concurrent_evaluations` | int | `0` means auto, resolved from the configured `worker_threads` value or the startup container-aware `GOMAXPROCS`; explicit values are 1–1024 |
 | `evaluation_queue_timeout` | duration | `1s`; 0 disables waiting; explicit values are 0–10s |
 | `body_timeout` | duration | `60s`; explicit `0s` disables it; negative values are rejected |
@@ -182,19 +183,22 @@ max_response_header_bytes = "64k"
 These fields have process scope and hot-reload together. A reload publishes the
 complete limit set without recreating the governor or resetting its counters;
 automatic slots resolve against the candidate `worker_threads` value, or the
-startup `GOMAXPROCS` when worker threads are `auto`.
+startup `GOMAXPROCS` when worker threads are `auto`. Limits-only changes do not
+rebuild plugin instances. Other reload candidates warm against the currently
+published guest ceiling, not an increase in the candidate.
 
-**Only the plugin request path is governed so far.** The status API marks
-request-path integration as `partial`. A route with WASM plugins holds one
-lease for the whole request, charges prepared bodies, fetch results,
-per-request state and generated or replaced bodies before allocating them, and
-in `enforce` mode answers saturation with `503` plus `Retry-After: 1` and a
-stalled body upload with `408` once `body_timeout` has passed since the first
-read. `observe` mode counts the same decisions without refusing. WAF request
-state, evaluation slots, response-subscription buffers and the response-header
-gate are not governed yet, so `mode = "enforce"` does not protect WAF-only
-routes. See [Plugins](plugins.md#inspection-governor) for the exact
-behaviour.
+The status API marks request-path integration as `partial`. Plugin and WAF
+request and response paths share the process governor, including charged
+buffers, estimated WAF state and evaluation slots. In `enforce` mode,
+saturation answers `503` plus `Retry-After: 1`; inspected plugin and WAF
+body-arrival timeouts answer `408`. `observe` counts would-refuse decisions
+without applying those governor refusals. Spool
+protection and integrated acceptance remain outstanding. The unmerged guest
+control is blocked by the watcher ownership issue above, and omission is
+unbounded. See
+[Plugins](plugins.md#inspection-governor) and
+[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md) for the scope
+and limitations.
 
 `jul check`, startup, reload and admin apply compute each inspected route's
 worst-case single-request charge from the compiled WAF limits, plugin limits
@@ -203,9 +207,10 @@ and its largest terms. The default CRS route needs about 246.7 MiB; with
 otherwise default limits, a WAF `request_body_limit` above 327 KiB needs a
 larger `max_buffered_bytes` (1 MiB needs about 288.7 MiB), as does a default
 WAF route that also runs a response-generating plugin (about 270.7 MiB). Raise the budget,
-lower that route's limits, or use `mode = "observe"` while sizing. Actual-size
-R3 reservations remain pending, and the 64 KiB ceiling is a compatibility
-policy default, not an experimentally established optimum. See
+lower that route's limits, or use `mode = "observe"` while sizing. R3 reserves
+an estimate based on measured header shape before WAF ingestion; the 64 KiB
+ceiling is a compatibility policy default, not an experimentally established
+optimum. See
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
 
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.

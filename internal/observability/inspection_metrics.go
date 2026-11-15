@@ -10,16 +10,18 @@ import (
 )
 
 type InspectionMetricsSnapshot struct {
-	BaseBytes, BufferBytes, WAFStateBytes uint64
-	AuditBytes                            uint64
-	MaxBytes                              uint64
-	ActiveLeases                          uint64
-	ActiveEvaluations, WaitingEvaluations uint64
-	EvaluationLimit                       int
-	AbandonedEvaluations                  uint64
-	AuditAbandonedCalls                   uint64
-	AuditAbandonedBytes                   uint64
-	CommittedOverruns                     uint64
+	BaseBytes, BufferBytes, WAFStateBytes  uint64
+	AuditBytes                             uint64
+	MaxBytes                               uint64
+	ActiveLeases                           uint64
+	ActiveEvaluations, WaitingEvaluations  uint64
+	EvaluationLimit                        int
+	AbandonedEvaluations                   uint64
+	AuditAbandonedCalls                    uint64
+	AuditAbandonedBytes                    uint64
+	CommittedOverruns                      uint64
+	GuestCapacityBytes, GuestCapacityLimit uint64
+	GuestInstances                         [5]uint64
 }
 
 type inspectionCollector struct {
@@ -37,6 +39,9 @@ type inspectionCollector struct {
 	auditDrops       *prometheus.CounterVec
 	auditAbandoned   *prometheus.GaugeVec
 	committedOverrun *prometheus.Desc
+	guestCapacity    prometheus.Gauge
+	guestLimit       prometheus.Gauge
+	guestInstances   *prometheus.GaugeVec
 }
 
 func newInspectionCollector() *inspectionCollector {
@@ -63,7 +68,7 @@ func newInspectionCollector() *inspectionCollector {
 		}),
 		rejections: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_inspection_rejections_total",
-			Help: "Inspection admission rejections in enforce mode and would-reject decisions in observe mode.",
+			Help: "Inspection admission rejections in enforce mode and would-reject decisions in observe mode, including guest-capacity admission.",
 		}, []string{"reason", "mode"}),
 		bodyTimeouts: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_inspection_body_timeouts_total",
@@ -87,6 +92,18 @@ func newInspectionCollector() *inspectionCollector {
 		}, []string{"measure"}),
 		committedOverrun: prometheus.NewDesc("jul_inspection_committed_overruns_total",
 			"Non-refusable inspection charges (already-admitted work whose inputs outgrew their reservation) that exceeded the byte ceiling.", nil, nil),
+		guestCapacity: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "jul_inspection_guest_capacity_bytes",
+			Help: "Reserved effective linear-memory ceilings for starting, idle, busy, closing and failed-retained plugin instances; not actual memory or RSS.",
+		}),
+		guestLimit: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "jul_inspection_guest_capacity_bytes_limit",
+			Help: "Configured process-wide plugin guest-capacity ceiling; zero means no finite ceiling is configured.",
+		}),
+		guestInstances: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "jul_inspection_guest_instances",
+			Help: "Plugin instances by reserved lifecycle state; failed_retained instances remain charged.",
+		}, []string{"state"}),
 	}
 	for _, class := range []string{"base", "buffer", "waf_state", "audit"} {
 		c.bytes.WithLabelValues(class)
@@ -94,7 +111,10 @@ func newInspectionCollector() *inspectionCollector {
 	for _, state := range []string{"active", "waiting"} {
 		c.evaluations.WithLabelValues(state)
 	}
-	for _, reason := range []string{"bytes", "waf_state", "evaluation", "audit"} {
+	for _, state := range []string{"starting", "idle", "busy", "closing", "failed_retained"} {
+		c.guestInstances.WithLabelValues(state)
+	}
+	for _, reason := range []string{"bytes", "waf_state", "evaluation", "audit", "guest_capacity"} {
 		for _, mode := range []string{"enforce", "observe"} {
 			c.rejections.WithLabelValues(reason, mode)
 		}
@@ -119,6 +139,9 @@ func (c *inspectionCollector) Describe(ch chan<- *prometheus.Desc) {
 	c.leases.Describe(ch)
 	c.evaluations.Describe(ch)
 	c.evaluationsLimit.Describe(ch)
+	c.guestCapacity.Describe(ch)
+	c.guestLimit.Describe(ch)
+	c.guestInstances.Describe(ch)
 	c.rejections.Describe(ch)
 	c.bodyTimeouts.Describe(ch)
 	c.unslottedLogging.Describe(ch)
@@ -143,6 +166,11 @@ func (c *inspectionCollector) Collect(ch chan<- prometheus.Metric) {
 		c.evaluations.WithLabelValues("active").Set(float64(s.ActiveEvaluations))
 		c.evaluations.WithLabelValues("waiting").Set(float64(s.WaitingEvaluations))
 		c.evaluationsLimit.Set(float64(s.EvaluationLimit))
+		c.guestCapacity.Set(float64(s.GuestCapacityBytes))
+		c.guestLimit.Set(float64(s.GuestCapacityLimit))
+		for i, state := range []string{"starting", "idle", "busy", "closing", "failed_retained"} {
+			c.guestInstances.WithLabelValues(state).Set(float64(s.GuestInstances[i]))
+		}
 		c.abandoned.Set(float64(s.AbandonedEvaluations))
 		overruns = s.CommittedOverruns
 	}
@@ -152,6 +180,9 @@ func (c *inspectionCollector) Collect(ch chan<- prometheus.Metric) {
 	c.leases.Collect(ch)
 	c.evaluations.Collect(ch)
 	c.evaluationsLimit.Collect(ch)
+	c.guestCapacity.Collect(ch)
+	c.guestLimit.Collect(ch)
+	c.guestInstances.Collect(ch)
 	c.rejections.Collect(ch)
 	c.bodyTimeouts.Collect(ch)
 	c.unslottedLogging.Collect(ch)
@@ -170,7 +201,7 @@ func (m *Metrics) ObserveInspectionRejection(reason, mode string) {
 	if m == nil || m.inspection == nil {
 		return
 	}
-	if (reason == "bytes" || reason == "waf_state" || reason == "evaluation" || reason == "audit") &&
+	if (reason == "bytes" || reason == "waf_state" || reason == "evaluation" || reason == "audit" || reason == "guest_capacity") &&
 		(mode == "enforce" || mode == "observe") {
 		m.inspection.rejections.WithLabelValues(reason, mode).Inc()
 	}

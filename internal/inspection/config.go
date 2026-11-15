@@ -75,6 +75,12 @@ func LimitsFromConfig(cfg *config.Config, startupProcs int) (Limits, error) {
 		BodyTimeout:               bodyTimeout,
 		BaseChargeBytes:           BaseChargeBytes,
 	}
+	if inspection.MaxGuestCapacityBytes != nil {
+		if *inspection.MaxGuestCapacityBytes <= 0 {
+			return Limits{}, fmt.Errorf("%w: global.inspection.max_guest_capacity_bytes must be positive", ErrInvalidLimits)
+		}
+		limits.MaxGuestCapacityBytes = uint64(inspection.MaxGuestCapacityBytes.Bytes())
+	}
 	if err := limits.validate(); err != nil {
 		return Limits{}, err
 	}

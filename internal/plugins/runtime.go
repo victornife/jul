@@ -70,6 +70,11 @@ const instanceLimitLogInterval = 10 * time.Second
 // for the whole bounded wait. Callers answer 503 with Retry-After.
 var errInstanceLimit = errors.New("plugin instance limit reached")
 
+var (
+	errGuestWorkInFlight        = errors.New("plugin guest work is still in flight")
+	errGuestTeardownUnconfirmed = errors.New("plugin guest teardown could not be confirmed")
+)
+
 // Outcomes of a call that found every allowed instance busy and had to wait.
 const (
 	instanceWaitAcquired = "acquired"
@@ -79,8 +84,19 @@ const (
 // pooledModule pairs a pooled WASM module instance with its lifetime call
 // count so acquire/release can retire it once maxInstanceInvocations is hit.
 type pooledModule struct {
-	mod   api.Module
-	calls int
+	mod    api.Module
+	ticket *inspection.GuestTicket
+	calls  int
+}
+
+type guestOwnership struct {
+	active bool
+	failed error
+}
+
+type guestPotential struct {
+	maxBytes     uint64
+	maxInstances uint64
 }
 
 // Options configures a Manager.
@@ -155,14 +171,18 @@ type Manager struct {
 	onBodyErr func(string, string)
 	// live holds every compiled plugin not yet closed, across generations, so
 	// InstanceStats can report live instances at scrape time.
-	liveMu sync.Mutex
-	live   map[*plugin]struct{}
+	liveMu     sync.Mutex
+	live       map[*plugin]struct{}
+	potential  map[*guestPotential]struct{}
+	retainedMu sync.Mutex
+	retained   map[*plugin]struct{}
 	// egressWrap composes the global egress guard beneath each plugin's fetch
 	// SSRF guard; nil when egress is disabled.
 	egressWrap func(base DialFunc) DialFunc
 	// gov is the process inspection governor; nil only for MetadataOnly.
 	gov          *inspection.Governor
 	metadataOnly bool
+	setID        atomic.Uint64
 }
 
 // NewManager creates a Manager. It fails when a request-serving Manager has no
@@ -214,6 +234,8 @@ func NewManager(opts Options) (*Manager, error) {
 		onWait:       onWait,
 		onBodyErr:    onBodyErr,
 		live:         make(map[*plugin]struct{}),
+		potential:    make(map[*guestPotential]struct{}),
+		retained:     make(map[*plugin]struct{}),
 		egressWrap:   opts.EgressWrap,
 		gov:          opts.Inspection,
 		metadataOnly: opts.MetadataOnly,
@@ -242,12 +264,11 @@ func (m *Manager) InstanceStats() []InstanceStats {
 	if m == nil {
 		return nil
 	}
-	m.liveMu.Lock()
+	plugins := m.pluginsSnapshot()
 	by := make(map[string]int)
-	for p := range m.live {
+	for _, p := range plugins {
 		by[p.name] += len(p.slots)
 	}
-	m.liveMu.Unlock()
 	out := make([]InstanceStats, 0, len(by))
 	for name, n := range by {
 		out = append(out, InstanceStats{Plugin: name, Live: n})
@@ -257,15 +278,23 @@ func (m *Manager) InstanceStats() []InstanceStats {
 }
 
 // GuestCapacityStats reports configured maximum guest memory capacity and
-// instance counts across every compiled plugin generation not yet closed.
+// instance counts across candidates being prepared and compiled generations
+// not yet closed.
 func (m *Manager) GuestCapacityStats() (GuestCapacityStats, error) {
 	var out GuestCapacityStats
 	if m == nil {
 		return out, nil
 	}
-	m.liveMu.Lock()
-	defer m.liveMu.Unlock()
-	for p := range m.live {
+	plugins, pending := m.guestCapacitySnapshot()
+	for _, potential := range pending {
+		if out.MaxPermittedBytes > ^uint64(0)-potential.maxBytes ||
+			out.MaxInstances > ^uint64(0)-potential.maxInstances {
+			return GuestCapacityStats{}, fmt.Errorf("aggregate plugin guest capacity overflows uint64")
+		}
+		out.MaxPermittedBytes += potential.maxBytes
+		out.MaxInstances += potential.maxInstances
+	}
+	for _, p := range plugins {
 		maxInstances := uint64(cap(p.slots))
 		if p.memoryLimitBytes != 0 && maxInstances > ^uint64(0)/p.memoryLimitBytes {
 			return GuestCapacityStats{}, fmt.Errorf("plugin %q guest capacity overflows uint64", p.name)
@@ -283,16 +312,79 @@ func (m *Manager) GuestCapacityStats() (GuestCapacityStats, error) {
 	return out, nil
 }
 
+func (m *Manager) guestCapacitySnapshot() ([]*plugin, []guestPotential) {
+	m.liveMu.Lock()
+	defer m.liveMu.Unlock()
+	m.retainedMu.Lock()
+	defer m.retainedMu.Unlock()
+
+	seen := make(map[*plugin]struct{}, len(m.live)+len(m.retained))
+	plugins := make([]*plugin, 0, len(m.live)+len(m.retained))
+	for p := range m.live {
+		seen[p] = struct{}{}
+		plugins = append(plugins, p)
+	}
+	for p := range m.retained {
+		if _, ok := seen[p]; !ok {
+			plugins = append(plugins, p)
+		}
+	}
+	pending := make([]guestPotential, 0, len(m.potential))
+	for potential := range m.potential {
+		pending = append(pending, *potential)
+	}
+	return plugins, pending
+}
+
+func (m *Manager) pluginsSnapshot() []*plugin {
+	seen := make(map[*plugin]struct{})
+	m.liveMu.Lock()
+	m.retainedMu.Lock()
+	plugins := make([]*plugin, 0, len(m.live))
+	for p := range m.live {
+		seen[p] = struct{}{}
+		plugins = append(plugins, p)
+	}
+	for p := range m.retained {
+		if _, ok := seen[p]; !ok {
+			plugins = append(plugins, p)
+		}
+	}
+	m.retainedMu.Unlock()
+	m.liveMu.Unlock()
+	return plugins
+}
+
 func (m *Manager) track(p *plugin) {
 	m.liveMu.Lock()
+	delete(m.potential, p.potential)
 	m.live[p] = struct{}{}
+	m.liveMu.Unlock()
+}
+
+func (m *Manager) trackPotential(p *guestPotential) {
+	m.liveMu.Lock()
+	m.potential[p] = struct{}{}
 	m.liveMu.Unlock()
 }
 
 func (m *Manager) forget(p *plugin) {
 	m.liveMu.Lock()
+	delete(m.potential, p.potential)
 	delete(m.live, p)
 	m.liveMu.Unlock()
+}
+
+func (m *Manager) retain(p *plugin) {
+	m.retainedMu.Lock()
+	m.retained[p] = struct{}{}
+	m.retainedMu.Unlock()
+}
+
+func (m *Manager) forgetRetained(p *plugin) {
+	m.retainedMu.Lock()
+	delete(m.retained, p)
+	m.retainedMu.Unlock()
 }
 
 // kvLedger is the quota accounting for one plugin KV namespace.
@@ -317,12 +409,33 @@ func (m *Manager) kvLedgerFor(name string) *kvLedger {
 	return l
 }
 
-// Close releases the shared compilation cache.
+// Close tears down retained plugins before releasing the shared compilation
+// cache. A failed runtime close cannot be retried safely by wazero.
 func (m *Manager) Close() error {
-	if m == nil || m.cache == nil {
+	if m == nil {
 		return nil
 	}
-	return m.cache.Close(context.Background())
+	m.retainedMu.Lock()
+	retained := make([]*plugin, 0, len(m.retained))
+	for p := range m.retained {
+		retained = append(retained, p)
+	}
+	m.retainedMu.Unlock()
+	var errs []error
+	for _, p := range retained {
+		if err := p.closeRuntime(context.Background()); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 && len(m.pluginsSnapshot()) != 0 {
+		errs = append(errs, errors.New("plugin manager still owns live runtimes"))
+	}
+	if len(errs) == 0 && m.cache != nil {
+		if err := m.cache.Close(context.Background()); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Build compiles and instantiates every declared plugin into a Set for one
@@ -339,6 +452,11 @@ func (m *Manager) Build(ctx context.Context, cfg map[string]config.PluginConfig)
 // compilation cache and KV store. A nil wrapper preserves plugin-local SSRF and
 // allowed_hosts enforcement without a global egress policy.
 func (m *Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.PluginConfig, egressWrap func(base DialFunc) DialFunc) (*Set, error) {
+	generation := m.setID.Add(1)
+	return m.buildWithEgress(ctx, cfg, egressWrap, generation)
+}
+
+func (m *Manager) buildWithEgress(ctx context.Context, cfg map[string]config.PluginConfig, egressWrap func(base DialFunc) DialFunc, generation uint64) (_ *Set, err error) {
 	if m.gov == nil {
 		return nil, errNoGovernor
 	}
@@ -346,14 +464,16 @@ func (m *Manager) BuildWithEgress(ctx context.Context, cfg map[string]config.Plu
 	ok := false
 	defer func() {
 		if !ok {
-			_ = s.Close()
+			if closeErr := s.Close(); closeErr != nil {
+				err = errors.Join(err, closeErr)
+			}
 		}
 	}()
 	for name, pc := range cfg {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", name, err)
 		}
-		p, err := m.compilePlugin(ctx, name, pc, egressWrap)
+		p, err := m.compilePlugin(ctx, name, pc, egressWrap, generation)
 		if err != nil {
 			return nil, fmt.Errorf("plugin %q: %w", name, err)
 		}
@@ -376,6 +496,14 @@ type plugin struct {
 	// slots holds one token per live instance (idle or in use); its capacity
 	// is max_instances (#506).
 	slots            chan struct{}
+	generation       uint64
+	guestMu          sync.Mutex
+	guestTickets     map[*inspection.GuestTicket]*guestOwnership
+	guestAcquires    int           // includes pool receivers before their ticket becomes busy
+	retired          chan struct{} // wakes instance waiters when the generation closes
+	runtimeCloseMu   sync.Mutex
+	runtimeClosed    bool
+	runtimeCloseErr  error
 	memoryLimitBytes uint64
 	timeout          time.Duration
 	isHandler        bool
@@ -437,9 +565,13 @@ type plugin struct {
 	// trapLog throttles the contained-trap warning.
 	trapLog logthrottle.Limiter
 	// mgr tracks this plugin for InstanceStats until close.
-	mgr *Manager
+	mgr       *Manager
+	potential *guestPotential
 	// gov is the process inspection governor every request is admitted to.
 	gov *inspection.Governor
+	// closeOnContextDone records whether wazero starts an unjoinable module
+	// watcher that can retain a partial instance after InstantiateModule fails.
+	closeOnContextDone bool
 
 	// closed is set when the plugin's generation is torn down; preparing
 	// holds the requests reading their body for it, so close can abort them.
@@ -452,13 +584,10 @@ type plugin struct {
 // compilation; production leaves it nil.
 var afterModuleRead func(name string)
 
-func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.PluginConfig, egressWrap func(base DialFunc) DialFunc) (*plugin, error) {
+func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.PluginConfig, egressWrap func(base DialFunc) DialFunc, generation uint64) (*plugin, error) {
 	module, err := ReadModule(pc)
 	if err != nil {
 		return nil, err
-	}
-	if afterModuleRead != nil {
-		afterModuleRead(name)
 	}
 	wasm := module.Bytes
 
@@ -474,6 +603,8 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		return nil, err
 	}
 	p.identity = module.Identity
+	p.generation = generation
+	p.guestTickets = make(map[*inspection.GuestTicket]*guestOwnership)
 	p.pool = make(chan *pooledModule, poolCapacity)
 	p.capKV = pc.KV
 	p.allowedHosts = pc.AllowedHosts
@@ -496,6 +627,14 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		maxInstances = defaultMaxInstances
 	}
 	p.slots = make(chan struct{}, maxInstances)
+	p.gov = m.gov
+	p.mgr = m
+	p.potential = &guestPotential{
+		maxBytes:     uint64(maxInstances) * p.memoryLimitBytes,
+		maxInstances: uint64(maxInstances),
+	}
+	m.trackPotential(p.potential)
+	p.closeOnContextDone = true
 	if p.fetchTimeout <= 0 {
 		p.fetchTimeout = 5 * time.Second
 	}
@@ -538,10 +677,10 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		WithMemoryLimitPages(pages).
 		WithCloseOnContextDone(true)
 	r := wazero.NewRuntimeWithConfig(ctx, rtCfg)
+	p.runtime = r
 
 	closeOnErr := func(err error) (*plugin, error) {
-		_ = r.Close(ctx)
-		return nil, err
+		return nil, errors.Join(err, p.close())
 	}
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
@@ -556,6 +695,9 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		return closeOnErr(fmt.Errorf("register host module: %w", err))
 	}
 
+	if afterModuleRead != nil {
+		afterModuleRead(name)
+	}
 	compiled, err := r.CompileModule(ctx, wasm)
 	if err != nil {
 		return closeOnErr(fmt.Errorf("compile module: %w", err))
@@ -569,21 +711,18 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 	p.readsBody = decl.readsBody
 	p.facts = p.inspectionFacts(decl)
 
-	p.runtime = r
 	p.compiled = compiled
+	m.track(p)
 
 	// Eagerly instantiate one instance so a broken module fails the build (and
 	// thus the reload) rather than the first request.
-	mod, err := p.instantiate(ctx)
+	p.slots <- struct{}{}
+	pm, err, _ := p.instantiateGuest(ctx, inspection.GuestIdle)
 	if err != nil {
 		return closeOnErr(fmt.Errorf("instantiate module: %w", err))
 	}
-	p.slots <- struct{}{}
-	p.pool <- &pooledModule{mod: mod}
+	p.pool <- pm
 
-	p.mgr = m
-	p.gov = m.gov
-	m.track(p)
 	return p, nil
 }
 
@@ -592,12 +731,9 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 // pages. compilePlugin and InspectionFacts share it so both report the same
 // limits and reject invalid values.
 func newPluginLimits(name string, pc config.PluginConfig) (*plugin, uint32, error) {
-	if err := config.ValidatePluginMemoryLimit(pc.MemoryLimit); err != nil {
+	pages, err := config.EffectivePluginMemoryPages(pc.MemoryLimit)
+	if err != nil {
 		return nil, 0, err
-	}
-	pages := uint32(pc.MemoryLimit.Bytes() / wasmPageSize)
-	if pages == 0 {
-		pages = 256 // 16 MiB
 	}
 	return &plugin{
 		name:             name,
@@ -677,11 +813,31 @@ func (p *plugin) instantiate(ctx context.Context) (api.Module, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Startup must not inherit wazero's experimental allocators, import
+	// resolvers or sockets from a request context; those can retain a module
+	// after an unsuccessful instantiation.
+	var guestCtx context.Context
+	var cancel context.CancelFunc
+	deadline, hasDeadline := ctx.Deadline()
+	if hasDeadline {
+		guestCtx, cancel = context.WithDeadline(context.Background(), deadline)
+	} else {
+		guestCtx, cancel = context.WithCancel(context.Background())
+	}
+	stop := context.AfterFunc(ctx, func() {
+		if !hasDeadline || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			cancel()
+		}
+	})
+	defer func() {
+		stop()
+		cancel()
+	}()
 	cfg := wazero.NewModuleConfig().
 		WithName("").
 		WithSysWalltime().
 		WithStartFunctions("_initialize")
-	return p.runtime.InstantiateModule(ctx, p.compiled, cfg)
+	return p.runtime.InstantiateModule(guestCtx, p.compiled, cfg)
 }
 
 // acquire returns an idle instance, or instantiates one while fewer than
@@ -689,16 +845,30 @@ func (p *plugin) instantiate(ctx context.Context) (api.Module, error) {
 // ctx ends) for an instance to come back or be retired, then fails with
 // errInstanceLimit (#506).
 func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
+	p.guestMu.Lock()
 	if p.closed.Load() {
+		p.guestMu.Unlock()
 		return nil, errPluginClosed
 	}
+	if p.retired == nil {
+		p.retired = make(chan struct{})
+	}
+	retired := p.retired
+	p.guestAcquires++
+	p.guestMu.Unlock()
+	defer p.finishGuestAcquire()
+
 	select {
 	case pm := <-p.pool:
-		return pm, nil
+		return p.acquirePooled(pm)
 	default:
 	}
 	select {
 	case p.slots <- struct{}{}:
+		if p.closed.Load() {
+			p.freeSlot()
+			return nil, errPluginClosed
+		}
 		return p.newInstance(ctx)
 	default:
 	}
@@ -707,10 +877,17 @@ func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
 	select {
 	case pm := <-p.pool:
 		p.onWait(p.name, instanceWaitAcquired)
-		return pm, nil
+		return p.acquirePooled(pm)
 	case p.slots <- struct{}{}:
 		p.onWait(p.name, instanceWaitAcquired)
+		if p.closed.Load() {
+			p.freeSlot()
+			return nil, errInstanceLimit
+		}
 		return p.newInstance(ctx)
+	case <-retired:
+		p.onWait(p.name, instanceWaitRejected)
+		return nil, errInstanceLimit
 	case <-ctx.Done():
 	case <-wait.C:
 	}
@@ -721,31 +898,218 @@ func (p *plugin) acquire(ctx context.Context) (*pooledModule, error) {
 	return nil, errInstanceLimit
 }
 
+func (p *plugin) finishGuestAcquire() {
+	p.guestMu.Lock()
+	p.guestAcquires--
+	retired := p.closed.Load()
+	p.guestMu.Unlock()
+	if retired {
+		p.finishGuestClose()
+	}
+}
+
+func (p *plugin) acquirePooled(pm *pooledModule) (*pooledModule, error) {
+	p.guestMu.Lock()
+	if p.closed.Load() {
+		p.guestMu.Unlock()
+		p.discard(pm)
+		return nil, errPluginClosed
+	}
+	err := p.transitionGuestLocked(pm.ticket, inspection.GuestBusy)
+	p.guestMu.Unlock()
+	if err != nil {
+		p.discard(pm)
+		return nil, err
+	}
+	return pm, nil
+}
+
 // newInstance instantiates a module for a slot the caller already holds.
 // A canceled successful start retains its slot if closing the module fails.
 func (p *plugin) newInstance(parent context.Context) (*pooledModule, error) {
 	ctx, cancel := context.WithTimeout(parent, instantiateTimeout)
 	defer cancel()
-	mod, err := p.instantiate(ctx)
+	pm, err, retained := p.instantiateGuest(ctx, inspection.GuestBusy)
 	if err != nil {
-		p.freeSlot()
-		return nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		if closeErr := mod.Close(context.Background()); closeErr != nil {
-			return nil, errors.Join(err, fmt.Errorf("close canceled plugin instance: %w", closeErr))
+		if !retained {
+			p.freeSlot()
 		}
-		p.freeSlot()
+		if p.closed.Load() {
+			return nil, errPluginClosed
+		}
 		return nil, err
 	}
-	return &pooledModule{mod: mod}, nil
+	if p.closed.Load() {
+		p.discard(pm)
+		return nil, errPluginClosed
+	}
+	return pm, nil
 }
 
-// discard closes an instance and frees its slot. Every instance ends here or
-// in the runtime's Close.
-func (p *plugin) discard(mod api.Module) {
-	_ = mod.Close(context.Background())
-	p.freeSlot()
+func (p *plugin) reserveGuest() (*inspection.GuestTicket, error) {
+	if p.gov == nil {
+		return nil, nil
+	}
+	p.guestMu.Lock()
+	defer p.guestMu.Unlock()
+	if p.closed.Load() {
+		return nil, errPluginClosed
+	}
+	ticket, err := p.gov.ReserveGuestCapacity(p.generation, p.memoryLimitBytes)
+	if err != nil {
+		return nil, err
+	}
+	p.guestTickets[ticket] = &guestOwnership{active: true}
+	return ticket, nil
+}
+
+func (p *plugin) transitionGuest(ticket *inspection.GuestTicket, state inspection.GuestState) error {
+	p.guestMu.Lock()
+	defer p.guestMu.Unlock()
+	return p.transitionGuestLocked(ticket, state)
+}
+
+func (p *plugin) transitionGuestLocked(ticket *inspection.GuestTicket, state inspection.GuestState) error {
+	if ticket == nil {
+		return nil
+	}
+	owner, ok := p.guestTickets[ticket]
+	if !ok {
+		return &inspection.AdmissionError{Outcome: inspection.InvalidAccounting}
+	}
+	if err := ticket.Transition(state); err != nil {
+		return err
+	}
+	owner.active = state != inspection.GuestIdle
+	return nil
+}
+
+func (p *plugin) resolveGuest(ticket *inspection.GuestTicket, teardownErr error) (bool, error) {
+	if ticket == nil {
+		return teardownErr == nil, nil
+	}
+	p.guestMu.Lock()
+	defer p.guestMu.Unlock()
+	owner, ok := p.guestTickets[ticket]
+	if !ok {
+		return false, &inspection.AdmissionError{Outcome: inspection.InvalidAccounting}
+	}
+	owner.failed = errors.Join(owner.failed, teardownErr)
+	if err := ticket.ResolveTeardown(owner.failed); err != nil {
+		return false, err
+	}
+	owner.active = false
+	if owner.failed == nil {
+		delete(p.guestTickets, ticket)
+		return true, nil
+	}
+	return false, nil
+}
+
+func (p *plugin) hasGuestTickets() bool {
+	if p == nil {
+		return false
+	}
+	p.guestMu.Lock()
+	defer p.guestMu.Unlock()
+	return len(p.guestTickets) != 0
+}
+
+func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestState) (*pooledModule, error, bool) {
+	if err := ctx.Err(); err != nil {
+		return nil, err, false
+	}
+	ticket, err := p.reserveGuest()
+	if err != nil {
+		return nil, err, false
+	}
+	mod, err := p.instantiate(ctx)
+	if err != nil {
+		if ticket != nil {
+			var closeErr error
+			if mod != nil {
+				closeErr = mod.Close(context.Background())
+			} else if p.closeOnContextDone {
+				closeErr = errGuestTeardownUnconfirmed
+			}
+			transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
+			released, resolveErr := p.resolveGuest(ticket, closeErr)
+			p.finishGuestClose()
+			return nil, errors.Join(err, closeErr, transitionErr, resolveErr), !released || resolveErr != nil
+		}
+		return nil, err, false
+	}
+	if mod.IsClosed() {
+		transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
+		closeErr := mod.Close(context.Background())
+		released, resolveErr := p.resolveGuest(ticket, closeErr)
+		p.finishGuestClose()
+		return nil, errors.Join(errors.New("plugin instance closed during initialization"), closeErr, transitionErr, resolveErr),
+			!released || resolveErr != nil
+	}
+	if err := ctx.Err(); err != nil {
+		closeErr := mod.Close(context.Background())
+		if ticket != nil {
+			transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
+			released, resolveErr := p.resolveGuest(ticket, closeErr)
+			closeErr = errors.Join(closeErr, transitionErr, resolveErr)
+			p.finishGuestClose()
+			return nil, errors.Join(err, closeErr), !released || resolveErr != nil
+		}
+		p.finishGuestClose()
+		return nil, errors.Join(err, closeErr), closeErr != nil
+	}
+	if err := p.transitionGuest(ticket, state); err != nil {
+		closeErr := mod.Close(context.Background())
+		released, resolveErr := p.resolveGuest(ticket, closeErr)
+		p.finishGuestClose()
+		return nil, errors.Join(err, closeErr, resolveErr), !released || resolveErr != nil
+	}
+	return &pooledModule{mod: mod, ticket: ticket}, nil, false
+}
+
+// discard closes an instance and frees its slot only after confirmed teardown.
+func (p *plugin) discard(pm *pooledModule) {
+	if pm == nil {
+		return
+	}
+	transitionErr := p.transitionGuest(pm.ticket, inspection.GuestClosing)
+	if transitionErr != nil {
+		if p.log != nil {
+			p.log.Error("plugin guest lifecycle transition failed", "plugin", p.name, "error", transitionErr)
+		}
+	}
+	mod := pm.mod
+	pm.mod = nil
+	var closeErr error
+	if mod != nil {
+		closeErr = mod.Close(context.Background())
+		mod = nil
+	} else {
+		closeErr = errGuestTeardownUnconfirmed
+	}
+	released, resolveErr := p.resolveGuest(pm.ticket, closeErr)
+	if resolveErr != nil && p.log != nil {
+		p.log.Error("plugin guest capacity accounting failed after close", "plugin", p.name, "error", resolveErr)
+	}
+	if closeErr != nil {
+		if p.log != nil {
+			p.log.Error("plugin guest close failed; capacity remains reserved", "plugin", p.name, "error", closeErr)
+		}
+	} else if released && resolveErr == nil {
+		p.freeSlot()
+	}
+	p.finishGuestClose()
+}
+
+func (p *plugin) finishGuestClose() {
+	if !p.closed.Load() {
+		return
+	}
+	if err := p.closeRuntime(context.Background()); err != nil &&
+		!errors.Is(err, errGuestWorkInFlight) && p.log != nil {
+		p.log.Error("plugin runtime teardown remains incomplete", "plugin", p.name, "error", err)
+	}
 }
 
 // freeSlot never blocks, so a slot can never be leaked into a deadlock.
@@ -762,14 +1126,24 @@ func (p *plugin) freeSlot() {
 // silently dropped (see poolCapacity).
 func (p *plugin) release(pm *pooledModule) {
 	pm.calls++
-	if pm.calls < p.maxInstanceInvocations {
-		select {
-		case p.pool <- pm:
-			return
-		default:
+	p.guestMu.Lock()
+	if !p.closed.Load() && pm.calls < p.maxInstanceInvocations {
+		if err := p.transitionGuestLocked(pm.ticket, inspection.GuestIdle); err == nil {
+			select {
+			case p.pool <- pm:
+				p.guestMu.Unlock()
+				return
+			default:
+				if err := p.transitionGuestLocked(pm.ticket, inspection.GuestBusy); err != nil && p.log != nil {
+					p.log.Error("plugin guest lifecycle transition failed", "plugin", p.name, "error", err)
+				}
+			}
+		} else if p.log != nil {
+			p.log.Error("plugin guest lifecycle transition failed", "plugin", p.name, "error", err)
 		}
 	}
-	p.discard(pm.mod)
+	p.guestMu.Unlock()
+	p.discard(pm)
 }
 
 // kvSet stores a value under an already-namespaced key, enforcing the plugin's
@@ -807,6 +1181,13 @@ const (
 	callHostError
 )
 
+func shouldCountPluginPanic(err error) bool {
+	return !errors.Is(err, errInstanceLimit) &&
+		!errors.Is(err, errPluginClosed) &&
+		!inspection.IsOverload(err) &&
+		!inspection.IsOutcome(err, inspection.InvalidAccounting)
+}
+
 // call runs one guest export on a pooled instance. On any outcome but callOK
 // the instance is discarded, not pooled, because a failed module may be in an
 // undefined state. valid, when non-nil, rejects reserved result values.
@@ -826,16 +1207,20 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("plugin %q panicked: %v", p.name, rec)
-			p.discard(mod)
+			fn = nil
+			mod = nil
+			p.discard(pm)
 			res, dur, outcome = 0, time.Since(start), callTrapped
 			p.logTrap(trapHostPanic)
 		}
 	}()
 
 	results, callErr := fn.Call(ctx)
+	fn = nil
+	mod = nil
 	dur = time.Since(start)
 	if callErr != nil {
-		p.discard(mod)
+		p.discard(pm)
 		// A guest that traps after a host call was refused budget still
 		// fails as overload, not as a guest fault: the refusal is retained
 		// in the invocation whatever the guest did with its error return.
@@ -850,12 +1235,12 @@ func (p *plugin) call(parent context.Context, export string, inv *invocation, va
 	// overflow); treat that as a contained failure so the caller returns 500
 	// instead of serving a truncated request/response.
 	if inv.err != nil {
-		p.discard(mod)
+		p.discard(pm)
 		return 0, dur, callHostError, inv.err
 	}
 	res = uint32(results[0])
 	if valid != nil && !valid(res) {
-		p.discard(mod)
+		p.discard(pm)
 		return 0, dur, callHostError, errBadResult
 	}
 
@@ -934,7 +1319,7 @@ func (p *plugin) invoke(parent context.Context, w http.ResponseWriter, r *http.R
 	action, dur, outcome, err := p.call(parent, exportHandleRequest, inv, valid)
 	switch outcome {
 	case callAcquireFailed:
-		if !errors.Is(err, errInstanceLimit) && !errors.Is(err, errPluginClosed) {
+		if shouldCountPluginPanic(err) {
 			p.onPanic(p.name)
 		}
 		return 0, nil, err
@@ -971,7 +1356,7 @@ func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *r
 	res, dur, outcome, err := p.call(parent, exportHandleResponse, inv, valid)
 	switch outcome {
 	case callAcquireFailed:
-		if !errors.Is(err, errInstanceLimit) && !errors.Is(err, errPluginClosed) {
+		if shouldCountPluginPanic(err) {
 			p.onPanic(p.name)
 		}
 		p.onRespInv(p.name, "error", 0)
@@ -992,23 +1377,93 @@ func (p *plugin) invokeResponse(parent context.Context, r *http.Request, view *r
 	return res, nil
 }
 
-// close tears down the plugin's runtime, which closes every instance (pooled or
-// in flight) and the compiled module.
-func (p *plugin) close() {
+// close retires the plugin and wakes waiters; the runtime stays owned until
+// in-flight guests and pool handoffs have finished.
+func (p *plugin) close() error {
 	if p == nil {
-		return
+		return nil
 	}
+	p.guestMu.Lock()
+	if !p.closed.Swap(true) && p.retired != nil {
+		close(p.retired)
+	}
+	p.guestMu.Unlock()
 	p.abortPreparations()
 	if p.mgr != nil {
+		p.mgr.retain(p)
 		p.mgr.forget(p)
 	}
 	if p.client != nil {
 		p.client.CloseIdleConnections()
 	}
-	if p.runtime == nil {
-		return
+	err := p.closeRuntime(context.Background())
+	if err != nil && !errors.Is(err, errGuestWorkInFlight) && p.log != nil {
+		p.log.Error("plugin runtime teardown failed", "plugin", p.name, "error", err)
 	}
-	_ = p.runtime.Close(context.Background())
+	return err
+}
+
+func (p *plugin) closeRuntime(ctx context.Context) error {
+	p.runtimeCloseMu.Lock()
+	defer p.runtimeCloseMu.Unlock()
+
+	p.guestMu.Lock()
+	if p.guestAcquires != 0 {
+		p.guestMu.Unlock()
+		return errGuestWorkInFlight
+	}
+	for _, owner := range p.guestTickets {
+		if owner.active {
+			p.guestMu.Unlock()
+			return errGuestWorkInFlight
+		}
+	}
+	p.guestMu.Unlock()
+	if p.runtime == nil {
+		if p.hasGuestTickets() {
+			return fmt.Errorf("plugin %q has reserved guest capacity without a runtime owner", p.name)
+		}
+		if p.mgr != nil {
+			p.mgr.forgetRetained(p)
+		}
+		return nil
+	}
+	if !p.runtimeClosed {
+		p.runtimeCloseErr = p.runtime.Close(ctx)
+		p.runtimeClosed = true
+	}
+	var errs []error
+	if p.runtimeCloseErr != nil {
+		errs = append(errs, p.runtimeCloseErr)
+	}
+	p.guestMu.Lock()
+	for {
+		select {
+		case pm := <-p.pool:
+			// A returning call may still hold the wrapper after pooling it.
+			pm.mod = nil
+		default:
+			goto drained
+		}
+	}
+drained:
+	for ticket, owner := range p.guestTickets {
+		owner.failed = errors.Join(owner.failed, p.runtimeCloseErr)
+		if resolveErr := ticket.ResolveTeardown(owner.failed); resolveErr != nil {
+			errs = append(errs, resolveErr)
+		} else if owner.failed != nil {
+			errs = append(errs, owner.failed)
+		} else {
+			delete(p.guestTickets, ticket)
+			p.freeSlot()
+		}
+	}
+	remaining := len(p.guestTickets)
+	p.guestMu.Unlock()
+	if remaining == 0 && p.runtimeCloseErr == nil && p.mgr != nil {
+		p.mgr.forgetRetained(p)
+	}
+	return errors.Join(errs...)
 }
 
 // inspectionFacts derives the static inputs to the route minimum budget from

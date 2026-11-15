@@ -299,7 +299,11 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		log.Error("failed to initialize plugin manager", "error", err)
 		return 1
 	}
-	defer func() { _ = pluginMgr.Close() }()
+	defer func() {
+		if err := pluginMgr.Close(); err != nil {
+			log.Error("close plugin manager", "error", err)
+		}
+	}()
 	pluginEngine, pluginEngineReason := plugins.EngineMode()
 	if plugins.Compiled {
 		log.Info("wasm plugin engine", "mode", pluginEngine, "reason", pluginEngineReason)

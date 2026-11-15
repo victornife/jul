@@ -228,15 +228,15 @@ Two fields exist for clients that poll or retry:
   limits, current charged classes, leases, active/waiting evaluations and the
   draining state. A configured slot value of `0` remains visible as `0` while
   the effective object reports its resolved count. Its
-  `request_path_integration` is `partial`: live plugin request paths acquire
-  leases and charge their buffers, but WAF request state, evaluation slots and
-  response-side buffering are not governed yet. `enforce` mode is therefore
-  not evidence that WAF traffic is gated, and zero usage does not mean traffic
-  is protected. `base_charge_bytes` and `base_charge_scope` describe the measured
+  `request_path_integration` is `partial`: plugin and WAF request/response
+  paths acquire or reuse leases and account their supported buffers and WAF
+  state, but spool protection and integrated acceptance remain outstanding.
+  Zero usage does not establish a whole-process memory bound.
+  `base_charge_bytes` and `base_charge_scope` describe the measured
   governor/context scaffolding only. `configured.max_response_header_bytes`
   and `effective.max_response_header_bytes` report the complete accounted
-  response-header ceiling used for the R3 worst-case term; runtime will reserve
-  the measured R3 amount, not the ceiling, before Coraza ingestion. This ceiling
+  response-header ceiling used for the R3 worst-case term; runtime reserves
+  an R3 estimate based on measured header shape before Coraza ingestion. This ceiling
   does not raise `max_buffered_bytes`. `plugin_guest_max_bytes`,
   `plugin_guest_live_instances`, and `plugin_guest_max_instances` report the
   configured aggregate capacity and live instance counts across compiled,

@@ -13,20 +13,15 @@ import (
 type inspectionLimitsComponent struct {
 	governor *inspection.Governor
 	limits   inspection.Limits
+	version  uint64
 }
 
-func (c *inspectionLimitsComponent) component() RuntimeComponent {
-	return ComponentInspectionLimits
-}
-
-func (c *inspectionLimitsComponent) commit() retirement {
-	if err := c.governor.PublishLimits(c.limits); err != nil {
-		panic(fmt.Sprintf("server: prepared inspection limits became invalid: %v", err))
+func (c *inspectionLimitsComponent) publish() error {
+	if c == nil || c.governor == nil {
+		return fmt.Errorf("inspection limits publisher is unavailable")
 	}
-	return nil
+	return c.governor.PublishLimitsIfVersion(c.version, c.limits)
 }
-
-func (c *inspectionLimitsComponent) abort() {}
 
 // withRouteMinimum attaches generation genID's route-aware minimum budget to
 // limits and validates the result, so a too-small enforce budget is refused
@@ -57,5 +52,5 @@ func (s *Server) publishStartupInspectionLimits(genID uint64) error {
 	if limits, err = s.withRouteMinimum(limits, genID); err != nil {
 		return err
 	}
-	return s.Inspection.PublishLimits(limits)
+	return s.Inspection.PublishLimitsIfVersion(s.Inspection.Snapshot().LimitsVersion, limits)
 }
