@@ -12,8 +12,8 @@ qualification, soak or maturity change.
 | --- | --- |
 | Starting `main` | `d151989435e49493d02ea895dce25b7125f3e2e8` (verified #718 merge, after I4) |
 | Latest checked `main` | `13126aadf419839560c5a51b2ab155760ca9e8bb` (#720 dependency updates) |
-| Published I2b head | `e2f1a555dbd700f1c05998c13e5b1749de1229fb` (prototype commit `ee55b72d`; latest main merged) |
-| Hosted CI | [Run 43705663340](https://github.com/victornife/jul/actions/runs/43705663340), manually dispatched for the published I2b head; pending |
+| Published I2b code/test head | `4af8bfdb1be1e6941df91974756c52976b02b1a6` (prototype `ee55b72d`; latest main merged) |
+| Hosted CI | [Run 43707306605](https://github.com/victornife/jul/actions/runs/43707306605), manually dispatched for `4af8bfdb`; all checks passed |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
@@ -369,14 +369,19 @@ On macOS arm64 with Go 1.27.4, the local worktree before integrating #719 passed
 ## Post-#720 verification on the published branch
 
 The code tests below ran on `aa5a8dd3`; `e2f1a555` adds only the checksummed current-probe
-documentation and raw outputs. `main` was `13126aad` (#720). Environment: macOS arm64, Go 1.27.4,
-CGO enabled unless specified. The full-tag `CI` workflow was manually dispatched against
-`e2f1a555` as run 43705663340 and is still in progress; no merge or PR is requested while I2b is
-blocked.
+documentation and raw outputs, and `4af8bfdb` adds focused guest-capacity coverage tests.
+`main` was `13126aad` (#720). Environment: macOS arm64, Go 1.27.4, CGO enabled unless specified.
+Full-tag hosted CI run 43707306605 passed on `4af8bfdb`. The preceding run 43705663340 on
+`e2f1a555` passed every check except the 90% changed-Go coverage gate (84.4%); the new tests
+raise the local combined coverage measurement above 90%, and the subsequent hosted coverage gate
+passed. No merge or PR is requested while I2b remains blocked.
 
 - `go test -count=1 -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./cmd/jul`: passed.
 - `go test -count=1 ./internal/inspection ./internal/config ./internal/configcontract ./internal/lifecycle ./internal/observability`: passed.
 - `go test -race -count=5 -tags wasmplugins ./internal/plugins -run '^(TestGuestCapacityRetainsFailedInstantiationWithoutModule|TestGuestCapacityStatsIncludesCompilingCandidate|TestGuestCapacityRemainsChargedDuringPoolHandoff|TestGuestCapacityRemainsChargedWhileClosedCallIsRunning|TestGuestRetirementClearsReleasedModuleAlias|TestGuestRetirementWakesCapacityWaiters|TestGuestStartupDoesNotInheritRetainingAllocator|TestGuestStartupRejectsModuleClosedByInitialize)$'`: passed.
+- `go test -count=1 -coverprofile=/tmp/jul-inspection-guest.cover ./internal/inspection`: passed, 92.4% package coverage.
+- `go test -count=1 -tags wasmplugins -coverprofile=/tmp/jul-plugins-guest.cover ./internal/plugins`: passed, 90.9% package coverage.
+- `go test -race -count=5 ./internal/inspection -run 'TestGuest(StateNames|CapacityMinimum|TicketResolveTeardown|CapacityRejectsInvalidAndOverflow)'` and `go test -race -count=3 -tags wasmplugins ./internal/plugins -run '^TestGuestHelpersWithoutGovernorAreNoops$'`: passed.
 - `go vet -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./internal/config`: passed.
 - `make generated-check && make config-check && python3 scripts/docs-check.py && git diff --check`: passed; 2,727 documentation checks passed, config fixtures loaded, generated artifacts were current.
 - `make format-check`: passed.
@@ -394,8 +399,9 @@ suite passed with the default CGO setting; the failed no-CGO run is not reported
 The Linux-only
 assessment harness tests cross-compiled but could not be run on this macOS host; no Linux
 container daemon was available. No load or A20 result is inferred from the focused lifecycle
-tests. The hosted CI run linked above is still pending. The implementation is not merged and has
-no I2b PR. The watcher ownership invariant, A20 qualification and a finite supported default
+tests. Hosted CI run 43707306605 passed, but this does not establish the watcher ownership
+invariant or A20. The implementation is not merged and has no I2b PR. The watcher ownership
+invariant, A20 qualification and a finite supported default
 remain explicitly blocked;
 do not close #700/#62 or claim final acceptance before I6b.
 
