@@ -201,15 +201,15 @@ metric dimension rather than request-handling behavior.
 | `jul_inspection_abandoned_evaluations` | Gauge | — | Merged / release pending | Evaluations still running after their request context ended. |
 | `jul_inspection_audit_abandoned` | Gauge | `measure` | Merged / release pending | WAF audit writer calls abandoned at their deadline that have not returned (`calls`) and their detached record bytes (`bytes`), which stay charged under the `audit` class until each call returns. |
 | `jul_inspection_audit_drops_total` | Counter | `reason` | Merged / release pending | WAF audit records not handed to their writer: the bounded audit-output set was full (`abandoned_full`), or the record's R5 construction or formatting charge was refused in enforce mode (`budget`). Phase-5 rules still ran. |
-| `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected request-body receive outcomes (`timeout`, `would_timeout`, `unsupported`); counted once per request by body-reading plugins (I2), not yet by the WAF. |
-| `jul_inspection_bytes` | Gauge | `class` | Merged / release pending | Process-wide charged bytes (`base`, `buffer`, `waf_state`); WAF state is an estimate, not a measured heap bound. Plugin request paths charge `base` and `buffer`; WAF paths are not yet integrated. |
+| `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected request-body receive outcomes (`timeout`, `would_timeout`, `unsupported`) from the shared deadline owner used by body-reading plugins and WAF. |
+| `jul_inspection_bytes` | Gauge | `class` | Merged / release pending | Process-wide charged bytes (`base`, `buffer`, `waf_state`, `audit`); WAF state is an estimate, not a measured heap bound. |
 | `jul_inspection_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide inspection byte ceiling. |
 | `jul_inspection_committed_overruns_total` | Counter | — | Merged / release pending | Non-refusable charges that exceeded the byte ceiling: already-admitted work (an audit record whose phase-5 inputs grew past its reserved estimate) is charged anyway so the debt stays visible. Nonzero means the ceiling was briefly exceeded by committed work. |
 | `jul_inspection_evaluations` | Gauge | `state` | Merged / release pending | Active and waiting process-wide inspection evaluations. |
 | `jul_inspection_evaluations_limit` | Gauge | — | Merged / release pending | Effective process-wide inspection evaluation slot limit. |
-| `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor; one per request through a plugin chain (WAF-only routes not yet integrated). |
-| `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state and evaluation slots. Enforce stops a request at its first rejection; observe continues and counts every later refused charge too. |
-| `jul_inspection_unslotted_logging_total` | Counter | — | Merged / release pending | Phase-5 logging evaluations that proceeded without a slot; phase-5 integration is pending. |
+| `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor across WAF and plugin inspection chains. |
+| `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state, evaluation slots and audit saturation. These are decisions, not necessarily unique requests; observe continues and can count several per request. |
+| `jul_inspection_unslotted_logging_total` | Counter | — | Merged / release pending | Phase-5 logging evaluations that proceeded without a slot. |
 | `jul_listener_conns` | Gauge | — | Released `v1.32.0` | Current concurrent connections across all listeners. |
 | `jul_managed_apply_finalization_errors_total` | Counter | `component` | Released `v2.0.0` | Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded. |
 | `jul_managed_apply_finalized_total` | Counter | `mode`, `operation`, `outcome`, `restored` | Released `v2.0.0` | Terminal async managed-apply outcomes, labeled by operation, mode, outcome and whether restoration succeeded (true/false/n/a). |
@@ -266,19 +266,19 @@ Metric labels must remain bounded and must never contain request paths, queries,
 client identity, destination URLs, raw errors, or secrets. See the
 [cardinality policy and operator playbook](core-http.md#label-cardinality-policy).
 
-### Inspection governor (#700 I1, I2)
+### Inspection governor (#700)
 
 I1 publishes configured limits and the process-owned governor snapshot. Since
 I2, the WASM plugin request path is governed: a plugin chain acquires one
 lease, charges its request-side host allocations (`base`, `buffer`) before
 making them, records `bytes` rejections (enforce `503`, or observe
 would-reject), and reports body-arrival outcomes in
-`jul_inspection_body_timeouts_total`. The WAF does not yet acquire leases,
-WAF-state charges or evaluation slots (I3), and plugin response-subscription
-buffers are not charged (I4). Zero WAF usage therefore does not demonstrate
-that WAF traffic is protected, and the unslotted-logging and
-abandoned-evaluation series stay idle. See
-[plugins.md](plugins.md#inspection-governor) for the governed allocations.
+`jul_inspection_body_timeouts_total`. I3a and I4 also integrate WAF request
+and response work, phase-5 audit ownership, and plugin response-subscription
+buffers. Zero usage alone does not demonstrate that inspection was applicable
+or that all requests are admissible. Guest-capacity and spool protection are
+not yet implemented. See [plugins.md](plugins.md#inspection-governor) and
+[waf.md](waf.md) for the governed allocations and their boundaries.
 
 Throttled warnings accompany rejections (`inspection budget saturated;
 request rejected`, or `…; observe mode would reject`, at most one per 10 s with
@@ -295,6 +295,17 @@ Static guest-capacity and evaluation-headroom estimates are not reported as
 measured zero. The response-header accounting ceiling and the route-aware
 minimum budget are defined; see
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
+
+For the optional external-alerting work in #628, the existing pressure inputs
+include `jul_inspection_rejections_total` (split enforce from observe),
+`jul_inspection_audit_drops_total`, `jul_inspection_audit_abandoned`, and
+`jul_inspection_abandoned_evaluations`. Audit drops count governor refusals,
+not formatter or writer failures; abandoned audit bytes are already included
+in the audit charge. Counters reset on process restart and observe decisions
+are not unique rejected requests. Apply rules only where inspection and the
+relevant WAF/audit output are active; missing scrapes are unknown, not healthy.
+There are no spool-quota or process-wide guest-capacity signals yet. Thresholds,
+delivery and rule validation remain owned by #628.
 
 ### Runtime resources and capacity (#431)
 
