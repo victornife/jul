@@ -11,14 +11,17 @@ qualification, soak or maturity change.
 | Item | State |
 | --- | --- |
 | Starting `main` | `d06538cecc1398b6e8bf6302b553f873cd44e941` (verified #717 merge, after I4) |
+| Latest verified `main` | `ed775fd5ce9836cafb8c137dab25231fb8ccc10f` (#722 reload safety) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below |
+| Checkpoint 5 | **Blocked**: I2b draft #721 at `14ebcb20` cannot establish A20 while wazero's cancellation watcher may retain guest memory after a reservation refund |
+| Checkpoint 6 | **Not started**: I6a #712 requires stable implemented resource contracts |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Resolve and review the I3b integration and ownership prerequisites; investigate I2b independently without claiming I3b protection |
+| Exact next action | Resolve and review the I3b integration prerequisites and the I2b last-alias teardown blocker; do not claim either protection |
 
 ## Checkpoint schedule and dependencies
 
@@ -28,14 +31,14 @@ qualification, soak or maturity change.
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Investigation: process-wide per-live-instance guest-capacity admission; #711; runtime implementation not yet started | Accepted guest design, plugin manager and supported finite default; no technical dependency on the WAF parser, though scheduled after I3b |
+| 5 — I2b | Blocked: unmerged draft #721 prototypes admission but does not prove guest-memory ownership; #711 | Supported last-alias teardown and interrupt behavior, failed-start drainage, and a measured finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
-Do not open runtime PRs until their prerequisite amendment and preceding scheduled checkpoint
-are confirmed merged. The child issues were created after checking existing tracking and linked
-to #700. The scheduling order does not itself create technical dependencies between unrelated
-resources.
+The maintainer requested publication of the I2b prototype as draft #721 while I3b remains blocked.
+This exception does not make the prototype merge-ready or change its acceptance requirements.
+The child issues were created after checking existing tracking and linked to #700. The scheduling
+order does not itself create technical dependencies between unrelated resources.
 
 ## Resolved recommendations and explicit blockers
 
@@ -247,9 +250,26 @@ The recommended next step is a reviewed public engine integration with per-trans
 and typed storage outcomes, followed by the ADR's filesystem, lifecycle and protocol tests.
 No upstream change has been submitted, and no logical spool quota is claimed.
 
+## I2b blocker and reload safety follow-up
+
+Draft #721 contains the guest-capacity prototype and reproducible
+[watcher evidence](https://github.com/victornife/jul/tree/14ebcb20/docs/reviews/evidence/2026-11-15-700-i2b-watcher)
+and [join experiment](https://github.com/victornife/jul/tree/14ebcb20/docs/reviews/evidence/2026-11-16-700-i2b-join).
+The pinned wazero v1.12.0 can retain guest memory in an unjoined cancellation watcher after Jul
+refunds its reservation. The isolated join experiment does not prove absence of all aliases or
+failed-start debt drainage and is not a supported production fix. A20, the finite guest default,
+the remaining adversarial review, and integrated qualification remain open.
+
+Independent reload corrections discovered during that investigation were merged in #722 as
+`ed775fd5ce9836cafb8c137dab25231fb8ccc10f` from reviewed head `bda851355b46019d4d3e88ad11093917d8e6d206`.
+They prevent false no-ops for order-sensitive or duplicate declarations, bind authentication and
+WAF to the owning route declaration, preserve duplicate backend state, and correct previews.
+Hosted CI reported 66 successful checks and two skips. The draft incorporated these changes at
+`14ebcb20`; they do not fix the guest or spool ownership blockers.
+
 ## Handoff rules
 
-I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b is blocked as described above; continue
-independent I2b investigation while preserving the scheduled checkpoint merge order. Do not mark
-I3b, I2b or I6a implemented merely because their designs or tracking issues exist; do not close
-#700/#62 or claim final acceptance before I6b.
+I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described
+above; I6a requires stable producer contracts. Do not mark I3b, I2b or I6a implemented merely
+because their designs or tracking issues exist; do not close #700/#62 or claim final acceptance
+before I6b.
