@@ -382,6 +382,12 @@ The regression tests in `4e9b1fb5` exercise cancellation, generation changes and
 publication conflict. On macOS arm64, the HR-07C full-tag coverage workload and its diff-scoring
 calculation passed at 135/148 (91.2162%); the two affected tests also passed with and without
 `-race`. Hosted checks for the later head must be verified separately.
+PR CI on `efff1288` also found 9/15 (60%) in the #407 changed-statement gate; focused
+effective guest-page boundary tests and the two local #407 coverage workloads measured
+15/15 (100%). Its full-tag race job failed in the Linux-only assessment harness:
+`TestExecuteBudgetChurnAcknowledgesReloads` reported unexpected in-flight request errors.
+That failure has not been reproduced locally on macOS and requires a hosted rerun and
+investigation if it persists; it is not evidence that the final race suite passed.
 
 - `go test -count=1 -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./cmd/jul`: passed.
 - `go test -count=1 ./internal/inspection ./internal/config ./internal/configcontract ./internal/lifecycle ./internal/observability`: passed.

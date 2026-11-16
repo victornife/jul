@@ -444,6 +444,30 @@ func TestValidatePluginMemoryLimit(t *testing.T) {
 	}
 }
 
+func TestEffectivePluginMemoryPages(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit Size
+		pages uint32
+		valid bool
+	}{
+		{"default", 0, 256, true},
+		{"one page", 1 << 16, 1, true},
+		{"partial second page", (1 << 16) + 1, 1, true},
+		{"maximum", (1 << 32) + (1 << 16) - 1, 1 << 16, true},
+		{"below one page", (1 << 16) - 1, 0, false},
+		{"above maximum", (1 << 32) + (1 << 16), 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pages, err := EffectivePluginMemoryPages(tt.limit)
+			if (err == nil) != tt.valid || pages != tt.pages {
+				t.Fatalf("EffectivePluginMemoryPages(%d) = (%d, %v), want (%d, valid=%t)", tt.limit, pages, err, tt.pages, tt.valid)
+			}
+		})
+	}
+}
+
 func TestValidatePluginsErrors(t *testing.T) {
 	good := "../../testdata/plugins/header-inject.wasm"
 	cases := map[string]*Config{
