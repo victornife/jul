@@ -5,10 +5,10 @@ This is the authoritative ownership model for Jul's mutable runtime resources
 identity is, what decides reuse versus replacement, and how it moves through
 **Prepare → Publish → Abort → Retire → drain → close**.
 
-The unmerged I2b branch's guest-ticket rows describe the intended ownership
-contract, not a verified guarantee: a wazero watcher can retain a closed
-instance after its capacity is refunded. See the
-[I2b blocker](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
+The unmerged I2b branch retains guest reservations for the process lifetime
+after teardown because a wazero watcher can retain a closed instance. This
+conservative policy does not satisfy the original A20 release contract; see the
+[I2b ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
 
 It deliberately does **not** repeat which configuration fields are hot-reloaded
 or restart-required. That truth is generated from one registry and lives in:
@@ -109,7 +109,7 @@ field up in the generated table rather than here.
 | Admin runtime | `PrepareAdmin` / `PrepareAdminRuntime` | `PreparedAdmin.Commit` | `PreparedAdmin.Abort` (once) | next Commit | `RetirePreparedRuntime`, asynchronous and bounded | audit file owner reference-counted | `TestRuntimeHealthyDetectsDegradedAuditSinkAndRepairAfterFix`, `TestServingChangeForcesReloadWhenAdminRuntimeDegraded` |
 | Access-log sinks | acquired in `buildHandlers`, lease staged | adopted with the generation | lease released by `Generation.Abort` | generation lease released; backing closes after the last owner | old generation keeps its lease until it drains; identical file policies share one writer ([policy-change limitation](known-limitations.md)) | yes, on last file owner | `TestBuildAccessSinksSamePathGenerationsPreserveJSON`, `TestBuildAccessSinksSharedFileLeaseLifetime`, `TestAccessLogCandidateAbortLeavesNoRealFile`, `TestFakeAccessSinkClosesOnlyAfterOldRequestsDrain` |
 | Response cache | — | — | — | process exit | — | at shutdown | [churn_test.go](../internal/cache/churn_test.go) |
-| Inspection governor | candidate limits are resolved without mutating the governor; replacement guests reserve against published limits | version-checked publication installs the limits; limits-only changes preserve the handler generation | no-op; candidate holds no live resources | process exit | existing leases, guest tickets and evaluation holders keep their accounting until explicit release; decreases drain above-limit usage | no | `TestInspectionLimitsPublishWithReloadAndPreserveProcessGovernor` ([inspection_reload_test.go](../internal/server/inspection_reload_test.go)) |
+| Inspection governor | candidate limits are resolved without mutating the governor; replacement guests reserve against published limits | version-checked publication installs the limits; limits-only changes preserve the handler generation | candidate guest debt remains charged | process exit | leases and evaluation holders release normally; guest teardown debt persists until process exit, including after decreases | no | `TestInspectionLimitsPublishWithReloadAndPreserveProcessGovernor` ([inspection_reload_test.go](../internal/server/inspection_reload_test.go)) |
 | Cache revalidation | — | lease admitted by the live generation | — | generation retirement cancels leases | bounded by `MaxOperation` and `shutdown_timeout` | context cancel | `TestRevalidationRefusedByRetiringGeneration`, `TestRepeatedRetirementWithActiveLeases`, `TestDrainCancelsAndBoundsLiveBackgroundWork` |
 | Upstream pool | `Registry.Begin`/`For` stage fresh pools; reused pools defer `UpdateBackends` | `Registry.Commit`, then `Activate` starts workers | `Registry.Abort` closes fresh pools only | `Commit` closes pools no longer wanted | old generations keep their pool snapshots; parked admission waiters are rejected | `Pool.Close`, `closeOnce` | `TestRegistryAbortKeepsLiveClosesStaged` |
 | Active health checker | health config is part of the pool shape | started by `Activate` | never started for aborted pools | pool `Close` | in-flight probe cancelled and its verdict dropped | goroutine exits on `Done` | `TestHealthProbeCancelledAndFencedOnPoolRetirement` ([health_retirement_test.go](../internal/upstream/health_retirement_test.go)), `TestProbeGRPCChurnQuiescence` |

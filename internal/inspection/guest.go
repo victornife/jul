@@ -19,6 +19,7 @@ const (
 	GuestBusy
 	GuestClosing
 	GuestFailedRetained
+	GuestTeardownUnconfirmed
 	GuestClosed
 )
 
@@ -44,7 +45,7 @@ func (g *Governor) guestSnapshotLocked() GuestCapacitySnapshot {
 
 // GuestStateNames returns the stable bounded states suitable for metrics.
 func GuestStateNames() []string {
-	return []string{"starting", "idle", "busy", "closing", "failed_retained"}
+	return []string{"starting", "idle", "busy", "closing", "failed_retained", "teardown_unconfirmed"}
 }
 
 // CheckGuestCapacityMinimum checks that one eager instance of each plugin can
@@ -125,7 +126,8 @@ func (g *Governor) ReserveGuestCapacity(generation, amount uint64) (*GuestTicket
 }
 
 // Transition moves a ticket through the instance lifecycle. GuestClosed may
-// be reported only after the owner has confirmed that teardown succeeded.
+// be reported only after the owner has confirmed last-alias teardown.
+// GuestTeardownUnconfirmed is irreversible process-lifetime debt.
 func (t *GuestTicket) Transition(next GuestState) error {
 	if t == nil || t.g == nil {
 		return &AdmissionError{Outcome: InvalidAccounting}
@@ -148,7 +150,7 @@ func (t *GuestTicket) Transition(next GuestState) error {
 	case GuestBusy:
 		valid = next == GuestIdle || next == GuestClosing
 	case GuestClosing:
-		valid = next == GuestClosed || next == GuestFailedRetained
+		valid = next == GuestClosed || next == GuestFailedRetained || next == GuestTeardownUnconfirmed
 	case GuestFailedRetained:
 		valid = next == GuestClosing
 	}
@@ -168,7 +170,9 @@ func (t *GuestTicket) Transition(next GuestState) error {
 }
 
 // ResolveTeardown releases the ticket only after the runtime owner confirms
-// teardown. Any reported failure retains the reservation as visible debt.
+// last-alias teardown from GuestClosing. A failure from GuestClosing retains
+// the reservation; repeating a failure in GuestFailedRetained is idempotent.
+// Process-lifetime unconfirmed debt cannot be resolved.
 func (t *GuestTicket) ResolveTeardown(closeErr error) error {
 	if t == nil || t.g == nil {
 		return &AdmissionError{Outcome: InvalidAccounting}
@@ -177,7 +181,16 @@ func (t *GuestTicket) ResolveTeardown(closeErr error) error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if t.state == GuestClosed {
-		return nil
+		if closeErr == nil {
+			return nil
+		}
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	if t.state == GuestTeardownUnconfirmed {
+		return &AdmissionError{Outcome: InvalidAccounting}
+	}
+	if t.state != GuestClosing && !(closeErr != nil && t.state == GuestFailedRetained) {
+		return &AdmissionError{Outcome: InvalidAccounting}
 	}
 	next := GuestClosed
 	if closeErr != nil {

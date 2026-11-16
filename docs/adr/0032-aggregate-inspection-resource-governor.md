@@ -6,6 +6,8 @@
   2026-11-13 amendment below was accepted when #714 merged as `16d98258` from head `faf3ead4`;
   implementation remains incomplete
   until the scheduled checkpoints and qualification gates pass.
+  The local I2b alternative retains guest teardown debt until process exit;
+  that conservative implementation does not change this ADR or claim A20.
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.

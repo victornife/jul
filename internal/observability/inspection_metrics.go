@@ -21,7 +21,7 @@ type InspectionMetricsSnapshot struct {
 	AuditAbandonedBytes                    uint64
 	CommittedOverruns                      uint64
 	GuestCapacityBytes, GuestCapacityLimit uint64
-	GuestInstances                         [5]uint64
+	GuestInstances                         [6]uint64
 }
 
 type inspectionCollector struct {
@@ -94,7 +94,7 @@ func newInspectionCollector() *inspectionCollector {
 			"Non-refusable inspection charges (already-admitted work whose inputs outgrew their reservation) that exceeded the byte ceiling.", nil, nil),
 		guestCapacity: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_inspection_guest_capacity_bytes",
-			Help: "Reserved effective linear-memory ceilings for starting, idle, busy, closing and failed-retained plugin instances; not actual memory or RSS.",
+			Help: "Reserved effective linear-memory ceilings for live and retained plugin instances; not actual memory or RSS.",
 		}),
 		guestLimit: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "jul_inspection_guest_capacity_bytes_limit",
@@ -102,7 +102,7 @@ func newInspectionCollector() *inspectionCollector {
 		}),
 		guestInstances: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "jul_inspection_guest_instances",
-			Help: "Plugin instances by reserved lifecycle state; failed_retained instances remain charged.",
+			Help: "Plugin instances by reserved lifecycle state; failed_retained and teardown_unconfirmed remain charged.",
 		}, []string{"state"}),
 	}
 	for _, class := range []string{"base", "buffer", "waf_state", "audit"} {
@@ -111,7 +111,7 @@ func newInspectionCollector() *inspectionCollector {
 	for _, state := range []string{"active", "waiting"} {
 		c.evaluations.WithLabelValues(state)
 	}
-	for _, state := range []string{"starting", "idle", "busy", "closing", "failed_retained"} {
+	for _, state := range []string{"starting", "idle", "busy", "closing", "failed_retained", "teardown_unconfirmed"} {
 		c.guestInstances.WithLabelValues(state)
 	}
 	for _, reason := range []string{"bytes", "waf_state", "evaluation", "audit", "guest_capacity"} {
@@ -168,7 +168,7 @@ func (c *inspectionCollector) Collect(ch chan<- prometheus.Metric) {
 		c.evaluationsLimit.Set(float64(s.EvaluationLimit))
 		c.guestCapacity.Set(float64(s.GuestCapacityBytes))
 		c.guestLimit.Set(float64(s.GuestCapacityLimit))
-		for i, state := range []string{"starting", "idle", "busy", "closing", "failed_retained"} {
+		for i, state := range []string{"starting", "idle", "busy", "closing", "failed_retained", "teardown_unconfirmed"} {
 			c.guestInstances.WithLabelValues(state).Set(float64(s.GuestInstances[i]))
 		}
 		c.abandoned.Set(float64(s.AbandonedEvaluations))

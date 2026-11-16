@@ -614,27 +614,34 @@ or routes without an upstream. Account for all enabled layers and overlapping
 generations when sizing the host.
 
 The unmerged I2b prototype's `[global.inspection].max_guest_capacity_bytes`
-is intended to limit the sum of the effective page-rounded `memory_limit` of
-each starting or live instance across plugin names and generations in
-`enforce` mode. **It is not a reliable aggregate bound:** a wazero watcher
-can retain guest memory after the reservation is refunded. I2b is blocked
-until that ownership gap is resolved; see the
-[reproduction and ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
+limits the sum of effective page-rounded `memory_limit` reservations in
+`enforce` mode. Wazero does not expose a way to join its cancellation watcher,
+so every reserved instance attempt remains charged for the **process lifetime**, even
+after successful close, cancellation, traps, or an aborted candidate. This is
+conservative accounting, not proof of the original A20 release contract; see
+the [ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
 The configured ceiling must fit at least
 one eager instance of every configured plugin; `jul check` rejects a shortfall
 in enforce mode and warns in observe mode without executing guest code. Idle
-instances remain charged; reuse does not charge again, and a failed teardown
-remains visible as retained capacity. The policy does not evict idle instances:
+instances remain charged; reuse does not charge again. Closed instances accrue
+`teardown_unconfirmed` debt; close failures are `failed_retained`. The policy does not evict idle instances:
 one idle pool may leave too little capacity for another plugin or a reload
 candidate. Size for expected pools **and** old/candidate overlap, and raise
-the limit separately before a full reload if needed. Observe mode tracks
-would-refuse decisions without enforcing the ceiling.
+the limit separately before a full reload if needed. Churn from `max_invocations`,
+traps, traffic bursts and failed reloads accumulates debt even when memory is
+later reclaimed. In enforce mode exhausted capacity refuses new instances and
+reload candidates; existing pooled instances can still serve. Observe mode
+records would-refuse decisions but admits over the ceiling, so it is not a
+memory bound. Raising the limit provides headroom but does not erase debt and
+must fit the host budget. A process restart resets accounting; use a controlled
+restart with sufficient overlap/host headroom and monitor the debt gauge.
 
 No finite production default has been approved. Omitting the setting tracks
 reservations but imposes no aggregate guest ceiling; it is not a protected
 configuration. Guest reservations are configured ceilings, not committed
 memory or RSS, and exclude compiled code, host allocations and other process
-resources.
+resources. Even in enforce mode this is a bound on reserved guest linear-memory
+ceilings, not on total process memory or RSS.
 
 Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`

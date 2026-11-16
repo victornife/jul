@@ -408,7 +408,7 @@
     {
       "name": "jul_inspection_guest_capacity_bytes",
       "type": "gauge",
-      "help": "Reserved effective linear-memory ceilings for starting, idle, busy, closing and failed-retained plugin instances; not actual memory or RSS.",
+      "help": "Reserved effective linear-memory ceilings for live and retained plugin instances; not actual memory or RSS.",
       "labels": [],
       "state": "merged_release_pending"
     },
@@ -422,7 +422,7 @@
     {
       "name": "jul_inspection_guest_instances",
       "type": "gauge",
-      "help": "Plugin instances by reserved lifecycle state; failed_retained instances remain charged.",
+      "help": "Plugin instances by reserved lifecycle state; failed_retained and teardown_unconfirmed remain charged.",
       "labels": [
         "state"
       ],

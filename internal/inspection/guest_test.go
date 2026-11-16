@@ -14,7 +14,7 @@ import (
 )
 
 func TestGuestStateNames(t *testing.T) {
-	want := []string{"starting", "idle", "busy", "closing", "failed_retained"}
+	want := []string{"starting", "idle", "busy", "closing", "failed_retained", "teardown_unconfirmed"}
 	got := GuestStateNames()
 	if len(got) != len(want) {
 		t.Fatalf("guest state names = %v, want %v", got, want)
@@ -75,11 +75,17 @@ func TestGuestTicketResolveTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := succeeded.Transition(GuestClosing); err != nil {
+		t.Fatal(err)
+	}
 	if err := succeeded.ResolveTeardown(nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := succeeded.ResolveTeardown(nil); err != nil {
 		t.Fatalf("duplicate confirmed teardown: %v", err)
+	}
+	if err := succeeded.ResolveTeardown(errors.New("late close failure")); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("failure reported after confirmed close = %v", err)
 	}
 
 	failed, err := g.ReserveGuestCapacity(2, 20)
@@ -87,6 +93,9 @@ func TestGuestTicketResolveTeardown(t *testing.T) {
 		t.Fatal(err)
 	}
 	closeErr := errors.New("runtime close failed")
+	if err := failed.Transition(GuestClosing); err != nil {
+		t.Fatal(err)
+	}
 	if err := failed.ResolveTeardown(closeErr); err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +113,77 @@ func TestGuestTicketResolveTeardown(t *testing.T) {
 	}
 	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || got.Instances[GuestFailedRetained] != 0 {
 		t.Fatalf("confirmed retry did not release capacity: %+v", got)
+	}
+}
+
+func TestGuestUnconfirmedTeardownCannotBeRefunded(t *testing.T) {
+	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 100, 1), Hooks{})
+	ticket, err := g.ReserveGuestCapacity(1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Transition(GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Transition(GuestTeardownUnconfirmed); err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.ResolveTeardown(nil); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("unconfirmed debt resolved: %v", err)
+	}
+	if err := ticket.Transition(GuestClosed); !IsOutcome(err, InvalidAccounting) {
+		t.Fatalf("unconfirmed debt closed: %v", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 20 || got.Instances[GuestTeardownUnconfirmed] != 1 {
+		t.Fatalf("unconfirmed debt lost: %+v", got)
+	}
+}
+
+func TestGuestResolveTeardownRejectsPrematureResolution(t *testing.T) {
+	for _, state := range []GuestState{GuestStarting, GuestIdle, GuestBusy, GuestFailedRetained} {
+		t.Run(GuestStateNames()[state], func(t *testing.T) {
+			limits := testLimits(Enforce, 1, 0, 100, 1)
+			limits.MaxGuestCapacityBytes = 20
+			g := newTestGovernor(t, limits, Hooks{})
+			ticket, err := g.ReserveGuestCapacity(1, 20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch state {
+			case GuestIdle, GuestBusy:
+				if err := ticket.Transition(state); err != nil {
+					t.Fatal(err)
+				}
+			case GuestFailedRetained:
+				if err := ticket.Transition(GuestClosing); err != nil {
+					t.Fatal(err)
+				}
+				if err := ticket.ResolveTeardown(errors.New("close failed")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before := g.Snapshot().GuestCapacity
+			if err := ticket.ResolveTeardown(nil); !IsOutcome(err, InvalidAccounting) {
+				t.Errorf("successful teardown from %v = %v, want invalid accounting", state, err)
+			}
+			if got := g.Snapshot().GuestCapacity; got != before {
+				t.Errorf("premature teardown changed capacity: before=%+v after=%+v", before, got)
+			}
+			err = ticket.ResolveTeardown(errors.New("close failed"))
+			if state == GuestFailedRetained {
+				if err != nil {
+					t.Errorf("repeated failure = %v", err)
+				}
+			} else if !IsOutcome(err, InvalidAccounting) {
+				t.Errorf("failure teardown from %v = %v, want invalid accounting", state, err)
+			}
+			if got := g.Snapshot().GuestCapacity; got != before {
+				t.Errorf("failure resolution changed capacity: before=%+v after=%+v", before, got)
+			}
+			if _, err := g.ReserveGuestCapacity(2, 1); !IsOutcome(err, GuestCapacitySaturated) {
+				t.Errorf("admission after premature teardown = %v, want saturation", err)
+			}
+		})
 	}
 }
 

@@ -569,10 +569,6 @@ type plugin struct {
 	potential *guestPotential
 	// gov is the process inspection governor every request is admitted to.
 	gov *inspection.Governor
-	// closeOnContextDone records whether wazero starts an unjoinable module
-	// watcher that can retain a partial instance after InstantiateModule fails.
-	closeOnContextDone bool
-
 	// closed is set when the plugin's generation is torn down; preparing
 	// holds the requests reading their body for it, so close can abort them.
 	closed    atomic.Bool
@@ -634,7 +630,6 @@ func (m *Manager) compilePlugin(ctx context.Context, name string, pc config.Plug
 		maxInstances: uint64(maxInstances),
 	}
 	m.trackPotential(p.potential)
-	p.closeOnContextDone = true
 	if p.fetchTimeout <= 0 {
 		p.fetchTimeout = 5 * time.Second
 	}
@@ -995,14 +990,20 @@ func (p *plugin) resolveGuest(ticket *inspection.GuestTicket, teardownErr error)
 		return false, &inspection.AdmissionError{Outcome: inspection.InvalidAccounting}
 	}
 	owner.failed = errors.Join(owner.failed, teardownErr)
+	if owner.failed == nil {
+		// Wazero provides no join for its cancellation watcher; successful
+		// close is not proof that the module's memory is unreachable.
+		if err := ticket.Transition(inspection.GuestTeardownUnconfirmed); err != nil {
+			return false, err
+		}
+		owner.active = false
+		delete(p.guestTickets, ticket)
+		return true, nil
+	}
 	if err := ticket.ResolveTeardown(owner.failed); err != nil {
 		return false, err
 	}
 	owner.active = false
-	if owner.failed == nil {
-		delete(p.guestTickets, ticket)
-		return true, nil
-	}
 	return false, nil
 }
 
@@ -1029,8 +1030,6 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 			var closeErr error
 			if mod != nil {
 				closeErr = mod.Close(context.Background())
-			} else if p.closeOnContextDone {
-				closeErr = errGuestTeardownUnconfirmed
 			}
 			transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
 			released, resolveErr := p.resolveGuest(ticket, closeErr)
@@ -1061,14 +1060,16 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 	}
 	if err := p.transitionGuest(ticket, state); err != nil {
 		closeErr := mod.Close(context.Background())
+		transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
 		released, resolveErr := p.resolveGuest(ticket, closeErr)
 		p.finishGuestClose()
-		return nil, errors.Join(err, closeErr, resolveErr), !released || resolveErr != nil
+		return nil, errors.Join(err, closeErr, transitionErr, resolveErr), !released || resolveErr != nil
 	}
 	return &pooledModule{mod: mod, ticket: ticket}, nil, false
 }
 
-// discard closes an instance and frees its slot only after confirmed teardown.
+// discard closes an instance. A successful close frees its local slot, but
+// its process reservation remains charged because last-alias teardown is unknown.
 func (p *plugin) discard(pm *pooledModule) {
 	if pm == nil {
 		return
@@ -1448,14 +1449,25 @@ func (p *plugin) closeRuntime(ctx context.Context) error {
 	}
 drained:
 	for ticket, owner := range p.guestTickets {
-		owner.failed = errors.Join(owner.failed, p.runtimeCloseErr)
-		if resolveErr := ticket.ResolveTeardown(owner.failed); resolveErr != nil {
-			errs = append(errs, resolveErr)
-		} else if owner.failed != nil {
+		if p.runtimeCloseErr != nil && !errors.Is(owner.failed, p.runtimeCloseErr) {
+			owner.failed = errors.Join(owner.failed, p.runtimeCloseErr)
+		}
+		if owner.failed != nil {
+			if transitionErr := ticket.Transition(inspection.GuestClosing); transitionErr != nil {
+				errs = append(errs, transitionErr)
+			} else if resolveErr := ticket.ResolveTeardown(owner.failed); resolveErr != nil {
+				errs = append(errs, resolveErr)
+			}
 			errs = append(errs, owner.failed)
 		} else {
-			delete(p.guestTickets, ticket)
-			p.freeSlot()
+			if err := ticket.Transition(inspection.GuestClosing); err != nil {
+				errs = append(errs, err)
+			} else if err := ticket.Transition(inspection.GuestTeardownUnconfirmed); err != nil {
+				errs = append(errs, err)
+			} else {
+				delete(p.guestTickets, ticket)
+				p.freeSlot()
+			}
 		}
 	}
 	remaining := len(p.guestTickets)

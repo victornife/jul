@@ -27,6 +27,23 @@ buffer. No supported Jul-side way to wait for this watcher has been established.
 Normal I2b retirement remains blocked until an upstream or other supported
 solution proves the required last-alias ownership and cancellation behavior.
 
+The local conservative alternative retains all reserved guest attempts
+until process exit, rather than proving watcher completion. The original
+`reproduce-retained.sh` passed both watcher cases on macOS arm64 with Go 1.27.4,
+with and without `PROBE_RACE=1`. Those results used the original script, which
+removed its fixture recursively. The modified script has **not been run**.
+When approved for execution, use
+`bash docs/reviews/evidence/2026-11-15-700-i2b-watcher/reproduce-retained.sh`
+and repeat with `PROBE_RACE=1` to exercise this same paused watcher against that
+alternative. This demonstrates retention for the reproduced interleaving, not
+eventual reclamation or original A20 acceptance. The modified script creates
+the repository-local `.i2b-watcher-probe` fixture exclusively with mode 0700,
+refuses an existing path and leaves the fixture for manual inspection, including
+on failure; a second run requires the existing fixture to be dealt with first.
+It does not modify the pinned dependency. Go and the tests may clean their own
+temporary directories within the fixture. The private directory does not guard
+against concurrent interference by other processes running as the same user.
+
 ## Source identity
 
 The measured tree was dirty on top of `41820205ee956dd6ff1e75435a919c5c402d5840`;

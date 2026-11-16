@@ -11,12 +11,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
-- **Unmerged I2b prototype, blocked:** an optional process-wide guest-capacity
-  ceiling tracks starting, idle, busy and retiring WASM instances across
-  generations, and limits-only reloads avoid warming replacement instances.
-  A wazero watcher can retain memory after a reservation is refunded, so the
-  prototype is not a reliable aggregate bound. Omission is unbounded, and no
-  finite production default or integrated acceptance is claimed.
+- **Unmerged I2b prototype:** guest reservations are conservatively retained
+  for the process lifetime after teardown, including failed candidates, because
+  wazero exposes no watcher join. This avoids premature refunds but eventually
+  exhausts a finite enforce budget under instance churn. Omission is unbounded;
+  no finite default, original A20 acceptance or integrated acceptance is claimed.
 - Plugin `memory_limit` values below one 64 KiB WebAssembly page are now
   rejected instead of silently selecting the 16 MiB default. Limits whose
   page-rounded value exceeds 4 GiB are also rejected before wazero can panic.

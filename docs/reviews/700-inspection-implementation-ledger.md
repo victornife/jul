@@ -18,12 +18,12 @@ qualification, soak or maturity change.
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below; the blocker update merged as #718 |
-| Checkpoint 5 | **Blocked**: I2b watcher teardown can retain guest memory after ticket refund; draft #721 is not merge-ready and provides no reliable aggregate protection |
+| Checkpoint 5 | **Blocked (B1)**: process-lifetime debt exhausts a finite enforce budget under normal churn; #721 remains draft and original A20 is not accepted |
 | Checkpoint 6 | **Not started**: I6a #712 requires stable implemented resource contracts |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-15 I2b watcher reproduction](evidence/2026-11-15-700-i2b-watcher/README.md); [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Resolve and review the I3b integration prerequisites and the I2b last-alias teardown blocker; do not claim either protection |
+| Exact next action | Review the I2b process-lifetime debt tradeoff and contract/default decisions; resolve I3b integration prerequisites |
 
 ## Checkpoint schedule and dependencies
 
@@ -33,7 +33,7 @@ qualification, soak or maturity change.
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Blocked: unmerged draft #721 prototypes admission but does not prove guest-memory ownership; #711 | Supported last-alias teardown and interrupt behavior, failed-start drainage, and a measured finite default; no technical dependency on the WAF parser, though scheduled after I3b |
+| 5 — I2b | Blocked: conservative process-lifetime debt exhausts finite enforce budgets under ordinary churn; draft #721, #711 | Resolve B1 and the release contract, review, and determine a measured finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
@@ -264,6 +264,84 @@ merged in #723 as `9c70b64d`.
 
 ## I2b implementation progress
 
+### Local process-lifetime debt alternative
+
+The current local worktree on `cbdc0c17` uses public wazero APIs and keeps every
+reserved attempted guest charged after successful module or runtime close. It
+does not assume the cancellation watcher has terminated, including when a
+failed start returns no module. `teardown_unconfirmed` is an irreversible
+process-scope aggregate counter; successful teardown frees the plugin's local
+instance slot and drops the ticket object, not its charge. Close failures
+remain `failed_retained` and retain their owner/error. Active calls and pool
+handoffs remain protected until they finish. Normal cancellation remains
+enabled. The counter need not represent memory still allocated.
+
+The local slot can be reused after a successful close or an on-demand failed
+start that returned no module, even if a watcher may still retain memory;
+the separate process reservation remains charged. An actual close error keeps
+the slot as well as the charge. The unconfirmed watcher alone does not block
+the local slot.
+
+**B1 — blocking availability defect:** a finite enforce cap may be exhausted
+by normal churn, traps and failed candidates; existing pooled instances can continue, but new instances and
+reload candidates are refused. A limits-only increase can add headroom without
+releasing debt; restarting the process resets it. Observe continues admission
+over the cap and therefore does not bound guest capacity. Omission remains
+unbounded; there is no evidence for a finite default. Memory outside guest
+linear-memory ceilings and RSS are not bounded by this control. This is
+not acceptable normal enforce behavior; it does **not** establish original A20
+completion, eventual drainage, or an ADR amendment. For example, with one
+sequential pool, 16 MiB per guest, `max_invocations=1000` and a 256 MiB cap,
+16 retired guests exhaust the cap after approximately 16,000 guest calls;
+concurrency, errors or reloads can exhaust it sooner. #721 remains draft;
+this finding is unresolved, and integrated qualification remains open.
+
+**NB2 — corrected lifecycle API:** `ResolveTeardown(nil)` previously refunded
+from `starting`, `idle`, `busy` and `failed_retained`, and
+`ResolveTeardown(err)` could incorrectly move a live ticket to
+`failed_retained`, enabling a later close/refund. The focused regressions
+reproduced both bypasses. Resolution now requires `closing`; repeated failures
+in `failed_retained` and repeated success in `closed` are idempotent. Runtime
+close moves idle/retained tickets through `closing` before recording errors,
+preserving both module and runtime errors without accumulating duplicates on
+retry. Successful closes still enter `teardown_unconfirmed`. This correction
+does not resolve B1.
+
+Local validation on macOS arm64, Go 1.27.4 (with `TMPDIR` and `GOTMPDIR`
+set to a repository-local scratch directory except where noted):
+
+- `go test -race -count=1 -tags wasmplugins ./internal/inspection ./internal/plugins ./internal/observability`:
+  passed after the lifecycle corrections, using the shell's inherited environment.
+- After the `ResolveTeardown`/`closeRuntime` state-machine corrections,
+  `TMPDIR="$PWD/.nb2-review-scratch" GOTMPDIR="$PWD/.nb2-review-scratch" go test -race -count=3 -tags wasmplugins ./internal/inspection ./internal/plugins -run '^(TestGuestResolveTeardownRejectsPrematureResolution|TestGuestTicketResolveTeardown|TestGuestUnconfirmedTeardownCannotBeRefunded|TestGuestRuntimeCloseFailureFromIdleRetainsDebtOnRetry|TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure|TestFailedGuestCandidateReportsPriorRuntimeCloseFailure|TestGuestCapacityRetainsModuleCloseFailureAfterSuccessfulRuntimeClose|TestGuestCapacityDoesNotForgetFailedRuntimeCloseOnRetry|TestManagerKeepsRuntimeCloseErrorWithoutGuestTickets|TestGuestCapacityRemainsChargedDuringPoolHandoff)$'`:
+  passed both packages.
+- After those corrections,
+  `TMPDIR="$PWD/.nb2-review-scratch" GOTMPDIR="$PWD/.nb2-review-scratch" go test -tags wasmplugins ./internal/inspection ./internal/plugins`:
+  passed both packages.
+- The following watcher, broader race, full-tag and vet results predate the
+  subsequent `ResolveTeardown`/`closeRuntime` state-machine corrections:
+- `bash docs/reviews/evidence/2026-11-15-700-i2b-watcher/reproduce-retained.sh`
+  and the same command with `PROBE_RACE=1`: passed both paused-watcher cases
+  using the original script; the subsequently modified script has not run.
+- `go test -race -count=3 -tags wasmplugins ./internal/plugins ./internal/inspection ./internal/observability -run 'TestGuest(Capacity|Retirement|Startup|Cancellation|Unconfirmed|Teardown)|TestFailedGuestCandidate|TestInstanceStartRespectsRequestCancellation'`:
+  passed, including repeated failed candidates in enforce and observe modes.
+- `go test -race -count=1 -tags 'wasmplugins waf grpc http3' ./internal/inspection ./internal/plugins ./internal/observability ./internal/app ./internal/server ./cmd/jul`:
+  passed before the final two focused tests and before the subsequent
+  `ResolveTeardown`/`closeRuntime` corrections.
+- `go test -p 2 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./...`:
+  passed before the final two focused tests and before the subsequent
+  `ResolveTeardown`/`closeRuntime` corrections. Its first run failed the
+  config-description contract after an edit; restoring the expected first
+  sentence fixed it, and the full rerun passed.
+- `go vet -tags 'wasmplugins waf grpc http3' ./internal/inspection ./internal/plugins ./internal/observability ./internal/app ./internal/server ./cmd/jul`:
+  passed before the state-machine corrections.
+- After those corrections, `python3 scripts/docs-check.py`: 2727 passed, 0 failed.
+
+The historical blocker and prior test results below describe the earlier
+prototype; they are not claims about the local conservative implementation.
+
+### Historical implementation and blocker
+
 The independent I2b branch includes `bea7ef8b`, which rejects sub-page plugin memory limits and
 effective limits above 4 GiB, and `8c4ec5f1`, which propagates request cancellation into on-demand
 guest startup and closes an instance that finishes starting after cancellation. A deterministic
@@ -316,7 +394,7 @@ result is approval of the current blocked head.
 | Application shutdown discarded `Manager.Close` errors, including the case where a retained owner still has work in flight. | Log the manager close error in `app.Serve`; shutdown does not block indefinitely waiting for guest work. The retained reservation remains visible while the process is running. |
 | A second runtime close could hide the first error if no ticket retained it. | Preserve the first close result, including when there are no guest tickets. `TestManagerKeepsRuntimeCloseErrorWithoutGuestTickets` covers the retry. |
 | A failed start could inherit an experimental allocator that retains guest memory; `_initialize` could also return an already-closed module as usable. | Isolate startup context values while retaining cancellation and deadlines; reject a closed module. `TestGuestStartupDoesNotInheritRetainingAllocator` and `TestGuestStartupRejectsModuleClosedByInitialize` cover these paths. |
-| Wazero can return no module after a failed start even though teardown is not proven. The previous nil-module path refunded the guest ticket, while a non-nil failed module was closed explicitly. | Treat a nil module on an instantiate error as `errGuestTeardownUnconfirmed`; retain the ticket and instance slot as visible debt. `TestGuestCapacityRetainsFailedInstantiationWithoutModule` exercises a real trapping start. |
+| Wazero can return no module after a failed start even though teardown is not proven. The previous nil-module path refunded the guest ticket, while a non-nil failed module was closed explicitly. | The earlier prototype retained the ticket and slot. The current conservative alternative retains the charge for process lifetime while freeing the local slot. `TestGuestCapacityRetainsFailedInstantiationWithoutModule` exercises a real trapping start. |
 | Configured guest potential was absent from status while a candidate was still compiling, because registration happened only after compile and ABI negotiation. | Track candidate potential before compilation and transfer it atomically to the compiled-plugin set. `TestGuestCapacityStatsIncludesCompilingCandidate` checks potential, live count, and drainage on close. |
 
 Temporary Go overlays of earlier local implementations reproduced the route, active-host-call,
@@ -330,7 +408,7 @@ Before the pool-handoff correction, the new permanent regression failed with 16 
 the handoff. A separate scheduling-only overlay showed 2,424,832 bytes of guest memory still
 reachable in that state; this is a local observation, not a process-wide memory measurement.
 
-**Blocking ownership finding — high, confidence 9/10.** Pinned wazero v1.12.0's
+**Historical blocking ownership finding — high, confidence 9/10.** Pinned wazero v1.12.0's
 `CloseModuleOnCanceledOrTimeout` closes its watcher cancellation channel without waiting for the
 goroutine. `Module.Close` does not clear the module's linear-memory buffer. If the watcher is
 delayed, it can still reach the module while Jul has already refunded its ticket, allowing new
@@ -340,19 +418,21 @@ last-alias condition; it does not depend on guest memory being equivalent to pro
 The [dated probe and raw output](evidence/2026-11-15-700-i2b-watcher/README.md) force that
 interleaving by pausing the watcher **before** its original `select`, where the original
 cancellation branch still uses the module. The pre-fix prototype refunded a trapping start's
-64 KiB ticket while the watcher held a module with 64 KiB of linear memory. That nil-module
-failure path is now corrected: production records whether close-on-context-done is enabled and
-retains the ticket/slot if a start returns no module without confirmed teardown.
-`TestGuestCapacityRetainsFailedInstantiationWithoutModule` passes. The pre-fix probe also showed
+64 KiB ticket while the watcher held a module with 64 KiB of linear memory. An intermediate
+prototype retained both ticket and slot for a nil-module failure when close-on-context-done was
+enabled. The current conservative alternative instead retains the process charge but frees the
+local slot, as described above; `TestGuestCapacityRetainsFailedInstantiationWithoutModule`
+exercises the direct failed-start path. The pre-fix probe also showed
 a real guest retirement refunding its 16 MiB ceiling while a weak pointer found 2,424,832 bytes
-still reachable after forced GC; normal retirement remains unfixed. Both historical failures
+still reachable after forced GC; that prototype also refunded normal retirement. Both historical failures
 reproduced with and without `-race`; the race run reported no data race.
 The branch has no established public API to join these watchers, and the same cancellation logic
 was present in the latest upstream source checked on 2026-11-15. Timed sleeps, unsafe access,
 finalizers and disabling guest cancellation are not acceptable substitutes. A reviewed upstream
 fix or another supported solution must establish the last-alias and interruption invariants,
-with failed-start, normal-close, overlap, cancellation and drainage tests. Until then I2b is
-blocked and its configured ceiling and gauges are not a reliable aggregate bound.
+with failed-start, normal-close, overlap, cancellation and drainage tests. The conservative
+alternative avoids this early refund by retaining debt until process exit, but B1 blocks I2b
+because normal churn exhausts finite enforce limits.
 
 On 2026-11-16, an isolated [watcher-join experiment](evidence/2026-11-16-700-i2b-join/README.md)
 prevented the reproduced early startup return on one host and passed its focused reachability

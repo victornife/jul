@@ -526,7 +526,7 @@ Labels fall into three classes by what bounds them:
 | `jul_inspection_rejections_total` | `reason`, `mode` | `bytes`/`waf_state`/`evaluation`/`audit`/`guest_capacity` × `enforce`/`observe` |
 | `jul_inspection_audit_drops_total` | `reason` | `abandoned_full`, `budget` |
 | `jul_inspection_audit_abandoned` | `measure` | `calls`/`bytes` |
-| `jul_inspection_guest_instances` | `state` | `starting`/`idle`/`busy`/`closing`/`failed_retained` |
+| `jul_inspection_guest_instances` | `state` | `starting`/`idle`/`busy`/`closing`/`failed_retained`/`teardown_unconfirmed` |
 | `jul_inspection_guest_capacity_bytes`, `jul_inspection_guest_capacity_bytes_limit` | — | single series each |
 | `jul_inspection_body_timeouts_total` | `protocol`, `result` | `h1`/`h2`/`h3` × `timeout`/`would_timeout`/`unsupported` |
 | `jul_inspection_leases`, `jul_inspection_bytes_limit`, `jul_inspection_evaluations_limit`, `jul_inspection_unslotted_logging_total`, `jul_inspection_abandoned_evaluations`, `jul_inspection_committed_overruns_total` | — | single series each |

@@ -32,10 +32,12 @@ request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
 `body_timeout` bounds body-reading plugin uploads). I3a and I4 added WAF
 request/response accounting and plugin response-subscription charges. Spool
-protection remains blocked. The unmerged I2b prototype can refund guest
-capacity while a wazero watcher still retains guest memory, so even a
-configured ceiling is not a reliable bound; omission is unbounded. See the
-[I2b ownership blocker](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
+protection remains blocked. The unmerged I2b prototype retains guest capacity
+after every teardown for the process lifetime: churn and failed candidates can
+exhaust a finite enforce ceiling, requiring increased headroom or a controlled
+restart. Observe does not enforce; omission is unbounded. This is not the
+original A20 release guarantee. See the
+[I2b ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
 No integrated resource acceptance is claimed. The route-aware minimum budget
 is validated statically from compiled limits, which
 also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:
@@ -717,9 +719,9 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   copies, request state, generated and replacement bodies) are charged to the
   process-wide inspection budget and refused with `503` when it is exhausted;
   response-subscription buffers are also charged (#700 I4). The unmerged I2b
-  prototype tracks a separate guest-capacity ceiling but can refund it before
-  a wazero watcher releases memory. It is not a reliable aggregate bound, and
-  no finite production default has been approved.
+  prototype retains closed guest reservations until process exit because a
+  wazero watcher can outlive close. A finite enforce cap can be exhausted by
+  churn; observe is not a bound. No finite production default is approved.
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,

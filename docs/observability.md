@@ -163,10 +163,10 @@ metric dimension rather than request-handling behavior.
 ### Exported Jul.IA metric families
 
 The guest-capacity families below are currently present only on the unmerged,
-blocked I2b branch; their contract state describes intended post-merge status.
-Their counters can drop before a wazero watcher releases guest memory, so
-they must not be used as evidence of a complete aggregate bound. See the
-[I2b blocker](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
+I2b branch; their contract state describes intended post-merge status.
+`teardown_unconfirmed` is process-lifetime accounting debt, not a live-instance
+or actual-memory measurement. See the
+[I2b ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
 
 | Metric | Type | Labels | Contract | Description |
 | --- | --- | --- | --- | --- |
@@ -213,9 +213,9 @@ they must not be used as evidence of a complete aggregate bound. See the
 | `jul_inspection_committed_overruns_total` | Counter | — | Merged / release pending | Non-refusable charges that exceeded the byte ceiling: already-admitted work (an audit record whose phase-5 inputs grew past its reserved estimate) is charged anyway so the debt stays visible. Nonzero means the ceiling was briefly exceeded by committed work. |
 | `jul_inspection_evaluations` | Gauge | `state` | Merged / release pending | Active and waiting process-wide inspection evaluations. |
 | `jul_inspection_evaluations_limit` | Gauge | — | Merged / release pending | Effective process-wide inspection evaluation slot limit. |
-| `jul_inspection_guest_capacity_bytes` | Gauge | — | Merged / release pending | Sum of reserved per-instance linear-memory ceilings across starting, idle, busy, closing and failed-retained plugin instances; not committed memory or RSS. |
+| `jul_inspection_guest_capacity_bytes` | Gauge | — | Merged / release pending | Sum of live and retained per-instance linear-memory ceilings; not committed memory or RSS. |
 | `jul_inspection_guest_capacity_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide guest-capacity ceiling; zero means no finite ceiling is configured. |
-| `jul_inspection_guest_instances` | Gauge | `state` | Merged / release pending | Plugin instances by reserved lifecycle state; failed-retained instances remain charged. |
+| `jul_inspection_guest_instances` | Gauge | `state` | Merged / release pending | Reservations by lifecycle state; `failed_retained` and `teardown_unconfirmed` remain charged. |
 | `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor; plugin chains and WAF paths acquire or reuse one per request. |
 | `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state, evaluation slots, audit and guest capacity. These count admission decisions, not unique rejected requests. |
 | `jul_inspection_unslotted_logging_total` | Counter | — | Merged / release pending | Phase-5 logging evaluations that proceeded without a slot. |

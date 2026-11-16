@@ -128,9 +128,9 @@ func TestInstanceStartRespectsRequestCancellation(t *testing.T) {
 		if len(p.slots) != 0 {
 			t.Fatal("canceled instance start retained a local slot")
 		}
-		if got := gov.Snapshot().GuestCapacity; got.ReservedBytes != 0 ||
-			got.Instances != ([inspection.GuestClosed]uint64{}) {
-			t.Fatalf("failed instantiate leaked guest capacity: %+v", got)
+		if got := gov.Snapshot().GuestCapacity; got.ReservedBytes != 64<<20 ||
+			got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
+			t.Fatalf("cancelled instantiate lost debt: %+v", got)
 		}
 		if len(p.guestTickets) != 0 {
 			t.Fatalf("failed instantiate retained %d guest tickets", len(p.guestTickets))

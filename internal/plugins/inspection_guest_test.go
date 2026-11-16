@@ -272,16 +272,17 @@ func TestGuestCapacityEnforceTracksReuseAndCleansFailedCandidate(t *testing.T) {
 	if !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
 		t.Fatalf("candidate build error = %v, want guest-capacity refusal", err)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
-		got.Instances[inspection.GuestIdle] != 1 || got.Instances[inspection.GuestFailedRetained] != 0 {
-		t.Fatalf("failed candidate leaked or released a reservation: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
+		got.Instances[inspection.GuestIdle] != 1 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
+		t.Fatalf("failed candidate debt = %+v", got)
 	}
 
 	if err := old.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
-		t.Fatalf("old generation close left %d bytes reserved", got.ReservedBytes)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
+		got.Instances[inspection.GuestTeardownUnconfirmed] != 2 {
+		t.Fatalf("retired generation debt = %+v", got)
 	}
 }
 
@@ -411,6 +412,96 @@ func TestGuestCapacityObserveAllowsAndCountsOverLimitGenerations(t *testing.T) {
 	}
 }
 
+func TestGuestRetirementDebtAdmissionAndLimitIncrease(t *testing.T) {
+	for _, mode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+		t.Run(string(mode), func(t *testing.T) {
+			limits := testLimits()
+			limits.Mode = mode
+			limits.MaxGuestCapacityBytes = 16 << 20
+			m, _, g, recorder := govManager(t, limits)
+			cfg := map[string]config.PluginConfig{
+				"guest": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+			}
+			old, err := m.Build(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := old.Close(); err != nil {
+				t.Fatal(err)
+			}
+			candidate, err := m.Build(context.Background(), cfg)
+			if mode == inspection.Enforce {
+				if !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) || candidate != nil {
+					t.Fatalf("admission with debt = %v, %v", candidate, err)
+				}
+				limits.MaxGuestCapacityBytes = 32 << 20
+				if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, limits); err != nil {
+					t.Fatal(err)
+				}
+				candidate, err = m.Build(context.Background(), cfg)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
+				got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || got.Instances[inspection.GuestIdle] != 1 {
+				t.Fatalf("debt plus candidate = %+v", got)
+			}
+			rejections, _ := recorder.snapshot()
+			if got := rejections["guest_capacity/"+string(mode)]; got != 1 {
+				t.Fatalf("saturation decisions = %d, want 1", got)
+			}
+			if err := candidate.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
+				got.Instances[inspection.GuestTeardownUnconfirmed] != 2 {
+				t.Fatalf("candidate retirement debt = %+v", got)
+			}
+		})
+	}
+}
+
+func TestFailedGuestCandidateDebtRespectsModes(t *testing.T) {
+	for _, mode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+		t.Run(string(mode), func(t *testing.T) {
+			limits := testLimits()
+			limits.Mode = mode
+			limits.MaxGuestCapacityBytes = 64 << 10
+			m, _, g, recorder := govManager(t, limits)
+			wasm := assemble(nil, []wasmFunc{{export: "_initialize", body: []byte{opUnreachable}}, fnRequest})
+			cfg := map[string]config.PluginConfig{"bad": pcfg("", inlineSrc(wasm), func(pc *config.PluginConfig) {
+				pc.Path = ""
+				pc.MemoryLimit = config.Size(64 << 10)
+			})}
+			if set, err := m.Build(context.Background(), cfg); err == nil || set != nil {
+				t.Fatalf("trapping candidate = %v, %v", set, err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
+				t.Fatalf("trapping candidate debt = %+v", got)
+			}
+			set, err := m.Build(context.Background(), cfg)
+			if set != nil || err == nil {
+				t.Fatalf("second trapping candidate = %v, %v", set, err)
+			}
+			if saturated := inspection.IsOutcome(err, inspection.GuestCapacitySaturated); saturated != (mode == inspection.Enforce) {
+				t.Fatalf("second candidate saturation = %t: %v", saturated, err)
+			}
+			want := uint64(64 << 10)
+			if mode == inspection.Observe {
+				want *= 2
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != want {
+				t.Fatalf("repeated candidate debt = %+v, want %d", got, want)
+			}
+			rejections, _ := recorder.snapshot()
+			if got := rejections["guest_capacity/"+string(mode)]; got != 1 {
+				t.Fatalf("saturation decisions = %d, want 1", got)
+			}
+		})
+	}
+}
+
 func TestGuestHelpersWithoutGovernorAreNoops(t *testing.T) {
 	p := &plugin{}
 	if ticket, err := p.reserveGuest(); ticket != nil || err != nil {
@@ -461,15 +552,17 @@ func TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure(t *
 		slots:        make(chan struct{}, 1),
 	}
 	p.slots <- struct{}{}
-	p.discard(&pooledModule{mod: closeErrorModule{err: errors.New("module close failed")}, ticket: ticket})
+	moduleCloseErr := errors.New("module close failed")
+	p.discard(&pooledModule{mod: closeErrorModule{err: moduleCloseErr}, ticket: ticket})
 	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestFailedRetained] != 1 {
 		t.Fatalf("module close failure did not retain capacity: %+v", got)
 	}
 	if len(p.guestTickets) != 1 || len(p.slots) != 1 {
 		t.Fatalf("failed close lost owner state: tickets=%d slots=%d", len(p.guestTickets), len(p.slots))
 	}
-	if err := p.close(); !errors.Is(err, rtCloseErr) {
-		t.Fatalf("plugin close error = %v, want runtime close failure", err)
+	firstClose := p.close()
+	if !errors.Is(firstClose, rtCloseErr) || !errors.Is(firstClose, moduleCloseErr) {
+		t.Fatalf("plugin close error = %v, want module and runtime failures", firstClose)
 	}
 	if !strings.Contains(logs.String(), "plugin runtime teardown failed") {
 		t.Error("runtime close failure was not logged")
@@ -478,8 +571,8 @@ func TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure(t *
 		stats.LiveInstances != 1 || stats.MaxInstances != 1 {
 		t.Fatalf("retained close stats = %+v, %v", stats, err)
 	}
-	if err := m.Close(); !errors.Is(err, rtCloseErr) {
-		t.Fatalf("manager retry = %v, want the original runtime close failure", err)
+	if retry := m.Close(); !errors.Is(retry, rtCloseErr) || !errors.Is(retry, moduleCloseErr) || retry.Error() != firstClose.Error() {
+		t.Fatalf("manager retry = %v, want stable module and runtime failures from %v", retry, firstClose)
 	}
 	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
 		got.Instances[inspection.GuestFailedRetained] != 1 {
@@ -489,6 +582,40 @@ func TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure(t *
 	defer m.retainedMu.Unlock()
 	if len(m.retained) != 1 {
 		t.Fatalf("manager retained %d plugins after failed teardown, want 1", len(m.retained))
+	}
+}
+
+func TestGuestRuntimeCloseFailureFromIdleRetainsDebtOnRetry(t *testing.T) {
+	g := testGovernor(t)
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Transition(inspection.GuestIdle); err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("runtime close failed")
+	p := &plugin{
+		name: "idle-close", runtime: closeErrorRuntime{err: closeErr},
+		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {}},
+		pool:         make(chan *pooledModule, 1), slots: make(chan struct{}, 1),
+	}
+	p.pool <- &pooledModule{ticket: ticket}
+	p.slots <- struct{}{}
+	first := p.close()
+	if !errors.Is(first, closeErr) || inspection.IsOutcome(first, inspection.InvalidAccounting) {
+		t.Fatalf("first close = %v, want runtime failure without accounting error", first)
+	}
+	before := g.Snapshot().GuestCapacity
+	if before.ReservedBytes != 16<<20 || before.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Fatalf("idle runtime failure lost debt: %+v", before)
+	}
+	retry := p.closeRuntime(context.Background())
+	if !errors.Is(retry, closeErr) || retry.Error() != first.Error() {
+		t.Fatalf("runtime retry = %v, want stable original failure %v", retry, first)
+	}
+	if got := g.Snapshot().GuestCapacity; got != before || len(p.slots) != 1 {
+		t.Fatalf("runtime retry changed debt/slot: %+v, slots=%d", got, len(p.slots))
 	}
 }
 
@@ -563,7 +690,9 @@ func TestGuestCapacityRemainsChargedDuringPoolHandoff(t *testing.T) {
 	during := g.Snapshot().GuestCapacity
 	candidate, admissionErr := g.ReserveGuestCapacity(2, 16<<20)
 	if candidate != nil {
-		if err := candidate.ResolveTeardown(nil); err != nil {
+		if err := candidate.Transition(inspection.GuestClosing); err != nil {
+			t.Errorf("close unexpectedly admitted candidate: %v", err)
+		} else if err := candidate.ResolveTeardown(nil); err != nil {
 			t.Errorf("release unexpectedly admitted candidate: %v", err)
 		}
 	}
@@ -583,8 +712,8 @@ func TestGuestCapacityRemainsChargedDuringPoolHandoff(t *testing.T) {
 	if !inspection.IsOutcome(admissionErr, inspection.GuestCapacitySaturated) {
 		t.Errorf("candidate admission during pool handoff = %v, want guest-capacity refusal", admissionErr)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
-		t.Errorf("completed pool handoff left capacity reserved: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
+		t.Errorf("completed pool handoff lost debt: %+v", got)
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after pool handoff: %v", err)
@@ -612,11 +741,11 @@ func TestGuestRetirementClearsReleasedModuleAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	if pm.mod != nil {
-		t.Fatalf("refunded an idle guest while its released wrapper still retained %d bytes",
+		t.Fatalf("released wrapper still retained %d bytes",
 			pm.mod.Memory().Size())
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
-		t.Errorf("retired guest left capacity reserved: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
+		t.Errorf("retired guest debt = %+v", got)
 	}
 }
 
@@ -671,8 +800,8 @@ func TestGuestRetirementWakesCapacityWaiters(t *testing.T) {
 		t.Errorf("retirement refunded the busy guest: %+v", got)
 	}
 	releaseOnce.Do(func() { p.release(pm) })
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
-		t.Errorf("guest release after retirement left capacity reserved: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
+		t.Errorf("guest release after retirement lost debt: %+v", got)
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after guest release: %v", err)
@@ -767,8 +896,8 @@ func TestGuestCapacityRemainsChargedWhileClosedCallIsRunning(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("guest call did not finish")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
-		t.Errorf("completed guest call left capacity reserved: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
+		t.Errorf("completed guest call lost debt: %+v", got)
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after guest finished: %v", err)
@@ -840,8 +969,8 @@ func TestGuestStartupDoesNotInheritRetainingAllocator(t *testing.T) {
 	if used.Load() || mem.buffer != nil {
 		t.Fatal("guest startup inherited an allocator that could retain guest memory")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
-		t.Fatalf("failed startup did not drain: %+v, slots=%d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
+		t.Fatalf("failed startup debt/slots: %+v, slots=%d", got, len(p.slots))
 	}
 }
 
@@ -877,8 +1006,8 @@ func TestGuestStartupRejectsModuleClosedByInitialize(t *testing.T) {
 	if _, err := p.acquire(ctx); err == nil {
 		t.Fatal("initialization returned a closed module as usable")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
-		t.Fatalf("closed initialization did not drain: %+v, slots=%d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
+		t.Fatalf("closed initialization debt/slots: %+v, slots=%d", got, len(p.slots))
 	}
 }
 
@@ -965,8 +1094,8 @@ func TestGuestCapacityRemainsChargedDuringRetiredStartup(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("retired guest startup did not finish")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
-		t.Errorf("retired startup did not drain: %+v, slots=%d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
+		t.Errorf("retired startup debt/slots: %+v, slots=%d", got, len(p.slots))
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after startup finished: %v", err)
@@ -1060,17 +1189,79 @@ func TestGuestCapacityRetainsFailedInstantiationWithoutModule(t *testing.T) {
 		name: "failed-start", runtime: rt, compiled: compiled,
 		pool: make(chan *pooledModule, 1), slots: make(chan struct{}, 1),
 		gov: g, generation: 1, memoryLimitBytes: 64 << 10,
-		closeOnContextDone: true,
-		guestTickets:       make(map[*inspection.GuestTicket]*guestOwnership),
+		guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
 	}
 	p.slots <- struct{}{}
 	_, err, retained := p.instantiateGuest(ctx, inspection.GuestBusy)
-	if err == nil || !retained {
-		t.Fatalf("failed start = (%v, retained=%t), want error and retained capacity", err, retained)
+	if err == nil || retained {
+		t.Fatalf("failed start = (%v, slot retained=%t), want error and reusable slot", err, retained)
 	}
 	got := g.Snapshot().GuestCapacity
-	if got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestFailedRetained] != 1 || len(p.slots) != 1 {
+	if got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 1 {
 		t.Errorf("unreturned start module was not retained: capacity=%+v slots=%d", got, len(p.slots))
+	}
+}
+
+func TestGuestCancellationRetainsDebtAndRefusesReplacement(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().WithCloseOnContextDone(true).WithMemoryLimitPages(2))
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+	entered := make(chan struct{})
+	_, err := rt.NewHostModuleBuilder(hostModuleV1).NewFunctionBuilder().
+		WithFunc(func(ctx context.Context) {
+			close(entered)
+			<-ctx.Done()
+		}).Export("wait").Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := rt.CompileModule(ctx, (hostGuest{
+		abi: ABIJulV1, fns: []hostFn{{name: "wait"}},
+		body: []byte{0x10, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x41, 0x00},
+	}).wasm())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 128 << 10
+	g, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &plugin{
+		name: "cancelled", runtime: rt, compiled: compiled,
+		pool: make(chan *pooledModule, 1), slots: make(chan struct{}, 1),
+		gov: g, generation: 1, memoryLimitBytes: 128 << 10,
+		guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
+		timeout:      5 * time.Second, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	request, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := p.call(request, exportHandleRequest, &invocation{}, nil)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest did not enter host call")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled guest call succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest call did not stop after cancellation")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 128<<10 ||
+		got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
+		t.Fatalf("cancelled call debt/slots = %+v, %d", got, len(p.slots))
+	}
+	if _, err := p.acquire(ctx); !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
+		t.Fatalf("replacement after cancellation = %v, want saturation", err)
 	}
 }
 

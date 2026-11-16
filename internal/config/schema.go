@@ -343,7 +343,8 @@ type InspectionConfig struct {
 	// MaxGuestCapacityBytes is an optional process-wide ceiling for plugin
 	// instance linear-memory reservations; enforce requires room for one eager
 	// instance of every plugin and observe warns; no finite production default
-	// has been selected.
+	// has been selected. Teardown reservations remain charged until process
+	// exit.
 	MaxGuestCapacityBytes *Size `toml:"max_guest_capacity_bytes,omitempty"`
 	// MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and
 	// values plus 64 bytes per occurrence) checked before WAF response-header
