@@ -228,12 +228,12 @@ Two fields exist for clients that poll or retry:
   limits, current charged classes, leases, active/waiting evaluations and the
   draining state. A configured slot value of `0` remains visible as `0` while
   the effective object reports its resolved count. Its
-  `request_path_integration` is `partial`: live plugin request paths acquire
-  leases and charge their buffers, but WAF request state, evaluation slots and
-  response-side buffering are not governed yet. `enforce` mode is therefore
-  not evidence that WAF traffic is gated, and zero usage does not mean traffic
-  is protected. `base_charge_bytes` and `base_charge_scope` describe the measured
-  governor/context scaffolding only. `configured.max_response_header_bytes`
+  `request_path_integration` is `partial`: request and response accounting
+  covers implemented plugin and WAF paths, but process-wide guest-capacity and
+  inspection-spool protection are not implemented. `enforce` mode and zero
+  usage do not imply those resources are protected. `base_charge_bytes` and
+  `base_charge_scope` describe the measured governor/context scaffolding only.
+  `configured.max_response_header_bytes`
   and `effective.max_response_header_bytes` report the complete accounted
   response-header ceiling used for the R3 worst-case term; runtime will reserve
   the measured R3 amount, not the ceiling, before Coraza ingestion. This ceiling
@@ -247,6 +247,12 @@ Two fields exist for clients that poll or retry:
   emitted as `null` or a measured zero. The configured budget is validated
   against the route-aware minimum described in
   [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
+
+The Console Overview includes an expandable inspection-resources section backed
+by the same status projection. Charged bytes are not process memory or RSS.
+The view does not report guest-capacity or spool protection. If inspection
+status cannot be reported, the Console shows an unavailable warning without
+discarding the rest of the Overview.
 
 ### `GET /api/v1/capabilities`
 
