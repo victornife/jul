@@ -96,6 +96,27 @@ describe("operator-centred Overview", () => {
     expect(within(card).getByText(/not process memory/)).toBeVisible();
   });
 
+  it("shows an enforce snapshot without claiming it is draining", () => {
+    show(
+      overview({
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0, audit_bytes: 0 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Mode: enforce/)).toBeVisible();
+    expect(within(card).queryByText(/Draining/)).not.toBeInTheDocument();
+    expect(within(card).queryByText(/without governor-driven refusal/)).not.toBeInTheDocument();
+  });
+
   it("surfaces inspection errors without losing the overview", () => {
     show(overview({ inspection_error: "could not report plugin guest capacity" }));
     expect(screen.getByText("Inspection status unavailable")).toBeVisible();
@@ -103,6 +124,16 @@ describe("operator-centred Overview", () => {
     const card = screen.getByRole("region", { name: "Inspection resources" });
     expect(within(card).getByText(/Inspection status unavailable/)).toBeVisible();
     expect(screen.getByText("Requests/sec")).toBeVisible();
+  });
+
+  it("distinguishes missing inspection data from an idle snapshot", () => {
+    show(overview());
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    expect(
+      within(screen.getByRole("region", { name: "Inspection resources" })).getByText(
+        "Inspection status unavailable.",
+      ),
+    ).toBeVisible();
   });
 
   it("isolates an incompatible inspection projection from the rest of the overview", () => {
