@@ -418,6 +418,84 @@ func TestRuntimeOverviewInspection(t *testing.T) {
 	}
 }
 
+func TestRuntimeOverviewAndV1StatusFollowGovernorDraining(t *testing.T) {
+	limits := inspection.Limits{
+		Mode:                   inspection.Enforce,
+		MaxBytes:               8192,
+		MaxResponseHeaderBytes: 1024,
+		EvaluationSlots:        1,
+		BaseChargeBytes:        4096,
+	}
+	governor, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{InspectionSnapshot: governor.Snapshot})
+	assertStatus := func(mode string, bytes, leases uint64, draining bool) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("overview status = %d: %s", rr.Code, rr.Body.String())
+		}
+		var overview RuntimeOverview
+		if err := json.Unmarshal(rr.Body.Bytes(), &overview); err != nil {
+			t.Fatal(err)
+		}
+		status := decodeInto[adminapi.StatusResponse](t, getV1(t, s, "/api/v1/status", ""))
+		for name, got := range map[string]*adminapi.InspectionStatus{
+			"overview": overview.Inspection,
+			"v1":       status.Inspection,
+		} {
+			if got == nil || got.Effective.Mode != mode || got.Effective.MaxBufferedBytes != 4096 ||
+				got.Usage.BaseBytes != bytes ||
+				got.ActiveLeases != leases || got.Draining != draining {
+				t.Fatalf("%s inspection = %+v, want mode=%s bytes=%d leases=%d draining=%t",
+					name, got, mode, bytes, leases, draining)
+			}
+		}
+	}
+	acquire := func() *inspection.Lease {
+		t.Helper()
+		lease, _, owner, err := governor.AcquireLease(context.Background())
+		if err != nil || !owner {
+			t.Fatalf("acquire = %v, owner=%t", err, owner)
+		}
+		return lease
+	}
+
+	first, second := acquire(), acquire()
+	limits.MaxBytes = 4096
+	if err := governor.PublishLimits(limits); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("enforce", 8192, 2, true)
+	if lease, _, _, err := governor.AcquireLease(context.Background()); lease != nil ||
+		!inspection.IsOutcome(err, inspection.ByteSaturated) {
+		t.Fatalf("enforce admission = %v, %v", lease, err)
+	}
+	assertStatus("enforce", 8192, 2, true)
+
+	limits.Mode = inspection.Observe
+	if err := governor.PublishLimits(limits); err != nil {
+		t.Fatal(err)
+	}
+	third := acquire()
+	assertStatus("observe", 12288, 3, true)
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("observe", 8192, 2, true)
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("observe", 4096, 1, false)
+	if err := third.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("observe", 0, 0, false)
+}
+
 func TestRuntimeOverviewReportsInspectionFailureWithoutLosingOverview(t *testing.T) {
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		InspectionSnapshot: func() inspection.Snapshot { return inspection.Snapshot{} },

@@ -302,6 +302,14 @@ against the clean `9c70b64d` baseline because the overview had no inspection
 projection. This fixture has no inspected route; it does not demonstrate
 observe-mode traffic, a refusal, or draining.
 
+An additional admin integration test wires a real governor into both overview
+and v1 status. It checks an enforce-mode admission refusal after a limit
+reduction, observe-mode admission above the limit, and the reported draining
+transition as leases close. These leases are acquired directly by the test,
+not by HTTP inspection traffic; browser and protocol acceptance remain open.
+The test failed as expected in a disposable `a68b68ee` worktree when the
+status projection was independently mutated to always report `draining=false`.
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described
