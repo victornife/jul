@@ -376,6 +376,9 @@ over static directives, not per-transaction `ctl:ruleEngine` actions.
   Set the temporary-directory environment before starting Jul and verify that
   the service can write to the intended mount in its own filesystem namespace.
   The directory applies to the whole process, not only WAF inspection.
+  Coraza's `SecUploadDir` can direct multipart files elsewhere; review all
+  effective rules and ensure that destination is also isolated. Keep both
+  temporary and upload directories outside any served static roots.
   `PrivateTmp=yes` isolates a systemd service's temporary directory but does
   not itself impose byte or inode quotas. A full temporary filesystem can
   affect other process operations; size and monitor it accordingly.

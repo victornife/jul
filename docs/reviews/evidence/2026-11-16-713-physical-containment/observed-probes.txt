@@ -1,0 +1,32 @@
+normal write=4330/4330 interruption=<nil> error=<nil> before=[body]
+normal process interruption=<nil> error=<nil> reqbody_error=0 engine=[body crzmp] alternate=[]
+normal close=<nil> after=[]
+explicit_upload_dir write=4330/4330 interruption=<nil> error=<nil> before=[body]
+explicit_upload_dir process interruption=<nil> error=<nil> reqbody_error=0 engine=[body] alternate=[crzmp]
+explicit_upload_dir close=<nil> after=[]
+multipart_create_fault write=362/362 interruption=<nil> error=<nil> before=[]
+multipart_create_fault process interruption=<nil> error=<nil> reqbody_error=1 engine=[] alternate=[]
+multipart_create_fault close=<nil> after=[]
+spill write=4330/4330 interruption=<nil> error=<nil> before=[body]
+spill process interruption=<nil> error=<nil> reqbody_error=0 engine=[body crzmp] alternate=[]
+spill close=<nil> after=[]
+spill_create_fault write=0/4330 interruption=<nil> error=open <fixture>/engine/body678487337: permission denied before=[]
+spill_create_fault close=<nil> after=[]
+late_cleanup_fault close_error=true error_is_not_exist=false
+jul_create_fault mode=block crs=false status=204 origin=true bytes=362
+jul_create_fault mode=block crs=true status=400 origin=false bytes=0
+jul_create_fault mode=detect crs=true status=204 origin=true bytes=362
+nofs_small_multipart write=362/362 interruption=<nil> error=<nil> before=[]
+nofs_small_multipart process interruption=<nil> error=<nil> reqbody_error=0 engine=[] alternate=[]
+nofs_small_multipart close=<nil> after=[]
+nofs_spill write=0/4330 interruption=<nil> error=memoryLimit reached while writing before=[]
+nofs_spill close=<nil> after=[]
+created: <fixture>/bounded2.dmg
+/dev/disk4          	GUID_partition_scheme
+/dev/disk4s1        	Apple_HFS                      	<fixture>/mount
+initial bytes_free=16347136 files=4294967279 files_free=4294967277 files_available=4294967277
+empty-files 5000 bytes_free=14434304 files=4294967279 files_free=4294962274 files_available=4294962274
+after-unlink bytes_free=14274560 files=4294967279 files_free=4294967272 files_available=4294967272
+write-failure 28 No space left on device
+bytes-written 13631488 bytes_free=643072 files=4294967279 files_free=4294967271 files_available=4294967271
+"disk4" ejected.
