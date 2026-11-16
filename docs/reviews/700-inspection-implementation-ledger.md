@@ -8,6 +8,22 @@ qualification, soak or maturity change.
 
 ## Current checkpoint
 
+### 2026-11-16 follow-up
+
+#725 merged as `dced01786a50454d09ecb0e9ceab1c7b5664ede1` from head `f8d2af27`
+with 57 successful checks and two skips. The I3b containment evidence below is
+historical research, not A19 completion; #713 remains blocked.
+
+Draft #721 at `0f8d28c4` retains unconfirmed guest reservations for the process
+lifetime. This avoids the reproduced premature refund but normal churn can
+exhaust a finite enforce limit, so A20 and #711 remain blocked. Its
+[public-API close probe](https://github.com/victornife/jul/tree/0f8d28c4706a8231e38283cf14dee49640106b4d/docs/reviews/evidence/2026-11-16-700-i2b-public-close)
+observed that closing infinite guests with cancellation watching disabled did
+not interrupt them within 750 ms in either engine; this is not a general
+last-alias proof. Draft #724 at `0e76f990` remains partial, pending stable guest
+and spool producer contracts. These identities supersede older draft and main
+identities in the table and historical text below.
+
 | Item | State |
 | --- | --- |
 | Starting `main` | `d06538cecc1398b6e8bf6302b553f873cd44e941` (verified #717 merge, after I4) |
