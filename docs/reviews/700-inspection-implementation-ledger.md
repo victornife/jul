@@ -11,18 +11,19 @@ qualification, soak or maturity change.
 | Item | State |
 | --- | --- |
 | Starting `main` | `d151989435e49493d02ea895dce25b7125f3e2e8` (verified #718 merge, after I4) |
-| Latest checked `main` | `13126aadf419839560c5a51b2ab155760ca9e8bb` (#720 dependency updates) |
-| Published I2b code/test head | `4e9b1fb534836b58456b0bfc6864c6c590bc2801` (prototype `ee55b72d`; latest main merged) |
-| Hosted CI | [Run 43707306605](https://github.com/victornife/jul/actions/runs/43707306605) passed on `4af8bfdb`; PR checks on the later head require verification |
+| Latest checked `main` | `9c70b64d31396882ab62cc38f1c95377e2e9ddf6` (#723 ledger update) |
+| Previous I2b head | `14ebcb2014f14fc866aea9fdbbae61a44732a4bf` (merged #722; draft continues below) |
+| Hosted CI | PR checks on `14ebcb20` passed with 64 successes and two skips; this ledger merge requires its own CI verification |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below; the blocker update merged as #718 |
 | Checkpoint 5 | **Blocked**: I2b watcher teardown can retain guest memory after ticket refund; draft #721 is not merge-ready and provides no reliable aggregate protection |
+| Checkpoint 6 | **Not started**: I6a #712 requires stable implemented resource contracts |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-15 I2b watcher reproduction](evidence/2026-11-15-700-i2b-watcher/README.md); [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
-| Exact next action | Resolve the I3b integration prerequisites and the I2b wazero watcher-ownership blocker; do not claim either protection |
+| Exact next action | Resolve and review the I3b integration prerequisites and the I2b last-alias teardown blocker; do not claim either protection |
 
 ## Checkpoint schedule and dependencies
 
@@ -32,15 +33,14 @@ qualification, soak or maturity change.
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Blocked: a wazero watcher can retain guest memory after a capacity refund; the unmerged prototype is in draft #721 and provides no protection; #711 | A supported last-alias/interrupt solution, accepted guest design and finite default; no technical dependency on the WAF parser, though scheduled after I3b |
+| 5 — I2b | Blocked: unmerged draft #721 prototypes admission but does not prove guest-memory ownership; #711 | Supported last-alias teardown and interrupt behavior, failed-start drainage, and a measured finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
-The maintainer requested publication of the I2b prototype as draft #721 before the preceding
-scheduled checkpoint is merged. This exception does not make it merge-ready or change the
-checkpoint dependencies. The child issues were created after checking existing tracking and
-linked to #700. The scheduling order does not itself create technical dependencies between
-unrelated resources.
+The maintainer requested publication of the I2b prototype as draft #721 while I3b remains blocked.
+This exception does not make the prototype merge-ready or change its acceptance requirements.
+The child issues were created after checking existing tracking and linked to #700. The scheduling
+order does not itself create technical dependencies between unrelated resources.
 
 ## Resolved recommendations and explicit blockers
 
@@ -252,6 +252,16 @@ The recommended next step is a reviewed public engine integration with per-trans
 and typed storage outcomes, followed by the ADR's filesystem, lifecycle and protocol tests.
 No upstream change has been submitted, and no logical spool quota is claimed.
 
+## I2b blocker and reload safety follow-up
+
+Independent reload corrections discovered during the I2b investigation merged in #722 as
+`ed775fd5ce9836cafb8c137dab25231fb8ccc10f` from reviewed head `bda851355b46019d4d3e88ad11093917d8e6d206`.
+They prevent false no-ops for order-sensitive or duplicate declarations, bind authentication and
+WAF to the owning route declaration, preserve duplicate backend state, and correct previews.
+Hosted CI reported 66 successful checks and two skips. The draft incorporated these changes at
+`14ebcb20`; they do not fix the guest or spool ownership blockers. The authoritative summary
+merged in #723 as `9c70b64d`.
+
 ## I2b implementation progress
 
 The independent I2b branch includes `bea7ef8b`, which rejects sub-page plugin memory limits and
@@ -298,7 +308,7 @@ result is approval of the current blocked head.
 | Finding and counterexample | Local correction and regression |
 | --- | --- |
 | **High, confidence 9/10:** keyed lifecycle extraction can miss overlapping-regex order or duplicate route changes. Without a limit change, a security-restricting reload was classified as a no-op; with one, the new config published while the old router still returned `200` rather than `403`. | Require exact equality outside the permitted limits for limits-only publication, and compare server blocks in order for ordinary no-ops. `TestLimitsOnlyReloadDoesNotHideRouteOrderChange` exercises both route changes, with and without a limit change, on a real HTTP server. |
-| **Medium:** keyed upstream extraction can hide a weight change in the first of several identical backend addresses. A weighted-round-robin reload was incorrectly reported as a no-op, leaving traffic distributed 6:3 instead of the configured 8:1. | Compare backend configurations as multisets when assessing serving no-ops. `TestReloadDoesNotHideDuplicateUpstreamWeightChange` uses a real HTTP server and reusable upstream registry, checks the applied distribution and preserves a no-op for equivalent reordering. An isolated overlay removing this comparison reproduces the failure. |
+| **Medium:** keyed upstream extraction can hide a weight change in the first of several identical backend addresses. A weighted-round-robin reload was incorrectly reported as a no-op, leaving traffic distributed 6:3 instead of the configured 8:1. | The original multiset comparison was superseded by #722's ordered comparison because backend order can affect tie-breaking. `TestReloadDoesNotHideDuplicateUpstreamWeightChange` checks the applied distribution and publishes the reordered generation. An isolated overlay removing the comparison reproduced the weight failure. |
 | A closed runtime could refund guest capacity while a host call still retained guest memory. | Keep the active owner charged until the call returns. `TestGuestCapacityRemainsChargedWhileClosedCallIsRunning` uses a blocked real host call. |
 | A pool recipient could hold a module after removing it from the channel but before marking its ticket busy; retirement treated the ticket as idle and refunded its capacity. | Register acquisitions before receiving a pooled module, retain their capacity during retirement and discard a received instance before releasing ownership. `TestGuestCapacityRemainsChargedDuringPoolHandoff` reproduces the interleaving using the existing wait hook and confirms another candidate is refused; `TestGuestRetirementWakesCapacityWaiters` checks prompt wakeup without changing the existing busy response. |
 | A caller could still hold a released pool wrapper after retirement refunded its ticket, and that wrapper retained the closed module's linear memory. | Clear each drained wrapper's module reference before refunding its ticket. `TestGuestRetirementClearsReleasedModuleAlias` failed with 2,424,832 bytes still reachable before the correction. |
