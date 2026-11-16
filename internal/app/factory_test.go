@@ -267,6 +267,30 @@ func TestHandlerFactoryBuildMinimalConfigDryRun(t *testing.T) {
 	}
 }
 
+func TestHandlerFactoryDuplicateMatchesKeepOwnAuthentication(t *testing.T) {
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+
+	cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
+	cfg.Servers[0].Locations = []config.LocationConfig{
+		{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusOK,
+			Auth: &config.AuthConfig{Allow: []string{"10.0.0.0/8"}}},
+		{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusOK,
+			Auth: &config.AuthConfig{Allow: []string{"0.0.0.0/0"}}},
+	}
+	handlers, _, err := f.Build(context.Background(), cfg, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/private/data", nil)
+	req.RemoteAddr = "192.0.2.1:1234"
+	rec := httptest.NewRecorder()
+	handlers[":0"].ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("first route authentication returned %d, want 403", rec.Code)
+	}
+}
+
 func TestHandlerFactoryBuildCommitReturnsRetire(t *testing.T) {
 	f, cleanup := minimalFactory(t)
 	defer cleanup()

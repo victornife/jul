@@ -104,6 +104,9 @@ type Router struct {
 // rate limiting (and later authentication), applied as the outermost wrapper.
 type LocationModifier func(config.ServerConfig, config.LocationConfig) middleware.Middleware
 
+// IndexedLocationModifier also identifies the declaration that owns the middleware.
+type IndexedLocationModifier func(int, int, config.ServerConfig, config.LocationConfig) middleware.Middleware
+
 // New compiles a Router from cfg. The router provides built-in builders for the
 // config-only actions (deny, redirect, return); builders supplies the content
 // actions (static, proxy, fastcgi) and may register or override others. fallback
@@ -111,6 +114,17 @@ type LocationModifier func(config.ServerConfig, config.LocationConfig) middlewar
 // before every handler exists). locModifier, when non-nil, may wrap each
 // location's handler with additional middleware.
 func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locModifier LocationModifier, log *slog.Logger) (*Router, error) {
+	var indexed IndexedLocationModifier
+	if locModifier != nil {
+		indexed = func(_, _ int, srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
+			return locModifier(srv, loc)
+		}
+	}
+	return NewIndexed(cfg, builders, fallback, indexed, log)
+}
+
+// NewIndexed compiles a router with declaration-indexed location middleware.
+func NewIndexed(cfg *config.Config, builders map[string]Builder, fallback Builder, locModifier IndexedLocationModifier, log *slog.Logger) (*Router, error) {
 	if fallback == nil {
 		fallback = notImplementedBuilder
 	}
@@ -129,7 +143,7 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 			continue
 		}
 		srv.MIME = config.ResolveMIME(cfg.MIME, srv.MIME)
-		sr, err := buildServerRoute(srv, reg, fallback, locModifier, log)
+		sr, err := buildServerRoute(i, srv, reg, fallback, locModifier, log)
 		if err != nil {
 			return nil, err
 		}
@@ -150,7 +164,7 @@ func New(cfg *config.Config, builders map[string]Builder, fallback Builder, locM
 	return r, nil
 }
 
-func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback Builder, locModifier LocationModifier, log *slog.Logger) (*serverRoute, error) {
+func buildServerRoute(serverIndex int, srv config.ServerConfig, reg map[string]Builder, fallback Builder, locModifier IndexedLocationModifier, log *slog.Logger) (*serverRoute, error) {
 	var metricHost string
 	if len(srv.ServerNames) > 0 {
 		metricHost = normalizeHost(srv.ServerNames[0])
@@ -230,7 +244,7 @@ func buildServerRoute(srv config.ServerConfig, reg map[string]Builder, fallback 
 		// Per-location modifier (e.g. rate limiting) wraps outside BodyLimit so it
 		// runs before the request body is read.
 		if locModifier != nil {
-			if mw := locModifier(srv, loc); mw != nil {
+			if mw := locModifier(serverIndex, i, srv, loc); mw != nil {
 				h = mw(h)
 			}
 		}

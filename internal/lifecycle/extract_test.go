@@ -271,16 +271,72 @@ func TestServerNameOrderDoesNotCreateDiff(t *testing.T) {
 	}
 }
 
-// TestUpstreamBackendOrderDoesNotCreateDiff proves an unordered backend list is
-// compared as a set.
-func TestUpstreamBackendOrderDoesNotCreateDiff(t *testing.T) {
+func TestUpstreamBackendOrderCreatesDiff(t *testing.T) {
 	before := fullConfig()
 	before.Upstreams[0].Servers = []config.UpstreamServer{{Address: "a:1", Weight: 1}, {Address: "b:2", Weight: 2}}
 	after := fullConfig()
 	after.Upstreams[0].Servers = []config.UpstreamServer{{Address: "b:2", Weight: 2}, {Address: "a:1", Weight: 1}}
 
-	if changes := DiffConfig(before, after); len(changes) != 0 {
-		t.Fatalf("reordering backends produced changes: %+v", changes)
+	if changes := DiffConfig(before, after); len(changes) == 0 {
+		t.Fatal("backend order changes tie-breaking and must be reported")
+	}
+}
+
+func TestLocationOrderAndDuplicateChangesCreateDiff(t *testing.T) {
+	before := fullConfig()
+	before.Servers[0].Locations = []config.LocationConfig{
+		{Match: config.MatchConfig{Type: "regex", Path: "^/"}, Return: 200},
+		{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 403},
+	}
+	after := fullConfig()
+	after.Servers[0].Locations = []config.LocationConfig{before.Servers[0].Locations[1], before.Servers[0].Locations[0]}
+	if changes := DiffConfig(before, after); len(changes) == 0 {
+		t.Fatal("location order changes regex precedence and must be reported")
+	}
+	before.Servers[0].Locations = []config.LocationConfig{
+		{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 200},
+		{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 403},
+	}
+	after.Servers[0].Locations = []config.LocationConfig{
+		{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 403},
+		before.Servers[0].Locations[1],
+	}
+	if changes := DiffConfig(before, after); len(changes) == 0 {
+		t.Fatal("changes to an earlier duplicate location must be reported")
+	}
+}
+
+func TestServerOrderIsScopedToListener(t *testing.T) {
+	first := config.ServerConfig{Listen: ":8080", ServerNames: []string{"a.example"}}
+	second := config.ServerConfig{Listen: ":8080", ServerNames: []string{"b.example"}}
+	other := config.ServerConfig{Listen: ":9090", ServerNames: []string{"c.example"}}
+	before := &config.Config{Servers: []config.ServerConfig{first, other, second}}
+	independent := &config.Config{Servers: []config.ServerConfig{other, first, second}}
+	if changes := DiffConfig(before, independent); len(changes) != 0 {
+		t.Fatalf("reordering independent listeners produced changes: %+v", changes)
+	}
+	reordered := &config.Config{Servers: []config.ServerConfig{second, other, first}}
+	if changes := DiffConfig(before, reordered); len(changes) == 0 {
+		t.Fatal("server order on a listener changes default routing and must be reported")
+	}
+}
+
+func TestPluginOrderCreatesDiff(t *testing.T) {
+	for _, scope := range []string{"server", "location"} {
+		t.Run(scope, func(t *testing.T) {
+			before := fullConfig()
+			after := fullConfig()
+			if scope == "server" {
+				before.Servers[0].Plugins = []string{"first", "second"}
+				after.Servers[0].Plugins = []string{"second", "first"}
+			} else {
+				before.Servers[0].Locations[0].Plugins = []string{"first", "second"}
+				after.Servers[0].Locations[0].Plugins = []string{"second", "first"}
+			}
+			if changes := DiffConfig(before, after); len(changes) == 0 {
+				t.Fatal("plugin order changes the middleware chain and must be reported")
+			}
+		})
 	}
 }
 

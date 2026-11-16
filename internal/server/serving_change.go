@@ -4,6 +4,7 @@
 package server
 
 import (
+	"reflect"
 	"strings"
 
 	"jul/internal/config"
@@ -56,6 +57,11 @@ func (p *ReloadPlan) AssessServingChange() error {
 				return nil
 			}
 		}
+		if !servingServersEqual(live.EffectiveConfig, p.Candidate.Effective) ||
+			!servingBackendsEqual(live.EffectiveConfig, p.Candidate.Effective) {
+			p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
+			return nil
+		}
 
 		// A serving no-op exists only relative to an installed generation. This
 		// also keeps direct-call tests and partially initialized servers from
@@ -97,6 +103,48 @@ func (p *ReloadPlan) AssessServingChange() error {
 		p.ServingChange = ServingChangeAssessment{NoChange: true, Evidence: evidence}
 		return nil
 	})
+}
+
+// Lifecycle's keyed extraction can collapse duplicate entries and lose route order.
+func servingServersEqual(current, candidate *config.Config) bool {
+	if current == nil || candidate == nil || len(current.Servers) != len(candidate.Servers) {
+		return false
+	}
+	for i := range current.Servers {
+		server := candidate.Servers[i]
+		server.AccessLog = current.Servers[i].AccessLog
+		server.ErrorLog = current.Servers[i].ErrorLog
+		if !reflect.DeepEqual(current.Servers[i], server) {
+			return false
+		}
+	}
+	return true
+}
+
+func servingBackendsEqual(current, candidate *config.Config) bool {
+	if current == nil || candidate == nil || len(current.Upstreams) != len(candidate.Upstreams) {
+		return false
+	}
+	byName := make(map[string][]config.UpstreamServer, len(current.Upstreams))
+	for _, pool := range current.Upstreams {
+		if _, exists := byName[pool.Name]; exists {
+			return false
+		}
+		byName[pool.Name] = pool.Servers
+	}
+	for _, pool := range candidate.Upstreams {
+		before, exists := byName[pool.Name]
+		if !exists || len(before) != len(pool.Servers) {
+			return false
+		}
+		delete(byName, pool.Name)
+		for i, server := range pool.Servers {
+			if before[i] != server {
+				return false
+			}
+		}
+	}
+	return len(byName) == 0
 }
 
 // staticCertificatesUnchanged compares candidate file content with the

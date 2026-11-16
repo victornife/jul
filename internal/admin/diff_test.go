@@ -34,6 +34,185 @@ func warnHas(d ConfigDiff, substr string) bool {
 	return false
 }
 
+func TestDiffReportsServingOrderChanges(t *testing.T) {
+	firstID, secondID := "first", "second"
+	first := config.LocationConfig{RouteID: &firstID, Match: config.MatchConfig{Type: "regex", Path: "^/private/"},
+		Return: 200, Auth: &config.AuthConfig{Allow: []string{"10.0.0.0/8"}}}
+	second := config.LocationConfig{RouteID: &secondID, Match: config.MatchConfig{Type: "regex", Path: "^/private/"},
+		Return: 200, Auth: &config.AuthConfig{Allow: []string{"0.0.0.0/0"}}}
+	before := &config.Config{
+		Servers: []config.ServerConfig{{Listen: ":8080", Locations: []config.LocationConfig{first, second}, Plugins: []string{"a", "b"}}},
+		Upstreams: []config.UpstreamConfig{{Name: "backend", Servers: []config.UpstreamServer{
+			{Address: "a:80"}, {Address: "b:80"},
+		}}},
+	}
+	after, err := before.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	after.Servers[0].Locations[0], after.Servers[0].Locations[1] = after.Servers[0].Locations[1], after.Servers[0].Locations[0]
+	after.Servers[0].Plugins[0], after.Servers[0].Plugins[1] = after.Servers[0].Plugins[1], after.Servers[0].Plugins[0]
+	after.Upstreams[0].Servers[0], after.Upstreams[0].Servers[1] = after.Upstreams[0].Servers[1], after.Upstreams[0].Servers[0]
+	diff := diffConfigs(before, after)
+	for _, detail := range []string{"route order", "plugin order", "backend order"} {
+		if !diffHas(diff, detail) {
+			t.Errorf("diff did not report %s", detail)
+		}
+	}
+}
+
+func TestDiffReportsRouteReorderWithAddition(t *testing.T) {
+	firstID, secondID, thirdID := "first", "second", "third"
+	first := config.LocationConfig{RouteID: &firstID, Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 403}
+	second := config.LocationConfig{RouteID: &secondID, Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 200}
+	third := config.LocationConfig{RouteID: &thirdID, Match: config.MatchConfig{Type: "regex", Path: "^/new/"}, Return: 200}
+	before := &config.Config{Servers: []config.ServerConfig{{Listen: ":8080", Locations: []config.LocationConfig{first, second}}}}
+	after := &config.Config{Servers: []config.ServerConfig{{Listen: ":8080", Locations: []config.LocationConfig{second, first, third}}}}
+	if diff := diffConfigs(before, after); !diffHas(diff, "route order") {
+		t.Fatal("route reorder was hidden by an added route")
+	}
+}
+
+func TestDiffReportsRouteChangesInCollidingServerIndex(t *testing.T) {
+	firstID, secondID := "first", "second"
+	first := config.LocationConfig{RouteID: &firstID, Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 403}
+	second := config.LocationConfig{RouteID: &secondID, Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 200}
+	before := &config.Config{Servers: []config.ServerConfig{
+		{Listen: ":8080", ServerNames: []string{"shared", "one"}, Locations: []config.LocationConfig{first, second}},
+		{Listen: ":8080", ServerNames: []string{"shared", "two"}, Locations: []config.LocationConfig{first}},
+	}}
+	after := &config.Config{Servers: []config.ServerConfig{
+		{Listen: ":8080", ServerNames: []string{"shared", "one"}, Locations: []config.LocationConfig{second, first}},
+		before.Servers[1],
+	}}
+	if diff := diffConfigs(before, after); !diffHas(diff, "route order") {
+		t.Fatal("route reorder was hidden by a colliding server index")
+	}
+}
+
+func TestDiffCorrelatesDuplicateRoutesInDeclarationOrder(t *testing.T) {
+	first := config.LocationConfig{Match: config.MatchConfig{Path: "/"}, Return: 200,
+		RateLimit: &config.RateLimitConfig{Enabled: true, Rate: 100}}
+	second := config.LocationConfig{Match: config.MatchConfig{Path: "/"}, Return: 403}
+	unlimited := config.LocationConfig{Match: config.MatchConfig{Path: "/"}, Return: 200}
+	tests := []struct {
+		name                string
+		before, after       []config.LocationConfig
+		additions, removals int
+		wantRateLimitChange bool
+	}{
+		{"unchanged", []config.LocationConfig{first, second}, []config.LocationConfig{first, second}, 0, 0, false},
+		{"addition", []config.LocationConfig{first}, []config.LocationConfig{first, second}, 1, 0, false},
+		{"removal and effective policy change", []config.LocationConfig{first, second}, []config.LocationConfig{unlimited}, 0, 1, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := &config.Config{Servers: []config.ServerConfig{{Listen: ":8080", Locations: tt.before}}}
+			after := &config.Config{Servers: []config.ServerConfig{{Listen: ":8080", Locations: tt.after}}}
+			diff := diffConfigs(before, after)
+			if len(diff.Additions) != tt.additions || len(diff.Removals) != tt.removals {
+				t.Fatalf("additions=%+v removals=%+v", diff.Additions, diff.Removals)
+			}
+			if tt.name == "unchanged" && len(diff.Affected) != 0 {
+				t.Fatalf("unchanged duplicates reported a change: %+v", diff.Modifications)
+			}
+			if got := diffHas(diff, "rate-limit override on route"); got != tt.wantRateLimitChange {
+				t.Fatalf("rate-limit policy change reported=%v, diff=%+v", got, diff)
+			}
+		})
+	}
+}
+
+func TestDiffCorrelatesDuplicateServers(t *testing.T) {
+	first := config.ServerConfig{Listen: ":8080", ServerNames: []string{"example"},
+		ReadHeaderTimeout: config.Duration(5e9), Locations: []config.LocationConfig{{
+			Match: config.MatchConfig{Path: "/api"}, Return: 200,
+			RateLimit: &config.RateLimitConfig{Enabled: true, Rate: 10},
+		}}}
+	second := config.ServerConfig{Listen: ":8080", ServerNames: []string{"example"},
+		ReadHeaderTimeout: config.Duration(30e9)}
+	configWith := func(servers ...config.ServerConfig) *config.Config { return &config.Config{Servers: servers} }
+	t.Run("unchanged", func(t *testing.T) {
+		diff := diffConfigs(configWith(first, second), configWith(first, second))
+		if len(diff.Affected) != 0 {
+			t.Fatalf("unchanged servers reported changes: %+v", diff.Affected)
+		}
+	})
+	t.Run("addition", func(t *testing.T) {
+		diff := diffConfigs(configWith(first), configWith(first, second))
+		if len(diff.Additions) != 1 || diff.Additions[0].Kind != "server" || diffHas(diff, "read header timeout") {
+			t.Fatalf("duplicate addition was misreported: additions=%+v modifications=%+v", diff.Additions, diff.Modifications)
+		}
+	})
+	t.Run("removal", func(t *testing.T) {
+		diff := diffConfigs(configWith(first, second), configWith(first))
+		if len(diff.Removals) != 1 || diff.Removals[0].Kind != "server" || diffHas(diff, "read header timeout") {
+			t.Fatalf("duplicate removal was misreported: removals=%+v modifications=%+v", diff.Removals, diff.Modifications)
+		}
+	})
+	t.Run("add first", func(t *testing.T) {
+		diff := diffConfigs(configWith(first), configWith(second, first))
+		if !diffHas(diff, "Add server block") || !diffHas(diff, "read header timeout") {
+			t.Fatalf("effective listener timeout change missed: additions=%+v modifications=%+v", diff.Additions, diff.Modifications)
+		}
+	})
+	t.Run("remove first", func(t *testing.T) {
+		diff := diffConfigs(configWith(first, second), configWith(second))
+		if !diffHas(diff, "Remove server block") || !diffHas(diff, "read header timeout") {
+			t.Fatalf("effective listener timeout change missed: removals=%+v modifications=%+v", diff.Removals, diff.Modifications)
+		}
+	})
+	t.Run("effective route policy", func(t *testing.T) {
+		changed := first
+		changed.Locations = append([]config.LocationConfig(nil), first.Locations...)
+		changed.Locations[0].RateLimit = nil
+		diff := diffConfigs(configWith(first, second), configWith(changed, second))
+		if !diffHas(diff, "rate-limit override on route") {
+			t.Fatalf("first server's policy change was hidden: %+v", diff.Modifications)
+		}
+	})
+}
+
+func TestDiffServerNameOrderDoesNotRemoveServer(t *testing.T) {
+	before := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080", ServerNames: []string{"b.example", "a.example"},
+	}}}
+	after := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8080", ServerNames: []string{"a.example", "b.example"},
+	}}}
+	diff := diffConfigs(before, after)
+	if len(diff.Affected) != 0 || len(diff.Warnings) != 0 {
+		t.Fatalf("server_names reorder reported as a removal: affected=%v warnings=%v", diff.Affected, diff.Warnings)
+	}
+}
+
+func TestDiffReportsEffectiveListenerTimeoutAfterServerOrderChanges(t *testing.T) {
+	first := config.ServerConfig{Listen: ":8080", ServerNames: []string{"a"}, ReadHeaderTimeout: config.Duration(5e9), MaxHeaderBytes: config.Size(1024)}
+	second := config.ServerConfig{Listen: ":8080", ServerNames: []string{"b"}, ReadHeaderTimeout: config.Duration(9e9), MaxHeaderBytes: config.Size(2048)}
+	for _, tt := range []struct {
+		name                   string
+		before, after          []config.ServerConfig
+		oldTimeout, newTimeout string
+	}{
+		{"removal", []config.ServerConfig{first, second}, []config.ServerConfig{second}, "5s", "9s"},
+		{"addition", []config.ServerConfig{second}, []config.ServerConfig{first, second}, "9s", "5s"},
+		{"reorder", []config.ServerConfig{first, second}, []config.ServerConfig{second, first}, "5s", "9s"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			diff := diffConfigs(&config.Config{Servers: tt.before}, &config.Config{Servers: tt.after})
+			if !diffHas(diff, "servers.*.max_header_bytes") {
+				t.Error("effective max_header_bytes change missing from preview")
+			}
+			for _, entry := range diff.Modifications {
+				if strings.Contains(entry.Detail, "read header timeout") && entry.Before == tt.oldTimeout && entry.After == tt.newTimeout {
+					return
+				}
+			}
+			t.Fatalf("effective listener timeout %s -> %s missing from preview", tt.oldTimeout, tt.newTimeout)
+		})
+	}
+}
+
 // TestDiffConfigsExportedWrapper pins that the exported DiffConfigs (used by
 // the app composition root to build adopt-preview diffs without importing
 // admin's unexported diff internals) delegates to diffConfigs verbatim.

@@ -512,6 +512,14 @@ configuration version while the handler generation stays fixed; after adoption
 that no runtime Publish occurred. Raw-only formatting can advance provenance
 without changing either canonical version.
 
+The lifecycle comparison preserves server-block order within each listener,
+location order, middleware plugin order, and backend order. These orders can
+affect default routing, regex precedence, middleware composition or backend
+tie-breaking. The reload assessment also rebuilds when blocks are reordered
+across distinct listeners because active exchanges retain declaration
+coordinates. Duplicate locations retain their own authentication and WAF
+policy.
+
 The proof is conservative. Same-path data-plane and admin certificate/key
 rotations are detected from the installed content fingerprints. Inputs whose
 installed content identity is not yet exposed to the coordinator—plugin and

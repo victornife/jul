@@ -5,6 +5,7 @@ package admin
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 	"jul/internal/lifecycle"
 )
 
-// (helpers: serverIndex, sortedKeys, durStr, sizeStr, orNone and the
+// (helpers: sortedKeys, durStr, sizeStr, orNone and the
 // diffLocations / diffUpstreams / diffGlobal* comparators live in
 // diff_helpers.go.)
 
@@ -280,13 +281,72 @@ func formatCutoverSelector(sel cache.NormalizedSelector) string {
 }
 
 func diffServers(before, after *config.Config, d *ConfigDiff) {
-	bs, as := serverIndex(before.Servers), serverIndex(after.Servers)
-	for _, name := range sortedKeys(as) {
-		srv := as[name]
-		b, ok := bs[name]
-		if !ok {
+	oldOrder := make([]string, len(before.Servers))
+	newOrder := make([]string, len(after.Servers))
+	beforeByIdentity := make(map[string][]int)
+	for i, server := range before.Servers {
+		oldOrder[i] = serverOrderIdentity(server)
+		beforeByIdentity[oldOrder[i]] = append(beforeByIdentity[oldOrder[i]], i)
+	}
+	for i, server := range after.Servers {
+		newOrder[i] = serverOrderIdentity(server)
+	}
+	if relativeOrderChanged(oldOrder, newOrder) {
+		d.mod(DiffEntry{Kind: "server", Detail: "Change server block order"}, "server order")
+	}
+
+	matchedBefore := make([]bool, len(before.Servers))
+	matchedAfter := make([]int, len(after.Servers))
+	for i := range matchedAfter {
+		matchedAfter[i] = -1
+	}
+	for i, identity := range newOrder {
+		if matches := beforeByIdentity[identity]; len(matches) > 0 {
+			matchedAfter[i] = matches[0]
+			matchedBefore[matches[0]] = true
+			beforeByIdentity[identity] = matches[1:]
+		}
+	}
+	for i, server := range after.Servers {
+		if matchedAfter[i] >= 0 {
+			continue
+		}
+		for j, old := range before.Servers {
+			if !matchedBefore[j] && serverPreviewKey(old) == serverPreviewKey(server) {
+				matchedAfter[i] = j
+				matchedBefore[j] = true
+				break
+			}
+		}
+	}
+
+	firstBefore := make(map[string]int)
+	for i, server := range before.Servers {
+		if _, ok := firstBefore[server.Listen]; !ok {
+			firstBefore[server.Listen] = i
+		}
+	}
+	seenAfter := make(map[string]bool)
+	for i, server := range after.Servers {
+		if seenAfter[server.Listen] {
+			continue
+		}
+		seenAfter[server.Listen] = true
+		if oldIndex, ok := firstBefore[server.Listen]; ok && matchedAfter[i] != oldIndex {
+			diffServerTimeouts(server.Listen, serverWrapper{ServerConfig: &before.Servers[oldIndex]}, serverWrapper{ServerConfig: &after.Servers[i]}, d)
+		}
+	}
+
+	for i := range after.Servers {
+		srv := serverWrapper{ServerConfig: &after.Servers[i]}
+		name := serverPreviewKey(*srv.ServerConfig)
+		if matchedAfter[i] < 0 {
 			d.add(DiffEntry{Kind: "server", Name: name, After: fmt.Sprintf("listen=%s, %d locations", srv.Listen, len(srv.Locations)), Detail: "Add server block for " + name}, "server "+name)
 			continue
+		}
+		b := serverWrapper{ServerConfig: &before.Servers[matchedAfter[i]]}
+		if relativeOrderChanged(locationOrder(b.Locations), locationOrder(srv.Locations)) {
+			d.mod(DiffEntry{Kind: "location", Detail: "Change route order on a server block"}, "route order")
 		}
 		if srv.Listen != b.Listen {
 			d.mod(DiffEntry{Kind: "server", Name: name, Before: b.Listen, After: srv.Listen, Detail: "Change " + name + " listen address"}, "server "+name+" listen")
@@ -297,21 +357,21 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 		diffServerTimeouts(name, b, srv, d)
 		diffServerBodyLimit(name, b, srv, d)
 		diffServerTLS(name, b.TLS, srv.TLS, d)
+		if !slices.Equal(b.Plugins, srv.Plugins) {
+			d.mod(DiffEntry{Kind: "plugin", Name: name, Detail: "Change plugin order or membership on " + name}, "server "+name+" plugin order")
+		}
 		diffLocations(name, b.Locations, srv.Locations, before.WAF, after.WAF, d)
 	}
-	for _, name := range sortedKeys(bs) {
-		if _, ok := as[name]; !ok {
-			srv := bs[name]
+	for i, srv := range before.Servers {
+		if !matchedBefore[i] {
+			name := serverPreviewKey(srv)
 			d.del(DiffEntry{Kind: "server", Name: name, Before: fmt.Sprintf("listen=%s, %d locations", srv.Listen, len(srv.Locations)), Detail: "Remove server block " + name}, "server "+name)
-			d.warn("Removing server block %s will stop serving traffic on %s.", name, srv.Listen)
+			d.warn("Removing server block %s may change traffic served on %s.", name, srv.Listen)
 		}
 	}
 }
 
-// diffServerNames reports a change to a server block's host names (server_names)
-// for matched server blocks — a route_rename that keeps the first host name (so
-// the block still indexes to the same key). A rename that changes the first host
-// name re-keys the block, surfacing instead as a server remove + add above.
+// diffServerNames reports host-name changes for paired server blocks.
 func diffServerNames(name string, b, a serverWrapper, d *ConfigDiff) {
 	if serverNamesEqual(b.ServerNames, a.ServerNames) {
 		d.cover("servers.*.server_names")
