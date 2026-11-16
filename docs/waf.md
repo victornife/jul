@@ -366,9 +366,28 @@ over static directives, not per-transaction `ctl:ruleEngine` actions.
   CRS location and, where `response_body_check = false` must hold with CRS, add
   `SecResponseBodyAccess Off` to `inline_rules`.
 - **Bodies above 128 KiB spill to temporary files.** With CRS and a larger
-  `request_body_limit`, Coraza writes the part above 128 KiB to the OS
+  `request_body_limit`, Coraza copies the buffered body and subsequent bytes to the OS
   temporary directory (`TMPDIR` on Unix, `TMP`/`TEMP` on Windows) for the
-  duration of the request. On `tmpfs` this counts as memory.
+  duration of the request. Multipart uploads can also create temporary files.
+  On `tmpfs` this counts as memory.
+
+  Operators can place the process temporary directory on a dedicated,
+  access-restricted filesystem with externally enforced byte and inode limits.
+  Set the temporary-directory environment before starting Jul and verify that
+  the service can write to the intended mount in its own filesystem namespace.
+  The directory applies to the whole process, not only WAF inspection.
+  Coraza's `SecUploadDir` can direct multipart files elsewhere; review all
+  effective rules and ensure that destination is also isolated. Keep both
+  temporary and upload directories outside any served static roots.
+  `PrivateTmp=yes` isolates a systemd service's temporary directory but does
+  not itself impose byte or inode quotas. A full temporary filesystem can
+  affect other process operations; size and monitor it accordingly.
+
+  This is physical containment, **not** Jul's inspection spool quota: it does
+  not provide per-file ownership, cleanup-debt accounting, or reliable rejection
+  of every Coraza storage failure before forwarding. It does not complete
+  [I3b](https://github.com/victornife/jul/issues/713) or A19. Choose a disk-backed
+  filesystem where tmpfs memory pressure is unacceptable.
 
 ### Sizing and concurrency
 

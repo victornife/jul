@@ -1,0 +1,27 @@
+import os, sys
+p = sys.argv[1]
+def stat():
+    s = os.statvfs(p)
+    return f'bytes_free={s.f_bavail*s.f_frsize} files={s.f_files} files_free={s.f_ffree} files_available={s.f_favail}'
+print('initial', stat(), flush=True)
+created = 0
+try:
+    for i in range(5000):
+        fd = os.open(os.path.join(p, f'f{i}'), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(fd)
+        created += 1
+except OSError as e:
+    print('file-create failure', e.errno, e.strerror, flush=True)
+print('empty-files', created, stat(), flush=True)
+for i in range(created):
+    os.unlink(os.path.join(p, f'f{i}'))
+print('after-unlink', stat(), flush=True)
+written = 0
+try:
+    with open(os.path.join(p, 'bytes'), 'wb', buffering=0) as f:
+        for i in range(32):
+            written += f.write(b'x' * (1024 * 1024))
+except OSError as e:
+    print('write-failure', e.errno, e.strerror, flush=True)
+print('bytes-written', written, stat(), flush=True)
+os.unlink(os.path.join(p, 'bytes'))
