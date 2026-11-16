@@ -318,6 +318,27 @@ The test failed with the same independent draining-projection mutation. This
 uses an in-process HTTP fixture, not the packaged Jul server or a browser, so
 the corresponding browser acceptance remains open.
 
+The isolated `inspection-real-server` Playwright project now builds a
+`console waf` Jul binary and holds real WAF requests at a local origin. It
+publishes a lower valid limit, checks the resulting 503 and `Retry-After`,
+renders the draining state in the browser, switches to observe, confirms
+traffic reaches the origin and drains the held requests. The browser then
+shows observe without draining. A random fixture token and private temporary
+directory isolate it from other Jul processes. Three concurrent repetitions
+passed locally; changing only the displayed `Draining` label made the test
+fail before restoring it. The existing CI real-server project includes this
+test; the isolated project also permits running it independently.
+This covers the WAF browser scenario, not the missing guest/spool producers,
+all browser compatibility cases, or final I6a review.
+
+| Validation command | Result |
+| --- | --- |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=inspection-real-server --repeat-each=3 --reporter=list` (from `internal/admin/ui`) | Passed, three concurrent repetitions on macOS |
+| `node node_modules/typescript/bin/tsc --noEmit` and `node node_modules/eslint/bin/eslint.js .` (from `internal/admin/ui`) | Passed; the project configuration excludes the E2E files |
+| `GOMAXPROCS=2 python3 scripts/docs-check.py` | Passed, 2,723 checks |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=real-server --project=inspection-real-server --reporter=list` (from `internal/admin/ui`) | Did not start: the existing shared real-server script's macOS `mktemp` path traverses `/var`, a symlink rejected by the version-key directory check. The isolated project passed separately; hosted CI must validate its real-server invocation. |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=real-server inspection-real-server.spec.ts --reporter=list` (from `internal/admin/ui`) | Passed on macOS with a canonical `TMPDIR` and a temporary local change making the existing script pass that directory explicitly to `mktemp`. The script was restored afterwards; the full real-server suite was not rerun. |
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described
