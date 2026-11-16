@@ -310,6 +310,14 @@ not by HTTP inspection traffic; browser and protocol acceptance remain open.
 The test failed as expected in a disposable `a68b68ee` worktree when the
 status projection was independently mutated to always report `draining=false`.
 
+A further `waf`-tagged integration test sends real HTTP traffic through the
+WAF and checks both live status endpoints while an origin request is held.
+After a limit reduction, it verifies enforce returns 503 without reaching the
+origin, observe allows the next request, and the statuses drain on release.
+The test failed with the same independent draining-projection mutation. This
+uses an in-process HTTP fixture, not the packaged Jul server or a browser, so
+the corresponding browser acceptance remains open.
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described
