@@ -230,6 +230,24 @@ func cmdRemoteStatus(args []string) int {
 	if common.json {
 		return renderJSONMap("status", true, r.Body, nil)
 	}
+	var auditFields struct {
+		Inspection struct {
+			Usage struct {
+				AuditBytes *uint64 `json:"audit_bytes"`
+			} `json:"usage"`
+			AuditOutput *struct {
+				InFlightCalls  *uint64 `json:"in_flight_calls"`
+				AbandonedCalls *uint64 `json:"abandoned_calls"`
+				AbandonedBytes *uint64 `json:"abandoned_bytes"`
+				MaxCalls       *uint64 `json:"max_calls"`
+				MaxBytes       *uint64 `json:"max_bytes"`
+				Drops          *uint64 `json:"drops"`
+			} `json:"audit_output"`
+		} `json:"inspection"`
+	}
+	if err := json.Unmarshal(r.Body, &auditFields); err != nil {
+		return renderRemoteError(false, "status", &adminclient.TransportError{Phase: "decode", Err: err}, r.RequestID)
+	}
 	fmt.Fprintf(stdout, "authority: %s (%s)\n", v.ConfigAuthority, v.ConfigAuthoritySource)
 	fmt.Fprintf(stdout, "config state: %s\n", emptyDash(v.ConfigState))
 	fmt.Fprintf(stdout, "serving: %s\npersisted: %s\n", emptyDash(v.ServingVersion), emptyDash(v.PersistedVersion))
@@ -247,6 +265,19 @@ func cmdRemoteStatus(args []string) int {
 			i.Usage.BaseBytes, i.Usage.BufferBytes, i.Usage.WAFStateBytes, i.ActiveLeases,
 			i.ActiveEvaluations, i.WaitingEvaluations, i.Draining, i.RequestPathIntegration)
 		fmt.Fprintf(stdout, "inspection base charge: %dB (%s)\n", i.BaseChargeBytes, i.BaseChargeScope)
+		if auditFields.Inspection.Usage.AuditBytes == nil {
+			fmt.Fprintln(stdout, "inspection audit charge: unavailable")
+		} else {
+			fmt.Fprintf(stdout, "inspection audit charge: %dB\n", *auditFields.Inspection.Usage.AuditBytes)
+		}
+		a := auditFields.Inspection.AuditOutput
+		if a == nil || a.InFlightCalls == nil || a.AbandonedCalls == nil || a.AbandonedBytes == nil ||
+			a.MaxCalls == nil || a.MaxBytes == nil || a.Drops == nil {
+			fmt.Fprintln(stdout, "inspection audit output: unavailable")
+		} else {
+			fmt.Fprintf(stdout, "inspection audit output: in_flight=%d abandoned=%d abandoned_bytes=%dB max_calls=%d byte_threshold=%dB governor_drops_since_start=%d (excludes formatter and writer failures; threshold includes in-flight bytes; one oversized record may exceed it when empty)\n",
+				*a.InFlightCalls, *a.AbandonedCalls, *a.AbandonedBytes, *a.MaxCalls, *a.MaxBytes, *a.Drops)
+		}
 	}
 	return 0
 }

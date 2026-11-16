@@ -156,7 +156,7 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 		t.Fatalf("configured/effective inspection limits = %+v/%+v", i.Configured, i.Effective)
 	}
 	if i.Usage.BaseBytes != inspection.BaseChargeBytes || i.Usage.BufferBytes != 8192 ||
-		i.Usage.WAFStateBytes != 4096 || i.ActiveLeases != 1 ||
+		i.Usage.WAFStateBytes != 4096 || i.Usage.AuditBytes != 2048 || i.ActiveLeases != 1 ||
 		i.ActiveEvaluations != 2 || i.WaitingEvaluations != 1 {
 		t.Fatalf("inspection usage = %+v", i)
 	}

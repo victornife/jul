@@ -250,6 +250,16 @@ Two fields exist for clients that poll or retry:
 
 The Console Overview includes an expandable inspection-resources section backed
 by the same status projection. Charged bytes are not process memory or RSS.
+Audit-output calls past their deadline retain their audit charge until the writer
+returns; abandoned bytes are included in, not added to, the audit charge. The
+output threshold counts detached record bytes held by both in-flight and
+abandoned writers; it is not the same measure as the audit charge. In either
+mode, audit records can be dropped when output is full.
+The output byte threshold can be exceeded by one oversized record when the output
+set is empty. The drop counter covers governor budget and output-set refusals,
+not formatter or writer failures; it resets on process restart. The text form of
+`jul status` reports these signals and marks fields absent from older servers
+as unavailable rather than zero.
 The view does not report guest-capacity or spool protection. If inspection
 status cannot be reported, the Console shows an unavailable warning without
 discarding the rest of the Overview.

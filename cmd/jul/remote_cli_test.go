@@ -130,10 +130,50 @@ func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) 
 			"evaluations=0 waiting=0",
 			"request_path_integration=partial",
 			"inspection base charge: 16384B",
+			"inspection audit charge: unavailable",
+			"inspection audit output: unavailable",
 		} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("status output missing %q:\n%s", want, out)
 			}
+		}
+	})
+}
+
+func TestRemoteStatusReportsRetainedAuditOutput(t *testing.T) {
+	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+		`,"inspection":{"configured":{},"effective":{},"usage":{"audit_bytes":2048},` +
+		`"audit_output":{"in_flight_calls":2,"abandoned_calls":1,"abandoned_bytes":1024,"max_calls":64,"max_bytes":8192,"drops":3}}}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer ts.Close()
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 {
+			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+		}
+		for _, want := range []string{
+			"inspection audit charge: 2048B",
+			"inspection audit output: in_flight=2 abandoned=1 abandoned_bytes=1024B max_calls=64 byte_threshold=8192B governor_drops_since_start=3 (excludes formatter and writer failures;",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("status output missing %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestRemoteStatusReportsIncompleteAuditOutputAsUnavailable(t *testing.T) {
+	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+		`,"inspection":{"configured":{},"effective":{},"usage":{},"audit_output":{"abandoned_calls":1}}}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer ts.Close()
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 ||
+			!strings.Contains(out.String(), "inspection audit output: unavailable") {
+			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 		}
 	})
 }

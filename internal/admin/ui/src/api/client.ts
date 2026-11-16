@@ -605,6 +605,12 @@ export const OverviewSchema = z.object({
   status: z.array(FeatureStatusSchema),
   inspection: z
     .object({
+      configured: z
+        .object({
+          max_buffered_bytes: z.number(),
+          max_concurrent_evaluations: z.number(),
+        })
+        .optional(),
       effective: z.object({
         mode: z.string(),
         max_buffered_bytes: z.number(),
@@ -614,8 +620,20 @@ export const OverviewSchema = z.object({
         base_bytes: z.number(),
         buffer_bytes: z.number(),
         waf_state_bytes: z.number(),
-        audit_bytes: z.number(),
+        audit_bytes: z.number().optional(),
       }),
+      audit_output: z
+        .object({
+          in_flight_calls: z.number(),
+          abandoned_calls: z.number(),
+          abandoned_bytes: z.number(),
+          max_calls: z.number(),
+          max_bytes: z.number(),
+          drops: z.number(),
+        })
+        .nullable()
+        .optional()
+        .catch(null),
       active_leases: z.number(),
       active_evaluations: z.number(),
       waiting_evaluations: z.number(),

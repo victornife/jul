@@ -204,7 +204,8 @@ function InspectionCard({
           </p>
           {inspection.effective.mode === "observe" && (
             <p className="mt-1 text-sm">
-              Observe mode reports pressure without governor-driven refusal.
+              Observe mode reports pressure without governor-driven request refusal. Audit records
+              can still be dropped and counted when output is full.
             </p>
           )}
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -222,7 +223,11 @@ function InspectionCard({
             </div>
             <div>
               <dt>Audit</dt>
-              <dd>{formatBytes(inspection.usage.audit_bytes)}</dd>
+              <dd>
+                {inspection.usage.audit_bytes === undefined
+                  ? "Unavailable"
+                  : formatBytes(inspection.usage.audit_bytes)}
+              </dd>
             </div>
             <div>
               <dt>Accounted-byte limit</dt>
@@ -244,6 +249,44 @@ function InspectionCard({
               <dd>{inspection.waiting_evaluations.toLocaleString()}</dd>
             </div>
           </dl>
+          <p className="mt-3 text-xs text-jul-muted">
+            Configured byte limit:{" "}
+            {inspection.configured
+              ? formatBytes(inspection.configured.max_buffered_bytes)
+              : "unavailable"}
+            . Configured evaluation slots:{" "}
+            {inspection.configured
+              ? inspection.configured.max_concurrent_evaluations === 0
+                ? "automatic"
+                : inspection.configured.max_concurrent_evaluations.toLocaleString()
+              : "unavailable"}
+            .
+          </p>
+          <h3 className="mt-3 text-sm font-semibold">Audit output</h3>
+          {inspection.audit_output ? (
+            <>
+              <p className="mt-1 text-sm">
+                {inspection.audit_output.in_flight_calls.toLocaleString()} within deadline;{" "}
+                {inspection.audit_output.abandoned_calls.toLocaleString()} past deadline and still
+                running. Call limit: {inspection.audit_output.max_calls.toLocaleString()}; byte
+                threshold: {formatBytes(inspection.audit_output.max_bytes)}.
+              </p>
+              <p className="mt-1 text-sm">
+                Retained abandoned bytes: {formatBytes(inspection.audit_output.abandoned_bytes)}.
+                Governor-dropped audit records since process start:{" "}
+                {inspection.audit_output.drops.toLocaleString()}.
+              </p>
+              <p className="mt-1 text-xs text-jul-muted">
+                Abandoned bytes remain charged as audit bytes until their writers return; they are
+                not an additional charge. The output threshold counts detached record bytes held by
+                both in-flight and abandoned writers; it is not the same measure as the audit
+                charge. One oversized record may exceed the threshold when the output set is empty.
+                The drop count excludes formatter and writer failures.
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-jul-muted">Audit output status unavailable.</p>
+          )}
           <p className="mt-3 text-xs text-jul-muted">
             Accounted charges are not process memory. Guest-capacity and spool protection are not
             reported by this view.

@@ -78,8 +78,17 @@ describe("operator-centred Overview", () => {
     show(
       overview({
         inspection: {
+          configured: { max_buffered_bytes: 4096, max_concurrent_evaluations: 0 },
           effective: { mode: "observe", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
           usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+          audit_output: {
+            in_flight_calls: 2,
+            abandoned_calls: 1,
+            abandoned_bytes: 3,
+            max_calls: 64,
+            max_bytes: 4096,
+            drops: 5,
+          },
           active_leases: 1,
           active_evaluations: 2,
           waiting_evaluations: 1,
@@ -91,8 +100,16 @@ describe("operator-centred Overview", () => {
     fireEvent.click(screen.getByText("Show inspection resources"));
     const card = screen.getByRole("region", { name: "Inspection resources" });
     expect(within(card).getByText(/Mode: observe.*Draining/)).toBeVisible();
-    expect(within(card).getByText(/without governor-driven refusal/)).toBeVisible();
+    expect(within(card).getByText(/without governor-driven request refusal/)).toBeVisible();
+    expect(within(card).getByText(/Audit records can still be dropped/)).toBeVisible();
     expect(within(card).getByText("WAF state estimate")).toBeVisible();
+    expect(within(card).getByText(/Configured evaluation slots: automatic/)).toBeVisible();
+    expect(within(card).getByText(/1 past deadline and still running/)).toBeVisible();
+    expect(
+      within(card).getByText(/Governor-dropped audit records since process start: 5/),
+    ).toBeVisible();
+    expect(within(card).getByText(/drop count excludes formatter and writer failures/)).toBeVisible();
+    expect(within(card).getByText(/not an additional charge/)).toBeVisible();
     expect(within(card).getByText(/not process memory/)).toBeVisible();
   });
 
@@ -114,7 +131,9 @@ describe("operator-centred Overview", () => {
     const card = screen.getByRole("region", { name: "Inspection resources" });
     expect(within(card).getByText(/Mode: enforce/)).toBeVisible();
     expect(within(card).queryByText(/Draining/)).not.toBeInTheDocument();
-    expect(within(card).queryByText(/without governor-driven refusal/)).not.toBeInTheDocument();
+    expect(
+      within(card).queryByText(/without governor-driven request refusal/),
+    ).not.toBeInTheDocument();
   });
 
   it("surfaces inspection errors without losing the overview", () => {
@@ -134,6 +153,48 @@ describe("operator-centred Overview", () => {
         "Inspection status unavailable.",
       ),
     ).toBeVisible();
+  });
+
+  it("reports missing older audit fields as unavailable rather than zero", () => {
+    show(
+      overview({
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText("Audit output status unavailable.")).toBeVisible();
+    expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Unavailable");
+  });
+
+  it("isolates incomplete audit output from otherwise valid inspection status", () => {
+    show(
+      OverviewSchema.parse({
+        ...overview(),
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0 },
+          audit_output: { abandoned_calls: 1 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Mode: enforce/)).toBeVisible();
+    expect(within(card).getByText("Audit output status unavailable.")).toBeVisible();
   });
 
   it("isolates an incompatible inspection projection from the rest of the overview", () => {
