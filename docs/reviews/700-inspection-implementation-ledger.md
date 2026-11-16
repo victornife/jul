@@ -12,8 +12,8 @@ qualification, soak or maturity change.
 | --- | --- |
 | Starting `main` | `d151989435e49493d02ea895dce25b7125f3e2e8` (verified #718 merge, after I4) |
 | Latest checked `main` | `13126aadf419839560c5a51b2ab155760ca9e8bb` (#720 dependency updates) |
-| Published I2b code/test head | `4af8bfdb1be1e6941df91974756c52976b02b1a6` (prototype `ee55b72d`; latest main merged) |
-| Hosted CI | [Run 43707306605](https://github.com/victornife/jul/actions/runs/43707306605), manually dispatched for `4af8bfdb`; all checks passed |
+| Published I2b code/test head | `4e9b1fb534836b58456b0bfc6864c6c590bc2801` (prototype `ee55b72d`; latest main merged) |
+| Hosted CI | [Run 43707306605](https://github.com/victornife/jul/actions/runs/43707306605) passed on `4af8bfdb`; PR checks on the later head require verification |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
@@ -375,7 +375,13 @@ documentation and raw outputs, and `4af8bfdb` adds focused guest-capacity covera
 Full-tag hosted CI run 43707306605 passed on `4af8bfdb`. The preceding run 43705663340 on
 `e2f1a555` passed every check except the 90% changed-Go coverage gate (84.4%); the new tests
 raise the local combined coverage measurement above 90%, and the subsequent hosted coverage gate
-passed. No merge or PR is requested while I2b remains blocked.
+passed. Draft #721 is not merge-ready while I2b remains blocked.
+
+PR CI on `1e8d7fa2` reported 123/148 (83.1081%) in the separate HR-07C changed-statement gate.
+The regression tests in `4e9b1fb5` exercise cancellation, generation changes and a concurrent
+publication conflict. On macOS arm64, the HR-07C full-tag coverage workload and its diff-scoring
+calculation passed at 135/148 (91.2162%); the two affected tests also passed with and without
+`-race`. Hosted checks for the later head must be verified separately.
 
 - `go test -count=1 -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./cmd/jul`: passed.
 - `go test -count=1 ./internal/inspection ./internal/config ./internal/configcontract ./internal/lifecycle ./internal/observability`: passed.
