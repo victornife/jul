@@ -602,6 +602,7 @@ export type ConfigAuthority = z.infer<typeof ConfigAuthoritySchema>;
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
+  boot_id: z.string().optional(),
   status: z.array(FeatureStatusSchema),
   inspection: z
     .object({

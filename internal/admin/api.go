@@ -111,6 +111,7 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	out := RuntimeOverview{
 		Product:  s.deps.Product,
 		Version:  s.deps.Version,
+		BootID:   s.bootID(),
 		Status:   status,
 		CertRisk: certRisk,
 	}

@@ -230,6 +230,76 @@ describe("operator-centred Overview", () => {
     expect(screen.getByText("Requests/sec")).toBeVisible();
   });
 
+  it("labels the observed inspection window and warns when the last poll is stale", async () => {
+    const snapshot = overview({
+      boot_id: "test-boot",
+      inspection: {
+        effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+        usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+        active_leases: 0,
+        active_evaluations: 0,
+        waiting_evaluations: 0,
+        draining: false,
+        request_path_integration: "partial",
+      },
+    });
+    const client = show(snapshot);
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() + 1000 }); });
+    expect(await screen.findByRole("img", { name: /Accounted inspection bytes across/ })).toBeVisible();
+    expect(screen.getByText(/2 samples over 1 s/)).toBeVisible();
+    expect(screen.getByText(/not a process high-water mark/)).toBeVisible();
+    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() - 10000 }); });
+    expect(await screen.findByText(/Inspection data may be stale/)).toBeVisible();
+    expect(screen.queryByRole("img", { name: /Accounted inspection bytes across/ })).not.toBeInTheDocument();
+  });
+
+  it("marks a stalled overview poll stale after the six-second threshold", () => {
+    vi.useFakeTimers();
+    try {
+      show(overview());
+      fireEvent.click(screen.getByText("Show inspection resources"));
+      act(() => { vi.advanceTimersByTime(6000); });
+      expect(screen.queryByText(/Inspection data may be stale/)).not.toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(screen.getByText(/Inspection data may be stale/)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the trend when a poll fails before its retry succeeds", async () => {
+    const snapshot = overview({
+      boot_id: "test-boot",
+      inspection: {
+        effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+        usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+        active_leases: 0,
+        active_evaluations: 0,
+        waiting_evaluations: 0,
+        draining: false,
+        request_path_integration: "partial",
+      },
+    });
+    const client = show(snapshot);
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() + 1000 }); });
+    await screen.findByRole("img", { name: /Accounted inspection bytes across/ });
+    const query = client.getQueryCache().find({ queryKey: ["overview"] });
+    expect(query).toBeDefined();
+    act(() => {
+      query?.setState({ fetchFailureCount: 1, fetchFailureReason: new Error("temporary failure") });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("img", { name: /Accounted inspection bytes across/ })).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/last overview poll failed and is being retried/)).toBeVisible();
+    act(() => {
+      query?.setState({ fetchFailureCount: 0, fetchFailureReason: null, dataUpdatedAt: Date.now() + 2000 });
+    });
+    await waitFor(() => { expect(screen.getByText(/Inspection trend unavailable or awaiting samples/)).toBeVisible(); });
+  });
+
   it("distinguishes missing inspection data from an idle snapshot", () => {
     show(overview());
     fireEvent.click(screen.getByText("Show inspection resources"));

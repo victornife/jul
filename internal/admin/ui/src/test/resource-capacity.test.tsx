@@ -11,8 +11,8 @@ import type { ReactNode } from "react";
 import { renderHook, act } from "@testing-library/react";
 
 import { formatBytes, formatBytesPerSec, formatCores } from "@/lib/formatBytes.ts";
-import { useMetricsHistory } from "@/lib/useMetricsHistory.ts";
-import type { StatsSnapshot } from "@/api/client.ts";
+import { useInspectionHistory, useMetricsHistory } from "@/lib/useMetricsHistory.ts";
+import type { Overview, StatsSnapshot } from "@/api/client.ts";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
@@ -78,6 +78,59 @@ function baseStats(overrides: Partial<StatsSnapshot> = {}): StatsSnapshot {
     ...overrides,
   };
 }
+
+describe("useInspectionHistory", () => {
+  const inspection: NonNullable<Overview["inspection"]> = {
+    effective: { mode: "enforce", max_buffered_bytes: 10, max_concurrent_evaluations: 1 },
+    usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+    active_leases: 1,
+    active_evaluations: 0,
+    waiting_evaluations: 0,
+    draining: false,
+    request_path_integration: "partial",
+  };
+  type Sample = {
+    inspection: Overview["inspection"];
+    boot: string | undefined;
+    at: number;
+    unavailable: boolean;
+  };
+
+  it("uses at most 60 real samples and resets on boot or clock changes", () => {
+    const { result, rerender } = renderHook<ReturnType<typeof useInspectionHistory>, Sample>(
+      (sample: Sample) => useInspectionHistory(sample.inspection, sample.boot, sample.at, sample.unavailable),
+      { initialProps: { inspection, boot: "one", at: 1, unavailable: false } },
+    );
+    expect(result.current?.bytes).toEqual([10]);
+    for (let at = 2; at <= 65; at++) rerender({ inspection, boot: "one", at, unavailable: false });
+    expect(result.current?.timestamps).toHaveLength(60);
+    expect(result.current?.timestamps[0]).toBe(6);
+    rerender({ inspection, boot: "two", at: 66, unavailable: false });
+    expect(result.current?.timestamps).toEqual([66]);
+    rerender({ inspection, boot: "two", at: 2, unavailable: false });
+    expect(result.current?.timestamps).toEqual([2]);
+    rerender({ inspection, boot: "two", at: 6002, unavailable: false });
+    expect(result.current?.timestamps).toEqual([2, 6002]);
+    rerender({ inspection, boot: "two", at: 12003, unavailable: false });
+    expect(result.current?.timestamps).toEqual([12003]);
+  });
+
+  it("does not join samples across missing data or fabricate audit bytes", () => {
+    const { result, rerender } = renderHook<ReturnType<typeof useInspectionHistory>, Sample>(
+      (sample: Sample) => useInspectionHistory(sample.inspection, sample.boot, sample.at, sample.unavailable),
+      { initialProps: { inspection, boot: "one", at: 1, unavailable: false } },
+    );
+    rerender({ inspection, boot: "one", at: 2, unavailable: true });
+    expect(result.current).toBeNull();
+    rerender({ inspection, boot: "one", at: 3, unavailable: false });
+    expect(result.current?.timestamps).toEqual([3]);
+    const missingAudit = { ...inspection, usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3 } };
+    rerender({ inspection: missingAudit, boot: "one", at: 4, unavailable: false });
+    expect(result.current).toBeNull();
+    rerender({ inspection, boot: undefined, at: 5, unavailable: false });
+    expect(result.current).toBeNull();
+  });
+});
 
 describe("useMetricsHistory resource/capacity fields", () => {
   it("records each poll even when the response is unchanged", () => {

@@ -586,6 +586,7 @@ type CertRiskProjection struct {
 type RuntimeOverview struct {
 	Product         string                     `json:"product"`
 	Version         string                     `json:"version"`
+	BootID          string                     `json:"boot_id,omitempty"`
 	Status          []FeatureStatus            `json:"status"` // existing 21-row backbone
 	Stats           interface{}                `json:"stats,omitempty"`
 	Inspection      *adminapi.InspectionStatus `json:"inspection,omitempty"`

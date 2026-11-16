@@ -18,7 +18,7 @@ import { formatBytes, formatBytesPerSec, formatCores } from "@/lib/formatBytes.t
 import type { MetricsHistory } from "@/lib/useMetricsHistory";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
-import { useMetricsHistory } from "@/lib/useMetricsHistory";
+import { INSPECTION_STALE_MS, useInspectionHistory, useMetricsHistory } from "@/lib/useMetricsHistory";
 import { METRIC_META_LIST, type MetricKey } from "@/lib/metricMeta";
 import { resolveFeatureRoute } from "@/lib/featureRoutes";
 import { StorageSection } from "./StorageSection.tsx";
@@ -180,10 +180,18 @@ function GenerationRetirementCard({ stats }: { readonly stats: StatsSnapshot | u
 function InspectionCard({
   inspection,
   error,
+  history,
+  stale,
+  retrying,
 }: {
   readonly inspection: Overview["inspection"];
   readonly error: string | undefined;
+  readonly history: ReturnType<typeof useInspectionHistory>;
+  readonly stale: boolean;
+  readonly retrying: boolean;
 }) {
+  const firstSample = history?.timestamps.at(0);
+  const lastSample = history?.timestamps.at(-1);
   return (
     <section
       aria-labelledby="inspection-title"
@@ -192,6 +200,16 @@ function InspectionCard({
       <h2 id="inspection-title" className="text-sm font-semibold text-jul-text">
         Inspection resources
       </h2>
+      {stale && (
+        <p className="mt-2 text-sm text-jul-warning">
+          Inspection data may be stale: the last successful overview poll was over 6 seconds ago.
+        </p>
+      )}
+      {retrying && (
+        <p className="mt-2 text-sm text-jul-warning">
+          The last overview poll failed and is being retried; inspection data may be stale.
+        </p>
+      )}
       {error ? (
         <p className="mt-2 text-sm text-jul-danger">Inspection status unavailable: {error}</p>
       ) : !inspection ? (
@@ -249,6 +267,21 @@ function InspectionCard({
               <dd>{inspection.waiting_evaluations.toLocaleString()}</dd>
             </div>
           </dl>
+          {history && history.bytes.length > 1 && firstSample !== undefined && lastSample !== undefined ? (
+            <div className="mt-3">
+              <p className="text-sm">Accounted bytes: browser-local samples</p>
+              <Sparkline data={history.bytes} width={180} height={40}
+                ariaLabel="Accounted inspection bytes across browser-local samples" />
+              <p className="text-xs text-jul-muted">
+                {history.bytes.length} samples over{" "}
+                {Math.round((lastSample - firstSample) / 1000)} s.
+                Samples are equally spaced in the chart, not time-scaled. This is not a process
+                high-water mark.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-jul-muted">Inspection trend unavailable or awaiting samples.</p>
+          )}
           <p className="mt-3 text-sm">
             Single-request minimum:{" "}
             {inspection.minimum_request_bytes === undefined
@@ -688,13 +721,23 @@ function ActionableStatusGroup({
 export function OverviewPanel() {
   const navigate = useNavigate();
   const { search, key: locationKey } = useLocation();
-  const { data, dataUpdatedAt, isLoading, isError, error, refetch } = useQuery({
+  const { data, dataUpdatedAt, isLoading, isError, error, failureCount, refetch } = useQuery({
     queryKey: ["overview"],
     queryFn: fetchOverview,
     refetchInterval: 2000, // Poll every 2 seconds per Milestone 1.1
   });
 
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => { setNow(Date.now()); }, 2000);
+    return () => { window.clearInterval(timer); };
+  }, []);
+  const inspectionStale = dataUpdatedAt > 0 && now - dataUpdatedAt > INSPECTION_STALE_MS;
   const history = useMetricsHistory(data?.stats, 60, dataUpdatedAt);
+  const inspectionHistory = useInspectionHistory(
+    data?.inspection, data?.boot_id, dataUpdatedAt,
+    isError || failureCount > 0 || !!data?.inspection_error || inspectionStale,
+  );
 
   const [activeMetric, setActiveMetric] = useState<{
     key: MetricKey;
@@ -1307,7 +1350,8 @@ export function OverviewPanel() {
               <span className="ml-2 text-jul-danger">Inspection status unavailable</span>
             )}
           </summary>
-          <InspectionCard inspection={data.inspection} error={data.inspection_error} />
+          <InspectionCard inspection={data.inspection} error={data.inspection_error}
+            history={inspectionHistory} stale={inspectionStale} retrying={failureCount > 0} />
         </details>
         {stats?.available ? (
           <>

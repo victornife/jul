@@ -397,6 +397,7 @@ func TestRuntimeOverviewInspection(t *testing.T) {
 		Draining: true,
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
+		BootID:             func() string { return "test-boot" },
 		InspectionSnapshot: func() inspection.Snapshot { return snapshot },
 		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
 			return adminapi.InspectionPluginGuestCapacity{MaxPermittedBytes: 5678}, nil
@@ -408,7 +409,7 @@ func TestRuntimeOverviewInspection(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
-	if rr.Code != http.StatusOK || out.Inspection == nil ||
+	if rr.Code != http.StatusOK || out.BootID != "test-boot" || out.Inspection == nil ||
 		out.Inspection.Effective.Mode != "observe" ||
 		out.Inspection.Effective.MaxBufferedBytes != 1234 ||
 		out.Inspection.Usage.AuditBytes != 4 || !out.Inspection.Draining ||

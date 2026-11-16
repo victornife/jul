@@ -4,7 +4,48 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import type { HTTPRouteStats, StatsSnapshot } from "@/api/client";
+import type { HTTPRouteStats, Overview, StatsSnapshot } from "@/api/client";
+
+export interface InspectionHistory {
+  bootId: string;
+  timestamps: number[];
+  bytes: number[];
+}
+
+export const INSPECTION_STALE_MS = 6000;
+
+export function useInspectionHistory(
+  inspection: Overview["inspection"],
+  bootId: string | undefined,
+  sampledAt: number,
+  unavailable: boolean,
+): InspectionHistory | null {
+  const [history, setHistory] = useState<InspectionHistory | null>(null);
+  useEffect(() => {
+    const audit = inspection?.usage.audit_bytes;
+    if (!bootId || !inspection || audit === undefined || unavailable || sampledAt <= 0) {
+      setHistory(null);
+      return;
+    }
+    const bytes = inspection.usage.base_bytes + inspection.usage.buffer_bytes +
+      inspection.usage.waf_state_bytes + audit;
+    setHistory((previous) => {
+      if (previous?.bootId === bootId && previous.timestamps.at(-1) === sampledAt) return previous;
+      const lastAt = previous?.timestamps.at(-1) ?? 0;
+      const current = previous?.bootId === bootId && sampledAt > lastAt &&
+        sampledAt - lastAt <= INSPECTION_STALE_MS
+        ? previous
+        : { bootId, timestamps: [], bytes: [] };
+      return {
+        bootId,
+        timestamps: [...current.timestamps, sampledAt].slice(-60),
+        bytes: [...current.bytes, bytes].slice(-60),
+      };
+    });
+  }, [inspection, bootId, sampledAt, unavailable]);
+  return history?.bootId === bootId && inspection?.usage.audit_bytes !== undefined &&
+    !unavailable ? history : null;
+}
 
 export interface RouteMetricPoint {
   requestsPerSec: number;
