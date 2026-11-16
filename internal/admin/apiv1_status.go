@@ -39,23 +39,32 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 		LedgerRetention: s.ledgerRetention(),
 	}
 	out.PersistedVersion = authority.DiskVersion
-	if s.deps.InspectionSnapshot != nil {
-		snapshot := s.deps.InspectionSnapshot()
-		guestCapacity := adminapi.InspectionPluginGuestCapacity{}
-		guestCapacityState := "unavailable"
-		if s.deps.InspectionPluginGuestCapacity != nil {
-			var err error
-			guestCapacity, err = s.deps.InspectionPluginGuestCapacity()
-			if err != nil {
-				writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError,
-					"could not report plugin guest capacity: %v", err))
-				return
-			}
-			guestCapacityState = "not_sampled"
-		}
-		out.Inspection = inspectionStatus(snapshot, guestCapacity, guestCapacityState)
+	var err error
+	out.Inspection, err = s.currentInspectionStatus()
+	if err != nil {
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError,
+			"could not report plugin guest capacity: %v", err))
+		return
 	}
 	writeAPIJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) currentInspectionStatus() (*adminapi.InspectionStatus, error) {
+	if s.deps.InspectionSnapshot == nil {
+		return nil, nil
+	}
+	snapshot := s.deps.InspectionSnapshot()
+	guestCapacity := adminapi.InspectionPluginGuestCapacity{}
+	guestCapacityState := "unavailable"
+	if s.deps.InspectionPluginGuestCapacity != nil {
+		var err error
+		guestCapacity, err = s.deps.InspectionPluginGuestCapacity()
+		if err != nil {
+			return nil, err
+		}
+		guestCapacityState = "not_sampled"
+	}
+	return inspectionStatus(snapshot, guestCapacity, guestCapacityState), nil
 }
 
 func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.InspectionPluginGuestCapacity, guestCapacityState string) *adminapi.InspectionStatus {

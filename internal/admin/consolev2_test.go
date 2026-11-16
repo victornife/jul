@@ -21,7 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"jul/internal/adminapi"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/observability"
 	"jul/internal/rbac"
 	"jul/internal/server"
@@ -385,6 +387,52 @@ func TestRuntimeOverviewOK(t *testing.T) {
 	}
 	if len(out.Status) == 0 {
 		t.Error("status rows should not be empty")
+	}
+}
+
+func TestRuntimeOverviewInspection(t *testing.T) {
+	snapshot := inspection.Snapshot{
+		Limits:   inspection.Limits{Mode: inspection.Observe, MaxBytes: 1234},
+		Usage:    [4]uint64{1, 2, 3, 4},
+		Draining: true,
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return snapshot },
+		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
+			return adminapi.InspectionPluginGuestCapacity{MaxPermittedBytes: 5678}, nil
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || out.Inspection == nil ||
+		out.Inspection.Effective.Mode != "observe" ||
+		out.Inspection.Effective.MaxBufferedBytes != 1234 ||
+		out.Inspection.Usage.AuditBytes != 4 || !out.Inspection.Draining ||
+		out.Inspection.PluginGuestMaxBytes == nil || *out.Inspection.PluginGuestMaxBytes != 5678 {
+		t.Fatalf("overview = %d %+v", rr.Code, out.Inspection)
+	}
+}
+
+func TestRuntimeOverviewReportsInspectionFailureWithoutLosingOverview(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return inspection.Snapshot{} },
+		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
+			return adminapi.InspectionPluginGuestCapacity{}, errors.New("private detail")
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || out.Inspection != nil || out.InspectionError == "" ||
+		strings.Contains(rr.Body.String(), "private detail") {
+		t.Fatalf("overview = %d %s", rr.Code, rr.Body.String())
 	}
 }
 

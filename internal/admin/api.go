@@ -115,6 +115,12 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 		Status:   status,
 		CertRisk: certRisk,
 	}
+	inspection, err := s.currentInspectionStatus()
+	if err != nil {
+		out.InspectionError = "could not report plugin guest capacity"
+	} else {
+		out.Inspection = inspection
+	}
 	if s.deps.PendingRestartCheck != nil {
 		var live server.LiveSnapshot
 		if s.deps.LiveSnapshot != nil {

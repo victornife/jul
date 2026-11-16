@@ -11,6 +11,7 @@ import {
   type FeatureStatus,
   type TrafficSources,
   type StatsSnapshot,
+  type Overview,
 } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
 import { formatBytes, formatBytesPerSec, formatCores } from "@/lib/formatBytes.ts";
@@ -172,6 +173,83 @@ function GenerationRetirementCard({ stats }: { readonly stats: StatsSnapshot | u
       >
         Lifecycle documentation
       </a>
+    </section>
+  );
+}
+
+function InspectionCard({
+  inspection,
+  error,
+}: {
+  readonly inspection: Overview["inspection"];
+  readonly error: string | undefined;
+}) {
+  return (
+    <section
+      aria-labelledby="inspection-title"
+      className="rounded-lg border border-jul-border bg-jul-surface p-4"
+    >
+      <h2 id="inspection-title" className="text-sm font-semibold text-jul-text">
+        Inspection resources
+      </h2>
+      {error ? (
+        <p className="mt-2 text-sm text-jul-danger">Inspection status unavailable: {error}</p>
+      ) : !inspection ? (
+        <p className="mt-2 text-sm text-jul-muted">Inspection status unavailable.</p>
+      ) : (
+        <>
+          <p className="mt-2 text-sm">
+            Mode: {inspection.effective.mode}. Integration: {inspection.request_path_integration}.
+            {inspection.draining ? " Draining." : ""}
+          </p>
+          {inspection.effective.mode === "observe" && (
+            <p className="mt-1 text-sm">
+              Observe mode reports pressure without governor-driven refusal.
+            </p>
+          )}
+          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt>Base</dt>
+              <dd>{formatBytes(inspection.usage.base_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Buffers</dt>
+              <dd>{formatBytes(inspection.usage.buffer_bytes)}</dd>
+            </div>
+            <div>
+              <dt>WAF state estimate</dt>
+              <dd>{formatBytes(inspection.usage.waf_state_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Audit</dt>
+              <dd>{formatBytes(inspection.usage.audit_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Accounted-byte limit</dt>
+              <dd>{formatBytes(inspection.effective.max_buffered_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Active leases</dt>
+              <dd>{inspection.active_leases.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Evaluations active / limit</dt>
+              <dd>
+                {inspection.active_evaluations.toLocaleString()} /{" "}
+                {inspection.effective.max_concurrent_evaluations.toLocaleString()}
+              </dd>
+            </div>
+            <div>
+              <dt>Evaluations waiting</dt>
+              <dd>{inspection.waiting_evaluations.toLocaleString()}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-jul-muted">
+            Accounted charges are not process memory. Guest-capacity and spool protection are not
+            reported by this view.
+          </p>
+        </>
+      )}
     </section>
   );
 }
@@ -1142,6 +1220,15 @@ export function OverviewPanel() {
             Inspect process resources, capacity, and Jul-owned storage headroom.
           </p>
         </div>
+        <details className="rounded-lg border border-jul-border">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
+            Show inspection resources
+            {(data.inspection_error || data.inspection === null) && (
+              <span className="ml-2 text-jul-danger">Inspection status unavailable</span>
+            )}
+          </summary>
+          <InspectionCard inspection={data.inspection} error={data.inspection_error} />
+        </details>
         {stats?.available ? (
           <>
             {buildGuidance(stats, history).some((item) => item.signal === "unknown") && (

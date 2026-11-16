@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { Overview, StatsSnapshot } from "@/api/client.ts";
+import { OverviewSchema, type Overview, type StatsSnapshot } from "@/api/client.ts";
 import { App } from "@/app/App.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
 import { openResourceDisclosure } from "@/features/overview/resourceDisclosure.ts";
@@ -74,6 +74,49 @@ describe("operator-centred Overview", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows observe and draining inspection charges without calling them process memory", () => {
+    show(
+      overview({
+        inspection: {
+          effective: { mode: "observe", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+          active_leases: 1,
+          active_evaluations: 2,
+          waiting_evaluations: 1,
+          draining: true,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Mode: observe.*Draining/)).toBeVisible();
+    expect(within(card).getByText(/without governor-driven refusal/)).toBeVisible();
+    expect(within(card).getByText("WAF state estimate")).toBeVisible();
+    expect(within(card).getByText(/not process memory/)).toBeVisible();
+  });
+
+  it("surfaces inspection errors without losing the overview", () => {
+    show(overview({ inspection_error: "could not report plugin guest capacity" }));
+    expect(screen.getByText("Inspection status unavailable")).toBeVisible();
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Inspection status unavailable/)).toBeVisible();
+    expect(screen.getByText("Requests/sec")).toBeVisible();
+  });
+
+  it("isolates an incompatible inspection projection from the rest of the overview", () => {
+    show(OverviewSchema.parse({ ...overview(), inspection: { effective: {} } }));
+    expect(screen.getByText("Inspection status unavailable")).toBeVisible();
+    expect(screen.getByText("Requests/sec")).toBeVisible();
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    expect(
+      within(screen.getByRole("region", { name: "Inspection resources" })).getByText(
+        "Inspection status unavailable.",
+      ),
+    ).toBeVisible();
+  });
+
   it("opens an available resource disclosure and tolerates an absent one", () => {
     const details = document.createElement("details");
     expect(details.open).toBe(false);
@@ -94,7 +137,9 @@ describe("operator-centred Overview", () => {
     expect(
       within(traffic).getByRole("region", { name: "Connection lifecycle across reloads" }),
     ).toBeVisible();
-    const resourceSummary = screen.getByText("Show resource and storage details", { selector: "summary" });
+    const resourceSummary = screen.getByText("Show resource and storage details", {
+      selector: "summary",
+    });
     expect(resourceSummary.parentElement).not.toHaveAttribute("open");
     fireEvent.click(resourceSummary);
     expect(resourceSummary.parentElement).toHaveAttribute("open");
@@ -209,8 +254,22 @@ describe("operator-centred Overview", () => {
         stats: {
           ...stats,
           cacheTiers: [
-            { tier: "memory", bytes: 90, maxBytes: 100, entries: 3, evictions: 0, occupancyRatio: 0.9 },
-            { tier: "disk", bytes: 89, maxBytes: 100, entries: 4, evictions: 0, occupancyRatio: 0.89 },
+            {
+              tier: "memory",
+              bytes: 90,
+              maxBytes: 100,
+              entries: 3,
+              evictions: 0,
+              occupancyRatio: 0.9,
+            },
+            {
+              tier: "disk",
+              bytes: 89,
+              maxBytes: 100,
+              entries: 4,
+              evictions: 0,
+              occupancyRatio: 0.89,
+            },
           ],
           upstreamWorstActive: { pool: "api", current: 9, max: 10, ratio: 0.9 },
           upstreamWorstPending: { pool: "billing", current: 10, max: 10, ratio: 1 },
@@ -258,11 +317,9 @@ describe("operator-centred Overview", () => {
     const client = show(overview({ stats: { ...stats, requestsPerSec: 2 } }));
     await screen.findByText("2-Minute Trends");
     act(() => {
-      client.setQueryData(
-        ["overview"],
-        overview({ stats: { ...stats, requestsPerSec: 4 } }),
-        { updatedAt: Date.now() + 1000 },
-      );
+      client.setQueryData(["overview"], overview({ stats: { ...stats, requestsPerSec: 4 } }), {
+        updatedAt: Date.now() + 1000,
+      });
     });
     fireEvent.click(screen.getByText("2-Minute Trends"));
     const trigger = await screen.findByRole("button", { name: /Request Rate trend\. 2 samples/ });

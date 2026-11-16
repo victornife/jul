@@ -603,6 +603,29 @@ export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
   status: z.array(FeatureStatusSchema),
+  inspection: z
+    .object({
+      effective: z.object({
+        mode: z.string(),
+        max_buffered_bytes: z.number(),
+        max_concurrent_evaluations: z.number(),
+      }),
+      usage: z.object({
+        base_bytes: z.number(),
+        buffer_bytes: z.number(),
+        waf_state_bytes: z.number(),
+        audit_bytes: z.number(),
+      }),
+      active_leases: z.number(),
+      active_evaluations: z.number(),
+      waiting_evaluations: z.number(),
+      draining: z.boolean(),
+      request_path_integration: z.string(),
+    })
+    .nullable()
+    .optional()
+    .catch(null),
+  inspection_error: z.string().optional(),
   stats: StatsSnapshotSchema.optional(),
   traffic_sources: TrafficSourcesSchema.optional(),
   // stream_status is the most recent L4 stream-proxy reload outcome: "ok",
