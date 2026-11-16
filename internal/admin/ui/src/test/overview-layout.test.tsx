@@ -79,6 +79,8 @@ describe("operator-centred Overview", () => {
       overview({
         inspection: {
           configured: { max_buffered_bytes: 4096, max_concurrent_evaluations: 0 },
+          minimum_request_bytes: 1048578,
+          minimum_request_route: "servers[0].locations[0]",
           effective: { mode: "observe", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
           usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
           audit_output: {
@@ -104,6 +106,9 @@ describe("operator-centred Overview", () => {
     expect(within(card).getByText(/Audit records can still be dropped/)).toBeVisible();
     expect(within(card).getByText("WAF state estimate")).toBeVisible();
     expect(within(card).getByText(/Configured evaluation slots: automatic/)).toBeVisible();
+    expect(within(card).getByText(/Limiting route: servers\[0\].locations\[0\]/)).toBeVisible();
+    expect(within(card).getByText(/1,048,578 B/)).toBeVisible();
+    expect(within(card).getByText(/not a concurrency or process-memory recommendation/)).toBeVisible();
     expect(within(card).getByText(/1 past deadline and still running/)).toBeVisible();
     expect(
       within(card).getByText(/Governor-dropped audit records since process start: 5/),
@@ -173,6 +178,31 @@ describe("operator-centred Overview", () => {
     const card = screen.getByRole("region", { name: "Inspection resources" });
     expect(within(card).getByText("Audit output status unavailable.")).toBeVisible();
     expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Unavailable");
+    expect(within(card).getByText(/Single-request minimum: unavailable/)).toBeVisible();
+  });
+
+  it.each([
+    [0, "no inspected routes"],
+    [2048, "Limiting route: unavailable or restricted"],
+  ])("reports a minimum of %i without a route as %s", (minimum, message) => {
+    show(
+      overview({
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0 },
+          minimum_request_bytes: minimum,
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    expect(within(screen.getByRole("region", { name: "Inspection resources" })).getByText(
+      new RegExp(message),
+    )).toBeVisible();
   });
 
   it("isolates incomplete audit output from otherwise valid inspection status", () => {

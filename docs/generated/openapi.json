@@ -11528,6 +11528,13 @@
               "evaluation_headroom_estimate_state": {
                 "type": "string"
               },
+              "minimum_request_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "minimum_request_route": {
+                "type": "string"
+              },
               "plugin_guest_actual_bytes": {
                 "type": "integer",
                 "format": "int64"

@@ -42,6 +42,8 @@ type InspectionStatus struct {
 	RequestPathIntegration          string                     `json:"request_path_integration"`
 	BaseChargeBytes                 uint64                     `json:"base_charge_bytes"`
 	BaseChargeScope                 string                     `json:"base_charge_scope"`
+	MinimumRequestBytes             *uint64                    `json:"minimum_request_bytes,omitempty"`
+	MinimumRequestRoute             string                     `json:"minimum_request_route,omitempty"`
 	PluginGuestMaxBytes             *uint64                    `json:"plugin_guest_max_bytes,omitempty"`
 	PluginGuestLiveInstances        *uint64                    `json:"plugin_guest_live_instances,omitempty"`
 	PluginGuestMaxInstances         *uint64                    `json:"plugin_guest_max_instances,omitempty"`

@@ -249,6 +249,21 @@ function InspectionCard({
               <dd>{inspection.waiting_evaluations.toLocaleString()}</dd>
             </div>
           </dl>
+          <p className="mt-3 text-sm">
+            Single-request minimum:{" "}
+            {inspection.minimum_request_bytes === undefined
+              ? "unavailable"
+              : inspection.minimum_request_bytes === 0
+                ? "no inspected routes"
+                : `${formatBytes(inspection.minimum_request_bytes)} (${inspection.minimum_request_bytes.toLocaleString()} B)`}
+            {inspection.minimum_request_bytes !== undefined &&
+              inspection.minimum_request_bytes > 0 &&
+              `. Limiting route: ${inspection.minimum_request_route || "unavailable or restricted"}`}
+            .
+          </p>
+          <p className="mt-1 text-xs text-jul-muted">
+            This compiled minimum is not a concurrency or process-memory recommendation.
+          </p>
           <p className="mt-3 text-xs text-jul-muted">
             Configured byte limit:{" "}
             {inspection.configured

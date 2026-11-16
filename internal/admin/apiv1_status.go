@@ -16,6 +16,8 @@ import (
 	"jul/internal/buildcaps"
 	"jul/internal/configcontract"
 	"jul/internal/inspection"
+	"jul/internal/rbac"
+	"jul/internal/server"
 )
 
 // externalEndpointList is derived from Catalog after the v1 write closure has
@@ -27,10 +29,11 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authority := s.currentAuthority()
+	live := s.liveSnapshot()
 	out := adminapi.StatusResponse{
 		APIVersion:      adminapi.APIVersion,
 		Ready:           s.dataPlaneReady(),
-		ServingVersion:  s.servingVersion(),
+		ServingVersion:  s.servingVersionOf(live),
 		AuthorityState:  authorityState(authority),
 		Drift:           driftState(authority),
 		PendingRestart:  s.pendingRestartState(),
@@ -40,7 +43,7 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 	}
 	out.PersistedVersion = authority.DiskVersion
 	var err error
-	out.Inspection, err = s.currentInspectionStatus()
+	out.Inspection, err = s.currentInspectionStatus(r, live)
 	if err != nil {
 		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError,
 			"could not report plugin guest capacity: %v", err))
@@ -49,7 +52,7 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 	writeAPIJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) currentInspectionStatus() (*adminapi.InspectionStatus, error) {
+func (s *Server) currentInspectionStatus(r *http.Request, live server.LiveSnapshot) (*adminapi.InspectionStatus, error) {
 	if s.deps.InspectionSnapshot == nil {
 		return nil, nil
 	}
@@ -64,7 +67,18 @@ func (s *Server) currentInspectionStatus() (*adminapi.InspectionStatus, error) {
 		}
 		guestCapacityState = "not_sampled"
 	}
-	return inspectionStatus(snapshot, guestCapacity, guestCapacityState), nil
+	result := inspectionStatus(snapshot, guestCapacity, guestCapacityState)
+	if snapshot.Limits.MinimumKnown && live.EffectiveConfig != nil &&
+		snapshot.Limits.MinimumGeneration == live.Generation {
+		result.MinimumRequestBytes = &snapshot.Limits.MinimumBytes
+		if id, ok := rbac.IdentityFromContext(r.Context()); !ok || id.Has(rbac.ConfigRead) {
+			var serverIndex, locationIndex uint64
+			if n, _ := fmt.Sscanf(snapshot.Limits.MinimumRoute, "servers[%d].locations[%d]", &serverIndex, &locationIndex); n == 2 {
+				result.MinimumRequestRoute = fmt.Sprintf("servers[%d].locations[%d]", serverIndex, locationIndex)
+			}
+		}
+	}
+	return result, nil
 }
 
 func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.InspectionPluginGuestCapacity, guestCapacityState string) *adminapi.InspectionStatus {
@@ -196,11 +210,18 @@ func (s *Server) dataPlaneReady() bool {
 	return s.deps.Ready()
 }
 
-func (s *Server) servingVersion() string {
+func (s *Server) liveSnapshot() server.LiveSnapshot {
 	if s.deps.LiveSnapshot == nil {
-		return ""
+		return server.LiveSnapshot{}
 	}
-	snap := s.deps.LiveSnapshot()
+	return s.deps.LiveSnapshot()
+}
+
+func (s *Server) servingVersion() string {
+	return s.servingVersionOf(s.liveSnapshot())
+}
+
+func (s *Server) servingVersionOf(snap server.LiveSnapshot) string {
 	if snap.EffectiveConfig == nil {
 		return ""
 	}

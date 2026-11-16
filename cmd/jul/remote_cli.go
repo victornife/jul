@@ -265,6 +265,18 @@ func cmdRemoteStatus(args []string) int {
 			i.Usage.BaseBytes, i.Usage.BufferBytes, i.Usage.WAFStateBytes, i.ActiveLeases,
 			i.ActiveEvaluations, i.WaitingEvaluations, i.Draining, i.RequestPathIntegration)
 		fmt.Fprintf(stdout, "inspection base charge: %dB (%s)\n", i.BaseChargeBytes, i.BaseChargeScope)
+		switch {
+		case i.MinimumRequestBytes == nil:
+			fmt.Fprintln(stdout, "inspection single-request minimum: unavailable")
+		case *i.MinimumRequestBytes == 0:
+			fmt.Fprintln(stdout, "inspection single-request minimum: no inspected routes")
+		default:
+			route := i.MinimumRequestRoute
+			if route == "" {
+				route = "unavailable or restricted"
+			}
+			fmt.Fprintf(stdout, "inspection single-request minimum: %dB (limiting route: %s; not a concurrency or process-memory recommendation)\n", *i.MinimumRequestBytes, route)
+		}
 		if auditFields.Inspection.Usage.AuditBytes == nil {
 			fmt.Fprintln(stdout, "inspection audit charge: unavailable")
 		} else {

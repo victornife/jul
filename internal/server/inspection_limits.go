@@ -36,6 +36,8 @@ func (s *Server) withRouteMinimum(limits inspection.Limits, genID uint64) (inspe
 		if minimum, route, ok := s.InspectionRequirement(genID); ok {
 			limits.MinimumBytes = minimum
 			limits.MinimumRoute = route
+			limits.MinimumKnown = true
+			limits.MinimumGeneration = genID
 		}
 	}
 	if err := limits.Validate(); err != nil {

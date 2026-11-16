@@ -49,9 +49,10 @@ func TestRouteMinimumAppliesAtStartupAndReload(t *testing.T) {
 	if err := srv.publishStartupInspectionLimits(1); err != nil {
 		t.Fatalf("startup: %v", err)
 	}
-	if got := governor.Snapshot().Limits; got.MinimumBytes != 3<<20 || got.MinimumRoute != "servers[0].locations[0]" {
+	if got := governor.Snapshot().Limits; !got.MinimumKnown || got.MinimumGeneration != 1 || got.MinimumBytes != 3<<20 || got.MinimumRoute != "servers[0].locations[0]" {
 		t.Fatalf("startup limits = %+v", got)
 	}
+
 	if _, err := srv.withRouteMinimum(limits, 2); err == nil || !strings.Contains(err.Error(), "servers[0].locations[0]") {
 		t.Fatalf("enforce minimum above budget accepted: %v", err)
 	}
@@ -85,5 +86,23 @@ func TestRouteMinimumAppliesAtStartupAndReload(t *testing.T) {
 	}
 	if got := governor.Snapshot().Limits; got.MinimumBytes != 3<<20 {
 		t.Fatalf("unpublished reloads changed live limits: %+v", got)
+	}
+}
+
+func TestRouteMinimumDistinguishesUnavailableAndNoInspectedRoutes(t *testing.T) {
+	s := &Server{InspectionRequirement: func(id uint64) (uint64, string, bool) {
+		return 0, "", id == 1
+	}}
+	limits, err := inspection.LimitsFromConfig(cfgWith(freePort(t)), lifecycle.InitialGOMAXPROCS())
+	if err != nil {
+		t.Fatal(err)
+	}
+	known, err := s.withRouteMinimum(limits, 1)
+	if err != nil || !known.MinimumKnown || known.MinimumBytes != 0 {
+		t.Fatalf("known empty minimum: %+v, %v", known, err)
+	}
+	unknown, err := s.withRouteMinimum(limits, 2)
+	if err != nil || unknown.MinimumKnown {
+		t.Fatalf("unavailable minimum: %+v, %v", unknown, err)
 	}
 }

@@ -634,6 +634,8 @@ export const OverviewSchema = z.object({
         .nullable()
         .optional()
         .catch(null),
+      minimum_request_bytes: z.number().optional(),
+      minimum_request_route: z.string().optional(),
       active_leases: z.number(),
       active_evaluations: z.number(),
       waiting_evaluations: z.number(),

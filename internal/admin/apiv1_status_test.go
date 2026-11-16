@@ -16,6 +16,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/rbac"
+	"jul/internal/server"
 )
 
 // getV1 issues an authenticated GET against a v1 route.
@@ -192,6 +193,58 @@ func TestV1StatusDoesNotRepresentUnavailableGuestCapacityAsZero(t *testing.T) {
 	}
 	if strings.Contains(rr.Body.String(), `"plugin_guest_max_bytes"`) {
 		t.Fatalf("unavailable guest capacity must be omitted, not encoded as zero: %s", rr.Body.String())
+	}
+}
+
+func TestInspectionMinimumStatusPermissionsAndAvailability(t *testing.T) {
+	limits := inspection.Limits{
+		MinimumKnown: true, MinimumBytes: 1234, MinimumGeneration: 1,
+		MinimumRoute: "servers[0].locations[1] (private-address /private-path)",
+	}
+	generation := uint64(1)
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return inspection.Snapshot{Limits: limits} },
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{Generation: generation, EffectiveConfig: &config.Config{}}
+		},
+	})
+	for _, path := range []string{"/api/v1/status", "/api/runtime/overview"} {
+		for _, canReadConfig := range []bool{false, true} {
+			perms := []rbac.Permission{rbac.StatusRead}
+			if canReadConfig {
+				perms = append(perms, rbac.ConfigRead)
+			}
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req = req.WithContext(rbac.WithIdentity(req.Context(), rbac.Identity{Permissions: perms}))
+			rr := httptest.NewRecorder()
+			if path == "/api/v1/status" {
+				s.handleV1Status(rr, req)
+			} else {
+				s.handleRuntimeOverview(rr, req)
+			}
+			body := rr.Body.String()
+			if rr.Code != http.StatusOK || !strings.Contains(body, `"minimum_request_bytes":1234`) ||
+				strings.Contains(body, `"minimum_request_route":"servers[0].locations[1]"`) != canReadConfig ||
+				strings.Contains(body, "private-address") || strings.Contains(body, "private-path") {
+				t.Fatalf("path %s config:read %v: %d %s", path, canReadConfig, rr.Code, rr.Body.String())
+			}
+		}
+	}
+	generation = 2
+	rr := getV1(t, s, "/api/v1/status", "")
+	if strings.Contains(rr.Body.String(), `"minimum_request_bytes"`) || strings.Contains(rr.Body.String(), `"minimum_request_route"`) {
+		t.Fatalf("minimum from another generation must be omitted: %s", rr.Body.String())
+	}
+	generation = 1
+	limits.MinimumKnown, limits.MinimumBytes, limits.MinimumRoute = false, 0, ""
+	rr = getV1(t, s, "/api/v1/status", "")
+	if strings.Contains(rr.Body.String(), `"minimum_request_bytes"`) {
+		t.Fatalf("unknown minimum must be omitted: %s", rr.Body.String())
+	}
+	limits.MinimumKnown = true
+	rr = getV1(t, s, "/api/v1/status", "")
+	if !strings.Contains(rr.Body.String(), `"minimum_request_bytes":0`) {
+		t.Fatalf("known empty minimum must be zero: %s", rr.Body.String())
 	}
 }
 

@@ -130,6 +130,7 @@ func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) 
 			"evaluations=0 waiting=0",
 			"request_path_integration=partial",
 			"inspection base charge: 16384B",
+			"inspection single-request minimum: unavailable",
 			"inspection audit charge: unavailable",
 			"inspection audit output: unavailable",
 		} {
@@ -138,6 +139,31 @@ func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) 
 			}
 		}
 	})
+}
+
+func TestRemoteStatusReportsSingleRequestMinimum(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, want string
+	}{
+		{"route", `"minimum_request_bytes":4096,"minimum_request_route":"servers[0]"`, "4096B (limiting route: servers[0]; not a concurrency or process-memory recommendation)"},
+		{"restricted", `"minimum_request_bytes":4096`, "4096B (limiting route: unavailable or restricted;"},
+		{"no routes", `"minimum_request_bytes":0`, "no inspected routes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+				`,"inspection":{"configured":{},"effective":{},"usage":{},` + tc.fields + `}}`
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, payload)
+			}))
+			defer ts.Close()
+			withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+				if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 ||
+					!strings.Contains(out.String(), "inspection single-request minimum: "+tc.want) {
+					t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+				}
+			})
+		})
+	}
 }
 
 func TestRemoteStatusReportsRetainedAuditOutput(t *testing.T) {

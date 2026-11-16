@@ -260,6 +260,11 @@ set is empty. The drop counter covers governor budget and output-set refusals,
 not formatter or writer failures; it resets on process restart. The text form of
 `jul status` reports these signals and marks fields absent from older servers
 as unavailable rather than zero.
+The compiled single-request minimum is omitted until available; a reported
+zero means no inspected routes. During a generation transition it is omitted
+until the governor and serving snapshot agree. A route index, without the
+resolved address or path, is disclosed only with `config:read`. This minimum
+is not a concurrency or process-memory sizing recommendation.
 The view does not report guest-capacity or spool protection. If inspection
 status cannot be reported, the Console shows an unavailable warning without
 discarding the rest of the Overview.

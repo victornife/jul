@@ -84,9 +84,12 @@ type Limits struct {
 	BodyTimeout               time.Duration
 	BaseChargeBytes           uint64
 	// MinimumBytes is the effective-route worst-case single-request charge
-	// of the generation these limits are published with (ADR 0032 §7). Zero
-	// means no inspected route; enforce mode rejects MaxBytes below it.
-	MinimumBytes uint64
+	// of the generation these limits are published with (ADR 0032 §7). When
+	// MinimumKnown is true, zero means no inspected route; enforce mode
+	// rejects MaxBytes below the minimum.
+	MinimumBytes      uint64
+	MinimumKnown      bool
+	MinimumGeneration uint64
 	// MinimumRoute names the route that sets MinimumBytes, for errors.
 	MinimumRoute string
 }

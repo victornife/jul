@@ -18,7 +18,6 @@ import (
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/rbac"
-	"jul/internal/server"
 	"jul/internal/waf"
 )
 
@@ -115,17 +114,14 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 		Status:   status,
 		CertRisk: certRisk,
 	}
-	inspection, err := s.currentInspectionStatus()
+	live := s.liveSnapshot()
+	inspection, err := s.currentInspectionStatus(r, live)
 	if err != nil {
 		out.InspectionError = "could not report plugin guest capacity"
 	} else {
 		out.Inspection = inspection
 	}
 	if s.deps.PendingRestartCheck != nil {
-		var live server.LiveSnapshot
-		if s.deps.LiveSnapshot != nil {
-			live = s.deps.LiveSnapshot()
-		}
 		if subsystems := s.deps.PendingRestartCheck(live); len(subsystems) > 0 {
 			out.PendingRestart = subsystems
 		}
