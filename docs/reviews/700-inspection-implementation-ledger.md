@@ -267,6 +267,33 @@ WAF to the owning route declaration, preserve duplicate backend state, and corre
 Hosted CI reported 66 successful checks and two skips. The draft incorporated these changes at
 `14ebcb20`; they do not fix the guest or spool ownership blockers.
 
+## I6a partial guided settings review
+
+The #724 draft adds the six existing inspection fields to the shared global
+settings editor. Editable values come from the authoritative write baseline;
+inspection edits require managed authority, `config:write`, `config:raw`, and a
+version from that same baseline. The preview is pinned to the version captured
+when the editor opened. File-owned, unknown-authority and incompatible older
+servers remain read-only or unavailable. These changes do not implement guest
+capacity or spool protection, nor complete I6a.
+
+Independent read-only reviews of the guided-settings diff identified four
+functional findings: an unpinned baseline could overwrite concurrent changes;
+edits could change while a preview was in flight; clearing a timeout could
+silently disable it; and pathless server validation details were hidden. The
+version is now permission-gated and pinned, the form is frozen during preview,
+changed empty durations require explicit `0s`, and server issues are displayed.
+The reviewers confirmed their fixes without further significant findings. A
+separate focused security review and follow-up reported no vulnerabilities;
+these reviews are scoped to this diff, not the entire checkpoint.
+
+Focused Go and frontend tests cover version permissions and stale baselines,
+explicit zero, empty timeouts, missing authority and versions, preview errors,
+busy state and navigation. The real-server browser smoke exercised an invalid
+slot error and a successful version-pinned preview without applying it. Full
+I6a refusal/draining browser acceptance, guest/spool producers and final
+whole-checkpoint review remain outstanding.
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described

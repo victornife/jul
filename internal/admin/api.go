@@ -336,7 +336,12 @@ func (s *Server) handleTrafficControls(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, projectIssue81TrafficControls(state.Config))
+	projection := projectIssue81TrafficControls(state.Config)
+	projection.ConfigAuthority = s.currentAuthority().Mode
+	if id, ok := rbac.IdentityFromContext(r.Context()); !ok || id.Has(rbac.ConfigRaw) {
+		projection.BaseVersion = state.Version
+	}
+	writeJSON(w, http.StatusOK, projection)
 }
 
 // handleConfigValidate accepts a candidate config and returns structured

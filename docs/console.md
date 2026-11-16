@@ -191,6 +191,17 @@ change, missing data, a poll failure or stale data; older servers without boot
 identity or audit charges do not produce a trend. A snapshot is marked stale
 when the last successful Overview poll is over six seconds old.
 
+The inspection section links to **Global & Traffic Controls → Global
+settings**, where inspection mode, byte and header budgets, evaluation slots,
+and queue and body timeouts use the existing sparse preview and Config
+workflow. Editing requires managed configuration and `config:write` plus
+`config:raw`; file-owned or unknown authority is read-only. Older servers
+without a compatible inspection projection show the settings as unavailable.
+Inspection edits are pinned to the projected configuration version, so a
+concurrent change requires a fresh review. The backend validates values and
+remains authoritative if ownership changes; enter `0s` explicitly to disable a
+timeout rather than clearing the field.
+
 ##### Runtime Resources and Capacity (#431)
 
 These sections answer "is this instance healthy,

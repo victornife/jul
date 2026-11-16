@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter } from "react-router-dom";
 import { PermissionContext } from "@/auth/usePermission.ts";
 import { GlobalSettingsEditor } from "@/features/config/GlobalSettingsEditor.tsx";
-import { GlobalSettingsProjectionSchema } from "@/api/client.ts";
+import { GlobalSettingsProjectionSchema, type GlobalSettingsProjection } from "@/api/client.ts";
 import { takePendingDraft } from "@/lib/configDraftHandoff.ts";
 
 vi.unmock("@/api/client.ts");
@@ -24,9 +24,25 @@ const preview = {
   base_version: "v1",
   lifecycle: { changes: [], can_apply_hot: true, can_stage_restart: true },
 };
-function mount(canWrite = true) {
+const inspectionCurrent = GlobalSettingsProjectionSchema.parse({
+  inspection: {
+    mode: "enforce",
+    max_buffered_bytes: "256m",
+    max_response_header_bytes: "64k",
+    max_concurrent_evaluations: 4,
+    evaluation_queue_timeout: "1s",
+    body_timeout: "1m0s",
+  },
+});
+function mount(
+  canWrite = true,
+  projection: GlobalSettingsProjection = current,
+  configAuthority?: "managed" | "file_owned",
+  canReadRaw = canWrite,
+  baseVersion: string | undefined = "v1",
+) {
   const onClose = vi.fn();
-  const permissions = canWrite ? ["config:write", "config:raw"] : [];
+  const permissions = [...(canWrite ? ["config:write"] : []), ...(canReadRaw ? ["config:raw"] : [])];
   render(
     <MemoryRouter>
       <PermissionContext.Provider
@@ -37,7 +53,7 @@ function mount(canWrite = true) {
           has: (p) => permissions.includes(p),
         }}
       >
-        <GlobalSettingsEditor current={current} onClose={onClose} />
+        <GlobalSettingsEditor current={projection} configAuthority={configAuthority} baseVersion={baseVersion} onClose={onClose} />
       </PermissionContext.Provider>
     </MemoryRouter>,
   );
@@ -52,6 +68,135 @@ afterEach(() => {
 });
 
 describe("global configuration UI uses sparse server-owned previews", () => {
+  it("previews only changed inspection settings including explicit zeros", async () => {
+    const fetch = vi.fn((url: string, _init?: RequestInit) =>
+      Promise.resolve(json(url.endsWith("pending-restart") ? { pending: false } : preview)),
+    );
+    vi.stubGlobal("fetch", fetch);
+    mount(true, inspectionCurrent, "managed");
+    fireEvent.change(screen.getByLabelText("Inspection mode"), { target: { value: "observe" } });
+    fireEvent.change(screen.getByLabelText(/Inspection evaluation slots/), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/Inspection evaluation slots/), { target: { value: "0" } });
+    fireEvent.change(screen.getByLabelText(/Inspection body timeout/), { target: { value: "0s" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => { expect(fetch).toHaveBeenCalledTimes(2); });
+    expect(JSON.parse(fetch.mock.calls[1]?.[1]?.body as string)).toEqual({
+      base_version: "v1",
+      ops: [{ op: "global_set", global: {
+        inspection: { mode: "observe", max_concurrent_evaluations: 0, body_timeout: "0s" },
+      } }],
+    });
+  });
+
+  it.each(["file_owned", undefined] as const)(
+    "keeps inspection settings read-only when authority is %s",
+    (authority) => {
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      mount(true, inspectionCurrent, authority);
+      expect(screen.getByLabelText("Inspection mode")).toBeDisabled();
+      expect(screen.getByLabelText(/Inspection body timeout/)).toBeDisabled();
+      expect(screen.getByText(/inspection settings are read-only|File-owned configuration is read-only/i)).toBeVisible();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("shows incompatible or absent inspection settings as unavailable", () => {
+    const old = GlobalSettingsProjectionSchema.parse({ inspection: { mode: "observe" } });
+    mount(true, old, "managed");
+    expect(screen.getByText("Inspection settings are unavailable on this server.")).toBeVisible();
+    expect(screen.queryByLabelText("Inspection mode")).toBeNull();
+  });
+
+  it("keeps inspection read-only when the editable base version is missing", () => {
+    mount(true, inspectionCurrent, "managed", true, "");
+    expect(screen.getByLabelText("Inspection mode")).toBeDisabled();
+    expect(screen.getByText(/configuration version is unavailable/)).toBeVisible();
+  });
+
+  it("requires explicit zero instead of a cleared timeout", () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    mount(true, inspectionCurrent, "managed");
+    fireEvent.change(screen.getByLabelText(/Inspection body timeout/), { target: { value: " " } });
+    expect(screen.getByText(/Enter a duration; use 0s to disable the body deadline/)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("freezes the form while a preview is running", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+    mount(true, inspectionCurrent, "managed");
+    fireEvent.change(screen.getByLabelText("Inspection mode"), { target: { value: "observe" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => { expect(screen.getByLabelText("Inspection mode")).toBeDisabled(); });
+    expect(screen.getByLabelText(/Worker threads/)).toBeDisabled();
+  });
+
+  it("keeps the original base version if the projection changes while editing", async () => {
+    const fetch = vi.fn((url: string, _init?: RequestInit) =>
+      Promise.resolve(json(url.endsWith("pending-restart") ? { pending: false } : preview)));
+    vi.stubGlobal("fetch", fetch);
+    const permissions = ["config:write", "config:raw"];
+    const editor = (version: string) => (
+      <MemoryRouter>
+        <PermissionContext.Provider value={{
+          ready: true, isLoading: false, identity: null, has: (p) => permissions.includes(p),
+        }}>
+          <GlobalSettingsEditor current={inspectionCurrent} configAuthority="managed" baseVersion={version} onClose={() => undefined} />
+        </PermissionContext.Provider>
+      </MemoryRouter>
+    );
+    const view = render(editor("v1"));
+    fireEvent.change(screen.getByLabelText("Inspection mode"), { target: { value: "observe" } });
+    view.rerender(editor("v2"));
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    await waitFor(() => { expect(fetch).toHaveBeenCalledTimes(2); });
+    expect(JSON.parse(fetch.mock.calls[1]?.[1]?.body as string)).toMatchObject({ base_version: "v1" });
+  });
+
+  it.each([[false, false], [true, false]])(
+    "keeps inspection read-only without required permissions (write=%s, raw=%s)",
+    (write, raw) => {
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      mount(write, inspectionCurrent, "managed", raw);
+      expect(screen.getByLabelText("Inspection mode")).toBeDisabled();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
+
+  it("reports backend inspection validation errors and allows correction", async () => {
+    const fetch = vi.fn((url: string) => Promise.resolve(url.endsWith("pending-restart")
+      ? json({ pending: false })
+      : json({
+          ok: false, message: "Invalid inspection settings",
+          errors: [{ code: "duration", severity: "error", path: "global.inspection.body_timeout", summary: "invalid duration" }],
+        }, 400)));
+    vi.stubGlobal("fetch", fetch);
+    mount(true, inspectionCurrent, "managed");
+    fireEvent.change(screen.getByLabelText(/Inspection body timeout/), { target: { value: "bad" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect((await screen.findAllByText("invalid duration")).length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText(/Inspection body timeout/), { target: { value: "3s" } });
+    expect(screen.queryByText("invalid duration")).toBeNull();
+  });
+
+  it("shows pathless backend operation details", async () => {
+    const fetch = vi.fn((url: string) => Promise.resolve(url.endsWith("pending-restart")
+      ? json({ pending: false })
+      : json({
+          ok: false, message: "Operation could not be applied", op_index: 0, op: "global_set",
+          errors: [{ code: "unknown", severity: "error", summary: "inspection.max_concurrent_evaluations must be between 0 and 1024" }],
+        }, 400)));
+    vi.stubGlobal("fetch", fetch);
+    mount(true, inspectionCurrent, "managed");
+    fireEvent.change(screen.getByLabelText(/Inspection evaluation slots/), { target: { value: "1025" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
+    expect(await screen.findByText(/must be between 0 and 1024/)).toBeVisible();
+  });
+
   it("validates worker input and hands off one sparse operation with all changed fields", async () => {
     const fetch = vi.fn((url: string, _init?: RequestInit) =>
       Promise.resolve(json(url.endsWith("pending-restart") ? { pending: false } : preview)),
@@ -152,7 +297,7 @@ describe("global configuration UI uses sparse server-owned previews", () => {
         status === 400 ? "bad timeout" : "permission revoked",
       );
       if (status === 400)
-        expect(screen.getByText("invalid duration — use seconds")).toBeInTheDocument();
+        expect(screen.getAllByText("invalid duration — use seconds").length).toBeGreaterThan(0);
       expect(takePendingDraft()).toBeNull();
       expect(fetch).toHaveBeenCalledTimes(2);
       fireEvent.change(screen.getByLabelText(/Reload timeout/), { target: { value: "5s" } });

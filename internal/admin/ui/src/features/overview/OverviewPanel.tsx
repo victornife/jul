@@ -5,7 +5,7 @@
 
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   fetchOverview,
   type FeatureStatus,
@@ -200,6 +200,9 @@ function InspectionCard({
       <h2 id="inspection-title" className="text-sm font-semibold text-jul-text">
         Inspection resources
       </h2>
+      <Link to="/traffic" className="mt-2 inline-block text-xs text-jul-accent underline">
+        Configure inspection in Global settings
+      </Link>
       {stale && (
         <p className="mt-2 text-sm text-jul-warning">
           Inspection data may be stale: the last successful overview poll was over 6 seconds ago.

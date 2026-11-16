@@ -17,6 +17,16 @@ export interface GlobalSettingsDraft {
   shutdownTimeout: string;
   reloadTimeout: string;
   redactMinSecretLength: number;
+  inspection?: InspectionSettingsDraft | undefined;
+}
+
+export interface InspectionSettingsDraft {
+  mode: "enforce" | "observe";
+  maxBufferedBytes: string;
+  maxResponseHeaderBytes: string;
+  maxConcurrentEvaluations: string;
+  evaluationQueueTimeout: string;
+  bodyTimeout: string;
 }
 
 export interface CompressionDraft {
@@ -81,6 +91,14 @@ export function seedGlobalSettings(current: GlobalSettingsProjection): GlobalSet
     shutdownTimeout: current.shutdown_timeout,
     reloadTimeout: current.reload_timeout,
     redactMinSecretLength: current.redact_min_secret_length,
+    inspection: current.inspection === undefined ? undefined : {
+      mode: current.inspection.mode,
+      maxBufferedBytes: current.inspection.max_buffered_bytes ?? "",
+      maxResponseHeaderBytes: current.inspection.max_response_header_bytes ?? "",
+      maxConcurrentEvaluations: String(current.inspection.max_concurrent_evaluations),
+      evaluationQueueTimeout: current.inspection.evaluation_queue_timeout ?? "",
+      bodyTimeout: current.inspection.body_timeout ?? "",
+    },
   };
 }
 
@@ -100,6 +118,32 @@ export function buildGlobalPatch(
     global.reload_timeout = current.reloadTimeout;
   if (current.redactMinSecretLength !== initial.redactMinSecretLength) {
     global.redact_min_secret_length = current.redactMinSecretLength;
+  }
+  if (initial.inspection !== undefined && current.inspection !== undefined) {
+    const before = initial.inspection;
+    const after = current.inspection;
+    const inspection: NonNullable<typeof global.inspection> = {};
+    if (after.mode !== before.mode) inspection.mode = after.mode;
+    if (after.maxBufferedBytes !== before.maxBufferedBytes)
+      inspection.max_buffered_bytes = after.maxBufferedBytes;
+    if (after.maxResponseHeaderBytes !== before.maxResponseHeaderBytes)
+      inspection.max_response_header_bytes = after.maxResponseHeaderBytes;
+    if (after.maxConcurrentEvaluations !== before.maxConcurrentEvaluations) {
+      const slots = Number(after.maxConcurrentEvaluations);
+      if (!/^\d+$/.test(after.maxConcurrentEvaluations) || !Number.isSafeInteger(slots)) {
+        throw new Error("Inspection evaluation slots must be a non-negative integer.");
+      }
+      inspection.max_concurrent_evaluations = slots;
+    }
+    if (after.evaluationQueueTimeout !== before.evaluationQueueTimeout) {
+      if (after.evaluationQueueTimeout.trim() === "") throw new Error("Enter a duration; use 0s to disable queueing.");
+      inspection.evaluation_queue_timeout = after.evaluationQueueTimeout;
+    }
+    if (after.bodyTimeout !== before.bodyTimeout) {
+      if (after.bodyTimeout.trim() === "") throw new Error("Enter a duration; use 0s to disable the body deadline.");
+      inspection.body_timeout = after.bodyTimeout;
+    }
+    if (hasOwnFields(inspection)) global.inspection = inspection;
   }
   return hasOwnFields(global) ? { op: "global_set", global } : null;
 }

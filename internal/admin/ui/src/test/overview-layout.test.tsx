@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { OverviewSchema, type Overview, type StatsSnapshot } from "@/api/client.ts";
+import { OverviewSchema, TrafficControlsSchema, type Overview, type StatsSnapshot } from "@/api/client.ts";
 import { App } from "@/app/App.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
 import { openResourceDisclosure } from "@/features/overview/resourceDisclosure.ts";
@@ -72,6 +72,38 @@ describe("operator-centred Overview", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("navigates from inspection resources to the shared global settings editor", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["overview"], overview());
+    client.setQueryData(["traffic-controls"], TrafficControlsSchema.parse({
+      config_authority: "managed",
+      base_version: "v1",
+      global: { inspection: {
+        mode: "enforce", max_buffered_bytes: "256m", max_response_header_bytes: "64k",
+        max_concurrent_evaluations: 0, evaluation_queue_timeout: "1s", body_timeout: "1m0s",
+      } },
+    }));
+    const perms: PermissionState = {
+      ...permission(false),
+      has: (value) => value === "config:write" || value === "config:raw",
+    };
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <PermissionContext.Provider value={perms}><App /></PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    fireEvent.click(screen.getByRole("link", { name: "Configure inspection in Global settings" }));
+    const card = (await screen.findByText("Global settings")).closest(".rounded-lg");
+    if (card === null) throw new Error("Missing global settings card");
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Edit" }));
+    expect(await screen.findByLabelText("Inspection mode")).toBeEnabled();
   });
 
   it("opens and focuses inspection resources for a shared link without reopening on refresh", () => {

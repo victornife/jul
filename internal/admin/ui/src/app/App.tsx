@@ -11,7 +11,6 @@ import { RoutesPanel } from "@/features/routes/RoutesPanel.tsx";
 import { AppsPanel } from "@/features/apps/AppsPanel.tsx";
 import { TLSPanel } from "@/features/tls/TLSPanel.tsx";
 import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
-import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
 import { PluginsPanel } from "@/features/plugins/PluginsPanel.tsx";
 import { StreamsPanel } from "@/features/streams/StreamsPanel.tsx";
 import { SearchPanel } from "@/features/search/SearchPanel.tsx";
@@ -23,6 +22,11 @@ import { Loading } from "@/components/ui.tsx";
 const HistoryPanel = lazy(() =>
   import("@/features/history/HistoryPanel.tsx").then((m) => ({
     default: m.HistoryPanel,
+  })),
+);
+const TrafficControlsPanel = lazy(() =>
+  import("@/features/traffic-controls/TrafficControlsPanel.tsx").then((m) => ({
+    default: m.TrafficControlsPanel,
   })),
 );
 const TranscodeDesignerPanel = lazy(() =>
@@ -45,7 +49,14 @@ export function App() {
         <Route path="/apps" element={<AppsPanel />} />
         <Route path="/tls" element={<TLSPanel />} />
         <Route path="/security" element={<SecurityPanel />} />
-        <Route path="/traffic" element={<TrafficControlsPanel />} />
+        <Route
+          path="/traffic"
+          element={
+            <Suspense fallback={<Loading label="Loading traffic controls…" />}>
+              <TrafficControlsPanel />
+            </Suspense>
+          }
+        />
         <Route path="/plugins" element={<PluginsPanel />} />
         <Route path="/streams" element={<StreamsPanel />} />
         <Route

@@ -1065,6 +1065,7 @@ func TestTrafficControlsProjection(t *testing.T) {
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+		Authority:  func() ConfigAuthorityStatus { return ConfigAuthorityStatus{Mode: "file_owned"} },
 	})
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traffic-controls", nil))
@@ -1074,6 +1075,13 @@ func TestTrafficControlsProjection(t *testing.T) {
 	var out TrafficControlsProjection
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	var editor issue81TrafficControlsProjection
+	if err := json.Unmarshal(rr.Body.Bytes(), &editor); err != nil {
+		t.Fatalf("decode editor projection: %v", err)
+	}
+	if editor.ConfigAuthority != "file_owned" {
+		t.Errorf("config authority = %q, want file_owned", editor.ConfigAuthority)
 	}
 	if out.Compression == nil || !out.Compression.Enabled {
 		t.Error("compression should be enabled")
@@ -1092,6 +1100,73 @@ func TestTrafficControlsProjection(t *testing.T) {
 		out.AccessLog.File != "/var/log/jul/access.log" || out.AccessLog.Format != "json" ||
 		out.AccessLog.RotateMaxMB != 50 || out.AccessLog.RotateKeep != 3 {
 		t.Errorf("access-log projection = %+v", out.AccessLog)
+	}
+}
+
+func TestTrafficControlsVersionRequiresRawPermission(t *testing.T) {
+	cfg := &config.Config{}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	for _, tt := range []struct {
+		name        string
+		permissions []rbac.Permission
+		wantVersion bool
+	}{
+		{"status-only", []rbac.Permission{rbac.StatusRead}, false},
+		{"write-only", []rbac.Permission{rbac.ConfigWrite}, false},
+		{"raw-writer", []rbac.Permission{rbac.ConfigWrite, rbac.ConfigRaw}, true},
+		{"cache-inspection", []rbac.Permission{rbac.CacheInspect}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/traffic-controls", nil)
+			req = req.WithContext(rbac.WithIdentity(req.Context(), rbac.Identity{Permissions: tt.permissions}))
+			rr := httptest.NewRecorder()
+			s.handleTrafficControls(rr, req)
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			version, present := body["base_version"]
+			if present != tt.wantVersion {
+				t.Fatalf("base_version present=%v, want %v", present, tt.wantVersion)
+			}
+			if present && string(version) != fmt.Sprintf("%q", server.CanonicalVersion(cfg)) {
+				t.Fatalf("wrong editable base version: %s", version)
+			}
+		})
+	}
+}
+
+func TestTrafficControlsInspectionPreviewRejectsStaleBaseline(t *testing.T) {
+	s, path := v2WriteServer(t)
+	projection := httptest.NewRecorder()
+	s.routes().ServeHTTP(projection, httptest.NewRequest(http.MethodGet, "/api/traffic-controls", nil))
+	var out issue81TrafficControlsProjection
+	if err := json.Unmarshal(projection.Body.Bytes(), &out); err != nil || out.BaseVersion == "" {
+		t.Fatalf("missing projected base version: %s (%v)", projection.Body.String(), err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Global.Inspection.Mode = "observe"
+	raw, err = config.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"base_version":%q,"ops":[{"op":"global_set","global":{"inspection":{"body_timeout":"0s"}}}]}`, out.BaseVersion)
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", strings.NewReader(body)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("stale inspection preview = %d, want 409: %s", rr.Code, rr.Body.String())
 	}
 }
 
