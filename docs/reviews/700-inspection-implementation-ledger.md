@@ -294,6 +294,14 @@ slot error and a successful version-pinned preview without applying it. Full
 I6a refusal/draining browser acceptance, guest/spool producers and final
 whole-checkpoint review remain outstanding.
 
+The real-server Playwright suite now exercises observe-mode publication, the
+Overview explanation and navigation to the shared settings editor, including
+the explicit zero evaluation-slot value. It restores the original configuration.
+The targeted test passed against the I6a branch's embedded Console and failed
+against the clean `9c70b64d` baseline because the overview had no inspection
+projection. This fixture has no inspected route; it does not demonstrate
+observe-mode traffic, a refusal, or draining.
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described
