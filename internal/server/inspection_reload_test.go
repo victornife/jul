@@ -376,6 +376,26 @@ func TestLimitsOnlyPublicationAvoidsHandlerRebuild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	stalePlan.inspectionLimitsOnly = false
+	if err := stalePlan.PublishInspectionLimitsOnly(); err == nil {
+		t.Fatal("non-limits-only plan unexpectedly published inspection limits")
+	}
+	stalePlan.inspectionLimitsOnly = true
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	stalePlan.ctx = cancelled
+	if err := stalePlan.PublishInspectionLimitsOnly(); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled limits-only publication = %v, want context cancellation", err)
+	}
+	stalePlan.ctx = context.Background()
+	stalePlan.inspectionGeneration++
+	if err := stalePlan.PublishInspectionLimitsOnly(); err == nil || !strings.Contains(err.Error(), "serving generation changed") {
+		t.Fatalf("publication against changed generation = %v", err)
+	}
+	stalePlan.inspectionGeneration--
+	if got := governor.Limits().MaxGuestCapacityBytes; got != 128<<20 {
+		t.Fatalf("rejected publication changed guest capacity to %d", got)
+	}
 	concurrentLimits := governor.Limits()
 	concurrentLimits.MaxResponseHeaderBytes *= 2
 	if err := governor.PublishLimitsIfVersion(governor.Snapshot().LimitsVersion, concurrentLimits); err != nil {
@@ -707,6 +727,50 @@ func TestLimitsOnlyReloadPublishesCapIncreaseWithoutCandidateWarmup(t *testing.T
 	}
 	if got := governor.Limits().MaxGuestCapacityBytes; got != 128<<20 {
 		t.Fatalf("published guest capacity = %d, want 128 MiB", got)
+	}
+
+	staleCfg, err := next.Effective.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleCfg.Global.Inspection.MaxGuestCapacityBytes = sizePtr(256 << 20)
+	stale, err := config.NewCandidate(staleCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := srv.LiveSnapshot()
+	var authChecks int
+	resultCh = make(chan ReloadResult, 1)
+	reloads <- ReloadRequest{
+		ID:                 "limits-only-version-conflict",
+		Source:             ReloadSourceAdmin,
+		Candidate:          stale,
+		ExpectedGeneration: before.Generation,
+		AuthGeneration:     "auth",
+		ValidateAuthGeneration: func(string) bool {
+			authChecks++
+			if authChecks == 2 {
+				limits := governor.Limits()
+				limits.MaxResponseHeaderBytes *= 2
+				if err := governor.PublishLimitsIfVersion(governor.Snapshot().LimitsVersion, limits); err != nil {
+					t.Errorf("concurrent limits publication: %v", err)
+					return false
+				}
+			}
+			return true
+		},
+		Result: resultCh,
+	}
+	result = <-resultCh
+	if authChecks != 2 || result.Outcome != ReloadNotApplied || result.Published ||
+		result.FailedPhase != "publish" || !strings.Contains(result.Error, "version") {
+		t.Fatalf("stale limits-only reload: checks=%d result=%+v", authChecks, result)
+	}
+	if after := srv.LiveSnapshot(); after.Generation != before.Generation || after.EffectiveVersion != before.EffectiveVersion {
+		t.Fatalf("stale reload changed serving state: before=%+v after=%+v", before, after)
+	}
+	if got := governor.Limits().MaxGuestCapacityBytes; got != 128<<20 {
+		t.Fatalf("stale reload changed guest capacity to %d", got)
 	}
 	newGuest, err := governor.ReserveGuestCapacity(live.Generation+1, 16<<20)
 	if err != nil {
