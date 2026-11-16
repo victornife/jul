@@ -18,7 +18,7 @@ qualification, soak or maturity change.
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below; the blocker update merged as #718 |
-| Checkpoint 5 | **Blocked**: I2b watcher teardown can retain guest memory after ticket refund; no runtime PR or reliable aggregate protection |
+| Checkpoint 5 | **Blocked**: I2b watcher teardown can retain guest memory after ticket refund; draft #721 is not merge-ready and provides no reliable aggregate protection |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-15 I2b watcher reproduction](evidence/2026-11-15-700-i2b-watcher/README.md); [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
@@ -32,14 +32,15 @@ qualification, soak or maturity change.
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Blocked: a wazero watcher can retain guest memory after a capacity refund; preliminary fixes and an unmerged prototype exist, but no runtime PR or protection; #711 | A supported last-alias/interrupt solution, accepted guest design and finite default; no technical dependency on the WAF parser, though scheduled after I3b |
+| 5 — I2b | Blocked: a wazero watcher can retain guest memory after a capacity refund; the unmerged prototype is in draft #721 and provides no protection; #711 | A supported last-alias/interrupt solution, accepted guest design and finite default; no technical dependency on the WAF parser, though scheduled after I3b |
 | 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
-Do not open runtime PRs until their prerequisite amendment and preceding scheduled checkpoint
-are confirmed merged. The child issues were created after checking existing tracking and linked
-to #700. The scheduling order does not itself create technical dependencies between unrelated
-resources.
+The maintainer requested publication of the I2b prototype as draft #721 before the preceding
+scheduled checkpoint is merged. This exception does not make it merge-ready or change the
+checkpoint dependencies. The child issues were created after checking existing tracking and
+linked to #700. The scheduling order does not itself create technical dependencies between
+unrelated resources.
 
 ## Resolved recommendations and explicit blockers
 
@@ -400,7 +401,7 @@ The Linux-only
 assessment harness tests cross-compiled but could not be run on this macOS host; no Linux
 container daemon was available. No load or A20 result is inferred from the focused lifecycle
 tests. Hosted CI run 43707306605 passed, but this does not establish the watcher ownership
-invariant or A20. The implementation is not merged and has no I2b PR. The watcher ownership
+invariant or A20. The implementation is not merged; draft #721 is blocked. The watcher ownership
 invariant, A20 qualification and a finite supported default
 remain explicitly blocked;
 do not close #700/#62 or claim final acceptance before I6b.
