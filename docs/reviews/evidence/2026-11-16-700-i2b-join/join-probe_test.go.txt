@@ -1,0 +1,150 @@
+package plugins
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+	"weak"
+
+	"jul/internal/config"
+)
+
+func TestJoinProbeGuestStartupAndRetirement(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("JUL_GUEST_JOIN_PROBE", dir)
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	m, _, g, _ := govManager(t, limits)
+	type result struct {
+		set *Set
+		err error
+	}
+
+	resultCh := make(chan result, 1)
+	go func() {
+		set, err := m.Build(context.Background(), map[string]config.PluginConfig{
+			"guest": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+		})
+		resultCh <- result{set, err}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "memory")); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("watcher did not reach the barrier")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := g.Snapshot().GuestCapacity.ReservedBytes; got != 16<<20 {
+		t.Fatalf("reservation during watcher barrier = %d, want 16 MiB", got)
+	}
+	select {
+	case r := <-resultCh:
+		_ = os.WriteFile(filepath.Join(dir, "release"), []byte("release"), 0o600)
+		if r.set != nil {
+			_ = r.set.Close()
+		}
+		t.Fatalf("startup returned before watcher exited: %+v", r)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := os.WriteFile(filepath.Join(dir, "release"), []byte("release"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var r result
+	select {
+	case r = <-resultCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("startup failed to return after watcher release")
+	}
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	p := r.set.plugins["guest"]
+	ptr := func() weak.Pointer[byte] {
+		pm := <-p.pool
+		defer func() { p.pool <- pm }()
+		buf, ok := pm.mod.Memory().Read(0, 1)
+		if !ok {
+			t.Fatal("guest memory unavailable")
+		}
+		return weak.Make(&buf[0])
+	}()
+	if err := p.close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("reservation after retirement = %+v", got)
+	}
+	runtime.GC()
+	if ptr.Value() != nil {
+		t.Fatal("guest memory remained reachable after retirement")
+	}
+}
+
+func TestJoinProbeAfterSignalReachability(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("JUL_GUEST_JOIN_AFTER_PROBE", dir)
+	t.Cleanup(func() {
+		if err := os.WriteFile(filepath.Join(dir, "release"), []byte("release"), 0o600); err != nil {
+			t.Errorf("release watcher: %v", err)
+			return
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, err := os.Stat(filepath.Join(dir, "exited")); err == nil {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Error("watcher did not exit after release")
+	})
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	m, _, g, _ := govManager(t, limits)
+	set, err := m.Build(context.Background(), map[string]config.PluginConfig{
+		"guest": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = set.Close() })
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "signaled")); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("watcher did not reach the post-signal barrier")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	p := set.plugins["guest"]
+	ptr := func() weak.Pointer[byte] {
+		pm := <-p.pool
+		defer func() { p.pool <- pm }()
+		buf, ok := pm.mod.Memory().Read(0, 1)
+		if !ok {
+			t.Fatal("guest memory unavailable")
+		}
+		return weak.Make(&buf[0])
+	}()
+	if err := p.close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("reservation after retirement = %+v", got)
+	}
+	runtime.GC()
+	if ptr.Value() != nil {
+		t.Fatal("guest memory remains reachable after watcher signal")
+	}
+}

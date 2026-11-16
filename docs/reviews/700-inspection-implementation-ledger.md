@@ -344,6 +344,12 @@ fix or another supported solution must establish the last-alias and interruption
 with failed-start, normal-close, overlap, cancellation and drainage tests. Until then I2b is
 blocked and its configured ceiling and gauges are not a reliable aggregate bound.
 
+On 2026-11-16, an isolated [watcher-join experiment](evidence/2026-11-16-700-i2b-join/README.md)
+prevented the reproduced early startup return on one host and passed its focused reachability
+probes under `-race`. The completion signal still precedes goroutine termination, the nil-module
+failed-start debt path remains unresolved, and the experiment is neither an upstream change nor
+proof of A20. It does not change the merge blocker.
+
 On macOS arm64 with Go 1.27.4, the local worktree before integrating #719 passed these checks:
 
 - `go test -count=1 -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./cmd/jul`.

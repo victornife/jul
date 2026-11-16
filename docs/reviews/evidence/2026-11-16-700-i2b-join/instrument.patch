@@ -1,0 +1,27 @@
+--- a/internal/wasm/module_instance.go
++++ b/internal/wasm/module_instance.go
+@@ -6,0 +7,2 @@
++	"os"
++	"time"
+@@ -11,0 +14,2 @@
++var watcherProbeBeforeSelect func()
++
+@@ -44,0 +49,18 @@
++	if watcherProbeBeforeSelect != nil {
++		watcherProbeBeforeSelect()
++	}
++	if dir := os.Getenv("JUL_GUEST_JOIN_PROBE"); dir != "" && m.MemoryInstance != nil {
++		if err := os.WriteFile(dir+"/memory", []byte("ready"), 0o600); err != nil {
++			panic(err)
++		}
++		for {
++			_, err := os.Stat(dir + "/release")
++			if err == nil {
++				break
++			}
++			if !os.IsNotExist(err) {
++				panic(err)
++			}
++			time.Sleep(time.Millisecond)
++		}
++	}

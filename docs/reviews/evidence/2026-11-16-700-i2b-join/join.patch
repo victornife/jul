@@ -1,0 +1,42 @@
+--- a/internal/wasm/module_instance.go
++++ b/internal/wasm/module_instance.go
+@@ -43,2 +43,37 @@
+-	go m.closeModuleOnCanceledOrTimeout(ctx, cancelChan)
+-	return func() { close(cancelChan) }
++	exited := make(chan struct{})
++	hasGuestMemory := m.MemoryInstance != nil
++	go func() {
++		defer func() {
++			close(exited)
++			if dir := os.Getenv("JUL_GUEST_JOIN_AFTER_PROBE"); dir != "" && hasGuestMemory {
++				marker, err := os.OpenFile(dir+"/signaled", os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
++				if os.IsExist(err) {
++					return
++				}
++				if err != nil {
++					panic(err)
++				}
++				if err = marker.Close(); err != nil {
++					panic(err)
++				}
++				for {
++					_, err := os.Stat(dir + "/release")
++					if err == nil {
++						break
++					}
++					if !os.IsNotExist(err) {
++						panic(err)
++					}
++					time.Sleep(time.Millisecond)
++				}
++				if err := os.WriteFile(dir+"/exited", []byte("done"), 0o600); err != nil {
++					panic(err)
++				}
++			}
++		}()
++		m.closeModuleOnCanceledOrTimeout(ctx, cancelChan)
++	}()
++	return func() {
++		close(cancelChan)
++		<-exited
++	}
