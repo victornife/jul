@@ -1,0 +1,2 @@
+Fixture retained for inspection: <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/.work
+go: golang.org/toolchain@v0.0.1-go1.27.4.darwin-arm64: verifying module: checksum database disabled by GOSUMDB=off

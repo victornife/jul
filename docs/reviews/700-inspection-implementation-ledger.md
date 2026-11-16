@@ -440,6 +440,13 @@ probes under `-race`. The completion signal still precedes goroutine termination
 failed-start debt path remains unresolved, and the experiment is neither an upstream change nor
 proof of A20. It does not change the merge blocker.
 
+The [public-API close probe](evidence/2026-11-16-700-i2b-public-close/README.md)
+tested both wazero engines on macOS with and without cancellation watching. With
+watching disabled, explicit close returned but the tested infinite call and
+start did not stop within 750 ms. This bounded result does not establish that
+the loop can never stop, but it does not support substituting close for
+cancellation or establish last-alias teardown.
+
 On macOS arm64 with Go 1.27.4, the local worktree before integrating #719 passed these checks:
 
 - `go test -count=1 -tags wasmplugins ./internal/plugins ./internal/app ./internal/server ./cmd/jul`.

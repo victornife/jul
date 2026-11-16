@@ -189,7 +189,7 @@ func (t *GuestTicket) ResolveTeardown(closeErr error) error {
 	if t.state == GuestTeardownUnconfirmed {
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
-	if t.state != GuestClosing && !(closeErr != nil && t.state == GuestFailedRetained) {
+	if t.state != GuestClosing && (closeErr == nil || t.state != GuestFailedRetained) {
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
 	next := GuestClosed
