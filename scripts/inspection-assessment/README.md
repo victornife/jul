@@ -18,9 +18,9 @@ The harness includes:
 - versioned run manifests with checksums;
 - deterministic summaries.
 
-It measures Jul; it does not make Jul enforce anything. Until I2–I4 land, the live WAF and plugin
-request paths are not governed. That holds even in post-I1 builds that export governor metrics or
-accept `mode = "enforce"`, and no result from this harness says otherwise.
+It measures Jul; it does not make Jul enforce anything. I2, I3a and I4 now govern parts of the
+plugin and WAF paths on unreleased main, but guest capacity and inspection spool protection remain
+unimplemented. A harness result alone does not establish an enforcement or qualification claim.
 
 ## Prerequisites
 

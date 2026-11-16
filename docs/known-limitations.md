@@ -30,11 +30,11 @@ aggregate inspection bound remains
 the I1 foundation publishes process-wide limits, and I2 makes the WASM plugin
 request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
-`body_timeout` bounds body-reading plugin uploads); the WAF path (I3) and
-plugin response-subscription buffers (I4) are not yet governed, so
-configured `enforce` mode does not yet protect WAF traffic.
-The R3 response-header ceiling now has an explicit 64 KiB accounting default,
-but actual response-path reservation/enforcement remains pending. The
+`body_timeout` bounds inspected uploads). I3a and I4 also account WAF
+request/response work and plugin response-subscription buffers. Guest-capacity
+and inspection-spool protection remain unimplemented; the logical byte
+ceiling is not a process-memory guarantee. The R3 response-header accounting
+ceiling has an explicit 64 KiB default. The
 route-aware minimum budget is validated statically from compiled limits, which
 also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:
 a raised body beyond the compiled limit is refused, not buffered (see
@@ -683,14 +683,14 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   512 KiB response limit (then partial); other types, including JSON, need an
   explicit `SecResponseBodyMimeType`. The effective policy reports compiled
   settings, not per-transaction `ctl:` changes (#698).
-- **No aggregate WAF inspection enforcement yet.** The process-owned governor
-  gates the WASM plugin request path (I2, unreleased) but not WAF request or
-  response paths (I3/I4). WAF inspection still runs before upstream admission,
-  on cache hits and no-upstream routes, and can continue after client
-  disconnect; configured limits do not protect it. The route-aware minimum budget is
-  validated, but actual response-header reservations remain pending under
-  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)
-  (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
+- **Inspection protection remains partial.** On unreleased `main`, the
+  process-owned governor accounts WAF request and response paths as well as
+  plugin buffers. WAF work can continue after client disconnect and remains
+  charged while it runs; phase-5 logging may run without a slot. Guest-capacity
+  and temporary-spool protection are not implemented, and the logical byte
+  limit is not an RSS bound. See
+  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md) and
+  [waf.md](waf.md#sizing-and-concurrency).
 
 ---
 
@@ -714,7 +714,8 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   On unreleased `main`, request-side host buffers (prepared bodies, `fetch`
   copies, request state, generated and replacement bodies) are charged to the
   process-wide inspection budget and refused with `503` when it is exhausted;
-  response-subscription buffers are not yet charged (#700 I4).
+  response-subscription buffers are also charged (#700 I4). Process-wide
+  guest-instance capacity is not yet governed (#700 I2b).
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,

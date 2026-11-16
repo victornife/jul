@@ -603,12 +603,13 @@ Host-side buffers are separate and follow request concurrency: up to
 `max_request_body` per request with a body-reading plugin (one copy, shared by
 the chain and kept until the request ends) and, for a `jul-abi/v2`
 body subscription, up to `max_response_body` per subscribed response.
-Request-side buffers are capped together by `max_buffered_bytes` (see
-[Inspection governor](#inspection-governor)); response-subscription buffers
-and WAF state are not yet. Upstream admission occurs after request plugins
-and WAF on proxy routes and does not cap earlier inspection or routes without
-an upstream. Account for all enabled layers and overlapping generations when
-sizing the host.
+Request-side buffers, response-subscription buffers and estimated WAF state
+share `max_buffered_bytes` (see [Inspection governor](#inspection-governor)).
+Guest capacity is not governed process-wide, and the logical budget is not an
+RSS bound. Upstream admission occurs after request plugins and WAF on proxy
+routes and does not cap earlier inspection or routes without an upstream.
+Account for all enabled layers and overlapping generations when sizing the
+host.
 
 Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`
@@ -801,7 +802,7 @@ are addressed by design, configuration, or runtime containment:
 | Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
 | Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, the absolute inspection `body_timeout` (`408`), client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699, #700) | With `observe` mode or `body_timeout = "0s"` and `read_timeout = 0`, a stalled upload keeps its bytes until the client gives up |
-| Memory exhaustion by concurrent plugin requests | Many concurrent body-reading or allocating requests | Request-side host buffers are charged to `max_buffered_bytes` before allocation; excess requests get `503` (#700) | Response-subscription buffers and WAF state are not charged yet; `observe` mode does not refuse |
+| Memory exhaustion by concurrent plugin requests | Many concurrent body-reading or allocating requests | Request-side host buffers and response-subscription buffers are charged to `max_buffered_bytes` before allocation; excess requests get `503` in enforce mode (#700) | WAF state is an estimate; process-wide guest capacity is not yet governed, and `observe` mode does not refuse |
 | Memory or CPU exhaustion by concurrency | Many concurrent requests on a plugin route, each instantiating a module | `max_instances` (default 64) caps live instances per plugin; excess calls wait one `timeout`, then get `503` and are counted in `jul_plugin_instance_waits_total` (#506) | Operator sets `max_instances × memory_limit` above what the host can hold |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |

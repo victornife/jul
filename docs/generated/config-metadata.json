@@ -1197,9 +1197,9 @@
       "value_kind": "duration",
       "constraint": "non-negative",
       "zero_semantics": "omitted defaults to 60s; explicit 0s disables the inspection body-arrival deadline",
-      "active_when": "enforce mode bounds plugin request-body arrival from its first read; observe counts would_timeout instead; WAF-only routes do not apply it yet",
+      "active_when": "enforce mode bounds inspected request-body arrival from its first read; observe counts would_timeout instead",
       "default": "60s",
-      "description": "BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only routes do not apply it yet",
+      "description": "BodyTimeout bounds inspected request-body arrival in enforce mode",
       "anchor": "global-inspection-body_timeout"
     },
     "global.inspection.evaluation_queue_timeout": {
@@ -1214,9 +1214,9 @@
       "value_kind": "duration",
       "constraint": "between 0s and 10s",
       "zero_semantics": "omitted defaults to 1s; explicit 0s disables waiting",
-      "active_when": "applied by the governor API; live requests do not acquire governor slots yet",
+      "active_when": "applied to eligible WAF evaluation slot waits",
       "default": "1s",
-      "description": "EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots yet",
+      "description": "EvaluationQueueTimeout bounds eligible WAF evaluation slot waiting",
       "anchor": "global-inspection-evaluation_queue_timeout"
     },
     "global.inspection.max_buffered_bytes": {
@@ -1231,9 +1231,9 @@
       "value_kind": "size",
       "constraint": "positive size",
       "zero_semantics": "omitted defaults to 256 MiB; explicit zero is invalid",
-      "active_when": "applied by governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet",
+      "active_when": "applied by governor accounting and configuration validation for WAF and plugin inspection",
       "default": "256m",
-      "description": "MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; it governs live plugin requests, not WAF requests yet",
+      "description": "MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state and audit",
       "anchor": "global-inspection-max_buffered_bytes"
     },
     "global.inspection.max_concurrent_evaluations": {
@@ -1248,8 +1248,8 @@
       "value_kind": "integer",
       "constraint": "0 or between 1 and 1024",
       "zero_semantics": "0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting",
-      "active_when": "applied by the governor API; live WAF evaluations do not acquire slots yet",
-      "description": "MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations do not acquire slots yet",
+      "active_when": "applied to WAF evaluation admission; phase-5 logging may run unslotted",
+      "description": "MaxConcurrentEvaluations is the governor slot limit for WAF evaluations",
       "anchor": "global-inspection-max_concurrent_evaluations"
     },
     "global.inspection.max_response_header_bytes": {
@@ -1264,9 +1264,9 @@
       "value_kind": "size",
       "constraint": "positive size",
       "zero_semantics": "omitted defaults to 64 KiB; explicit zero is invalid",
-      "active_when": "used by configuration validation; live response-header accounting is pending",
+      "active_when": "used by configuration validation and live WAF response-header accounting",
       "default": "64k",
-      "description": "MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not yet applied to live responses",
+      "description": "MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence)",
       "anchor": "global-inspection-max_response_header_bytes"
     },
     "global.inspection.mode": {
@@ -1281,13 +1281,13 @@
       "value_kind": "enum",
       "constraint": "exact lowercase enum",
       "zero_semantics": "omitted defaults to enforce",
-      "active_when": "controls governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet",
+      "active_when": "controls governor accounting and configuration validation for WAF and plugin inspection",
       "allowed": [
         "enforce",
         "observe"
       ],
       "default": "enforce",
-      "description": "Mode is \"enforce\" (default) or \"observe\" for governor accounting; live plugin requests are governed, WAF requests are not yet",
+      "description": "Mode is \"enforce\" (default) or \"observe\" for governor accounting of WAF and plugin inspection",
       "anchor": "global-inspection-mode"
     },
     "global.log_format": {

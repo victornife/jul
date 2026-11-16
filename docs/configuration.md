@@ -184,17 +184,17 @@ complete limit set without recreating the governor or resetting its counters;
 automatic slots resolve against the candidate `worker_threads` value, or the
 startup `GOMAXPROCS` when worker threads are `auto`.
 
-**Only the plugin request path is governed so far.** The status API marks
-request-path integration as `partial`. A route with WASM plugins holds one
+The status API marks request-path integration as `partial`: guest-capacity and
+inspection-spool protection are not implemented. A route with WASM plugins holds one
 lease for the whole request, charges prepared bodies, fetch results,
 per-request state and generated or replaced bodies before allocating them, and
 in `enforce` mode answers saturation with `503` plus `Retry-After: 1` and a
 stalled body upload with `408` once `body_timeout` has passed since the first
-read. `observe` mode counts the same decisions without refusing. WAF request
-state, evaluation slots, response-subscription buffers and the response-header
-gate are not governed yet, so `mode = "enforce"` does not protect WAF-only
-routes. See [Plugins](plugins.md#inspection-governor) for the exact
-behaviour.
+read. WAF request and response state, evaluation admission, audit ownership and
+plugin response-subscription buffers are also accounted. `observe` mode counts
+would-refuse decisions without governor-driven request refusal; audit records
+can still be dropped under output saturation. See
+[Plugins](plugins.md#inspection-governor) and [WAF](waf.md) for the boundaries.
 
 `jul check`, startup, reload and admin apply compute each inspected route's
 worst-case single-request charge from the compiled WAF limits, plugin limits
@@ -203,9 +203,9 @@ and its largest terms. The default CRS route needs about 246.7 MiB; with
 otherwise default limits, a WAF `request_body_limit` above 327 KiB needs a
 larger `max_buffered_bytes` (1 MiB needs about 288.7 MiB), as does a default
 WAF route that also runs a response-generating plugin (about 270.7 MiB). Raise the budget,
-lower that route's limits, or use `mode = "observe"` while sizing. Actual-size
-R3 reservations remain pending, and the 64 KiB ceiling is a compatibility
-policy default, not an experimentally established optimum. See
+lower that route's limits, or use `mode = "observe"` while sizing. The 64 KiB
+response-header ceiling is a compatibility policy default, not an experimentally
+established optimum. See
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
 
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestInspectionContractDescribesPendingRequestIntegration(t *testing.T) {
+func TestInspectionContractDescribesCurrentIntegration(t *testing.T) {
 	artifacts, err := RenderArtifacts(buildTestContract(t))
 	if err != nil {
 		t.Fatal(err)
@@ -45,33 +45,33 @@ func TestInspectionContractDescribesPendingRequestIntegration(t *testing.T) {
 	}{
 		{
 			"global.inspection.body_timeout",
-			"enforce mode bounds plugin request-body arrival from its first read; observe counts would_timeout instead; WAF-only routes do not apply it yet",
-			"BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only routes do not apply it yet",
+			"enforce mode bounds inspected request-body arrival from its first read; observe counts would_timeout instead",
+			"BodyTimeout bounds inspected request-body arrival in enforce mode",
 		},
 		{
 			"global.inspection.evaluation_queue_timeout",
-			"applied by the governor API; live requests do not acquire governor slots yet",
-			"EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots yet",
+			"applied to eligible WAF evaluation slot waits",
+			"EvaluationQueueTimeout bounds eligible WAF evaluation slot waiting",
 		},
 		{
 			"global.inspection.max_buffered_bytes",
-			"applied by governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet",
-			"MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; it governs live plugin requests, not WAF requests yet",
+			"applied by governor accounting and configuration validation for WAF and plugin inspection",
+			"MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state and audit",
 		},
 		{
 			"global.inspection.max_concurrent_evaluations",
-			"applied by the governor API; live WAF evaluations do not acquire slots yet",
-			"MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations do not acquire slots yet",
+			"applied to WAF evaluation admission; phase-5 logging may run unslotted",
+			"MaxConcurrentEvaluations is the governor slot limit for WAF evaluations",
 		},
 		{
 			"global.inspection.max_response_header_bytes",
-			"used by configuration validation; live response-header accounting is pending",
-			"MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not yet applied to live responses",
+			"used by configuration validation and live WAF response-header accounting",
+			"MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence)",
 		},
 		{
 			"global.inspection.mode",
-			"controls governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet",
-			`Mode is "enforce" (default) or "observe" for governor accounting; live plugin requests are governed, WAF requests are not yet`,
+			"controls governor accounting and configuration validation for WAF and plugin inspection",
+			`Mode is "enforce" (default) or "observe" for governor accounting of WAF and plugin inspection`,
 		},
 	}
 	for _, tt := range tests {

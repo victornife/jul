@@ -1061,7 +1061,7 @@ ErrorLog is the legacy destination for error records, kept for v1 compatibility.
 
 ## `global.inspection.body_timeout` {#global-inspection-body_timeout}
 
-BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only routes do not apply it yet.
+BodyTimeout bounds inspected request-body arrival in enforce mode.
 
 | | |
 | --- | --- |
@@ -1073,11 +1073,11 @@ BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only routes 
 | Default | 60s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted defaults to 60s; explicit 0s disables the inspection body-arrival deadline |
-| Active when | enforce mode bounds plugin request-body arrival from its first read; observe counts would_timeout instead; WAF-only routes do not apply it yet |
+| Active when | enforce mode bounds inspected request-body arrival from its first read; observe counts would_timeout instead |
 
 ## `global.inspection.evaluation_queue_timeout` {#global-inspection-evaluation_queue_timeout}
 
-EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots yet.
+EvaluationQueueTimeout bounds eligible WAF evaluation slot waiting.
 
 | | |
 | --- | --- |
@@ -1089,11 +1089,11 @@ EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquir
 | Default | 1s |
 | Constraint | between 0s and 10s |
 | Zero/empty semantics | omitted defaults to 1s; explicit 0s disables waiting |
-| Active when | applied by the governor API; live requests do not acquire governor slots yet |
+| Active when | applied to eligible WAF evaluation slot waits |
 
 ## `global.inspection.max_buffered_bytes` {#global-inspection-max_buffered_bytes}
 
-MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; it governs live plugin requests, not WAF requests yet.
+MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state and audit.
 
 | | |
 | --- | --- |
@@ -1105,11 +1105,11 @@ MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated W
 | Default | 256m |
 | Constraint | positive size |
 | Zero/empty semantics | omitted defaults to 256 MiB; explicit zero is invalid |
-| Active when | applied by governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet |
+| Active when | applied by governor accounting and configuration validation for WAF and plugin inspection |
 
 ## `global.inspection.max_concurrent_evaluations` {#global-inspection-max_concurrent_evaluations}
 
-MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations do not acquire slots yet.
+MaxConcurrentEvaluations is the governor slot limit for WAF evaluations.
 
 | | |
 | --- | --- |
@@ -1119,11 +1119,11 @@ MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations do not
 | Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
 | Constraint | 0 or between 1 and 1024 |
 | Zero/empty semantics | 0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting |
-| Active when | applied by the governor API; live WAF evaluations do not acquire slots yet |
+| Active when | applied to WAF evaluation admission; phase-5 logging may run unslotted |
 
 ## `global.inspection.max_response_header_bytes` {#global-inspection-max_response_header_bytes}
 
-MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not yet applied to live responses.
+MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence).
 
 | | |
 | --- | --- |
@@ -1135,11 +1135,11 @@ MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and value
 | Default | 64k |
 | Constraint | positive size |
 | Zero/empty semantics | omitted defaults to 64 KiB; explicit zero is invalid |
-| Active when | used by configuration validation; live response-header accounting is pending |
+| Active when | used by configuration validation and live WAF response-header accounting |
 
 ## `global.inspection.mode` {#global-inspection-mode}
 
-Mode is "enforce" (default) or "observe" for governor accounting; live plugin requests are governed, WAF requests are not yet.
+Mode is "enforce" (default) or "observe" for governor accounting of WAF and plugin inspection.
 
 | | |
 | --- | --- |
@@ -1151,7 +1151,7 @@ Mode is "enforce" (default) or "observe" for governor accounting; live plugin re
 | Allowed values | `enforce`, `observe` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to enforce |
-| Active when | controls governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet |
+| Active when | controls governor accounting and configuration validation for WAF and plugin inspection |
 
 ## `global.log_format` {#global-log_format}
 
