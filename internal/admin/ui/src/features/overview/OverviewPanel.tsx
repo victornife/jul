@@ -205,7 +205,7 @@ function InspectionCard({
       </Link>
       {stale && (
         <p className="mt-2 text-sm text-jul-warning">
-          Inspection data may be stale: the last successful overview poll was over 6 seconds ago.
+          Inspection data may be stale: the last successful overview request started over 6 seconds ago.
         </p>
       )}
       {retrying && (
@@ -276,8 +276,13 @@ function InspectionCard({
               <Sparkline data={history.bytes} width={180} height={40}
                 ariaLabel="Accounted inspection bytes across browser-local samples" />
               <p className="text-xs text-jul-muted">
-                {history.bytes.length} samples over{" "}
+                {history.bytes.length} samples; request-start window:{" "}
                 {Math.round((lastSample - firstSample) / 1000)} s.
+                Actual sample times are unknown.
+                First sample: {history.bytes[0]?.toLocaleString()} B; latest sample:{" "}
+                {history.bytes.at(-1)?.toLocaleString()} B.
+                Minimum: {Math.min(...history.bytes).toLocaleString()} B; maximum:{" "}
+                {Math.max(...history.bytes).toLocaleString()} B.
                 Samples are equally spaced in the chart, not time-scaled. This is not a process
                 high-water mark.
               </p>
@@ -735,11 +740,14 @@ export function OverviewPanel() {
     const timer = window.setInterval(() => { setNow(Date.now()); }, 2000);
     return () => { window.clearInterval(timer); };
   }, []);
-  const inspectionStale = dataUpdatedAt > 0 && now - dataUpdatedAt > INSPECTION_STALE_MS;
+  const inspectionSampledAt = data?.clientRequestStartedAt ?? dataUpdatedAt;
+  const inspectionStale = inspectionSampledAt > 0 &&
+    Math.max(now, dataUpdatedAt) - inspectionSampledAt > INSPECTION_STALE_MS;
   const history = useMetricsHistory(data?.stats, 60, dataUpdatedAt);
   const inspectionHistory = useInspectionHistory(
-    data?.inspection, data?.boot_id, dataUpdatedAt,
+    data?.inspection, data?.boot_id, inspectionSampledAt,
     isError || failureCount > 0 || !!data?.inspection_error || inspectionStale,
+    dataUpdatedAt,
   );
 
   const [activeMetric, setActiveMetric] = useState<{

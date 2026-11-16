@@ -277,11 +277,44 @@ describe("operator-centred Overview", () => {
     });
     const client = show(snapshot);
     fireEvent.click(screen.getByText("Show inspection resources"));
-    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() + 1000 }); });
-    expect(await screen.findByRole("img", { name: /Accounted inspection bytes across/ })).toBeVisible();
-    expect(screen.getByText(/2 samples over 1 s/)).toBeVisible();
+    if (!snapshot.inspection) throw new Error("Missing inspection fixture");
+    const later = {
+      ...snapshot,
+      inspection: {
+        ...snapshot.inspection,
+        usage: { ...snapshot.inspection.usage, buffer_bytes: 10 },
+      },
+    };
+    act(() => { client.setQueryData(["overview"], later, { updatedAt: Date.now() + 1000 }); });
+    expect(await screen.findByText(/2 samples; request-start window: 1 s/)).toBeVisible();
+    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() + 2000 }); });
+    expect(await screen.findByText(/3 samples; request-start window: 2 s/)).toBeVisible();
+    expect(screen.getByRole("img", { name: /Accounted inspection bytes across/ })).toBeVisible();
+    expect(screen.getByText(/First sample: 10 B; latest sample: 10 B/)).toBeVisible();
+    expect(screen.getByText(/Minimum: 10 B; maximum: 18 B/)).toBeVisible();
     expect(screen.getByText(/not a process high-water mark/)).toBeVisible();
     act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() - 10000 }); });
+    expect(await screen.findByText(/Inspection data may be stale/)).toBeVisible();
+    expect(screen.queryByRole("img", { name: /Accounted inspection bytes across/ })).not.toBeInTheDocument();
+  });
+
+  it("treats a delayed inspection response as stale on receipt", async () => {
+    const snapshot = {
+      ...overview({
+        boot_id: "test-boot",
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+      clientRequestStartedAt: Date.now() - 10_000,
+    };
+    show(snapshot, permission(false), "/?inspection=1");
     expect(await screen.findByText(/Inspection data may be stale/)).toBeVisible();
     expect(screen.queryByRole("img", { name: /Accounted inspection bytes across/ })).not.toBeInTheDocument();
   });

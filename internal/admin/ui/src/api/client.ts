@@ -1547,8 +1547,12 @@ export function fetchPoolResilience(name: string) {
   );
 }
 
-export function fetchOverview(): Promise<Overview> {
-  return api<unknown>("/runtime/overview").then((d) => OverviewSchema.parse(d));
+export function fetchOverview(): Promise<Overview & { clientRequestStartedAt: number }> {
+  const clientRequestStartedAt = Date.now();
+  return api<unknown>("/runtime/overview").then((d) => ({
+    ...OverviewSchema.parse(d),
+    clientRequestStartedAt,
+  }));
 }
 
 export function fetchRoutes(): Promise<RouteProjection[]> {

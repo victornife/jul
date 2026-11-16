@@ -19,6 +19,7 @@ export function useInspectionHistory(
   bootId: string | undefined,
   sampledAt: number,
   unavailable: boolean,
+  receivedAt: number,
 ): InspectionHistory | null {
   const [history, setHistory] = useState<InspectionHistory | null>(null);
   useEffect(() => {
@@ -32,8 +33,9 @@ export function useInspectionHistory(
     setHistory((previous) => {
       if (previous?.bootId === bootId && previous.timestamps.at(-1) === sampledAt) return previous;
       const lastAt = previous?.timestamps.at(-1) ?? 0;
+      // The server sample occurred between request start and response receipt.
       const current = previous?.bootId === bootId && sampledAt > lastAt &&
-        sampledAt - lastAt <= INSPECTION_STALE_MS
+        Math.max(sampledAt, receivedAt) - lastAt <= INSPECTION_STALE_MS
         ? previous
         : { bootId, timestamps: [], bytes: [] };
       return {
@@ -42,7 +44,7 @@ export function useInspectionHistory(
         bytes: [...current.bytes, bytes].slice(-60),
       };
     });
-  }, [inspection, bootId, sampledAt, unavailable]);
+  }, [inspection, bootId, sampledAt, unavailable, receivedAt]);
   return history?.bootId === bootId && inspection?.usage.audit_bytes !== undefined &&
     !unavailable ? history : null;
 }

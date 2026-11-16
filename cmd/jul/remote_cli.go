@@ -255,7 +255,9 @@ func cmdRemoteStatus(args []string) int {
 	if v.LastApply != nil {
 		fmt.Fprintf(stdout, "last apply: %s state=%s outcome=%s\n", v.LastApply.ApplyID, v.LastApply.State, emptyDash(string(v.LastApply.Outcome)))
 	}
-	if v.Inspection != nil {
+	if v.Inspection == nil {
+		fmt.Fprintln(stdout, "inspection: unavailable")
+	} else {
 		i := v.Inspection
 		fmt.Fprintf(stdout, "inspection: mode=%s byte_limit=%dB response_header_accounting_ceiling=%dB slots=%d (effective %d) queue_timeout=%s body_timeout=%s\n",
 			i.Configured.Mode, i.Configured.MaxBufferedBytes, i.Configured.MaxResponseHeaderBytes,

@@ -98,7 +98,7 @@ describe("useInspectionHistory", () => {
 
   it("uses at most 60 real samples and resets on boot or clock changes", () => {
     const { result, rerender } = renderHook<ReturnType<typeof useInspectionHistory>, Sample>(
-      (sample: Sample) => useInspectionHistory(sample.inspection, sample.boot, sample.at, sample.unavailable),
+      (sample: Sample) => useInspectionHistory(sample.inspection, sample.boot, sample.at, sample.unavailable, sample.at),
       { initialProps: { inspection, boot: "one", at: 1, unavailable: false } },
     );
     expect(result.current?.bytes).toEqual([10]);
@@ -117,7 +117,7 @@ describe("useInspectionHistory", () => {
 
   it("does not join samples across missing data or fabricate audit bytes", () => {
     const { result, rerender } = renderHook<ReturnType<typeof useInspectionHistory>, Sample>(
-      (sample: Sample) => useInspectionHistory(sample.inspection, sample.boot, sample.at, sample.unavailable),
+      (sample: Sample) => useInspectionHistory(sample.inspection, sample.boot, sample.at, sample.unavailable, sample.at),
       { initialProps: { inspection, boot: "one", at: 1, unavailable: false } },
     );
     rerender({ inspection, boot: "one", at: 2, unavailable: true });
@@ -129,6 +129,17 @@ describe("useInspectionHistory", () => {
     expect(result.current).toBeNull();
     rerender({ inspection, boot: undefined, at: 5, unavailable: false });
     expect(result.current).toBeNull();
+  });
+
+  it("does not join samples when the possible sampling gap exceeds six seconds", () => {
+    const { result, rerender } = renderHook(
+      ({ started, received }) => useInspectionHistory(inspection, "one", started, false, received),
+      { initialProps: { started: 1000, received: 1001 } },
+    );
+    rerender({ started: 3000, received: 8400 });
+    expect(result.current?.timestamps).toEqual([3000]);
+    rerender({ started: 8500, received: 9000 });
+    expect(result.current?.timestamps).toEqual([3000, 8500]);
   });
 });
 

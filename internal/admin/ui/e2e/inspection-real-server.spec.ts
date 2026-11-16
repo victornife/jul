@@ -195,10 +195,13 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     let pollBlocked = false;
     const overviewURL = `${adminURL}/api/runtime/overview`;
     const stallPoll = async (route: import("@playwright/test").Route) => {
+      const response = await route.fetch();
+      const data = await response.json() as { inspection: { usage: { base_bytes: number } } };
+      data.inspection.usage.base_bytes = 24_680;
       pollBlocked = true;
       await pollGate;
       try {
-        await route.continue();
+        await route.fulfill({ response, json: data });
       } finally {
         finishPoll();
       }
@@ -208,6 +211,10 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
       await expect.poll(() => pollBlocked).toBe(true);
       await expect(card.getByText(/Inspection data may be stale/)).toBeVisible({ timeout: 12_000 });
       await expect(card.getByRole("img", { name: /Accounted inspection bytes across/ })).toHaveCount(0);
+      releasePoll();
+      await pollFinished;
+      await expect(card.getByText("24.1 KiB")).toBeVisible();
+      await expect(card.getByText(/Inspection data may be stale/)).toBeVisible();
     } finally {
       releasePoll();
       if (pollBlocked) await pollFinished;
@@ -240,6 +247,14 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     }
     await expect(card.getByText(/Mode: observe\./)).toBeVisible();
     await expect(summary.getByText("Inspection status unavailable")).toHaveCount(0);
+
+    await page.route("**/TrafficControlsPanel-*.js", (route) => route.abort());
+    await card.getByRole("link", { name: "Configure inspection in Global settings" }).click();
+    await expect(page.getByRole("alert")).toContainText("This page could not be loaded");
+    await expect(page.getByRole("button", { name: "Reload Console" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "History", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Config History" })).toBeVisible();
   } finally {
     for (const response of held) {
       if (!response.writableEnded) response.end();

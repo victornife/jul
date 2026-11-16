@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { lazy, Suspense } from "react";
+import { Component, lazy, Suspense, type ReactNode } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/app/Layout.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
@@ -17,7 +17,31 @@ import { SearchPanel } from "@/features/search/SearchPanel.tsx";
 import { OperationsPanel } from "@/features/operations/OperationsPanel.tsx";
 import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
-import { Loading } from "@/components/ui.tsx";
+import { Button, Loading } from "@/components/ui.tsx";
+
+class RouteErrorBoundary extends Component<{ readonly children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("Console page failed to load:", error);
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div role="alert" className="space-y-3 rounded-md border border-jul-danger/40 p-4">
+        <p>This page could not be loaded. Reload the Console to try again.</p>
+        <Button variant="secondary" onClick={() => { window.location.reload(); }}>
+          Reload Console
+        </Button>
+      </div>
+    );
+  }
+}
 
 const HistoryPanel = lazy(() =>
   import("@/features/history/HistoryPanel.tsx").then((m) => ({
@@ -52,9 +76,11 @@ export function App() {
         <Route
           path="/traffic"
           element={
-            <Suspense fallback={<Loading label="Loading traffic controls…" />}>
-              <TrafficControlsPanel />
-            </Suspense>
+            <RouteErrorBoundary key="traffic">
+              <Suspense fallback={<Loading label="Loading traffic controls…" />}>
+                <TrafficControlsPanel />
+              </Suspense>
+            </RouteErrorBoundary>
           }
         />
         <Route path="/plugins" element={<PluginsPanel />} />
@@ -82,9 +108,11 @@ export function App() {
         <Route
           path="/history"
           element={
-            <Suspense fallback={<Loading label="Loading history…" />}>
-              <HistoryPanel />
-            </Suspense>
+            <RouteErrorBoundary key="history">
+              <Suspense fallback={<Loading label="Loading history…" />}>
+                <HistoryPanel />
+              </Suspense>
+            </RouteErrorBoundary>
           }
         />
         <Route

@@ -359,6 +359,43 @@ the summary to treat both `null` and missing inspection as unavailable.
 The built initial-route assets totaled 242,808 bytes with local `gzip -9 -n`
 against the unchanged 256,000-byte budget; hosted CI must verify its own build.
 
+Two independent whole-diff reviews found that a delayed Overview response
+could be presented as fresh, lazy-route chunk failures could remove the whole
+Console, the inspection trend lacked accessible values, and `jul status`
+silently omitted inspection on older servers. The Overview now dates samples
+from the start of the request, suppresses stale trends, and exposes first,
+latest, minimum and maximum values. The lazy routes report failures with a
+reload action and retain navigation; the CLI marks absent inspection status
+unavailable. The initial timestamp and CLI regressions failed before their
+fixes. A follow-up review identified missing intermediate peaks in the first
+accessible summary; minimum and maximum are now included, with a spike
+regression. Another follow-up found that two request starts could conceal a
+longer possible gap between server samples; history now resets if the latest
+possible current sample and earliest possible prior sample are over six
+seconds apart. The regression failed before that correction. The UI labels its
+window as request-start times, not actual sample times. A browser navigation
+check also exposed an error boundary retained across different routes;
+route-specific keys correct it. Both reviewers confirmed the corrections
+without further significant findings.
+
+The published head `1f78bce9` failed hosted `docs-check`: D11-104 still named
+26 obsolete content-hashed assets from an earlier build. The current build
+reconciles those paths and records the replacement mapping without changing
+historical review evidence. Its local D11 inventory check and all 22 D11 tests
+passed. This is path reconciliation, not a recertification of the new code.
+
+| Validation command | Result |
+| --- | --- |
+| `corepack pnpm exec vitest run src/test/resource-capacity.test.tsx src/test/overview-layout.test.tsx` (from `internal/admin/ui`) | Passed, 59 tests. |
+| `corepack pnpm run build` and `corepack pnpm run lint` (from `internal/admin/ui`) | Passed; the build included type checking and reported the existing sourcemap warning. |
+| `corepack pnpm test:coverage` (from `internal/admin/ui`) | Passed, 1,086 tests and the coverage contract. |
+| `corepack pnpm exec playwright test --project=inspection-real-server e2e/inspection-real-server.spec.ts --repeat-each=3 --workers=3 --retries=0` (from `internal/admin/ui`) | Passed, three concurrent packaged-WAF browser runs, including delayed response and lazy-chunk failure injection. |
+| `go test ./cmd/jul -run '^TestRemoteStatus' -count=1` | Passed. |
+| `python3 scripts/check-d11-certification.py` and `python3 scripts/test_d11_certification.py` | Passed, zero inventory errors and 22 tests. |
+
+The final initial-route assets totaled 243,162 bytes with local `gzip -9 -n`
+against the unchanged 256,000-byte budget. Hosted current-head CI is required.
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described

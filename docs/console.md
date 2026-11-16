@@ -185,11 +185,13 @@ and Plugins panels link to it; following either link opens the shared section
 and focuses it when no other control has focus. It reports logical charges and
 limits, not process memory. Missing inspection data is shown as unavailable.
 When boot identity and all charge classes are available, the section plots up
-to 60 browser-local accounted-byte samples and labels their actual observed
-window. These are not a process high-water mark. The window resets on a boot
+to 60 browser-local accounted-byte samples, labels their request-start window,
+and reports the first, latest, minimum and maximum values in text. These are not
+a process high-water mark. The window resets on a boot
 change, missing data, a poll failure or stale data; older servers without boot
 identity or audit charges do not produce a trend. A snapshot is marked stale
-when the last successful Overview poll is over six seconds old.
+when the last successful Overview request started over six seconds ago. This
+conservatively includes time spent waiting for the response.
 
 The inspection section links to **Global & Traffic Controls → Global
 settings**, where inspection mode, byte and header budgets, evaluation slots,

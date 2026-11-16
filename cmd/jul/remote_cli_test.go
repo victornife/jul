@@ -98,7 +98,9 @@ func TestRemoteStatusAndApplyLookup(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
-		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 || !strings.Contains(out.String(), "managed_clean") {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 ||
+			!strings.Contains(out.String(), "managed_clean") ||
+			!strings.Contains(out.String(), "inspection: unavailable") {
 			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 		}
 	})
