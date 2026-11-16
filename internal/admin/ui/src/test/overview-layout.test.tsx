@@ -43,14 +43,14 @@ const permission = (manage: boolean): PermissionState => ({
   has: (value) => value === "admin:manage" && manage,
 });
 
-function show(overview: Overview, perms = permission(false)) {
+function show(overview: Overview, perms = permission(false), location = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   client.setQueryData(["overview"], overview);
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[location]}>
         <PermissionContext.Provider value={perms}>
           <OverviewPanel />
         </PermissionContext.Provider>
@@ -72,6 +72,86 @@ describe("operator-centred Overview", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("opens and focuses inspection resources for a shared link without reopening on refresh", () => {
+    const client = show(overview(), permission(false), "/?inspection=1");
+    const summary = screen.getByText("Show inspection resources");
+    const details = summary.closest("details");
+    expect(details).toHaveAttribute("open");
+    expect(summary).toHaveFocus();
+    fireEvent.click(summary);
+    expect(details).not.toHaveAttribute("open");
+    act(() => { client.setQueryData(["overview"], overview()); });
+    expect(details).not.toHaveAttribute("open");
+  });
+
+  it("opens the shared inspection link after the overview loads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/?inspection=1"]}>
+          <PermissionContext.Provider value={permission(false)}>
+            <OverviewPanel />
+          </PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Loading overview…")).toBeVisible();
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const summary = await screen.findByText("Show inspection resources");
+    await waitFor(() => { expect(summary.closest("details")).toHaveAttribute("open"); });
+    expect(summary).toHaveFocus();
+  });
+
+  it("does not steal focus from another control while the overview loads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/?inspection=1"]}>
+          <PermissionContext.Provider value={permission(false)}>
+            <button type="button">Other control</button>
+            <OverviewPanel />
+          </PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const other = screen.getByRole("button", { name: "Other control" });
+    other.focus();
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const summary = await screen.findByText("Show inspection resources");
+    await waitFor(() => { expect(summary.closest("details")).toHaveAttribute("open"); });
+    expect(other).toHaveFocus();
+  });
+
+  it("does not reopen the shared inspection link after a polling error recovers", async () => {
+    const client = show(overview(), permission(false), "/?inspection=1");
+    const summary = screen.getByText("Show inspection resources");
+    fireEvent.click(summary);
+    const query = client.getQueryCache().find({ queryKey: ["overview"] });
+    expect(query).toBeDefined();
+    act(() => {
+      query?.setState({ status: "error", error: new Error("temporarily unavailable") });
+    });
+    await screen.findByText(/temporarily unavailable/);
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const recovered = await screen.findByText("Show inspection resources");
+    expect(recovered.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("preserves an open inspection disclosure after a polling error recovers", async () => {
+    const client = show(overview(), permission(false), "/?inspection=1");
+    const query = client.getQueryCache().find({ queryKey: ["overview"] });
+    expect(query).toBeDefined();
+    act(() => {
+      query?.setState({ status: "error", error: new Error("temporarily unavailable") });
+    });
+    await screen.findByText(/temporarily unavailable/);
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const recovered = await screen.findByText("Show inspection resources");
+    expect(recovered.closest("details")).toHaveAttribute("open");
   });
 
   it("shows observe and draining inspection charges without calling them process memory", () => {

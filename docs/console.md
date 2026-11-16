@@ -180,6 +180,11 @@ even if the operator closes the details. Unavailable or unjudged readings are
 not treated as healthy. Use **Show resource and storage details** to expand or
 collapse the entire detail area.
 
+**Inspection resources** is a separate expandable section in this area. The WAF
+and Plugins panels link to it; following either link opens the shared section
+and focuses it when no other control has focus. It reports logical charges and
+limits, not process memory. Missing inspection data is shown as unavailable.
+
 ##### Runtime Resources and Capacity (#431)
 
 These sections answer "is this instance healthy,

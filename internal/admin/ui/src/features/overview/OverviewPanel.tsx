@@ -5,7 +5,7 @@
 
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   fetchOverview,
   type FeatureStatus,
@@ -687,6 +687,7 @@ function ActionableStatusGroup({
 
 export function OverviewPanel() {
   const navigate = useNavigate();
+  const { search, key: locationKey } = useLocation();
   const { data, dataUpdatedAt, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["overview"],
     queryFn: fetchOverview,
@@ -701,6 +702,10 @@ export function OverviewPanel() {
     timestamps: number[];
   } | null>(null);
   const resourcesRef = useRef<HTMLDetailsElement>(null);
+  const inspectionRef = useRef<HTMLDetailsElement>(null);
+  const handledInspectionLink = useRef<string | null>(null);
+  const [inspectionOpen, setInspectionOpen] = useState(false);
+  const overviewAvailable = !!data && !isError;
 
   const rawStats = data?.stats;
   const stats = rawStats && {
@@ -737,6 +742,18 @@ export function OverviewPanel() {
   useEffect(() => {
     if (resourceAttention) openResourceDisclosure(resourcesRef.current);
   }, [resourceAttention]);
+  useEffect(() => {
+    if (
+      !overviewAvailable ||
+      handledInspectionLink.current === locationKey ||
+      new URLSearchParams(search).get("inspection") !== "1"
+    ) return;
+    const details = inspectionRef.current;
+    if (!details) return;
+    handledInspectionLink.current = locationKey;
+    setInspectionOpen(true);
+    if (document.activeElement === document.body) details.querySelector("summary")?.focus();
+  }, [overviewAvailable, search, locationKey]);
 
   if (isLoading) {
     return <Loading label="Loading overview…" />;
@@ -1278,7 +1295,12 @@ export function OverviewPanel() {
             Inspect process resources, capacity, and Jul-owned storage headroom.
           </p>
         </div>
-        <details className="rounded-lg border border-jul-border">
+        <details
+          ref={inspectionRef}
+          open={inspectionOpen}
+          onToggle={(event) => { setInspectionOpen(event.currentTarget.open); }}
+          className="rounded-lg border border-jul-border"
+        >
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
             Show inspection resources
             {(data.inspection_error || data.inspection === null) && (

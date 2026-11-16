@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading, MaturityBadge } from "@/components/ui.tsx";
 import {
@@ -68,6 +69,9 @@ export function PluginsPanel() {
             WASM plugins attached to routes for custom request/response processing.
             Build your own middleware or use third-party modules compiled to WebAssembly.
           </p>
+          <Link to="/?inspection=1" className="text-sm text-jul-accent hover:underline">
+            View shared inspection resources
+          </Link>
         </div>
         <div className="flex shrink-0 gap-2">
           <div className="flex flex-col items-end gap-1">

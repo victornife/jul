@@ -266,6 +266,8 @@ describe("PluginsPanel", () => {
   it("lists declared plugins with type badges", async () => {
     render(<PluginsPanel />, { wrapper: Wrapper });
     expect(await screen.findByText("inject")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View shared inspection resources" }))
+      .toHaveAttribute("href", "/?inspection=1");
     expect(screen.getByText("block")).toBeInTheDocument();
     expect(screen.getAllByText("middleware").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("handler")).toBeInTheDocument();
