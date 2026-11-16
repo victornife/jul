@@ -629,6 +629,23 @@ describe("operator-centred Overview", () => {
     expect(await screen.findByRole("heading", { name: "Setup Wizard" })).toBeVisible();
   });
 
+  it("loads configuration history through its app route", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["history"], []);
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/history"]}>
+          <PermissionContext.Provider value={permission(false)}>
+            <App />
+          </PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: "Config History" })).toBeVisible();
+  });
+
   it("renders a trend summary once sufficient samples have been collected", async () => {
     const { ChartDetailPanel } = await import("@/components/ChartDetailPanel.tsx");
     render(

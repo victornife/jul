@@ -18,9 +18,13 @@ import { SearchPanel } from "@/features/search/SearchPanel.tsx";
 import { OperationsPanel } from "@/features/operations/OperationsPanel.tsx";
 import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
-import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
 import { Loading } from "@/components/ui.tsx";
 
+const HistoryPanel = lazy(() =>
+  import("@/features/history/HistoryPanel.tsx").then((m) => ({
+    default: m.HistoryPanel,
+  })),
+);
 const TranscodeDesignerPanel = lazy(() =>
   import("@/features/transcode/TranscodeDesignerPanel.tsx").then((m) => ({
     default: m.TranscodeDesignerPanel,
@@ -64,7 +68,14 @@ export function App() {
         <Route path="/audit" element={<AuditPanel />} />
         <Route path="/config" element={<ConfigPanel />} />
         <Route path="/ui" element={<Navigate to="/config" replace />} />
-        <Route path="/history" element={<HistoryPanel />} />
+        <Route
+          path="/history"
+          element={
+            <Suspense fallback={<Loading label="Loading history…" />}>
+              <HistoryPanel />
+            </Suspense>
+          }
+        />
         <Route
           path="/wizard"
           element={
