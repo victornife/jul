@@ -86,6 +86,32 @@ path = "/"
 	}
 }
 
+func TestRawPreviewReportsRouteOrderChange(t *testing.T) {
+	before := config.ProxyTarget("127.0.0.1:9001", "127.0.0.1:8080")
+	before.Servers[0].Locations = []config.LocationConfig{
+		{Match: config.MatchConfig{Type: "regex", Path: "^/"}, Return: 200},
+		{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: 403},
+	}
+	after, err := before.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	after.Servers[0].Locations[0], after.Servers[0].Locations[1] =
+		after.Servers[0].Locations[1], after.Servers[0].Locations[0]
+	raw, err := config.Marshal(after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := previewRawCandidate(context.Background(), before, nil,
+		lifecycle.Live{BoundHTTPAddrs: []string{"127.0.0.1:8080"}}, "base", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Lifecycle.Changes) == 0 || len(preview.Diff.Affected) == 0 {
+		t.Fatalf("preview missed route order change: lifecycle=%+v diff=%+v", preview.Lifecycle, preview.Diff)
+	}
+}
+
 func TestIssue81RawValidationErrorsDoNotEchoCandidateValues(t *testing.T) {
 	const marker = "ISSUE81_SECRET_VALUE_MUST_NOT_ESCAPE"
 	issues := secretSafeRawValidationErrors(errors.New("rate_limit.key: invalid value " + marker))

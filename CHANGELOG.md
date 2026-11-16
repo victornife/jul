@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Report and apply changes to serving order or duplicate route/backend entries
+  on reload instead of continuing with stale routing or weights (#700).
+  Duplicate route declarations retain their own authentication and WAF
+  policies; duplicate backends retain their individual health and in-flight
+  state across reloads.
+
 - Require Go 1.27.4 for current source builds, including the upstream
   `net/http` fix for [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859).
   The root and example modules, CI/release toolchain and Docker builder are

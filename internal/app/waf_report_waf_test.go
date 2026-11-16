@@ -230,6 +230,52 @@ func TestFactorySharesTheGlobalFirewall(t *testing.T) {
 	}
 }
 
+func TestFactoryDuplicateMatchesKeepOwnWAF(t *testing.T) {
+	tests := []struct {
+		name       string
+		first      *config.WAFConfig
+		second     *config.WAFConfig
+		wantStatus int
+	}{
+		{
+			name: "first policy blocks",
+			first: &config.WAFConfig{Enabled: true, Mode: "block", RequestBodyLimit: 128 << 10,
+				InlineRules: `SecRule ARGS:q "@streq attack" "id:40011,phase:1,deny,status:403"`},
+			second:     &config.WAFConfig{Enabled: true, Mode: "block", RequestBodyLimit: 128 << 10},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:  "first policy disabled",
+			first: &config.WAFConfig{Enabled: false},
+			second: &config.WAFConfig{Enabled: true, Mode: "block", RequestBodyLimit: 128 << 10,
+				InlineRules: `SecRule ARGS:q "@streq attack" "id:40012,phase:1,deny,status:403"`},
+			wantStatus: http.StatusOK,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, cleanup := minimalFactory(t)
+			defer cleanup()
+			f.Inspection = f.RT.Inspection
+			cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
+			cfg.Servers[0].Locations = []config.LocationConfig{
+				{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusOK, WAF: tt.first},
+				{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusOK, WAF: tt.second},
+			}
+			handlers, _, err := f.Build(context.Background(), cfg, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "http://example.test/private/data?q=attack", nil)
+			rec := httptest.NewRecorder()
+			handlers[":0"].ServeHTTP(rec, req)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("first route WAF returned %d, want %d", rec.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestWAFPreparationErrorDoesNotExportMatcherFingerprint(t *testing.T) {
 	f, cleanup := minimalFactory(t)
 	defer cleanup()

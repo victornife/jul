@@ -147,6 +147,48 @@ func TestClassifyListenerTimeoutOnRetainedAddress(t *testing.T) {
 	}
 }
 
+func TestClassifySecondaryServerReorderDoesNotStrandListenerTimeout(t *testing.T) {
+	first := config.ServerConfig{Listen: ":8443", ServerNames: []string{"a"}, ReadHeaderTimeout: config.Duration(5e9)}
+	second := config.ServerConfig{Listen: ":8443", ServerNames: []string{"b"}, ReadHeaderTimeout: config.Duration(8e9)}
+	third := config.ServerConfig{Listen: ":8443", ServerNames: []string{"c"}, ReadHeaderTimeout: config.Duration(9e9)}
+	before := &config.Config{Servers: []config.ServerConfig{first, second, third}}
+	after := &config.Config{Servers: []config.ServerConfig{first, third, second}}
+	res, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.CanApplyHot {
+		t.Fatalf("secondary blocks cannot change the bound timeout: %+v", res)
+	}
+}
+
+func TestClassifyBackendTLSChangeInFirstDuplicateServer(t *testing.T) {
+	server := func(name string) config.ServerConfig {
+		return config.ServerConfig{
+			Listen: ":8443", ServerNames: []string{"same.example"},
+			Locations: []config.LocationConfig{{
+				Match:      config.MatchConfig{Type: "prefix", Path: "/"},
+				BackendTLS: &config.BackendTLSConfig{ServerName: name},
+			}},
+		}
+	}
+	before := &config.Config{Servers: []config.ServerConfig{server("old.example"), server("other.example")}}
+	after := &config.Config{Servers: []config.ServerConfig{server("new.example"), server("other.example")}}
+	res, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, change := range res.Changes {
+		if change.Path == "servers.*.locations.*.backend_tls.server_name" && change.Effective == HotReloadClass {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("backend TLS change in first duplicate was lost: %+v", res)
+	}
+}
+
 // TestClassifyConnectionCapIsHot proves #106 removed max_conns from the
 // bind-time lifecycle: retained and newly bound listeners use the same live
 // admission policy.
