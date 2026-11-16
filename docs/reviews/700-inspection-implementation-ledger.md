@@ -11,13 +11,13 @@ qualification, soak or maturity change.
 | Item | State |
 | --- | --- |
 | Starting `main` | `d06538cecc1398b6e8bf6302b553f873cd44e941` (verified #717 merge, after I4) |
-| Latest verified `main` | `ed775fd5ce9836cafb8c137dab25231fb8ccc10f` (#722 reload safety) |
+| Latest verified `main` at this update | `9c70b64d31396882ab62cc38f1c95377e2e9ddf6` (#723 status record, following #722 reload safety) |
 | Checkpoint 1 | **Merged**: #714 merged as `16d98258` from head `faf3ead4` after green hosted checks; the amendment is accepted |
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below |
 | Checkpoint 5 | **Blocked**: I2b draft #721 at `14ebcb20` cannot establish A20 while wazero's cancellation watcher may retain guest memory after a reservation refund |
-| Checkpoint 6 | **Not started**: I6a #712 requires stable implemented resource contracts |
+| Checkpoint 6 | **Partial, blocked**: draft #724 surfaces existing resources, but full I6a #712 requires stable implemented guest and spool contracts |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
@@ -32,7 +32,7 @@ qualification, soak or maturity change.
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
 | 5 — I2b | Blocked: unmerged draft #721 prototypes admission but does not prove guest-memory ownership; #711 | Supported last-alias teardown and interrupt behavior, failed-start drainage, and a measured finite default; no technical dependency on the WAF parser, though scheduled after I3b |
-| 6 — I6a | Not started: operational API/CLI/Console and implementation documentation; #712 | Stable implemented resource contracts and real producer signals; implementation owner |
+| 6 — I6a | Partial draft #724: operational API/CLI/Console for existing resources; #712 remains blocked | Stable implemented resource contracts and real producer signals; implementation owner |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
 The maintainer requested publication of the I2b prototype as draft #721 while I3b remains blocked.
@@ -250,6 +250,20 @@ The recommended next step is a reviewed public engine integration with per-trans
 and typed storage outcomes, followed by the ADR's filesystem, lifecycle and protocol tests.
 No upstream change has been submitted, and no logical spool quota is claimed.
 
+On 2026-11-16, a bounded investigation on macOS with Coraza v3.8.1 found that
+the default `TMPDIR` contained both spill and multipart files in the tested case,
+but an explicit `SecUploadDir` redirected multipart files elsewhere. An induced
+multipart create failure reached the origin in Jul block mode without CRS and
+detect mode with CRS; block mode with CRS returned 400. A private, finite HFS+
+image reached ENOSPC for byte writes, but the experiment did not demonstrate a
+separate inode quota. Linux was not tested. See the [experiment evidence](evidence/2026-11-16-713-physical-containment/README.md)
+for exact identities, cases and limits. These results support only operational
+containment, not A19 or reliable fail-closed handling in all profiles. The
+`no_fs_access` build tag changed existing body-processing behavior and is not
+recommended as a default. Draft #725 documents containment without changing the
+runtime. #713 remains blocked pending a supported complete ownership boundary
+or another conservatively proved solution.
+
 ## I2b blocker and reload safety follow-up
 
 Draft #721 contains the guest-capacity prototype and reproducible
@@ -270,6 +284,6 @@ Hosted CI reported 66 successful checks and two skips. The draft incorporated th
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described
-above; I6a requires stable producer contracts. Do not mark I3b, I2b or I6a implemented merely
+above; the partial I6a draft still requires stable producer contracts. Do not mark I3b, I2b or I6a implemented merely
 because their designs or tracking issues exist; do not close #700/#62 or claim final acceptance
 before I6b.
