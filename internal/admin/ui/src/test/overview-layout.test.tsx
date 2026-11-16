@@ -334,6 +334,7 @@ describe("operator-centred Overview", () => {
 
   it("distinguishes missing inspection data from an idle snapshot", () => {
     show(overview());
+    expect(screen.getByText("Inspection status unavailable")).toBeVisible();
     fireEvent.click(screen.getByText("Show inspection resources"));
     expect(
       within(screen.getByRole("region", { name: "Inspection resources" })).getByText(

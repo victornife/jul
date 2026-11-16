@@ -1349,7 +1349,7 @@ export function OverviewPanel() {
         >
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
             Show inspection resources
-            {(data.inspection_error || data.inspection === null) && (
+            {(data.inspection_error || !data.inspection) && (
               <span className="ml-2 text-jul-danger">Inspection status unavailable</span>
             )}
           </summary>

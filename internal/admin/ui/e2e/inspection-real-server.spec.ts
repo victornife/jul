@@ -186,6 +186,60 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     });
     await expect(card.getByText(/Mode: observe\./)).toBeVisible();
     await expect(card.getByText(/Draining\./)).toHaveCount(0);
+
+    await expect(card.getByRole("img", { name: /Accounted inspection bytes across/ })).toBeVisible();
+    let releasePoll = () => {};
+    const pollGate = new Promise<void>((resolvePoll) => { releasePoll = resolvePoll; });
+    let finishPoll = () => {};
+    const pollFinished = new Promise<void>((resolvePoll) => { finishPoll = resolvePoll; });
+    let pollBlocked = false;
+    const overviewURL = `${adminURL}/api/runtime/overview`;
+    const stallPoll = async (route: import("@playwright/test").Route) => {
+      pollBlocked = true;
+      await pollGate;
+      try {
+        await route.continue();
+      } finally {
+        finishPoll();
+      }
+    };
+    await page.route(overviewURL, stallPoll);
+    try {
+      await expect.poll(() => pollBlocked).toBe(true);
+      await expect(card.getByText(/Inspection data may be stale/)).toBeVisible({ timeout: 12_000 });
+      await expect(card.getByRole("img", { name: /Accounted inspection bytes across/ })).toHaveCount(0);
+    } finally {
+      releasePoll();
+      if (pollBlocked) await pollFinished;
+      await page.unroute(overviewURL, stallPoll);
+    }
+    await expect(card.getByText(/Inspection data may be stale/)).toHaveCount(0);
+    await expect(card.getByText(/Mode: observe\./)).toBeVisible();
+
+    const summary = page.locator("summary").filter({ hasText: "Show inspection resources" });
+    await summary.click();
+    let missingResponses = 0;
+    const omitInspection = async (route: import("@playwright/test").Route) => {
+      const response = await route.fetch();
+      const data = await response.json() as Record<string, unknown>;
+      expect(data.inspection).toBeTruthy();
+      delete data.inspection;
+      delete data.inspection_error;
+      missingResponses++;
+      await route.fulfill({ response, json: data });
+    };
+    await page.route(overviewURL, omitInspection);
+    try {
+      await expect.poll(() => missingResponses).toBeGreaterThan(0);
+      await expect(summary.getByText("Inspection status unavailable")).toBeVisible();
+      await summary.click();
+      await expect(card.getByText("Inspection status unavailable.")).toBeVisible();
+      await expect(card.getByText(/Mode: observe\./)).toHaveCount(0);
+    } finally {
+      await page.unroute(overviewURL, omitInspection);
+    }
+    await expect(card.getByText(/Mode: observe\./)).toBeVisible();
+    await expect(summary.getByText("Inspection status unavailable")).toHaveCount(0);
   } finally {
     for (const response of held) {
       if (!response.writableEnded) response.end();

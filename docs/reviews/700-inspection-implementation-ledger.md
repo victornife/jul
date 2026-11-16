@@ -339,6 +339,26 @@ all browser compatibility cases, or final I6a review.
 | `CI=1 node node_modules/@playwright/test/cli.js test --project=real-server --project=inspection-real-server --reporter=list` (from `internal/admin/ui`) | Did not start: the existing shared real-server script's macOS `mktemp` path traverses `/var`, a symlink rejected by the version-key directory check. The isolated project passed separately; hosted CI must validate its real-server invocation. |
 | `CI=1 node node_modules/@playwright/test/cli.js test --project=real-server inspection-real-server.spec.ts --reporter=list` (from `internal/admin/ui`) | Passed on macOS with a canonical `TMPDIR` and a temporary local change making the existing script pass that directory explicitly to `mktemp`. The script was restored afterwards; the full real-server suite was not rerun. |
 
+The packaged-browser test now also stalls an actual overview poll to check
+the stale warning and trend removal, then restores polling. It next removes
+the inspection field from otherwise real server responses to simulate an older
+backend, verifies the collapsed and expanded unavailable states, and restores
+the real response. This is a deliberately injected compatibility fault, not
+an actual older-server binary. The test exposed a missing-field case where the
+collapsed summary did not warn: the unit regression failed before changing
+the summary to treat both `null` and missing inspection as unavailable.
+
+| Validation command | Result |
+| --- | --- |
+| `corepack pnpm exec vitest run src/test/overview-layout.test.tsx src/test/resource-capacity.test.tsx` (from `internal/admin/ui`) | Passed, 57 tests; the new missing-field assertion failed before the fix. |
+| `corepack pnpm run lint`, `corepack pnpm run typecheck`, `corepack pnpm run build` (from `internal/admin/ui`) | Passed; the build reported the existing sourcemap warning. |
+| `go test -tags console ./internal/admin -run 'TestConsole\|TestRuntimeOverview' -count=1` | Passed with the updated embedded assets. |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=inspection-real-server --repeat-each=3 --retries=0 --reporter=list` (from `internal/admin/ui`) | Passed, three concurrent macOS repetitions with local dependencies and freshly built assets. An earlier run failed because the test removed its route before the stalled handler finished; the handler is now joined before removal. |
+| `CI=1 corepack pnpm exec playwright test --project=inspection-real-server --repeat-each=3 --retries=0 --reporter=list` (from `internal/admin/ui`) | Did not start the browser: Corepack's pnpm attempted a separate `pnpm install`, but the shell's pnpm shim had no configured version. The direct Playwright invocation above used the same installed dependencies. |
+
+The built initial-route assets totaled 242,808 bytes with local `gzip -9 -n`
+against the unchanged 256,000-byte budget; hosted CI must verify its own build.
+
 ## Handoff rules
 
 I3a is merged as #715 and I4 as #716 (`daa06bdc`). I3b and I2b remain blocked as described
