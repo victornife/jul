@@ -53,9 +53,8 @@ func EffectiveValue(cfg *config.Config, path string) (any, bool) {
 
 // extractGeneric navigates the resolved configuration along a dotted registry
 // path using the TOML-tagged schema. A wildcard segment expands the matching
-// slice or map into a map keyed by the element's operational identity, so two
-// configurations that list the same elements in a different order compare equal
-// wherever order carries no runtime meaning.
+// slice or map into a map keyed by the element's operational identity, or by
+// declaration index where order affects runtime behavior.
 func extractGeneric(cfg *config.Config, path string) any {
 	return walkPath(reflect.ValueOf(cfg), strings.Split(path, "."))
 }
@@ -76,9 +75,16 @@ func walkPath(v reflect.Value, parts []string) any {
 		switch v.Kind() {
 		case reflect.Slice, reflect.Array:
 			out := make(map[string]any, v.Len())
+			serverOrdinals := make(map[string]int)
 			for i := 0; i < v.Len(); i++ {
 				elem := v.Index(i)
-				out[collectionKey(elem, i)] = walkPath(elem, rest)
+				key := collectionKey(elem, i)
+				if elem.Type() == reflect.TypeOf(config.ServerConfig{}) {
+					listen := elem.FieldByName("Listen").String()
+					key = serverOrdinalKey(listen, serverOrdinals[listen])
+					serverOrdinals[listen]++
+				}
+				out[key] = walkPath(elem, rest)
 			}
 			return out
 		case reflect.Map:
@@ -185,8 +191,7 @@ func fieldByTOML(v reflect.Value, name string) reflect.Value {
 // collectionKey returns the identity of a collection element. Collections whose
 // order carries no runtime meaning are keyed by the identity the operational
 // code addresses them with, so reordering the document produces no diff.
-// Collections where order is part of the behavior — rewrite rules are evaluated
-// top to bottom — are keyed by index so a reorder is reported.
+// Collections where order is part of the behavior are keyed by index.
 func collectionKey(elem reflect.Value, index int) string {
 	elem = deref(elem)
 	if !elem.IsValid() {
@@ -194,14 +199,8 @@ func collectionKey(elem reflect.Value, index int) string {
 	}
 
 	switch elem.Type() {
-	case reflect.TypeOf(config.ServerConfig{}):
-		return serverKey(elem.Addr().Interface().(*config.ServerConfig))
-	case reflect.TypeOf(config.LocationConfig{}):
-		return locationKey(elem.Addr().Interface().(*config.LocationConfig))
 	case reflect.TypeOf(config.UpstreamConfig{}), reflect.TypeOf(config.AdminPrincipal{}), reflect.TypeOf(config.AdminRole{}):
 		return elem.FieldByName("Name").String()
-	case reflect.TypeOf(config.UpstreamServer{}):
-		return elem.FieldByName("Address").String()
 	case reflect.TypeOf(config.StreamServer{}):
 		return streamKey(elem.Addr().Interface().(*config.StreamServer))
 	default:
@@ -209,11 +208,8 @@ func collectionKey(elem reflect.Value, index int) string {
 	}
 }
 
-// serverKey is the operational identity of a server block: its listen address
-// plus its order-insensitive host-name set. Two documents that list the same
-// blocks in a different order therefore compare equal.
-func serverKey(s *config.ServerConfig) string {
-	return sniKey(s.ServerNames) + "@" + s.Listen
+func serverOrdinalKey(listen string, ordinal int) string {
+	return strconv.Itoa(ordinal) + "@" + listen
 }
 
 // streamKey is the operational identity of an L4 listener, matching the
@@ -222,21 +218,7 @@ func streamKey(s *config.StreamServer) string {
 	return normalizeStreamProtocol(s.Protocol) + "|" + strings.TrimSpace(s.Listen)
 }
 
-// locationKey is the operational identity of a location: the match type and
-// path the router dispatches on, plus the normalized predicate set that ADR 0018
-// §14 made part of that identity. Two locations may now legitimately share a
-// type and path, and a colliding key silently drops one of them out of the
-// extracted value — which under-reports a real change in the reload preview.
-func locationKey(l *config.LocationConfig) string {
-	t := l.Match.Type
-	if t == "" {
-		t = "prefix"
-	}
-	return t + " " + l.Match.Path + "\x00" + l.Match.CanonicalPredicates()
-}
-
-// sniKey is the order-insensitive rendering of a server block's host names,
-// used both as the TLS certificate-selection identity and as part of serverKey.
+// sniKey is the order-insensitive rendering of a server block's host names.
 func sniKey(names []string) string {
 	if len(names) == 0 {
 		return "_default_"
@@ -293,31 +275,43 @@ func perListener(cfg *config.Config, fn func(*config.ServerConfig) any) any {
 }
 
 // locationBackendTLS groups a location's backend_tls field by listen address,
-// then by virtual host, then by the location's match path. The address keying
+// then by server and location declaration indices. The address keying
 // is what lets DiffAddressAware ignore listeners the reload added or removed
 // rather than reporting them as a restart for an untouched address.
 func locationBackendTLS(fn func(*config.BackendTLSConfig) any) func(*config.Config) any {
 	return func(cfg *config.Config) any {
-		return perListener(cfg, func(s *config.ServerConfig) any {
-			out := make(map[string]any, len(s.Locations))
+		byAddr := make(map[string]any)
+		ordinals := make(map[string]int)
+		for i := range cfg.Servers {
+			s := &cfg.Servers[i]
+			servers, ok := byAddr[s.Listen].(map[string]any)
+			if !ok {
+				servers = make(map[string]any)
+				byAddr[s.Listen] = servers
+			}
+			locations := make(map[string]any, len(s.Locations))
 			for i := range s.Locations {
 				loc := &s.Locations[i]
 				if loc.BackendTLS == nil {
 					continue
 				}
-				out[loc.Match.Type+" "+loc.Match.Path] = fn(loc.BackendTLS)
+				locations[strconv.Itoa(i)] = fn(loc.BackendTLS)
 			}
-			return out
-		})
+			servers[strconv.Itoa(ordinals[s.Listen])] = locations
+			ordinals[s.Listen]++
+		}
+		return byAddr
 	}
 }
 
-// perServer groups a per-block value by the block's operational identity.
+// perServer preserves order between blocks sharing a listener.
 func perServer(cfg *config.Config, fn func(*config.ServerConfig) any) any {
 	out := make(map[string]any, len(cfg.Servers))
+	ordinals := make(map[string]int)
 	for i := range cfg.Servers {
 		s := &cfg.Servers[i]
-		out[serverKey(s)] = fn(s)
+		out[serverOrdinalKey(s.Listen, ordinals[s.Listen])] = fn(s)
+		ordinals[s.Listen]++
 	}
 	return out
 }
@@ -544,7 +538,7 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 		}, true
 	case "servers.*.plugins":
 		return func(cfg *config.Config) any {
-			return perServer(cfg, func(s *config.ServerConfig) any { return sortedCopy(s.Plugins) })
+			return perServer(cfg, func(s *config.ServerConfig) any { return append([]string(nil), s.Plugins...) })
 		}, true
 	case "servers.*.locations.*.backend_tls.ca_file":
 		return locationBackendTLS(func(b *config.BackendTLSConfig) any { return digestTLSMaterial(b.CAFile) }), true
@@ -568,7 +562,7 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 				locs := make(map[string]any, len(s.Locations))
 				for j := range s.Locations {
 					l := &s.Locations[j]
-					locs[locationKey(l)] = sortedCopy(l.Plugins)
+					locs[strconv.Itoa(j)] = append([]string(nil), l.Plugins...)
 				}
 				return locs
 			})
@@ -580,7 +574,7 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 				for j := range s.Locations {
 					l := &s.Locations[j]
 					if l.CachePolicy == nil || len(l.CachePolicy.BypassCookies) == 0 {
-						locs[locationKey(l)] = []string(nil)
+						locs[strconv.Itoa(j)] = []string(nil)
 						continue
 					}
 					out := make([]string, len(l.CachePolicy.BypassCookies))
@@ -588,7 +582,7 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 						out[k] = strings.ToLower(strings.TrimSpace(c))
 					}
 					sort.Strings(out)
-					locs[locationKey(l)] = out
+					locs[strconv.Itoa(j)] = out
 				}
 				return locs
 			})

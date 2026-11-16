@@ -302,30 +302,11 @@ func serverScopedChangedOnRetained(path string, before, candidate *config.Config
 		// A global listener-installed value such as rate_limit.max_conns.
 		return !deepEqualValues(bv, av)
 	}
-	keys := map[string]bool{}
-	for k := range bm {
-		keys[k] = true
-	}
-	for k := range am {
-		keys[k] = true
-	}
-	for k := range keys {
-		if !retained[addrFromServerKey(k)] {
-			continue
-		}
-		if !deepEqualValues(bm[k], am[k]) {
+	for addr := range retained {
+		key := serverOrdinalKey(addr, 0)
+		if !deepEqualValues(bm[key], am[key]) {
 			return true
 		}
 	}
 	return false
-}
-
-// addrFromServerKey extracts the listen address from a serverKey
-// ("names@addr"). A key without the separator is returned unchanged so an
-// unexpected shape degrades to "not retained" rather than panicking.
-func addrFromServerKey(key string) string {
-	if i := strings.LastIndex(key, "@"); i >= 0 {
-		return key[i+1:]
-	}
-	return key
 }

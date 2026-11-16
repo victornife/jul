@@ -89,6 +89,33 @@ func TestUpdateBackendsRemovesAndAdds(t *testing.T) {
 	}
 }
 
+func TestUpdateBackendsPreservesDuplicateInstances(t *testing.T) {
+	p := pool(t, "least_conn",
+		config.UpstreamServer{Address: "a:80", Weight: 1},
+		config.UpstreamServer{Address: "a:80", Weight: 2},
+		config.UpstreamServer{Address: "b:80", Weight: 1},
+	)
+	before := append([]*Backend(nil), p.Backends()...)
+	p.MarkFailure(admitOn(t, before[0]))
+	p.MarkFailure(admitOn(t, before[0]))
+	before[1].acquire()
+	p.UpdateBackends([]config.UpstreamServer{
+		{Address: "b:80", Weight: 1},
+		{Address: "a:80", Weight: 3},
+		{Address: "a:80", Weight: 4},
+	})
+	after := p.Backends()
+	if after[0] != before[2] || after[1] != before[0] || after[2] != before[1] {
+		t.Fatal("duplicate backend instances were not preserved in occurrence order")
+	}
+	if after[1].available(time.Now().UnixNano()) || after[2].Inflight() != 1 {
+		t.Fatal("duplicate backend health or in-flight state was lost")
+	}
+	if after[1].Weight() != 3 || after[2].Weight() != 4 {
+		t.Fatalf("updated weights = %d, %d; want 3, 4", after[1].Weight(), after[2].Weight())
+	}
+}
+
 func TestWeightedRRPrunesRemovedBackends(t *testing.T) {
 	p := pool(t, "weighted_round_robin",
 		config.UpstreamServer{Address: "a:80", Weight: 1},

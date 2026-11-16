@@ -17,6 +17,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/lifecycle"
 	"jul/internal/redact"
+	"jul/internal/router"
 	"jul/internal/upstream"
 )
 
@@ -352,6 +353,102 @@ match = { path = "/", type = "prefix" }
 	}
 }
 
+func TestReloadDoesNotHideRouteChanges(t *testing.T) {
+	tests := []struct {
+		name      string
+		locations []config.LocationConfig
+		change    func([]config.LocationConfig)
+	}{
+		{
+			name: "overlapping regex order",
+			locations: []config.LocationConfig{
+				{Match: config.MatchConfig{Type: "regex", Path: "^/"}, Return: http.StatusOK},
+				{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusForbidden},
+			},
+			change: func(locations []config.LocationConfig) {
+				locations[0], locations[1] = locations[1], locations[0]
+			},
+		},
+		{
+			name: "duplicate location identity",
+			locations: []config.LocationConfig{
+				{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusOK},
+				{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusForbidden},
+			},
+			change: func(locations []config.LocationConfig) {
+				locations[0].Return = http.StatusForbidden
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr := freePort(t)
+			raw := cfgWith(addr)
+			raw.Servers[0].Locations = tt.locations
+			initial := normalizedCandidate(t, raw)
+			var factoryCalls atomic.Int64
+			factory := func(_ context.Context, cfg *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+				r, err := router.New(cfg, nil, nil, nil, quietLogger())
+				if err != nil {
+					return nil, 0, nil, nil, err
+				}
+				generation := uint64(factoryCalls.Add(1))
+				return map[string]http.Handler{addr: r.For(addr)}, generation,
+					func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+			}
+			source := &stubSource{cfg: initial.Raw, raw: []byte("persisted")}
+			srv := New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), quietLogger(), factory, source, nil)
+			ctx, cancel := context.WithCancel(context.Background())
+			reloads := make(chan ReloadRequest, 1)
+			done := make(chan error, 1)
+			go func() { done <- srv.Run(ctx, reloads, initial.Redaction) }()
+			t.Cleanup(func() {
+				cancel()
+				if err := <-done; err != nil {
+					t.Errorf("Run returned error: %v", err)
+				}
+			})
+			waitForInitialGeneration(t, srv)
+			client := &http.Client{Timeout: 5 * time.Second}
+			status := func() int {
+				t.Helper()
+				resp, err := client.Get("http://" + addr + "/private/data")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				return resp.StatusCode
+			}
+			if got := status(); got != http.StatusOK {
+				t.Fatalf("initial private route = %d, want 200", got)
+			}
+			nextCfg, err := initial.Effective.Clone()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.change(nextCfg.Servers[0].Locations)
+			next := normalizedCandidate(t, nextCfg)
+			resultCh := make(chan ReloadResult, 1)
+			reloads <- ReloadRequest{
+				ID:                 "route-change",
+				Source:             ReloadSourceAdmin,
+				Candidate:          next,
+				ExpectedGeneration: srv.LiveSnapshot().Generation,
+				Result:             resultCh,
+			}
+			if result := <-resultCh; result.Outcome != ReloadAppliedLive || !result.Published {
+				t.Fatalf("reload = %+v, want published route change", result)
+			}
+			if got := status(); got != http.StatusForbidden {
+				t.Fatalf("private route after published change = %d, want 403", got)
+			}
+			if got := factoryCalls.Load(); got != 2 {
+				t.Fatalf("handler builds = %d, want initial and replacement", got)
+			}
+		})
+	}
+}
+
 func TestReloadDoesNotHideDuplicateUpstreamWeightChange(t *testing.T) {
 	addr := freePort(t)
 	raw := cfgWithReturn(addr, http.StatusOK)
@@ -437,8 +534,8 @@ func TestReloadDoesNotHideDuplicateUpstreamWeightChange(t *testing.T) {
 		ExpectedGeneration: srv.LiveSnapshot().Generation,
 		Result:             resultCh,
 	}
-	if result := <-resultCh; result.Outcome != ReloadNoChange || result.Published {
-		t.Fatalf("reorder reload = %+v, want semantic no-op", result)
+	if result := <-resultCh; result.Outcome != ReloadAppliedLive || !result.Published {
+		t.Fatalf("reorder reload = %+v, want published backend order", result)
 	}
 	nextRaw, err := raw.Clone()
 	if err != nil {
@@ -458,6 +555,147 @@ func TestReloadDoesNotHideDuplicateUpstreamWeightChange(t *testing.T) {
 	}
 	if got := distribution(); got["a.example:80"] != 8 || got["b.example:80"] != 1 {
 		t.Fatalf("new distribution = %v, want 8/1", got)
+	}
+	if got := factoryCalls.Load(); got != 3 {
+		t.Fatalf("handler builds = %d, want initial and two replacements", got)
+	}
+}
+
+func TestReloadPublishesLeastConnBackendOrder(t *testing.T) {
+	addr := freePort(t)
+	raw := cfgWithReturn(addr, http.StatusOK)
+	raw.Upstreams = []config.UpstreamConfig{{
+		Name: "backend", Strategy: "least_conn",
+		Servers: []config.UpstreamServer{{Address: "a.example:80"}, {Address: "b.example:80"}},
+	}}
+	initial := normalizedCandidate(t, raw)
+	registry := upstream.NewRegistry(upstream.RegistryOptions{})
+	t.Cleanup(registry.CloseAll)
+	var factoryCalls atomic.Int64
+	factory := func(ctx context.Context, cfg *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		registry.Begin()
+		pool, err := registry.For(ctx, cfg.Upstreams[0], "http")
+		if err != nil {
+			registry.Abort()
+			return nil, 0, nil, nil, err
+		}
+		handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			attempt, err := pool.Pick()
+			if err != nil {
+				http.Error(w, "no backend", http.StatusServiceUnavailable)
+				return
+			}
+			defer pool.Release(attempt.Backend)
+			_, _ = io.WriteString(w, attempt.Address)
+		})
+		generation := uint64(factoryCalls.Add(1))
+		return map[string]http.Handler{addr: handler}, generation,
+			func() (upstream.SnapshotMap, func()) { registry.Commit(); return nil, nil }, registry.Abort, nil
+	}
+	source := &stubSource{cfg: initial.Raw, raw: []byte("persisted")}
+	srv := New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), quietLogger(), factory, source, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	reloads := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reloads, initial.Redaction) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run returned error: %v", err)
+		}
+	})
+	waitForInitialGeneration(t, srv)
+	client := &http.Client{Timeout: 5 * time.Second}
+	selected := func() string {
+		t.Helper()
+		resp, err := client.Get("http://" + addr + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("backend selection = %d, %v", resp.StatusCode, err)
+		}
+		return string(body)
+	}
+	if got := selected(); got != "a.example:80" {
+		t.Fatalf("initial selection = %q", got)
+	}
+	nextRaw, err := raw.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRaw.Upstreams[0].Servers[0], nextRaw.Upstreams[0].Servers[1] =
+		nextRaw.Upstreams[0].Servers[1], nextRaw.Upstreams[0].Servers[0]
+	results := make(chan ReloadResult, 1)
+	reloads <- ReloadRequest{
+		ID: "backend-order", Source: ReloadSourceAdmin, Candidate: normalizedCandidate(t, nextRaw),
+		ExpectedGeneration: srv.LiveSnapshot().Generation, Result: results,
+	}
+	if result := <-results; result.Outcome != ReloadAppliedLive || !result.Published {
+		t.Fatalf("reorder reload = %+v, want published order", result)
+	}
+	if got := selected(); got != "b.example:80" {
+		t.Fatalf("selection after reorder = %q, want b.example:80", got)
+	}
+}
+
+func TestServingServerOrderPreservesGenerationCoordinates(t *testing.T) {
+	first := config.ServerConfig{Listen: ":1001", ServerNames: []string{"a"}}
+	second := config.ServerConfig{Listen: ":1002", ServerNames: []string{"b"}}
+	third := config.ServerConfig{Listen: ":1001", ServerNames: []string{"c"}}
+	before := &config.Config{Servers: []config.ServerConfig{first, second, third}}
+	if servingServersEqual(before, &config.Config{Servers: []config.ServerConfig{second, first, third}}) {
+		t.Fatal("reordering independent listeners changes generation coordinates")
+	}
+	if servingServersEqual(before, &config.Config{Servers: []config.ServerConfig{third, second, first}}) {
+		t.Fatal("reordering blocks on one listener can change the default route")
+	}
+}
+
+func TestReloadPublishesIndependentListenerReorder(t *testing.T) {
+	firstAddr, secondAddr := freePort(t), freePort(t)
+	raw := cfgWithReturn(firstAddr, http.StatusOK)
+	second := raw.Servers[0]
+	second.Listen = secondAddr
+	raw.Servers = append(raw.Servers, second)
+	initial := normalizedCandidate(t, raw)
+	var factoryCalls atomic.Int64
+	factory := func(_ context.Context, cfg *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+		handlers := make(map[string]http.Handler)
+		for _, server := range cfg.Servers {
+			handlers[server.Listen] = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+		}
+		return handlers, uint64(factoryCalls.Add(1)), func() (upstream.SnapshotMap, func()) { return nil, nil }, func() {}, nil
+	}
+	source := &stubSource{cfg: initial.Raw, raw: []byte("persisted")}
+	srv := New(initial.Effective, initial.Raw, lifecycle.ComputeFingerprint(initial.Effective), quietLogger(), factory, source, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	reloads := make(chan ReloadRequest, 1)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reloads, initial.Redaction) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("Run returned error: %v", err)
+		}
+	})
+	waitForInitialGeneration(t, srv)
+	nextRaw, err := raw.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRaw.Servers[0], nextRaw.Servers[1] = nextRaw.Servers[1], nextRaw.Servers[0]
+	results := make(chan ReloadResult, 1)
+	reloads <- ReloadRequest{
+		ID: "listener-reorder", Source: ReloadSourceAdmin, Candidate: normalizedCandidate(t, nextRaw),
+		ExpectedGeneration: srv.LiveSnapshot().Generation, Result: results,
+	}
+	if result := <-results; result.Outcome != ReloadAppliedLive || !result.Published {
+		t.Fatalf("reorder reload = %+v, want a generation with matching coordinates", result)
 	}
 	if got := factoryCalls.Load(); got != 2 {
 		t.Fatalf("handler builds = %d, want initial and replacement", got)

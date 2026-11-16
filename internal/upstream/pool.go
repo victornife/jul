@@ -409,20 +409,22 @@ func (p *Pool) replaceBackends(next []*Backend) {
 	defer p.updateMu.Unlock()
 
 	current := p.Backends()
-	prev := make(map[reuseKey]*Backend, len(current))
+	prev := make(map[reuseKey][]*Backend, len(current))
 	for _, b := range current {
-		prev[keyFor(b)] = b
+		key := keyFor(b)
+		prev[key] = append(prev[key], b)
 	}
 
 	for i, b := range next {
 		k := keyFor(b)
-		existing, ok := prev[k]
-		if !ok {
+		matches := prev[k]
+		if len(matches) == 0 {
 			continue
 		}
+		existing := matches[0]
 		existing.setWeight(b.Weight())
 		next[i] = existing
-		delete(prev, k) // reuse each surviving backend at most once
+		prev[k] = matches[1:]
 	}
 	p.applyCircuitHook(next)
 	p.backends.Store(&next)

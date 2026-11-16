@@ -43,7 +43,7 @@ func listenerHeaderBytes(c *config.Config, listen string) uint64 {
 // inspectionRouteFacts describes every configured route's inspection
 // composition: the middleware plugins (server then location), the terminal
 // handler plugin when it is the route's action, and the effective WAF.
-func inspectionRouteFacts(c *config.Config, pluginFacts func(string) (inspection.PluginFacts, bool), wafFacts func(srv config.ServerConfig, loc config.LocationConfig) *inspection.WAFFacts) []inspection.RouteFacts {
+func inspectionRouteFacts(c *config.Config, pluginFacts func(string) (inspection.PluginFacts, bool), wafFacts func(int, int, config.ServerConfig, config.LocationConfig) *inspection.WAFFacts) []inspection.RouteFacts {
 	var routes []inspection.RouteFacts
 	for i := range c.Servers {
 		srv := c.Servers[i]
@@ -51,7 +51,7 @@ func inspectionRouteFacts(c *config.Config, pluginFacts func(string) (inspection
 			loc := srv.Locations[j]
 			rf := inspection.RouteFacts{
 				Route:              fmt.Sprintf("servers[%d].locations[%d] (%s %s)", i, j, srv.Listen, loc.Match.Path),
-				WAF:                wafFacts(srv, loc),
+				WAF:                wafFacts(i, j, srv, loc),
 				RequestHeaderBytes: listenerHeaderBytes(c, srv.Listen),
 			}
 			for _, name := range append(append([]string(nil), srv.Plugins...), loc.Plugins...) {
@@ -141,7 +141,7 @@ func CheckInspectionBudget(ctx context.Context, c *config.Config) (warning error
 				return pf, ok
 			}
 		}
-		firewalls := map[string]*inspection.WAFFacts{}
+		firewalls := map[[2]int]*inspection.WAFFacts{}
 		var compiled []*waf.Firewall
 		defer func() {
 			for _, fw := range compiled {
@@ -149,7 +149,7 @@ func CheckInspectionBudget(ctx context.Context, c *config.Config) (warning error
 			}
 		}()
 		var compileErr error
-		wafFacts := func(srv config.ServerConfig, loc config.LocationConfig) *inspection.WAFFacts {
+		wafFacts := func(i, j int, _ config.ServerConfig, loc config.LocationConfig) *inspection.WAFFacts {
 			if !waf.Compiled || compileErr != nil {
 				return nil
 			}
@@ -157,9 +157,9 @@ func CheckInspectionBudget(ctx context.Context, c *config.Config) (warning error
 			if !ok {
 				return nil
 			}
-			key := "global"
+			key := [2]int{-1, -1}
 			if loc.WAF != nil {
-				key = WAFScope(srv, loc)
+				key = [2]int{i, j}
 			}
 			if facts, ok := firewalls[key]; ok {
 				return facts

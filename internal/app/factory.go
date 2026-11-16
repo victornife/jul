@@ -691,10 +691,8 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		authDial = egressGeneration.For(egress.SubsystemAuth).DialContext(base)
 	}
 
-	// Authenticators are built once per reload, keyed by a stable location
-	// scope, so a misconfiguration (for example, an unreadable htpasswd file)
-	// fails the reload with a clear error instead of surfacing per request.
-	authByScope := make(map[string]*auth.Authenticator)
+	// Each declaration owns its authenticator, including duplicate matches.
+	authByLocation := make(map[[2]int]*auth.Authenticator)
 	gen.basicByLoc = make(map[[2]int][]byte)
 	for i := range c.Servers {
 		for j := range c.Servers[i].Locations {
@@ -702,7 +700,6 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if loc.Auth == nil {
 				continue
 			}
-			key := AuthScope(c.Servers[i], loc)
 			var forwardURL, jwksURL string
 			if loc.Auth.ForwardAuth != nil {
 				forwardURL = loc.Auth.ForwardAuth.URL
@@ -734,14 +731,14 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				}
 			}
 			gen.Stage(a)
-			authByScope[key] = a
+			authByLocation[[2]int{i, j}] = a
 		}
 	}
-	locAuth := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
+	locAuth := func(i, j int, loc config.LocationConfig) middleware.Middleware {
 		if loc.Auth == nil {
 			return nil
 		}
-		if a := authByScope[AuthScope(srv, loc)]; a != nil {
+		if a := authByLocation[[2]int{i, j}]; a != nil {
 			return a.Wrap
 		}
 		return nil
@@ -756,8 +753,8 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// build (no "waf" tag) waf.New is never reached because waf.Check already
 	// rejected the configuration at startup.
 	rawWAFConfig := config.RawConfigFromContext(ctx, c)
-	wafByScope := make(map[string]*waf.Firewall)
-	wafRouteAttrByScope := make(map[string]waf.RouteAttribution)
+	wafByLocation := make(map[[2]int]*waf.Firewall)
+	wafRouteAttrByLocation := make(map[[2]int]waf.RouteAttribution)
 	wafReport := newWAFReport(c)
 	gen.wafDigestByLoc = make(map[[2]int]string)
 	gen.wafOverridePolicyRaw = make(map[string]string)
@@ -797,8 +794,8 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 				}
 			}
 			wafReport.protected(c.Servers[i], loc, fw.Info())
-			scopeKey := WAFScope(c.Servers[i], loc)
-			wafByScope[scopeKey] = fw
+			location := [2]int{i, j}
+			wafByLocation[location] = fw
 			scopeKind := "global"
 			if loc.WAF != nil {
 				scopeKind = "override"
@@ -812,7 +809,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if loc.RouteID != nil {
 				routeID = *loc.RouteID
 			}
-			wafRouteAttrByScope[scopeKey] = waf.RouteAttribution{
+			wafRouteAttrByLocation[location] = waf.RouteAttribution{
 				RouteID:             routeID,
 				Listen:              c.Servers[i].Listen,
 				ServerNames:         append([]string(nil), c.Servers[i].ServerNames...),
@@ -836,8 +833,8 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// single worst-case request must fit the aggregate budget. Checked here so
 	// startup, reload and admin apply share one calculation; observe mode
 	// only warns.
-	inspectionRoutes := inspectionRouteFacts(c, pluginSet.InspectionFacts, func(srv config.ServerConfig, loc config.LocationConfig) *inspection.WAFFacts {
-		fw := wafByScope[WAFScope(srv, loc)]
+	inspectionRoutes := inspectionRouteFacts(c, pluginSet.InspectionFacts, func(i, j int, _ config.ServerConfig, _ config.LocationConfig) *inspection.WAFFacts {
+		fw := wafByLocation[[2]int{i, j}]
 		if fw == nil {
 			return nil
 		}
@@ -852,13 +849,13 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		f.Log.Warn("inspection configuration below a minimum", "error", inspectionWarning)
 	}
 	gen.inspectionReq = inspectionReq
-	locWAF := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
-		scopeKey := WAFScope(srv, loc)
-		fw := wafByScope[scopeKey]
+	locWAF := func(i, j int) middleware.Middleware {
+		location := [2]int{i, j}
+		fw := wafByLocation[location]
 		if fw == nil {
 			return nil
 		}
-		return fw.RouteMiddleware(wafRouteAttrByScope[scopeKey], gen.PublishedGeneration)
+		return fw.RouteMiddleware(wafRouteAttrByLocation[location], gen.PublishedGeneration)
 	}
 
 	// locPreflightRateLimit is the CORS preflight terminator's own rate guard
@@ -893,10 +890,10 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	// the plugins, authentication wraps rate limiting, making validated JWT
 	// claims available to a "jwt:<claim>" rate-limit key. All stay modifiers
 	// that compose around the action; none is an action itself.
-	locModifier := func(srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
-		au := locAuth(srv, loc)
+	locModifier := func(i, j int, srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
+		au := locAuth(i, j, loc)
 		rl := locRateLimit(srv, loc)
-		wf := locWAF(srv, loc)
+		wf := locWAF(i, j)
 		// The CORS preflight terminator (ADR 0018 §10) needs no config surface
 		// of its own: an enabled cors policy is what turns it on, and it reuses
 		// this same location's WAF (wf) and a rate limiter in its own scope.
@@ -978,7 +975,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		}
 	}
 
-	rtr, err := router.New(c, builders, nil, locModifier, f.Log)
+	rtr, err := router.NewIndexed(c, builders, nil, locModifier, f.Log)
 	if err != nil {
 		return nil, err
 	}

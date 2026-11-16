@@ -6,6 +6,8 @@ package admin
 import (
 	"fmt"
 	"maps"
+	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -14,23 +16,58 @@ import (
 )
 
 type serverWrapper struct {
-	Name string
 	*config.ServerConfig
 }
 
-func serverIndex(servers []config.ServerConfig) map[string]serverWrapper {
-	m := make(map[string]serverWrapper, len(servers))
-	for i := range servers {
-		srv := &servers[i]
-		key := srv.Listen
-		if len(srv.ServerNames) > 0 {
-			// Separated by a space rather than a colon: an IPv6 listen address
-			// already contains colons, so "host:[::1]:8080" reads as garbage.
-			key = srv.ServerNames[0] + " " + srv.Listen
-		}
-		m[key] = serverWrapper{Name: key, ServerConfig: srv}
+func relativeOrderChanged(before, after []string) bool {
+	beforeCounts, afterCounts := make(map[string]int), make(map[string]int)
+	for _, key := range before {
+		beforeCounts[key]++
 	}
-	return m
+	for _, key := range after {
+		afterCounts[key]++
+	}
+	common := make(map[string]int, len(beforeCounts))
+	for key, count := range beforeCounts {
+		common[key] = min(count, afterCounts[key])
+	}
+	filter := func(keys []string) []string {
+		remaining := maps.Clone(common)
+		var result []string
+		for _, key := range keys {
+			if remaining[key] > 0 {
+				result = append(result, key)
+				remaining[key]--
+			}
+		}
+		return result
+	}
+	return !slices.Equal(filter(before), filter(after))
+}
+
+func serverOrderIdentity(server config.ServerConfig) string {
+	names := slices.Clone(server.ServerNames)
+	slices.Sort(names)
+	return fmt.Sprintf("%q:%q", server.Listen, names)
+}
+
+func locationOrder(locations []config.LocationConfig) []string {
+	keys := make([]string, len(locations))
+	for i := range locations {
+		if id := routeID(&locations[i]); id != "" {
+			keys[i] = "id:" + id
+		} else {
+			keys[i] = "match:" + locationKey(&locations[i])
+		}
+	}
+	return keys
+}
+
+func serverPreviewKey(server config.ServerConfig) string {
+	if len(server.ServerNames) > 0 {
+		return server.ServerNames[0] + " " + server.Listen
+	}
+	return server.Listen
 }
 
 func upstreamIndex(upstreams []config.UpstreamConfig) map[string]*config.UpstreamConfig {
@@ -274,13 +311,14 @@ type locationPair struct {
 
 func correlateLocations(before, after []config.LocationConfig) (afterPairs, removedPairs []locationPair) {
 	byIDBefore := make(map[string]*config.LocationConfig)
-	byFPBefore := make(map[string]*config.LocationConfig)
+	byFPBefore := make(map[string][]*config.LocationConfig)
 	for i := range before {
 		b := &before[i]
 		if id := routeID(b); id != "" {
 			byIDBefore[id] = b
 		} else {
-			byFPBefore[locationKey(b)] = b
+			key := locationKey(b)
+			byFPBefore[key] = append(byFPBefore[key], b)
 		}
 	}
 	usedBefore := make(map[*config.LocationConfig]bool, len(before))
@@ -299,12 +337,15 @@ func correlateLocations(before, after []config.LocationConfig) (afterPairs, remo
 			afterPairs = append(afterPairs, locationPair{key: id, after: a})
 			continue
 		}
-		if b, ok := byFPBefore[locationKey(a)]; ok {
+		key := locationKey(a)
+		if matches := byFPBefore[key]; len(matches) > 0 {
+			b := matches[0]
+			byFPBefore[key] = matches[1:]
 			usedBefore[b] = true
-			afterPairs = append(afterPairs, locationPair{key: locationKey(a), before: b, after: a})
+			afterPairs = append(afterPairs, locationPair{key: key, before: b, after: a})
 			continue
 		}
-		afterPairs = append(afterPairs, locationPair{key: locationKey(a), after: a})
+		afterPairs = append(afterPairs, locationPair{key: key, after: a})
 	}
 	for i := range before {
 		b := &before[i]
@@ -328,6 +369,19 @@ func correlateLocations(before, after []config.LocationConfig) (afterPairs, remo
 // consequences (action/target, auth, cache, compression, rate limit, body
 // size, proxy timeouts).
 func diffLocations(server string, before, after []config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {
+	oldOrder, newOrder := locationOrder(before), locationOrder(after)
+	if len(oldOrder) == len(newOrder) {
+		counts := make(map[string]int, len(oldOrder))
+		for _, key := range oldOrder {
+			counts[key]++
+		}
+		for i, key := range oldOrder {
+			if counts[key] > 1 && key == newOrder[i] && !reflect.DeepEqual(before[i], after[i]) {
+				d.mod(DiffEntry{Kind: "location", Name: server, Detail: "Change duplicate route declaration on " + server}, "server "+server+" duplicate route")
+				break
+			}
+		}
+	}
 	// route_id is fully accounted for by correlateLocations: it decides
 	// resource identity (matched/added/removed) rather than being reported as
 	// a plain field change, so the registry completeness pass must not
@@ -605,6 +659,9 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 		for _, p := range detached {
 			d.mod(DiffEntry{Kind: "plugin", Name: name, Before: p, Detail: fmt.Sprintf("Detach plugin %s from route %s", p, key)}, "route "+name+" plugin "+p)
 		}
+	}
+	if !slices.Equal(b.Plugins, a.Plugins) {
+		d.mod(DiffEntry{Kind: "plugin", Name: name, Detail: "Change plugin order or membership on route " + key}, "route "+name+" plugin order")
 	}
 	d.cover("servers.*.locations.*.plugins")
 
@@ -1104,6 +1161,9 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 	d.cover("upstreams.*.hash")
 
 	// Backend set (targets).
+	if !slices.Equal(b.Servers, a.Servers) {
+		d.mod(DiffEntry{Kind: "upstream", Name: name, Detail: "Change backend order or entries in " + name}, "upstream "+name+" backend order")
+	}
 	bb, ab := backendSet(b.Servers), backendSet(a.Servers)
 	for _, addr := range sortedKeys(ab) {
 		if _, ok := bb[addr]; !ok {

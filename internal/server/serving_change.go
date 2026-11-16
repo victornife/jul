@@ -148,6 +148,7 @@ func inspectionLimitsOnlyConfig(current, candidate *config.Config) bool {
 	return reflect.DeepEqual(current, &normalized)
 }
 
+// Lifecycle's keyed extraction can collapse duplicate entries and lose route order.
 func servingServersEqual(current, candidate *config.Config) bool {
 	if current == nil || candidate == nil || len(current.Servers) != len(candidate.Servers) {
 		return false
@@ -180,15 +181,10 @@ func servingBackendsEqual(current, candidate *config.Config) bool {
 			return false
 		}
 		delete(byName, pool.Name)
-		counts := make(map[config.UpstreamServer]int, len(before))
-		for _, server := range before {
-			counts[server]++
-		}
-		for _, server := range pool.Servers {
-			if counts[server] == 0 {
+		for i, server := range pool.Servers {
+			if before[i] != server {
 				return false
 			}
-			counts[server]--
 		}
 	}
 	return len(byName) == 0
