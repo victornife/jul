@@ -76,6 +76,17 @@ taskset -c 4-9 /tmp/ia run -out /tmp/ia-run -profile qualification -suite campai
 /tmp/ia calibrate -target base /tmp/ia-cal
 ```
 
+### Combined functional soak
+
+The in-process real-server test exercises stock WAF/WASM, normal and multipart
+traffic, deliberate WAF denials, guest recycling, and repeated serving reloads.
+It checks goodput separately from denials and verifies logical pool and shutdown
+drainage. It does not replace the Linux envelope or throughput qualification.
+
+```sh
+JUL_INSPECTION_SOAK_DURATION=30m GOMAXPROCS=2 go test -tags 'soak waf wasmplugins' -run '^TestInspectionCombinedSoak$' -count=1 -timeout=40m -v ./internal/app
+```
+
 ### Targets
 
 `-target label:adapter:path` names a binary, its configuration adapter and its label. Each target
