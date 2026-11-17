@@ -9,8 +9,8 @@ qualification, soak or maturity change.
 ## Current recovery status — 2026-11-17
 
 The reduced-scope recovery implementation is published on draft #721; #724
-remains a separate partial draft. Published head `8e151dff` passed hosted HR-05
-at 493/538 statements (91.6357%) and Codecov patch coverage at 99.06%. Its
+remains a separate partial draft. Published head `7f6628c2` passed hosted HR-05
+at 508/548 statements (92.7007%) and Codecov patch coverage at 99.06%. Its
 Console audit failed on the upstream dependency advisory described below.
 A corrective follow-up retains guest capacity on real close failures and
 refuses new guest reservations at 64 unresolved guest tickets in every mode;
@@ -46,13 +46,14 @@ specified; hosted checks for subsequent changes must be re-run:
 | `PATH="$HOME/go/bin:$PATH" make ci-pr` | Passed on the corrective production code with CI-pinned tools; includes full-tag lint/tests/build, security gates, `go vet`, generated/config checks and 2,726 documentation checks. The subsequent admitted-work overshoot test and documentation edits were verified separately. |
 | `go test -race -count=1 -p 2 -tags 'wasmplugins waf' ./internal/inspection ./internal/plugins ./internal/waf ./internal/server` | Passed on the corrective follow-up. Includes the 101,000-call guest recycling regression and reload/WAF interactions. |
 | HR-05 CI-equivalent lean/full added-Go coverage | Hosted `8e151dff`: 493/538 statements (91.6357%). The preceding published head scored 474/538 (88.1041%). |
-| Corrective follow-up Go coverage | HR-05 package profiles score 508/548 added statements (92.70%) locally against `origin/main`; the corrective diff scores 54/58 statements (93.10%) across inspection, plugins and observability. Hosted coverage remains to be verified on the follow-up head. |
+| Corrective follow-up Go coverage | Hosted `7f6628c2` HR-05 scored 508/548 added statements (92.7007%); the corrective diff scores 54/58 statements (93.10%) locally across inspection, plugins and observability. |
 | `go test -race -count=1 ./internal/inspection -run '^TestFailedGuestTeardown'` | Passed; covers the failure threshold, observe/unlimited admission, retained-closing transition and previously admitted failures above the threshold. |
 | `JUL_INSPECTION_SOAK_DURATION=5s go test -race -tags 'soak waf wasmplugins' -run '^TestInspectionCombinedSoak$' -count=1 -timeout=120s -v ./internal/app` | Passed as a functional preflight. The combined 30-minute run and Linux envelope qualification must be reported separately. |
 | Guest-refund and body-failure mutations | Both were detected by focused tests using temporary Go overlays. Removing the body-failure check forwarded the reproduced multipart request to the origin, demonstrating that the guard regression is effective. |
 | `go test -race -tags wasmplugins ./internal/plugins -run '^TestGuestAccounting(ResolutionPaths\|RejectsInvalidOwnershipTransitions)$' -count=1` | Passed; covers valid resolution, retained teardown, missing ownership and invalid lifecycle transitions. |
 | `corepack pnpm test:coverage`; `corepack pnpm typecheck`; `corepack pnpm lint` | Passed: 1,087 UI tests; changed production TS/TSX executable-line coverage is 95/100 (95%). |
 | `corepack pnpm e2e e2e/real-server.spec.ts` | Passed: 32 tests. |
+| `./node_modules/.bin/playwright test --project=inspection-real-server e2e/inspection-real-server.spec.ts` | Passed on macOS with stock WAF/WASM: compares actual guest reservation and inspection status across API, CLI and Console, including refusal, observe, drainage and a rejected capacity reload. |
 | `python3 scripts/check-d11-certification.py` | Passed: 0 errors. |
 
 The focused adversarial review identified unbounded retained owners in
@@ -66,11 +67,12 @@ The published head's Console audit failed on the unchanged UI lockfile's
 transitive `picomatch@4.0.7` (GHSA-fc5q-39xc-vjpf). The advisory lists `4.0.8`
 as patched, but that version is not available from the public npm registry; no
 audit suppression or local third-party patch was added. This dependency remains
-unchanged in the follow-up. The 30-minute combined
-inspection soak and Linux/cgroup qualification remain unrun: the
-available `scripts/soak.sh` scenarios cover proxy, cache and UDP churn rather
-than combined WASM/WAF inspection, and the Docker daemon is unavailable on this
-host. The integrated A1–A22 campaign also remains outstanding. Do not claim
+unchanged in the follow-up. A combined functional soak fixture is now available
+in the [assessment commands](../../scripts/inspection-assessment/README.md#combined-functional-soak);
+its sustained result must be recorded separately and does not qualify the
+Linux envelope. Linux/cgroup qualification remains unrun because this host is
+macOS and its Docker daemon is unavailable. The integrated A1–A22 campaign
+also remains outstanding. Do not claim
 original A19/A20 completion or close #700/#711/#713/#712 based on these checks;
 record the reduced guarantees and pending qualification explicitly.
 

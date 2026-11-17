@@ -14,7 +14,7 @@ import { OverviewSchema, RawConfigSchema } from "../src/api/client.ts";
 
 test.use({ extraHTTPHeaders: {} });
 
-test("packaged WAF refusal, observe and draining appear in Overview", async ({ page }) => {
+test("packaged inspection and guest capacity agree across API, CLI and Overview", async ({ page }) => {
   test.setTimeout(180_000);
   const root = resolve(import.meta.dirname, "../../../..");
   const dir = await mkdtemp(resolve(await realpath(tmpdir()), "jul-inspection-e2e-"));
@@ -51,15 +51,15 @@ test("packaged WAF refusal, observe and draining appear in Overview", async ({ p
   const traffic = await request.newContext({ timeout: 150_000 });
   let server: ReturnType<typeof spawn> | undefined;
   let output = "";
-  const pending: Promise<{ status: number } | { error: unknown }>[] = [];
+  const pending: Promise<{ status: number; plugin: string | undefined } | { error: unknown }>[] = [];
   const sendTraffic = () => {
     pending.push(traffic.get(servingURL).then(
-      (response) => ({ status: response.status() }),
+      (response) => ({ status: response.status(), plugin: response.headers()["x-plugin"] }),
       (error: unknown) => ({ error }),
     ));
   };
   try {
-    execFileSync("go", ["build", "-tags", "console waf", "-o", binary, "./cmd/jul"], {
+    execFileSync("go", ["build", "-tags", "console waf wasmplugins", "-o", binary, "./cmd/jul"], {
       cwd: root, env, timeout: 120_000, stdio: "pipe",
     });
     execFileSync(binary, ["version-key", "init"], { cwd: root, env, stdio: "pipe" });
@@ -71,6 +71,13 @@ config_authority = "managed"
 mode = "enforce"
 max_buffered_bytes = "64m"
 max_response_header_bytes = "8k"
+max_guest_capacity_bytes = "64m"
+[plugins.p]
+path = ${JSON.stringify(resolve(root, "testdata/plugins/header-inject.wasm"))}
+memory_limit = "16m"
+max_instances = 4
+max_request_body = "1k"
+max_response_body = "1k"
 [waf]
 enabled = true
 mode = "block"
@@ -86,6 +93,7 @@ max_header_bytes = "8k"
 [[servers.locations]]
 match = { type = "prefix", path = "/" }
 proxy_pass = "http://127.0.0.1:${originAddress.port}"
+plugins = ["p"]
 [admin]
 enabled = true
 listen = "127.0.0.1:${adminPort}"
@@ -120,8 +128,50 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
       if (!inspection) throw new Error("inspection projection unavailable");
       return inspection;
     };
+    const checkStatusAgreement = async (overview: Awaited<ReturnType<typeof snapshot>>) => {
+      const response = await api.get("/api/v1/status");
+      expect(response.status(), await response.text()).toBe(200);
+      type Status = { inspection: {
+        effective: { mode: string };
+        draining: boolean;
+        active_leases: number;
+        plugin_guest_reserved_bytes: number;
+        plugin_guest_capacity_limit_bytes: number;
+        plugin_guest_actual_bytes_state: string;
+      } };
+      const apiStatus = await response.json() as Status;
+      const cliStatus = JSON.parse(execFileSync(binary, ["status", "--endpoint", adminURL, "--json"], {
+        cwd: root, env: { ...env, JUL_TOKEN: token }, timeout: 15_000, encoding: "utf8",
+      })) as Status;
+      for (const status of [apiStatus.inspection, cliStatus.inspection]) {
+        expect(status.effective.mode).toBe(overview.effective.mode);
+        expect(status.draining).toBe(overview.draining);
+        expect(status.active_leases).toBe(overview.active_leases);
+        expect(status.plugin_guest_reserved_bytes).toBe(overview.plugin_guest_reserved_bytes);
+        expect(status.plugin_guest_capacity_limit_bytes).toBe(overview.plugin_guest_capacity_limit_bytes);
+        expect(status.plugin_guest_actual_bytes_state).toBe(overview.plugin_guest_actual_bytes_state);
+      }
+    };
     const initial = await snapshot();
     expect(initial.minimum_request_bytes).toBeGreaterThan(0);
+    expect(initial.plugin_guest_reserved_bytes).toBe(16 * 1024 * 1024);
+    expect(initial.plugin_guest_capacity_limit_bytes).toBe(64 * 1024 * 1024);
+    expect(initial.plugin_guest_actual_bytes_state).toBe("unavailable_engine_measurement");
+    await checkStatusAgreement(initial);
+    const beforeInvalid = RawConfigSchema.parse(await (await api.get("/api/config")).json());
+    const invalid = await api.post("/api/config/patch/apply", {
+      data: {
+        base_version: beforeInvalid.base_version,
+        ops: [{ op: "global_set", global: { inspection: { max_guest_capacity_bytes: "1m" } } }],
+      },
+    });
+    const invalidBody = await invalid.text();
+    expect(invalid.ok(), invalidBody).toBe(false);
+    expect(invalidBody).toMatch(/guest|capacity/i);
+    const afterInvalid = await snapshot();
+    expect(afterInvalid.plugin_guest_reserved_bytes).toBe(initial.plugin_guest_reserved_bytes);
+    expect(afterInvalid.plugin_guest_capacity_limit_bytes).toBe(initial.plugin_guest_capacity_limit_bytes);
+    await checkStatusAgreement(afterInvalid);
     let active = initial;
     for (let count = 1; count <= 64 && !active.draining; count++) {
       sendTraffic();
@@ -146,6 +196,7 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     });
     expect(apply.status(), await apply.text()).toBe(200);
     await expect.poll(async () => (await snapshot()).draining).toBe(true);
+    await checkStatusAgreement(await snapshot());
 
     await page.goto(`${adminURL}/?inspection=1`);
     const tokenDialog = page.getByRole("dialog", { name: "Admin token required" });
@@ -153,6 +204,8 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     await tokenDialog.getByRole("button", { name: "Save & retry" }).click();
     const card = page.getByRole("region", { name: "Inspection resources" });
     await expect(card.getByText(/Mode: enforce\..*Draining\./)).toBeVisible();
+    await expect(card.getByText("16.0 MiB / 64.0 MiB")).toBeVisible();
+    await expect(card.getByText("unavailable_engine_measurement")).toBeVisible();
     const callsBefore = originCalls;
     const refused = await traffic.get(servingURL);
     expect(refused.status()).toBe(503);
@@ -170,12 +223,15 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     });
     expect(observe.status(), await observe.text()).toBe(200);
     await expect.poll(async () => (await snapshot()).effective.mode).toBe("observe");
+    await checkStatusAgreement(await snapshot());
     sendTraffic();
     await expect.poll(() => originCalls).toBe(callsBefore + 1);
     await expect(card.getByText(/Mode: observe\..*Draining\./)).toBeVisible();
     await expect(card.getByText(/without governor-driven request refusal/)).toBeVisible();
     for (const response of held) response.writeHead(204).end();
-    expect(await Promise.all(pending)).toEqual(Array<{ status: number }>(pending.length).fill({ status: 204 }));
+    expect(await Promise.all(pending)).toEqual(
+      Array<{ status: number; plugin: string }>(pending.length).fill({ status: 204, plugin: "header-inject" }),
+    );
     await expect.poll(async () => {
       const state = await snapshot();
       return { draining: state.draining, leases: state.active_leases, usage: state.usage };
@@ -184,6 +240,7 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
       leases: 0,
       usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0, audit_bytes: 0 },
     });
+    await checkStatusAgreement(await snapshot());
     await expect(card.getByText(/Mode: observe\./)).toBeVisible();
     await expect(card.getByText(/Draining\./)).toHaveCount(0);
 
