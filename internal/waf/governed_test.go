@@ -228,35 +228,102 @@ func TestGovernedWAFMultipartFileQuotaRefusesBeforeOriginDispatch(t *testing.T) 
 		"--" + boundary + "--\r\n"
 	for _, crs := range []bool{false, true} {
 		for _, mode := range []string{"block", "detect"} {
-			t.Run(fmt.Sprintf("crs=%t/mode=%s", crs, mode), func(t *testing.T) {
-				limits := governedLimits(inspection.Enforce)
-				limits.MaxSpoolBytes = 1 << 20
-				limits.MaxSpoolFiles = 1
-				g := newGovernor(t, limits)
-				fw := governedFirewall(t, config.WAFConfig{
-					CRSEnabled:       crs,
-					Mode:             mode,
-					RequestBodyLimit: config.Size(256 << 10),
-				}, g, Hooks{})
-				originCalls := 0
-				h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					originCalls++
-					w.WriteHeader(http.StatusNoContent)
-				}))
-				req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
-				req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
-				rr := httptest.NewRecorder()
-				h.ServeHTTP(rr, req)
-				if rr.Code != http.StatusServiceUnavailable {
-					t.Fatalf("status = %d, want 503 (body %q)", rr.Code, rr.Body.String())
-				}
-				if originCalls != 0 {
-					t.Fatalf("origin was invoked %d times after multipart quota refusal", originCalls)
-				}
-				if got := g.Snapshot().Rejections[inspection.RejectSpoolFiles][0]; got == 0 {
-					t.Fatal("multipart spool-file refusal was not recorded")
-				}
-			})
+			for _, governorMode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+				t.Run(fmt.Sprintf("crs=%t/mode=%s/governor=%s", crs, mode, governorMode), func(t *testing.T) {
+					limits := governedLimits(governorMode)
+					limits.MaxSpoolBytes = 1 << 20
+					limits.MaxSpoolFiles = 1
+					g := newGovernor(t, limits)
+					fw := governedFirewall(t, config.WAFConfig{
+						CRSEnabled:       crs,
+						Mode:             mode,
+						RequestBodyLimit: config.Size(256 << 10),
+					}, g, Hooks{})
+					originCalls := 0
+					var originBody string
+					h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						originCalls++
+						b, err := io.ReadAll(r.Body)
+						if err != nil {
+							t.Errorf("read origin body: %v", err)
+						}
+						originBody = string(b)
+						w.WriteHeader(http.StatusNoContent)
+					}))
+					req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+					req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+					rr := httptest.NewRecorder()
+					h.ServeHTTP(rr, req)
+					modeIndex := 0
+					if governorMode == inspection.Enforce {
+						if rr.Code != http.StatusServiceUnavailable || originCalls != 0 {
+							t.Fatalf("enforce result status=%d calls=%d, want 503 and no origin dispatch (body %q)", rr.Code, originCalls, rr.Body.String())
+						}
+					} else {
+						modeIndex = 1
+						if rr.Code != http.StatusNoContent || originCalls != 1 || originBody != body {
+							t.Fatalf("observe result status=%d calls=%d body_bytes=%d, want 204, one call, and full body (response %q)", rr.Code, originCalls, len(originBody), rr.Body.String())
+						}
+					}
+					if got := g.Snapshot().Rejections[inspection.RejectSpoolFiles][modeIndex]; got == 0 {
+						t.Fatal("multipart spool-file refusal was not recorded")
+					}
+				})
+			}
+		}
+	}
+}
+
+type firstReadHook struct {
+	reader io.Reader
+	once   sync.Once
+	hook   func()
+}
+
+func (r *firstReadHook) Read(p []byte) (int, error) {
+	r.once.Do(r.hook)
+	return r.reader.Read(p)
+}
+
+func TestGovernedWAFMultipartCreateFailureRefusesBeforeOriginDispatch(t *testing.T) {
+	const boundary = "jul-spool-test-boundary"
+	body := "--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"one.txt\"\r\n" +
+		"Content-Type: text/plain\r\n\r\none\r\n" +
+		"--" + boundary + "--\r\n"
+	for _, crs := range []bool{false, true} {
+		for _, mode := range []string{"block", "detect"} {
+			for _, governorMode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+				t.Run(fmt.Sprintf("crs=%t/mode=%s/governor=%s", crs, mode, governorMode), func(t *testing.T) {
+					g := newGovernor(t, governedLimits(governorMode))
+					fw := governedFirewall(t, config.WAFConfig{
+						CRSEnabled:       crs,
+						Mode:             mode,
+						RequestBodyLimit: config.Size(256 << 10),
+					}, g, Hooks{})
+					originCalls := 0
+					h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						originCalls++
+						w.WriteHeader(http.StatusNoContent)
+					}))
+					reader := &firstReadHook{reader: strings.NewReader(body), hook: func() {
+						dirs, err := filepath.Glob(filepath.Join(fw.opts.Spool.Root(), "tx-*"))
+						if err != nil || len(dirs) != 1 {
+							t.Fatalf("transaction directories = %v, %v; want one", dirs, err)
+						}
+						if err := os.Remove(dirs[0]); err != nil {
+							t.Fatalf("induce multipart create failure: %v", err)
+						}
+					}}
+					req := httptest.NewRequest(http.MethodPost, "/upload", reader)
+					req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+					rr := httptest.NewRecorder()
+					h.ServeHTTP(rr, req)
+					if rr.Code != http.StatusInternalServerError || originCalls != 0 {
+						t.Fatalf("create failure result status=%d calls=%d, want 500 and no origin dispatch (body %q)", rr.Code, originCalls, rr.Body.String())
+					}
+				})
+			}
 		}
 	}
 }

@@ -25,5 +25,5 @@ Focused checks:
 cd third_party/coraza
 GOWORK=off go test ./internal/corazawaf -run '^TestBodyBufferUsesTemporaryFileProviderForSpillAndCleanup$' -count=1
 cd ../..
-go test -tags waf ./internal/waf -run '^TestGovernedWAF(SpoolQuotaRefusesBeforeOriginDispatch|ObserveSpoolQuotaContinuesAndRecordsWouldReject|MultipartFileQuotaRefusesBeforeOriginDispatch)$' -count=1
+go test -tags waf ./internal/waf -run '^TestGovernedWAF(SpoolQuotaRefusesBeforeOriginDispatch|ObserveSpoolQuotaContinuesAndRecordsWouldReject|MultipartFileQuotaRefusesBeforeOriginDispatch|MultipartCreateFailureRefusesBeforeOriginDispatch)$' -count=1
 ```

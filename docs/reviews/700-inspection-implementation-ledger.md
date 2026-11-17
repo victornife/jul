@@ -62,6 +62,7 @@ diff review and the hosted checks for the final published head are still require
 | `go test -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./...` | Passed. The first run exposed unnormalized programmatic test configs; shared server fixtures now set the parsed spool-root default, and WAF fixtures use their controller's private root. |
 | `go test -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/server ./internal/app` | Passed after correcting the spool-root fixtures. |
 | Coraza provider, Wazero watcher/failed-instantiation, and 100,000-call guest recycling focused tests | Passed. Exact commands are recorded in the dependency patch records. |
+| `go test -tags waf ./internal/waf -run '^TestGovernedWAFMultipart(FileQuota\|CreateFailure)RefusesBeforeOriginDispatch$' -count=1` | Passed on macOS: quota refusal/observe and an induced multipart file-creation failure across CRS on/off, WAF block/detect and governor enforce/observe. The creation failure is rejected before origin dispatch in every case. |
 | `make generated-check` | Passed. |
 | `make format-check` | Passed. |
 | `GOMAXPROCS=2 python3 scripts/docs-check.py` | Passed; 2,729 checks, 0 failures. |
