@@ -513,6 +513,127 @@ func TestGuestHelpersWithoutGovernorAreNoops(t *testing.T) {
 	nilPlugin.discard(nil)
 }
 
+func TestGuestAccountingResolutionPaths(t *testing.T) {
+	g := testGovernor(t)
+	p := &plugin{guestTickets: make(map[*inspection.GuestTicket]*guestOwnership)}
+
+	orphan, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.resolveGuest(orphan, nil); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("resolve orphan = %t, %v", released, err)
+	}
+	if released, err := p.releaseClosedGuest(orphan); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("release orphan = %t, %v", released, err)
+	}
+	if err := orphan.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := orphan.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.guestTickets[ticket] = &guestOwnership{active: true}
+	if released, err := p.resolveGuest(ticket, nil); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("premature resolve = %t, %v", released, err)
+	}
+	if err := ticket.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.resolveGuest(ticket, nil); !released || err != nil {
+		t.Fatalf("successful resolve = %t, %v", released, err)
+	}
+	if p.hasGuestTickets() {
+		t.Fatal("successful resolve retained its owner")
+	}
+
+	retained, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.guestTickets[retained] = &guestOwnership{active: true}
+	if err := retained.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("module cleanup is unconfirmed")
+	if released, err := p.resolveGuest(retained, closeErr); released || err != nil {
+		t.Fatalf("failed teardown resolve = %t, %v", released, err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Fatalf("failed teardown did not retain capacity: %+v", got)
+	}
+	if err := retained.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.resolveGuest(retained, nil); released || err != nil {
+		t.Fatalf("repeated failed teardown resolve = %t, %v", released, err)
+	}
+	if err := retained.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.releaseClosedGuest(retained); !released || err != nil {
+		t.Fatalf("confirmed runtime teardown = %t, %v", released, err)
+	}
+	if p.hasGuestTickets() || g.Snapshot().GuestCapacity.ReservedBytes != 0 {
+		t.Fatal("confirmed teardown retained guest accounting")
+	}
+
+	if released, err := p.releaseClosedGuest(nil); !released || err != nil {
+		t.Fatalf("nil-ticket release = %t, %v", released, err)
+	}
+}
+
+func TestGuestAccountingRejectsInvalidOwnershipTransitions(t *testing.T) {
+	g := testGovernor(t)
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &plugin{
+		gov:          g,
+		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {active: true}},
+	}
+	if err := p.transitionGuest(ticket, inspection.GuestClosed); !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("invalid guest transition = %v", err)
+	}
+	if released, err := p.releaseClosedGuest(ticket); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("premature closed-ticket release = %t, %v", released, err)
+	}
+
+	orphan, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.transitionGuest(orphan, inspection.GuestIdle); !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("unowned guest transition = %v", err)
+	}
+	if err := orphan.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := orphan.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	closed := &plugin{gov: g}
+	closed.closed.Store(true)
+	if got, err := closed.reserveGuest(); got != nil || !errors.Is(err, errPluginClosed) {
+		t.Fatalf("closed-plugin reservation = %v, %v", got, err)
+	}
+
+	if err := ticket.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.releaseClosedGuest(ticket); !released || err != nil {
+		t.Fatalf("closed-ticket release = %t, %v", released, err)
+	}
+}
+
 func TestGuestCapacityReleasedAfterModuleCloseFailure(t *testing.T) {
 	g := testGovernor(t)
 	var logs bytes.Buffer

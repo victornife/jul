@@ -9,11 +9,14 @@ qualification, soak or maturity change.
 ## Current recovery status — 2026-11-17
 
 The reduced-scope recovery implementation is committed and published on draft
-#721; #724 remains a separate partial draft. The changes are not qualified, and
-hosted checks on the published head are in progress. The 2026-11-17 amendment
-in [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md) governs
-this scope; earlier fork-dependent plans and checks below are historical only.
-No merge, issue closure or release has occurred.
+#721; #724 remains a separate partial draft. The published head `9c256c02`
+failed the hosted HR-05 coverage gate at 88.1041%; the recovery follow-up adds
+focused guest-accounting regressions and reaches 90.1487% locally with the
+CI-equivalent lean/full profiles. Hosted validation of the follow-up is pending.
+The 2026-11-17 amendment in
+[ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md) governs this
+scope; earlier fork-dependent plans and checks below are historical only. No
+merge, issue closure or release has occurred.
 
 | Disposition | Scope |
 | --- | --- |
@@ -31,19 +34,24 @@ No merge, issue closure or release has occurred.
 | #700 | Revised scope only; A1–A18/A21/A22 qualification and integrated acceptance remain pending. |
 
 The reduced-scope recovery changes are implemented in the recovery branch.
-Local checks for this source identity pass; hosted checks remain pending:
+Local checks for the follow-up pass; hosted checks remain pending:
 
 | Verification | Result |
 | --- | --- |
 | `make ci-pr` | Passed with CI-pinned `golangci-lint` 2.14.0, `govulncheck` 1.6.0 and `addlicense` 1.2.0; includes full-tag lint/tests/build, security gates, `go vet`, generated/config checks and 2,726 documentation checks. |
 | `go test -race -count=1 -p 2 -tags 'wasmplugins waf' ./internal/inspection ./internal/plugins ./internal/waf ./internal/server` | Passed. Includes the 100,000-call guest recycling regression and reload/WAF interactions. |
-| Full-tag changed-Go coverage via `scripts/check-added-go-coverage.py` | Passed: 786/867 added or modified production statements (90.6574%), above the 90% requirement. |
+| HR-05 CI-equivalent lean/full added-Go coverage | Passed locally after the follow-up tests: 485/538 statements (90.1487%); the previous published head scored 474/538 (88.1041%). |
+| `go test -race -tags wasmplugins ./internal/plugins -run '^TestGuestAccounting(ResolutionPaths\|RejectsInvalidOwnershipTransitions)$' -count=1` | Passed; covers valid resolution, retained teardown, missing ownership and invalid lifecycle transitions. |
 | `corepack pnpm test:coverage`; `corepack pnpm typecheck`; `corepack pnpm lint` | Passed: 1,087 UI tests; changed production TS/TSX executable-line coverage is 95/100 (95%). |
 | `corepack pnpm e2e e2e/real-server.spec.ts` | Passed: 32 tests. |
 | `python3 scripts/check-d11-certification.py` | Passed: 0 errors. |
 
-These are local results; hosted checks on the published head are still in
-progress. The 30-minute combined inspection soak and Linux/cgroup qualification remain unrun: the
+The previous hosted head's Console audit failed on the unchanged UI lockfile's
+transitive `picomatch@4.0.7` (GHSA-fc5q-39xc-vjpf). The advisory lists `4.0.8`
+as patched, but that version is not available from the public npm registry; no
+audit suppression or local third-party patch was added. This dependency remains
+unchanged in the follow-up. The 30-minute combined
+inspection soak and Linux/cgroup qualification remain unrun: the
 available `scripts/soak.sh` scenarios cover proxy, cache and UDP churn rather
 than combined WASM/WAF inspection, and the Docker daemon is unavailable on this
 host. The integrated A1–A22 campaign also remains outstanding. Do not claim
