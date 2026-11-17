@@ -31,13 +31,14 @@ the I1 foundation publishes process-wide limits, and I2 makes the WASM plugin
 request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
 `body_timeout` bounds body-reading plugin uploads). I3a and I4 added WAF
-request/response accounting and plugin response-subscription charges. Spool
-protection remains blocked. The unmerged I2b prototype retains guest capacity
-after every teardown for the process lifetime: churn and failed candidates can
-exhaust a finite enforce ceiling, requiring increased headroom or a controlled
-restart. Observe does not enforce; omission is unbounded. This is not the
-original A20 release guarantee. See the
-[I2b ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
+request/response accounting and plugin response-subscription charges. The
+unmerged I3b/I2b implementation now includes a transaction-owned Coraza
+temporary-file provider and a Wazero cancellation-watcher join before guest
+capacity refund. Guest-capacity omission remains unbounded and does not provide
+an A20 ceiling; spool quotas are logical, not an OS filesystem quota or RSS
+bound. A failed spool lock requires the documented offline recovery procedure.
+The controls have not passed integrated acceptance. See the
+[inspection ledger](reviews/700-inspection-implementation-ledger.md#i3b-i2b-implementation-review).
 No integrated resource acceptance is claimed. The route-aware minimum budget
 is validated statically from compiled limits, which
 also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:
@@ -687,12 +688,16 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   512 KiB response limit (then partial); other types, including JSON, need an
   explicit `SecResponseBodyMimeType`. The effective policy reports compiled
   settings, not per-transaction `ctl:` changes (#698).
-- **Inspection protection is not a whole-process bound.** The unreleased I3a
-  and I4 source governs WAF request/response accounting, but spool bytes and
-  files remain unprotected pending I3b. WAF work can continue after client
-  disconnect, with its reservations held until the work finishes. WAF state is
-  a calibrated estimate rather than measured heap, and integrated acceptance
-  remains pending under [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md)
+- **Inspection protection is not a whole-process bound.** The unmerged I3b
+  implementation adds logical byte/file reservations for Coraza body spill and
+  multipart files, with cleanup debt retained until removal is confirmed; it
+  does not impose a physical filesystem quota. The unmerged I2b implementation
+  joins Wazero's cancellation watcher before refunding guest capacity, while
+  Go heap reclamation remains asynchronous and an omitted guest ceiling is
+  unbounded. WAF work can continue after client disconnect, with its
+  reservations held until the work finishes. WAF state is a calibrated
+  estimate rather than measured heap, and integrated acceptance remains
+  pending under [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md)
   (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
 
 ---

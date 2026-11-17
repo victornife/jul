@@ -34,6 +34,18 @@ const stats: StatsSnapshot = {
   goroutines: 2,
   openFDs: 5,
   maxFDs: 100,
+  inspectionSpool: {
+    available: true,
+    mode: "observe",
+    usedBytes: 10,
+    usedFiles: 2,
+    cleanupDebtBytes: 3,
+    cleanupDebtFiles: 1,
+    wouldRejectBytes: 5,
+    wouldRejectFiles: 1,
+    byteLimit: 100,
+    fileLimit: 8,
+  },
 };
 
 const permission = (manage: boolean): PermissionState => ({
@@ -99,6 +111,9 @@ describe("operator-centred Overview", () => {
     fireEvent.click(resourceSummary);
     expect(resourceSummary.parentElement).toHaveAttribute("open");
     expect(screen.getByText("Runtime Resources")).toBeVisible();
+    expect(screen.getByRole("region", { name: "WAF temporary-file spool" })).toHaveTextContent(
+      "not physical disk usage",
+    );
     fireEvent.click(resourceSummary);
     expect(resourceSummary.parentElement).not.toHaveAttribute("open");
     const trend = await screen.findByText("2-Minute Trends");

@@ -72,3 +72,7 @@ require (
 )
 
 replace github.com/yookoala/gofast => ./third_party/gofast
+
+replace github.com/tetratelabs/wazero => ./third_party/wazero
+
+replace github.com/corazawaf/coraza/v3 => ./third_party/coraza

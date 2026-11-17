@@ -598,6 +598,19 @@
               "type": "string",
               "x-jul-constraint": "positive size"
             },
+            "max_spool_bytes": {
+              "default": "512m",
+              "description": "MaxSpoolBytes is the process-wide logical temporary-file byte quota",
+              "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
+              "type": "string",
+              "x-jul-constraint": "positive size"
+            },
+            "max_spool_files": {
+              "default": 1024,
+              "description": "MaxSpoolFiles is the process-wide logical temporary-file count quota",
+              "type": "integer",
+              "x-jul-constraint": "0 or between 1 and 1048576"
+            },
             "mode": {
               "default": "enforce",
               "description": "Mode is \"enforce\" (default) or \"observe\" for governor accounting on supported WAF and plugin paths",
@@ -607,6 +620,12 @@
               ],
               "type": "string",
               "x-jul-constraint": "exact lowercase enum"
+            },
+            "spool_dir": {
+              "default": "./jul-data/inspection-spool",
+              "description": "SpoolDir is the restart-bound directory for Coraza request-body spill and multipart temporary files",
+              "type": "string",
+              "x-jul-constraint": "non-empty path without leading or trailing whitespace"
             }
           },
           "type": "object"

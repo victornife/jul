@@ -168,6 +168,9 @@ max_concurrent_evaluations = 0
 evaluation_queue_timeout = "1s"
 body_timeout = "60s"
 max_response_header_bytes = "64k"
+spool_dir = "./jul-data/inspection-spool"
+max_spool_bytes = "512m"
+max_spool_files = 1024
 ```
 
 | Key | Type | Default and validation |
@@ -176,29 +179,63 @@ max_response_header_bytes = "64k"
 | `max_buffered_bytes` | size | `256m` (256 MiB); must be positive. In `enforce` mode it must also fit the largest single-request worst-case charge of any inspected (WAF or plugin) route; `observe` only warns. Uninspected configurations have no minimum |
 | `max_guest_capacity_bytes` | size | Optional positive ceiling on cumulative per-instance linear-memory reservations in the unmerged I2b prototype. In `enforce`, it must fit one eager instance of every configured plugin; `observe` warns on a shortfall and does not enforce it. Reservations remain charged after teardown until process exit, so churn and failed candidates can exhaust the cap; see [operational guidance](plugins.md#inspection-governor). Omission is unbounded; no finite default is selected. Values are reservations, not committed memory or RSS |
 | `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled. Enforce refuses an oversized WAF response before inspection; observe records the decision |
+| `spool_dir` | path | `./jul-data/inspection-spool`; dedicated identity-marked Coraza temp root, private permissions, restart-bound. It must remain separate from every static root; changing it requires stopping Jul and completing the documented offline recovery/migration procedure |
+| `max_spool_bytes` | size | `512m`; positive process-wide logical quota reserved before Coraza writes. `enforce` refuses before origin dispatch; `observe` records would-reject and continues if filesystem I/O succeeds. Cleanup debt remains charged |
+| `max_spool_files` | int | `1024`; `0` or omitted uses the default; explicit values are 1–1,048,576. Counts empty files and cleanup debt independently of bytes |
 | `max_concurrent_evaluations` | int | `0` means auto, resolved from the configured `worker_threads` value or the startup container-aware `GOMAXPROCS`; explicit values are 1–1024 |
 | `evaluation_queue_timeout` | duration | `1s`; 0 disables waiting; explicit values are 0–10s |
 | `body_timeout` | duration | `60s`; explicit `0s` disables it; negative values are rejected |
 
-These fields have process scope and hot-reload together. A reload publishes the
-complete limit set without recreating the governor or resetting its counters;
-automatic slots resolve against the candidate `worker_threads` value, or the
-startup `GOMAXPROCS` when worker threads are `auto`. Limits-only changes do not
+The quotas and other numeric/mode fields have process scope and hot-reload
+together. A reload publishes the complete limit set without recreating the
+governor or resetting its counters; automatic slots resolve against the
+candidate `worker_threads` value, or the startup `GOMAXPROCS` when worker
+threads are `auto`. `spool_dir` is restart-bound. Limits-only changes do not
 rebuild plugin instances. Other reload candidates warm against the currently
 published guest ceiling, not an increase in the candidate.
 
-The status API marks request-path integration as `partial`. Plugin and WAF
+The status API marks integrated qualification as `partial`. Plugin and WAF
 request and response paths share the process governor, including charged
-buffers, estimated WAF state and evaluation slots. In `enforce` mode,
-saturation answers `503` plus `Retry-After: 1`; inspected plugin and WAF
-body-arrival timeouts answer `408`. `observe` counts would-refuse decisions
-without applying those governor refusals. Spool
-protection and integrated acceptance remain outstanding. The unmerged guest
-control is blocked by the watcher ownership issue above, and omission is
-unbounded. See
+buffers, estimated WAF state and evaluation slots. Coraza body spill and
+multipart uploads use Jul's transaction-owned provider and separate logical
+byte/file quotas. Enforce-mode quota refusals answer `503` plus
+`Retry-After: 1` before the origin is called; observe records would-refuse
+decisions and continues only while actual filesystem operations succeed.
+Cleanup failures remain charged as debt and are recovered from the identity-
+marked root at the next startup; they are not retried by a background worker.
+These are logical quotas, not an OS filesystem quota or RSS guarantee. The
+unmerged guest control remains separately gated, and integrated qualification
+is still pending. See
 [Plugins](plugins.md#inspection-governor) and
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md) for the scope
-and limitations.
+and limitations. The local Coraza and wazero source replacements, their pinned
+upstream provenance, update procedure, and patch-removal criteria are recorded
+in [Coraza's patch record](../third_party/coraza/PATCHES.md) and
+[wazero's patch record](../third_party/wazero/PATCHES.md).
+
+#### Offline spool recovery and relocation
+
+The spool root may contain request-body or uploaded-file contents. Jul uses an
+exclusive `.jul-spool.lock`; after an abrupt process exit, that file may remain
+and startup intentionally fails closed instead of guessing whether another
+process still owns the directory.
+
+To recover the same root:
+
+1. Stop Jul and any supervisor action that could restart it. Confirm no Jul
+   process or other deployment is using this spool directory.
+2. Remove only `<spool_dir>/.jul-spool.lock`. Keep `.jul-spool-root` and any
+   `tx-*` entries. On startup Jul validates the root marker and removes only
+   recognized stale transaction entries. Unknown entries or cleanup failures
+   continue to block startup.
+3. Start Jul and confirm the spool controller initializes before restoring
+   traffic.
+
+To relocate the spool, stop all Jul processes first, configure a new empty,
+private directory, and start Jul against it. Do not copy transaction
+directories or remove the old root marker while Jul is running. Keep the old
+root offline until the new controller is confirmed active, then remove the old
+root's request data according to the deployment's data-retention policy.
 
 `jul check`, startup, reload and admin apply compute each inspected route's
 worst-case single-request charge from the compiled WAF limits, plugin limits

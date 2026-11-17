@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -46,11 +47,42 @@ func newGovernor(t *testing.T, limits inspection.Limits) *inspection.Governor {
 	return g
 }
 
+func governedSpool(t *testing.T, g *inspection.Governor) *inspection.SpoolController {
+	t.Helper()
+
+	limits := g.Limits()
+	limits.SpoolDir = t.TempDir()
+	if limits.MaxSpoolBytes == 0 {
+		limits.MaxSpoolBytes = 1 << 20
+	}
+	if limits.MaxSpoolFiles == 0 {
+		limits.MaxSpoolFiles = 128
+	}
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, limits); err != nil {
+		t.Fatal(err)
+	}
+
+	spool, err := inspection.NewSpoolController(g, limits.SpoolDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := spool.Close(); err != nil {
+			t.Errorf("close spool controller: %v", err)
+		}
+	})
+	return spool
+}
+
 func governedFirewall(t *testing.T, cfg config.WAFConfig, g *inspection.Governor, hooks Hooks) *Firewall {
 	t.Helper()
+	var spool *inspection.SpoolController
+	if g != nil {
+		spool = governedSpool(t, g)
+	}
 	applyTestDefaults(&cfg)
 	cfg.Enabled = true
-	fw, err := New(context.Background(), cfg, Options{Governor: g, Hooks: hooks})
+	fw, err := New(context.Background(), cfg, Options{Governor: g, Hooks: hooks, Spool: spool})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +145,142 @@ func TestGovernedWAFChargesAndReleasesTransaction(t *testing.T) {
 		t.Fatalf("transaction not charged while the origin ran: %+v", during.Usage)
 	}
 	assertDrained(t, g)
+}
+
+func TestGovernedWAFSpoolQuotaRefusesBeforeOriginDispatch(t *testing.T) {
+	body := strings.Repeat("x", 160<<10)
+	for _, crs := range []bool{false, true} {
+		for _, mode := range []string{"block", "detect"} {
+			t.Run(fmt.Sprintf("crs=%t/mode=%s", crs, mode), func(t *testing.T) {
+				limits := governedLimits(inspection.Enforce)
+				limits.MaxSpoolBytes = 8
+				limits.MaxSpoolFiles = 8
+				g := newGovernor(t, limits)
+				fw := governedFirewall(t, config.WAFConfig{
+					CRSEnabled:       crs,
+					Mode:             mode,
+					InlineRules:      "SecRequestBodyInMemoryLimit 8",
+					RequestBodyLimit: config.Size(256 << 10),
+				}, g, Hooks{})
+				originCalls := 0
+				h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					originCalls++
+					_, _ = io.Copy(io.Discard, r.Body)
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/octet-stream")
+				rr := httptest.NewRecorder()
+				h.ServeHTTP(rr, req)
+				if rr.Code != http.StatusServiceUnavailable {
+					t.Fatalf("status = %d, want 503 (body %q)", rr.Code, rr.Body.String())
+				}
+				if originCalls != 0 {
+					t.Fatalf("origin was invoked %d times after spool quota refusal", originCalls)
+				}
+				if got := g.Snapshot().Rejections[inspection.RejectSpoolBytes][0]; got == 0 {
+					t.Fatal("spool-byte refusal was not recorded")
+				}
+			})
+		}
+	}
+}
+
+func TestGovernedWAFObserveSpoolQuotaContinuesAndRecordsWouldReject(t *testing.T) {
+	limits := governedLimits(inspection.Observe)
+	limits.MaxSpoolBytes = 8
+	limits.MaxSpoolFiles = 8
+	g := newGovernor(t, limits)
+	fw := governedFirewall(t, config.WAFConfig{
+		Mode:             "detect",
+		InlineRules:      "SecRequestBodyInMemoryLimit 8",
+		RequestBodyLimit: config.Size(256 << 10),
+	}, g, Hooks{})
+	body := strings.Repeat("x", 160<<10)
+	originCalls := 0
+	var originBody string
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		originCalls++
+		b, _ := io.ReadAll(r.Body)
+		originBody = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent || originCalls != 1 || originBody != body {
+		t.Fatalf("observe result status=%d calls=%d body_bytes=%d, want 204, one call, and full body", rr.Code, originCalls, len(originBody))
+	}
+	if got := g.Snapshot().Rejections[inspection.RejectSpoolBytes][1]; got == 0 {
+		t.Fatal("observe-mode would-reject was not recorded")
+	}
+}
+
+func TestGovernedWAFMultipartFileQuotaRefusesBeforeOriginDispatch(t *testing.T) {
+	const boundary = "jul-spool-test-boundary"
+	body := "--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"first\"; filename=\"one.txt\"\r\n" +
+		"Content-Type: text/plain\r\n\r\none\r\n" +
+		"--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"second\"; filename=\"two.txt\"\r\n" +
+		"Content-Type: text/plain\r\n\r\ntwo\r\n" +
+		"--" + boundary + "--\r\n"
+	for _, crs := range []bool{false, true} {
+		for _, mode := range []string{"block", "detect"} {
+			t.Run(fmt.Sprintf("crs=%t/mode=%s", crs, mode), func(t *testing.T) {
+				limits := governedLimits(inspection.Enforce)
+				limits.MaxSpoolBytes = 1 << 20
+				limits.MaxSpoolFiles = 1
+				g := newGovernor(t, limits)
+				fw := governedFirewall(t, config.WAFConfig{
+					CRSEnabled:       crs,
+					Mode:             mode,
+					RequestBodyLimit: config.Size(256 << 10),
+				}, g, Hooks{})
+				originCalls := 0
+				h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					originCalls++
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+				req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+				rr := httptest.NewRecorder()
+				h.ServeHTTP(rr, req)
+				if rr.Code != http.StatusServiceUnavailable {
+					t.Fatalf("status = %d, want 503 (body %q)", rr.Code, rr.Body.String())
+				}
+				if originCalls != 0 {
+					t.Fatalf("origin was invoked %d times after multipart quota refusal", originCalls)
+				}
+				if got := g.Snapshot().Rejections[inspection.RejectSpoolFiles][0]; got == 0 {
+					t.Fatal("multipart spool-file refusal was not recorded")
+				}
+			})
+		}
+	}
+}
+
+func TestGovernedWAFRejectsRetainedUploadFiles(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	limits := g.Limits()
+	limits.SpoolDir = t.TempDir()
+	limits.MaxSpoolBytes = 1 << 20
+	limits.MaxSpoolFiles = 8
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, limits); err != nil {
+		t.Fatal(err)
+	}
+	spool, err := inspection.NewSpoolController(g, limits.SpoolDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	_, err = New(context.Background(), config.WAFConfig{
+		InlineRules: "SecUploadKeepFiles On\nSecUploadDir " + t.TempDir(),
+	}, Options{Governor: g, Spool: spool})
+	if err == nil || !strings.Contains(err.Error(), "SecUploadKeepFiles must be Off") {
+		t.Fatalf("retained upload policy error = %v", err)
+	}
 }
 
 func TestGovernedWAFResponseHeaderCeilingModes(t *testing.T) {
@@ -638,7 +806,8 @@ func TestGovernedWAFRejectsUnsupportedAuditWriter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := config.WAFConfig{Enabled: true, InlineRules: rules}
 			applyTestDefaults(&cfg)
-			if _, err := New(context.Background(), cfg, Options{Governor: g}); err == nil {
+			spool := governedSpool(t, g)
+			if _, err := New(context.Background(), cfg, Options{Governor: g, Spool: spool}); err == nil {
 				t.Fatal("governed WAF accepted an unsupported audit configuration")
 			}
 			fw, err := New(context.Background(), cfg, Options{})

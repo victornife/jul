@@ -5,10 +5,11 @@ This is the authoritative ownership model for Jul's mutable runtime resources
 identity is, what decides reuse versus replacement, and how it moves through
 **Prepare → Publish → Abort → Retire → drain → close**.
 
-The unmerged I2b branch retains guest reservations for the process lifetime
-after teardown because a wazero watcher can retain a closed instance. This
-conservative policy does not satisfy the original A20 release contract; see the
-[I2b ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
+The unmerged I2b implementation retains each guest reservation until Wazero's
+cancellation watcher has joined, represented cleanup has completed, and
+Jul-owned aliases are dropped. Go heap reclamation and return of pages to the
+OS remain asynchronous; an omitted capacity ceiling is unbounded. See the
+[inspection ledger](reviews/700-inspection-implementation-ledger.md#i3b-i2b-implementation-review).
 
 It deliberately does **not** repeat which configuration fields are hot-reloaded
 or restart-required. That truth is generated from one registry and lives in:
@@ -82,7 +83,7 @@ field up in the generated table rather than here.
 | L4 upstream pools | `stream.Server.reg` (its own `upstream.Registry`) | pool | as upstream pools | as upstream pools | as upstream pools | stream, upstreams |
 | WASM plugin manager | `plugins.Manager` (compilation cache, KV store, KV quota ledgers) | process | the process manager | none | none | plugins (process boundary) |
 | WASM plugin set | `plugins.Set` (one wazero runtime + compiled module per plugin) | generation | plugin name | rebuilt with the generation; the no-op proof compares every module's current digest with the serving one | module content identity: SHA-256 of the exact compiled bytes, snapshotted once per build (#429) | plugins |
-| WASM module instance | `plugins.pooledModule` and its `inspection.GuestTicket` | instance | — | — | its effective memory ceiling is reserved before startup and remains charged through idle/busy work, pool handoffs and unconfirmed teardown; retirement wakes instance waiters and follows `max_invocations`, traps, or a full pool (#420), with at most `max_instances` per plugin (#506) | plugins, `global.inspection` |
+| WASM module instance | `plugins.pooledModule` and its `inspection.GuestTicket` | instance | — | — | its effective memory ceiling is reserved before startup and remains charged through idle/busy work, pool handoffs and teardown; cancellation watcher completion and cleanup precede refund, while unresolved close failures remain charged; Go heap reclamation is asynchronous. Retirement wakes instance waiters and follows `max_invocations`, traps, or a full pool (#420), with at most `max_instances` per plugin (#506) | plugins, `global.inspection` |
 | Inspection request lease | `inspection.Lease`, acquired by the outermost plugin wrapper (`plugins.(*plugin).requestLease`) and carried in the request context | request | the request | — | owns every request-side host charge of every plugin in the chain; only the acquiring wrapper closes it, after the whole downstream handler and its response callbacks return (ADR 0032 §4, #700) | plugins |
 | Request deadline owner | `reqdeadline.Owner`, created by `server.dynamicHandler` on the raw transport writer and carried in the request context | request (one per HTTP/2 or HTTP/3 stream) | the request | — | arms the absolute `body_timeout` and applies the sticky retirement abort through the transport's per-request read deadline; never extends or restores a transport deadline; inert after the handler returns | server, plugins, WAF |
 | WASM prepared request body | `plugins.preparedBody` replacing the request's `Body` (≤ the preparing plugin's `max_request_body`) | request | the request | — | prepared before instance acquisition and outside the guest deadline; reused unconsumed by later body-reading plugins, each enforcing its own limit (#699); its capacity is charged to the request lease before each allocation (#700) | plugins |

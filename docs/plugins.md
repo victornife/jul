@@ -613,24 +613,23 @@ request plugins and WAF on proxy routes and does not cap earlier inspection
 or routes without an upstream. Account for all enabled layers and overlapping
 generations when sizing the host.
 
-The unmerged I2b prototype's `[global.inspection].max_guest_capacity_bytes`
-limits the sum of effective page-rounded `memory_limit` reservations in
-`enforce` mode. Wazero does not expose a way to join its cancellation watcher,
-so every reserved instance attempt remains charged for the **process lifetime**, even
-after successful close, cancellation, traps, or an aborted candidate. This is
-conservative accounting, not proof of the original A20 release contract; see
-the [ledger](reviews/700-inspection-implementation-ledger.md#i2b-implementation-progress).
-The configured ceiling must fit at least
-one eager instance of every configured plugin; `jul check` rejects a shortfall
-in enforce mode and warns in observe mode without executing guest code. Idle
-instances remain charged; reuse does not charge again. Closed instances accrue
-`teardown_unconfirmed` debt; close failures are `failed_retained`. The policy does not evict idle instances:
-one idle pool may leave too little capacity for another plugin or a reload
-candidate. Size for expected pools **and** old/candidate overlap, and raise
-the limit separately before a full reload if needed. Churn from `max_invocations`,
-traps, traffic bursts and failed reloads accumulates debt even when memory is
-later reclaimed. In enforce mode exhausted capacity refuses new instances and
-reload candidates; existing pooled instances can still serve. Observe mode
+The unmerged I2b implementation's `[global.inspection].max_guest_capacity_bytes`
+reserves each instance's effective page-rounded `memory_limit` before
+instantiation and across live generations. A local patch to pinned Wazero
+v1.12.0 joins its cancellation watcher before Jul releases that reservation;
+failed instantiation also cleans resources acquired before the start failure.
+This proves watcher quiescence at the release boundary, not synchronous Go heap
+reclamation or return of pages to the OS. An omitted guest ceiling remains
+unbounded and provides no A20 capacity guarantee; the configured ceiling must
+fit at least one eager instance of every configured plugin. `jul check` checks
+that condition without executing guest code. Idle instances remain charged;
+reuse does not charge again. Close/cleanup failures remain charged and
+observable. The policy does not evict idle instances: one idle pool may leave
+too little capacity for another plugin or a reload candidate. Size for expected
+pools **and** old/candidate overlap, and raise the limit separately before a
+full reload if needed. In enforce mode an exhausted configured capacity refuses
+new instances and reload candidates; existing pooled instances can still
+serve. Observe mode
 records would-refuse decisions but admits over the ceiling, so it is not a
 memory bound. Raising the limit provides headroom but does not erase debt and
 must fit the host budget. A process restart resets accounting; use a controlled

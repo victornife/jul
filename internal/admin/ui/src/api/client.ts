@@ -471,6 +471,20 @@ export const StatsSnapshotSchema = z.object({
   upstreamBudgetExhausted: z.array(z.string()).optional(),
   storage: z.array(StorageHeadroomSchema).optional(),
   storageHints: StorageHintsSchema.optional(),
+  inspectionSpool: z
+    .object({
+      available: z.boolean(),
+      mode: z.string(),
+      usedBytes: z.number().nonnegative(),
+      usedFiles: z.number().nonnegative(),
+      cleanupDebtBytes: z.number().nonnegative(),
+      cleanupDebtFiles: z.number().nonnegative(),
+      wouldRejectBytes: z.number().nonnegative(),
+      wouldRejectFiles: z.number().nonnegative(),
+      byteLimit: z.number().nonnegative(),
+      fileLimit: z.number().nonnegative(),
+    })
+    .optional(),
 });
 export type StatsSnapshot = z.infer<typeof StatsSnapshotSchema>;
 

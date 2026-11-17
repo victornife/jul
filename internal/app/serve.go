@@ -340,6 +340,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		GenRes:        genRes,
 		RT:            rt,
 		Inspection:    rt.Inspection,
+		Spool:         rt.Spool,
 		Versions:      options.versions,
 	}
 
@@ -464,6 +465,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		StreamCompiled:   stream.Compiled,
 		WAFCompiled:      waf.Compiled,
 		Inspection:       rt.Inspection,
+		Spool:            rt.Spool,
 		LastStreamReload: &rt.LastStreamReload,
 	}
 	deps := BuildAdminDeps(productName, version, src, subsystems)

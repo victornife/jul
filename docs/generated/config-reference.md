@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 399 configurable leaves.
+Coverage: 402 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -1152,6 +1152,38 @@ MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and value
 | Zero/empty semantics | omitted defaults to 64 KiB; explicit zero is invalid |
 | Active when | used by configuration validation and before WAF response-header inspection |
 
+## `global.inspection.max_spool_bytes` {#global-inspection-max_spool_bytes}
+
+MaxSpoolBytes is the process-wide logical temporary-file byte quota.
+
+| | |
+| --- | --- |
+| Type | `size` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | the process-owned spool controller reads the newly published logical byte quota for each reservation; outstanding file usage and cleanup debt persist |
+| Default | 512m |
+| Constraint | positive size |
+| Zero/empty semantics | omitted defaults to 512 MiB; explicit zero is invalid |
+| Active when | bounds process-wide Coraza temporary-file writes in enforce mode and records would-reject usage in observe mode |
+
+## `global.inspection.max_spool_files` {#global-inspection-max_spool_files}
+
+MaxSpoolFiles is the process-wide logical temporary-file count quota.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | the process-owned spool controller reads the newly published logical file quota for each creation; outstanding file usage and cleanup debt persist |
+| Default | 1024 |
+| Constraint | 0 or between 1 and 1048576 |
+| Zero/empty semantics | omitted/zero defaults to 1024 |
+| Active when | bounds process-wide Coraza temporary-file creation in enforce mode and records would-reject usage in observe mode |
+
 ## `global.inspection.mode` {#global-inspection-mode}
 
 Mode is "enforce" (default) or "observe" for governor accounting on supported WAF and plugin paths.
@@ -1167,6 +1199,23 @@ Mode is "enforce" (default) or "observe" for governor accounting on supported WA
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to enforce |
 | Active when | controls governor accounting and configuration validation on supported plugin and WAF paths |
+
+## `global.inspection.spool_dir` {#global-inspection-spool_dir}
+
+SpoolDir is the restart-bound directory for Coraza request-body spill and multipart temporary files.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `restart_required` |
+| Subsystem | `inspection` |
+| Why | the dedicated Coraza temporary-file root is identity-checked, exclusively locked and recovered at startup; moving it requires an offline migration and restart |
+| Default | ./jul-data/inspection-spool |
+| Flags | startup-consumed |
+| Constraint | non-empty path without leading or trailing whitespace |
+| Zero/empty semantics | omitted/empty defaults to ./jul-data/inspection-spool |
+| Active when | restart-bound dedicated root for Coraza request-body spill and multipart temporary files |
 
 ## `global.log_format` {#global-log_format}
 

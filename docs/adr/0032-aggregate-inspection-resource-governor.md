@@ -2,12 +2,10 @@
 
 - **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
   merged (#710, `c8bba7f2`); I3a merged (#715, `def419f5`); I4 merged (#716, `daa06bdc`);
-  I3b is blocked and I2b and I6 remain pending. The
-  2026-11-13 amendment below was accepted when #714 merged as `16d98258` from head `faf3ead4`;
-  implementation remains incomplete
-  until the scheduled checkpoints and qualification gates pass.
-  The local I2b alternative retains guest teardown debt until process exit;
-  that conservative implementation does not change this ADR or claim A20.
+  I3b and I2b implementation is present in the current draft, but A19/A20 and integrated
+  qualification remain unaccepted; I6 remains partial. The 2026-11-13 amendment below was accepted
+  when #714 merged as `16d98258` from head `faf3ead4`. Implementation maturity and release
+  qualification remain incomplete until the scheduled gates pass.
 - **Date:** 2026-11-10
 - **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
   maintainer's decisions are recorded in §Maintainer decisions.
@@ -1934,6 +1932,21 @@ does not claim that any implementation or A1–A22 criterion has passed.
   future I/O/cleanup failure, or automatic discovery after the deployment identity is replaced.
   They do not waive logical quota admission, fail-closed handling of errors detectable before
   dispatch, truthful cleanup debt, same-identity recovery or the focused and integrated tests.
+
+## Current implementation status — 2026-11-17
+
+The current draft follows the accepted amendment: pinned local Coraza and Wazero patches expose the
+two required lifecycle seams, while Jul retains policy, quotas, admission, failure mapping and
+operability. The draft includes transaction-owned spool files for body spill and multipart, a
+process-wide logical byte/file controller, watcher-joined guest refunds, and cleanup after failed
+instantiation. The spool quota fields can be published as limits-only changes without rebuilding
+the serving generation; `spool_dir` remains restart-bound.
+
+The focused reload regression, `make security-gates`, and full-tag repository test suite pass after
+test fixtures were aligned with the restart-bound spool-root default. This is implementation
+evidence, not acceptance: hosted checks, the Codecov threshold, combined 30-minute soak and A1–A22
+integrated campaign remain outstanding. A19 and A20 are not claimed as passed, and #700/#62 remain
+open until the ledger records completed qualification evidence.
 
 ## Related
 

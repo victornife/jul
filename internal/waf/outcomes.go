@@ -41,10 +41,23 @@ type unwrappedTx interface {
 	Unwrap() types.Transaction
 }
 
-func (f *Firewall) newTransaction(r *http.Request) types.Transaction {
+type corazaSpoolProvider struct{ tx *inspection.SpoolTransaction }
+
+func (p corazaSpoolProvider) CreateTemp(dir, pattern string) (types.TemporaryFile, error) {
+	return p.tx.CreateTemp(dir, pattern)
+}
+
+func (p corazaSpoolProvider) Remove(name string) error { return p.tx.Remove(name) }
+
+func (f *Firewall) newTransaction(r *http.Request, spool *inspection.SpoolTransaction) types.Transaction {
 	if ctxwaf, ok := f.waf.(experimental.WAFWithOptions); ok {
+		var provider types.TemporaryFileProvider
+		if spool != nil {
+			provider = corazaSpoolProvider{tx: spool}
+		}
 		return ctxwaf.NewTransactionWithOptions(experimental.Options{
-			Context: r.Context(),
+			Context:               r.Context(),
+			TemporaryFileProvider: provider,
 		})
 	}
 	return f.waf.NewTransaction()
@@ -233,7 +246,16 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	endLease := sync.OnceFunc(admitted)
 	defer endLease()
 
-	tx := f.newTransaction(r)
+	var spoolTx *inspection.SpoolTransaction
+	if f.opts.Spool != nil {
+		var err error
+		spoolTx, err = f.opts.Spool.NewTransaction()
+		if err != nil {
+			http.Error(w, "inspection error", http.StatusInternalServerError)
+			return
+		}
+	}
+	tx := f.newTransaction(r, spoolTx)
 	if a.governed() && f.audit.writer.hasOutput() {
 		a.txID = tx.ID()
 		a.audit = &auditTxCtx{gov: a.gov, lease: a.lease}
@@ -320,6 +342,20 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			it := tx.Interruption()
 			detIt := detectionOnlyInterruption(tx)
 			rules, totalMatched, matchesTruncated := extractMatchedRules(tx.MatchedRules(), it, detIt)
+			txCloseErr := tx.Close()
+			var spoolErr error
+			var spoolCleanupErr error
+			if spoolTx != nil {
+				spoolErr = spoolTx.Err()
+				spoolCleanupErr = spoolTx.Close()
+			}
+			if cleanupErr := errors.Join(txCloseErr, spoolCleanupErr); cleanupErr != nil {
+				outcome = OutcomeInspectionError
+				errorCategory = "spool_cleanup_error"
+			} else if originReached && spoolErr != nil {
+				outcome = OutcomeInspectionError
+				errorCategory = "spool_storage_error"
+			}
 
 			wouldInterrupt := false
 			interruptedAction := ""
@@ -403,7 +439,6 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 				}
 			}
 
-			_ = tx.Close()
 			// Only now is the transaction state unreachable.
 			a.release()
 		})
@@ -474,6 +509,12 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		res, ran := f.readRequestBody(w, r, tx, a)
 		phase2 = ran
 		a.bodyBytes = uint64(max(res.written, 0))
+		if spoolTx != nil {
+			if spoolErr := spoolTx.Err(); spoolErr != nil {
+				refuse(spoolErr)
+				return
+			}
+		}
 		if res.admission != nil {
 			refuse(res.admission)
 			return
@@ -544,6 +585,12 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	}
 	if n, ok := argsHeld(tx, false); ok {
 		a.trueDown(a.r2, &a.r2Amount, r2Estimate(n, a.bodyBytes))
+	}
+	if spoolTx != nil {
+		if spoolErr := spoolTx.Err(); spoolErr != nil {
+			refuse(spoolErr)
+			return
+		}
 	}
 	if err != nil && it == nil {
 		outcome = OutcomeInspectionError

@@ -51,6 +51,7 @@ func TestSixth653SnapshotMustNotReopenPreparedAuthFile(t *testing.T) {
 		routeID := "admin-only"
 		makeCfg := func(withdrawn bool) *config.Config {
 			return &config.Config{
+				Global: config.GlobalConfig{Inspection: config.InspectionConfig{SpoolDir: "./jul-data/inspection-spool"}},
 				Servers: []config.ServerConfig{{
 					Listen: addr,
 					Locations: []config.LocationConfig{{

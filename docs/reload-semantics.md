@@ -1026,6 +1026,9 @@ time (admin path) or at swap time (SIGHUP/file-watch):
 
 - **ACME issued-domain set / issuer** — frozen when the autocert manager is
   built at startup.
+- **Inspection spool root (`global.inspection.spool_dir`)** — owned and
+  recovered at startup; changing it requires stopping Jul, following the
+  offline recovery or relocation procedure, and restarting.
 
 `global.worker_threads` is *not* restart-required: the GOMAXPROCS cap is
 applied dynamically on the next successful reload. `global.log_format` is also

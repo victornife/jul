@@ -36,6 +36,43 @@ infrastructure, then the guest, spool, operability and integrated-qualification 
 
 ## Current checkpoint
 
+### I3b-I2b Implementation Review
+
+Status updated 2026-11-17.
+
+The current draft implements the selected bounded approach with source-pinned local replacements:
+Coraza v3.8.1 provides a transaction-scoped temporary-file seam for body spill and multipart, and
+Wazero v1.12.0 joins cancellation-watcher completion and cleans up resources acquired by failed
+instantiation. Jul owns the logical spool quotas, tickets, sticky failures, cleanup debt and
+restart-bound spool root. Spool byte/file limits are limits-only reloadable; changing `spool_dir`
+still requires the documented offline relocation procedure. The upstream tag targets and recorded
+commit IDs were verified to match.
+
+The three adversarial passes identified (1) guest teardown and failed-start ownership, (2) spool
+root/lock recovery and cleanup-debt boundaries, and (3) operational status and reload contracts.
+The implementation now joins the Wazero watcher before refund, closes failed-start resources,
+documents fail-closed lock recovery as an offline operator action, and classifies both spool quotas
+as limits-only changes. This update adds separate byte/file reload regressions. A final integrated
+diff review and the hosted checks for the final published head are still required.
+
+| Verification | Result |
+| --- | --- |
+| `make security-gates` | Passed, including lean/full-tag security tests and package coverage floors. |
+| `go test ./internal/server -run '^TestLimitsOnlyPublicationAvoidsHandlerRebuild$' -count=1` | Passed; independently publishes spool byte and file limits without changing the serving generation or rebuilding handlers. |
+| `go test -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./...` | Passed. The first run exposed unnormalized programmatic test configs; shared server fixtures now set the parsed spool-root default, and WAF fixtures use their controller's private root. |
+| `go test -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/server ./internal/app` | Passed after correcting the spool-root fixtures. |
+| Coraza provider, Wazero watcher/failed-instantiation, and 100,000-call guest recycling focused tests | Passed. Exact commands are recorded in the dependency patch records. |
+| `make generated-check` | Passed. |
+| `make format-check` | Passed. |
+| `GOMAXPROCS=2 python3 scripts/docs-check.py` | Passed; 2,729 checks, 0 failures. |
+
+These results do not qualify A19 or A20. The 30-minute combined soak and A1–A22 integrated
+campaign have not run, and the Codecov threshold for the final diff remains unverified. A full
+upstream Coraza test run completed but reports 62.0% aggregate package coverage; the attempted
+Wazero all-package test run is incomplete because this source replacement omits CLI and generated
+example fixtures. The focused dependency patch tests, rather than those incomplete aggregate
+figures, remain the current dependency-test evidence.
+
 ### 2026-11-16 follow-up
 
 #725 merged as `dced01786a50454d09ecb0e9ceab1c7b5664ede1` from head `f8d2af27`

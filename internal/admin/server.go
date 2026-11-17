@@ -362,9 +362,11 @@ type Deps struct {
 	// "unavailable" snapshot so the console can render an empty state.
 	Stats func() observability.StatsSnapshot
 	// InspectionSnapshot reports process-wide governor limits and charged
-	// usage. Its request-path integration state remains pending until later
-	// implementation slices connect live WAF/plugin calls.
+	// usage.
 	InspectionSnapshot func() inspection.Snapshot
+	// InspectionSpoolSnapshot reports process-wide logical Coraza spool
+	// accounting when the WAF spool controller is active.
+	InspectionSpoolSnapshot func() inspection.SpoolSnapshot
 	// InspectionPluginGuestCapacity reports configured guest-memory capacity
 	// across every compiled plugin generation not yet closed.
 	InspectionPluginGuestCapacity func() (adminapi.InspectionPluginGuestCapacity, error)

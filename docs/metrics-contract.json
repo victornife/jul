@@ -438,10 +438,35 @@
     {
       "name": "jul_inspection_rejections_total",
       "type": "counter",
-      "help": "Inspection admission rejections in enforce mode and would-reject decisions in observe mode, including guest-capacity admission.",
+      "help": "Inspection admission rejections in enforce mode and would-reject decisions in observe mode, including guest-capacity and spool quotas.",
       "labels": [
         "mode",
         "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_spool_available",
+      "type": "gauge",
+      "help": "Whether Jul has a process-owned Coraza temporary-file controller in this build/runtime.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_spool_bytes",
+      "type": "gauge",
+      "help": "Coraza temporary-file logical bytes by state; cleanup debt remains charged and would_reject is cumulative in observe mode.",
+      "labels": [
+        "state"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_spool_files",
+      "type": "gauge",
+      "help": "Coraza temporary-file logical file count by state; cleanup debt remains charged and would_reject is cumulative in observe mode.",
+      "labels": [
+        "state"
       ],
       "state": "merged_release_pending"
     },

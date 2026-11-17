@@ -124,6 +124,8 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 			Mode:                      inspection.Enforce,
 			MaxBytes:                  256 << 20,
 			MaxResponseHeaderBytes:    64 << 10,
+			MaxSpoolBytes:             512 << 20,
+			MaxSpoolFiles:             1024,
 			ConfiguredEvaluationSlots: 0,
 			EvaluationSlots:           4,
 			EvaluationQueueTimeout:    time.Second,
@@ -137,6 +139,12 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		InspectionSnapshot: func() inspection.Snapshot { return snapshot },
+		InspectionSpoolSnapshot: func() inspection.SpoolSnapshot {
+			return inspection.SpoolSnapshot{
+				UsedBytes: 10, UsedFiles: 2, DebtBytes: 3, DebtFiles: 1,
+				WouldBytes: 5, WouldFiles: 1, ByteLimit: 512 << 20, FileLimit: 1024,
+			}
+		},
 		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
 			return adminapi.InspectionPluginGuestCapacity{
 				MaxPermittedBytes: 56 << 20,
@@ -152,8 +160,17 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 	i := got.Inspection
 	if i.Configured.MaxConcurrentEvaluations != 0 || i.Effective.MaxConcurrentEvaluations != 4 ||
 		i.Configured.Mode != "enforce" || i.Effective.Mode != "enforce" ||
-		i.Configured.MaxResponseHeaderBytes != 64<<10 || i.Effective.MaxResponseHeaderBytes != 64<<10 {
+		i.Configured.MaxResponseHeaderBytes != 64<<10 || i.Effective.MaxResponseHeaderBytes != 64<<10 ||
+		i.Configured.MaxSpoolBytes != 512<<20 || i.Effective.MaxSpoolBytes != 512<<20 ||
+		i.Configured.MaxSpoolFiles != 1024 || i.Effective.MaxSpoolFiles != 1024 {
 		t.Fatalf("configured/effective inspection limits = %+v/%+v", i.Configured, i.Effective)
+	}
+	if i.Spool.State != "active" || i.Spool.Mode != "enforce" ||
+		i.Spool.UsedBytes != 10 || i.Spool.UsedFiles != 2 ||
+		i.Spool.DebtBytes != 3 || i.Spool.DebtFiles != 1 ||
+		i.Spool.WouldBytes != 5 || i.Spool.WouldFiles != 1 ||
+		i.Spool.ByteLimit != 512<<20 || i.Spool.FileLimit != 1024 {
+		t.Fatalf("spool status = %+v", i.Spool)
 	}
 	if i.Usage.BaseBytes != inspection.BaseChargeBytes || i.Usage.BufferBytes != 8192 ||
 		i.Usage.WAFStateBytes != 4096 || i.ActiveLeases != 1 ||
@@ -189,6 +206,9 @@ func TestV1StatusDoesNotRepresentUnavailableGuestCapacityAsZero(t *testing.T) {
 		got.Inspection.PluginGuestMaxInstances != nil ||
 		got.Inspection.PluginGuestActualBytesState != "unavailable" {
 		t.Fatalf("unavailable plugin guest capacity = %+v", got.Inspection)
+	}
+	if got.Inspection.Spool.State != "unavailable" {
+		t.Fatalf("unavailable spool status = %+v", got.Inspection.Spool)
 	}
 	if strings.Contains(rr.Body.String(), `"plugin_guest_max_bytes"`) {
 		t.Fatalf("unavailable guest capacity must be omitted, not encoded as zero: %s", rr.Body.String())

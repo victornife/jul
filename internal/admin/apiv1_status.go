@@ -41,6 +41,22 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 	out.PersistedVersion = authority.DiskVersion
 	if s.deps.InspectionSnapshot != nil {
 		snapshot := s.deps.InspectionSnapshot()
+		spool := adminapi.InspectionSpoolStatus{State: "unavailable"}
+		if s.deps.InspectionSpoolSnapshot != nil {
+			spoolSnapshot := s.deps.InspectionSpoolSnapshot()
+			spool = adminapi.InspectionSpoolStatus{
+				State:      "active",
+				Mode:       string(snapshot.Limits.Mode),
+				UsedBytes:  spoolSnapshot.UsedBytes,
+				UsedFiles:  spoolSnapshot.UsedFiles,
+				DebtBytes:  spoolSnapshot.DebtBytes,
+				DebtFiles:  spoolSnapshot.DebtFiles,
+				WouldBytes: spoolSnapshot.WouldBytes,
+				WouldFiles: spoolSnapshot.WouldFiles,
+				ByteLimit:  spoolSnapshot.ByteLimit,
+				FileLimit:  spoolSnapshot.FileLimit,
+			}
+		}
 		guestCapacity := adminapi.InspectionPluginGuestCapacity{}
 		guestCapacityState := "unavailable"
 		if s.deps.InspectionPluginGuestCapacity != nil {
@@ -53,12 +69,12 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 			}
 			guestCapacityState = "not_sampled"
 		}
-		out.Inspection = inspectionStatus(snapshot, guestCapacity, guestCapacityState)
+		out.Inspection = inspectionStatus(snapshot, spool, guestCapacity, guestCapacityState)
 	}
 	writeAPIJSON(w, http.StatusOK, out)
 }
 
-func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.InspectionPluginGuestCapacity, guestCapacityState string) *adminapi.InspectionStatus {
+func inspectionStatus(snapshot inspection.Snapshot, spool adminapi.InspectionSpoolStatus, guestCapacity adminapi.InspectionPluginGuestCapacity, guestCapacityState string) *adminapi.InspectionStatus {
 	limits := snapshot.Limits
 	var guestMaxBytes, guestLiveInstances, guestMaxInstances *uint64
 	if guestCapacityState != "unavailable" {
@@ -71,6 +87,8 @@ func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.Inspe
 			Mode:                     string(limits.Mode),
 			MaxBufferedBytes:         limits.MaxBytes,
 			MaxResponseHeaderBytes:   limits.MaxResponseHeaderBytes,
+			MaxSpoolBytes:            limits.MaxSpoolBytes,
+			MaxSpoolFiles:            limits.MaxSpoolFiles,
 			MaxConcurrentEvaluations: limits.ConfiguredEvaluationSlots,
 			EvaluationQueueTimeout:   limits.EvaluationQueueTimeout.String(),
 			BodyTimeout:              limits.BodyTimeout.String(),
@@ -79,6 +97,8 @@ func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.Inspe
 			Mode:                     string(limits.Mode),
 			MaxBufferedBytes:         limits.MaxBytes,
 			MaxResponseHeaderBytes:   limits.MaxResponseHeaderBytes,
+			MaxSpoolBytes:            limits.MaxSpoolBytes,
+			MaxSpoolFiles:            limits.MaxSpoolFiles,
 			MaxConcurrentEvaluations: limits.EvaluationSlots,
 			EvaluationQueueTimeout:   limits.EvaluationQueueTimeout.String(),
 			BodyTimeout:              limits.BodyTimeout.String(),
@@ -89,6 +109,7 @@ func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.Inspe
 			WAFStateBytes: snapshot.Usage[inspection.WAFStateBytes],
 			AuditBytes:    snapshot.Usage[inspection.AuditBytes],
 		},
+		Spool: spool,
 		AuditOutput: adminapi.InspectionAuditOutput{
 			InFlightCalls:  snapshot.AuditOutput.InFlight,
 			AbandonedCalls: snapshot.AuditOutput.Abandoned,

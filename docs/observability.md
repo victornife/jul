@@ -218,6 +218,9 @@ or actual-memory measurement. See the
 | `jul_inspection_guest_instances` | Gauge | `state` | Merged / release pending | Reservations by lifecycle state; `failed_retained` and `teardown_unconfirmed` remain charged. |
 | `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor; plugin chains and WAF paths acquire or reuse one per request. |
 | `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state, evaluation slots, audit and guest capacity. These count admission decisions, not unique rejected requests. |
+| `jul_inspection_spool_available` | Gauge | — | Merged / release pending | Whether this process has the Jul-owned Coraza temporary-file controller available; `0` means the WAF/spool runtime is absent. |
+| `jul_inspection_spool_bytes` | Gauge | `state` | Merged / release pending | Logical Coraza spool bytes in use, cleanup debt, cumulative observe-mode would-reject bytes, and configured limit. This is not a filesystem-wide or RSS limit. |
+| `jul_inspection_spool_files` | Gauge | `state` | Merged / release pending | Logical Coraza spool file count in use, cleanup debt, cumulative observe-mode would-reject creations, and configured limit. |
 | `jul_inspection_unslotted_logging_total` | Counter | — | Merged / release pending | Phase-5 logging evaluations that proceeded without a slot. |
 | `jul_listener_conns` | Gauge | — | Released `v1.32.0` | Current concurrent connections across all listeners. |
 | `jul_managed_apply_finalization_errors_total` | Counter | `component` | Released `v2.0.0` | Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded. |

@@ -416,6 +416,9 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 
 	makeCfg := func(wafMode string, wafEnabled bool) *config.Config {
 		return &config.Config{
+			Global: config.GlobalConfig{
+				Inspection: config.InspectionConfig{SpoolDir: factory.Spool.Root()},
+			},
 			WAF: config.WAFConfig{
 				Enabled:         wafEnabled,
 				Mode:            wafMode,
@@ -969,7 +972,7 @@ func TestWAFProgrammeIntegratedOperatorJourneyEpic629(t *testing.T) {
 		rec := httptest.NewRecorder()
 		hGen1.ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden {
-			t.Fatalf("Gen 1 bio POST status = %d, want 403", rec.Code)
+			t.Fatalf("Gen 1 bio POST status = %d, want 403 (body %q)", rec.Code, rec.Body.String())
 		}
 		supportEventID = rec.Header().Get(waf.HeaderWAFEvent)
 		if !strings.HasPrefix(supportEventID, "wev_") {

@@ -64,8 +64,9 @@ type HandlerFactory struct {
 	PoolReg          *upstream.Registry
 	PluginMgr        *plugins.Manager
 	GenRes           *GenerationResources
-	RT               *Runtime                // Tracer.Middleware, ACME
-	Inspection       *inspection.Governor    // process-owned; shared by the plugin and WAF request paths
+	RT               *Runtime             // Tracer.Middleware, ACME
+	Inspection       *inspection.Governor // process-owned; shared by the plugin and WAF request paths
+	Spool            *inspection.SpoolController
 	Versions         *versionid.Context      // private effective-version context (#649)
 	WAFInvestigation *waf.InvestigationStore // bounded WAF transaction investigation buffer (#632)
 
@@ -261,6 +262,17 @@ func (f *HandlerFactory) Build(ctx context.Context, c *config.Config, commit boo
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	if waf.Enabled(c) && f.Spool != nil && !f.Spool.MatchesRoot(c.Global.Inspection.SpoolDir) {
+		return nil, nil, fmt.Errorf("global.inspection.spool_dir is restart-bound; restart Jul to change it")
+	}
+	if f.Spool != nil {
+		if err := validateSpoolIsolation(c, f.Spool.Root()); err != nil {
+			return nil, nil, err
+		}
+	}
+	if waf.Enabled(c) && f.Inspection != nil && f.Spool == nil {
+		return nil, nil, fmt.Errorf("WAF enablement requires a process spool controller; restart with WAF enabled")
+	}
 	upstreams := IndexUpstreams(c.Upstreams)
 	candidateEgress, egressChanged, err := f.prepareEgress(c)
 	if err != nil {
@@ -784,6 +796,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 					Versions:      f.Versions,
 					Investigation: invStore,
 					Governor:      f.Inspection,
+					Spool:         f.Spool,
 				})
 				if err != nil {
 					return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)

@@ -62,9 +62,17 @@ func (s *stubSource) ReadRaw() ([]byte, error) {
 
 func (s *stubSource) Name() string { return "stub" }
 
+// serverTestGlobalConfig matches parser defaults for restart-bound fields.
+func serverTestGlobalConfig() config.GlobalConfig {
+	return config.GlobalConfig{
+		ShutdownTimeout: config.Duration(2 * time.Second),
+		Inspection:      config.InspectionConfig{SpoolDir: "./jul-data/inspection-spool"},
+	}
+}
+
 func cfgWith(addr string) *config.Config {
 	return &config.Config{
-		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Global: serverTestGlobalConfig(),
 		Servers: []config.ServerConfig{{
 			Listen:    addr,
 			Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}},

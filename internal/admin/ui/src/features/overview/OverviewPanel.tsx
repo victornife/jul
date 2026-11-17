@@ -1158,6 +1158,61 @@ export function OverviewPanel() {
                 <RuntimeResourcesSection stats={stats} history={history} />
                 <CapacitySection stats={stats} history={history} />
                 <StorageSection storage={stats.storage} hints={stats.storageHints} />
+                {stats.inspectionSpool && (
+                  <section
+                    className="rounded-lg border border-jul-border bg-jul-surface p-4"
+                    aria-labelledby="inspection-spool-heading"
+                  >
+                    <h3
+                      id="inspection-spool-heading"
+                      className="text-xs font-semibold uppercase tracking-wider text-jul-muted"
+                    >
+                      WAF temporary-file spool
+                    </h3>
+                    {stats.inspectionSpool.available ? (
+                      <>
+                        <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                          <div>
+                            <dt className="text-xs text-jul-muted">Logical byte reservations</dt>
+                            <dd className="mt-1 text-sm font-semibold text-jul-text">
+                              {formatBytes(stats.inspectionSpool.usedBytes)} reserved (
+                              {formatBytes(stats.inspectionSpool.cleanupDebtBytes)} cleanup debt)
+                              {" / "}
+                              {formatBytes(stats.inspectionSpool.byteLimit)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-jul-muted">Logical file reservations</dt>
+                            <dd className="mt-1 text-sm font-semibold text-jul-text">
+                              {stats.inspectionSpool.usedFiles.toLocaleString()} reserved (
+                              {stats.inspectionSpool.cleanupDebtFiles.toLocaleString()} cleanup
+                              debt) / {stats.inspectionSpool.fileLimit.toLocaleString()}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-jul-muted">Mode</dt>
+                            <dd className="mt-1 text-sm font-semibold capitalize text-jul-text">
+                              {stats.inspectionSpool.mode}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-jul-muted">Would reject</dt>
+                            <dd className="mt-1 text-sm font-semibold text-jul-text">
+                              {formatBytes(stats.inspectionSpool.wouldRejectBytes)} ·{" "}
+                              {stats.inspectionSpool.wouldRejectFiles.toLocaleString()} files
+                            </dd>
+                          </div>
+                        </dl>
+                        <p className="mt-2 text-xs text-jul-muted">
+                          Jul logical quotas and cleanup debt; not physical disk usage or a
+                          filesystem quota.
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-2 text-sm text-jul-muted">Not active in this runtime.</p>
+                    )}
+                  </section>
+                )}
                 {rawStats?.storage && rawStats.storage.length !== (stats.storage?.length ?? 0) && (
                   <p className="text-xs text-jul-muted">
                     Unrecognized storage categories are not shown.

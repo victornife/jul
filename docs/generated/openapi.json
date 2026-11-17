@@ -11469,6 +11469,14 @@
                     "type": "integer",
                     "format": "int64"
                   },
+                  "max_spool_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_spool_files": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
                   "mode": {
                     "type": "string"
                   }
@@ -11479,6 +11487,8 @@
                   "max_buffered_bytes",
                   "max_concurrent_evaluations",
                   "max_response_header_bytes",
+                  "max_spool_bytes",
+                  "max_spool_files",
                   "mode"
                 ],
                 "additionalProperties": false
@@ -11507,6 +11517,14 @@
                     "type": "integer",
                     "format": "int64"
                   },
+                  "max_spool_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "max_spool_files": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
                   "mode": {
                     "type": "string"
                   }
@@ -11517,6 +11535,8 @@
                   "max_buffered_bytes",
                   "max_concurrent_evaluations",
                   "max_response_header_bytes",
+                  "max_spool_bytes",
+                  "max_spool_files",
                   "mode"
                 ],
                 "additionalProperties": false
@@ -11549,6 +11569,62 @@
               },
               "request_path_integration": {
                 "type": "string"
+              },
+              "spool": {
+                "type": "object",
+                "properties": {
+                  "byte_limit": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "cleanup_debt_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "cleanup_debt_files": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "file_limit": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "mode": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "used_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "used_files": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "would_reject_bytes": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "would_reject_files": {
+                    "type": "integer",
+                    "format": "int64"
+                  }
+                },
+                "required": [
+                  "byte_limit",
+                  "cleanup_debt_bytes",
+                  "cleanup_debt_files",
+                  "file_limit",
+                  "mode",
+                  "state",
+                  "used_bytes",
+                  "used_files",
+                  "would_reject_bytes",
+                  "would_reject_files"
+                ],
+                "additionalProperties": false
               },
               "usage": {
                 "type": "object",
@@ -11595,6 +11671,7 @@
               "evaluation_headroom_estimate_state",
               "plugin_guest_actual_bytes_state",
               "request_path_integration",
+              "spool",
               "usage",
               "waiting_evaluations"
             ],

@@ -34,6 +34,7 @@ type InspectionStatus struct {
 	Configured                      InspectionConfiguredLimits `json:"configured"`
 	Effective                       InspectionEffectiveLimits  `json:"effective"`
 	Usage                           InspectionUsage            `json:"usage"`
+	Spool                           InspectionSpoolStatus      `json:"spool"`
 	AuditOutput                     InspectionAuditOutput      `json:"audit_output"`
 	ActiveLeases                    uint64                     `json:"active_leases"`
 	ActiveEvaluations               uint64                     `json:"active_evaluations"`
@@ -61,6 +62,8 @@ type InspectionConfiguredLimits struct {
 	Mode                     string `json:"mode"`
 	MaxBufferedBytes         uint64 `json:"max_buffered_bytes"`
 	MaxResponseHeaderBytes   uint64 `json:"max_response_header_bytes"`
+	MaxSpoolBytes            uint64 `json:"max_spool_bytes"`
+	MaxSpoolFiles            uint64 `json:"max_spool_files"`
 	MaxConcurrentEvaluations int    `json:"max_concurrent_evaluations"`
 	EvaluationQueueTimeout   string `json:"evaluation_queue_timeout"`
 	BodyTimeout              string `json:"body_timeout"`
@@ -70,9 +73,26 @@ type InspectionEffectiveLimits struct {
 	Mode                     string `json:"mode"`
 	MaxBufferedBytes         uint64 `json:"max_buffered_bytes"`
 	MaxResponseHeaderBytes   uint64 `json:"max_response_header_bytes"`
+	MaxSpoolBytes            uint64 `json:"max_spool_bytes"`
+	MaxSpoolFiles            uint64 `json:"max_spool_files"`
 	MaxConcurrentEvaluations int    `json:"max_concurrent_evaluations"`
 	EvaluationQueueTimeout   string `json:"evaluation_queue_timeout"`
 	BodyTimeout              string `json:"body_timeout"`
+}
+
+// InspectionSpoolStatus reports Jul's logical accounting for Coraza temporary
+// files. It does not represent filesystem capacity or physical disk usage.
+type InspectionSpoolStatus struct {
+	State      string `json:"state"`
+	Mode       string `json:"mode"`
+	UsedBytes  uint64 `json:"used_bytes"`
+	UsedFiles  uint64 `json:"used_files"`
+	DebtBytes  uint64 `json:"cleanup_debt_bytes"`
+	DebtFiles  uint64 `json:"cleanup_debt_files"`
+	WouldBytes uint64 `json:"would_reject_bytes"`
+	WouldFiles uint64 `json:"would_reject_files"`
+	ByteLimit  uint64 `json:"byte_limit"`
+	FileLimit  uint64 `json:"file_limit"`
 }
 
 type InspectionUsage struct {

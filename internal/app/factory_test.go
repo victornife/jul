@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/lifecycle"
 	"jul/internal/middleware"
 	"jul/internal/observability"
@@ -51,6 +52,17 @@ func minimalFactory(t *testing.T) (*HandlerFactory, func()) {
 	rt, err := RuntimeBuilder{Config: cfg, Logger: log, Metrics: metrics}.Build()
 	if err != nil {
 		t.Fatalf("RuntimeBuilder.Build: %v", err)
+	}
+	limits := rt.Inspection.Limits()
+	limits.SpoolDir = t.TempDir()
+	if err := rt.Inspection.PublishLimitsIfVersion(rt.Inspection.Snapshot().LimitsVersion, limits); err != nil {
+		rt.Close()
+		t.Fatalf("publish test spool limits: %v", err)
+	}
+	spool, err := inspection.NewSpoolController(rt.Inspection, limits.SpoolDir)
+	if err != nil {
+		rt.Close()
+		t.Fatalf("inspection.NewSpoolController: %v", err)
 	}
 
 	poolReg := upstream.NewRegistry(upstream.RegistryOptions{
@@ -79,12 +91,14 @@ func minimalFactory(t *testing.T) (*HandlerFactory, func()) {
 		PluginMgr:     pm,
 		GenRes:        genRes,
 		RT:            rt,
+		Spool:         spool,
 	}
 
 	cleanup := func() {
 		_ = pm.Close()
 		genRes.CloseLive()
 		poolReg.CloseAll()
+		_ = spool.Close()
 		rt.Close()
 	}
 	return f, cleanup
@@ -653,6 +667,7 @@ func TestFifth653DottedUpstreamAndMixedCORSRuntime(t *testing.T) {
 					})
 				}
 				return &config.Config{
+					Global:    config.GlobalConfig{Inspection: config.InspectionConfig{SpoolDir: "./jul-data/inspection-spool"}},
 					Upstreams: ups,
 					Servers: []config.ServerConfig{{
 						Listen: addr,
@@ -781,6 +796,7 @@ func TestFifth653DottedUpstreamAndMixedCORSRuntime(t *testing.T) {
 			routeID := "cors-api"
 			makeCfg := func(origins []string, creds bool) *config.Config {
 				return &config.Config{
+					Global: config.GlobalConfig{Inspection: config.InspectionConfig{SpoolDir: "./jul-data/inspection-spool"}},
 					Servers: []config.ServerConfig{{
 						Listen: addr,
 						Locations: []config.LocationConfig{{
@@ -979,6 +995,7 @@ func TestSixth653CertificateRotationMustRetire(t *testing.T) {
 		otherID := "other-api"
 		makeCfg := func(certPath, keyPath string, withdrawn bool) *config.Config {
 			return &config.Config{
+				Global: config.GlobalConfig{Inspection: config.InspectionConfig{SpoolDir: "./jul-data/inspection-spool"}},
 				Servers: []config.ServerConfig{
 					{
 						Listen:      addr,

@@ -990,20 +990,14 @@ func (p *plugin) resolveGuest(ticket *inspection.GuestTicket, teardownErr error)
 		return false, &inspection.AdmissionError{Outcome: inspection.InvalidAccounting}
 	}
 	owner.failed = errors.Join(owner.failed, teardownErr)
-	if owner.failed == nil {
-		// Wazero provides no join for its cancellation watcher; successful
-		// close is not proof that the module's memory is unreachable.
-		if err := ticket.Transition(inspection.GuestTeardownUnconfirmed); err != nil {
-			return false, err
-		}
-		owner.active = false
-		delete(p.guestTickets, ticket)
-		return true, nil
-	}
 	if err := ticket.ResolveTeardown(owner.failed); err != nil {
 		return false, err
 	}
 	owner.active = false
+	if owner.failed == nil {
+		delete(p.guestTickets, ticket)
+		return true, nil
+	}
 	return false, nil
 }
 
@@ -1068,8 +1062,7 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 	return &pooledModule{mod: mod, ticket: ticket}, nil, false
 }
 
-// discard closes an instance. A successful close frees its local slot, but
-// its process reservation remains charged because last-alias teardown is unknown.
+// discard closes an instance and releases its reservation only after teardown joins.
 func (p *plugin) discard(pm *pooledModule) {
 	if pm == nil {
 		return
@@ -1462,7 +1455,7 @@ drained:
 		} else {
 			if err := ticket.Transition(inspection.GuestClosing); err != nil {
 				errs = append(errs, err)
-			} else if err := ticket.Transition(inspection.GuestTeardownUnconfirmed); err != nil {
+			} else if err := ticket.ResolveTeardown(nil); err != nil {
 				errs = append(errs, err)
 			} else {
 				delete(p.guestTickets, ticket)

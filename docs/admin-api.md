@@ -230,7 +230,11 @@ Two fields exist for clients that poll or retry:
   the effective object reports its resolved count. Its
   `request_path_integration` is `partial`: plugin and WAF request/response
   paths acquire or reuse leases and account their supported buffers and WAF
-  state, but spool protection and integrated acceptance remain outstanding.
+  state. The `spool` object reports the WAF temporary-file controller's logical
+  usage, cleanup debt, observe-mode would-reject counters, and configured
+  byte/file ceilings; its `state` is `unavailable` when that controller is not
+  active. These quotas do not measure physical disk usage or impose a
+  filesystem quota, and integrated acceptance remains outstanding.
   Zero usage does not establish a whole-process memory bound.
   `base_charge_bytes` and `base_charge_scope` describe the measured
   governor/context scaffolding only. `configured.max_response_header_bytes`

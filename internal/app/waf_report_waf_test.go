@@ -258,6 +258,7 @@ func TestFactoryDuplicateMatchesKeepOwnWAF(t *testing.T) {
 			defer cleanup()
 			f.Inspection = f.RT.Inspection
 			cfg := config.ProxyTarget("127.0.0.1:9001", ":0")
+			cfg.Global.Inspection.SpoolDir = f.Spool.Root()
 			cfg.Servers[0].Locations = []config.LocationConfig{
 				{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusOK, WAF: tt.first},
 				{Match: config.MatchConfig{Type: "regex", Path: "^/private/"}, Return: http.StatusOK, WAF: tt.second},
@@ -280,6 +281,7 @@ func TestWAFPreparationErrorDoesNotExportMatcherFingerprint(t *testing.T) {
 	f, cleanup := minimalFactory(t)
 	defer cleanup()
 	cfg := wafFactoryConfig(filepath.Join(t.TempDir(), "missing-rules"))
+	cfg.Global.Inspection.SpoolDir = f.Spool.Root()
 	private := WAFScope(cfg.Servers[0], cfg.Servers[0].Locations[1])
 	_, done, err := f.Build(context.Background(), cfg, false)
 	if done != nil {
@@ -980,6 +982,7 @@ func TestWAFArgumentGuardAndResponseInspectionAcrossRoutes(t *testing.T) {
 	defer cleanup()
 	serve := func(cfg *config.Config) (http.Handler, func()) {
 		t.Helper()
+		cfg.Global.Inspection.SpoolDir = f.Spool.Root()
 		hMap, _, commit, _, err := f.Prepare(ctx, provisionedInspection(cfg))
 		if err != nil {
 			t.Fatalf("Prepare: %v", err)

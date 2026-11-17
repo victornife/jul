@@ -273,7 +273,7 @@ func TestHTTP3SharedConnStreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 
 	baseCfg := func() *config.Config {
 		return &config.Config{
-			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Global: serverTestGlobalConfig(),
 			Servers: []config.ServerConfig{
 				{
 					Name:        "portal",

@@ -11,11 +11,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
-- **Unmerged I2b prototype:** guest reservations are conservatively retained
-  for the process lifetime after teardown, including failed candidates, because
-  wazero exposes no watcher join. This avoids premature refunds but eventually
-  exhausts a finite enforce budget under instance churn. Omission is unbounded;
-  no finite default, original A20 acceptance or integrated acceptance is claimed.
+- **Unmerged I2b/I3b implementation:** the pinned wazero v1.12.0 replacement
+  joins its cancellation watcher before Jul releases guest capacity and cleans
+  resources after failed instantiation. The pinned Coraza v3.8.1 replacement
+  routes body spill and multipart files through Jul's transaction-owned provider
+  with process-wide logical byte/file quotas and retained cleanup debt. These
+  controls do not impose an OS filesystem quota or RSS bound; offline spool-lock
+  recovery is fail-closed and documented. A19/A20 and integrated A1–A22
+  qualification remain pending.
 - Plugin `memory_limit` values below one 64 KiB WebAssembly page are now
   rejected instead of silently selecting the 16 MiB default. Limits whose
   page-rounded value exceeds 4 GiB are also rejected before wazero can panic.

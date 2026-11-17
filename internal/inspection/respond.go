@@ -36,7 +36,8 @@ func IsOverload(err error) bool {
 	return IsOutcome(err, ByteSaturated) || IsOutcome(err, WAFStateSaturated) ||
 		IsOutcome(err, EvaluationSaturated) || IsOutcome(err, QueueExhausted) ||
 		IsOutcome(err, WaitExpired) || IsOutcome(err, AuditSaturated) ||
-		IsOutcome(err, GuestCapacitySaturated)
+		IsOutcome(err, GuestCapacitySaturated) || IsOutcome(err, SpoolBytesSaturated) ||
+		IsOutcome(err, SpoolFilesSaturated)
 }
 
 // IsGRPCRequest reports whether r is a native gRPC request over HTTP/2 or

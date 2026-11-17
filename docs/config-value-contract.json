@@ -707,6 +707,22 @@
       "active_when": "used by configuration validation and before WAF response-header inspection"
     },
     {
+      "go_field": "InspectionConfig.MaxSpoolBytes",
+      "path": "global.inspection.max_spool_bytes",
+      "kind": "size",
+      "constraint": "positive size",
+      "zero_semantics": "omitted defaults to 512 MiB; explicit zero is invalid",
+      "active_when": "bounds process-wide Coraza temporary-file writes in enforce mode and records would-reject usage in observe mode"
+    },
+    {
+      "go_field": "InspectionConfig.MaxSpoolFiles",
+      "path": "global.inspection.max_spool_files",
+      "kind": "integer",
+      "constraint": "0 or between 1 and 1048576",
+      "zero_semantics": "omitted/zero defaults to 1024",
+      "active_when": "bounds process-wide Coraza temporary-file creation in enforce mode and records would-reject usage in observe mode"
+    },
+    {
       "go_field": "InspectionConfig.Mode",
       "path": "global.inspection.mode",
       "kind": "enum",
@@ -717,6 +733,14 @@
         "enforce",
         "observe"
       ]
+    },
+    {
+      "go_field": "InspectionConfig.SpoolDir",
+      "path": "global.inspection.spool_dir",
+      "kind": "string",
+      "constraint": "non-empty path without leading or trailing whitespace",
+      "zero_semantics": "omitted/empty defaults to ./jul-data/inspection-spool",
+      "active_when": "restart-bound dedicated root for Coraza request-body spill and multipart temporary files"
     },
     {
       "go_field": "JWTAuthConfig.Timeout",

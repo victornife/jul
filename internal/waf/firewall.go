@@ -80,6 +80,9 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if opts.Governor != nil && opts.Spool == nil {
+		return nil, errors.New("waf: governed inspection requires the process spool controller")
+	}
 	directives, err := buildDirectives(cfg)
 	if err != nil {
 		return nil, err
@@ -107,6 +110,12 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err != nil {
 		return nil, fmt.Errorf("waf: compiling rules: %w", err)
 	}
+	if opts.Spool != nil {
+		if _, ok := w.(experimental.WAFWithOptions); !ok {
+			_ = closeWAF(w)
+			return nil, fmt.Errorf("waf: Coraza does not support per-transaction temporary-file providers")
+		}
+	}
 	if counter.collisionID != 0 {
 		_ = closeWAF(w)
 		return nil, fmt.Errorf("waf: compiling rules: external rule id %d collides with Jul reserved generated range (%d–%d)",
@@ -121,6 +130,10 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err != nil {
 		_ = closeWAF(w)
 		return nil, err
+	}
+	if opts.Spool != nil && state.uploadKeepFiles != types.UploadKeepFilesOff {
+		_ = closeWAF(w)
+		return nil, errors.New("waf: SecUploadKeepFiles must be Off when Jul spool ownership is enabled; retained uploads are unsupported")
 	}
 	for i, exc := range cfg.Exceptions {
 		if !activeRuleIDs[exc.RuleID] {
@@ -628,6 +641,7 @@ type engineState struct {
 	// that reaches the limit is refused without evaluating phase 2.
 	requestBodyLimitReject  bool
 	responseBodyLimitReject bool
+	uploadKeepFiles         types.UploadKeepFilesStatus
 }
 
 // compiledEngineState reads the authoritative compiled response-body and
@@ -650,11 +664,14 @@ func compiledEngineState(w coraza.WAF) (engineState, error) {
 	reqLimit := engine.FieldByName("RequestBodyLimit")
 	respLimit := engine.FieldByName("ResponseBodyLimit")
 	inMemory := engine.FieldByName("requestBodyInMemoryLimit")
+	uploadKeepFiles := engine.FieldByName("UploadKeepFiles")
 	if !reqLimit.IsValid() || reqLimit.Kind() != reflect.Int64 ||
 		!respLimit.IsValid() || respLimit.Kind() != reflect.Int64 ||
-		!inMemory.IsValid() || inMemory.Kind() != reflect.Pointer || inMemory.Type().Elem().Kind() != reflect.Int64 {
+		!inMemory.IsValid() || inMemory.Kind() != reflect.Pointer || inMemory.Type().Elem().Kind() != reflect.Int64 ||
+		!uploadKeepFiles.IsValid() || uploadKeepFiles.Type() != reflect.TypeOf(types.UploadKeepFilesOff) {
 		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing body-limit settings on %T", w)
 	}
+	st.uploadKeepFiles = types.UploadKeepFilesStatus(uploadKeepFiles.Int())
 	st.requestBodyLimit = reqLimit.Int()
 	action := engine.FieldByName("RequestBodyLimitAction")
 	responseAction := engine.FieldByName("ResponseBodyLimitAction")

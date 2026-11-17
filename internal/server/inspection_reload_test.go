@@ -361,6 +361,65 @@ func TestLimitsOnlyPublicationAvoidsHandlerRebuild(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	for _, tc := range []struct {
+		name   string
+		update func(*config.Config)
+		limit  func(inspection.Limits) uint64
+		want   uint64
+	}{
+		{
+			name: "spool bytes",
+			update: func(cfg *config.Config) {
+				cfg.Global.Inspection.MaxSpoolBytes = sizePtr(64 << 20)
+			},
+			limit: func(limits inspection.Limits) uint64 { return limits.MaxSpoolBytes },
+			want:  64 << 20,
+		},
+		{
+			name: "spool files",
+			update: func(cfg *config.Config) {
+				cfg.Global.Inspection.MaxSpoolFiles = 2048
+			},
+			limit: func(limits inspection.Limits) uint64 { return limits.MaxSpoolFiles },
+			want:  2048,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := srv.cfg.Clone()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.update(cfg)
+			candidate, err := config.NewCandidate(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := srv.newReloadPlan(context.Background(), candidate.Raw, candidate, nil)
+			for _, phase := range []func() error{plan.Resolve, plan.Validate, plan.Lifecycle, plan.AssessServingChange} {
+				if err := phase(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !plan.inspectionLimitsOnly {
+				t.Fatalf("assessment = %+v, want limits-only publication", plan.ServingChange)
+			}
+			generation := srv.LiveSnapshot().Generation
+			if err := plan.PublishInspectionLimitsOnly(); err != nil {
+				t.Fatal(err)
+			}
+			if got := tc.limit(governor.Limits()); got != tc.want {
+				t.Fatalf("published limit = %d, want %d", got, tc.want)
+			}
+			if got := srv.LiveSnapshot().Generation; got != generation {
+				t.Fatalf("serving generation = %d, want unchanged %d", got, generation)
+			}
+			if got := factoryCalls.Load(); got != 0 {
+				t.Fatalf("handler factory called %d times for limits-only publication", got)
+			}
+		})
+	}
+
+	effectiveVersionBeforeStale := srv.LiveSnapshot().EffectiveVersion
 	staleCfg, err := srv.cfg.Clone()
 	if err != nil {
 		t.Fatal(err)
@@ -405,7 +464,7 @@ func TestLimitsOnlyPublicationAvoidsHandlerRebuild(t *testing.T) {
 		t.Fatalf("stale limits-only publication = %v, want version conflict", err)
 	}
 	stalePlan.Abort()
-	if got := srv.LiveSnapshot().EffectiveVersion; got != srv.versions.Config(candidate.Effective) {
+	if got := srv.LiveSnapshot().EffectiveVersion; got != effectiveVersionBeforeStale {
 		t.Fatalf("stale publication changed effective config version to %s", got)
 	}
 	if got := governor.Limits().MaxGuestCapacityBytes; got != 128<<20 {

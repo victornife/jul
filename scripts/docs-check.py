@@ -1099,7 +1099,9 @@ def check_changelog_unreleased_categories():
 
 
 def main():
-    SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews"}
+    # Upstream source replacements carry documentation with links relative to
+    # their own module layout, not the repository's documentation tree.
+    SKIP_DIRS = {"node_modules", "vendor", ".git", "__pycache__", "reviews", "third_party"}
     md_files = [
         p for p in ROOT.rglob("*.md")
         if not any(part in SKIP_DIRS for part in p.parts)

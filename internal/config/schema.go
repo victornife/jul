@@ -335,6 +335,15 @@ type InspectionConfig struct {
 	// Mode is "enforce" (default) or "observe" for governor accounting on
 	// supported WAF and plugin paths.
 	Mode string `toml:"mode"`
+	// SpoolDir is the restart-bound directory for Coraza request-body spill
+	// and multipart temporary files. It defaults to ./jul-data/inspection-spool.
+	SpoolDir string `toml:"spool_dir,omitempty"`
+	// MaxSpoolBytes is the process-wide logical temporary-file byte quota.
+	// Zero applies a 512 MiB default.
+	MaxSpoolBytes *Size `toml:"max_spool_bytes,omitempty"`
+	// MaxSpoolFiles is the process-wide logical temporary-file count quota.
+	// Zero applies a 1024-file default.
+	MaxSpoolFiles int `toml:"max_spool_files,omitempty"`
 	// MaxBufferedBytes is the shared governor ceiling for base, buffer and
 	// estimated WAF state and audit; plugin and WAF paths consume it. It must
 	// be positive, and in enforce mode at least the largest inspected route's

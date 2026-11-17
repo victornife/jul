@@ -116,7 +116,7 @@
     },
     {
       "name": "inspection",
-      "description": "Process-wide inspection-governor limits and accounting; request-path enforcement is pending."
+      "description": "Process-wide inspection-governor limits and accounting, including Jul-owned Coraza temporary-file storage."
     },
     {
       "name": "listener",
@@ -260,15 +260,15 @@
     }
   ],
   "counts": {
-    "schema_paths": 470,
-    "schema_leaves": 399,
-    "registry_entries": 399,
-    "startup_consumed": 29,
+    "schema_paths": 473,
+    "schema_leaves": 402,
+    "registry_entries": 402,
+    "startup_consumed": 30,
     "by_class": {
-      "hot_reload": 356,
+      "hot_reload": 358,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
-      "restart_required": 29,
+      "restart_required": 30,
       "validation_rejected_reserved": 3
     }
   },
@@ -1406,11 +1406,50 @@
       "secret_digested": false
     },
     {
+      "path": "global.inspection.max_spool_bytes",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "the process-owned spool controller reads the newly published logical byte quota for each reservation; outstanding file usage and cleanup debt persist",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.max_spool_files",
+      "class": "hot_reload",
+      "subsystem": "inspection",
+      "reason": "the process-owned spool controller reads the newly published logical file quota for each creation; outstanding file usage and cleanup debt persist",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
       "path": "global.inspection.mode",
       "class": "hot_reload",
       "subsystem": "inspection",
       "reason": "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads.",
       "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "global.inspection.spool_dir",
+      "class": "restart_required",
+      "subsystem": "inspection",
+      "reason": "the dedicated Coraza temporary-file root is identity-checked, exclusively locked and recovered at startup; moving it requires an offline migration and restart",
+      "startup_consumed": true,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,

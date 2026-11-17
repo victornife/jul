@@ -272,17 +272,16 @@ func TestGuestCapacityEnforceTracksReuseAndCleansFailedCandidate(t *testing.T) {
 	if !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
 		t.Fatalf("candidate build error = %v, want guest-capacity refusal", err)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
-		got.Instances[inspection.GuestIdle] != 1 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
-		t.Fatalf("failed candidate debt = %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestIdle] != 1 {
+		t.Fatalf("failed candidate cleanup = %+v", got)
 	}
 
 	if err := old.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
-		got.Instances[inspection.GuestTeardownUnconfirmed] != 2 {
-		t.Fatalf("retired generation debt = %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("retired generation capacity = %+v", got)
 	}
 }
 
@@ -412,7 +411,7 @@ func TestGuestCapacityObserveAllowsAndCountsOverLimitGenerations(t *testing.T) {
 	}
 }
 
-func TestGuestRetirementDebtAdmissionAndLimitIncrease(t *testing.T) {
+func TestGuestRetirementReleasesCapacityAfterTeardown(t *testing.T) {
 	for _, mode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
 		t.Run(string(mode), func(t *testing.T) {
 			limits := testLimits()
@@ -430,33 +429,22 @@ func TestGuestRetirementDebtAdmissionAndLimitIncrease(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidate, err := m.Build(context.Background(), cfg)
-			if mode == inspection.Enforce {
-				if !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) || candidate != nil {
-					t.Fatalf("admission with debt = %v, %v", candidate, err)
-				}
-				limits.MaxGuestCapacityBytes = 32 << 20
-				if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, limits); err != nil {
-					t.Fatal(err)
-				}
-				candidate, err = m.Build(context.Background(), cfg)
-			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
-				got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || got.Instances[inspection.GuestIdle] != 1 {
-				t.Fatalf("debt plus candidate = %+v", got)
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+				got.Instances[inspection.GuestIdle] != 1 {
+				t.Fatalf("candidate after teardown = %+v", got)
 			}
 			rejections, _ := recorder.snapshot()
-			if got := rejections["guest_capacity/"+string(mode)]; got != 1 {
-				t.Fatalf("saturation decisions = %d, want 1", got)
+			if got := rejections["guest_capacity/"+string(mode)]; got != 0 {
+				t.Fatalf("saturation decisions = %d, want 0", got)
 			}
 			if err := candidate.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
-				got.Instances[inspection.GuestTeardownUnconfirmed] != 2 {
-				t.Fatalf("candidate retirement debt = %+v", got)
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+				t.Fatalf("candidate retirement capacity = %+v", got)
 			}
 		})
 	}
@@ -477,26 +465,22 @@ func TestFailedGuestCandidateDebtRespectsModes(t *testing.T) {
 			if set, err := m.Build(context.Background(), cfg); err == nil || set != nil {
 				t.Fatalf("trapping candidate = %v, %v", set, err)
 			}
-			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
-				t.Fatalf("trapping candidate debt = %+v", got)
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+				t.Fatalf("trapping candidate cleanup = %+v", got)
 			}
 			set, err := m.Build(context.Background(), cfg)
 			if set != nil || err == nil {
 				t.Fatalf("second trapping candidate = %v, %v", set, err)
 			}
-			if saturated := inspection.IsOutcome(err, inspection.GuestCapacitySaturated); saturated != (mode == inspection.Enforce) {
-				t.Fatalf("second candidate saturation = %t: %v", saturated, err)
+			if inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
+				t.Fatalf("second candidate unexpectedly saturated: %v", err)
 			}
-			want := uint64(64 << 10)
-			if mode == inspection.Observe {
-				want *= 2
-			}
-			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != want {
-				t.Fatalf("repeated candidate debt = %+v, want %d", got, want)
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+				t.Fatalf("repeated candidate cleanup = %+v", got)
 			}
 			rejections, _ := recorder.snapshot()
-			if got := rejections["guest_capacity/"+string(mode)]; got != 1 {
-				t.Fatalf("saturation decisions = %d, want 1", got)
+			if got := rejections["guest_capacity/"+string(mode)]; got != 0 {
+				t.Fatalf("saturation decisions = %d, want 0", got)
 			}
 		})
 	}
@@ -712,8 +696,8 @@ func TestGuestCapacityRemainsChargedDuringPoolHandoff(t *testing.T) {
 	if !inspection.IsOutcome(admissionErr, inspection.GuestCapacitySaturated) {
 		t.Errorf("candidate admission during pool handoff = %v, want guest-capacity refusal", admissionErr)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
-		t.Errorf("completed pool handoff lost debt: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("completed pool handoff retained capacity: %+v", got)
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after pool handoff: %v", err)
@@ -744,8 +728,8 @@ func TestGuestRetirementClearsReleasedModuleAlias(t *testing.T) {
 		t.Fatalf("released wrapper still retained %d bytes",
 			pm.mod.Memory().Size())
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
-		t.Errorf("retired guest debt = %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("retired guest capacity = %+v", got)
 	}
 }
 
@@ -800,8 +784,8 @@ func TestGuestRetirementWakesCapacityWaiters(t *testing.T) {
 		t.Errorf("retirement refunded the busy guest: %+v", got)
 	}
 	releaseOnce.Do(func() { p.release(pm) })
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
-		t.Errorf("guest release after retirement lost debt: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("guest release after retirement retained capacity: %+v", got)
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after guest release: %v", err)
@@ -896,8 +880,8 @@ func TestGuestCapacityRemainsChargedWhileClosedCallIsRunning(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("guest call did not finish")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 {
-		t.Errorf("completed guest call lost debt: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("completed guest call retained capacity: %+v", got)
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after guest finished: %v", err)
@@ -969,8 +953,8 @@ func TestGuestStartupDoesNotInheritRetainingAllocator(t *testing.T) {
 	if used.Load() || mem.buffer != nil {
 		t.Fatal("guest startup inherited an allocator that could retain guest memory")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
-		t.Fatalf("failed startup debt/slots: %+v, slots=%d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Fatalf("failed startup capacity/slots: %+v, slots=%d", got, len(p.slots))
 	}
 }
 
@@ -1006,8 +990,8 @@ func TestGuestStartupRejectsModuleClosedByInitialize(t *testing.T) {
 	if _, err := p.acquire(ctx); err == nil {
 		t.Fatal("initialization returned a closed module as usable")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
-		t.Fatalf("closed initialization debt/slots: %+v, slots=%d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Fatalf("closed initialization capacity/slots: %+v, slots=%d", got, len(p.slots))
 	}
 }
 
@@ -1094,8 +1078,8 @@ func TestGuestCapacityRemainsChargedDuringRetiredStartup(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("retired guest startup did not finish")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
-		t.Errorf("retired startup debt/slots: %+v, slots=%d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Errorf("retired startup capacity/slots: %+v, slots=%d", got, len(p.slots))
 	}
 	if err := m.Close(); err != nil {
 		t.Errorf("manager close after startup finished: %v", err)
@@ -1197,12 +1181,12 @@ func TestGuestCapacityRetainsFailedInstantiationWithoutModule(t *testing.T) {
 		t.Fatalf("failed start = (%v, slot retained=%t), want error and reusable slot", err, retained)
 	}
 	got := g.Snapshot().GuestCapacity
-	if got.ReservedBytes != 64<<10 || got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 1 {
-		t.Errorf("unreturned start module was not retained: capacity=%+v slots=%d", got, len(p.slots))
+	if got.ReservedBytes != 0 || len(p.slots) != 1 {
+		t.Errorf("failed start cleanup did not release capacity: capacity=%+v slots=%d", got, len(p.slots))
 	}
 }
 
-func TestGuestCancellationRetainsDebtAndRefusesReplacement(t *testing.T) {
+func TestGuestCancellationJoinsTeardownBeforeReplacement(t *testing.T) {
 	ctx := context.Background()
 	rt := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().WithCloseOnContextDone(true).WithMemoryLimitPages(2))
 	t.Cleanup(func() { _ = rt.Close(ctx) })
@@ -1256,12 +1240,53 @@ func TestGuestCancellationRetainsDebtAndRefusesReplacement(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("guest call did not stop after cancellation")
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 128<<10 ||
-		got.Instances[inspection.GuestTeardownUnconfirmed] != 1 || len(p.slots) != 0 {
-		t.Fatalf("cancelled call debt/slots = %+v, %d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Fatalf("cancelled call capacity/slots = %+v, %d", got, len(p.slots))
 	}
-	if _, err := p.acquire(ctx); !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
-		t.Fatalf("replacement after cancellation = %v, want saturation", err)
+	pm, err := p.acquire(ctx)
+	if err != nil {
+		t.Fatalf("replacement after cancellation = %v", err)
+	}
+	p.release(pm)
+	if err := p.close(); err != nil {
+		t.Fatalf("close after replacement = %v", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("replacement teardown retained capacity: %+v", got)
+	}
+}
+
+func TestGuestCapacityRecyclesAcross100KInvocations(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 256 << 20
+	m, _, g, _ := govManager(t, limits)
+	guest := hostGuest{abi: ABIJulV2, body: []byte{0x41, 0x01}}
+	set := buildSet(t, m, map[string]config.PluginConfig{
+		"guest": guest.config(func(pc *config.PluginConfig) {
+			pc.MemoryLimit = config.Size(16 << 20)
+			pc.MaxInvocations = 1000
+		}),
+	})
+	p := set.plugins["guest"]
+	call := func(i int) {
+		result, _, outcome, err := p.call(context.Background(), exportHandleRequest, &invocation{},
+			func(v uint32) bool { return v == actionContinue })
+		if err != nil || outcome != callOK || result != actionContinue {
+			t.Fatalf("invocation %d = (%d, %d, %v), want a successful recycled call", i, result, outcome, err)
+		}
+	}
+	for i := 0; i < 100_000; i++ {
+		call(i)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("100,000 recycled invocations retained guest capacity: %+v", got)
+	}
+	p.maxInstanceInvocations = 1
+	for i := 0; i < 1000; i++ {
+		call(100_000 + i)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("accelerated recycling retained guest capacity: %+v", got)
 	}
 }
 
