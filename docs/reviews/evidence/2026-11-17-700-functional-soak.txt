@@ -1,0 +1,5 @@
+=== RUN   TestInspectionCombinedSoak
+    inspection_combined_soak_test.go:339: duration=30m0.036741542s reloads=60 max_generation_good=719 good=43203 (get=14401 form=14401 multipart=14401) goodput=24.00/s rejected=14400 origin=43203 blocked_origin=0
+--- PASS: TestInspectionCombinedSoak (1800.40s)
+PASS
+ok  	jul/internal/app	1801.530s

@@ -34,7 +34,7 @@ merge, issue closure or release has occurred.
 | --- | --- |
 | #711 / original A20 | Managed logical capacity is implemented in the draft; original A20 is deferred, not passed. |
 | #713 / original A19 | Public-result failure guard is the reduced scope; original A19 is deferred, not passed. |
-| #712 / A22 | Real implemented status and permission-safe shared projections are being integrated; UI/API/CLI agreement and qualification are pending. |
+| #712 / A22 | Real API/CLI/Console agreement has focused coverage; full qualification remains pending. |
 | #700 | Revised scope only; A1–A18/A21/A22 qualification and integrated acceptance remain pending. |
 
 The reduced-scope recovery changes are implemented in the recovery branch.
@@ -49,6 +49,7 @@ specified; hosted checks for subsequent changes must be re-run:
 | Corrective follow-up Go coverage | Hosted `7f6628c2` HR-05 scored 508/548 added statements (92.7007%); the corrective diff scores 54/58 statements (93.10%) locally across inspection, plugins and observability. |
 | `go test -race -count=1 ./internal/inspection -run '^TestFailedGuestTeardown'` | Passed; covers the failure threshold, observe/unlimited admission, retained-closing transition and previously admitted failures above the threshold. |
 | `JUL_INSPECTION_SOAK_DURATION=5s go test -race -tags 'soak waf wasmplugins' -run '^TestInspectionCombinedSoak$' -count=1 -timeout=120s -v ./internal/app` | Passed as a functional preflight. The combined 30-minute run and Linux envelope qualification must be reported separately. |
+| `JUL_INSPECTION_SOAK_DURATION=30m GOMAXPROCS=2 go test -tags 'soak waf wasmplugins' -run '^TestInspectionCombinedSoak$' -count=1 -timeout=40m -v ./internal/app` | Passed on macOS/arm64, Go 1.27.4, source `86968176c476084bcec5da6133c345a293c5f098`: 30m0.0367s, 60 reloads, 43,203 successful requests (14,401 each GET/form/multipart), 14,400 expected denials and zero blocked requests at origin. Maximum successful requests per generation was 719, demonstrating recycling; managed counters drained at shutdown. |
 | Guest-refund and body-failure mutations | Both were detected by focused tests using temporary Go overlays. Removing the body-failure check forwarded the reproduced multipart request to the origin, demonstrating that the guard regression is effective. |
 | `go test -race -tags wasmplugins ./internal/plugins -run '^TestGuestAccounting(ResolutionPaths\|RejectsInvalidOwnershipTransitions)$' -count=1` | Passed; covers valid resolution, retained teardown, missing ownership and invalid lifecycle transitions. |
 | `corepack pnpm test:coverage`; `corepack pnpm typecheck`; `corepack pnpm lint` | Passed: 1,087 UI tests; changed production TS/TSX executable-line coverage is 95/100 (95%). |
@@ -63,14 +64,22 @@ recovery below the 64-ticket threshold, reports its mode-independent refusal,
 and documents the restart boundary and admitted-work overshoot. Its final
 accounting re-review found no blocking defect.
 
-The published head's Console audit failed on the unchanged UI lockfile's
+The [functional soak output](evidence/2026-11-17-700-functional-soak.txt) has
+SHA-256 `03e0accc72b7b6cf7550a96b442332ffea954a25844eb2a036b6e4604e4b9bee`.
+Its configuration and guest fixture are constructed by the source test; the
+ephemeral Go test binary was not retained or hashed. Wazero v1.12.0 and Coraza
+v3.8.1 were unmodified. Later head `adae382e72bd9d3ad956c626496d23dce649f372`
+changes only the browser test and this ledger, not production code. The run is
+functional evidence, not Linux memory or throughput qualification.
+
+Head `adae382e` had 63 successful hosted checks, two skips and one failure;
+the coverage gate passed and Codecov reported 99.06% patch coverage. Its
+Console audit failed on the unchanged UI lockfile's
 transitive `picomatch@4.0.7` (GHSA-fc5q-39xc-vjpf). The advisory lists `4.0.8`
 as patched, but that version is not available from the public npm registry; no
 audit suppression or local third-party patch was added. This dependency remains
-unchanged in the follow-up. A combined functional soak fixture is now available
-in the [assessment commands](../../scripts/inspection-assessment/README.md#combined-functional-soak);
-its sustained result must be recorded separately and does not qualify the
-Linux envelope. Linux/cgroup qualification remains unrun because this host is
+unchanged in the follow-up. The [assessment commands](../../scripts/inspection-assessment/README.md#combined-functional-soak)
+describe how to reproduce the soak. Linux/cgroup qualification remains unrun because this host is
 macOS and its Docker daemon is unavailable. The integrated A1–A22 campaign
 also remains outstanding. Do not claim
 original A19/A20 completion or close #700/#711/#713/#712 based on these checks;
