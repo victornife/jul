@@ -11,14 +11,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
-- **Unmerged I2b/I3b implementation:** the pinned wazero v1.12.0 replacement
-  joins its cancellation watcher before Jul releases guest capacity and cleans
-  resources after failed instantiation. The pinned Coraza v3.8.1 replacement
-  routes body spill and multipart files through Jul's transaction-owned provider
-  with process-wide logical byte/file quotas and retained cleanup debt. These
-  controls do not impose an OS filesystem quota or RSS bound; offline spool-lock
-  recovery is fail-closed and documented. A19/A20 and integrated A1–A22
-  qualification remain pending.
+- **Unmerged inspection recovery:** Jul uses stock wazero and Coraza. Managed
+  guest instances reserve logical page-rounded capacity; this is not an RSS
+  bound or proof that engine references have been released. At 64 unresolved
+  guest teardown tickets, new reservations are refused in all modes. Jul also
+  rejects detected request-body processing failures before origin dispatch,
+  including in detect/observe mode. Coraza's hidden or late I/O failures and
+  aggregate temporary-file usage remain outside these controls. Original
+  A19/A20 and integrated A1–A22 qualification remain pending.
 - Plugin `memory_limit` values below one 64 KiB WebAssembly page are now
   rejected instead of silently selecting the 16 MiB default. Limits whose
   page-rounded value exceeds 4 GiB are also rejected before wazero can panic.

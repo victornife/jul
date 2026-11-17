@@ -65,8 +65,17 @@ reservation for Jul-managed instances, not a physical-memory recommendation.
 Each instance reserves its page-rounded configured ceiling before startup.
 Normal successful teardown releases the logical ticket only after managed
 calls/callbacks return, required stock close operations succeed and Jul drops
-its aliases. Cancellation remains enabled. Unmodified Wazero may retain
-references asynchronously after that boundary; Jul cannot prove the original
+its aliases. A module close failure retains its reservation and local instance
+slot until successful runtime cleanup; a runtime close failure cannot be
+retried safely and remains charged and visible until process restart. At 64
+guest tickets with unresolved teardown,
+new guest reservations are refused even in observe mode or with an unlimited
+programmatic limit, including candidate prewarming; existing idle guests can
+still be reused. Work already admitted can also fail during teardown, so the
+number of retained tickets can exceed 64. If it cannot drain below 64, a
+restart is required before new instances or candidates can start.
+Cancellation remains enabled. Unmodified Wazero may retain references
+asynchronously after that boundary; Jul cannot prove the original
 last-alias release or a fixed reclamation time. The engine tail is outside the
 logical guarantee and is not a fixed extra bound. Process/container memory
 limits are a separate external safeguard and may terminate the process.
@@ -1944,6 +1953,10 @@ The review also required these contracts to be settled in the ADR. This revision
 
 ## Accepted bounded execution amendment — 2026-11-17
 
+**Superseded:** the recovery amendment at the start of this ADR withdraws the
+dependency patches and strict spool/last-alias implementation described below.
+This section is retained as historical design evidence.
+
 The maintainer authorized implementation of the bounded approach in the #700 completion prompt.
 This amendment changes the integration boundary and clarifies the physical-resource limits; it
 does not claim that any implementation or A1–A22 criterion has passed.
@@ -1983,14 +1996,14 @@ does not claim that any implementation or A1–A22 criterion has passed.
   They do not waive logical quota admission, fail-closed handling of errors detectable before
   dispatch, truthful cleanup debt, same-identity recovery or the focused and integrated tests.
 
-## Current implementation status — 2026-11-17
+## Historical implementation status — 2026-11-17 (superseded)
 
-The current draft follows the accepted amendment: pinned local Coraza and Wazero patches expose the
-two required lifecycle seams, while Jul retains policy, quotas, admission, failure mapping and
-operability. The draft includes transaction-owned spool files for body spill and multipart, a
+The earlier fork-dependent draft followed the then-accepted amendment: pinned local Coraza and Wazero patches exposed the
+two required lifecycle seams, while Jul retained policy, quotas, admission, failure mapping and
+operability. That draft included transaction-owned spool files for body spill and multipart, a
 process-wide logical byte/file controller, watcher-joined guest refunds, and cleanup after failed
-instantiation. The spool quota fields can be published as limits-only changes without rebuilding
-the serving generation; `spool_dir` remains restart-bound.
+instantiation. Its spool quota fields could be published as limits-only changes without rebuilding
+the serving generation; `spool_dir` was restart-bound.
 
 The focused reload regression, `make security-gates`, and full-tag repository test suite pass after
 test fixtures were aligned with the restart-bound spool-root default. This is implementation

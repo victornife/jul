@@ -5,6 +5,7 @@ package inspection
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -161,6 +162,95 @@ func TestGuestResolveTeardownRejectsPrematureResolution(t *testing.T) {
 				t.Errorf("admission after premature teardown = %v, want saturation", err)
 			}
 		})
+	}
+}
+
+func TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved(t *testing.T) {
+	for _, mode := range []Mode{Enforce, Observe} {
+		for _, cap := range []uint64{0, 1000} {
+			t.Run(string(mode)+"/"+fmt.Sprint(cap), func(t *testing.T) {
+				limits := testLimits(mode, 1, 0, 100, 1)
+				limits.MaxGuestCapacityBytes = cap
+				var decisions []Mode
+				g := newTestGovernor(t, limits, Hooks{OnRejection: func(reason Outcome, mode Mode) {
+					if reason == GuestCapacitySaturated {
+						decisions = append(decisions, mode)
+					}
+				}})
+				tickets := make([]*GuestTicket, 0, maxRetainedGuestFailures)
+				for i := 0; i < maxRetainedGuestFailures; i++ {
+					ticket, err := g.ReserveGuestCapacity(1, 10)
+					if err != nil {
+						t.Fatalf("admission with %d failed teardowns: %v", i, err)
+					}
+					if err := ticket.Transition(GuestClosing); err != nil {
+						t.Fatal(err)
+					}
+					if err := ticket.ResolveTeardown(errors.New("close failed")); err != nil {
+						t.Fatal(err)
+					}
+					tickets = append(tickets, ticket)
+				}
+				for i := 0; i < 2; i++ {
+					if _, err := g.ReserveGuestCapacity(2, 10); !IsOutcome(err, GuestCapacitySaturated) {
+						t.Fatalf("admission after failed teardown = %v, want refusal", err)
+					}
+				}
+				ticket := tickets[len(tickets)-1]
+				if err := ticket.Transition(GuestClosing); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := g.ReserveGuestCapacity(2, 10); !IsOutcome(err, GuestCapacitySaturated) {
+					t.Fatalf("admission during teardown resolution = %v, want refusal", err)
+				}
+				if len(decisions) != 3 || decisions[0] != Enforce || decisions[1] != Enforce || decisions[2] != Enforce {
+					t.Fatalf("teardown refusal decisions = %v, want enforced decisions", decisions)
+				}
+				if got := g.Snapshot().Rejections[RejectGuestCapacity]; got != [2]uint64{3, 0} {
+					t.Fatalf("teardown refusal counters = %v, want enforced decisions", got)
+				}
+				if err := ticket.ResolveTeardown(nil); err != nil {
+					t.Fatal(err)
+				}
+				next, err := g.ReserveGuestCapacity(2, 10)
+				if err != nil {
+					t.Fatalf("admission after successful teardown: %v", err)
+				}
+				if err := next.Transition(GuestClosing); err != nil {
+					t.Fatal(err)
+				}
+				if err := next.ResolveTeardown(nil); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+func TestFailedGuestTeardownsCanExceedBoundForAdmittedWork(t *testing.T) {
+	limits := testLimits(Observe, 1, 0, 100, 1)
+	g := newTestGovernor(t, limits, Hooks{})
+	tickets := make([]*GuestTicket, 0, maxRetainedGuestFailures+1)
+	for i := 0; i <= maxRetainedGuestFailures; i++ {
+		ticket, err := g.ReserveGuestCapacity(1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tickets = append(tickets, ticket)
+	}
+	for _, ticket := range tickets {
+		if err := ticket.Transition(GuestClosing); err != nil {
+			t.Fatal(err)
+		}
+		if err := ticket.ResolveTeardown(errors.New("close failed")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := g.Snapshot().GuestCapacity.Instances[GuestFailedRetained]; got != maxRetainedGuestFailures+1 {
+		t.Fatalf("retained tickets = %d, want all previously admitted failures", got)
+	}
+	if _, err := g.ReserveGuestCapacity(2, 1); !IsOutcome(err, GuestCapacitySaturated) {
+		t.Fatalf("admission after failed teardowns = %v, want refusal", err)
 	}
 }
 

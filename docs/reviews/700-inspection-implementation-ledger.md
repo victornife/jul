@@ -8,11 +8,15 @@ qualification, soak or maturity change.
 
 ## Current recovery status — 2026-11-17
 
-The reduced-scope recovery implementation is committed and published on draft
-#721; #724 remains a separate partial draft. The published head `9c256c02`
-failed the hosted HR-05 coverage gate at 88.1041%; the recovery follow-up adds
-focused guest-accounting regressions and reaches 90.1487% locally with the
-CI-equivalent lean/full profiles. Hosted validation of the follow-up is pending.
+The reduced-scope recovery implementation is published on draft #721; #724
+remains a separate partial draft. Published head `8e151dff` passed hosted HR-05
+at 493/538 statements (91.6357%) and Codecov patch coverage at 99.06%. Its
+Console audit failed on the upstream dependency advisory described below.
+A corrective follow-up retains guest capacity on real close failures and
+refuses new guest reservations at 64 unresolved guest tickets in every mode;
+already-admitted work may add further failed tickets. Candidate prewarming
+shares that safety boundary. Terminal runtime failures require a process
+restart if the count cannot drain below the boundary.
 The 2026-11-17 amendment in
 [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md) governs this
 scope; earlier fork-dependent plans and checks below are historical only. No
@@ -34,19 +38,30 @@ merge, issue closure or release has occurred.
 | #700 | Revised scope only; A1–A18/A21/A22 qualification and integrated acceptance remain pending. |
 
 The reduced-scope recovery changes are implemented in the recovery branch.
-Local checks for the follow-up pass; hosted checks remain pending:
+The following checks describe the published recovery head unless otherwise
+specified; hosted checks for subsequent changes must be re-run:
 
 | Verification | Result |
 | --- | --- |
-| `make ci-pr` | Passed with CI-pinned `golangci-lint` 2.14.0, `govulncheck` 1.6.0 and `addlicense` 1.2.0; includes full-tag lint/tests/build, security gates, `go vet`, generated/config checks and 2,726 documentation checks. |
-| `go test -race -count=1 -p 2 -tags 'wasmplugins waf' ./internal/inspection ./internal/plugins ./internal/waf ./internal/server` | Passed. Includes the 100,000-call guest recycling regression and reload/WAF interactions. |
-| HR-05 CI-equivalent lean/full added-Go coverage | Passed locally after the follow-up tests: 485/538 statements (90.1487%); the previous published head scored 474/538 (88.1041%). |
+| `PATH="$HOME/go/bin:$PATH" make ci-pr` | Passed on the corrective production code with CI-pinned tools; includes full-tag lint/tests/build, security gates, `go vet`, generated/config checks and 2,726 documentation checks. The subsequent admitted-work overshoot test and documentation edits were verified separately. |
+| `go test -race -count=1 -p 2 -tags 'wasmplugins waf' ./internal/inspection ./internal/plugins ./internal/waf ./internal/server` | Passed on the corrective follow-up. Includes the 101,000-call guest recycling regression and reload/WAF interactions. |
+| HR-05 CI-equivalent lean/full added-Go coverage | Hosted `8e151dff`: 493/538 statements (91.6357%). The preceding published head scored 474/538 (88.1041%). |
+| Corrective follow-up Go coverage | HR-05 package profiles score 508/548 added statements (92.70%) locally against `origin/main`; the corrective diff scores 54/58 statements (93.10%) across inspection, plugins and observability. Hosted coverage remains to be verified on the follow-up head. |
+| `go test -race -count=1 ./internal/inspection -run '^TestFailedGuestTeardown'` | Passed; covers the failure threshold, observe/unlimited admission, retained-closing transition and previously admitted failures above the threshold. |
+| Guest-refund and body-failure mutations | Both were detected by focused tests using temporary Go overlays. Removing the body-failure check forwarded the reproduced multipart request to the origin, demonstrating that the guard regression is effective. |
 | `go test -race -tags wasmplugins ./internal/plugins -run '^TestGuestAccounting(ResolutionPaths\|RejectsInvalidOwnershipTransitions)$' -count=1` | Passed; covers valid resolution, retained teardown, missing ownership and invalid lifecycle transitions. |
 | `corepack pnpm test:coverage`; `corepack pnpm typecheck`; `corepack pnpm lint` | Passed: 1,087 UI tests; changed production TS/TSX executable-line coverage is 95/100 (95%). |
 | `corepack pnpm e2e e2e/real-server.spec.ts` | Passed: 32 tests. |
 | `python3 scripts/check-d11-certification.py` | Passed: 0 errors. |
 
-The previous hosted head's Console audit failed on the unchanged UI lockfile's
+The focused adversarial review identified unbounded retained owners in
+observe/unlimited configurations and an overly aggressive admission gate that
+could prevent recovery after a single failure. The corrective gate allows
+recovery below the 64-ticket threshold, reports its mode-independent refusal,
+and documents the restart boundary and admitted-work overshoot. Its final
+accounting re-review found no blocking defect.
+
+The published head's Console audit failed on the unchanged UI lockfile's
 transitive `picomatch@4.0.7` (GHSA-fc5q-39xc-vjpf). The advisory lists `4.0.8`
 as patched, but that version is not available from the public npm registry; no
 audit suppression or local third-party patch was added. This dependency remains

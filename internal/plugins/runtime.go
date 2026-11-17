@@ -410,7 +410,8 @@ func (m *Manager) kvLedgerFor(name string) *kvLedger {
 }
 
 // Close tears down retained plugins before releasing the shared compilation
-// cache. A failed runtime close cannot be retried safely by wazero.
+// cache. A failed runtime close cannot be retried safely by wazero, so the
+// cache remains owned while a failed runtime still holds reservations.
 func (m *Manager) Close() error {
 	if m == nil {
 		return nil
@@ -1001,12 +1002,14 @@ func (p *plugin) resolveGuest(ticket *inspection.GuestTicket, teardownErr error)
 	return false, nil
 }
 
-// releaseClosedGuest releases accounting after Wazero's Close call returned.
-// The caller must first transition the ticket to GuestClosing. A Close error
-// is diagnostic; Wazero removes the module regardless.
-func (p *plugin) releaseClosedGuest(ticket *inspection.GuestTicket) (bool, error) {
+// releaseClosedGuest resolves accounting after a module close. A failed
+// close remains charged until the owning runtime is successfully closed.
+func (p *plugin) releaseClosedGuest(ticket *inspection.GuestTicket, closeErr error) (bool, error) {
 	if ticket == nil {
 		return true, nil
+	}
+	if closeErr != nil {
+		return p.resolveGuest(ticket, closeErr)
 	}
 	p.guestMu.Lock()
 	defer p.guestMu.Unlock()
@@ -1049,7 +1052,7 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 				mod = nil
 			}
 			transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
-			released, resolveErr := p.releaseClosedGuest(ticket)
+			released, resolveErr := p.releaseClosedGuest(ticket, closeErr)
 			p.finishGuestClose()
 			return nil, errors.Join(err, closeErr, transitionErr, resolveErr), !released || resolveErr != nil
 		}
@@ -1059,7 +1062,7 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 		transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
 		closeErr := mod.Close(context.Background())
 		mod = nil
-		released, resolveErr := p.releaseClosedGuest(ticket)
+		released, resolveErr := p.releaseClosedGuest(ticket, closeErr)
 		p.finishGuestClose()
 		return nil, errors.Join(errors.New("plugin instance closed during initialization"), closeErr, transitionErr, resolveErr),
 			!released || resolveErr != nil
@@ -1069,7 +1072,7 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 		mod = nil
 		if ticket != nil {
 			transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
-			released, resolveErr := p.releaseClosedGuest(ticket)
+			released, resolveErr := p.releaseClosedGuest(ticket, closeErr)
 			closeErr = errors.Join(closeErr, transitionErr, resolveErr)
 			p.finishGuestClose()
 			return nil, errors.Join(err, closeErr), !released || resolveErr != nil
@@ -1081,7 +1084,7 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 		closeErr := mod.Close(context.Background())
 		mod = nil
 		transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
-		released, resolveErr := p.releaseClosedGuest(ticket)
+		released, resolveErr := p.releaseClosedGuest(ticket, closeErr)
 		p.finishGuestClose()
 		return nil, errors.Join(err, closeErr, transitionErr, resolveErr), !released || resolveErr != nil
 	}
@@ -1107,7 +1110,7 @@ func (p *plugin) discard(pm *pooledModule) {
 	if mod != nil {
 		closeErr = mod.Close(context.Background())
 		mod = nil
-		released, resolveErr = p.releaseClosedGuest(pm.ticket)
+		released, resolveErr = p.releaseClosedGuest(pm.ticket, closeErr)
 	} else {
 		closeErr = errGuestModuleMissing
 		released, resolveErr = p.resolveGuest(pm.ticket, closeErr)
@@ -1472,11 +1475,22 @@ func (p *plugin) closeRuntime(ctx context.Context) error {
 	}
 drained:
 	for ticket, owner := range p.guestTickets {
-		if owner.failed != nil {
+		if owner.failed != nil && !errors.Is(p.runtimeCloseErr, owner.failed) {
 			errs = append(errs, owner.failed)
 		}
 		if err := ticket.Transition(inspection.GuestClosing); err != nil {
 			errs = append(errs, err)
+			continue
+		}
+		if p.runtimeCloseErr != nil {
+			if err := ticket.ResolveTeardown(p.runtimeCloseErr); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			owner.active = false
+			if owner.failed == nil {
+				owner.failed = p.runtimeCloseErr
+			}
 			continue
 		}
 		if err := ticket.ResolveTeardown(nil); err != nil {

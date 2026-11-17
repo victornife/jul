@@ -5,11 +5,18 @@ This is the authoritative ownership model for Jul's mutable runtime resources
 identity is, what decides reuse versus replacement, and how it moves through
 **Prepare → Publish → Abort → Retire → drain → close**.
 
-The unmerged I2b implementation retains each guest reservation until Wazero's
-cancellation watcher has joined, represented cleanup has completed, and
-Jul-owned aliases are dropped. Go heap reclamation and return of pages to the
-OS remain asynchronous; an omitted capacity ceiling is unbounded. See the
-[inspection ledger](reviews/700-inspection-implementation-ledger.md#i3b-i2b-implementation-review).
+The draft I2b implementation reserves logical capacity for Jul-managed guests
+until their calls and callbacks finish, managed cleanup succeeds and Jul-owned
+aliases are dropped. A close failure retains the reservation until successful
+runtime cleanup; a runtime close failure cannot be retried safely and its
+reservation remains visible and charged until process restart. Stock Wazero may
+retain references asynchronously, so this is not a
+last-alias or physical-memory bound. Parsed configuration defaults to 1 GiB;
+observe mode does not enforce the limit, but 64 guest tickets with unresolved
+teardown refuse new reservations, including candidate prewarming, in every
+mode. Work already admitted may also fail; if the count cannot drain below 64,
+restart is required before new instances can start. See the
+[inspection ledger](reviews/700-inspection-implementation-ledger.md#current-recovery-status--2026-11-17).
 
 It deliberately does **not** repeat which configuration fields are hot-reloaded
 or restart-required. That truth is generated from one registry and lives in:

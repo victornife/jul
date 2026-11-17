@@ -18,9 +18,10 @@ The harness includes:
 - versioned run manifests with checksums;
 - deterministic summaries.
 
-It measures Jul; it does not make Jul enforce anything. I2, I3a and I4 now govern parts of the
-plugin and WAF paths on unreleased main, but guest capacity and inspection spool protection remain
-unimplemented. A harness result alone does not establish an enforcement or qualification claim.
+It measures Jul; it does not make Jul enforce anything. I2, I3a and I4 govern parts of the
+plugin and WAF paths. Draft #721 adds logical guest-capacity reservations; exact aggregate
+inspection spool protection remains unimplemented. A harness result alone does not establish an
+enforcement or qualification claim.
 
 ## Prerequisites
 

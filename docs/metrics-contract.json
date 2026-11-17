@@ -438,7 +438,7 @@
     {
       "name": "jul_inspection_rejections_total",
       "type": "counter",
-      "help": "Inspection admission rejections in enforce mode and would-reject decisions in observe mode, including guest-capacity reservations.",
+      "help": "Inspection admission rejections and observe-only would-reject decisions, including guest-capacity reservations.",
       "labels": [
         "mode",
         "reason"

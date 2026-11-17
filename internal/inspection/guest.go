@@ -10,6 +10,9 @@ import (
 	"jul/internal/config"
 )
 
+// Bound newly admitted work when repeated real teardown failures accumulate.
+const maxRetainedGuestFailures = 64
+
 // GuestState describes one reserved guest instance's lifetime.
 type GuestState uint8
 
@@ -24,6 +27,7 @@ const (
 
 type guestCapacity struct {
 	reserved  uint64
+	failed    uint64
 	instances [GuestClosed]uint64
 }
 
@@ -79,6 +83,7 @@ type GuestTicket struct {
 	generation uint64
 	amount     uint64
 	state      GuestState
+	failed     bool
 }
 
 // Generation identifies the generation that owns the reservation.
@@ -91,6 +96,16 @@ func (g *Governor) ReserveGuestCapacity(generation, amount uint64) (*GuestTicket
 		return nil, &AdmissionError{Outcome: InvalidAccounting}
 	}
 	g.mu.Lock()
+	if g.guest.failed >= maxRetainedGuestFailures {
+		g.noteRejectionForModeLocked(GuestCapacitySaturated, Enforce)
+		hook := g.hooks.OnRejection
+		g.mu.Unlock()
+		if hook != nil {
+			hook(GuestCapacitySaturated, Enforce)
+		}
+		return nil, fmt.Errorf("inspection: unresolved guest teardown prevents admission: %w",
+			&AdmissionError{Outcome: GuestCapacitySaturated})
+	}
 	wouldExceed := g.limits.MaxGuestCapacityBytes > 0 &&
 		(g.guest.reserved > g.limits.MaxGuestCapacityBytes ||
 			amount > g.limits.MaxGuestCapacityBytes-g.guest.reserved)
@@ -153,12 +168,16 @@ func (t *GuestTicket) Transition(next GuestState) error {
 	}
 	if !valid || g.guest.instances[t.state] == 0 ||
 		(next != GuestClosed && g.guest.instances[next] == math.MaxUint64) ||
-		(next == GuestClosed && g.guest.reserved < t.amount) {
+		(next == GuestClosed && (g.guest.reserved < t.amount || (t.failed && g.guest.failed == 0))) {
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
 	g.guest.instances[t.state]--
 	if next == GuestClosed {
 		g.guest.reserved -= t.amount
+		if t.failed {
+			g.guest.failed--
+			t.failed = false
+		}
 	} else {
 		g.guest.instances[next]++
 	}
@@ -191,14 +210,23 @@ func (t *GuestTicket) ResolveTeardown(closeErr error) error {
 	if t.state >= GuestClosed || g.guest.instances[t.state] == 0 ||
 		(next == GuestFailedRetained && t.state != GuestFailedRetained &&
 			g.guest.instances[GuestFailedRetained] == math.MaxUint64) ||
-		(next == GuestClosed && g.guest.reserved < t.amount) {
+		(closeErr != nil && !t.failed && g.guest.failed == math.MaxUint64) ||
+		(next == GuestClosed && (g.guest.reserved < t.amount || (t.failed && g.guest.failed == 0))) {
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
 	g.guest.instances[t.state]--
 	if next == GuestClosed {
 		g.guest.reserved -= t.amount
+		if t.failed {
+			g.guest.failed--
+			t.failed = false
+		}
 	} else {
 		g.guest.instances[next]++
+		if !t.failed {
+			g.guest.failed++
+			t.failed = true
+		}
 	}
 	t.state = next
 	return nil

@@ -174,7 +174,7 @@ max_response_header_bytes = "64k"
 | --- | --- | --- |
 | `mode` | string | `enforce` (default) or `observe`; other values are rejected |
 | `max_buffered_bytes` | size | `256m` (256 MiB); must be positive. In `enforce` mode it must also fit the largest single-request worst-case charge of any inspected (WAF or plugin) route; `observe` only warns. Uninspected configurations have no minimum |
-| `max_guest_capacity_bytes` | size | `1g` (1 GiB); positive process-wide ceiling for page-rounded logical reservations of Jul-managed starting/live plugin instances across names and generations. This is not a hard bound on engine-retained memory, process heap or RSS |
+| `max_guest_capacity_bytes` | size | `1g` (1 GiB); positive process-wide ceiling for page-rounded logical reservations of Jul-managed starting/live plugin instances across names and generations. This is not a hard bound on engine-retained memory, process heap or RSS. At 64 guest tickets with unresolved teardown, new reservations are refused even in observe mode |
 | `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled. Enforce refuses an oversized WAF response before inspection; observe records the decision |
 | `max_concurrent_evaluations` | int | `0` means auto, resolved from the configured `worker_threads` value or the startup container-aware `GOMAXPROCS`; explicit values are 1–1024 |
 | `evaluation_queue_timeout` | duration | `1s`; 0 disables waiting; explicit values are 0–10s |

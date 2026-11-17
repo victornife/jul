@@ -69,7 +69,7 @@ func newInspectionCollector() *inspectionCollector {
 		}),
 		rejections: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_inspection_rejections_total",
-			Help: "Inspection admission rejections in enforce mode and would-reject decisions in observe mode, including guest-capacity reservations.",
+			Help: "Inspection admission rejections and observe-only would-reject decisions, including guest-capacity reservations.",
 		}, []string{"reason", "mode"}),
 		bodyTimeouts: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_inspection_body_timeouts_total",
