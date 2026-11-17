@@ -128,14 +128,10 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 	var lastStreamReload atomic.Pointer[string]
 	initial := ""
 	lastStreamReload.Store(&initial)
-	spoolRoot := filepath.Join(t.TempDir(), "inspection-spool")
 	governor, err := inspection.New(inspection.Limits{
 		Mode:                   inspection.Enforce,
 		MaxBytes:               1 << 20,
 		MaxResponseHeaderBytes: 1 << 20,
-		MaxSpoolBytes:          100,
-		MaxSpoolFiles:          4,
-		SpoolDir:               spoolRoot,
 		EvaluationSlots:        1,
 		EvaluationQueueTimeout: time.Second,
 		BaseChargeBytes:        16 << 10,
@@ -143,15 +139,6 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspection.New: %v", err)
 	}
-	spool, err := inspection.NewSpoolController(governor, spoolRoot)
-	if err != nil {
-		t.Fatalf("inspection.NewSpoolController: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := spool.Close(); err != nil {
-			t.Errorf("close spool: %v", err)
-		}
-	})
 
 	subsystems := Subsystems{
 		ResponseCache:    responseCache,
@@ -162,7 +149,6 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 		StreamCompiled:   false,
 		WAFCompiled:      false,
 		Inspection:       governor,
-		Spool:            spool,
 		LastStreamReload: &lastStreamReload,
 	}
 
@@ -190,11 +176,8 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 	requireNonNil("RecentLogs", deps.RecentLogs)
 	requireNonNil("SubscribeLogs", deps.SubscribeLogs)
 	requireNonNil("Upstreams", deps.Upstreams)
-	if deps.InspectionSnapshot == nil || deps.InspectionSnapshot().Limits.MaxSpoolBytes != 100 {
+	if deps.InspectionSnapshot == nil || deps.InspectionSnapshot().Limits.MaxBytes != 1<<20 {
 		t.Error("inspection governor snapshot was not wired")
-	}
-	if deps.InspectionSpoolSnapshot == nil || deps.InspectionSpoolSnapshot().ByteLimit != 100 {
-		t.Error("inspection spool snapshot was not wired")
 	}
 	requireNonNil("Certs", deps.Certs)
 	requireNonNil("StreamStatus", deps.StreamStatus)

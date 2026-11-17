@@ -213,8 +213,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   `jul status` projections. In `enforce` mode a WAF route whose
   `request_body_limit` exceeds about 329 KiB (with otherwise default limits)
   needs a larger `max_buffered_bytes` than the 256 MiB default. This does
-  **not** yet gate live WAF/plugin paths, apply body deadlines or reserve
-  actual-size R3 usage; configured `enforce` mode is not runtime protection. See [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
+  **not** by itself gate live WAF/plugin paths, apply body deadlines or reserve
+  actual-size R3 usage; later slices provide those controls. See
+  [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
   for the R3 contract and remaining implementation slices.
 
 - Maintained inspection assessment tooling for #700 (ADR 0032 slice I5):

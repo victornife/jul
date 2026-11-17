@@ -408,7 +408,7 @@
     {
       "name": "jul_inspection_guest_capacity_bytes",
       "type": "gauge",
-      "help": "Reserved effective linear-memory ceilings for live and retained plugin instances; not actual memory or RSS.",
+      "help": "Jul-managed reserved effective linear-memory ceilings for plugin instances; not actual memory or RSS.",
       "labels": [],
       "state": "merged_release_pending"
     },
@@ -422,7 +422,7 @@
     {
       "name": "jul_inspection_guest_instances",
       "type": "gauge",
-      "help": "Plugin instances by reserved lifecycle state; failed_retained and teardown_unconfirmed remain charged.",
+      "help": "Plugin instances by Jul-managed reserved lifecycle state; failed_retained remains charged.",
       "labels": [
         "state"
       ],
@@ -438,35 +438,10 @@
     {
       "name": "jul_inspection_rejections_total",
       "type": "counter",
-      "help": "Inspection admission rejections in enforce mode and would-reject decisions in observe mode, including guest-capacity and spool quotas.",
+      "help": "Inspection admission rejections in enforce mode and would-reject decisions in observe mode, including guest-capacity reservations.",
       "labels": [
         "mode",
         "reason"
-      ],
-      "state": "merged_release_pending"
-    },
-    {
-      "name": "jul_inspection_spool_available",
-      "type": "gauge",
-      "help": "Whether Jul has a process-owned Coraza temporary-file controller in this build/runtime.",
-      "labels": [],
-      "state": "merged_release_pending"
-    },
-    {
-      "name": "jul_inspection_spool_bytes",
-      "type": "gauge",
-      "help": "Coraza temporary-file logical bytes by state; cleanup debt remains charged and would_reject is cumulative in observe mode.",
-      "labels": [
-        "state"
-      ],
-      "state": "merged_release_pending"
-    },
-    {
-      "name": "jul_inspection_spool_files",
-      "type": "gauge",
-      "help": "Coraza temporary-file logical file count by state; cleanup debt remains charged and would_reject is cumulative in observe mode.",
-      "labels": [
-        "state"
       ],
       "state": "merged_release_pending"
     },

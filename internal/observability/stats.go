@@ -124,22 +124,6 @@ type StatsSnapshot struct {
 	// generic thresholds its low/critical states were computed against.
 	Storage      []StorageHeadroom `json:"storage,omitempty"`
 	StorageHints *StorageHints     `json:"storageHints,omitempty"`
-	// InspectionSpool is Jul's logical accounting for Coraza temporary files.
-	// It is not a measurement of filesystem capacity or physical disk usage.
-	InspectionSpool *InspectionSpoolStats `json:"inspectionSpool,omitempty"`
-}
-
-type InspectionSpoolStats struct {
-	Available  bool   `json:"available"`
-	Mode       string `json:"mode"`
-	UsedBytes  uint64 `json:"usedBytes"`
-	UsedFiles  uint64 `json:"usedFiles"`
-	DebtBytes  uint64 `json:"cleanupDebtBytes"`
-	DebtFiles  uint64 `json:"cleanupDebtFiles"`
-	WouldBytes uint64 `json:"wouldRejectBytes"`
-	WouldFiles uint64 `json:"wouldRejectFiles"`
-	ByteLimit  uint64 `json:"byteLimit"`
-	FileLimit  uint64 `json:"fileLimit"`
 }
 
 type GenerationRetirementStats struct {
@@ -363,20 +347,6 @@ func (m *Metrics) Snapshot() StatsSnapshot {
 	snap.GoMaxProcs = float64(runtime.GOMAXPROCS(0))
 	snap.CacheTiers = cacheTierOccupancy(m.cacheTierSnapshot())
 	snap.Storage, snap.StorageHints = m.storageSnapshot()
-	if spool, ok := m.inspectionSnapshot(); ok {
-		snap.InspectionSpool = &InspectionSpoolStats{
-			Available:  spool.SpoolAvailable,
-			Mode:       spool.Mode,
-			UsedBytes:  spool.SpoolBytesUsed,
-			UsedFiles:  spool.SpoolFilesUsed,
-			DebtBytes:  spool.SpoolBytesDebt,
-			DebtFiles:  spool.SpoolFilesDebt,
-			WouldBytes: spool.SpoolBytesWouldReject,
-			WouldFiles: spool.SpoolFilesWouldReject,
-			ByteLimit:  spool.SpoolBytesLimit,
-			FileLimit:  spool.SpoolFilesLimit,
-		}
-	}
 	snap.UpstreamWorstActive, snap.UpstreamWorstPending, snap.UpstreamNoEligible, snap.UpstreamBudgetExhausted =
 		upstreamCapacitySummary(m.upstreamCapacitySnapshot())
 

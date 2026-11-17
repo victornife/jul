@@ -9,6 +9,15 @@ redact_min_secret_length = 0
 reload_timeout = '10s'
 config_authority = 'managed'
 
+[global.inspection]
+mode = 'enforce'
+max_buffered_bytes = '256m'
+max_guest_capacity_bytes = '1g'
+max_response_header_bytes = '64k'
+max_concurrent_evaluations = 0
+evaluation_queue_timeout = '1s'
+body_timeout = '1m0s'
+
 [[servers]]
 name = ''
 listen = '127.0.0.1:9292'
@@ -405,9 +414,6 @@ token = 'jul-e2e-test-token'
 console = true
 history_dir = './jul-data/config-history'
 history_keep = 50
-# This fixture is shared by a stateful real-server suite. Keep limiter budgets
-# well above suite traffic so unrelated acceptance tests cannot couple through
-# token-bucket exhaustion; limiter behavior has dedicated unit/security gates.
 rate_limit_read_per_min = 6000
 rate_limit_write_per_min = 6000
 rate_limit_apply_per_min = 6000
@@ -418,12 +424,30 @@ audit_log_rotate_keep = 0
 plugin_upload_dir = './jul-data/plugins'
 plugin_upload_max_size = 0
 plugin_upload_enabled = false
+pprof = true
 
 [admin.rbac]
 enabled = false
 default_role = ''
 roles = []
 principals = []
+
+[admin.oidc]
+enabled = false
+provider_name = ''
+issuer = ''
+client_id = ''
+client_secret = ''
+callback_url = ''
+scopes = []
+subjects = []
+group_claim = ''
+groups = []
+session_idle = '0s'
+session_absolute = '0s'
+max_sessions = 0
+max_transactions = 0
+clock_skew = '0s'
 
 [compression]
 enabled = false

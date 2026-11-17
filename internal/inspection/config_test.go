@@ -99,8 +99,8 @@ func TestLimitsFromConfigDefaultsAndAutoSlots(t *testing.T) {
 			if limits.MaxResponseHeaderBytes != uint64(config.InspectionDefaultMaxResponseHeaderBytes) {
 				t.Fatalf("default response-header ceiling = %d, want %d", limits.MaxResponseHeaderBytes, config.InspectionDefaultMaxResponseHeaderBytes)
 			}
-			if limits.MaxGuestCapacityBytes != 0 {
-				t.Fatalf("omitted guest-capacity ceiling = %d, want unavailable (0)", limits.MaxGuestCapacityBytes)
+			if limits.MaxGuestCapacityBytes != uint64(config.InspectionDefaultMaxGuestCapacityBytes) {
+				t.Fatalf("default guest-capacity ceiling = %d, want %d", limits.MaxGuestCapacityBytes, config.InspectionDefaultMaxGuestCapacityBytes)
 			}
 		})
 	}

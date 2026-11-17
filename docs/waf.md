@@ -73,11 +73,20 @@ to run it. The check is performed once at startup by `waf.Check`.
    (phases 1–4: request line, request headers, request body, and — when
    `response_body_check` is set — the response). Coraza buffers the request body
    up to `request_body_limit` for inspection.
-3. If a rule **interrupts** the transaction in **block** mode, the request is
+3. Before dispatching to the origin, Jul checks Coraza's public matched-rule
+   results for its generated request-body processing error guard. A detected
+   `REQBODY_ERROR` fails closed with `400`, regardless of CRS presence, WAF
+   block/detect mode, or inspection governor enforce/observe mode. Clean
+   multipart uploads and supported partial-body policies remain available.
+   The signal is intentionally conservative: it does not distinguish storage
+   failures from malformed syntax, and cannot detect failures Coraza does not
+   expose. Body-size limits, argument limits and partial processing are not
+   treated as parser failures by this guard.
+4. If a rule **interrupts** the transaction in **block** mode, the request is
    short-circuited with the configured status (default **403**) and never
    reaches the upstream. In ordinary **detect** mode the same match is recorded
    but the request proceeds; custom runtime engine controls can change this.
-4. Rules see Jul's **canonical client address** in `REMOTE_ADDR`: the transport
+5. Rules see Jul's **canonical client address** in `REMOTE_ADDR`: the transport
    peer unless the listener's
    [`client_address`](configuration.md#client-address-and-trusted-proxies)
    policy trusts that peer as a proxy. Coraza normally derives `REMOTE_ADDR`
@@ -95,7 +104,7 @@ to run it. The check is performed once at startup by `waf.Check`.
    proxy's port beside the client's address would be a value a rule could match
    on and be wrong about. A rule that inspects `REMOTE_PORT` will therefore see
    `0` for every request on a listener with a trusted-proxy policy.
-5. Every matched rule that logs is reported to metrics and structured-log
+6. Every matched rule that logs is reported to metrics and structured-log
    hooks. The metric keeps only bounded action/rule labels. The structured warning
    records `rule_id`, `mode`, `phase`, `severity`, a bounded/redacted `path`, and
    `query_omitted`; it never records the raw query or Coraza's macro-expanded
@@ -722,6 +731,7 @@ switching modes or rule sources.
 | **Request / response handling** ||||
 | Request line + headers (phases 1–2) | ✅ | ✅ | Always inspected |
 | Request body (phase 2 cont.) | ✅ | ✅ | Up to `request_body_limit` |
+| Public request-body processing error | ❌ `400` before origin dispatch | ❌ `400` before origin dispatch | Generated Jul guard applies in CRS/no-CRS, block/detect, and enforce/observe; generic parser/I/O failure signal |
 | Arguments beyond `SecArgumentsLimit` (CRS) | ✅ `413` | ☐ recorded | Generated rule `900001`; removable with `SecRuleRemoveById 900001` |
 | Response body (phase 4) | ✅ | ✅ | Opt-in via `response_body_check`, text MIME types only; rule directives can override |
 | Uncompressed body inspection | ✅ | ✅ | WAF runs before compression middleware |

@@ -52,6 +52,10 @@ var argumentLimitGuardRule = fmt.Sprintf(
 	`SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" "id:%d,phase:2,deny,status:413,log,t:none,msg:'Request argument limit reached; arguments beyond SecArgumentsLimit were not inspected',tag:'jul/argument-limit'"`,
 	config.WAFArgumentLimitGuardRuleID)
 
+var requestBodyErrorGuardRule = fmt.Sprintf(
+	`SecRule REQBODY_ERROR "@eq 1" "id:%d,phase:2,pass,log,t:none,msg:'Jul detected request body processing failure',tag:'jul/request-body-processing-error'"`,
+	config.WAFRequestBodyErrorRuleID)
+
 // Firewall wraps a configured Coraza engine and exposes it as a middleware.
 type Firewall struct {
 	waf         coraza.WAF
@@ -80,9 +84,6 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if opts.Governor != nil && opts.Spool == nil {
-		return nil, errors.New("waf: governed inspection requires the process spool controller")
-	}
 	directives, err := buildDirectives(cfg)
 	if err != nil {
 		return nil, err
@@ -110,12 +111,6 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err != nil {
 		return nil, fmt.Errorf("waf: compiling rules: %w", err)
 	}
-	if opts.Spool != nil {
-		if _, ok := w.(experimental.WAFWithOptions); !ok {
-			_ = closeWAF(w)
-			return nil, fmt.Errorf("waf: Coraza does not support per-transaction temporary-file providers")
-		}
-	}
 	if counter.collisionID != 0 {
 		_ = closeWAF(w)
 		return nil, fmt.Errorf("waf: compiling rules: external rule id %d collides with Jul reserved generated range (%d–%d)",
@@ -130,10 +125,6 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 	if err != nil {
 		_ = closeWAF(w)
 		return nil, err
-	}
-	if opts.Spool != nil && state.uploadKeepFiles != types.UploadKeepFilesOff {
-		_ = closeWAF(w)
-		return nil, errors.New("waf: SecUploadKeepFiles must be Off when Jul spool ownership is enabled; retained uploads are unsupported")
 	}
 	for i, exc := range cfg.Exceptions {
 		if !activeRuleIDs[exc.RuleID] {
@@ -166,12 +157,12 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		return nil, err
 	}
 	_ = probe.Close()
-	// Wrap the engine so rules see Jul's canonical client address rather than
-	// Coraza's own parse of RemoteAddr (see clientaddr.go).
+	// The request path supplies Jul's canonical client address through
+	// ProcessConnection, using the identity already attached to the request.
 	state.argumentLimitGuard = cfg.CRSEnabled && activeRuleIDs[config.WAFArgumentLimitGuardRuleID]
 	info, rawSum, polSum := policyInfo(cfg, counter.counts, rec, opts.Versions, state)
 	return &Firewall{
-		waf:         &clientAddrWAF{WAF: w},
+		waf:         w,
 		info:        info,
 		facts:       inspectionFacts(state),
 		opts:        opts,
@@ -296,6 +287,13 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 			info.Rules.Generated++
 		}
 	}
+	if info.Rules.Inline > 0 {
+		// buildDirectives always emits Jul's request-body processing guard
+		// after user directives, so it remains active even if user rules try to
+		// remove its reserved ID.
+		info.Rules.Inline--
+		info.Rules.Generated++
+	}
 	if n := len(cfg.Exceptions); n > 0 {
 		info.ExceptionsCount, info.ExceptionsReviewDue = SummarizeExceptions(cfg.Exceptions, time.Now())
 		for i := 0; i < n && info.Rules.Inline > 0; i++ {
@@ -342,10 +340,9 @@ func canonicalPolicyBytes(cfg config.WAFConfig, info PolicyInfo, rawExternalSum 
 	writeFramed("detection_paranoia", strconv.Itoa(info.DetectionParanoia))
 	writeFramed("request_body_limit", strconv.FormatInt(info.RequestBodyLimitBytes, 10))
 	writeFramed("response_body_inspection", strconv.FormatBool(info.ResponseBodyInspection))
-	// Version 2 of Jul's generated directives adds the argument-limit guard and
-	// the response-inspection default (#697, #698), so an evaluation of a
-	// version-1 policy is stale even when the TOML and engine are unchanged.
-	writeFramed("generated_directives", "2")
+	// Version 3 adds the request-body failure guard (#713), so policies evaluated
+	// before fail-closed body handling are stale even when TOML and engine match.
+	writeFramed("generated_directives", "3")
 	writeFramed("response_body_mime_types", strings.Join(info.ResponseBodyMimeTypes, " "))
 	writeFramed("argument_limit", strconv.Itoa(info.ArgumentLimit))
 	writeFramed("argument_limit_guard", strconv.FormatBool(info.ArgumentLimitGuard))
@@ -403,9 +400,6 @@ func closeWAF(w coraza.WAF) error {
 	if w == nil {
 		return nil
 	}
-	if cw, ok := w.(*clientAddrWAF); ok {
-		w = cw.WAF
-	}
 	err := closeAuditWriter(w)
 	if closer, ok := w.(io.Closer); ok {
 		err = errors.Join(err, closer.Close())
@@ -443,7 +437,8 @@ func rootFS(cfg config.WAFConfig, rec *sourceRecorder) fs.FS {
 //     argument-limit guard (id 900001, #697);
 //  3. Jul's response-body inspection default from response_body_check (#698);
 //  4. each user directive file;
-//  5. the inline rules snippet;
+//  5. the inline rules snippet, then Jul's request-body failure guard (id
+//     900002), so later user directives cannot remove it;
 //  6. the enforcement-mode override last, so "block"/"detect" always wins.
 func buildDirectives(cfg config.WAFConfig) (string, error) {
 	var b strings.Builder
@@ -466,7 +461,6 @@ func buildDirectives(cfg config.WAFConfig) (string, error) {
 			fmt.Fprintf(&b, "SecDefaultAction \"phase:%d,deny,status:%d,log\"\n", phase, bs)
 		}
 	}
-
 	excLines, _, err := BuildExceptionDirectives(cfg.Exceptions)
 	if err != nil {
 		return "", err
@@ -520,6 +514,9 @@ func buildDirectives(cfg config.WAFConfig) (string, error) {
 		b.WriteString(r)
 		b.WriteByte('\n')
 	}
+
+	b.WriteString(requestBodyErrorGuardRule)
+	b.WriteByte('\n')
 
 	// Enforce the configured mode last so it overrides any engine state set by
 	// the included rule files.
@@ -641,7 +638,6 @@ type engineState struct {
 	// that reaches the limit is refused without evaluating phase 2.
 	requestBodyLimitReject  bool
 	responseBodyLimitReject bool
-	uploadKeepFiles         types.UploadKeepFilesStatus
 }
 
 // compiledEngineState reads the authoritative compiled response-body and
@@ -664,14 +660,11 @@ func compiledEngineState(w coraza.WAF) (engineState, error) {
 	reqLimit := engine.FieldByName("RequestBodyLimit")
 	respLimit := engine.FieldByName("ResponseBodyLimit")
 	inMemory := engine.FieldByName("requestBodyInMemoryLimit")
-	uploadKeepFiles := engine.FieldByName("UploadKeepFiles")
 	if !reqLimit.IsValid() || reqLimit.Kind() != reflect.Int64 ||
 		!respLimit.IsValid() || respLimit.Kind() != reflect.Int64 ||
-		!inMemory.IsValid() || inMemory.Kind() != reflect.Pointer || inMemory.Type().Elem().Kind() != reflect.Int64 ||
-		!uploadKeepFiles.IsValid() || uploadKeepFiles.Type() != reflect.TypeOf(types.UploadKeepFilesOff) {
+		!inMemory.IsValid() || inMemory.Kind() != reflect.Pointer || inMemory.Type().Elem().Kind() != reflect.Int64 {
 		return engineState{}, fmt.Errorf("waf: incompatible coraza.WAF internal layout: missing body-limit settings on %T", w)
 	}
-	st.uploadKeepFiles = types.UploadKeepFilesStatus(uploadKeepFiles.Int())
 	st.requestBodyLimit = reqLimit.Int()
 	action := engine.FieldByName("RequestBodyLimitAction")
 	responseAction := engine.FieldByName("ResponseBodyLimitAction")

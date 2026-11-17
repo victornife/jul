@@ -14,7 +14,7 @@ import (
 )
 
 func TestGuestStateNames(t *testing.T) {
-	want := []string{"starting", "idle", "busy", "closing", "failed_retained", "teardown_unconfirmed"}
+	want := []string{"starting", "idle", "busy", "closing", "failed_retained"}
 	got := GuestStateNames()
 	if len(got) != len(want) {
 		t.Fatalf("guest state names = %v, want %v", got, want)
@@ -113,29 +113,6 @@ func TestGuestTicketResolveTeardown(t *testing.T) {
 	}
 	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || got.Instances[GuestFailedRetained] != 0 {
 		t.Fatalf("confirmed retry did not release capacity: %+v", got)
-	}
-}
-
-func TestGuestUnconfirmedTeardownCannotBeRefunded(t *testing.T) {
-	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 100, 1), Hooks{})
-	ticket, err := g.ReserveGuestCapacity(1, 20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ticket.Transition(GuestClosing); err != nil {
-		t.Fatal(err)
-	}
-	if err := ticket.Transition(GuestTeardownUnconfirmed); err != nil {
-		t.Fatal(err)
-	}
-	if err := ticket.ResolveTeardown(nil); !IsOutcome(err, InvalidAccounting) {
-		t.Fatalf("unconfirmed debt resolved: %v", err)
-	}
-	if err := ticket.Transition(GuestClosed); !IsOutcome(err, InvalidAccounting) {
-		t.Fatalf("unconfirmed debt closed: %v", err)
-	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 20 || got.Instances[GuestTeardownUnconfirmed] != 1 {
-		t.Fatalf("unconfirmed debt lost: %+v", got)
 	}
 }
 

@@ -416,9 +416,6 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 
 	makeCfg := func(wafMode string, wafEnabled bool) *config.Config {
 		return &config.Config{
-			Global: config.GlobalConfig{
-				Inspection: config.InspectionConfig{SpoolDir: factory.Spool.Root()},
-			},
 			WAF: config.WAFConfig{
 				Enabled:         wafEnabled,
 				Mode:            wafMode,

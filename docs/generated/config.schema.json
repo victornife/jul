@@ -586,10 +586,11 @@
               "x-jul-constraint": "0 or between 1 and 1024"
             },
             "max_guest_capacity_bytes": {
-              "description": "MaxGuestCapacityBytes is an optional process-wide ceiling for plugin instance linear-memory reservations; enforce requires room for one eager instance of every plugin and observe warns; no finite production default has been selected",
+              "default": "1g",
+              "description": "MaxGuestCapacityBytes is the process-wide ceiling for page-rounded logical reservations for Jul-managed plugin instances across names and generations",
               "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
               "type": "string",
-              "x-jul-constraint": "positive size; enforce requires the sum of one eager instance ceiling per plugin"
+              "x-jul-constraint": "positive size; process-wide ceiling for page-rounded Jul-managed starting/live plugin instances"
             },
             "max_response_header_bytes": {
               "default": "64k",
@@ -597,19 +598,6 @@
               "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
               "type": "string",
               "x-jul-constraint": "positive size"
-            },
-            "max_spool_bytes": {
-              "default": "512m",
-              "description": "MaxSpoolBytes is the process-wide logical temporary-file byte quota",
-              "pattern": "^[0-9]+([bBkKmMgG]|[kKmMgG][bB])?$",
-              "type": "string",
-              "x-jul-constraint": "positive size"
-            },
-            "max_spool_files": {
-              "default": 1024,
-              "description": "MaxSpoolFiles is the process-wide logical temporary-file count quota",
-              "type": "integer",
-              "x-jul-constraint": "0 or between 1 and 1048576"
             },
             "mode": {
               "default": "enforce",
@@ -620,12 +608,6 @@
               ],
               "type": "string",
               "x-jul-constraint": "exact lowercase enum"
-            },
-            "spool_dir": {
-              "default": "./jul-data/inspection-spool",
-              "description": "SpoolDir is the restart-bound directory for Coraza request-body spill and multipart temporary files",
-              "type": "string",
-              "x-jul-constraint": "non-empty path without leading or trailing whitespace"
             }
           },
           "type": "object"

@@ -59,6 +59,7 @@ export default defineConfig({
       // real-server project: API-level and browser tests against a real jul binary.
       name: "real-server",
       testMatch: [
+        "e2e/inspection-real-server.spec.ts",
         "e2e/real-server.spec.ts",
         "e2e/issue82-phase5.spec.ts",
         "e2e/issue157-admin-runtime.spec.ts",
@@ -71,6 +72,11 @@ export default defineConfig({
         baseURL: realServerURL,
         extraHTTPHeaders: { Authorization: "Bearer jul-e2e-test-token" },
       },
+    },
+    {
+      name: "inspection-real-server",
+      testMatch: ["e2e/inspection-real-server.spec.ts"],
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
   // webServer entries: the mocked-API smoke test uses vite preview; the

@@ -1,18 +1,16 @@
 # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 # SPDX-License-Identifier: agpl
 
-# Inspection governor example: the WAF is not enabled here, so the spool
-# controller is not opened until a WAF-enabled startup.
+# Inspection governor example: the managed guest reservation ceiling is
+# separate from request/WAF byte accounting.
 [global.inspection]
 mode = "enforce"
 max_buffered_bytes = "16m"
+max_guest_capacity_bytes = "1g"
 max_concurrent_evaluations = 0
 evaluation_queue_timeout = "1s"
 body_timeout = "60s"
 max_response_header_bytes = "64k"
-spool_dir = "./jul-data/inspection-spool"
-max_spool_bytes = "512m"
-max_spool_files = 1024
 
 [[servers]]
 listen = "127.0.0.1:8080"

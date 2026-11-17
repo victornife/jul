@@ -21,7 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"jul/internal/adminapi"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/observability"
 	"jul/internal/rbac"
 	"jul/internal/server"
@@ -385,6 +387,131 @@ func TestRuntimeOverviewOK(t *testing.T) {
 	}
 	if len(out.Status) == 0 {
 		t.Error("status rows should not be empty")
+	}
+}
+
+func TestRuntimeOverviewInspection(t *testing.T) {
+	snapshot := inspection.Snapshot{
+		Limits:   inspection.Limits{Mode: inspection.Observe, MaxBytes: 1234},
+		Usage:    [4]uint64{1, 2, 3, 4},
+		Draining: true,
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		BootID:             func() string { return "test-boot" },
+		InspectionSnapshot: func() inspection.Snapshot { return snapshot },
+		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
+			return adminapi.InspectionPluginGuestCapacity{MaxPermittedBytes: 5678}, nil
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || out.BootID != "test-boot" || out.Inspection == nil ||
+		out.Inspection.Effective.Mode != "observe" ||
+		out.Inspection.Effective.MaxBufferedBytes != 1234 ||
+		out.Inspection.Usage.AuditBytes != 4 || !out.Inspection.Draining ||
+		out.Inspection.PluginGuestMaxBytes == nil || *out.Inspection.PluginGuestMaxBytes != 5678 {
+		t.Fatalf("overview = %d %+v", rr.Code, out.Inspection)
+	}
+}
+
+func TestRuntimeOverviewAndV1StatusFollowGovernorDraining(t *testing.T) {
+	limits := inspection.Limits{
+		Mode:                   inspection.Enforce,
+		MaxBytes:               8192,
+		MaxResponseHeaderBytes: 1024,
+		EvaluationSlots:        1,
+		BaseChargeBytes:        4096,
+	}
+	governor, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{InspectionSnapshot: governor.Snapshot})
+	assertStatus := func(mode string, bytes, leases uint64, draining bool) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("overview status = %d: %s", rr.Code, rr.Body.String())
+		}
+		var overview RuntimeOverview
+		if err := json.Unmarshal(rr.Body.Bytes(), &overview); err != nil {
+			t.Fatal(err)
+		}
+		status := decodeInto[adminapi.StatusResponse](t, getV1(t, s, "/api/v1/status", ""))
+		for name, got := range map[string]*adminapi.InspectionStatus{
+			"overview": overview.Inspection,
+			"v1":       status.Inspection,
+		} {
+			if got == nil || got.Effective.Mode != mode || got.Effective.MaxBufferedBytes != 4096 ||
+				got.Usage.BaseBytes != bytes ||
+				got.ActiveLeases != leases || got.Draining != draining {
+				t.Fatalf("%s inspection = %+v, want mode=%s bytes=%d leases=%d draining=%t",
+					name, got, mode, bytes, leases, draining)
+			}
+		}
+	}
+	acquire := func() *inspection.Lease {
+		t.Helper()
+		lease, _, owner, err := governor.AcquireLease(context.Background())
+		if err != nil || !owner {
+			t.Fatalf("acquire = %v, owner=%t", err, owner)
+		}
+		return lease
+	}
+
+	first, second := acquire(), acquire()
+	limits.MaxBytes = 4096
+	if err := governor.PublishLimitsIfVersion(governor.Snapshot().LimitsVersion, limits); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("enforce", 8192, 2, true)
+	if lease, _, _, err := governor.AcquireLease(context.Background()); lease != nil ||
+		!inspection.IsOutcome(err, inspection.ByteSaturated) {
+		t.Fatalf("enforce admission = %v, %v", lease, err)
+	}
+	assertStatus("enforce", 8192, 2, true)
+
+	limits.Mode = inspection.Observe
+	if err := governor.PublishLimitsIfVersion(governor.Snapshot().LimitsVersion, limits); err != nil {
+		t.Fatal(err)
+	}
+	third := acquire()
+	assertStatus("observe", 12288, 3, true)
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("observe", 8192, 2, true)
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("observe", 4096, 1, false)
+	if err := third.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertStatus("observe", 0, 0, false)
+}
+
+func TestRuntimeOverviewReportsInspectionFailureWithoutLosingOverview(t *testing.T) {
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return inspection.Snapshot{} },
+		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
+			return adminapi.InspectionPluginGuestCapacity{}, errors.New("private detail")
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/runtime/overview", nil))
+	var out RuntimeOverview
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if rr.Code != http.StatusOK || out.Inspection != nil || out.InspectionError == "" ||
+		strings.Contains(rr.Body.String(), "private detail") {
+		t.Fatalf("overview = %d %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -1016,6 +1143,7 @@ func TestTrafficControlsProjection(t *testing.T) {
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+		Authority:  func() ConfigAuthorityStatus { return ConfigAuthorityStatus{Mode: "file_owned"} },
 	})
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/traffic-controls", nil))
@@ -1025,6 +1153,13 @@ func TestTrafficControlsProjection(t *testing.T) {
 	var out TrafficControlsProjection
 	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
 		t.Fatalf("decode: %v", err)
+	}
+	var editor issue81TrafficControlsProjection
+	if err := json.Unmarshal(rr.Body.Bytes(), &editor); err != nil {
+		t.Fatalf("decode editor projection: %v", err)
+	}
+	if editor.ConfigAuthority != "file_owned" {
+		t.Errorf("config authority = %q, want file_owned", editor.ConfigAuthority)
 	}
 	if out.Compression == nil || !out.Compression.Enabled {
 		t.Error("compression should be enabled")
@@ -1043,6 +1178,73 @@ func TestTrafficControlsProjection(t *testing.T) {
 		out.AccessLog.File != "/var/log/jul/access.log" || out.AccessLog.Format != "json" ||
 		out.AccessLog.RotateMaxMB != 50 || out.AccessLog.RotateKeep != 3 {
 		t.Errorf("access-log projection = %+v", out.AccessLog)
+	}
+}
+
+func TestTrafficControlsVersionRequiresRawPermission(t *testing.T) {
+	cfg := &config.Config{}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+	})
+	for _, tt := range []struct {
+		name        string
+		permissions []rbac.Permission
+		wantVersion bool
+	}{
+		{"status-only", []rbac.Permission{rbac.StatusRead}, false},
+		{"write-only", []rbac.Permission{rbac.ConfigWrite}, false},
+		{"raw-writer", []rbac.Permission{rbac.ConfigWrite, rbac.ConfigRaw}, true},
+		{"cache-inspection", []rbac.Permission{rbac.CacheInspect}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/traffic-controls", nil)
+			req = req.WithContext(rbac.WithIdentity(req.Context(), rbac.Identity{Permissions: tt.permissions}))
+			rr := httptest.NewRecorder()
+			s.handleTrafficControls(rr, req)
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			version, present := body["base_version"]
+			if present != tt.wantVersion {
+				t.Fatalf("base_version present=%v, want %v", present, tt.wantVersion)
+			}
+			if present && string(version) != fmt.Sprintf("%q", server.CanonicalVersion(cfg)) {
+				t.Fatalf("wrong editable base version: %s", version)
+			}
+		})
+	}
+}
+
+func TestTrafficControlsInspectionPreviewRejectsStaleBaseline(t *testing.T) {
+	s, path := v2WriteServer(t)
+	projection := httptest.NewRecorder()
+	s.routes().ServeHTTP(projection, httptest.NewRequest(http.MethodGet, "/api/traffic-controls", nil))
+	var out issue81TrafficControlsProjection
+	if err := json.Unmarshal(projection.Body.Bytes(), &out); err != nil || out.BaseVersion == "" {
+		t.Fatalf("missing projected base version: %s (%v)", projection.Body.String(), err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Global.Inspection.Mode = "observe"
+	raw, err = config.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"base_version":%q,"ops":[{"op":"global_set","global":{"inspection":{"body_timeout":"0s"}}}]}`, out.BaseVersion)
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/api/config/patch/preview", strings.NewReader(body)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("stale inspection preview = %d, want 409: %s", rr.Code, rr.Body.String())
 	}
 }
 

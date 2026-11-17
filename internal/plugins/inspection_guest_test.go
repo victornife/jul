@@ -320,9 +320,9 @@ func TestFailedGuestCandidateReportsPriorRuntimeCloseFailure(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || !errors.Is(err, closeErr) {
 		t.Errorf("failed candidate = %v, want cancellation and prior runtime close failure", err)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
-		got.Instances[inspection.GuestFailedRetained] != 1 {
-		t.Errorf("failed runtime teardown lost its capacity debt: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 ||
+		got.Instances[inspection.GuestFailedRetained] != 0 {
+		t.Errorf("runtime close error retained a closed candidate: %+v", got)
 	}
 }
 
@@ -513,7 +513,7 @@ func TestGuestHelpersWithoutGovernorAreNoops(t *testing.T) {
 	nilPlugin.discard(nil)
 }
 
-func TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure(t *testing.T) {
+func TestGuestCapacityReleasedAfterModuleCloseFailure(t *testing.T) {
 	g := testGovernor(t)
 	var logs bytes.Buffer
 	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
@@ -537,39 +537,41 @@ func TestGuestCapacityRemainsChargedUntilRuntimeCloseAfterModuleCloseFailure(t *
 	}
 	p.slots <- struct{}{}
 	moduleCloseErr := errors.New("module close failed")
-	p.discard(&pooledModule{mod: closeErrorModule{err: moduleCloseErr}, ticket: ticket})
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestFailedRetained] != 1 {
-		t.Fatalf("module close failure did not retain capacity: %+v", got)
+	module := &closeErrorModule{err: moduleCloseErr}
+	p.discard(&pooledModule{mod: module, ticket: ticket})
+	if !module.closed {
+		t.Fatal("close-error module was not marked removed")
 	}
-	if len(p.guestTickets) != 1 || len(p.slots) != 1 {
-		t.Fatalf("failed close lost owner state: tickets=%d slots=%d", len(p.guestTickets), len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("module close error retained capacity: %+v", got)
+	}
+	if len(p.guestTickets) != 0 || len(p.slots) != 0 {
+		t.Fatalf("closed module retained owner/slot: tickets=%d slots=%d", len(p.guestTickets), len(p.slots))
 	}
 	firstClose := p.close()
-	if !errors.Is(firstClose, rtCloseErr) || !errors.Is(firstClose, moduleCloseErr) {
-		t.Fatalf("plugin close error = %v, want module and runtime failures", firstClose)
+	if !errors.Is(firstClose, rtCloseErr) || errors.Is(firstClose, moduleCloseErr) {
+		t.Fatalf("plugin close error = %v, want only the runtime close failure", firstClose)
+	}
+	if !strings.Contains(logs.String(), moduleCloseErr.Error()) {
+		t.Error("module close error was not logged")
 	}
 	if !strings.Contains(logs.String(), "plugin runtime teardown failed") {
 		t.Error("runtime close failure was not logged")
 	}
-	if stats, err := m.GuestCapacityStats(); err != nil ||
-		stats.LiveInstances != 1 || stats.MaxInstances != 1 {
-		t.Fatalf("retained close stats = %+v, %v", stats, err)
+	if stats, err := m.GuestCapacityStats(); err != nil || stats != (GuestCapacityStats{}) {
+		t.Fatalf("closed plugin remained in capacity stats: %+v, %v", stats, err)
 	}
-	if retry := m.Close(); !errors.Is(retry, rtCloseErr) || !errors.Is(retry, moduleCloseErr) || retry.Error() != firstClose.Error() {
-		t.Fatalf("manager retry = %v, want stable module and runtime failures from %v", retry, firstClose)
-	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
-		got.Instances[inspection.GuestFailedRetained] != 1 {
-		t.Fatalf("runtime retry lost unconfirmed capacity: %+v", got)
+	if err := m.Close(); err != nil {
+		t.Fatalf("manager close after closed runtime: %v", err)
 	}
 	m.retainedMu.Lock()
 	defer m.retainedMu.Unlock()
-	if len(m.retained) != 1 {
-		t.Fatalf("manager retained %d plugins after failed teardown, want 1", len(m.retained))
+	if len(m.retained) != 0 {
+		t.Fatalf("manager retained %d already-closed plugins, want 0", len(m.retained))
 	}
 }
 
-func TestGuestRuntimeCloseFailureFromIdleRetainsDebtOnRetry(t *testing.T) {
+func TestGuestRuntimeCloseFailureReleasesIdleCapacity(t *testing.T) {
 	g := testGovernor(t)
 	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
 	if err != nil {
@@ -591,15 +593,15 @@ func TestGuestRuntimeCloseFailureFromIdleRetainsDebtOnRetry(t *testing.T) {
 		t.Fatalf("first close = %v, want runtime failure without accounting error", first)
 	}
 	before := g.Snapshot().GuestCapacity
-	if before.ReservedBytes != 16<<20 || before.Instances[inspection.GuestFailedRetained] != 1 {
-		t.Fatalf("idle runtime failure lost debt: %+v", before)
+	if before != (inspection.GuestCapacitySnapshot{}) || len(p.slots) != 0 {
+		t.Fatalf("runtime close error retained closed idle guest: %+v, slots=%d", before, len(p.slots))
 	}
 	retry := p.closeRuntime(context.Background())
 	if !errors.Is(retry, closeErr) || retry.Error() != first.Error() {
 		t.Fatalf("runtime retry = %v, want stable original failure %v", retry, first)
 	}
-	if got := g.Snapshot().GuestCapacity; got != before || len(p.slots) != 1 {
-		t.Fatalf("runtime retry changed debt/slot: %+v, slots=%d", got, len(p.slots))
+	if got := g.Snapshot().GuestCapacity; got != before || len(p.slots) != 0 {
+		t.Fatalf("runtime retry changed released capacity/slot: %+v, slots=%d", got, len(p.slots))
 	}
 }
 
@@ -888,29 +890,37 @@ func TestGuestCapacityRemainsChargedWhileClosedCallIsRunning(t *testing.T) {
 	}
 }
 
-func TestGuestCapacityRetainsModuleCloseFailureAfterSuccessfulRuntimeClose(t *testing.T) {
+func TestGuestCapacityReleasedAfterModuleCloseFailureAndRuntimeClose(t *testing.T) {
 	g := testGovernor(t)
 	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeErr := errors.New("module close failed")
+	var logs bytes.Buffer
 	p := &plugin{
 		name:         "failed-module-close",
 		runtime:      successfulCloseRuntime{},
+		log:          slog.New(slog.NewTextHandler(&logs, nil)),
 		gov:          g,
 		generation:   1,
 		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {active: true}},
 		slots:        make(chan struct{}, 1),
 	}
 	p.slots <- struct{}{}
-	p.discard(&pooledModule{mod: closeErrorModule{err: closeErr}, ticket: ticket})
-	if err := p.close(); !errors.Is(err, closeErr) {
-		t.Fatalf("runtime close lost module close error: %v", err)
+	module := &closeErrorModule{err: closeErr}
+	p.discard(&pooledModule{mod: module, ticket: ticket})
+	if !module.closed || !strings.Contains(logs.String(), closeErr.Error()) {
+		t.Fatalf("module closure/error not recorded: closed=%t logs=%q", module.closed, logs.String())
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
-		got.Instances[inspection.GuestFailedRetained] != 1 {
-		t.Fatalf("successful runtime close refunded unconfirmed module teardown: %+v", got)
+	if err := p.close(); err != nil {
+		t.Fatalf("runtime close after module removal: %v", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("module close error retained capacity: %+v", got)
+	}
+	if len(p.guestTickets) != 0 || len(p.slots) != 0 {
+		t.Fatalf("closed module retained owner/slot: tickets=%d slots=%d", len(p.guestTickets), len(p.slots))
 	}
 }
 
@@ -1101,7 +1111,7 @@ type successfulCloseRuntime struct{ wazero.Runtime }
 
 func (successfulCloseRuntime) Close(context.Context) error { return nil }
 
-func TestGuestCapacityDoesNotForgetFailedRuntimeCloseOnRetry(t *testing.T) {
+func TestGuestCapacityReleasedAfterFailedRuntimeClose(t *testing.T) {
 	g := testGovernor(t)
 	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
@@ -1125,16 +1135,16 @@ func TestGuestCapacityDoesNotForgetFailedRuntimeCloseOnRetry(t *testing.T) {
 	if err := p.close(); !errors.Is(err, closeErr) {
 		t.Fatalf("first close = %v, want %v", err, closeErr)
 	}
-	if err := m.Close(); !errors.Is(err, closeErr) {
-		t.Errorf("manager retry hid the original close failure: %v", err)
+	if err := m.Close(); err != nil {
+		t.Errorf("manager close after runtime teardown: %v", err)
 	}
-	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
-		got.Instances[inspection.GuestFailedRetained] != 1 {
-		t.Errorf("retry refunded unconfirmed teardown: %+v", got)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 ||
+		got.Instances[inspection.GuestFailedRetained] != 0 {
+		t.Errorf("runtime close error retained completed teardown: %+v", got)
 	}
 }
 
-func TestManagerKeepsRuntimeCloseErrorWithoutGuestTickets(t *testing.T) {
+func TestManagerCloseAfterRuntimeCloseErrorWithoutGuestTickets(t *testing.T) {
 	g := testGovernor(t)
 	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
@@ -1151,8 +1161,8 @@ func TestManagerKeepsRuntimeCloseErrorWithoutGuestTickets(t *testing.T) {
 	if err := p.close(); !errors.Is(err, closeErr) {
 		t.Fatalf("first close = %v, want %v", err, closeErr)
 	}
-	if err := m.Close(); !errors.Is(err, closeErr) {
-		t.Fatalf("manager retry hid a runtime close failure: %v", err)
+	if err := m.Close(); err != nil {
+		t.Fatalf("manager close after completed runtime teardown: %v", err)
 	}
 }
 
@@ -1347,19 +1357,28 @@ func TestGuestCapacityStatsIncludesCompilingCandidate(t *testing.T) {
 
 type closeErrorModule struct {
 	api.Module
-	err error
+	err    error
+	closed bool
 }
 
-func (m closeErrorModule) Close(context.Context) error { return m.err }
+func (m *closeErrorModule) Close(context.Context) error {
+	m.closed = true
+	return m.err
+}
 
-func (m closeErrorModule) IsClosed() bool { return false }
+func (m *closeErrorModule) IsClosed() bool { return m.closed }
 
 type closeErrorRuntime struct {
 	wazero.Runtime
 	err error
 }
 
-func (r closeErrorRuntime) Close(context.Context) error { return r.err }
+func (r closeErrorRuntime) Close(ctx context.Context) error {
+	if r.Runtime != nil {
+		return errors.Join(r.Runtime.Close(ctx), r.err)
+	}
+	return r.err
+}
 
 type failedOnceRuntime struct {
 	wazero.Runtime

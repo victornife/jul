@@ -77,23 +77,6 @@ func TestSnapshotGenerationRetirements(t *testing.T) {
 	}
 }
 
-func TestSnapshotReportsInspectionSpoolAccounting(t *testing.T) {
-	m := NewMetrics()
-	m.SetInspectionSource(func() InspectionMetricsSnapshot {
-		return InspectionMetricsSnapshot{
-			Mode: "observe", SpoolAvailable: true,
-			SpoolBytesUsed: 10, SpoolBytesDebt: 3, SpoolBytesWouldReject: 5, SpoolBytesLimit: 100,
-			SpoolFilesUsed: 2, SpoolFilesDebt: 1, SpoolFilesWouldReject: 1, SpoolFilesLimit: 8,
-		}
-	})
-	got := m.Snapshot().InspectionSpool
-	if got == nil || !got.Available || got.Mode != "observe" ||
-		got.UsedBytes != 10 || got.DebtBytes != 3 || got.WouldBytes != 5 || got.ByteLimit != 100 ||
-		got.UsedFiles != 2 || got.DebtFiles != 1 || got.WouldFiles != 1 || got.FileLimit != 8 {
-		t.Fatalf("inspection spool snapshot = %+v", got)
-	}
-}
-
 // drive sends one request through the metrics middleware with the given status
 // and optional X-Cache state, sleeping briefly so an observable latency is
 // recorded (Windows' coarse clock makes a no-op handler record a zero sample).

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestInspectionContractDescribesRequestIntegration(t *testing.T) {
+func TestInspectionContractDescribesCurrentIntegration(t *testing.T) {
 	artifacts, err := RenderArtifacts(buildTestContract(t))
 	if err != nil {
 		t.Fatal(err)
@@ -60,8 +60,8 @@ func TestInspectionContractDescribesRequestIntegration(t *testing.T) {
 		},
 		{
 			"global.inspection.max_guest_capacity_bytes",
-			"applied by process-wide guest instance reservations; observe warns if eager instances exceed the configured ceiling",
-			"MaxGuestCapacityBytes is an optional process-wide ceiling for plugin instance linear-memory reservations; enforce requires room for one eager instance of every plugin and observe warns; no finite production default has been selected",
+			"enforce mode rejects excess managed guest reservations; observe records would-refuse decisions",
+			"MaxGuestCapacityBytes is the process-wide ceiling for page-rounded logical reservations for Jul-managed plugin instances across names and generations",
 		},
 		{
 			"global.inspection.max_concurrent_evaluations",

@@ -1,14 +1,13 @@
 # ADR 0032 — Aggregate inspection resource governor
 
-- **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
-  merged (#710, `c8bba7f2`); I3a merged (#715, `def419f5`); I4 merged (#716, `daa06bdc`);
-  I3b and I2b implementation is present in the current draft, but A19/A20 and integrated
-  qualification remain unaccepted; I6 remains partial. The 2026-11-13 amendment below was accepted
-  when #714 merged as `16d98258` from head `faf3ead4`. Implementation maturity and release
-  qualification remain incomplete until the scheduled gates pass.
+- **Status:** Accepted design, amended 2026-11-17 to prohibit engine forks and narrow the
+  #700 completion scope. I1/I2/I3a/I4 foundations and I5 tooling are merged; recovery work for
+  managed guest reservations and the public-result WAF body-failure guard is under review.
+  Original A19/A20 are deferred, not passed; integrated A1–A18/A21/A22 qualification remains
+  incomplete. The 2026-11-13 amendment was accepted when #714 merged as `16d98258`.
 - **Date:** 2026-11-10
-- **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
-  maintainer's decisions are recorded in §Maintainer decisions.
+- **Revised:** 2026-11-17. This amendment supersedes conflicting implementation details and
+  acceptance claims below; those sections retain the historical design record.
 - **Accepted:** 2026-11-10 by the maintainer. PR #704 merged as `8c483be2` from head
   `81f07e75`. The PR proposed the ADR; this acceptance is recorded separately.
 - **Deciders:** Victor Niharra (`@victornife`)
@@ -41,6 +40,57 @@
 > (A1–A18; if the 2026-11-13 proposed amendment is accepted, also A19–A22 for the controls it
 > adds). Until then, current operator guidance in `docs/waf.md`, `docs/plugins.md` and
 > `docs/known-limitations.md` still applies.
+
+## 2026-11-17 recovery amendment — official engines, bounded first-party scope
+
+The maintainer rejected the lifetime cost of maintaining modified Coraza and
+Wazero engines. Jul must use official, unmodified upstream modules and public
+APIs; no local replacement, copied engine source, dependency patch, reflection
+or private hook is permitted. The original strict storage and last-alias
+memory guarantees are not achievable through the currently supported public
+interfaces and are explicitly deferred rather than simulated by a new service
+or lifecycle subsystem.
+
+| Work item | Revised disposition |
+| --- | --- |
+| #711 / original A20 | Deliver process-wide logical admission for page-rounded ceilings of Jul-managed starting/live guest instances. The original hard last-alias/retained-memory guarantee is deferred and not marked passed. |
+| #713 / original A19 | Deliver a public-result-based fail-closed guard for detected request-body processing errors before origin dispatch. Exact aggregate spool quotas, file ownership, crash recovery and typed storage-error accounting are deferred and not marked passed. |
+| #712 / A22 | Project actual governor accounting, logical guest reservations, permission-safe route minimums and explicit unavailable/limited states through shared API/CLI/Console surfaces. Qualification remains pending. |
+| #700 | Complete only the explicitly revised supported scope after focused tests, adversarial review and qualification; preserve links and acceptance traceability for deferred strict capabilities. |
+
+### Revised guest-capacity contract
+
+The default `max_guest_capacity_bytes` is 1 GiB, representing a logical
+reservation for Jul-managed instances, not a physical-memory recommendation.
+Each instance reserves its page-rounded configured ceiling before startup.
+Normal successful teardown releases the logical ticket only after managed
+calls/callbacks return, required stock close operations succeed and Jul drops
+its aliases. Cancellation remains enabled. Unmodified Wazero may retain
+references asynchronously after that boundary; Jul cannot prove the original
+last-alias release or a fixed reclamation time. The engine tail is outside the
+logical guarantee and is not a fixed extra bound. Process/container memory
+limits are a separate external safeguard and may terminate the process.
+
+### Revised WAF body-failure contract
+
+With stock Coraza, Jul checks its public matched-rule results for the generated
+`REQBODY_ERROR` guard after body processing and before dispatch. A detected
+failure returns a generic `400` irrespective of CRS presence, WAF block/detect
+mode or governor enforce/observe mode. Clean multipart and supported partial
+processing remain supported. The generic public flag cannot distinguish disk
+I/O, storage exhaustion and malformed syntax, and cannot reveal hidden or late
+failures. Jul therefore does not claim exact aggregate temporary-file quotas,
+complete file ownership or original A19.
+
+This amendment changes compatibility for requests whose body processor reports
+an error in detect/observe mode: they are no longer forwarded to the origin.
+It does not undo data already dispatched and provides no post-dispatch
+guarantee. The #725 OS-level containment guidance remains an optional external
+deployment safeguard, not a Jul logical quota.
+
+Qualification, coverage, adversarial review and current-head CI evidence must
+be recorded separately from implementation. A passing test or representative
+soak does not prove either deferred strict guarantee.
 
 ## Context
 

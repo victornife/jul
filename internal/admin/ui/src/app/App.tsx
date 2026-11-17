@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: agpl
  */
 
-import { lazy, Suspense } from "react";
+import { Component, lazy, Suspense, type ReactNode } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/app/Layout.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
@@ -11,16 +11,48 @@ import { RoutesPanel } from "@/features/routes/RoutesPanel.tsx";
 import { AppsPanel } from "@/features/apps/AppsPanel.tsx";
 import { TLSPanel } from "@/features/tls/TLSPanel.tsx";
 import { SecurityPanel } from "@/features/security/SecurityPanel.tsx";
-import { TrafficControlsPanel } from "@/features/traffic-controls/TrafficControlsPanel.tsx";
 import { PluginsPanel } from "@/features/plugins/PluginsPanel.tsx";
 import { StreamsPanel } from "@/features/streams/StreamsPanel.tsx";
 import { SearchPanel } from "@/features/search/SearchPanel.tsx";
 import { OperationsPanel } from "@/features/operations/OperationsPanel.tsx";
 import { AuditPanel } from "@/features/security/AuditPanel.tsx";
 import { ConfigPanel } from "@/features/config/ConfigPanel.tsx";
-import { HistoryPanel } from "@/features/history/HistoryPanel.tsx";
-import { Loading } from "@/components/ui.tsx";
+import { Button, Loading } from "@/components/ui.tsx";
 
+class RouteErrorBoundary extends Component<{ readonly children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error("Console page failed to load:", error);
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div role="alert" className="space-y-3 rounded-md border border-jul-danger/40 p-4">
+        <p>This page could not be loaded. Reload the Console to try again.</p>
+        <Button variant="secondary" onClick={() => { window.location.reload(); }}>
+          Reload Console
+        </Button>
+      </div>
+    );
+  }
+}
+
+const HistoryPanel = lazy(() =>
+  import("@/features/history/HistoryPanel.tsx").then((m) => ({
+    default: m.HistoryPanel,
+  })),
+);
+const TrafficControlsPanel = lazy(() =>
+  import("@/features/traffic-controls/TrafficControlsPanel.tsx").then((m) => ({
+    default: m.TrafficControlsPanel,
+  })),
+);
 const TranscodeDesignerPanel = lazy(() =>
   import("@/features/transcode/TranscodeDesignerPanel.tsx").then((m) => ({
     default: m.TranscodeDesignerPanel,
@@ -41,7 +73,16 @@ export function App() {
         <Route path="/apps" element={<AppsPanel />} />
         <Route path="/tls" element={<TLSPanel />} />
         <Route path="/security" element={<SecurityPanel />} />
-        <Route path="/traffic" element={<TrafficControlsPanel />} />
+        <Route
+          path="/traffic"
+          element={
+            <RouteErrorBoundary key="traffic">
+              <Suspense fallback={<Loading label="Loading traffic controls…" />}>
+                <TrafficControlsPanel />
+              </Suspense>
+            </RouteErrorBoundary>
+          }
+        />
         <Route path="/plugins" element={<PluginsPanel />} />
         <Route path="/streams" element={<StreamsPanel />} />
         <Route
@@ -64,7 +105,16 @@ export function App() {
         <Route path="/audit" element={<AuditPanel />} />
         <Route path="/config" element={<ConfigPanel />} />
         <Route path="/ui" element={<Navigate to="/config" replace />} />
-        <Route path="/history" element={<HistoryPanel />} />
+        <Route
+          path="/history"
+          element={
+            <RouteErrorBoundary key="history">
+              <Suspense fallback={<Loading label="Loading history…" />}>
+                <HistoryPanel />
+              </Suspense>
+            </RouteErrorBoundary>
+          }
+        />
         <Route
           path="/wizard"
           element={

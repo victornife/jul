@@ -6,37 +6,56 @@ authority is [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md); 
 measurements retain their original identities. Merged source is not a published release,
 qualification, soak or maturity change.
 
-### 2026-11-17 authorized completion prompt — starting inventory
+## Current recovery status — 2026-11-17
 
-Main is `155b6d94dfde580a9332c3a985c8ce156563fd20`. Draft #721 is open at
-`0497ab707cd0263e27a5f0e3a2f4817d847ce6ab`; draft #724 is open at
-`6a1a0f6b28caf9549066ab17f5cc6173cfeead6e`. #725 and #726 are merged. The checked-out #721
-branch contains the current main commit and was clean before this amendment.
+The active recovery worktree is `recover/700-unforked`, based on #721 and
+integrating #724. The work is uncommitted and not qualified. The 2026-11-17
+amendment in [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md)
+governs this scope; earlier fork-dependent plans and checks below are historical
+only. No commit, push, merge, issue closure or release has occurred.
 
-| Area | Reusable implementation/evidence | Remaining boundary |
-| --- | --- | --- |
-| I1, I2, I3a, I4, I5 | Merged controls, tests and tooling on main. | Re-run coupled tests and requalify only criteria affected by the integrated diff. |
-| I2b / #711 / #721 | Process governor, tickets, page rounding, config, metrics, reload/versioning and lifecycle regressions; public-close and experimental-join evidence. | Experimental evidence is not production support. The current debt prototype leaks reservations under normal churn; watcher synchronization, failed-start cleanup, finite default, coverage and A20 remain to implement and prove. |
-| I3b / #713 | Coraza failure/containment evidence and existing WAF accounting. | No Jul-owned provider, logical byte/file controller, typed sticky storage failure, recovery/migration or finite measured defaults; A19 remains unpassed. |
-| I6a / #712 / #724 | Shared Console/API/CLI projections, audit signals, permissions/navigation and real-server WAF tests. | No real guest/spool producers or full state/permission journeys for them; integrate without regressing existing draft changes. |
-| I6b | Frozen assessment harness and A1–A22 mapping. | No integrated qualification or 30-minute combined soak on this source identity. |
-| Dependency patches | Existing local-module replacement precedent in `third_party/gofast`. | Add only pinned wazero and Coraza deltas, source provenance, test/coverage commands and upstream removal criteria. |
+| Disposition | Scope |
+| --- | --- |
+| KEEP | Existing process governor, request leases, WAF/plugin accounting, audit ownership, reload publication/version checks, candidate isolation, exact no-op comparisons, and #724's shared API/CLI/Console, RBAC, accessibility and navigation work. |
+| SIMPLIFY | Guest tickets reserve page-rounded ceilings for Jul-managed starting/live instances, with a 1 GiB parsed-config default. Stock cancellation remains enabled. The reservation excludes asynchronous engine-retained references and is not physical memory/RSS. |
+| SIMPLIFY | Stock-Coraza public request-body processing failure results trigger a generated fail-closed guard before origin dispatch. The generic result does not identify a storage cause and does not guarantee all I/O failures are detected. |
+| REMOVE | Wazero/Coraza local replacements and copied source, provider-specific temporary-file plumbing, spool controller/debt/recovery machinery, unsupported spool settings/metrics/API/UI, and replacement-only build/coverage machinery. |
+| DEFER | Original A20 last-alias/retained-memory proof; original A19 exact aggregate spool byte/file quotas, Jul-owned file lifecycle, typed storage failures and crash recovery. No renamed substitute is accepted. |
 
-| Acceptance | Starting status | Required completion evidence |
-| --- | --- | --- |
-| A1–A18 | Prior implementation checkpoints exist; the integrated campaign is not qualified at this source identity. | Reuse unchanged-boundary evidence only after mapping it to the final diff; rerun changed/coupled criteria and preserve the original thresholds. |
-| A19 | Not passed. | Logical spool quotas, transaction-owned files, typed failures, cleanup debt, same-identity recovery and pre-dispatch enforcement tests. |
-| A20 | Not passed. | Watcher last-access join, safe failed-start teardown, normal recycling drainage, finite measured capacity and multi-generation tests. |
-| A21 | Existing I3a/I4 work; integrated qualification pending. | Revalidate retained audit ownership and blocked-writer behavior against the final combined lifecycle. |
-| A22 | Partial in draft #724. | Real guest/spool producer parity across API/CLI/Console, permissions, debt/observe/recovery and migration. |
+| Work item | Current disposition |
+| --- | --- |
+| #711 / original A20 | Managed logical capacity is implemented in the draft; original A20 is deferred, not passed. |
+| #713 / original A19 | Public-result failure guard is the reduced scope; original A19 is deferred, not passed. |
+| #712 / A22 | Real implemented status and permission-safe shared projections are being integrated; UI/API/CLI agreement and qualification are pending. |
+| #700 | Revised scope only; A1–A18/A21/A22 qualification and integrated acceptance remain pending. |
 
-The 2026-11-17 bounded execution amendment is recorded in ADR 0032. This inventory does not
-mark any acceptance criterion passed. The next steps are the contract commit, dependency patch
-infrastructure, then the guest, spool, operability and integrated-qualification slices.
+The reduced-scope recovery changes are implemented in the recovery branch.
+Local checks for this source identity pass; hosted checks remain pending:
 
-## Current checkpoint
+| Verification | Result |
+| --- | --- |
+| `make ci-pr` | Passed with CI-pinned `golangci-lint` 2.14.0, `govulncheck` 1.6.0 and `addlicense` 1.2.0; includes full-tag lint/tests/build, security gates, `go vet`, generated/config checks and 2,726 documentation checks. |
+| `go test -race -count=1 -p 2 -tags 'wasmplugins waf' ./internal/inspection ./internal/plugins ./internal/waf ./internal/server` | Passed. Includes the 100,000-call guest recycling regression and reload/WAF interactions. |
+| Full-tag changed-Go coverage via `scripts/check-added-go-coverage.py` | Passed: 786/867 added or modified production statements (90.6574%), above the 90% requirement. |
+| `corepack pnpm test:coverage`; `corepack pnpm typecheck`; `corepack pnpm lint` | Passed: 1,087 UI tests; changed production TS/TSX executable-line coverage is 95/100 (95%). |
+| `corepack pnpm e2e e2e/real-server.spec.ts` | Passed: 32 tests. |
+| `python3 scripts/check-d11-certification.py` | Passed: 0 errors. |
 
-### I3b-I2b Implementation Review
+These are local results, not hosted checks on a published head. The 30-minute
+combined inspection soak and Linux/cgroup qualification remain unrun: the
+available `scripts/soak.sh` scenarios cover proxy, cache and UDP churn rather
+than combined WASM/WAF inspection, and the Docker daemon is unavailable on this
+host. The integrated A1–A22 campaign also remains outstanding. Do not claim
+original A19/A20 completion or close #700/#711/#713/#712 based on these checks;
+record the reduced guarantees and pending qualification explicitly.
+
+## Historical evidence — fork-dependent #721/#713 draft (superseded)
+
+The following implementation notes and test results describe the earlier
+fork-based proposal. They are preserved for traceability and do not qualify or
+describe the current recovery implementation.
+
+### Historical I3b-I2b Implementation Review (superseded)
 
 Status updated 2026-11-17.
 
@@ -99,8 +118,8 @@ identities in the table and historical text below.
 | Checkpoint 2 | **Merged**: I3a WAF request accounting, #715 merged as `def419f5` from head `e7ea422e`; see [I3a implementation record](#i3a-implementation-record) |
 | Checkpoint 3 | **Merged**: I4 response accounting, #716 merged as `daa06bdc` from head `d879cba9` after all required hosted checks passed |
 | Checkpoint 4 | **Blocked**: I3b spool protection (#713) requires the supported Coraza boundary and ownership/default decisions recorded below |
-| Checkpoint 5 | **Blocked (B1)**: process-lifetime debt exhausts a finite enforce budget under normal churn; #721 remains draft and original A20 is not accepted |
-| Checkpoint 6 | **Partial, blocked**: draft #724 surfaces existing resources, but full I6a #712 requires stable implemented guest and spool contracts |
+| Checkpoint 5 | **Blocked**: the prior I2b draft retained unconfirmed guest capacity until process exit; normal churn could exhaust a finite enforce limit, so A20 remained open |
+| Checkpoint 6 | **Partial, blocked**: draft #724 projected existing inspection status; full I6a #712 still required stable guest/spool contracts |
 | Existing foundations | I1 #706 (`a57afa4d`), I5 #708 (`d8d0520b`), I2 #710 (`c8bba7f2`) and I3a #715 (`def419f5`) merged |
 | Programme owners | #700 and #62 remain open; no A1–A22 acceptance is claimed |
 | Evidence | [2026-11-15 I2b watcher reproduction](evidence/2026-11-15-700-i2b-watcher/README.md); [2026-11-13 checkpoint-1 probes](evidence/2026-11-13-700-checkpoint-1/README.md); historical [I1](evidence/2026-11-10-700-i1-base-charge/README.md), [I5](evidence/2026-11-12-700-i5/README.md), and [I2](evidence/2026-11-12-700-i2/README.md) |
@@ -114,8 +133,8 @@ identities in the table and historical text below.
 | 2 — I3a | Merged (#715, `def419f5`): WAF request accounting, slots, request/audit calibration | Complete for this checkpoint; response calibration followed in I4 |
 | 3 — I4 | Merged (#716, `daa06bdc`): WAF and plugin response paths, response audit calibration | Complete for this checkpoint; I3b remains next in the schedule |
 | 4 — I3b | Blocked: inspection spool bytes/files and restart/cleanup ownership; #713 | Accepted storage design, WAF integration, a reviewed Coraza interception boundary, supported finite defaults and safe directory/recovery design; implementation and upstream-integration owners |
-| 5 — I2b | Blocked: conservative process-lifetime debt exhausts finite enforce budgets under ordinary churn; draft #721, #711 | Resolve B1 and the release contract, review, and determine a measured finite default; no technical dependency on the WAF parser, though scheduled after I3b |
-| 6 — I6a | Partial draft #724: operational API/CLI/Console for existing resources; #712 remains blocked | Stable implemented resource contracts and real producer signals; implementation owner |
+| 5 — I2b | Blocked: the unmerged draft did not prove guest-memory ownership and process-lifetime retention could exhaust finite budgets; #711 | Supported last-alias teardown, interrupt behavior, failed-start drainage and a measured finite default |
+| 6 — I6a | Partial draft #724: operational API/CLI/Console for existing resources; #712 remains blocked | Stable implemented resource contracts and real producer signals |
 | I6b — separate prompt | Qualification pending | Integrated source, frozen plan and A1–A22 campaign; qualification owner |
 
 The maintainer requested publication of the I2b prototype as draft #721 while I3b remains blocked.
@@ -349,7 +368,16 @@ or another conservatively proved solution.
 
 ## I2b blocker and reload safety follow-up
 
-Independent reload corrections discovered during the I2b investigation merged in #722 as
+Draft #721 contains the guest-capacity prototype and reproducible
+[watcher evidence](https://github.com/victornife/jul/tree/14ebcb20/docs/reviews/evidence/2026-11-15-700-i2b-watcher)
+and [join experiment](https://github.com/victornife/jul/tree/14ebcb20/docs/reviews/evidence/2026-11-16-700-i2b-join).
+The pinned wazero v1.12.0 can retain guest memory in an unjoined cancellation watcher after a
+premature refund. Draft head `81337764` retains unconfirmed reservations for the process
+lifetime instead, but ordinary churn can exhaust a finite enforce limit. The isolated join experiment does not prove absence of all aliases or
+failed-start debt drainage and is not a supported production fix. A20, the finite guest default,
+the remaining adversarial review, and integrated qualification remain open.
+
+Independent reload corrections discovered during the I2b investigation were merged in #722 as
 `ed775fd5ce9836cafb8c137dab25231fb8ccc10f` from reviewed head `bda851355b46019d4d3e88ad11093917d8e6d206`.
 They prevent false no-ops for order-sensitive or duplicate declarations, bind authentication and
 WAF to the owning route declaration, preserve duplicate backend state, and correct previews.
@@ -615,6 +643,135 @@ invariant or A20. The implementation is not merged; draft #721 is blocked. The w
 invariant, A20 qualification and a finite supported default
 remain explicitly blocked;
 do not close #700/#62 or claim final acceptance before I6b.
+
+## I6a partial guided settings review
+
+The #724 draft adds the six existing inspection fields to the shared global
+settings editor. Editable values come from the authoritative write baseline;
+inspection edits require managed authority, `config:write`, `config:raw`, and a
+version from that same baseline. The preview is pinned to the version captured
+when the editor opened. File-owned, unknown-authority and incompatible older
+servers remain read-only or unavailable. These changes do not implement guest
+capacity or spool protection, nor complete I6a.
+
+Independent read-only reviews of the guided-settings diff identified four
+functional findings: an unpinned baseline could overwrite concurrent changes;
+edits could change while a preview was in flight; clearing a timeout could
+silently disable it; and pathless server validation details were hidden. The
+version is now permission-gated and pinned, the form is frozen during preview,
+changed empty durations require explicit `0s`, and server issues are displayed.
+The reviewers confirmed their fixes without further significant findings. A
+separate focused security review and follow-up reported no vulnerabilities;
+these reviews are scoped to this diff, not the entire checkpoint.
+
+Focused Go and frontend tests cover version permissions and stale baselines,
+explicit zero, empty timeouts, missing authority and versions, preview errors,
+busy state and navigation. The real-server browser smoke exercised an invalid
+slot error and a successful version-pinned preview without applying it. Full
+I6a refusal/draining browser acceptance, guest/spool producers and final
+whole-checkpoint review remain outstanding.
+
+The real-server Playwright suite now exercises observe-mode publication, the
+Overview explanation and navigation to the shared settings editor, including
+the explicit zero evaluation-slot value. It restores the original configuration.
+The targeted test passed against the I6a branch's embedded Console and failed
+against the clean `9c70b64d` baseline because the overview had no inspection
+projection. This fixture has no inspected route; it does not demonstrate
+observe-mode traffic, a refusal, or draining.
+
+An additional admin integration test wires a real governor into both overview
+and v1 status. It checks an enforce-mode admission refusal after a limit
+reduction, observe-mode admission above the limit, and the reported draining
+transition as leases close. These leases are acquired directly by the test,
+not by HTTP inspection traffic; browser and protocol acceptance remain open.
+The test failed as expected in a disposable `a68b68ee` worktree when the
+status projection was independently mutated to always report `draining=false`.
+
+A further `waf`-tagged integration test sends real HTTP traffic through the
+WAF and checks both live status endpoints while an origin request is held.
+After a limit reduction, it verifies enforce returns 503 without reaching the
+origin, observe allows the next request, and the statuses drain on release.
+The test failed with the same independent draining-projection mutation. This
+uses an in-process HTTP fixture, not the packaged Jul server or a browser, so
+the corresponding browser acceptance remains open.
+
+The isolated `inspection-real-server` Playwright project now builds a
+`console waf` Jul binary and holds real WAF requests at a local origin. It
+publishes a lower valid limit, checks the resulting 503 and `Retry-After`,
+renders the draining state in the browser, switches to observe, confirms
+traffic reaches the origin and drains the held requests. The browser then
+shows observe without draining. A random fixture token and private temporary
+directory isolate it from other Jul processes. Three concurrent repetitions
+passed locally; changing only the displayed `Draining` label made the test
+fail before restoring it. The existing CI real-server project includes this
+test; the isolated project also permits running it independently.
+This covers the WAF browser scenario, not the missing guest/spool producers,
+all browser compatibility cases, or final I6a review.
+
+| Validation command | Result |
+| --- | --- |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=inspection-real-server --repeat-each=3 --reporter=list` (from `internal/admin/ui`) | Passed, three concurrent repetitions on macOS |
+| `node node_modules/typescript/bin/tsc --noEmit` and `node node_modules/eslint/bin/eslint.js .` (from `internal/admin/ui`) | Passed; the project configuration excludes the E2E files |
+| `GOMAXPROCS=2 python3 scripts/docs-check.py` | Passed, 2,723 checks |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=real-server --project=inspection-real-server --reporter=list` (from `internal/admin/ui`) | Did not start: the existing shared real-server script's macOS `mktemp` path traverses `/var`, a symlink rejected by the version-key directory check. The isolated project passed separately; hosted CI must validate its real-server invocation. |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=real-server inspection-real-server.spec.ts --reporter=list` (from `internal/admin/ui`) | Passed on macOS with a canonical `TMPDIR` and a temporary local change making the existing script pass that directory explicitly to `mktemp`. The script was restored afterwards; the full real-server suite was not rerun. |
+
+The packaged-browser test now also stalls an actual overview poll to check
+the stale warning and trend removal, then restores polling. It next removes
+the inspection field from otherwise real server responses to simulate an older
+backend, verifies the collapsed and expanded unavailable states, and restores
+the real response. This is a deliberately injected compatibility fault, not
+an actual older-server binary. The test exposed a missing-field case where the
+collapsed summary did not warn: the unit regression failed before changing
+the summary to treat both `null` and missing inspection as unavailable.
+
+| Validation command | Result |
+| --- | --- |
+| `corepack pnpm exec vitest run src/test/overview-layout.test.tsx src/test/resource-capacity.test.tsx` (from `internal/admin/ui`) | Passed, 57 tests; the new missing-field assertion failed before the fix. |
+| `corepack pnpm run lint`, `corepack pnpm run typecheck`, `corepack pnpm run build` (from `internal/admin/ui`) | Passed; the build reported the existing sourcemap warning. |
+| `go test -tags console ./internal/admin -run 'TestConsole\|TestRuntimeOverview' -count=1` | Passed with the updated embedded assets. |
+| `CI=1 node node_modules/@playwright/test/cli.js test --project=inspection-real-server --repeat-each=3 --retries=0 --reporter=list` (from `internal/admin/ui`) | Passed, three concurrent macOS repetitions with local dependencies and freshly built assets. An earlier run failed because the test removed its route before the stalled handler finished; the handler is now joined before removal. |
+| `CI=1 corepack pnpm exec playwright test --project=inspection-real-server --repeat-each=3 --retries=0 --reporter=list` (from `internal/admin/ui`) | Did not start the browser: Corepack's pnpm attempted a separate `pnpm install`, but the shell's pnpm shim had no configured version. The direct Playwright invocation above used the same installed dependencies. |
+
+The built initial-route assets totaled 242,808 bytes with local `gzip -9 -n`
+against the unchanged 256,000-byte budget; hosted CI must verify its own build.
+
+Two independent whole-diff reviews found that a delayed Overview response
+could be presented as fresh, lazy-route chunk failures could remove the whole
+Console, the inspection trend lacked accessible values, and `jul status`
+silently omitted inspection on older servers. The Overview now dates samples
+from the start of the request, suppresses stale trends, and exposes first,
+latest, minimum and maximum values. The lazy routes report failures with a
+reload action and retain navigation; the CLI marks absent inspection status
+unavailable. The initial timestamp and CLI regressions failed before their
+fixes. A follow-up review identified missing intermediate peaks in the first
+accessible summary; minimum and maximum are now included, with a spike
+regression. Another follow-up found that two request starts could conceal a
+longer possible gap between server samples; history now resets if the latest
+possible current sample and earliest possible prior sample are over six
+seconds apart. The regression failed before that correction. The UI labels its
+window as request-start times, not actual sample times. A browser navigation
+check also exposed an error boundary retained across different routes;
+route-specific keys correct it. Both reviewers confirmed the corrections
+without further significant findings.
+
+The published head `1f78bce9` failed hosted `docs-check`: D11-104 still named
+26 obsolete content-hashed assets from an earlier build. The current build
+reconciles those paths and records the replacement mapping without changing
+historical review evidence. Its local D11 inventory check and all 22 D11 tests
+passed. This is path reconciliation, not a recertification of the new code.
+
+| Validation command | Result |
+| --- | --- |
+| `corepack pnpm exec vitest run src/test/resource-capacity.test.tsx src/test/overview-layout.test.tsx` (from `internal/admin/ui`) | Passed, 59 tests. |
+| `corepack pnpm run build` and `corepack pnpm run lint` (from `internal/admin/ui`) | Passed; the build included type checking and reported the existing sourcemap warning. |
+| `corepack pnpm test:coverage` (from `internal/admin/ui`) | Passed, 1,086 tests and the coverage contract. |
+| `corepack pnpm exec playwright test --project=inspection-real-server e2e/inspection-real-server.spec.ts --repeat-each=3 --workers=3 --retries=0` (from `internal/admin/ui`) | Passed, three concurrent packaged-WAF browser runs, including delayed response and lazy-chunk failure injection. |
+| `go test ./cmd/jul -run '^TestRemoteStatus' -count=1` | Passed. |
+| `python3 scripts/check-d11-certification.py` and `python3 scripts/test_d11_certification.py` | Passed, zero inventory errors and 22 tests. |
+
+The final initial-route assets totaled 243,162 bytes with local `gzip -9 -n`
+against the unchanged 256,000-byte budget. Hosted current-head CI is required.
 
 ## Handoff rules
 

@@ -613,34 +613,23 @@ request plugins and WAF on proxy routes and does not cap earlier inspection
 or routes without an upstream. Account for all enabled layers and overlapping
 generations when sizing the host.
 
-The unmerged I2b implementation's `[global.inspection].max_guest_capacity_bytes`
-reserves each instance's effective page-rounded `memory_limit` before
-instantiation and across live generations. A local patch to pinned Wazero
-v1.12.0 joins its cancellation watcher before Jul releases that reservation;
-failed instantiation also cleans resources acquired before the start failure.
-This proves watcher quiescence at the release boundary, not synchronous Go heap
-reclamation or return of pages to the OS. An omitted guest ceiling remains
-unbounded and provides no A20 capacity guarantee; the configured ceiling must
-fit at least one eager instance of every configured plugin. `jul check` checks
-that condition without executing guest code. Idle instances remain charged;
-reuse does not charge again. Close/cleanup failures remain charged and
-observable. The policy does not evict idle instances: one idle pool may leave
-too little capacity for another plugin or a reload candidate. Size for expected
-pools **and** old/candidate overlap, and raise the limit separately before a
-full reload if needed. In enforce mode an exhausted configured capacity refuses
-new instances and reload candidates; existing pooled instances can still
-serve. Observe mode
-records would-refuse decisions but admits over the ceiling, so it is not a
-memory bound. Raising the limit provides headroom but does not erase debt and
-must fit the host budget. A process restart resets accounting; use a controlled
-restart with sufficient overlap/host headroom and monitor the debt gauge.
+`[global.inspection].max_guest_capacity_bytes` defaults to 1 GiB and reserves
+the effective page-rounded `memory_limit` for each Jul-managed starting/live
+instance across plugin names and generations. Reservation happens before
+instantiation; idle reuse is not charged twice. Successful managed teardown
+releases the logical reservation after calls and host callbacks return, stock
+module close succeeds, and Jul drops its aliases. Startup/close failures retain
+known outstanding ownership until cleanup resolves.
 
-No finite production default has been approved. Omitting the setting tracks
-reservations but imposes no aggregate guest ceiling; it is not a protected
-configuration. Guest reservations are configured ceilings, not committed
-memory or RSS, and exclude compiled code, host allocations and other process
-resources. Even in enforce mode this is a bound on reserved guest linear-memory
-ceilings, not on total process memory or RSS.
+This is a logical capacity reservation, not a hard ceiling on memory that
+unmodified Wazero may still reference asynchronously, nor a measurement of
+committed memory, Go heap or RSS. Jul cannot prove the engine's last-alias
+release or bound its reclamation time through the examined public API. The
+engine tail is outside this guarantee; use process/container limits as a
+separate deployment safeguard. Cancellation remains enabled. `jul check`
+validates that the ceiling fits one eager instance of each configured plugin.
+The limit is published across reloads; candidates warm against the currently
+published ceiling. Size for expected pools and old/candidate overlap.
 
 Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`
@@ -834,7 +823,7 @@ are addressed by design, configuration, or runtime containment:
 | Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
 | Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, the absolute inspection `body_timeout` (`408`), client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699, #700) | With `observe` mode or `body_timeout = "0s"` and `read_timeout = 0`, a stalled upload keeps its bytes until the client gives up |
-| Memory exhaustion by concurrent plugin requests | Many concurrent body-reading or allocating requests | Request-side host buffers are charged to `max_buffered_bytes` before allocation; excess requests get `503` (#700) | `observe` mode does not refuse; guest capacity and compiled modules are separate from the request-byte budget |
+| Memory exhaustion by concurrent plugin requests | Many concurrent body-reading or allocating requests | Request-side host buffers and response-subscription buffers are charged to `max_buffered_bytes`; Jul-managed instance ceilings are reserved against `max_guest_capacity_bytes` (#700) | WAF state is an estimate; engine-retained references are outside the logical guest reservation, and `observe` mode does not refuse |
 | Memory or CPU exhaustion by concurrency | Many concurrent requests on a plugin route, each instantiating a module | `max_instances` (default 64) caps live instances per plugin; excess calls wait one `timeout`, then get `503` and are counted in `jul_plugin_instance_waits_total` (#506) | Operator sets `max_instances × memory_limit` above what the host can hold |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |

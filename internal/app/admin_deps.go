@@ -30,7 +30,6 @@ type Subsystems struct {
 	StreamCompiled   bool
 	WAFCompiled      bool
 	Inspection       *inspection.Governor
-	Spool            *inspection.SpoolController
 	LastStreamReload *atomic.Pointer[string]
 }
 
@@ -49,9 +48,6 @@ func BuildAdminDeps(productName, version string, src config.Source, subsystems S
 	}
 	if subsystems.Inspection != nil {
 		deps.InspectionSnapshot = subsystems.Inspection.Snapshot
-	}
-	if subsystems.Spool != nil {
-		deps.InspectionSpoolSnapshot = subsystems.Spool.Snapshot
 	}
 
 	deps.TrafficSources = subsystems.Metrics.TrafficSnapshot

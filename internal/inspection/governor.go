@@ -60,8 +60,6 @@ const (
 	EvaluationSaturated    Outcome = "evaluation"
 	AuditSaturated         Outcome = "audit"
 	GuestCapacitySaturated Outcome = "guest_capacity"
-	SpoolBytesSaturated    Outcome = "spool_bytes"
-	SpoolFilesSaturated    Outcome = "spool_files"
 	QueueExhausted         Outcome = "queue_exhausted"
 	WaitExpired            Outcome = "wait_expired"
 	Cancelled              Outcome = "cancelled"
@@ -82,11 +80,6 @@ var (
 type Limits struct {
 	Mode     Mode
 	MaxBytes uint64
-	// Spool settings bound Coraza's temporary request-body files separately
-	// from the in-memory inspection reservation.
-	SpoolDir      string
-	MaxSpoolBytes uint64
-	MaxSpoolFiles uint64
 	// MaxGuestCapacityBytes is the process-wide ceiling for live guest
 	// instances. Zero tracks reservations without limiting them.
 	MaxGuestCapacityBytes     uint64
@@ -97,9 +90,12 @@ type Limits struct {
 	BodyTimeout               time.Duration
 	BaseChargeBytes           uint64
 	// MinimumBytes is the effective-route worst-case single-request charge
-	// of the generation these limits are published with (ADR 0032 §7). Zero
-	// means no inspected route; enforce mode rejects MaxBytes below it.
-	MinimumBytes uint64
+	// of the generation these limits are published with (ADR 0032 §7). When
+	// MinimumKnown is true, zero means no inspected route; enforce mode
+	// rejects MaxBytes below the minimum.
+	MinimumBytes      uint64
+	MinimumKnown      bool
+	MinimumGeneration uint64
 	// MinimumRoute names the route that sets MinimumBytes, for errors.
 	MinimumRoute string
 }
@@ -992,8 +988,6 @@ const (
 	RejectEvaluation
 	RejectAudit
 	RejectGuestCapacity
-	RejectSpoolBytes
-	RejectSpoolFiles
 	rejectionReasons
 )
 
@@ -1021,7 +1015,7 @@ func (g *Governor) RecordRejection(reason Outcome, mode Mode) error {
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
 	switch reason {
-	case ByteSaturated, WAFStateSaturated, EvaluationSaturated, AuditSaturated, GuestCapacitySaturated, SpoolBytesSaturated, SpoolFilesSaturated:
+	case ByteSaturated, WAFStateSaturated, EvaluationSaturated, AuditSaturated, GuestCapacitySaturated:
 	default:
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
@@ -1046,10 +1040,6 @@ func (g *Governor) noteRejectionForModeLocked(reason Outcome, mode Mode) {
 		index = RejectAudit
 	case GuestCapacitySaturated:
 		index = RejectGuestCapacity
-	case SpoolBytesSaturated:
-		index = RejectSpoolBytes
-	case SpoolFilesSaturated:
-		index = RejectSpoolFiles
 	}
 	modeIndex := 0
 	if mode == Observe {

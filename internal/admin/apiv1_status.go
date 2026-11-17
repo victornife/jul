@@ -16,6 +16,8 @@ import (
 	"jul/internal/buildcaps"
 	"jul/internal/configcontract"
 	"jul/internal/inspection"
+	"jul/internal/rbac"
+	"jul/internal/server"
 )
 
 // externalEndpointList is derived from Catalog after the v1 write closure has
@@ -27,10 +29,11 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	authority := s.currentAuthority()
+	live := s.liveSnapshot()
 	out := adminapi.StatusResponse{
 		APIVersion:      adminapi.APIVersion,
 		Ready:           s.dataPlaneReady(),
-		ServingVersion:  s.servingVersion(),
+		ServingVersion:  s.servingVersionOf(live),
 		AuthorityState:  authorityState(authority),
 		Drift:           driftState(authority),
 		PendingRestart:  s.pendingRestartState(),
@@ -39,45 +42,49 @@ func (s *Server) handleV1Status(w http.ResponseWriter, r *http.Request) {
 		LedgerRetention: s.ledgerRetention(),
 	}
 	out.PersistedVersion = authority.DiskVersion
-	if s.deps.InspectionSnapshot != nil {
-		snapshot := s.deps.InspectionSnapshot()
-		spool := adminapi.InspectionSpoolStatus{State: "unavailable"}
-		if s.deps.InspectionSpoolSnapshot != nil {
-			spoolSnapshot := s.deps.InspectionSpoolSnapshot()
-			spool = adminapi.InspectionSpoolStatus{
-				State:      "active",
-				Mode:       string(snapshot.Limits.Mode),
-				UsedBytes:  spoolSnapshot.UsedBytes,
-				UsedFiles:  spoolSnapshot.UsedFiles,
-				DebtBytes:  spoolSnapshot.DebtBytes,
-				DebtFiles:  spoolSnapshot.DebtFiles,
-				WouldBytes: spoolSnapshot.WouldBytes,
-				WouldFiles: spoolSnapshot.WouldFiles,
-				ByteLimit:  spoolSnapshot.ByteLimit,
-				FileLimit:  spoolSnapshot.FileLimit,
-			}
-		}
-		guestCapacity := adminapi.InspectionPluginGuestCapacity{}
-		guestCapacityState := "unavailable"
-		if s.deps.InspectionPluginGuestCapacity != nil {
-			var err error
-			guestCapacity, err = s.deps.InspectionPluginGuestCapacity()
-			if err != nil {
-				writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError,
-					"could not report plugin guest capacity: %v", err))
-				return
-			}
-			guestCapacityState = "not_sampled"
-		}
-		out.Inspection = inspectionStatus(snapshot, spool, guestCapacity, guestCapacityState)
+	var err error
+	out.Inspection, err = s.currentInspectionStatus(r, live)
+	if err != nil {
+		writeAPIError(w, r, adminapi.Errorf(adminapi.CodeInternalError,
+			"could not report plugin guest capacity: %v", err))
+		return
 	}
 	writeAPIJSON(w, http.StatusOK, out)
 }
 
-func inspectionStatus(snapshot inspection.Snapshot, spool adminapi.InspectionSpoolStatus, guestCapacity adminapi.InspectionPluginGuestCapacity, guestCapacityState string) *adminapi.InspectionStatus {
+func (s *Server) currentInspectionStatus(r *http.Request, live server.LiveSnapshot) (*adminapi.InspectionStatus, error) {
+	if s.deps.InspectionSnapshot == nil {
+		return nil, nil
+	}
+	snapshot := s.deps.InspectionSnapshot()
+	guestCapacity := adminapi.InspectionPluginGuestCapacity{}
+	guestCapacityAvailable := false
+	if s.deps.InspectionPluginGuestCapacity != nil {
+		var err error
+		guestCapacity, err = s.deps.InspectionPluginGuestCapacity()
+		if err != nil {
+			return nil, err
+		}
+		guestCapacityAvailable = true
+	}
+	result := inspectionStatus(snapshot, guestCapacity, guestCapacityAvailable)
+	if snapshot.Limits.MinimumKnown && live.EffectiveConfig != nil &&
+		snapshot.Limits.MinimumGeneration == live.Generation {
+		result.MinimumRequestBytes = &snapshot.Limits.MinimumBytes
+		if id, ok := rbac.IdentityFromContext(r.Context()); !ok || id.Has(rbac.ConfigRead) {
+			var serverIndex, locationIndex uint64
+			if n, _ := fmt.Sscanf(snapshot.Limits.MinimumRoute, "servers[%d].locations[%d]", &serverIndex, &locationIndex); n == 2 {
+				result.MinimumRequestRoute = fmt.Sprintf("servers[%d].locations[%d]", serverIndex, locationIndex)
+			}
+		}
+	}
+	return result, nil
+}
+
+func inspectionStatus(snapshot inspection.Snapshot, guestCapacity adminapi.InspectionPluginGuestCapacity, guestCapacityAvailable bool) *adminapi.InspectionStatus {
 	limits := snapshot.Limits
 	var guestMaxBytes, guestLiveInstances, guestMaxInstances *uint64
-	if guestCapacityState != "unavailable" {
+	if guestCapacityAvailable {
 		guestMaxBytes = &guestCapacity.MaxPermittedBytes
 		guestLiveInstances = &guestCapacity.LiveInstances
 		guestMaxInstances = &guestCapacity.MaxInstances
@@ -87,8 +94,6 @@ func inspectionStatus(snapshot inspection.Snapshot, spool adminapi.InspectionSpo
 			Mode:                     string(limits.Mode),
 			MaxBufferedBytes:         limits.MaxBytes,
 			MaxResponseHeaderBytes:   limits.MaxResponseHeaderBytes,
-			MaxSpoolBytes:            limits.MaxSpoolBytes,
-			MaxSpoolFiles:            limits.MaxSpoolFiles,
 			MaxConcurrentEvaluations: limits.ConfiguredEvaluationSlots,
 			EvaluationQueueTimeout:   limits.EvaluationQueueTimeout.String(),
 			BodyTimeout:              limits.BodyTimeout.String(),
@@ -97,8 +102,6 @@ func inspectionStatus(snapshot inspection.Snapshot, spool adminapi.InspectionSpo
 			Mode:                     string(limits.Mode),
 			MaxBufferedBytes:         limits.MaxBytes,
 			MaxResponseHeaderBytes:   limits.MaxResponseHeaderBytes,
-			MaxSpoolBytes:            limits.MaxSpoolBytes,
-			MaxSpoolFiles:            limits.MaxSpoolFiles,
 			MaxConcurrentEvaluations: limits.EvaluationSlots,
 			EvaluationQueueTimeout:   limits.EvaluationQueueTimeout.String(),
 			BodyTimeout:              limits.BodyTimeout.String(),
@@ -109,7 +112,6 @@ func inspectionStatus(snapshot inspection.Snapshot, spool adminapi.InspectionSpo
 			WAFStateBytes: snapshot.Usage[inspection.WAFStateBytes],
 			AuditBytes:    snapshot.Usage[inspection.AuditBytes],
 		},
-		Spool: spool,
 		AuditOutput: adminapi.InspectionAuditOutput{
 			InFlightCalls:  snapshot.AuditOutput.InFlight,
 			AbandonedCalls: snapshot.AuditOutput.Abandoned,
@@ -126,10 +128,13 @@ func inspectionStatus(snapshot inspection.Snapshot, spool adminapi.InspectionSpo
 		BaseChargeBytes:                 limits.BaseChargeBytes,
 		BaseChargeScope:                 "governor lease/context scaffolding only; excludes request buffers, plugin/WAF state, protocol and process memory",
 		PluginGuestMaxBytes:             guestMaxBytes,
+		PluginGuestReservedBytes:        snapshot.GuestCapacity.ReservedBytes,
+		PluginGuestCapacityLimitBytes:   limits.MaxGuestCapacityBytes,
 		PluginGuestLiveInstances:        guestLiveInstances,
 		PluginGuestMaxInstances:         guestMaxInstances,
 		PluginGuestActualBytes:          nil,
-		PluginGuestActualBytesState:     guestCapacityState,
+		PluginGuestActualBytesState:     "unavailable_engine_measurement",
+		PluginGuestReservationScope:     "logical managed-instance capacity; excludes engine-internal retained references and is not RSS/heap",
 		EvaluationHeadroomEstimateBytes: nil,
 		EvaluationHeadroomEstimateState: "not_calibrated",
 	}
@@ -208,11 +213,18 @@ func (s *Server) dataPlaneReady() bool {
 	return s.deps.Ready()
 }
 
-func (s *Server) servingVersion() string {
+func (s *Server) liveSnapshot() server.LiveSnapshot {
 	if s.deps.LiveSnapshot == nil {
-		return ""
+		return server.LiveSnapshot{}
 	}
-	snap := s.deps.LiveSnapshot()
+	return s.deps.LiveSnapshot()
+}
+
+func (s *Server) servingVersion() string {
+	return s.servingVersionOf(s.liveSnapshot())
+}
+
+func (s *Server) servingVersionOf(snap server.LiveSnapshot) string {
 	if snap.EffectiveConfig == nil {
 		return ""
 	}

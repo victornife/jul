@@ -5,19 +5,20 @@
 
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   fetchOverview,
   type FeatureStatus,
   type TrafficSources,
   type StatsSnapshot,
+  type Overview,
 } from "@/api/client.ts";
 import { Sparkline } from "@/components/Sparkline";
 import { formatBytes, formatBytesPerSec, formatCores } from "@/lib/formatBytes.ts";
 import type { MetricsHistory } from "@/lib/useMetricsHistory";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
-import { useMetricsHistory } from "@/lib/useMetricsHistory";
+import { INSPECTION_STALE_MS, useInspectionHistory, useMetricsHistory } from "@/lib/useMetricsHistory";
 import { METRIC_META_LIST, type MetricKey } from "@/lib/metricMeta";
 import { resolveFeatureRoute } from "@/lib/featureRoutes";
 import { StorageSection } from "./StorageSection.tsx";
@@ -172,6 +173,214 @@ function GenerationRetirementCard({ stats }: { readonly stats: StatsSnapshot | u
       >
         Lifecycle documentation
       </a>
+    </section>
+  );
+}
+
+function InspectionCard({
+  inspection,
+  error,
+  history,
+  stale,
+  retrying,
+}: {
+  readonly inspection: Overview["inspection"];
+  readonly error: string | undefined;
+  readonly history: ReturnType<typeof useInspectionHistory>;
+  readonly stale: boolean;
+  readonly retrying: boolean;
+}) {
+  const firstSample = history?.timestamps.at(0);
+  const lastSample = history?.timestamps.at(-1);
+  return (
+    <section
+      aria-labelledby="inspection-title"
+      className="rounded-lg border border-jul-border bg-jul-surface p-4"
+    >
+      <h2 id="inspection-title" className="text-sm font-semibold text-jul-text">
+        Inspection resources
+      </h2>
+      <Link to="/traffic" className="mt-2 inline-block text-xs text-jul-accent underline">
+        Configure inspection in Global settings
+      </Link>
+      {stale && (
+        <p className="mt-2 text-sm text-jul-warning">
+          Inspection data may be stale: the last successful overview request started over 6 seconds ago.
+        </p>
+      )}
+      {retrying && (
+        <p className="mt-2 text-sm text-jul-warning">
+          The last overview poll failed and is being retried; inspection data may be stale.
+        </p>
+      )}
+      {error ? (
+        <p className="mt-2 text-sm text-jul-danger">Inspection status unavailable: {error}</p>
+      ) : !inspection ? (
+        <p className="mt-2 text-sm text-jul-muted">Inspection status unavailable.</p>
+      ) : (
+        <>
+          <p className="mt-2 text-sm">
+            Mode: {inspection.effective.mode}. Integration: {inspection.request_path_integration}.
+            {inspection.draining ? " Draining." : ""}
+          </p>
+          {inspection.effective.mode === "observe" && (
+            <p className="mt-1 text-sm">
+              Observe mode reports pressure without governor-driven request refusal. Audit records
+              can still be dropped and counted when output is full.
+            </p>
+          )}
+          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt>Base</dt>
+              <dd>{formatBytes(inspection.usage.base_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Buffers</dt>
+              <dd>{formatBytes(inspection.usage.buffer_bytes)}</dd>
+            </div>
+            <div>
+              <dt>WAF state estimate</dt>
+              <dd>{formatBytes(inspection.usage.waf_state_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Audit</dt>
+              <dd>
+                {inspection.usage.audit_bytes === undefined
+                  ? "Unavailable"
+                  : formatBytes(inspection.usage.audit_bytes)}
+              </dd>
+            </div>
+            <div>
+              <dt>Accounted-byte limit</dt>
+              <dd>{formatBytes(inspection.effective.max_buffered_bytes)}</dd>
+            </div>
+            <div>
+              <dt>Active leases</dt>
+              <dd>{inspection.active_leases.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Evaluations active / limit</dt>
+              <dd>
+                {inspection.active_evaluations.toLocaleString()} /{" "}
+                {inspection.effective.max_concurrent_evaluations.toLocaleString()}
+              </dd>
+            </div>
+            <div>
+              <dt>Evaluations waiting</dt>
+              <dd>{inspection.waiting_evaluations.toLocaleString()}</dd>
+            </div>
+          </dl>
+          {history && history.bytes.length > 1 && firstSample !== undefined && lastSample !== undefined ? (
+            <div className="mt-3">
+              <p className="text-sm">Accounted bytes: browser-local samples</p>
+              <Sparkline data={history.bytes} width={180} height={40}
+                ariaLabel="Accounted inspection bytes across browser-local samples" />
+              <p className="text-xs text-jul-muted">
+                {history.bytes.length} samples; request-start window:{" "}
+                {Math.round((lastSample - firstSample) / 1000)} s.
+                Actual sample times are unknown.
+                First sample: {history.bytes[0]?.toLocaleString()} B; latest sample:{" "}
+                {history.bytes.at(-1)?.toLocaleString()} B.
+                Minimum: {Math.min(...history.bytes).toLocaleString()} B; maximum:{" "}
+                {Math.max(...history.bytes).toLocaleString()} B.
+                Samples are equally spaced in the chart, not time-scaled. This is not a process
+                high-water mark.
+              </p>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-jul-muted">Inspection trend unavailable or awaiting samples.</p>
+          )}
+          <p className="mt-3 text-sm">
+            Single-request minimum:{" "}
+            {inspection.minimum_request_bytes === undefined
+              ? "unavailable"
+              : inspection.minimum_request_bytes === 0
+                ? "no inspected routes"
+                : `${formatBytes(inspection.minimum_request_bytes)} (${inspection.minimum_request_bytes.toLocaleString()} B)`}
+            {inspection.minimum_request_bytes !== undefined &&
+              inspection.minimum_request_bytes > 0 &&
+              `. Limiting route: ${inspection.minimum_request_route || "unavailable or restricted"}`}
+            .
+          </p>
+          <p className="mt-1 text-xs text-jul-muted">
+            This compiled minimum is not a concurrency or process-memory recommendation.
+          </p>
+          <p className="mt-3 text-xs text-jul-muted">
+            Configured byte limit:{" "}
+            {inspection.configured
+              ? formatBytes(inspection.configured.max_buffered_bytes)
+              : "unavailable"}
+            . Configured evaluation slots:{" "}
+            {inspection.configured
+              ? inspection.configured.max_concurrent_evaluations === 0
+                ? "automatic"
+                : inspection.configured.max_concurrent_evaluations.toLocaleString()
+              : "unavailable"}
+            .
+          </p>
+          <h3 className="mt-3 text-sm font-semibold">Audit output</h3>
+          {inspection.audit_output ? (
+            <>
+              <p className="mt-1 text-sm">
+                {inspection.audit_output.in_flight_calls.toLocaleString()} within deadline;{" "}
+                {inspection.audit_output.abandoned_calls.toLocaleString()} past deadline and still
+                running. Call limit: {inspection.audit_output.max_calls.toLocaleString()}; byte
+                threshold: {formatBytes(inspection.audit_output.max_bytes)}.
+              </p>
+              <p className="mt-1 text-sm">
+                Retained abandoned bytes: {formatBytes(inspection.audit_output.abandoned_bytes)}.
+                Governor-dropped audit records since process start:{" "}
+                {inspection.audit_output.drops.toLocaleString()}.
+              </p>
+              <p className="mt-1 text-xs text-jul-muted">
+                Abandoned bytes remain charged as audit bytes until their writers return; they are
+                not an additional charge. The output threshold counts detached record bytes held by
+                both in-flight and abandoned writers; it is not the same measure as the audit
+                charge. One oversized record may exceed the threshold when the output set is empty.
+                The drop count excludes formatter and writer failures.
+              </p>
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-jul-muted">Audit output status unavailable.</p>
+          )}
+          <p className="mt-3 text-xs text-jul-muted">
+            Accounted charges are not process memory. Guest capacity is a Jul-managed logical
+            reservation; actual engine memory and aggregate temporary-file quotas are unavailable.
+          </p>
+          <h3 className="mt-3 text-sm font-semibold">Managed guest capacity</h3>
+          <dl className="mt-2 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt>Reserved / limit</dt>
+              <dd>
+                {inspection.plugin_guest_reserved_bytes === undefined
+                  ? "Unavailable"
+                  : formatBytes(inspection.plugin_guest_reserved_bytes)}
+                {" / "}
+                {inspection.plugin_guest_capacity_limit_bytes === undefined
+                  ? "Unavailable"
+                  : formatBytes(inspection.plugin_guest_capacity_limit_bytes)}
+              </dd>
+            </div>
+            <div>
+              <dt>Live / configured maximum instances</dt>
+              <dd>
+                {inspection.plugin_guest_live_instances?.toLocaleString() ?? "Unavailable"}
+                {" / "}
+                {inspection.plugin_guest_max_instances?.toLocaleString() ?? "Unavailable"}
+              </dd>
+            </div>
+            <div>
+              <dt>Actual guest memory</dt>
+              <dd>{inspection.plugin_guest_actual_bytes_state ?? "Unavailable"}</dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-xs text-jul-muted">
+            The logical reservation excludes engine-internal references that Wazero may retain
+            asynchronously; it is not heap or RSS. Jul does not enforce an aggregate Coraza
+            temporary-file quota.
+          </p>
+        </>
+      )}
     </section>
   );
 }
@@ -551,13 +760,27 @@ function ActionableStatusGroup({
 
 export function OverviewPanel() {
   const navigate = useNavigate();
-  const { data, dataUpdatedAt, isLoading, isError, error, refetch } = useQuery({
+  const { search, key: locationKey } = useLocation();
+  const { data, dataUpdatedAt, isLoading, isError, error, failureCount, refetch } = useQuery({
     queryKey: ["overview"],
     queryFn: fetchOverview,
     refetchInterval: 2000, // Poll every 2 seconds per Milestone 1.1
   });
 
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => { setNow(Date.now()); }, 2000);
+    return () => { window.clearInterval(timer); };
+  }, []);
+  const inspectionSampledAt = data?.clientRequestStartedAt ?? dataUpdatedAt;
+  const inspectionStale = inspectionSampledAt > 0 &&
+    Math.max(now, dataUpdatedAt) - inspectionSampledAt > INSPECTION_STALE_MS;
   const history = useMetricsHistory(data?.stats, 60, dataUpdatedAt);
+  const inspectionHistory = useInspectionHistory(
+    data?.inspection, data?.boot_id, inspectionSampledAt,
+    isError || failureCount > 0 || !!data?.inspection_error || inspectionStale,
+    dataUpdatedAt,
+  );
 
   const [activeMetric, setActiveMetric] = useState<{
     key: MetricKey;
@@ -565,6 +788,10 @@ export function OverviewPanel() {
     timestamps: number[];
   } | null>(null);
   const resourcesRef = useRef<HTMLDetailsElement>(null);
+  const inspectionRef = useRef<HTMLDetailsElement>(null);
+  const handledInspectionLink = useRef<string | null>(null);
+  const [inspectionOpen, setInspectionOpen] = useState(false);
+  const overviewAvailable = !!data && !isError;
 
   const rawStats = data?.stats;
   const stats = rawStats && {
@@ -601,6 +828,18 @@ export function OverviewPanel() {
   useEffect(() => {
     if (resourceAttention) openResourceDisclosure(resourcesRef.current);
   }, [resourceAttention]);
+  useEffect(() => {
+    if (
+      !overviewAvailable ||
+      handledInspectionLink.current === locationKey ||
+      new URLSearchParams(search).get("inspection") !== "1"
+    ) return;
+    const details = inspectionRef.current;
+    if (!details) return;
+    handledInspectionLink.current = locationKey;
+    setInspectionOpen(true);
+    if (document.activeElement === document.body) details.querySelector("summary")?.focus();
+  }, [overviewAvailable, search, locationKey]);
 
   if (isLoading) {
     return <Loading label="Loading overview…" />;
@@ -1142,6 +1381,21 @@ export function OverviewPanel() {
             Inspect process resources, capacity, and Jul-owned storage headroom.
           </p>
         </div>
+        <details
+          ref={inspectionRef}
+          open={inspectionOpen}
+          onToggle={(event) => { setInspectionOpen(event.currentTarget.open); }}
+          className="rounded-lg border border-jul-border"
+        >
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-jul-accent">
+            Show inspection resources
+            {(data.inspection_error || !data.inspection) && (
+              <span className="ml-2 text-jul-danger">Inspection status unavailable</span>
+            )}
+          </summary>
+          <InspectionCard inspection={data.inspection} error={data.inspection_error}
+            history={inspectionHistory} stale={inspectionStale} retrying={failureCount > 0} />
+        </details>
         {stats?.available ? (
           <>
             {buildGuidance(stats, history).some((item) => item.signal === "unknown") && (
@@ -1158,61 +1412,6 @@ export function OverviewPanel() {
                 <RuntimeResourcesSection stats={stats} history={history} />
                 <CapacitySection stats={stats} history={history} />
                 <StorageSection storage={stats.storage} hints={stats.storageHints} />
-                {stats.inspectionSpool && (
-                  <section
-                    className="rounded-lg border border-jul-border bg-jul-surface p-4"
-                    aria-labelledby="inspection-spool-heading"
-                  >
-                    <h3
-                      id="inspection-spool-heading"
-                      className="text-xs font-semibold uppercase tracking-wider text-jul-muted"
-                    >
-                      WAF temporary-file spool
-                    </h3>
-                    {stats.inspectionSpool.available ? (
-                      <>
-                        <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                          <div>
-                            <dt className="text-xs text-jul-muted">Logical byte reservations</dt>
-                            <dd className="mt-1 text-sm font-semibold text-jul-text">
-                              {formatBytes(stats.inspectionSpool.usedBytes)} reserved (
-                              {formatBytes(stats.inspectionSpool.cleanupDebtBytes)} cleanup debt)
-                              {" / "}
-                              {formatBytes(stats.inspectionSpool.byteLimit)}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-jul-muted">Logical file reservations</dt>
-                            <dd className="mt-1 text-sm font-semibold text-jul-text">
-                              {stats.inspectionSpool.usedFiles.toLocaleString()} reserved (
-                              {stats.inspectionSpool.cleanupDebtFiles.toLocaleString()} cleanup
-                              debt) / {stats.inspectionSpool.fileLimit.toLocaleString()}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-jul-muted">Mode</dt>
-                            <dd className="mt-1 text-sm font-semibold capitalize text-jul-text">
-                              {stats.inspectionSpool.mode}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt className="text-xs text-jul-muted">Would reject</dt>
-                            <dd className="mt-1 text-sm font-semibold text-jul-text">
-                              {formatBytes(stats.inspectionSpool.wouldRejectBytes)} ·{" "}
-                              {stats.inspectionSpool.wouldRejectFiles.toLocaleString()} files
-                            </dd>
-                          </div>
-                        </dl>
-                        <p className="mt-2 text-xs text-jul-muted">
-                          Jul logical quotas and cleanup debt; not physical disk usage or a
-                          filesystem quota.
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-2 text-sm text-jul-muted">Not active in this runtime.</p>
-                    )}
-                  </section>
-                )}
                 {rawStats?.storage && rawStats.storage.length !== (stats.storage?.length ?? 0) && (
                   <p className="text-xs text-jul-muted">
                     Unrecognized storage categories are not shown.

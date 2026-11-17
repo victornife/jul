@@ -27,29 +27,34 @@ type LedgerRetention struct {
 	Policy             string `json:"policy"`
 }
 
-// InspectionStatus reports the process inspection governor.
-// RequestPathIntegration is "partial": plugin and WAF request paths are
-// governed; response-side accounting is not yet.
+// InspectionStatus reports process-owned inspection accounting. Guest capacity
+// is a logical reservation and excludes engine-internal retained references.
 type InspectionStatus struct {
-	Configured                      InspectionConfiguredLimits `json:"configured"`
-	Effective                       InspectionEffectiveLimits  `json:"effective"`
-	Usage                           InspectionUsage            `json:"usage"`
-	Spool                           InspectionSpoolStatus      `json:"spool"`
-	AuditOutput                     InspectionAuditOutput      `json:"audit_output"`
-	ActiveLeases                    uint64                     `json:"active_leases"`
-	ActiveEvaluations               uint64                     `json:"active_evaluations"`
-	WaitingEvaluations              uint64                     `json:"waiting_evaluations"`
-	Draining                        bool                       `json:"draining"`
-	RequestPathIntegration          string                     `json:"request_path_integration"`
-	BaseChargeBytes                 uint64                     `json:"base_charge_bytes"`
-	BaseChargeScope                 string                     `json:"base_charge_scope"`
-	PluginGuestMaxBytes             *uint64                    `json:"plugin_guest_max_bytes,omitempty"`
-	PluginGuestLiveInstances        *uint64                    `json:"plugin_guest_live_instances,omitempty"`
-	PluginGuestMaxInstances         *uint64                    `json:"plugin_guest_max_instances,omitempty"`
-	PluginGuestActualBytes          *uint64                    `json:"plugin_guest_actual_bytes,omitempty"`
-	PluginGuestActualBytesState     string                     `json:"plugin_guest_actual_bytes_state"`
-	EvaluationHeadroomEstimateBytes *uint64                    `json:"evaluation_headroom_estimate_bytes,omitempty"`
-	EvaluationHeadroomEstimateState string                     `json:"evaluation_headroom_estimate_state"`
+	Configured             InspectionConfiguredLimits `json:"configured"`
+	Effective              InspectionEffectiveLimits  `json:"effective"`
+	Usage                  InspectionUsage            `json:"usage"`
+	AuditOutput            InspectionAuditOutput      `json:"audit_output"`
+	ActiveLeases           uint64                     `json:"active_leases"`
+	ActiveEvaluations      uint64                     `json:"active_evaluations"`
+	WaitingEvaluations     uint64                     `json:"waiting_evaluations"`
+	Draining               bool                       `json:"draining"`
+	RequestPathIntegration string                     `json:"request_path_integration"`
+	BaseChargeBytes        uint64                     `json:"base_charge_bytes"`
+	BaseChargeScope        string                     `json:"base_charge_scope"`
+	MinimumRequestBytes    *uint64                    `json:"minimum_request_bytes,omitempty"`
+	MinimumRequestRoute    string                     `json:"minimum_request_route,omitempty"`
+	// PluginGuestMaxBytes is a projected configured maximum, not a reservation
+	// or measurement of memory currently retained by the engine.
+	PluginGuestMaxBytes             *uint64 `json:"plugin_guest_max_bytes,omitempty"`
+	PluginGuestReservedBytes        uint64  `json:"plugin_guest_reserved_bytes"`
+	PluginGuestCapacityLimitBytes   uint64  `json:"plugin_guest_capacity_limit_bytes"`
+	PluginGuestReservationScope     string  `json:"plugin_guest_reservation_scope"`
+	PluginGuestLiveInstances        *uint64 `json:"plugin_guest_live_instances,omitempty"`
+	PluginGuestMaxInstances         *uint64 `json:"plugin_guest_max_instances,omitempty"`
+	PluginGuestActualBytes          *uint64 `json:"plugin_guest_actual_bytes,omitempty"`
+	PluginGuestActualBytesState     string  `json:"plugin_guest_actual_bytes_state"`
+	EvaluationHeadroomEstimateBytes *uint64 `json:"evaluation_headroom_estimate_bytes,omitempty"`
+	EvaluationHeadroomEstimateState string  `json:"evaluation_headroom_estimate_state"`
 }
 
 type InspectionPluginGuestCapacity struct {
@@ -62,8 +67,6 @@ type InspectionConfiguredLimits struct {
 	Mode                     string `json:"mode"`
 	MaxBufferedBytes         uint64 `json:"max_buffered_bytes"`
 	MaxResponseHeaderBytes   uint64 `json:"max_response_header_bytes"`
-	MaxSpoolBytes            uint64 `json:"max_spool_bytes"`
-	MaxSpoolFiles            uint64 `json:"max_spool_files"`
 	MaxConcurrentEvaluations int    `json:"max_concurrent_evaluations"`
 	EvaluationQueueTimeout   string `json:"evaluation_queue_timeout"`
 	BodyTimeout              string `json:"body_timeout"`
@@ -73,26 +76,9 @@ type InspectionEffectiveLimits struct {
 	Mode                     string `json:"mode"`
 	MaxBufferedBytes         uint64 `json:"max_buffered_bytes"`
 	MaxResponseHeaderBytes   uint64 `json:"max_response_header_bytes"`
-	MaxSpoolBytes            uint64 `json:"max_spool_bytes"`
-	MaxSpoolFiles            uint64 `json:"max_spool_files"`
 	MaxConcurrentEvaluations int    `json:"max_concurrent_evaluations"`
 	EvaluationQueueTimeout   string `json:"evaluation_queue_timeout"`
 	BodyTimeout              string `json:"body_timeout"`
-}
-
-// InspectionSpoolStatus reports Jul's logical accounting for Coraza temporary
-// files. It does not represent filesystem capacity or physical disk usage.
-type InspectionSpoolStatus struct {
-	State      string `json:"state"`
-	Mode       string `json:"mode"`
-	UsedBytes  uint64 `json:"used_bytes"`
-	UsedFiles  uint64 `json:"used_files"`
-	DebtBytes  uint64 `json:"cleanup_debt_bytes"`
-	DebtFiles  uint64 `json:"cleanup_debt_files"`
-	WouldBytes uint64 `json:"would_reject_bytes"`
-	WouldFiles uint64 `json:"would_reject_files"`
-	ByteLimit  uint64 `json:"byte_limit"`
-	FileLimit  uint64 `json:"file_limit"`
 }
 
 type InspectionUsage struct {

@@ -157,6 +157,46 @@ redact_min_secret_length = 8
 	}
 }
 
+func TestIssue81InspectionProjectionPreservesExplicitZero(t *testing.T) {
+	cfg := parseIssue81Config(t, `
+[global.inspection]
+mode = "observe"
+max_buffered_bytes = "128m"
+max_response_header_bytes = "32k"
+max_concurrent_evaluations = 0
+evaluation_queue_timeout = "0s"
+body_timeout = "0s"
+`)
+	encoded, err := json.Marshal(projectGlobalSettings(cfg).Inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"mode": "observe", "max_buffered_bytes": "128m",
+		"max_response_header_bytes": "32k", "max_concurrent_evaluations": float64(0),
+		"evaluation_queue_timeout": "0s", "body_timeout": "0s",
+	}
+	for field, value := range want {
+		if got[field] != value {
+			t.Errorf("%s = %#v, want %#v", field, got[field], value)
+		}
+	}
+	empty, err := json.Marshal(projectGlobalSettings(&config.Config{}).Inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(empty, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["body_timeout"] != nil || got["evaluation_queue_timeout"] != nil {
+		t.Fatalf("absent timeouts must not become explicit zero: %s", empty)
+	}
+}
+
 func TestIssue81LocationRateLimitProjectionDoesNotExposeMaxConns(t *testing.T) {
 	cfg := parseIssue81Config(t, `
 [[servers]]

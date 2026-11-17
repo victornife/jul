@@ -18,6 +18,8 @@ func TestInspectionDefaultsAndExplicitZeroRoundTrip(t *testing.T) {
 	if defaults.Global.Inspection.Mode != "enforce" ||
 		defaults.Global.Inspection.MaxBufferedBytes == nil ||
 		*defaults.Global.Inspection.MaxBufferedBytes != Size(256<<20) ||
+		defaults.Global.Inspection.MaxGuestCapacityBytes == nil ||
+		*defaults.Global.Inspection.MaxGuestCapacityBytes != Size(InspectionDefaultMaxGuestCapacityBytes) ||
 		defaults.Global.Inspection.MaxResponseHeaderBytes == nil ||
 		*defaults.Global.Inspection.MaxResponseHeaderBytes != Size(64<<10) ||
 		defaults.Global.Inspection.MaxConcurrentEvaluations != 0 ||
@@ -69,7 +71,8 @@ max_response_header_bytes = "96k"
 		roundTrip.Global.Inspection.MaxConcurrentEvaluations != 0 ||
 		roundTrip.Global.Inspection.MaxResponseHeaderBytes == nil ||
 		*roundTrip.Global.Inspection.MaxResponseHeaderBytes != Size(96<<10) ||
-		roundTrip.Global.Inspection.MaxGuestCapacityBytes != nil {
+		roundTrip.Global.Inspection.MaxGuestCapacityBytes == nil ||
+		*roundTrip.Global.Inspection.MaxGuestCapacityBytes != Size(InspectionDefaultMaxGuestCapacityBytes) {
 		t.Fatalf("inspection values changed after round-trip: %+v", roundTrip.Global.Inspection)
 	}
 }

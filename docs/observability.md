@@ -207,20 +207,17 @@ or actual-memory measurement. See the
 | `jul_inspection_abandoned_evaluations` | Gauge | — | Merged / release pending | Evaluations still running after their request context ended. |
 | `jul_inspection_audit_abandoned` | Gauge | `measure` | Merged / release pending | WAF audit writer calls abandoned at their deadline that have not returned (`calls`) and their detached record bytes (`bytes`), which stay charged under the `audit` class until each call returns. |
 | `jul_inspection_audit_drops_total` | Counter | `reason` | Merged / release pending | WAF audit records not handed to their writer: the bounded audit-output set was full (`abandoned_full`), or the record's R5 construction or formatting charge was refused in enforce mode (`budget`). Phase-5 rules still ran. |
-| `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected request-body receive outcomes (`timeout`, `would_timeout`, `unsupported`); counted once per result per request across plugin and WAF body reads. |
+| `jul_inspection_body_timeouts_total` | Counter | `protocol`, `result` | Merged / release pending | Inspected request-body receive outcomes (`timeout`, `would_timeout`, `unsupported`) from the shared deadline owner used by body-reading plugins and WAF. |
 | `jul_inspection_bytes` | Gauge | `class` | Merged / release pending | Process-wide charged bytes (`base`, `buffer`, `waf_state`, `audit`); plugin and WAF paths contribute, and WAF state is an estimate, not a measured heap bound. |
 | `jul_inspection_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide inspection byte ceiling. |
 | `jul_inspection_committed_overruns_total` | Counter | — | Merged / release pending | Non-refusable charges that exceeded the byte ceiling: already-admitted work (an audit record whose phase-5 inputs grew past its reserved estimate) is charged anyway so the debt stays visible. Nonzero means the ceiling was briefly exceeded by committed work. |
 | `jul_inspection_evaluations` | Gauge | `state` | Merged / release pending | Active and waiting process-wide inspection evaluations. |
 | `jul_inspection_evaluations_limit` | Gauge | — | Merged / release pending | Effective process-wide inspection evaluation slot limit. |
-| `jul_inspection_guest_capacity_bytes` | Gauge | — | Merged / release pending | Sum of live and retained per-instance linear-memory ceilings; not committed memory or RSS. |
-| `jul_inspection_guest_capacity_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide guest-capacity ceiling; zero means no finite ceiling is configured. |
-| `jul_inspection_guest_instances` | Gauge | `state` | Merged / release pending | Reservations by lifecycle state; `failed_retained` and `teardown_unconfirmed` remain charged. |
-| `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor; plugin chains and WAF paths acquire or reuse one per request. |
-| `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state, evaluation slots, audit and guest capacity. These count admission decisions, not unique rejected requests. |
-| `jul_inspection_spool_available` | Gauge | — | Merged / release pending | Whether this process has the Jul-owned Coraza temporary-file controller available; `0` means the WAF/spool runtime is absent. |
-| `jul_inspection_spool_bytes` | Gauge | `state` | Merged / release pending | Logical Coraza spool bytes in use, cleanup debt, cumulative observe-mode would-reject bytes, and configured limit. This is not a filesystem-wide or RSS limit. |
-| `jul_inspection_spool_files` | Gauge | `state` | Merged / release pending | Logical Coraza spool file count in use, cleanup debt, cumulative observe-mode would-reject creations, and configured limit. |
+| `jul_inspection_guest_capacity_bytes` | Gauge | — | Merged / release pending | Sum of Jul-managed page-rounded guest-instance reservations; not actual engine memory, heap or RSS, and excludes references retained asynchronously by the engine. |
+| `jul_inspection_guest_capacity_bytes_limit` | Gauge | — | Merged / release pending | Configured process-wide logical guest-capacity ceiling; zero is unlimited only for direct programmatic configurations, while parsed config defaults to 1 GiB. |
+| `jul_inspection_guest_instances` | Gauge | `state` | Merged / release pending | Jul-managed reservations by lifecycle state (`starting`, `idle`, `busy`, `closing`, `failed_retained`). |
+| `jul_inspection_leases` | Gauge | — | Merged / release pending | Current outer request leases held by the governor across WAF and plugin inspection chains. |
+| `jul_inspection_rejections_total` | Counter | `mode`, `reason` | Merged / release pending | Enforce rejections and observe would-reject decisions for bytes, WAF state, evaluation slots, audit saturation and guest capacity. These are decisions, not necessarily unique requests; observe continues and can count several per request. |
 | `jul_inspection_unslotted_logging_total` | Counter | — | Merged / release pending | Phase-5 logging evaluations that proceeded without a slot. |
 | `jul_listener_conns` | Gauge | — | Released `v1.32.0` | Current concurrent connections across all listeners. |
 | `jul_managed_apply_finalization_errors_total` | Counter | `component` | Released `v2.0.0` | Managed-apply finalization/restoration failures, labeled by the bounded component that failed (restoration/pending/registry/callback_panic). An increment means the failure was made explicit and surfaced through logs/health/ledger rather than silently discarded. |
@@ -286,9 +283,13 @@ lease, charges its request-side host allocations (`base`, `buffer`) before
 making them, records `bytes` rejections (enforce `503`, or observe
 would-reject), and reports body-arrival outcomes in
 `jul_inspection_body_timeouts_total`. I3a and I4 also account WAF request and
-response paths, evaluation slots and plugin response-subscription buffers.
-Spool protection and integrated acceptance remain outstanding. See
-[plugins.md](plugins.md#inspection-governor) for the governed allocations.
+response work, phase-5 audit ownership, and plugin response-subscription
+buffers. Jul publishes logical guest reservations, but cannot measure or bound
+engine-retained references. Zero usage alone does not demonstrate that
+inspection was applicable or that all requests are admissible. Exact aggregate
+temporary-file quotas remain unsupported. See
+[plugins.md](plugins.md#inspection-governor) and [waf.md](waf.md) for the
+governed allocations and their boundaries.
 
 Throttled warnings accompany rejections (`inspection budget saturated;
 request rejected`, or `…; observe mode would reject`, at most one per 10 s with
@@ -307,6 +308,22 @@ Actual guest memory and uncalibrated evaluation-headroom estimates are not
 reported as measured zero. The response-header accounting ceiling and the
 route-aware minimum budget are defined; see
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
+
+For the optional external-alerting work in #628, the existing pressure inputs
+include `jul_inspection_rejections_total` (split enforce from observe),
+`jul_inspection_audit_drops_total`, `jul_inspection_audit_abandoned`, and
+`jul_inspection_abandoned_evaluations`. Audit drops count governor refusals,
+not formatter or writer failures; abandoned audit bytes are already included
+in the audit charge. Counters reset on process restart and observe decisions
+are not unique rejected requests. Apply rules only where inspection and the
+relevant WAF/audit output are active; missing scrapes are unknown, not healthy.
+Process-wide guest reservation and lifecycle signals are exposed by
+`jul_inspection_guest_capacity_bytes`,
+`jul_inspection_guest_capacity_bytes_limit` and
+`jul_inspection_guest_instances`; they do not measure engine-retained memory.
+There is no exact spool-quota signal because Jul does not own those files or
+enforce aggregate spool limits. Thresholds, delivery and rule validation
+remain owned by #628.
 
 ### Runtime resources and capacity (#431)
 

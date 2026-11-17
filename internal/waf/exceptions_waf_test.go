@@ -140,7 +140,7 @@ func TestWAFExceptionNarrowFieldPreservesNeighboringProtection(t *testing.T) {
 		t.Fatalf("New with narrow exception: %v", err)
 	}
 	info := fw.Info()
-	if info.ExceptionsCount != 1 || info.ExceptionsReviewDue != 1 || info.Rules.Generated != 1 {
+	if info.ExceptionsCount != 1 || info.ExceptionsReviewDue != 1 || info.Rules.Generated != 2 {
 		t.Fatalf("unexpected exception counts in PolicyInfo: %+v", info)
 	}
 

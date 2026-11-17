@@ -251,7 +251,8 @@ export function TrafficControlsPanel() {
       </div>
 
       {globalEditing && data.global && (
-        <GlobalSettingsEditor current={data.global} onClose={() => { setGlobalEditing(false); }} />
+        <GlobalSettingsEditor current={data.global} configAuthority={data.config_authority} baseVersion={data.base_version}
+          onClose={() => { setGlobalEditing(false); }} />
       )}
       {editing && (
         <TrafficControlEditor kind={editing} current={data} onClose={() => { setEditing(null); }} />

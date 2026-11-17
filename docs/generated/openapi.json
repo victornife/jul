@@ -11469,14 +11469,6 @@
                     "type": "integer",
                     "format": "int64"
                   },
-                  "max_spool_bytes": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "max_spool_files": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
                   "mode": {
                     "type": "string"
                   }
@@ -11487,8 +11479,6 @@
                   "max_buffered_bytes",
                   "max_concurrent_evaluations",
                   "max_response_header_bytes",
-                  "max_spool_bytes",
-                  "max_spool_files",
                   "mode"
                 ],
                 "additionalProperties": false
@@ -11517,14 +11507,6 @@
                     "type": "integer",
                     "format": "int64"
                   },
-                  "max_spool_bytes": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "max_spool_files": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
                   "mode": {
                     "type": "string"
                   }
@@ -11535,8 +11517,6 @@
                   "max_buffered_bytes",
                   "max_concurrent_evaluations",
                   "max_response_header_bytes",
-                  "max_spool_bytes",
-                  "max_spool_files",
                   "mode"
                 ],
                 "additionalProperties": false
@@ -11548,12 +11528,23 @@
               "evaluation_headroom_estimate_state": {
                 "type": "string"
               },
+              "minimum_request_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "minimum_request_route": {
+                "type": "string"
+              },
               "plugin_guest_actual_bytes": {
                 "type": "integer",
                 "format": "int64"
               },
               "plugin_guest_actual_bytes_state": {
                 "type": "string"
+              },
+              "plugin_guest_capacity_limit_bytes": {
+                "type": "integer",
+                "format": "int64"
               },
               "plugin_guest_live_instances": {
                 "type": "integer",
@@ -11567,64 +11558,15 @@
                 "type": "integer",
                 "format": "int64"
               },
-              "request_path_integration": {
+              "plugin_guest_reservation_scope": {
                 "type": "string"
               },
-              "spool": {
-                "type": "object",
-                "properties": {
-                  "byte_limit": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "cleanup_debt_bytes": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "cleanup_debt_files": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "file_limit": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "mode": {
-                    "type": "string"
-                  },
-                  "state": {
-                    "type": "string"
-                  },
-                  "used_bytes": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "used_files": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "would_reject_bytes": {
-                    "type": "integer",
-                    "format": "int64"
-                  },
-                  "would_reject_files": {
-                    "type": "integer",
-                    "format": "int64"
-                  }
-                },
-                "required": [
-                  "byte_limit",
-                  "cleanup_debt_bytes",
-                  "cleanup_debt_files",
-                  "file_limit",
-                  "mode",
-                  "state",
-                  "used_bytes",
-                  "used_files",
-                  "would_reject_bytes",
-                  "would_reject_files"
-                ],
-                "additionalProperties": false
+              "plugin_guest_reserved_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "request_path_integration": {
+                "type": "string"
               },
               "usage": {
                 "type": "object",
@@ -11670,8 +11612,10 @@
               "effective",
               "evaluation_headroom_estimate_state",
               "plugin_guest_actual_bytes_state",
+              "plugin_guest_capacity_limit_bytes",
+              "plugin_guest_reservation_scope",
+              "plugin_guest_reserved_bytes",
               "request_path_integration",
-              "spool",
               "usage",
               "waiting_evaluations"
             ],

@@ -20,9 +20,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/corazawaf/coraza/v3/experimental"
 	"github.com/corazawaf/coraza/v3/types"
 
+	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/middleware"
@@ -41,26 +41,17 @@ type unwrappedTx interface {
 	Unwrap() types.Transaction
 }
 
-type corazaSpoolProvider struct{ tx *inspection.SpoolTransaction }
-
-func (p corazaSpoolProvider) CreateTemp(dir, pattern string) (types.TemporaryFile, error) {
-	return p.tx.CreateTemp(dir, pattern)
+func (f *Firewall) newTransaction() types.Transaction {
+	return f.waf.NewTransaction()
 }
 
-func (p corazaSpoolProvider) Remove(name string) error { return p.tx.Remove(name) }
-
-func (f *Firewall) newTransaction(r *http.Request, spool *inspection.SpoolTransaction) types.Transaction {
-	if ctxwaf, ok := f.waf.(experimental.WAFWithOptions); ok {
-		var provider types.TemporaryFileProvider
-		if spool != nil {
-			provider = corazaSpoolProvider{tx: spool}
+func requestBodyProcessingFailed(tx types.Transaction) bool {
+	for _, matched := range tx.MatchedRules() {
+		if matched != nil && matched.Rule() != nil && matched.Rule().ID() == config.WAFRequestBodyErrorRuleID {
+			return true
 		}
-		return ctxwaf.NewTransactionWithOptions(experimental.Options{
-			Context:               r.Context(),
-			TemporaryFileProvider: provider,
-		})
 	}
-	return f.waf.NewTransaction()
+	return false
 }
 
 func detectionOnlyInterruption(tx types.Transaction) *types.Interruption {
@@ -99,7 +90,8 @@ func isBodyLimitInterruption(it *types.Interruption) bool {
 }
 
 func classifyRuleSource(id int, file string) string {
-	if id == 900000 || id == config.WAFArgumentLimitGuardRuleID || (id >= 890001 && id <= 899999) {
+	if id == 900000 || id == config.WAFArgumentLimitGuardRuleID ||
+		id == config.WAFRequestBodyErrorRuleID || (id >= 890001 && id <= 899999) {
 		return "generated"
 	}
 	switch {
@@ -246,16 +238,7 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	endLease := sync.OnceFunc(admitted)
 	defer endLease()
 
-	var spoolTx *inspection.SpoolTransaction
-	if f.opts.Spool != nil {
-		var err error
-		spoolTx, err = f.opts.Spool.NewTransaction()
-		if err != nil {
-			http.Error(w, "inspection error", http.StatusInternalServerError)
-			return
-		}
-	}
-	tx := f.newTransaction(r, spoolTx)
+	tx := f.newTransaction()
 	if a.governed() && f.audit.writer.hasOutput() {
 		a.txID = tx.ID()
 		a.audit = &auditTxCtx{gov: a.gov, lease: a.lease}
@@ -293,6 +276,14 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		}
 		hdr.Set(HeaderWAFEvent, eventID)
 		supportHeaderEmitted = true
+	}
+
+	rejectBodyProcessingFailure := func() {
+		outcome = OutcomeInspectionError
+		errorCategory = "request_body_processing_error"
+		clientStatus = http.StatusBadRequest
+		mintSupportHeader(w.Header())
+		w.WriteHeader(clientStatus)
 	}
 
 	// refuse answers a governor refusal or body-arrival failure after the
@@ -343,18 +334,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			detIt := detectionOnlyInterruption(tx)
 			rules, totalMatched, matchesTruncated := extractMatchedRules(tx.MatchedRules(), it, detIt)
 			txCloseErr := tx.Close()
-			var spoolErr error
-			var spoolCleanupErr error
-			if spoolTx != nil {
-				spoolErr = spoolTx.Err()
-				spoolCleanupErr = spoolTx.Close()
-			}
-			if cleanupErr := errors.Join(txCloseErr, spoolCleanupErr); cleanupErr != nil {
+			if txCloseErr != nil {
 				outcome = OutcomeInspectionError
-				errorCategory = "spool_cleanup_error"
-			} else if originReached && spoolErr != nil {
-				outcome = OutcomeInspectionError
-				errorCategory = "spool_storage_error"
+				errorCategory = "transaction_close_error"
 			}
 
 			wouldInterrupt := false
@@ -459,6 +441,10 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		client = r.RemoteAddr[:idx]
 		cport, _ = strconv.Atoi(r.RemoteAddr[idx+1:])
 	}
+	if id, ok := clientaddr.FromContext(r.Context()); ok && id.Client.IsValid() {
+		client = id.Client.String()
+		cport = 0
+	}
 	uri := requestTargetURI(r)
 	var h uint64
 	a.reqHeaderCount, a.reqHeaderBytes, h = requestHeaderShape(r, uri)
@@ -509,12 +495,6 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		res, ran := f.readRequestBody(w, r, tx, a)
 		phase2 = ran
 		a.bodyBytes = uint64(max(res.written, 0))
-		if spoolTx != nil {
-			if spoolErr := spoolTx.Err(); spoolErr != nil {
-				refuse(spoolErr)
-				return
-			}
-		}
 		if res.admission != nil {
 			refuse(res.admission)
 			return
@@ -532,6 +512,10 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			}
 			mintSupportHeader(w.Header())
 			w.WriteHeader(clientStatus)
+			return
+		}
+		if requestBodyProcessingFailed(tx) {
+			rejectBodyProcessingFailure()
 			return
 		}
 		if it := res.it; it != nil {
@@ -586,11 +570,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	if n, ok := argsHeld(tx, false); ok {
 		a.trueDown(a.r2, &a.r2Amount, r2Estimate(n, a.bodyBytes))
 	}
-	if spoolTx != nil {
-		if spoolErr := spoolTx.Err(); spoolErr != nil {
-			refuse(spoolErr)
-			return
-		}
+	if requestBodyProcessingFailed(tx) {
+		rejectBodyProcessingFailure()
+		return
 	}
 	if err != nil && it == nil {
 		outcome = OutcomeInspectionError

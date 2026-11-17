@@ -9,34 +9,52 @@ import (
 	"jul/internal/inspection"
 )
 
-func TestGuestTeardownDebtMetric(t *testing.T) {
+func TestGuestReservationMetricsReportManagedCapacity(t *testing.T) {
 	m := NewMetrics()
 	m.SetInspectionSource(func() InspectionMetricsSnapshot {
-		s := InspectionMetricsSnapshot{GuestCapacityBytes: 128 << 10}
-		s.GuestInstances[inspection.GuestTeardownUnconfirmed] = 2
+		s := InspectionMetricsSnapshot{
+			GuestCapacityBytes: 128 << 10,
+			GuestCapacityLimit: 256 << 10,
+		}
+		s.GuestInstances[inspection.GuestFailedRetained] = 2
 		return s
 	})
 	families, err := m.registry.Gather()
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	foundCapacity, foundLimit, foundRetained := false, false, false
 	for _, family := range families {
-		if family.GetName() != "jul_inspection_guest_instances" {
-			continue
-		}
-		for _, metric := range family.GetMetric() {
-			for _, label := range metric.GetLabel() {
-				if label.GetName() == "state" && label.GetValue() == "teardown_unconfirmed" {
-					found = true
-					if got := metric.GetGauge().GetValue(); got != 2 {
-						t.Errorf("debt gauge = %v, want 2", got)
+		switch family.GetName() {
+		case "jul_inspection_guest_capacity_bytes":
+			if got := family.GetMetric()[0].GetGauge().GetValue(); got != 128<<10 {
+				t.Errorf("reserved capacity = %v, want %d", got, 128<<10)
+			}
+			foundCapacity = true
+		case "jul_inspection_guest_capacity_bytes_limit":
+			if got := family.GetMetric()[0].GetGauge().GetValue(); got != 256<<10 {
+				t.Errorf("capacity limit = %v, want %d", got, 256<<10)
+			}
+			foundLimit = true
+		case "jul_inspection_guest_instances":
+			for _, metric := range family.GetMetric() {
+				for _, label := range metric.GetLabel() {
+					if label.GetName() == "state" {
+						if label.GetValue() == "failed_retained" {
+							foundRetained = true
+							if got := metric.GetGauge().GetValue(); got != 2 {
+								t.Errorf("retained instance gauge = %v, want 2", got)
+							}
+						}
+						if label.GetValue() == "teardown_unconfirmed" {
+							t.Error("removed teardown-unconfirmed state is still exposed")
+						}
 					}
 				}
 			}
 		}
 	}
-	if !found {
-		t.Fatal("teardown_unconfirmed metric missing")
+	if !foundCapacity || !foundLimit || !foundRetained {
+		t.Fatalf("reservation metric families missing: capacity=%t limit=%t retained=%t", foundCapacity, foundLimit, foundRetained)
 	}
 }

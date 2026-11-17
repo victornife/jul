@@ -523,13 +523,11 @@ Labels fall into three classes by what bounds them:
 | `jul_plugin_response_body_unavailable_total` | `plugin`, `reason` | configured plugins × `none`/`too_large`/`streaming`/`encoded`/`partial`/`upgraded` |
 | `jul_inspection_bytes` | `class` | `base`/`buffer`/`waf_state`/`audit` |
 | `jul_inspection_evaluations` | `state` | `active`/`waiting` |
-| `jul_inspection_rejections_total` | `reason`, `mode` | `bytes`/`waf_state`/`evaluation`/`audit`/`guest_capacity`/`spool_bytes`/`spool_files` × `enforce`/`observe` |
+| `jul_inspection_rejections_total` | `reason`, `mode` | `bytes`/`waf_state`/`evaluation`/`audit`/`guest_capacity` × `enforce`/`observe` |
 | `jul_inspection_audit_drops_total` | `reason` | `abandoned_full`, `budget` |
 | `jul_inspection_audit_abandoned` | `measure` | `calls`/`bytes` |
-| `jul_inspection_guest_instances` | `state` | `starting`/`idle`/`busy`/`closing`/`failed_retained`/`teardown_unconfirmed` |
+| `jul_inspection_guest_instances` | `state` | `starting`/`idle`/`busy`/`closing`/`failed_retained` |
 | `jul_inspection_guest_capacity_bytes`, `jul_inspection_guest_capacity_bytes_limit` | — | single series each |
-| `jul_inspection_spool_available` | — | single series (`1` available, `0` unavailable) |
-| `jul_inspection_spool_bytes`, `jul_inspection_spool_files` | `state` | `used`/`cleanup_debt`/`would_reject`/`limit` |
 | `jul_inspection_body_timeouts_total` | `protocol`, `result` | `h1`/`h2`/`h3` × `timeout`/`would_timeout`/`unsupported` |
 | `jul_inspection_leases`, `jul_inspection_bytes_limit`, `jul_inspection_evaluations_limit`, `jul_inspection_unslotted_logging_total`, `jul_inspection_abandoned_evaluations`, `jul_inspection_committed_overruns_total` | — | single series each |
 | `jul_listener_conns` | — | single series |

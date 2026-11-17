@@ -237,19 +237,13 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 	if c.Global.Inspection.Mode == "" {
 		c.Global.Inspection.Mode = "enforce"
 	}
-	if c.Global.Inspection.SpoolDir == "" {
-		c.Global.Inspection.SpoolDir = "./jul-data/inspection-spool"
-	}
-	if c.Global.Inspection.MaxSpoolBytes == nil {
-		maxBytes := Size(512 << 20)
-		c.Global.Inspection.MaxSpoolBytes = &maxBytes
-	}
-	if c.Global.Inspection.MaxSpoolFiles == 0 {
-		c.Global.Inspection.MaxSpoolFiles = 1024
-	}
 	if c.Global.Inspection.MaxBufferedBytes == nil {
 		maxBytes := Size(256 << 20)
 		c.Global.Inspection.MaxBufferedBytes = &maxBytes
+	}
+	if c.Global.Inspection.MaxGuestCapacityBytes == nil {
+		maxBytes := Size(InspectionDefaultMaxGuestCapacityBytes)
+		c.Global.Inspection.MaxGuestCapacityBytes = &maxBytes
 	}
 	if c.Global.Inspection.MaxResponseHeaderBytes == nil {
 		maxBytes := Size(InspectionDefaultMaxResponseHeaderBytes)

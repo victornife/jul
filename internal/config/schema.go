@@ -324,8 +324,7 @@ type GlobalConfig struct {
 	// and can only be staged through stage_restart (ADR 0019 §9.2).
 	ConfigAuthority string `toml:"config_authority"`
 	// Inspection configures process-wide admission accounting for WAF and
-	// plugin integrations; spool protection and integrated qualification remain
-	// pending.
+	// plugin inspection.
 	Inspection InspectionConfig `toml:"inspection"`
 }
 
@@ -335,25 +334,15 @@ type InspectionConfig struct {
 	// Mode is "enforce" (default) or "observe" for governor accounting on
 	// supported WAF and plugin paths.
 	Mode string `toml:"mode"`
-	// SpoolDir is the restart-bound directory for Coraza request-body spill
-	// and multipart temporary files. It defaults to ./jul-data/inspection-spool.
-	SpoolDir string `toml:"spool_dir,omitempty"`
-	// MaxSpoolBytes is the process-wide logical temporary-file byte quota.
-	// Zero applies a 512 MiB default.
-	MaxSpoolBytes *Size `toml:"max_spool_bytes,omitempty"`
-	// MaxSpoolFiles is the process-wide logical temporary-file count quota.
-	// Zero applies a 1024-file default.
-	MaxSpoolFiles int `toml:"max_spool_files,omitempty"`
 	// MaxBufferedBytes is the shared governor ceiling for base, buffer and
 	// estimated WAF state and audit; plugin and WAF paths consume it. It must
 	// be positive, and in enforce mode at least the largest inspected route's
 	// worst-case single-request charge (observe only warns).
 	MaxBufferedBytes *Size `toml:"max_buffered_bytes,omitempty"`
-	// MaxGuestCapacityBytes is an optional process-wide ceiling for plugin
-	// instance linear-memory reservations; enforce requires room for one eager
-	// instance of every plugin and observe warns; no finite production default
-	// has been selected. Teardown reservations remain charged until process
-	// exit.
+	// MaxGuestCapacityBytes is the process-wide ceiling for page-rounded
+	// logical reservations for Jul-managed plugin instances across names and
+	// generations. Omission defaults to 1 GiB. It excludes engine-internal
+	// memory references that may outlive managed teardown.
 	MaxGuestCapacityBytes *Size `toml:"max_guest_capacity_bytes,omitempty"`
 	// MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and
 	// values plus 64 bytes per occurrence) checked before WAF response-header
@@ -377,6 +366,7 @@ const (
 	InspectionResponseHeaderFieldOverheadBytes int64 = 64
 	InspectionResponseHeaderEstimateFactor     int64 = 48
 	InspectionDefaultMaxResponseHeaderBytes    int64 = 64 << 10
+	InspectionDefaultMaxGuestCapacityBytes     int64 = 1 << 30
 )
 
 // ServerConfig is a virtual host bound to one listen address.

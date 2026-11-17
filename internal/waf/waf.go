@@ -55,9 +55,6 @@ type Options struct {
 	// only Jul's audit writer and formatters are accepted. Nil keeps the
 	// legacy ungoverned behaviour (budget probes, tests).
 	Governor *inspection.Governor
-	// Spool is the process-owned Coraza temporary-file controller. Governed
-	// WAFs require it so neither spill nor multipart uploads use os.TempDir.
-	Spool *inspection.SpoolController
 }
 
 // Enabled reports whether any WAF policy is turned on in the configuration —

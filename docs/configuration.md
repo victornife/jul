@@ -168,74 +168,41 @@ max_concurrent_evaluations = 0
 evaluation_queue_timeout = "1s"
 body_timeout = "60s"
 max_response_header_bytes = "64k"
-spool_dir = "./jul-data/inspection-spool"
-max_spool_bytes = "512m"
-max_spool_files = 1024
 ```
 
 | Key | Type | Default and validation |
 | --- | --- | --- |
 | `mode` | string | `enforce` (default) or `observe`; other values are rejected |
 | `max_buffered_bytes` | size | `256m` (256 MiB); must be positive. In `enforce` mode it must also fit the largest single-request worst-case charge of any inspected (WAF or plugin) route; `observe` only warns. Uninspected configurations have no minimum |
-| `max_guest_capacity_bytes` | size | Optional positive ceiling on cumulative per-instance linear-memory reservations in the unmerged I2b prototype. In `enforce`, it must fit one eager instance of every configured plugin; `observe` warns on a shortfall and does not enforce it. Reservations remain charged after teardown until process exit, so churn and failed candidates can exhaust the cap; see [operational guidance](plugins.md#inspection-governor). Omission is unbounded; no finite default is selected. Values are reservations, not committed memory or RSS |
+| `max_guest_capacity_bytes` | size | `1g` (1 GiB); positive process-wide ceiling for page-rounded logical reservations of Jul-managed starting/live plugin instances across names and generations. This is not a hard bound on engine-retained memory, process heap or RSS |
 | `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled. Enforce refuses an oversized WAF response before inspection; observe records the decision |
-| `spool_dir` | path | `./jul-data/inspection-spool`; dedicated identity-marked Coraza temp root, private permissions, restart-bound. It must remain separate from every static root; changing it requires stopping Jul and completing the documented offline recovery/migration procedure |
-| `max_spool_bytes` | size | `512m`; positive process-wide logical quota reserved before Coraza writes. `enforce` refuses before origin dispatch; `observe` records would-reject and continues if filesystem I/O succeeds. Cleanup debt remains charged |
-| `max_spool_files` | int | `1024`; `0` or omitted uses the default; explicit values are 1–1,048,576. Counts empty files and cleanup debt independently of bytes |
 | `max_concurrent_evaluations` | int | `0` means auto, resolved from the configured `worker_threads` value or the startup container-aware `GOMAXPROCS`; explicit values are 1–1024 |
 | `evaluation_queue_timeout` | duration | `1s`; 0 disables waiting; explicit values are 0–10s |
 | `body_timeout` | duration | `60s`; explicit `0s` disables it; negative values are rejected |
 
-The quotas and other numeric/mode fields have process scope and hot-reload
-together. A reload publishes the complete limit set without recreating the
-governor or resetting its counters; automatic slots resolve against the
-candidate `worker_threads` value, or the startup `GOMAXPROCS` when worker
-threads are `auto`. `spool_dir` is restart-bound. Limits-only changes do not
-rebuild plugin instances. Other reload candidates warm against the currently
-published guest ceiling, not an increase in the candidate.
+The limits have process scope and hot-reload together. A reload publishes the
+complete limit set without recreating the governor or resetting its counters;
+automatic slots resolve against the candidate `worker_threads` value, or the
+startup `GOMAXPROCS` when worker threads are `auto`. Limits-only changes do
+not rebuild plugin instances. Other reload candidates warm against the
+currently published guest ceiling, not an increase in the candidate.
 
-The status API marks integrated qualification as `partial`. Plugin and WAF
-request and response paths share the process governor, including charged
-buffers, estimated WAF state and evaluation slots. Coraza body spill and
-multipart uploads use Jul's transaction-owned provider and separate logical
-byte/file quotas. Enforce-mode quota refusals answer `503` plus
-`Retry-After: 1` before the origin is called; observe records would-refuse
-decisions and continues only while actual filesystem operations succeed.
-Cleanup failures remain charged as debt and are recovered from the identity-
-marked root at the next startup; they are not retried by a background worker.
-These are logical quotas, not an OS filesystem quota or RSS guarantee. The
-unmerged guest control remains separately gated, and integrated qualification
-is still pending. See
-[Plugins](plugins.md#inspection-governor) and
-[ADR 0032](adr/0032-aggregate-inspection-resource-governor.md) for the scope
-and limitations. The local Coraza and wazero source replacements, their pinned
-upstream provenance, update procedure, and patch-removal criteria are recorded
-in [Coraza's patch record](../third_party/coraza/PATCHES.md) and
-[wazero's patch record](../third_party/wazero/PATCHES.md).
+The status API marks request-path integration as `partial`. The governor
+accounts the implemented plugin and WAF request/response work. The guest
+capacity limit reserves page-rounded ceilings for Jul-managed starting/live
+instances; it is not a hard bound on engine-retained references, heap or RSS.
+With stock Coraza, Jul also fails closed when public request-body processing
+results expose a body-processing error before dispatch. That generic signal
+does not identify the underlying I/O cause and cannot enforce exact aggregate
+temporary-file quotas or detect failures the engine does not expose.
 
-#### Offline spool recovery and relocation
-
-The spool root may contain request-body or uploaded-file contents. Jul uses an
-exclusive `.jul-spool.lock`; after an abrupt process exit, that file may remain
-and startup intentionally fails closed instead of guessing whether another
-process still owns the directory.
-
-To recover the same root:
-
-1. Stop Jul and any supervisor action that could restart it. Confirm no Jul
-   process or other deployment is using this spool directory.
-2. Remove only `<spool_dir>/.jul-spool.lock`. Keep `.jul-spool-root` and any
-   `tx-*` entries. On startup Jul validates the root marker and removes only
-   recognized stale transaction entries. Unknown entries or cleanup failures
-   continue to block startup.
-3. Start Jul and confirm the spool controller initializes before restoring
-   traffic.
-
-To relocate the spool, stop all Jul processes first, configure a new empty,
-private directory, and start Jul against it. Do not copy transaction
-directories or remove the old root marker while Jul is running. Keep the old
-root offline until the new controller is confirmed active, then remove the old
-root's request data according to the deployment's data-retention policy.
+In `enforce` mode, governor saturation refuses governed work with `503` plus
+`Retry-After: 1`; a stalled body upload can answer `408` once `body_timeout`
+has passed since the first read. `observe` records would-refuse decisions
+without governor-driven refusal; audit records can still be dropped under
+output saturation. See [Plugins](plugins.md#inspection-governor),
+[WAF](waf.md) and [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md)
+for the exact boundaries.
 
 `jul check`, startup, reload and admin apply compute each inspected route's
 worst-case single-request charge from the compiled WAF limits, plugin limits

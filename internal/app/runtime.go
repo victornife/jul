@@ -51,8 +51,6 @@ type Runtime struct {
 	// generation and listener. I1 publishes configured limits and accounting
 	// only; later slices connect request paths.
 	Inspection *inspection.Governor
-	// Spool owns the dedicated Coraza temporary-file root for the process.
-	Spool *inspection.SpoolController
 
 	// Tracer is the process TracerProvider / OTLP pipeline. Its Middleware wraps
 	// every listener; Close flushes buffered spans on shutdown. It is a no-op in
@@ -124,18 +122,6 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 			GuestCapacityLimit:   snapshot.Limits.MaxGuestCapacityBytes,
 			GuestInstances:       snapshot.GuestCapacity.Instances,
 		}
-		if rt.Spool != nil {
-			spool := rt.Spool.Snapshot()
-			metricsSnapshot.SpoolAvailable = true
-			metricsSnapshot.SpoolBytesUsed = spool.UsedBytes
-			metricsSnapshot.SpoolBytesDebt = spool.DebtBytes
-			metricsSnapshot.SpoolBytesWouldReject = spool.WouldBytes
-			metricsSnapshot.SpoolBytesLimit = spool.ByteLimit
-			metricsSnapshot.SpoolFilesUsed = spool.UsedFiles
-			metricsSnapshot.SpoolFilesDebt = spool.DebtFiles
-			metricsSnapshot.SpoolFilesWouldReject = spool.WouldFiles
-			metricsSnapshot.SpoolFilesLimit = spool.FileLimit
-		}
 		return metricsSnapshot
 	})
 
@@ -155,24 +141,11 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 	// leaks no OTLP exporter goroutine (serve() previously relied on a deferred
 	// tracer.Shutdown for this).
 	fail := func(err error) (*Runtime, error) {
-		if rt.Spool != nil {
-			_ = rt.Spool.Close()
-		}
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = tracer.Shutdown(shutCtx)
 		return nil, err
 	}
-	if waf.Compiled && waf.Enabled(cfg) {
-		if err := validateSpoolIsolation(cfg, inspectionLimits.SpoolDir); err != nil {
-			return fail(fmt.Errorf("initialize inspection spool: %w", err))
-		}
-		rt.Spool, err = inspection.NewSpoolController(rt.Inspection, inspectionLimits.SpoolDir)
-		if err != nil {
-			return fail(fmt.Errorf("initialize inspection spool: %w", err))
-		}
-	}
-
 	// Build the ACME manager once from the startup configuration. It covers the
 	// union of acme-enabled domains, caches certificates on disk, auto-renews,
 	// and answers HTTP-01 challenges. nil means no block enables ACME; an error
@@ -253,11 +226,6 @@ func (r *Runtime) StreamStatus() string {
 func (r *Runtime) Close() {
 	if r.Stream != nil {
 		_ = r.Stream.Close()
-	}
-	if r.Spool != nil {
-		if err := r.Spool.Close(); err != nil && r.log != nil {
-			r.log.Error("inspection spool shutdown", "error", err)
-		}
 	}
 	if r.Tracer != nil {
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

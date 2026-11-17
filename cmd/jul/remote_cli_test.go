@@ -98,7 +98,9 @@ func TestRemoteStatusAndApplyLookup(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
-		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 || !strings.Contains(out.String(), "managed_clean") {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 ||
+			!strings.Contains(out.String(), "managed_clean") ||
+			!strings.Contains(out.String(), "inspection: unavailable") {
 			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 		}
 	})
@@ -113,7 +115,7 @@ func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) 
 	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
 		`,"inspection":{"configured":{"mode":"enforce","max_buffered_bytes":268435456,"max_response_header_bytes":65536,"max_concurrent_evaluations":0,"evaluation_queue_timeout":"1s","body_timeout":"60s"},` +
 		`"effective":{"mode":"enforce","max_buffered_bytes":268435456,"max_response_header_bytes":65536,"max_concurrent_evaluations":4,"evaluation_queue_timeout":"1s","body_timeout":"60s"},` +
-		`"usage":{"base_bytes":16384,"buffer_bytes":0,"waf_state_bytes":0},"active_leases":1,"active_evaluations":0,"waiting_evaluations":0,"draining":false,"request_path_integration":"partial","base_charge_bytes":16384,"base_charge_scope":"governor lease/context scaffolding only; excludes request buffers and process memory"}}`
+		`"usage":{"base_bytes":16384,"buffer_bytes":0,"waf_state_bytes":0},"active_leases":1,"active_evaluations":0,"waiting_evaluations":0,"draining":false,"request_path_integration":"partial","base_charge_bytes":16384,"base_charge_scope":"governor lease/context scaffolding only; excludes request buffers and process memory","plugin_guest_reserved_bytes":16777216,"plugin_guest_capacity_limit_bytes":1073741824,"plugin_guest_live_instances":1,"plugin_guest_max_instances":64,"plugin_guest_actual_bytes_state":"unavailable_engine_measurement","plugin_guest_reservation_scope":"logical managed-instance capacity; excludes engine-internal retained references and is not RSS/heap"}}`
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, payload)
@@ -129,11 +131,102 @@ func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) 
 			"inspection: mode=enforce byte_limit=268435456B response_header_accounting_ceiling=65536B slots=0 (effective 4)",
 			"evaluations=0 waiting=0",
 			"request_path_integration=partial",
+			"inspection guest capacity: reserved=16777216B limit=1073741824B live_instances=1 max_instances=64 actual_memory=unavailable_engine_measurement",
+			"inspection guest reservation scope: logical managed-instance capacity; excludes engine-internal retained references",
 			"inspection base charge: 16384B",
+			"inspection single-request minimum: unavailable",
+			"inspection audit charge: unavailable",
+			"inspection audit output: unavailable",
 		} {
 			if !strings.Contains(out.String(), want) {
 				t.Errorf("status output missing %q:\n%s", want, out)
 			}
+		}
+	})
+}
+
+func TestRemoteStatusMarksMissingGuestCapacityAsUnavailable(t *testing.T) {
+	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+		`,"inspection":{"configured":{},"effective":{},"usage":{},"active_leases":0,"active_evaluations":0,"waiting_evaluations":0,"draining":false,"request_path_integration":"partial"}}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer ts.Close()
+
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 {
+			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+		}
+		for _, want := range []string{
+			"inspection guest capacity: reserved=unavailable limit=unavailable live_instances=unavailable max_instances=unavailable actual_memory=unavailable",
+			"inspection guest reservation scope: unavailable",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("status output missing %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestRemoteStatusReportsSingleRequestMinimum(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, want string
+	}{
+		{"route", `"minimum_request_bytes":4096,"minimum_request_route":"servers[0]"`, "4096B (limiting route: servers[0]; not a concurrency or process-memory recommendation)"},
+		{"restricted", `"minimum_request_bytes":4096`, "4096B (limiting route: unavailable or restricted;"},
+		{"no routes", `"minimum_request_bytes":0`, "no inspected routes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+				`,"inspection":{"configured":{},"effective":{},"usage":{},` + tc.fields + `}}`
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = io.WriteString(w, payload)
+			}))
+			defer ts.Close()
+			withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+				if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 ||
+					!strings.Contains(out.String(), "inspection single-request minimum: "+tc.want) {
+					t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+				}
+			})
+		})
+	}
+}
+
+func TestRemoteStatusReportsRetainedAuditOutput(t *testing.T) {
+	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+		`,"inspection":{"configured":{},"effective":{},"usage":{"audit_bytes":2048},` +
+		`"audit_output":{"in_flight_calls":2,"abandoned_calls":1,"abandoned_bytes":1024,"max_calls":64,"max_bytes":8192,"drops":3}}}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer ts.Close()
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 {
+			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+		}
+		for _, want := range []string{
+			"inspection audit charge: 2048B",
+			"inspection audit output: in_flight=2 abandoned=1 abandoned_bytes=1024B max_calls=64 byte_threshold=8192B governor_drops_since_start=3 (excludes formatter and writer failures;",
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Errorf("status output missing %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestRemoteStatusReportsIncompleteAuditOutputAsUnavailable(t *testing.T) {
+	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
+		`,"inspection":{"configured":{},"effective":{},"usage":{},"audit_output":{"abandoned_calls":1}}}`
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer ts.Close()
+	withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+		if code := cmdRemoteStatus([]string{"--endpoint", ts.URL}); code != 0 ||
+			!strings.Contains(out.String(), "inspection audit output: unavailable") {
+			t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
 		}
 	})
 }

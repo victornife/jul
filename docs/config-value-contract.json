@@ -694,9 +694,9 @@
       "go_field": "InspectionConfig.MaxGuestCapacityBytes",
       "path": "global.inspection.max_guest_capacity_bytes",
       "kind": "size",
-      "constraint": "positive size; enforce requires the sum of one eager instance ceiling per plugin",
-      "zero_semantics": "omitted tracks guest capacity without limiting it because no finite production default has been selected; explicit zero is invalid",
-      "active_when": "applied by process-wide guest instance reservations; observe warns if eager instances exceed the configured ceiling"
+      "constraint": "positive size; process-wide ceiling for page-rounded Jul-managed starting/live plugin instances",
+      "zero_semantics": "omitted defaults to 1 GiB; explicit zero is invalid",
+      "active_when": "enforce mode rejects excess managed guest reservations; observe records would-refuse decisions"
     },
     {
       "go_field": "InspectionConfig.MaxResponseHeaderBytes",
@@ -705,22 +705,6 @@
       "constraint": "positive size",
       "zero_semantics": "omitted defaults to 64 KiB; explicit zero is invalid",
       "active_when": "used by configuration validation and before WAF response-header inspection"
-    },
-    {
-      "go_field": "InspectionConfig.MaxSpoolBytes",
-      "path": "global.inspection.max_spool_bytes",
-      "kind": "size",
-      "constraint": "positive size",
-      "zero_semantics": "omitted defaults to 512 MiB; explicit zero is invalid",
-      "active_when": "bounds process-wide Coraza temporary-file writes in enforce mode and records would-reject usage in observe mode"
-    },
-    {
-      "go_field": "InspectionConfig.MaxSpoolFiles",
-      "path": "global.inspection.max_spool_files",
-      "kind": "integer",
-      "constraint": "0 or between 1 and 1048576",
-      "zero_semantics": "omitted/zero defaults to 1024",
-      "active_when": "bounds process-wide Coraza temporary-file creation in enforce mode and records would-reject usage in observe mode"
     },
     {
       "go_field": "InspectionConfig.Mode",
@@ -733,14 +717,6 @@
         "enforce",
         "observe"
       ]
-    },
-    {
-      "go_field": "InspectionConfig.SpoolDir",
-      "path": "global.inspection.spool_dir",
-      "kind": "string",
-      "constraint": "non-empty path without leading or trailing whitespace",
-      "zero_semantics": "omitted/empty defaults to ./jul-data/inspection-spool",
-      "active_when": "restart-bound dedicated root for Coraza request-body spill and multipart temporary files"
     },
     {
       "go_field": "JWTAuthConfig.Timeout",

@@ -1,8 +1,0 @@
-go 1.25.0
-
-use (
-	.
-	./examples/http-server
-	./testing/coreruleset
-	./testing/modsecurity
-)

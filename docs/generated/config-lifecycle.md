@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 473 |
-| Schema leaves (configurable values) | 402 |
-| Registry entries | 402 |
-| Startup-consumed entries | 30 |
-| Class `hot_reload` | 358 |
-| Class `restart_required` | 30 |
+| Schema paths (containers included) | 470 |
+| Schema leaves (configurable values) | 399 |
+| Registry entries | 399 |
+| Startup-consumed entries | 29 |
+| Class `hot_reload` | 356 |
+| Class `restart_required` | 29 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 3 |
@@ -203,12 +203,9 @@ value is compared as a digest so no secret material leaves the process.
 | `global.inspection.evaluation_queue_timeout` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
 | `global.inspection.max_buffered_bytes` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
 | `global.inspection.max_concurrent_evaluations` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
-| `global.inspection.max_guest_capacity_bytes` | `hot_reload` | `inspection` | — | The process-owned governor publishes the guest capacity ceiling during the no-fail reload transaction; live instance reservations persist across reloads and candidates warm against the currently published ceiling. |
+| `global.inspection.max_guest_capacity_bytes` | `hot_reload` | `inspection` | — | The process-owned governor publishes the logical managed-instance capacity ceiling during the no-fail reload transaction; live reservations persist across reloads and candidates warm against the currently published ceiling. |
 | `global.inspection.max_response_header_bytes` | `hot_reload` | `inspection` | — | The response-header accounting ceiling publishes atomically with the other process-owned inspection limits. |
-| `global.inspection.max_spool_bytes` | `hot_reload` | `inspection` | — | the process-owned spool controller reads the newly published logical byte quota for each reservation; outstanding file usage and cleanup debt persist |
-| `global.inspection.max_spool_files` | `hot_reload` | `inspection` | — | the process-owned spool controller reads the newly published logical file quota for each creation; outstanding file usage and cleanup debt persist |
 | `global.inspection.mode` | `hot_reload` | `inspection` | — | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
-| `global.inspection.spool_dir` | `restart_required` | `inspection` | startup | the dedicated Coraza temporary-file root is identity-checked, exclusively locked and recovered at startup; moving it requires an offline migration and restart |
 | `global.log_format` | `hot_reload` | `log_format` | — | the slog handler encoding is a swappable delegate behind DynamicHandler; OnReloaded installs the new one atomically on each successful reload without rebuilding the logger (#91) |
 | `global.log_level` | `hot_reload` | `log_level` | — | the level var is updated by OnReloaded on each successful reload |
 | `global.redact_min_secret_length` | `hot_reload` | `redact` | — | the redaction state is rebuilt and installed atomically on each successful reload |

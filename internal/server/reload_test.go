@@ -66,7 +66,6 @@ func (s *stubSource) Name() string { return "stub" }
 func serverTestGlobalConfig() config.GlobalConfig {
 	return config.GlobalConfig{
 		ShutdownTimeout: config.Duration(2 * time.Second),
-		Inspection:      config.InspectionConfig{SpoolDir: "./jul-data/inspection-spool"},
 	}
 }
 

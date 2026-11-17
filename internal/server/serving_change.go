@@ -142,8 +142,6 @@ func inspectionLimitsOnlyConfig(current, candidate *config.Config) bool {
 	normalized.Global.Inspection.MaxBufferedBytes = current.Global.Inspection.MaxBufferedBytes
 	normalized.Global.Inspection.MaxGuestCapacityBytes = current.Global.Inspection.MaxGuestCapacityBytes
 	normalized.Global.Inspection.MaxResponseHeaderBytes = current.Global.Inspection.MaxResponseHeaderBytes
-	normalized.Global.Inspection.MaxSpoolBytes = current.Global.Inspection.MaxSpoolBytes
-	normalized.Global.Inspection.MaxSpoolFiles = current.Global.Inspection.MaxSpoolFiles
 	normalized.Global.Inspection.MaxConcurrentEvaluations = current.Global.Inspection.MaxConcurrentEvaluations
 	normalized.Global.Inspection.EvaluationQueueTimeout = current.Global.Inspection.EvaluationQueueTimeout
 	normalized.Global.Inspection.BodyTimeout = current.Global.Inspection.BodyTimeout
@@ -198,8 +196,6 @@ func isInspectionLimitPath(path string) bool {
 		"global.inspection.max_buffered_bytes",
 		"global.inspection.max_guest_capacity_bytes",
 		"global.inspection.max_response_header_bytes",
-		"global.inspection.max_spool_bytes",
-		"global.inspection.max_spool_files",
 		"global.inspection.max_concurrent_evaluations",
 		"global.inspection.evaluation_queue_timeout",
 		"global.inspection.body_timeout":

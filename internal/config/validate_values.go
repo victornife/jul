@@ -125,15 +125,6 @@ func validateInspectionValues(c InspectionConfig) []error {
 	if err := validateOptionalEnum("[global.inspection].mode", c.Mode, "enforce", "observe"); err != nil {
 		errs = append(errs, err)
 	}
-	if strings.TrimSpace(c.SpoolDir) != "" && strings.TrimSpace(c.SpoolDir) != c.SpoolDir {
-		errs = append(errs, fmt.Errorf("[global.inspection].spool_dir: must not have leading or trailing whitespace"))
-	}
-	if c.MaxSpoolBytes != nil && *c.MaxSpoolBytes <= 0 {
-		errs = append(errs, fmt.Errorf("[global.inspection].max_spool_bytes: must be a positive size"))
-	}
-	if c.MaxSpoolFiles < 0 || c.MaxSpoolFiles > 1<<20 {
-		errs = append(errs, fmt.Errorf("[global.inspection].max_spool_files: must be 0 (default) or between 1 and 1048576"))
-	}
 	if c.MaxBufferedBytes != nil && *c.MaxBufferedBytes <= 0 {
 		errs = append(errs, fmt.Errorf("[global.inspection].max_buffered_bytes: must be a positive size"))
 	}

@@ -71,8 +71,8 @@ const instanceLimitLogInterval = 10 * time.Second
 var errInstanceLimit = errors.New("plugin instance limit reached")
 
 var (
-	errGuestWorkInFlight        = errors.New("plugin guest work is still in flight")
-	errGuestTeardownUnconfirmed = errors.New("plugin guest teardown could not be confirmed")
+	errGuestWorkInFlight  = errors.New("plugin guest work is still in flight")
+	errGuestModuleMissing = errors.New("plugin guest instance is missing before close")
 )
 
 // Outcomes of a call that found every allowed instance busy and had to wait.
@@ -1001,6 +1001,28 @@ func (p *plugin) resolveGuest(ticket *inspection.GuestTicket, teardownErr error)
 	return false, nil
 }
 
+// releaseClosedGuest releases accounting after Wazero's Close call returned.
+// The caller must first transition the ticket to GuestClosing. A Close error
+// is diagnostic; Wazero removes the module regardless.
+func (p *plugin) releaseClosedGuest(ticket *inspection.GuestTicket) (bool, error) {
+	if ticket == nil {
+		return true, nil
+	}
+	p.guestMu.Lock()
+	defer p.guestMu.Unlock()
+	owner, ok := p.guestTickets[ticket]
+	if !ok {
+		return false, &inspection.AdmissionError{Outcome: inspection.InvalidAccounting}
+	}
+	if err := ticket.ResolveTeardown(nil); err != nil {
+		return false, err
+	}
+	owner.active = false
+	owner.failed = nil
+	delete(p.guestTickets, ticket)
+	return true, nil
+}
+
 func (p *plugin) hasGuestTickets() bool {
 	if p == nil {
 		return false
@@ -1024,9 +1046,10 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 			var closeErr error
 			if mod != nil {
 				closeErr = mod.Close(context.Background())
+				mod = nil
 			}
 			transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
-			released, resolveErr := p.resolveGuest(ticket, closeErr)
+			released, resolveErr := p.releaseClosedGuest(ticket)
 			p.finishGuestClose()
 			return nil, errors.Join(err, closeErr, transitionErr, resolveErr), !released || resolveErr != nil
 		}
@@ -1035,34 +1058,37 @@ func (p *plugin) instantiateGuest(ctx context.Context, state inspection.GuestSta
 	if mod.IsClosed() {
 		transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
 		closeErr := mod.Close(context.Background())
-		released, resolveErr := p.resolveGuest(ticket, closeErr)
+		mod = nil
+		released, resolveErr := p.releaseClosedGuest(ticket)
 		p.finishGuestClose()
 		return nil, errors.Join(errors.New("plugin instance closed during initialization"), closeErr, transitionErr, resolveErr),
 			!released || resolveErr != nil
 	}
 	if err := ctx.Err(); err != nil {
 		closeErr := mod.Close(context.Background())
+		mod = nil
 		if ticket != nil {
 			transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
-			released, resolveErr := p.resolveGuest(ticket, closeErr)
+			released, resolveErr := p.releaseClosedGuest(ticket)
 			closeErr = errors.Join(closeErr, transitionErr, resolveErr)
 			p.finishGuestClose()
 			return nil, errors.Join(err, closeErr), !released || resolveErr != nil
 		}
 		p.finishGuestClose()
-		return nil, errors.Join(err, closeErr), closeErr != nil
+		return nil, errors.Join(err, closeErr), false
 	}
 	if err := p.transitionGuest(ticket, state); err != nil {
 		closeErr := mod.Close(context.Background())
+		mod = nil
 		transitionErr := p.transitionGuest(ticket, inspection.GuestClosing)
-		released, resolveErr := p.resolveGuest(ticket, closeErr)
+		released, resolveErr := p.releaseClosedGuest(ticket)
 		p.finishGuestClose()
 		return nil, errors.Join(err, closeErr, transitionErr, resolveErr), !released || resolveErr != nil
 	}
 	return &pooledModule{mod: mod, ticket: ticket}, nil, false
 }
 
-// discard closes an instance and releases its reservation only after teardown joins.
+// discard releases the Jul-managed reservation only after module Close returns.
 func (p *plugin) discard(pm *pooledModule) {
 	if pm == nil {
 		return
@@ -1076,21 +1102,25 @@ func (p *plugin) discard(pm *pooledModule) {
 	mod := pm.mod
 	pm.mod = nil
 	var closeErr error
+	var released bool
+	var resolveErr error
 	if mod != nil {
 		closeErr = mod.Close(context.Background())
 		mod = nil
+		released, resolveErr = p.releaseClosedGuest(pm.ticket)
 	} else {
-		closeErr = errGuestTeardownUnconfirmed
+		closeErr = errGuestModuleMissing
+		released, resolveErr = p.resolveGuest(pm.ticket, closeErr)
 	}
-	released, resolveErr := p.resolveGuest(pm.ticket, closeErr)
 	if resolveErr != nil && p.log != nil {
 		p.log.Error("plugin guest capacity accounting failed after close", "plugin", p.name, "error", resolveErr)
 	}
 	if closeErr != nil {
 		if p.log != nil {
-			p.log.Error("plugin guest close failed; capacity remains reserved", "plugin", p.name, "error", closeErr)
+			p.log.Error("plugin guest close returned an error", "plugin", p.name, "error", closeErr)
 		}
-	} else if released && resolveErr == nil {
+	}
+	if released && resolveErr == nil {
 		p.freeSlot()
 	}
 	p.finishGuestClose()
@@ -1442,30 +1472,25 @@ func (p *plugin) closeRuntime(ctx context.Context) error {
 	}
 drained:
 	for ticket, owner := range p.guestTickets {
-		if p.runtimeCloseErr != nil && !errors.Is(owner.failed, p.runtimeCloseErr) {
-			owner.failed = errors.Join(owner.failed, p.runtimeCloseErr)
-		}
 		if owner.failed != nil {
-			if transitionErr := ticket.Transition(inspection.GuestClosing); transitionErr != nil {
-				errs = append(errs, transitionErr)
-			} else if resolveErr := ticket.ResolveTeardown(owner.failed); resolveErr != nil {
-				errs = append(errs, resolveErr)
-			}
 			errs = append(errs, owner.failed)
-		} else {
-			if err := ticket.Transition(inspection.GuestClosing); err != nil {
-				errs = append(errs, err)
-			} else if err := ticket.ResolveTeardown(nil); err != nil {
-				errs = append(errs, err)
-			} else {
-				delete(p.guestTickets, ticket)
-				p.freeSlot()
-			}
 		}
+		if err := ticket.Transition(inspection.GuestClosing); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if err := ticket.ResolveTeardown(nil); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		owner.active = false
+		owner.failed = nil
+		delete(p.guestTickets, ticket)
+		p.freeSlot()
 	}
 	remaining := len(p.guestTickets)
 	p.guestMu.Unlock()
-	if remaining == 0 && p.runtimeCloseErr == nil && p.mgr != nil {
+	if remaining == 0 && p.mgr != nil {
 		p.mgr.forgetRetained(p)
 	}
 	return errors.Join(errs...)

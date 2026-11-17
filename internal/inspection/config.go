@@ -32,31 +32,18 @@ func LimitsFromConfig(cfg *config.Config, startupProcs int) (Limits, error) {
 		mode = Enforce
 	}
 	maxBytes := uint64(256 << 20)
-	spoolDir := inspection.SpoolDir
-	if strings.TrimSpace(spoolDir) == "" {
-		spoolDir = "./jul-data/inspection-spool"
-	} else if strings.TrimSpace(spoolDir) != spoolDir {
-		return Limits{}, fmt.Errorf("%w: global.inspection.spool_dir must not have leading or trailing whitespace", ErrInvalidLimits)
-	}
-	maxSpoolBytes := uint64(512 << 20)
-	if inspection.MaxSpoolBytes != nil {
-		if *inspection.MaxSpoolBytes <= 0 {
-			return Limits{}, fmt.Errorf("%w: global.inspection.max_spool_bytes must be positive", ErrInvalidLimits)
-		}
-		maxSpoolBytes = uint64(inspection.MaxSpoolBytes.Bytes())
-	}
-	maxSpoolFiles := inspection.MaxSpoolFiles
-	if maxSpoolFiles == 0 {
-		maxSpoolFiles = 1024
-	}
-	if maxSpoolFiles < 1 || maxSpoolFiles > 1<<20 {
-		return Limits{}, fmt.Errorf("%w: global.inspection.max_spool_files must be between 1 and 1048576", ErrInvalidLimits)
-	}
 	if inspection.MaxBufferedBytes != nil {
 		if *inspection.MaxBufferedBytes <= 0 {
 			return Limits{}, fmt.Errorf("%w: global.inspection.max_buffered_bytes must be positive", ErrInvalidLimits)
 		}
 		maxBytes = uint64(inspection.MaxBufferedBytes.Bytes())
+	}
+	maxGuestCapacityBytes := uint64(config.InspectionDefaultMaxGuestCapacityBytes)
+	if inspection.MaxGuestCapacityBytes != nil {
+		if *inspection.MaxGuestCapacityBytes <= 0 {
+			return Limits{}, fmt.Errorf("%w: global.inspection.max_guest_capacity_bytes must be positive", ErrInvalidLimits)
+		}
+		maxGuestCapacityBytes = uint64(inspection.MaxGuestCapacityBytes.Bytes())
 	}
 	maxResponseHeaderBytes := uint64(config.InspectionDefaultMaxResponseHeaderBytes)
 	if inspection.MaxResponseHeaderBytes != nil {
@@ -88,21 +75,13 @@ func LimitsFromConfig(cfg *config.Config, startupProcs int) (Limits, error) {
 	limits := Limits{
 		Mode:                      mode,
 		MaxBytes:                  maxBytes,
-		SpoolDir:                  spoolDir,
-		MaxSpoolBytes:             maxSpoolBytes,
-		MaxSpoolFiles:             uint64(maxSpoolFiles),
+		MaxGuestCapacityBytes:     maxGuestCapacityBytes,
 		MaxResponseHeaderBytes:    maxResponseHeaderBytes,
 		ConfiguredEvaluationSlots: inspection.MaxConcurrentEvaluations,
 		EvaluationSlots:           effectiveSlots,
 		EvaluationQueueTimeout:    queueTimeout,
 		BodyTimeout:               bodyTimeout,
 		BaseChargeBytes:           BaseChargeBytes,
-	}
-	if inspection.MaxGuestCapacityBytes != nil {
-		if *inspection.MaxGuestCapacityBytes <= 0 {
-			return Limits{}, fmt.Errorf("%w: global.inspection.max_guest_capacity_bytes must be positive", ErrInvalidLimits)
-		}
-		limits.MaxGuestCapacityBytes = uint64(inspection.MaxGuestCapacityBytes.Bytes())
 	}
 	if err := limits.validate(); err != nil {
 		return Limits{}, err

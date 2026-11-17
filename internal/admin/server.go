@@ -364,11 +364,8 @@ type Deps struct {
 	// InspectionSnapshot reports process-wide governor limits and charged
 	// usage.
 	InspectionSnapshot func() inspection.Snapshot
-	// InspectionSpoolSnapshot reports process-wide logical Coraza spool
-	// accounting when the WAF spool controller is active.
-	InspectionSpoolSnapshot func() inspection.SpoolSnapshot
-	// InspectionPluginGuestCapacity reports configured guest-memory capacity
-	// across every compiled plugin generation not yet closed.
+	// InspectionPluginGuestCapacity reports the projected configured guest
+	// capacity across every compiled or preparing plugin generation.
 	InspectionPluginGuestCapacity func() (adminapi.InspectionPluginGuestCapacity, error)
 	// TrafficSources returns the bounded top-N projection of request hosts,
 	// origins, and referers for the Console Overview Traffic Sources panel

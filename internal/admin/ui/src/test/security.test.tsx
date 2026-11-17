@@ -86,6 +86,8 @@ describe("SecurityPanel WAF build-tag degradation", () => {
     render(<SecurityPanel />, { wrapper: Wrapper });
     // Wait for the panel to render, then assert the banner is absent.
     await screen.findByText("Security");
+    expect(screen.getByRole("link", { name: "Inspection resources" }))
+      .toHaveAttribute("href", "/?inspection=1");
     await waitFor(() => {
       expect(
         screen.queryByText(/does not include the web application firewall/i),

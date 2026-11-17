@@ -24,23 +24,22 @@ published package contains the fix. Bodies are prepared before the guest call
 ([plugins.md](plugins.md#request-bodies);
 [revalidation](reviews/2026-11-10-699-plugin-body-preparation-revalidation.md)).
 On a published package, set `timeout` above the slowest legitimate upload for
-body-reading plugins and set a finite server `read_timeout`. The missing
-aggregate inspection bound remains
+body-reading plugins and set a finite server `read_timeout`. The broader
+aggregate inspection contract remains tracked by
 [#700](https://github.com/victornife/jul/issues/700). On unreleased `main`,
 the I1 foundation publishes process-wide limits, and I2 makes the WASM plugin
 request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
-`body_timeout` bounds body-reading plugin uploads). I3a and I4 added WAF
-request/response accounting and plugin response-subscription charges. The
-unmerged I3b/I2b implementation now includes a transaction-owned Coraza
-temporary-file provider and a Wazero cancellation-watcher join before guest
-capacity refund. Guest-capacity omission remains unbounded and does not provide
-an A20 ceiling; spool quotas are logical, not an OS filesystem quota or RSS
-bound. A failed spool lock requires the documented offline recovery procedure.
-The controls have not passed integrated acceptance. See the
-[inspection ledger](reviews/700-inspection-implementation-ledger.md#i3b-i2b-implementation-review).
-No integrated resource acceptance is claimed. The route-aware minimum budget
-is validated statically from compiled limits, which
+`body_timeout` bounds inspected uploads). I3a and I4 also account WAF
+request/response work and plugin response-subscription buffers. The recovery
+adds a 1 GiB default logical reservation ceiling for Jul-managed plugin
+instances and a fail-closed guard for public request-body processing errors
+exposed by stock Coraza before dispatch. Neither control is a hard bound on all
+engine memory or all temporary-file I/O. Exact aggregate spool byte/file
+quotas and proof of Wazero's last-alias release are deferred; the original
+A19/A20 guarantees are not claimed. The R3 response-header accounting ceiling
+has an explicit 64 KiB default. The route-aware minimum budget is validated
+statically from compiled limits, which
 also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:
 a raised body beyond the compiled limit is refused, not buffered (see
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)).
@@ -688,17 +687,19 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   512 KiB response limit (then partial); other types, including JSON, need an
   explicit `SecResponseBodyMimeType`. The effective policy reports compiled
   settings, not per-transaction `ctl:` changes (#698).
-- **Inspection protection is not a whole-process bound.** The unmerged I3b
-  implementation adds logical byte/file reservations for Coraza body spill and
-  multipart files, with cleanup debt retained until removal is confirmed; it
-  does not impose a physical filesystem quota. The unmerged I2b implementation
-  joins Wazero's cancellation watcher before refunding guest capacity, while
-  Go heap reclamation remains asynchronous and an omitted guest ceiling is
-  unbounded. WAF work can continue after client disconnect, with its
-  reservations held until the work finishes. WAF state is a calibrated
-  estimate rather than measured heap, and integrated acceptance remains
-  pending under [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md)
-  (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
+- **Inspection protection is not a whole-process bound.** The governor accounts
+  supported WAF and plugin request/response work; WAF state is estimated, not
+  measured heap. The guest capacity limit covers Jul-managed page-rounded
+  instance reservations only. Stock Wazero may retain engine references
+  asynchronously beyond Jul teardown, with no proven reclamation-time bound.
+  The WAF body guard rejects public request-body processing failures it detects
+  before dispatch, but cannot distinguish disk I/O, storage exhaustion and
+  malformed input or detect hidden/late failures. Jul does not enforce exact
+  aggregate temporary-file quotas or own crash-safe Coraza file cleanup.
+  WAF work can continue after client disconnect and remains charged while it
+  runs; phase-5 logging may run without a slot. See
+  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md) and
+  [waf.md](waf.md#sizing-and-concurrency).
 
 ---
 
@@ -723,10 +724,9 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   On unreleased `main`, request-side host buffers (prepared bodies, `fetch`
   copies, request state, generated and replacement bodies) are charged to the
   process-wide inspection budget and refused with `503` when it is exhausted;
-  response-subscription buffers are also charged (#700 I4). The unmerged I2b
-  prototype retains closed guest reservations until process exit because a
-  wazero watcher can outlive close. A finite enforce cap can be exhausted by
-  churn; observe is not a bound. No finite production default is approved.
+  response-subscription buffers are also charged (#700 I4). A finite 1 GiB
+  process-wide logical instance reservation is enforced by default; it does
+  not bound asynchronous engine-retained memory, and observe is not a limit.
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,

@@ -41,7 +41,6 @@ func buildV2Handler(t *testing.T, backend string, p config.PluginConfig, mutate 
 	t.Cleanup(cleanup)
 	f.Inspection = f.RT.Inspection
 	cfg := &config.Config{
-		Global:  config.GlobalConfig{Inspection: config.InspectionConfig{SpoolDir: f.Spool.Root()}},
 		Plugins: map[string]config.PluginConfig{"p": p},
 		Servers: []config.ServerConfig{{
 			Listen: "127.0.0.1:0",

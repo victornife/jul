@@ -16,6 +16,7 @@ import (
 	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/rbac"
+	"jul/internal/server"
 )
 
 // getV1 issues an authenticated GET against a v1 route.
@@ -118,14 +119,13 @@ func TestV1StatusReportsControlPlaneState(t *testing.T) {
 	}
 }
 
-func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
+func TestV1StatusReportsInspectionLimitsAndGuestReservation(t *testing.T) {
 	snapshot := inspection.Snapshot{
 		Limits: inspection.Limits{
 			Mode:                      inspection.Enforce,
 			MaxBytes:                  256 << 20,
 			MaxResponseHeaderBytes:    64 << 10,
-			MaxSpoolBytes:             512 << 20,
-			MaxSpoolFiles:             1024,
+			MaxGuestCapacityBytes:     64 << 20,
 			ConfiguredEvaluationSlots: 0,
 			EvaluationSlots:           4,
 			EvaluationQueueTimeout:    time.Second,
@@ -136,15 +136,12 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 		ActiveLeases:       1,
 		ActiveEvaluations:  2,
 		WaitingEvaluations: 1,
+		GuestCapacity: inspection.GuestCapacitySnapshot{
+			ReservedBytes: 16 << 20,
+		},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		InspectionSnapshot: func() inspection.Snapshot { return snapshot },
-		InspectionSpoolSnapshot: func() inspection.SpoolSnapshot {
-			return inspection.SpoolSnapshot{
-				UsedBytes: 10, UsedFiles: 2, DebtBytes: 3, DebtFiles: 1,
-				WouldBytes: 5, WouldFiles: 1, ByteLimit: 512 << 20, FileLimit: 1024,
-			}
-		},
 		InspectionPluginGuestCapacity: func() (adminapi.InspectionPluginGuestCapacity, error) {
 			return adminapi.InspectionPluginGuestCapacity{
 				MaxPermittedBytes: 56 << 20,
@@ -160,20 +157,11 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 	i := got.Inspection
 	if i.Configured.MaxConcurrentEvaluations != 0 || i.Effective.MaxConcurrentEvaluations != 4 ||
 		i.Configured.Mode != "enforce" || i.Effective.Mode != "enforce" ||
-		i.Configured.MaxResponseHeaderBytes != 64<<10 || i.Effective.MaxResponseHeaderBytes != 64<<10 ||
-		i.Configured.MaxSpoolBytes != 512<<20 || i.Effective.MaxSpoolBytes != 512<<20 ||
-		i.Configured.MaxSpoolFiles != 1024 || i.Effective.MaxSpoolFiles != 1024 {
+		i.Configured.MaxResponseHeaderBytes != 64<<10 || i.Effective.MaxResponseHeaderBytes != 64<<10 {
 		t.Fatalf("configured/effective inspection limits = %+v/%+v", i.Configured, i.Effective)
 	}
-	if i.Spool.State != "active" || i.Spool.Mode != "enforce" ||
-		i.Spool.UsedBytes != 10 || i.Spool.UsedFiles != 2 ||
-		i.Spool.DebtBytes != 3 || i.Spool.DebtFiles != 1 ||
-		i.Spool.WouldBytes != 5 || i.Spool.WouldFiles != 1 ||
-		i.Spool.ByteLimit != 512<<20 || i.Spool.FileLimit != 1024 {
-		t.Fatalf("spool status = %+v", i.Spool)
-	}
 	if i.Usage.BaseBytes != inspection.BaseChargeBytes || i.Usage.BufferBytes != 8192 ||
-		i.Usage.WAFStateBytes != 4096 || i.ActiveLeases != 1 ||
+		i.Usage.WAFStateBytes != 4096 || i.Usage.AuditBytes != 2048 || i.ActiveLeases != 1 ||
 		i.ActiveEvaluations != 2 || i.WaitingEvaluations != 1 {
 		t.Fatalf("inspection usage = %+v", i)
 	}
@@ -182,9 +170,11 @@ func TestV1StatusReportsInspectionLimitsAndPendingIntegration(t *testing.T) {
 		t.Fatalf("inspection delivery boundary = %+v", i)
 	}
 	if i.PluginGuestMaxBytes == nil || *i.PluginGuestMaxBytes != 56<<20 ||
+		i.PluginGuestReservedBytes != 16<<20 || i.PluginGuestCapacityLimitBytes != 64<<20 ||
 		i.PluginGuestLiveInstances == nil || *i.PluginGuestLiveInstances != 3 ||
 		i.PluginGuestMaxInstances == nil || *i.PluginGuestMaxInstances != 5 ||
-		i.PluginGuestActualBytes != nil || i.PluginGuestActualBytesState != "not_sampled" {
+		i.PluginGuestActualBytes != nil || i.PluginGuestActualBytesState != "unavailable_engine_measurement" ||
+		!strings.Contains(i.PluginGuestReservationScope, "engine-internal retained references") {
 		t.Fatalf("plugin guest capacity status = %+v", i)
 	}
 	if i.EvaluationHeadroomEstimateBytes != nil || i.EvaluationHeadroomEstimateState != "not_calibrated" {
@@ -204,14 +194,63 @@ func TestV1StatusDoesNotRepresentUnavailableGuestCapacityAsZero(t *testing.T) {
 	if got.Inspection.PluginGuestMaxBytes != nil ||
 		got.Inspection.PluginGuestLiveInstances != nil ||
 		got.Inspection.PluginGuestMaxInstances != nil ||
-		got.Inspection.PluginGuestActualBytesState != "unavailable" {
+		got.Inspection.PluginGuestActualBytesState != "unavailable_engine_measurement" {
 		t.Fatalf("unavailable plugin guest capacity = %+v", got.Inspection)
-	}
-	if got.Inspection.Spool.State != "unavailable" {
-		t.Fatalf("unavailable spool status = %+v", got.Inspection.Spool)
 	}
 	if strings.Contains(rr.Body.String(), `"plugin_guest_max_bytes"`) {
 		t.Fatalf("unavailable guest capacity must be omitted, not encoded as zero: %s", rr.Body.String())
+	}
+}
+
+func TestInspectionMinimumStatusPermissionsAndAvailability(t *testing.T) {
+	limits := inspection.Limits{
+		MinimumKnown: true, MinimumBytes: 1234, MinimumGeneration: 1,
+		MinimumRoute: "servers[0].locations[1] (private-address /private-path)",
+	}
+	generation := uint64(1)
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		InspectionSnapshot: func() inspection.Snapshot { return inspection.Snapshot{Limits: limits} },
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{Generation: generation, EffectiveConfig: &config.Config{}}
+		},
+	})
+	for _, path := range []string{"/api/v1/status", "/api/runtime/overview"} {
+		for _, canReadConfig := range []bool{false, true} {
+			perms := []rbac.Permission{rbac.StatusRead}
+			if canReadConfig {
+				perms = append(perms, rbac.ConfigRead)
+			}
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			req = req.WithContext(rbac.WithIdentity(req.Context(), rbac.Identity{Permissions: perms}))
+			rr := httptest.NewRecorder()
+			if path == "/api/v1/status" {
+				s.handleV1Status(rr, req)
+			} else {
+				s.handleRuntimeOverview(rr, req)
+			}
+			body := rr.Body.String()
+			if rr.Code != http.StatusOK || !strings.Contains(body, `"minimum_request_bytes":1234`) ||
+				strings.Contains(body, `"minimum_request_route":"servers[0].locations[1]"`) != canReadConfig ||
+				strings.Contains(body, "private-address") || strings.Contains(body, "private-path") {
+				t.Fatalf("path %s config:read %v: %d %s", path, canReadConfig, rr.Code, rr.Body.String())
+			}
+		}
+	}
+	generation = 2
+	rr := getV1(t, s, "/api/v1/status", "")
+	if strings.Contains(rr.Body.String(), `"minimum_request_bytes"`) || strings.Contains(rr.Body.String(), `"minimum_request_route"`) {
+		t.Fatalf("minimum from another generation must be omitted: %s", rr.Body.String())
+	}
+	generation = 1
+	limits.MinimumKnown, limits.MinimumBytes, limits.MinimumRoute = false, 0, ""
+	rr = getV1(t, s, "/api/v1/status", "")
+	if strings.Contains(rr.Body.String(), `"minimum_request_bytes"`) {
+		t.Fatalf("unknown minimum must be omitted: %s", rr.Body.String())
+	}
+	limits.MinimumKnown = true
+	rr = getV1(t, s, "/api/v1/status", "")
+	if !strings.Contains(rr.Body.String(), `"minimum_request_bytes":0`) {
+		t.Fatalf("known empty minimum must be zero: %s", rr.Body.String())
 	}
 }
 

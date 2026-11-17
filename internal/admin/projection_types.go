@@ -584,10 +584,13 @@ type CertRiskProjection struct {
 
 // RuntimeOverview is the top-level dashboard summary.
 type RuntimeOverview struct {
-	Product string          `json:"product"`
-	Version string          `json:"version"`
-	Status  []FeatureStatus `json:"status"` // existing 21-row backbone
-	Stats   interface{}     `json:"stats,omitempty"`
+	Product         string                     `json:"product"`
+	Version         string                     `json:"version"`
+	BootID          string                     `json:"boot_id,omitempty"`
+	Status          []FeatureStatus            `json:"status"` // existing 21-row backbone
+	Stats           interface{}                `json:"stats,omitempty"`
+	Inspection      *adminapi.InspectionStatus `json:"inspection,omitempty"`
+	InspectionError string                     `json:"inspection_error,omitempty"`
 	// TrafficSources is the bounded top-N projection of request hosts/origins/
 	// referers for the Console Overview Traffic Sources panel (Milestone 1.4).
 	TrafficSources interface{} `json:"traffic_sources,omitempty"`

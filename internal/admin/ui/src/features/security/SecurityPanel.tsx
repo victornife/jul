@@ -5,6 +5,7 @@
 
 import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
   fetchSecurity,
   fetchListeners,
@@ -328,6 +329,12 @@ export function SecurityPanel() {
               <OnOff on={false} />
             )}
             <div className="ml-auto flex flex-wrap items-center gap-2">
+              <Link
+                to="/?inspection=1"
+                className="rounded-md border border-jul-border px-2.5 py-1 text-xs text-jul-text hover:bg-jul-bg"
+              >
+                Inspection resources
+              </Link>
               <button
                 type="button"
                 onClick={() => {
