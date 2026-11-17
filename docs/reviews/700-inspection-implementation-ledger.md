@@ -8,11 +8,12 @@ qualification, soak or maturity change.
 
 ## Current recovery status — 2026-11-17
 
-The active recovery worktree is `recover/700-unforked`, based on #721 and
-integrating #724. The work is uncommitted and not qualified. The 2026-11-17
-amendment in [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md)
-governs this scope; earlier fork-dependent plans and checks below are historical
-only. No commit, push, merge, issue closure or release has occurred.
+The reduced-scope recovery implementation is committed and published on draft
+#721; #724 remains a separate partial draft. The changes are not qualified, and
+hosted checks on the published head are in progress. The 2026-11-17 amendment
+in [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md) governs
+this scope; earlier fork-dependent plans and checks below are historical only.
+No merge, issue closure or release has occurred.
 
 | Disposition | Scope |
 | --- | --- |
@@ -41,8 +42,8 @@ Local checks for this source identity pass; hosted checks remain pending:
 | `corepack pnpm e2e e2e/real-server.spec.ts` | Passed: 32 tests. |
 | `python3 scripts/check-d11-certification.py` | Passed: 0 errors. |
 
-These are local results, not hosted checks on a published head. The 30-minute
-combined inspection soak and Linux/cgroup qualification remain unrun: the
+These are local results; hosted checks on the published head are still in
+progress. The 30-minute combined inspection soak and Linux/cgroup qualification remain unrun: the
 available `scripts/soak.sh` scenarios cover proxy, cache and UDP churn rather
 than combined WASM/WAF inspection, and the Docker daemon is unavailable on this
 host. The integrated A1–A22 campaign also remains outstanding. Do not claim
