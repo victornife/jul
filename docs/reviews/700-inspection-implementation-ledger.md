@@ -6,6 +6,34 @@ authority is [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md); 
 measurements retain their original identities. Merged source is not a published release,
 qualification, soak or maturity change.
 
+### 2026-11-17 authorized completion prompt — starting inventory
+
+Main is `155b6d94dfde580a9332c3a985c8ce156563fd20`. Draft #721 is open at
+`0497ab707cd0263e27a5f0e3a2f4817d847ce6ab`; draft #724 is open at
+`6a1a0f6b28caf9549066ab17f5cc6173cfeead6e`. #725 and #726 are merged. The checked-out #721
+branch contains the current main commit and was clean before this amendment.
+
+| Area | Reusable implementation/evidence | Remaining boundary |
+| --- | --- | --- |
+| I1, I2, I3a, I4, I5 | Merged controls, tests and tooling on main. | Re-run coupled tests and requalify only criteria affected by the integrated diff. |
+| I2b / #711 / #721 | Process governor, tickets, page rounding, config, metrics, reload/versioning and lifecycle regressions; public-close and experimental-join evidence. | Experimental evidence is not production support. The current debt prototype leaks reservations under normal churn; watcher synchronization, failed-start cleanup, finite default, coverage and A20 remain to implement and prove. |
+| I3b / #713 | Coraza failure/containment evidence and existing WAF accounting. | No Jul-owned provider, logical byte/file controller, typed sticky storage failure, recovery/migration or finite measured defaults; A19 remains unpassed. |
+| I6a / #712 / #724 | Shared Console/API/CLI projections, audit signals, permissions/navigation and real-server WAF tests. | No real guest/spool producers or full state/permission journeys for them; integrate without regressing existing draft changes. |
+| I6b | Frozen assessment harness and A1–A22 mapping. | No integrated qualification or 30-minute combined soak on this source identity. |
+| Dependency patches | Existing local-module replacement precedent in `third_party/gofast`. | Add only pinned wazero and Coraza deltas, source provenance, test/coverage commands and upstream removal criteria. |
+
+| Acceptance | Starting status | Required completion evidence |
+| --- | --- | --- |
+| A1–A18 | Prior implementation checkpoints exist; the integrated campaign is not qualified at this source identity. | Reuse unchanged-boundary evidence only after mapping it to the final diff; rerun changed/coupled criteria and preserve the original thresholds. |
+| A19 | Not passed. | Logical spool quotas, transaction-owned files, typed failures, cleanup debt, same-identity recovery and pre-dispatch enforcement tests. |
+| A20 | Not passed. | Watcher last-access join, safe failed-start teardown, normal recycling drainage, finite measured capacity and multi-generation tests. |
+| A21 | Existing I3a/I4 work; integrated qualification pending. | Revalidate retained audit ownership and blocked-writer behavior against the final combined lifecycle. |
+| A22 | Partial in draft #724. | Real guest/spool producer parity across API/CLI/Console, permissions, debt/observe/recovery and migration. |
+
+The 2026-11-17 bounded execution amendment is recorded in ADR 0032. This inventory does not
+mark any acceptance criterion passed. The next steps are the contract commit, dependency patch
+infrastructure, then the guest, spool, operability and integrated-qualification slices.
+
 ## Current checkpoint
 
 ### 2026-11-16 follow-up

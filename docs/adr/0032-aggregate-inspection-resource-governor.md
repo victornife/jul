@@ -1251,7 +1251,7 @@ the table apply to every applicable row.
 | WAF transaction state | Cumulative `waf_state` **estimated** bytes R1–R4; reserve each phase's worst case before its Coraza call while holding the slot, then true down only as calibrated. `B_total` includes spilled input. | Hold until the synchronous work has returned and the owning goroutine closes the transaction. Cancellation or a reset is not a refund. `ARGS_PATH` remains empty unless its term and tests change. | I3a request, I4 response |
 | Phase-5 rules, audit construction and output | New `audit` **estimated reservation** R5, charged against the same `max_buffered_bytes`, not a second limit or an addition outside the accounted total. Reserve the complete per-transaction worst case before creating/entering a WAF transaction and before any response can make refusal impossible. | Retain through slotted or unslotted `ProcessLogging`, formatting and synchronous writer completion. Detach the immutable snapshot before transaction reset/pool reuse. If serialized bytes are asynchronously queued, transfer ownership to a distinct bounded queue; unsupported aliases cannot be refunded or claimed covered. Closing a request lease cannot refund an unowned retained record. | I3a request and I4 response calibration; integrated A21 qualification remains pending |
 | WAF execution | Process `slots`, one per synchronous rule-evaluating call, including implicit evaluations in body writes. No network read is performed while holding one. | Release only on actual return. Phases 1–4 try-acquire while request data is unread, otherwise use the existing bounded FIFO. Phase 5 never skips rules: it uses the same eligibility rule, but visibly runs unslotted if no slot is obtained. It is not strictly bounded by the slot count. | I3a/I4 |
-| Guest instances | Process `guest_capacity` bytes: the effective `WithMemoryLimitPages` ceiling, in 64 KiB pages, for **each** starting, idle, busy or closing instance across candidate/current/retiring generations. This is neither actual guest allocation nor RSS. | Reserve before instantiation and `_initialize`; reuse a pooled instance without another reservation. Release exactly once only after the module/runtime has stopped and no owner can use its memory. A failed close remains accounted and visible. | I2b |
+| Guest instances | Process `guest_capacity` bytes: the effective `WithMemoryLimitPages` ceiling, in 64 KiB pages, for **each** starting, idle, busy or closing instance across candidate/current/retiring generations. This is neither actual guest allocation nor RSS. | Reserve before instantiation and `_initialize`; reuse a pooled instance without another reservation. Release exactly once after guest execution and asynchronous engine work that can access the module have quiesced, represented cleanup has completed and Jul-owned aliases have been dropped. Go heap reclamation and return of pages to the OS remain asynchronous. An unresolved cleanup failure remains charged and visible. | I2b |
 | Compiled rules/modules and transaction pools | Generation-owned compiled state and process/GC-retained pool capacity; configured capacity, calibrated estimates or observations where available, **not** a guest or request reservation. | Retire only after actual generation users and resources finish; a reset pooled transaction can retain backing arrays. Unmeasured baseline is unavailable, not zero. | Existing lifecycle; A9/A15 and I6b |
 | Body spill and multipart files | Process `spool` logical reserved bytes and file count, independent of the request lease. Before every supported create, reserve a file; before a write/growth, reserve its possible resulting extent, including buffered-prefix copies and simultaneously retained multipart files. | A file remains charged through open handles, unlink/close, partial writes and failed cleanup. Refund only after all Jul-owned handles/aliases are closed and removal is confirmed. Crash leftovers are reconciled before new reservations. | I3b, blocked on the integration boundary below |
 | Audit output and other persistent storage | R5 covers in-process audit construction, the detached snapshot, synchronous formatter copies and any serialized buffer until its ownership is transferred. The configured sink's durable files/remote destination and other Jul-owned storage categories are separate external boundaries, not inspection spool and not bounded by R5. | Their configured owners, retention and I/O health remain responsible; a spool quota is not a filesystem-wide or durable-audit quota. tmpfs and page cache can still count against a cgroup. | Existing sink/storage owners; I6a exposes the distinction |
@@ -1624,8 +1624,8 @@ unchanged. Add the following unused identifiers:
 
 | # | Case | Pass condition |
 | --- | --- | --- |
-| A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing reservations/debt draining after a decrease or an observe-to-enforce transition, including when the numerical ceiling is unchanged; after either transition, no new acquisition may exceed the enforced ceiling. No early refund, unsafe deletion or partial inspection. Observe reports would-refuse while real I/O failures remain visible. Owned leftovers are reconciled before admission. Test observe-to-enforce with existing over-limit bytes/files and verify new acquisitions are refused. |
-| A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. A failed close stays charged; concurrent limit publications never let a stale candidate overwrite a newer limit. |
+| A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing reservations/debt draining after a decrease or an observe-to-enforce transition, including when the numerical ceiling is unchanged; after either transition, no new acquisition may exceed the enforced ceiling. No early refund or unsafe deletion. A storage failure detected before origin dispatch prevents dispatch and partial inspection; a failure discovered only during later replay, response delivery or cleanup stops affected further I/O, retains visible debt and does not claim already-sent work was undone. Observe reports would-refuse while real I/O failures remain visible. Same-deployment owned leftovers are reconciled before admission. Test observe-to-enforce with existing over-limit bytes/files and verify new acquisitions are refused. |
+| A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. Refund follows proven guest/watcher quiescence, represented cleanup and dropping Jul-owned aliases; it does not claim synchronous Go heap or OS-page reclamation. An unresolved cleanup failure stays charged; concurrent limit publications never let a stale candidate overwrite a newer limit. |
 | A21 | Phase-5 audit pressure and blocked output | R5 is reserved before transaction entry, covers the supported calibrated request/response audit construction and immutable detached record, and remains owned through the last bounded output alias; transaction reuse cannot mutate a prior record. Phase-5 rules are never skipped and saturation cannot create a governor wait cycle. A hung writer is abandoned at its deadline: the slot is released when the Coraza call returns, but the abandoned writer's retained audit charge stays bounded, charged and visible until the call actually returns, and only then drains. Once every abandoned or queued output has actually finished (returned, written or dropped and counted), slot, R5 and queue counters return to baseline. Long-lived exchanges release transaction ownership at their commit point, while pending output stays charged to its owner. When the abandonment set or output queue is saturated, enforce refuses with `audit` and observe admits, counts would-refuse and audit drops, and creates no unbounded writers or queue entries. Unsupported unbounded policies do not receive a protection claim. |
 | A22 | Operational usability and migration | API, CLI and Console agree with real producer state and permissions; units and unavailable/observe/draining/debt states are truthful; defaults, directive and directory migration are actionable; alerts use real bounded signals and do not claim a general notification or audit product. |
 
@@ -1893,6 +1893,47 @@ The review also required these contracts to be settled in the ADR. This revision
    (§7).
 8. **Deadline ownership.** Wrappers forward `SetReadDeadline` narrowly, without `Unwrap`, and a
    retirement abort cannot be undone (H6; restore replaced by the 2026-11-12 amendment, H6 item 8).
+
+## Accepted bounded execution amendment — 2026-11-17
+
+The maintainer authorized implementation of the bounded approach in the #700 completion prompt.
+This amendment changes the integration boundary and clarifies the physical-resource limits; it
+does not claim that any implementation or A1–A22 criterion has passed.
+
+- **Dependency ownership.** Keep wazero and Coraza. Jul may carry source-pinned local patches
+  under the existing `third_party` replacement convention: wazero exposes synchronous completion
+  of cancellation-watcher module access; Coraza accepts a transaction-scoped temporary-storage
+  provider and preserves typed storage failures out of band. Jul retains all policy, quotas,
+  ticket ownership, error mapping and status. Neither dependency imports Jul. Each patch must have
+  reproducible upstream provenance, focused tests/coverage, update instructions and a removal
+  criterion tied to upstream passing the same contract tests.
+- **Guest refund boundary.** Capacity is a reservation of page-rounded guest ceilings, not RSS,
+  committed pages, compiled-code memory or proof of physical reclamation. A reservation is
+  refundable only after guest execution and asynchronous engine work that can access the module
+  are quiescent, represented cleanup completes and Jul-owned aliases are dropped. Failed starts
+  use the same verified teardown boundary. Go heap collection and OS-page return are asynchronous;
+  GC, weak pointers and sleeps are diagnostic only. An unresolved cleanup failure remains charged.
+- **Spool boundary.** The controller owns inspection temporary files for body spill, multipart and
+  any enabled response spill through the same provider. Logical byte/file ceilings cover only
+  Jul-controlled files; filesystem allocation rounding, page cache/tmpfs accounting, external
+  processes and malicious same-user interference remain outside that guarantee. Pre-dispatch
+  storage errors fail closed before origin dispatch. A failure first discovered during later
+  replay, response delivery or cleanup cannot undo bytes already sent; abort further affected I/O,
+  retain debt and report the stage. Cleanup failure after a successful response does not replace
+  that response.
+- **Root identity and recovery.** Support recovery for one fixed private root associated with a
+  stable deployment identity. Same-identity startup acquires exclusive ownership and reconciles
+  attributable leftovers before admission. Root changes use an explicit offline procedure that
+  verifies the prior root/state, drains or accounts for cleanup debt and updates the durable
+  association; there is no live cross-root migration. Deletion/replacement of the stable identity,
+  independent snapshot rollback or out-of-band relocation is an operator recovery boundary, not a
+  promise of universal directory discovery. Unknown or unattributable files are preserved, not
+  deleted.
+- **No broadened claim.** These limits refine A19/A20 and supersede any conflicting wording in
+  this ADR that implies physical memory reclamation before refund, pre-dispatch detection of every
+  future I/O/cleanup failure, or automatic discovery after the deployment identity is replaced.
+  They do not waive logical quota admission, fail-closed handling of errors detectable before
+  dispatch, truthful cleanup debt, same-identity recovery or the focused and integrated tests.
 
 ## Related
 
