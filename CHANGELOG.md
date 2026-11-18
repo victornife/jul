@@ -11,6 +11,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- The Console CI audit temporarily accepts only development-dependency advisory
+  GHSA-fc5q-39xc-vjpf for `picomatch`: no patched release is published.
+  Malicious glob patterns can still cause build or development processes to
+  hang. A CI check rejects `picomatch` in production dependencies; remove the
+  exception and check when an upstream fix is available.
 - **Unmerged inspection recovery:** Jul uses stock wazero and Coraza. Managed
   guest instances reserve logical page-rounded capacity; this is not an RSS
   bound or proof that engine references have been released. At 64 unresolved

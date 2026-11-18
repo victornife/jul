@@ -76,9 +76,12 @@ Head `adae382e` had 63 successful hosted checks, two skips and one failure;
 the coverage gate passed and Codecov reported 99.06% patch coverage. Its
 Console audit failed on the unchanged UI lockfile's
 transitive `picomatch@4.0.7` (GHSA-fc5q-39xc-vjpf). The advisory lists `4.0.8`
-as patched, but that version is not available from the public npm registry; no
-audit suppression or local third-party patch was added. This dependency remains
-unchanged in the follow-up. The [assessment commands](../../scripts/inspection-assessment/README.md#combined-functional-soak)
+as patched, but that version is not available from the public npm registry.
+The subsequent pnpm configuration accepts only this advisory; a CI check
+rejects `picomatch` in the production dependency tree, while other advisories
+remain enforced. Untrusted glob patterns can still hang development or build
+tools. Remove the exception and production check when a patched release is
+available; no dependency patch was added. The [assessment commands](../../scripts/inspection-assessment/README.md#combined-functional-soak)
 describe how to reproduce the soak. Linux/cgroup qualification remains unrun because this host is
 macOS and its Docker daemon is unavailable. The integrated A1–A22 campaign
 also remains outstanding. Do not claim
