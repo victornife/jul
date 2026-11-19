@@ -734,7 +734,7 @@ switching modes or rule sources.
 | **Request / response handling** ||||
 | Request line + headers (phases 1–2) | ✅ | ✅ | Always inspected |
 | Request body (phase 2 cont.) | ✅ | ✅ | Up to `request_body_limit` |
-| Public request-body processing error | ❌ `400` before origin dispatch | ❌ `400` before origin dispatch | Generated Jul guard applies in CRS/no-CRS, block/detect, and enforce/observe; generic parser/I/O failure signal |
+| Public request-body processing error | ❌ `400` before origin dispatch | ❌ `400` before origin dispatch | Jul's transaction-state guard applies in CRS/no-CRS, block/detect, and enforce/observe independently of rule removal; generic parser/I/O failure signal, excluding hidden/late failures |
 | Arguments beyond `SecArgumentsLimit` (CRS) | ✅ `413` | ☐ recorded | Generated rule `900001`; removable with `SecRuleRemoveById 900001` |
 | Response body (phase 4) | ✅ | ✅ | Opt-in via `response_body_check`, text MIME types only; rule directives can override |
 | Uncompressed body inspection | ✅ | ✅ | WAF runs before compression middleware |

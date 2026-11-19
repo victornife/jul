@@ -94,6 +94,54 @@ inconclusive, not proof of no regression. The
 These are proposed dispositions only; no issue has been closed. Final-head
 required checks and coverage must pass before recommending merge.
 
+### Operational closeout verification — 2026-11-19
+
+The [synthetic guest diagnostic](evidence/2026-11-19-721-guest-diagnostic/README.md)
+now reproduces the Go assessment guest's allocator OOM on both main
+`155b6d94` and candidate `827be4f3`, using the byte-identical assessment WASM.
+With two request-only plugins, 16 MiB per guest and default recycling, both
+returned 994 successes and six contained 500s in 1000 requests; failed requests
+did not reach the origin. Earlier recycling (`max_invocations = 16`) produced
+1000 successes on each. Raw synthetic stderr shows `fatal error: out of memory`
+through SDK `readInto`/`Request.Body`; production error logging stays bounded
+and unchanged. This identifies a reproduced cause and a workload-specific
+mitigation, without assigning a cause to every historical arm64 500 or changing
+global defaults. Earlier recycling costs additional instantiations.
+
+The uninspected-path performance gap is separate. At C=16 the reported median
+was 33.6% lower; at C=8 the control medians were close (about +0.4% candidate),
+with large spreads. Different concurrency cells cannot cancel each other, and
+noise does not establish the cause. A concurrency-dependent regression remains
+possible; performance is unqualified and explicitly accepted under the reduced
+contract, not declared unchanged or explained by the guest OOM.
+
+Focused race coverage confirms automatic admission recovery when successful
+cleanup brings the unresolved count below 64. The overshoot regression also
+covers 65-to-64 remaining blocked and 64-to-63 reopening. Merely re-entering
+`closing` does not resolve ownership. Byte/local-instance limits still apply;
+idle reuse is distinct from new reservations and retired plugins are not
+reactivated. A module-close failure can be resolved by successful runtime
+cleanup. A runtime-close failure is cached and not retried; reclaiming its
+retained capacity requires process restart, potentially before 64 failures if
+the byte ceiling is exhausted. Reload/mode changes do not erase that debt.
+See the [operator recovery table](../plugins.md#guest-admission-recovery-and-restart).
+
+| Resource or failure | Explicit boundary |
+| --- | --- |
+| Logical request/guest accounting | Host-buffer charges and calibrated WAF estimates are separate from page-rounded managed-guest reservations. These are admission controls, not measured process memory. |
+| Physical memory | No hard heap/RSS, kernel-buffer, engine last-alias or reclamation-time guarantee. Deployment limits and workload sizing remain necessary. |
+| Temporary storage | No complete aggregate byte/file/inode quota or crash-safe Coraza cleanup ownership; use external containment when needed. Memory-backed storage also needs memory headroom. |
+| Coraza errors | Surfaced body errors are rejected before dispatch independently of rule controls and detect mode. Hidden/late errors are uncovered; an origin dispatch cannot be undone. |
+
+Validation for this clarification: focused `-race` tests passed in
+`internal/inspection`, `internal/plugins` and `internal/waf`, including
+`TestFailedGuestTeardownsCanExceedBoundForAdmittedWork`, the existing
+`TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved`, recoverable module
+close and sticky runtime-close tests, and surfaced-body-error bypass cases.
+The archived reproducer driver was also executed successfully. Documentation
+validation passed; final-head hosted checks remain the merge gate. Production
+Go code, defaults and logging were not changed by this clarification.
+
 ## Current recovery status — 2026-11-17
 
 **Historical status:** superseded by the reduced-scope closeout above.

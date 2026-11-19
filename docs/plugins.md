@@ -632,6 +632,46 @@ validates that the ceiling fits one eager instance of each configured plugin.
 The limit is published across reloads; candidates warm against the currently
 published ceiling. Size for expected pools and old/candidate overlap.
 
+#### Guest admission recovery and restart
+
+The `unresolved_teardowns` safety gate blocks **new reservations** at 64
+unresolved failed guest teardowns, in both enforce and observe modes. It does
+not disable reuse of an already-idle instance. Work admitted earlier can take
+the count above 64. Merely moving a failed ticket back to `closing` does not
+clear the gate: successful managed cleanup must refund its reservation and
+decrement the unresolved count. Once the count is below 64, the gate clears
+automatically; the byte ceiling and ordinary per-plugin instance limits still
+apply. No manual reset or process restart is needed for that recovery, and it
+does not reactivate a plugin that has already been retired.
+
+| Condition | Recovery |
+| --- | --- |
+| Calls/callbacks or pool handoffs are still active | Keep ownership and charges until the work ends and managed teardown can finish. This is drainage, not proof that a failed runtime can be retried. |
+| A module close failed, but its owning runtime subsequently closes successfully | Release the retained tickets and slots; new reservations can succeed subject to the remaining limits. The original close error is still reported. |
+| The owning runtime's close failed | Jul caches the error and does not call that runtime's close again. Its retained charges require process restart to clear. This can exhaust the byte ceiling even with fewer than 64 unresolved tickets. |
+| The count cannot fall below 64 through successful cleanup | Restart the process to restore new-reservation admission. Hot reload, increasing the byte ceiling or switching to observe mode does not override this gate. |
+
+There is no administrative operation that discards an unresolved ownership
+charge. See [resource ownership](resource-ownership.md).
+
+#### Guest allocation failures and recycling
+
+The default `max_invocations = 1000` is a recycling interval, not a guarantee
+that every guest can handle 1000 calls within its `memory_limit`. A Go guest
+can exhaust its own linear-memory allocator and return a contained `500`
+before that interval, independently of Jul's host-buffer budget.
+
+The [closeout diagnostic](reviews/evidence/2026-11-19-721-guest-diagnostic/README.md)
+used the assessment's byte-identical Go guest with repeated 768 KiB bodies.
+Both main and #721 trapped in the guest allocator at call 322 with a 16 MiB
+ceiling, and at call 333 with 32 MiB. Setting `max_invocations = 16` completed
+1000 calls in that synthetic workload. This is a tested workload-specific
+mitigation, not a new default: earlier recycling incurs more instantiation
+work, and guest size, body size and response callbacks change the appropriate
+interval. Increasing the memory ceiling alone need not eliminate the failure.
+Production logs retain only bounded trap reasons; raw guest errors can contain
+request data and are captured only by the synthetic diagnostic.
+
 Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`
 rising means the cap is too low for the traffic; lower it (or `memory_limit`)
@@ -652,8 +692,8 @@ limits how many requests prepare bodies at once. In `enforce` mode,
 allocations of all concurrent plugin requests together; excess requests get
 `503`. In `observe` mode, concurrent body-reading requests ×
 `max_request_body` remains the bound. The guest-memory product above is not
-part of that byte budget; the proposed guest-capacity ceiling is a separate,
-currently blocked control.
+part of that byte budget; `max_guest_capacity_bytes` is the separate logical
+reservation ceiling described above, not a physical-memory bound.
 
 ## Uploading modules (Console API)
 

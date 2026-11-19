@@ -672,8 +672,10 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   (and optionally response) body to inspect it. Large uploads or responses
   consume proportional memory. Tune `request_body_limit` and
   `response_body_check` for your workload.
-- **Detect mode does not block.** Requests in `detect` mode always reach the
-  upstream; WAF findings are logged/metrics-only.
+- **Detect mode does not enforce rule findings.** Security-rule findings are
+  logged/metrics-only. This does not bypass Jul's inspection safety checks:
+  surfaced request-body processing errors can still fail closed before
+  upstream dispatch, including when the diagnostic rule was removed.
 - **CRS rule updates require a rebuild.** The OWASP Core Rule Set is embedded
   in the binary; updating it requires rebuilding with the `waf` tag.
 - **SecLang parser errors fail closed at startup.** A malformed directive file
@@ -698,6 +700,10 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   before dispatch, but cannot distinguish disk I/O, storage exhaustion and
   malformed input or detect hidden/late failures. Jul does not enforce exact
   aggregate temporary-file quotas or own crash-safe Coraza file cleanup.
+  An error surfaced only after origin dispatch cannot undo that dispatch;
+  rejecting a surfaced error is not proof that other storage failures are
+  surfaced. External storage containment needs both byte and inode/file bounds;
+  a memory-backed temporary filesystem also consumes the deployment's memory.
   WAF work can continue after client disconnect and remains charged while it
   runs; phase-5 logging may run without a slot. See
   [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md) and
@@ -729,6 +735,14 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   response-subscription buffers are also charged (#700 I4). A finite 1 GiB
   process-wide logical instance reservation is enforced by default; it does
   not bound asynchronous engine-retained memory, and observe is not a limit.
+- **Guest recycling is workload-dependent.** Go guests can fail allocation
+  within their linear-memory ceiling before the default 1000-call recycle
+  interval. The assessment guest reproduces this on both main and #721;
+  earlier recycling is a tested mitigation for that fixture, with additional
+  instantiation cost. See [guest allocation failures](plugins.md#guest-allocation-failures-and-recycling).
+  Successful managed cleanup restores logical admission; a failed runtime
+  close retains capacity until restart and can exhaust the byte ceiling even
+  below the 64-ticket safety threshold. See the [recovery table](plugins.md#guest-admission-recovery-and-restart).
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,

@@ -1,0 +1,97 @@
+//go:build wasmplugins
+
+package plugins
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"jul/internal/config"
+)
+
+// Temporary synthetic-only diagnostic; removed before committing.
+func TestCloseoutGuestDiagnostic(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		memory, recycle int
+	}{
+		{"16MiB-default-recycling", 16, 0},
+		{"32MiB-default-recycling", 32, 0},
+		{"16MiB-recycle16", 16, 16},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testManager(t)
+			pc := config.PluginConfig{Path: os.Getenv("JUL_CLOSEOUT_GUEST"), Type: "middleware", ABI: ABIJulV2, MemoryLimit: config.Size(tc.memory << 20), Timeout: config.Duration(2 * time.Second), MaxInstances: 1, MaxInvocations: tc.recycle, Config: map[string]string{"name": "a", "read_body": "true"}}
+			s := buildSet(t, m, map[string]config.PluginConfig{"a": pc})
+			p := s.plugins["a"]
+			body := bytes.Repeat([]byte("x"), 768<<10)
+			var prior uint32
+			for i := 1; i <= 1000; i++ {
+				lease, ctx, _, err := m.gov.AcquireLease(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				r := httptest.NewRequest("POST", "http://localhost/", bytes.NewReader(body)).WithContext(ctx)
+				_, inv, err := p.invoke(ctx, httptest.NewRecorder(), r)
+				if inv != nil {
+					inv.releaseAll()
+				}
+				_ = lease.Close()
+				if err != nil {
+					if tc.recycle > 0 {
+						t.Fatalf("recycling control failed at call %d: %v", i, err)
+					}
+					t.Logf("DIAGNOSTIC guest failure at call=%d previous_guest_bytes=%d: %T: %+v", i, prior, err, err)
+					return
+				}
+				select {
+				case pm := <-p.pool:
+					prior = pm.mod.Memory().Size()
+					p.pool <- pm
+				default:
+				}
+			}
+			t.Logf("1000 successful calls; last_guest_bytes=%d", prior)
+		})
+	}
+}
+
+func TestCloseoutGuestHTTPDiagnostic(t *testing.T) {
+	for _, recycle := range []int{0, 16} {
+		t.Run(fmt.Sprint(recycle), func(t *testing.T) {
+			m := testManager(t)
+			cfg := map[string]config.PluginConfig{}
+			for _, name := range []string{"a", "b"} {
+				cfg[name] = config.PluginConfig{Path: os.Getenv("JUL_CLOSEOUT_GUEST"), Type: "middleware", ABI: ABIJulV2, MemoryLimit: 16 << 20, Timeout: config.Duration(2 * time.Second), MaxInstances: 1, MaxInvocations: recycle, Config: map[string]string{"name": name, "read_body": "true"}}
+			}
+			s := buildSet(t, m, cfg)
+			originCalls := 0
+			h := s.Middleware("a")(s.Middleware("b")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				originCalls++
+				_, _ = io.Copy(io.Discard, r.Body)
+				w.WriteHeader(200)
+			})))
+			body := bytes.Repeat([]byte("x"), 768<<10)
+			statuses := map[int]int{}
+			for range 1000 {
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, httptest.NewRequest("POST", "http://localhost/", bytes.NewReader(body)))
+				statuses[w.Code]++
+			}
+			if statuses[200]+statuses[500] != 1000 || originCalls != statuses[200] {
+				t.Fatalf("unexpected response/dispatch: %v origin=%d", statuses, originCalls)
+			}
+			if recycle > 0 && statuses[500] > 0 {
+				t.Fatalf("recycling control: %v", statuses)
+			}
+			t.Logf("max_invocations=%d statuses=%v origin_calls=%d", recycle, statuses, originCalls)
+		})
+	}
+}

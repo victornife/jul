@@ -16,7 +16,13 @@ observe mode does not enforce the limit, but 64 guest tickets with unresolved
 teardown refuse new reservations, including candidate prewarming, in every
 mode. Work already admitted may also fail; if the count cannot drain below 64,
 restart is required before new instances can start. See the
-[inspection ledger](reviews/700-inspection-implementation-ledger.md#current-recovery-status--2026-11-17).
+[inspection ledger](reviews/700-inspection-implementation-ledger.md#reduced-scope-closeout--2026-11-19).
+Successful cleanup decrements the unresolved count and returns the logical
+reservation. Admission resumes automatically below 64 when the remaining
+byte and per-plugin limits permit; a ticket merely re-entering `closing` is
+not resolved. A terminal runtime-close failure can exhaust the byte ceiling
+below 64 and needs restart to reclaim that retained capacity. Reload or a
+mode change does not erase it. See the [recovery table](plugins.md#guest-admission-recovery-and-restart).
 
 It deliberately does **not** repeat which configuration fields are hot-reloaded
 or restart-required. That truth is generated from one registry and lives in:

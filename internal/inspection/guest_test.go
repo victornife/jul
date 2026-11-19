@@ -270,6 +270,41 @@ func TestFailedGuestTeardownsCanExceedBoundForAdmittedWork(t *testing.T) {
 	if _, err := g.ReserveGuestCapacity(2, 1); !IsOutcome(err, GuestCapacitySaturated) {
 		t.Fatalf("admission after failed teardowns = %v, want refusal", err)
 	}
+	for i := 0; i < 2; i++ {
+		if err := tickets[i].Transition(GuestClosing); err != nil {
+			t.Fatal(err)
+		}
+		if err := tickets[i].ResolveTeardown(nil); err != nil {
+			t.Fatal(err)
+		}
+		got := g.Snapshot().GuestCapacity
+		want := uint64(maxRetainedGuestFailures - i)
+		if got.FailedTeardowns != want || got.ReservedBytes != want {
+			t.Fatalf("resolved overshoot = %+v, want %d remaining", got, want)
+		}
+		if i == 0 {
+			if got.AdmissionBlockedReason != GuestAdmissionBlockedTeardowns {
+				t.Fatalf("gate cleared at threshold: %+v", got)
+			}
+			if _, err := g.ReserveGuestCapacity(2, 1); !IsOutcome(err, GuestCapacitySaturated) {
+				t.Fatalf("admission at 64 unresolved tickets = %v, want refusal", err)
+			}
+			continue
+		}
+		if got.AdmissionBlockedReason != "" {
+			t.Fatalf("gate did not clear below threshold: %+v", got)
+		}
+		next, err := g.ReserveGuestCapacity(2, 1)
+		if err != nil {
+			t.Fatalf("admission after overshoot drains below threshold: %v", err)
+		}
+		if err := next.Transition(GuestClosing); err != nil {
+			t.Fatal(err)
+		}
+		if err := next.ResolveTeardown(nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestReserveGuestCapacityRejectsInvalidAndOverflow(t *testing.T) {
