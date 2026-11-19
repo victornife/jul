@@ -1,13 +1,12 @@
 # ADR 0032 — Aggregate inspection resource governor
 
-- **Status:** Accepted design, amended 2026-11-17 to prohibit engine forks and narrow the
-  #700 completion scope. I1/I2/I3a/I4 foundations and I5 tooling are merged; recovery work for
-  managed guest reservations and the public-state WAF body-failure guard is under review.
+- **Status:** Accepted design, amended 2026-11-19 to close out #721 with the reduced contract
+  below. Managed guest reservations and the public-state WAF body-failure guard are under review.
   Original A19/A20 are deferred, not passed; integrated A1–A18/A21/A22 qualification remains
-  incomplete. The 2026-11-13 amendment was accepted when #714 merged as `16d98258`.
+  incomplete and is not a prerequisite for this closeout.
 - **Date:** 2026-11-10
-- **Revised:** 2026-11-17. This amendment supersedes conflicting implementation details and
-  acceptance claims below; those sections retain the historical design record.
+- **Revised:** 2026-11-19. The closeout amendment supersedes conflicting scope and merge gates
+  below; earlier amendments and acceptance criteria remain as historical records.
 - **Accepted:** 2026-11-10 by the maintainer. PR #704 merged as `8c483be2` from head
   `81f07e75`. The PR proposed the ADR; this acceptance is recorded separately.
 - **Deciders:** Victor Niharra (`@victornife`)
@@ -34,12 +33,36 @@
   - [ADR 0031](0031-waf-operations-posture-isolation-and-alerting.md): WAF transaction outcomes;
   - [resource ownership](../resource-ownership.md).
 
-> **Accepted design record.** This ADR is the implementation contract for #700. Acceptance adds no
-> configuration fields, enforcement or metrics. It does not establish protection, release readiness,
-> a maturity change or soak. Those require implementation slices I1–I6 and the acceptance plan
-> (A1–A18; if the 2026-11-13 proposed amendment is accepted, also A19–A22 for the controls it
-> adds). Until then, current operator guidance in `docs/waf.md`, `docs/plugins.md` and
-> `docs/known-limitations.md` still applies.
+> **Accepted design record.** The current contract is the 2026-11-19 amendment below. The earlier
+> programme and A1–A22 are retained for traceability, not as #721 merge gates. This ADR alone
+> does not establish release readiness, a maturity change or performance qualification.
+
+## 2026-11-19 closeout amendment — reduced contract
+
+The maintainer has stopped pursuing the full #700 programme; it is not a
+prerequisite for #721. The supported change is logical admission for
+Jul-managed guests, with cancellation, recycling, reload safety and retained charges for genuine
+teardown failures; and pre-dispatch rejection of body errors actually surfaced
+by stock Coraza, independent of rule-control flow. Existing API/CLI/Console
+status and settings describe those controls. Official, unmodified Wazero and
+Coraza remain mandatory.
+
+Merge readiness requires correct reduced-scope behavior, a supported combined
+functional smoke, affected tests and final-head CI/coverage, with no concrete
+security or correctness blocker. The historical A1–A22 programme, a dedicated
+benchmark host, physical-memory or engine last-alias proofs, and complete
+Coraza temporary-file ownership are not prerequisites. Original A19/A20 remain
+deferred. Historical failures and inconclusive results remain unchanged,
+including the unmet 50 ms overload objective; no unrun or failed criterion is
+relabeled as passed. Unqualified performance and resource risks are accepted
+for this narrower change.
+
+This reduces exposure, not the whole process's resource use. Wazero may retain
+memory asynchronously; Coraza may hide or report storage errors too late for
+pre-dispatch rejection. Size the deployment for its actual workload and use
+external process-memory and temporary-file byte/inode containment where bounds
+are required. The [ledger](../reviews/700-inspection-implementation-ledger.md)
+records the evidence and issue dispositions.
 
 ## 2026-11-17 recovery amendment — official engines, bounded first-party scope
 

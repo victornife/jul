@@ -1,0 +1,1 @@
+/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/pr-721-closeout/combined.toml is valid (structural + runtime)

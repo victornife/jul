@@ -401,10 +401,12 @@ over static directives, not per-transaction `ctl:ruleEngine` actions.
 
 ### Sizing and concurrency
 
-WAF inspection has no concurrency or aggregate memory bound of its own
-([#700](https://github.com/victornife/jul/issues/700)). It runs before upstream
-admission, on cache hits and on routes without an upstream, and Coraza keeps
-evaluating a request after its client disconnects. The
+On this source tree, WAF work shares the process-wide
+[inspection governor](plugins.md#inspection-governor), including its byte and
+evaluation controls; observe mode records ordinary refusals without enforcing
+them. WAF-state charges are calibrated estimates, not a whole-process memory
+bound. WAF runs before upstream admission, on cache hits and on routes without
+an upstream, and Coraza can keep evaluating after its client disconnects. The
 [#695 assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
 measured one 2 vCPU / 768 MiB envelope (CRS 4.25, block mode). It recorded:
 

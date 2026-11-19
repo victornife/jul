@@ -5,7 +5,7 @@ This is the authoritative ownership model for Jul's mutable runtime resources
 identity is, what decides reuse versus replacement, and how it moves through
 **Prepare → Publish → Abort → Retire → drain → close**.
 
-The draft I2b implementation reserves logical capacity for Jul-managed guests
+The I2b implementation reserves logical capacity for Jul-managed guests
 until their calls and callbacks finish, managed cleanup succeeds and Jul-owned
 aliases are dropped. A close failure retains the reservation until successful
 runtime cleanup; a runtime close failure cannot be retried safely and its

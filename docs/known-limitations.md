@@ -24,9 +24,7 @@ published package contains the fix. Bodies are prepared before the guest call
 ([plugins.md](plugins.md#request-bodies);
 [revalidation](reviews/2026-11-10-699-plugin-body-preparation-revalidation.md)).
 On a published package, set `timeout` above the slowest legitimate upload for
-body-reading plugins and set a finite server `read_timeout`. The broader
-aggregate inspection contract remains tracked by
-[#700](https://github.com/victornife/jul/issues/700). On unreleased `main`,
+body-reading plugins and set a finite server `read_timeout`. On unreleased `main`,
 the I1 foundation publishes process-wide limits, and I2 makes the WASM plugin
 request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
@@ -37,7 +35,11 @@ instances and a fail-closed guard for public request-body processing errors
 exposed by stock Coraza before dispatch. Neither control is a hard bound on all
 engine memory or all temporary-file I/O. Exact aggregate spool byte/file
 quotas and proof of Wazero's last-alias release are deferred; the original
-A19/A20 guarantees are not claimed. The R3 response-header accounting ceiling
+A19/A20 guarantees are not claimed. Historical #700 memory and performance
+objectives remain unmet or unqualified, including the 50 ms overload target.
+These controls reduce exposure, not whole-process resource use: size for the
+workload and provide external process-memory and temporary-file containment
+when hard bounds are required. The R3 response-header accounting ceiling
 has an explicit 64 KiB default. The route-aware minimum budget is validated
 statically from compiled limits, which
 also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:

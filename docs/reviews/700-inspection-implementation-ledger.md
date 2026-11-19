@@ -6,7 +6,94 @@ authority is [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md); 
 measurements retain their original identities. Merged source is not a published release,
 qualification, soak or maturity change.
 
+## Reduced-scope closeout — 2026-11-19
+
+The maintainer's [closeout amendment](../adr/0032-aggregate-inspection-resource-governor.md#2026-11-19-closeout-amendment--reduced-contract)
+supersedes the programme merge gates and the historical HOLD below. #721 delivers
+logical managed-guest accounting and the surfaced Coraza body-error guard, not
+the original physical-memory or spool-ownership guarantees. A1–A22 is not a
+merge prerequisite. A1 and A2 remain failed; original A19/A20 are deferred;
+other historical objectives are unqualified where not established. ADR 0032's
+A1 specified overload 503s within 50 ms; candidate p99 at C=16 was
+60.342–60.814 ms, so that objective remains unmet. It was an internal target,
+not a protocol requirement. This accepts the unqualified performance and
+resource risk, not a claim that the old requirements passed.
+
+On shared Linux/arm64 WSL2, the real candidate built from
+`e8b6c0c42080255b8e5a29ec753651774409df2c` (production code unchanged through
+`64bbd5a54fab92b8a70fa4b04380d660ac1a6690`) validated and served a combined
+448 MiB WAF/two-plugin configuration. The earlier 320 MiB configuration failed
+because the combined route required 406,503,427 bytes. The smoke used four
+instances per plugin, a 2 s timeout, `GOMAXPROCS=2` and `GOMEMLIMIT=480MiB`;
+it did not run in the historical 768 MiB cgroup.
+
+- `jul-candidate check -config combined.toml` passed before startup.
+- Healthy JSON and multipart requests reached the origin with both guest
+  request and response echoes. WAF and WASM request denials returned 403
+  without incrementing the origin counter. A WAF response denial returned
+  403 after the expected origin dispatch.
+- Removing the configured upload directory surfaced a stock Coraza multipart
+  body error: detect mode with `ctl:ruleRemoveById=900002` returned 400, the
+  origin counter stayed unchanged, and `inspection_error` increased by one.
+  Restoring the directory and subsequent combined traffic succeeded; all six
+  request lease, byte and evaluation gauges drained to zero.
+
+The exact [configuration](evidence/2026-11-19-721-closeout/combined.toml),
+[smoke driver](evidence/2026-11-19-721-closeout/smoke.py),
+[check output](evidence/2026-11-19-721-closeout/check.txt),
+[results](evidence/2026-11-19-721-closeout/smoke.txt) and
+[checksums](evidence/2026-11-19-721-closeout/SHA256SUMS) are retained. The
+captured paths and loopback ports must be adapted together for a different host.
+The test binary SHA-256 was
+`c96daf7a91d04f46f99148dd21859f62f6576a45558b255748fe67184090a902`;
+the guest SHA-256 was
+`27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a`.
+This is functional evidence for that configuration, not A2 or a universal
+memory-envelope fit.
+
+The executed commands below used existing `upload` and `tmp` directories under
+`C`; the origin and server ran as separate owned processes and were stopped
+after the driver. The check and smoke driver passed.
+
+```sh
+B=/tmp/jul-721-qualification/bin
+C=/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/pr-721-closeout
+"$B/jul-candidate" check -config "$C/combined.toml"
+"$B/jul-candidate" version-key init --file "$C/version.key"
+"$B/ia-v5" origin -listen 127.0.0.1:32977
+GOMAXPROCS=2 GOMEMLIMIT=480MiB TMPDIR="$C/tmp" JUL_EFFECTIVE_VERSION_KEY_FILE="$C/version.key" \
+  "$B/jul-candidate" serve -config "$C/combined.toml"
+python3 -u "$C/smoke.py"
+```
+
+Focused Go race tests for guest reservations, teardown and cancellation,
+WAF errors and rule controls, status/settings, and reload passed on the same
+production source. The earlier 101,000-call recycling regression and both
+30-minute functional soaks remain applicable; the existing real-server
+API/CLI/Console agreement and guided-settings tests cover the operator surface.
+
+The p1 run observed pre-existing contained guest-failure 500s on current main
+(`16/2607`) and also on candidate (`18/3008`), with unresolved causes. Similar
+counts do not establish the same cause; no evidence attributes them to #721.
+H1 uninspected main/candidate median goodput was 5,219.6/3,466.0 requests/s
+(33.6% lower), but candidate spread was 21.7%; the stabilized control had
+36.7%/41.2% spreads and close medians. These shared-host measurements are
+inconclusive, not proof of no regression. The
+[original results](evidence/2026-11-19-721-current-main/README.md) remain intact.
+
+| Proposed disposition after merge | Reduced-scope record |
+| --- | --- |
+| #724 | Supersede: its head `6a1a0f6b28caf9549066ab17f5cc6173cfeead6e` is an ancestor of #721, and the shared status, CLI, Console and guided-settings work remains present. |
+| #712 | Close only after explicitly rescoping it to the verified existing operator surfaces and documentation; do not claim full A22, spool producers or the separate #625/#628 work. |
+| #711 / #713 | Record the logical guest and surfaced-error controls as delivered; defer the original strict last-alias and spool-ownership guarantees, not as passed. |
+| #700 | Retire the old umbrella as superseded by this reduced scope, without marking A1–A22 passed. |
+
+These are proposed dispositions only; no issue has been closed. Final-head
+required checks and coverage must pass before recommending merge.
+
 ## Current recovery status — 2026-11-17
+
+**Historical status:** superseded by the reduced-scope closeout above.
 
 The reduced-scope recovery implementation is published on draft #721; #724
 remains a separate partial draft. Earlier head `7f6628c2` passed hosted HR-05
@@ -32,7 +119,7 @@ merge, issue closure or release has occurred.
 
 ### Current-main qualification follow-up — 2026-11-19
 
-**HOLD:** the bounded paired comparison is noisy and does not establish no material regression;
+**HOLD at the time, superseded by the reduced-scope decision above:** the bounded paired comparison is noisy and does not establish no material regression;
 the sized p1 guest workload produced unexpected 500s on both current main and the candidate.
 The first A2 diagnostic could not render; its single targeted correction still failed the
 actual combined-route config check. See the [campaign and all attempts](evidence/2026-11-19-721-current-main/README.md)
