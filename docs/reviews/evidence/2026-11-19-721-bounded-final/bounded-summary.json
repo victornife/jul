@@ -1,0 +1,123 @@
+{
+  "diagnostic_only": true,
+  "hard_cgroup_qualification": false,
+  "uninspected": {
+    "main": {
+      "rps": [
+        6319.3,
+        6691.15,
+        6911.7
+      ],
+      "median_rps": 6691.15,
+      "spread": 0.08853485574228641,
+      "all_correct": true,
+      "cpu_fractions": [
+        0.586,
+        0.584,
+        0.592
+      ]
+    },
+    "candidate": {
+      "rps": [
+        5954.8,
+        6797.2,
+        6851.15
+      ],
+      "median_rps": 6797.2,
+      "spread": 0.13187047607838515,
+      "all_correct": true,
+      "cpu_fractions": [
+        0.575,
+        0.573,
+        0.588
+      ]
+    }
+  },
+  "p1": [
+    {
+      "run": "recycled-p1",
+      "target": "candidate",
+      "attempts": 2025,
+      "verified": 2025,
+      "rps": 98.05,
+      "request_drain": {
+        "jul_inspection_bytes{class=\"base\"}": 0,
+        "jul_inspection_bytes{class=\"buffer\"}": 0,
+        "jul_inspection_bytes{class=\"waf_state\"}": 0,
+        "jul_inspection_evaluations{state=\"active\"}": 0,
+        "jul_inspection_evaluations{state=\"waiting\"}": 0,
+        "jul_inspection_leases": 0
+      },
+      "guest": {
+        "jul_inspection_guest_capacity_bytes": 117440512,
+        "jul_inspection_guest_capacity_bytes_limit": 1073741824,
+        "jul_inspection_guest_instances{state=\"busy\"}": 0,
+        "jul_inspection_guest_instances{state=\"closing\"}": 0,
+        "jul_inspection_guest_instances{state=\"failed_retained\"}": 0,
+        "jul_inspection_guest_instances{state=\"idle\"}": 7,
+        "jul_inspection_guest_instances{state=\"starting\"}": 0,
+        "jul_inspection_rejections_total{mode=\"enforce\",reason=\"guest_capacity\"}": 0,
+        "jul_inspection_rejections_total{mode=\"observe\",reason=\"guest_capacity\"}": 0
+      }
+    },
+    {
+      "run": "recycled-p1",
+      "target": "main",
+      "attempts": 2389,
+      "verified": 2389,
+      "rps": 116.25,
+      "request_drain": {
+        "jul_inspection_bytes{class=\"base\"}": 0,
+        "jul_inspection_bytes{class=\"buffer\"}": 0,
+        "jul_inspection_bytes{class=\"waf_state\"}": 0,
+        "jul_inspection_evaluations{state=\"active\"}": 0,
+        "jul_inspection_evaluations{state=\"waiting\"}": 0,
+        "jul_inspection_leases": 0
+      },
+      "guest": {}
+    },
+    {
+      "run": "profiled-p1",
+      "target": "candidate",
+      "attempts": 2300,
+      "verified": 2300,
+      "rps": 111.8,
+      "request_drain": {
+        "jul_inspection_bytes{class=\"base\"}": 0,
+        "jul_inspection_bytes{class=\"buffer\"}": 0,
+        "jul_inspection_bytes{class=\"waf_state\"}": 0,
+        "jul_inspection_evaluations{state=\"active\"}": 0,
+        "jul_inspection_evaluations{state=\"waiting\"}": 0,
+        "jul_inspection_leases": 0
+      },
+      "guest": {
+        "jul_inspection_guest_capacity_bytes": 134217728,
+        "jul_inspection_guest_capacity_bytes_limit": 1073741824,
+        "jul_inspection_guest_instances{state=\"busy\"}": 0,
+        "jul_inspection_guest_instances{state=\"closing\"}": 0,
+        "jul_inspection_guest_instances{state=\"failed_retained\"}": 0,
+        "jul_inspection_guest_instances{state=\"idle\"}": 8,
+        "jul_inspection_guest_instances{state=\"starting\"}": 0,
+        "jul_inspection_rejections_total{mode=\"enforce\",reason=\"guest_capacity\"}": 0,
+        "jul_inspection_rejections_total{mode=\"observe\",reason=\"guest_capacity\"}": 0
+      }
+    },
+    {
+      "run": "profiled-p1",
+      "target": "main",
+      "attempts": 2351,
+      "verified": 2351,
+      "rps": 114.35,
+      "request_drain": {
+        "jul_inspection_bytes{class=\"base\"}": 0,
+        "jul_inspection_bytes{class=\"buffer\"}": 0,
+        "jul_inspection_bytes{class=\"waf_state\"}": 0,
+        "jul_inspection_evaluations{state=\"active\"}": 0,
+        "jul_inspection_evaluations{state=\"waiting\"}": 0,
+        "jul_inspection_leases": 0
+      },
+      "guest": {}
+    }
+  ],
+  "candidate_delta_percent": 1.5849293469732517
+}

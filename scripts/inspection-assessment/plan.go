@@ -19,7 +19,7 @@ import (
 // PlanVersion identifies the scenario semantics. Change it whenever a
 // workload, phase, variant set, verification rule or interpretation rule
 // changes; runs with different plan identities are never merged or compared.
-const PlanVersion = "inspection-assessment-plan/v6"
+const PlanVersion = "inspection-assessment-plan/v7"
 
 // Variants are the four inspection configurations preserved from #695.
 var Variants = []string{"none", "waf", "wasm", "both"}
@@ -141,12 +141,15 @@ type Scenario struct {
 	// MaxBuffered sets [global.inspection].max_buffered_bytes for every
 	// variant, replacing the adapter's WAF budget.
 	MaxBuffered string `json:"max_buffered_bytes,omitempty"`
-	// PluginTimeout sets the request-only plugins' per-invocation timeout
+	// PluginTimeout sets the load fixture plugins' per-invocation timeout
 	// ("" keeps the 100ms default).
 	PluginTimeout string `json:"plugin_timeout,omitempty"`
-	// PluginMaxInstances caps each request-only plugin's live instances
+	// PluginMaxInstances caps each load fixture plugin's live instances
 	// (0 keeps the default of 64).
 	PluginMaxInstances int `json:"plugin_max_instances,omitempty"`
+	// PluginMaxInvocations bounds reuse for the allocation-heavy Go fixture.
+	// Zero preserves the product default; it is not a global default change.
+	PluginMaxInvocations int `json:"plugin_max_invocations,omitempty"`
 	// GoMemLimit sets Jul's GOMEMLIMIT ("" leaves it unset).
 	GoMemLimit string `json:"gomemlimit,omitempty"`
 	// ReloadChurn selects the reload sequence: "" is the #695 s9 policy
@@ -494,7 +497,15 @@ func BuildScenarios(p Profile) []Scenario {
 		expectOverload(&sc)
 		return sc
 	}
-	return append(scenarios, a1, sizedA2(s3, "s3-large-h2-bounded"), sizedA2(s4, "s4-ramp-large-h2-bounded"))
+	scenarios = append(scenarios, a1, sizedA2(s3, "s3-large-h2-bounded"), sizedA2(s4, "s4-ramp-large-h2-bounded"))
+	for i := range scenarios {
+		switch scenarios[i].ID {
+		case "p1-large-body-plugin-h1", "p2-saturation-plugin-h1", "p2o-saturation-plugin-observe-h1", "p2h-saturation-hostile-h1", "s3-large-h2-bounded", "s4-ramp-large-h2-bounded":
+			scenarios[i].PluginMaxInvocations = 16
+			scenarios[i].Changes = append(scenarios[i].Changes, "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default")
+		}
+	}
+	return scenarios
 }
 
 // Suites name frozen scenario/variant selections.

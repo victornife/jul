@@ -219,7 +219,7 @@ func (r *Runner) RunCell(ctx context.Context, c Cell, t TargetSpec, rep int) (re
 	}
 	p := ConfigParams{Adapter: Adapters[t.Adapter], WAF: waf, WASM: wasm, Cache: sc.Cache, Port: ports[0], TLSPort: ports[1], AdminPort: ports[2],
 		Origin: r.Origin, WWW: r.Opt.WWW, Plugin: r.Opt.Guest, Cert: r.Opt.Cert, Key: r.Opt.Key, ReadTimeout: sc.ReadTimeout, BodyTimeout: sc.BodyTimeout, MaxPending: pending,
-		Fixture: FixtureOf(sc), PluginNoBody: r.Opt.GuestNoBody, InspectionMode: sc.InspectionMode, MaxBuffered: sc.MaxBuffered, PluginTimeout: sc.PluginTimeout, PluginMaxInstances: sc.PluginMaxInstances}
+		Fixture: FixtureOf(sc), PluginNoBody: r.Opt.GuestNoBody, InspectionMode: sc.InspectionMode, MaxBuffered: sc.MaxBuffered, PluginTimeout: sc.PluginTimeout, PluginMaxInstances: sc.PluginMaxInstances, PluginMaxInvocations: sc.PluginMaxInvocations}
 	cfg, err := RenderConfig(p)
 	if err != nil {
 		return fail("render: %v", err)

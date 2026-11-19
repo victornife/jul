@@ -1129,6 +1129,42 @@ func TestPlanV3FixturesAndLimits(t *testing.T) {
 	}
 }
 
+func TestPlanV7RecyclesOnlyAllocationHeavyFixtures(t *testing.T) {
+	want := map[string]bool{"p1-large-body-plugin-h1": true, "p2-saturation-plugin-h1": true,
+		"p2o-saturation-plugin-observe-h1": true, "p2h-saturation-hostile-h1": true,
+		"s3-large-h2-bounded": true, "s4-ramp-large-h2-bounded": true}
+	for _, sc := range BuildScenarios(Profiles["qualification"]) {
+		expected := 0
+		if want[sc.ID] {
+			expected = 16
+			delete(want, sc.ID)
+		}
+		if sc.PluginMaxInvocations != expected {
+			t.Errorf("%s: recycle interval %d, want %d", sc.ID, sc.PluginMaxInvocations, expected)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing mitigated scenarios: %v", want)
+	}
+	for _, fixture := range []string{FixtureFull, FixtureRequestOnly} {
+		p := ConfigParams{Adapter: Adapters["current"], Origin: "o:1", WASM: true, Plugin: "/g/load.wasm", Fixture: fixture}
+		b, err := RenderConfig(p)
+		if err != nil || strings.Contains(string(b), "max_invocations") {
+			t.Fatalf("%s changed the default: %v\n%s", fixture, err, b)
+		}
+		p.PluginMaxInvocations = 16
+		b, err = RenderConfig(p)
+		if err != nil || strings.Count(string(b), "max_invocations = 16\n") != 2 {
+			t.Fatalf("%s must recycle both plugins: %v\n%s", fixture, err, b)
+		}
+		p.Fixture = FixtureNoBody
+		p.PluginNoBody = "/g/nobody.wasm"
+		if _, err := RenderConfig(p); err == nil {
+			t.Fatal("recycle setting was silently ignored for an unsupported fixture")
+		}
+	}
+}
+
 func TestPlanV3ExerciseChecksAndGuestIdentity(t *testing.T) {
 	// Guest identities are compared across every run, not only the first,
 	// and the non-body guest is checked too.

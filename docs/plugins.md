@@ -669,6 +669,9 @@ ceiling, and at call 333 with 32 MiB. Setting `max_invocations = 16` completed
 mitigation, not a new default: earlier recycling incurs more instantiation
 work, and guest size, body size and response callbacks change the appropriate
 interval. Increasing the memory ceiling alone need not eliminate the failure.
+Plan v7 of the [maintained assessment](../scripts/inspection-assessment/README.md)
+applies this setting to both plugins in the allocation-heavy p1/p2 and additional
+bounded s3/s4 profiles; it is no longer only a diagnostic recommendation.
 Production logs retain only bounded trap reasons; raw guest errors can contain
 request data and are captured only by the synthetic diagnostic.
 

@@ -162,16 +162,20 @@ Runs under different plan versions have different hashes and are never merged.
   because the guest cannot see the body.
 - `inspection_mode` and `max_buffered_bytes` write `[global.inspection]`. They replace the
   adapter's WAF budget, and only the `current` adapter can express them.
-- `plugin_timeout`, `plugin_max_instances` and `gomemlimit` size a plugin-only cell's static
-  footprint. The first two render `timeout`/`max_instances` for both request-only plugins and are
-  refused for other fixtures. `gomemlimit` sets Jul's `GOMEMLIMIT`, as ADR 0032 §10 recommends.
+- `plugin_timeout`, `plugin_max_instances`, `plugin_max_invocations` and `gomemlimit` size a cell's
+  plugin footprint and reuse interval. The first three render the existing
+  `timeout`/`max_instances`/`max_invocations` settings for both request-only or full-fixture plugins
+  and are refused for the nobody fixture. `gomemlimit` sets Jul's `GOMEMLIMIT`, as ADR 0032 §10 recommends.
   `Launch` otherwise starts Jul with `GOMEMLIMIT` unset, and the envelope check reads the value
   from `/proc/<pid>/environ` (`gomemlimit_env`). Guest pools (`max_instances × memory_limit` per
   plugin), Go GC headroom and kernel socket buffers are outside the governor. With the default
   pools (2 × 64 × 16 MiB) the pre-freeze smokes of p1 and p2 were OOM-killed in the 768 MiB
   envelope, and p1 was killed in the same way on pre-I2 main `d8d0520b`.
 - `p1-large-body-plugin-h1`: 768 KiB bodies at C=64 through two request-only plugins at the
-  default budget. Four instances per plugin, a 2 s plugin timeout and `GOMEMLIMIT=480MiB`.
+  default budget. Four instances per plugin, a 2 s plugin timeout, `GOMEMLIMIT=480MiB` and,
+  from plan v7, `max_invocations = 16` for each instance. Earlier Go guest allocator exhaustion
+  produced contained 500s before the default 1000-call retirement point. The 16-call mitigation
+  applies equally to both targets and incurs more instantiations; it is not a product default.
 - `p2-saturation-plugin-h1` and its observe twin `p2o-…`: 160 concurrent 960 KiB bodies, each held
   5 s at the origin, against `max_buffered_bytes = "128m"`, with the p1 sizing. A known-length
   prepared body is charged at about its length, so the retained bodies need about 150 MiB for the
@@ -181,6 +185,25 @@ Runs under different plan versions have different hashes and are never merged.
   exhaustion, stays `status:503` and is a finding. p2o records would-reject decisions instead.
   Their clients set `honor_retry_after`: after an overload-class answer a worker waits at least 1 s
   before its next request.
+  Plan v7 applies the same 16-call reuse bound to p2/p2o/p2h and the additional bounded s3/s4
+  diagnostics. Original destructive s3/s4 fixtures and their historical results are unchanged.
+
+The generated body-heavy fixture now includes these existing settings for **both** plugins:
+
+```toml
+[plugins.inspect-a]
+path = "/tmp/inspect-load.wasm"
+abi = "jul-abi/v2"
+timeout = "2s"
+max_instances = 4
+max_invocations = 16
+config = { name = "a", read_body = "true" }
+```
+
+Use the same sizing/reuse settings for `inspect-b`. The full fixture retains its response
+subscription/replacement configuration. This trades additional initialization work for avoiding
+the reproduced allocator exhaustion; validate the interval for other guest/body combinations.
+
 - `p2h-saturation-hostile-h1` is p2 without that backoff. It is a record-only I6 sizing cell. A
   closed-loop client resends rejected 960 KiB uploads at about 1300 per second. net/http keeps each
   rejected connection open for its 500 ms close linger while unread body bytes arrive, so socket

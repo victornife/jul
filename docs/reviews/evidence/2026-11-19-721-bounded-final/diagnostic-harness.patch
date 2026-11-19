@@ -1,0 +1,38 @@
+--- a/scripts/inspection-assessment/plan.go
++++ b/scripts/inspection-assessment/plan.go
+@@ -141,10 +141,10 @@
+ 	// MaxBuffered sets [global.inspection].max_buffered_bytes for every
+ 	// variant, replacing the adapter's WAF budget.
+ 	MaxBuffered string `json:"max_buffered_bytes,omitempty"`
+-	// PluginTimeout sets the load fixture plugins' per-invocation timeout
++	// PluginTimeout sets the request-only plugins' per-invocation timeout
+ 	// ("" keeps the 100ms default).
+ 	PluginTimeout string `json:"plugin_timeout,omitempty"`
+-	// PluginMaxInstances caps each load fixture plugin's live instances
++	// PluginMaxInstances caps each request-only plugin's live instances
+ 	// (0 keeps the default of 64).
+ 	PluginMaxInstances int `json:"plugin_max_instances,omitempty"`
+ 	// PluginMaxInvocations bounds reuse for the allocation-heavy Go fixture.
+@@ -204,6 +204,11 @@
+ 
+ // Profiles are the archived qualification windows and the distinct smoke.
+ var Profiles = map[string]Profile{
++ "bounded-local": {Name: "bounded-local", AcceptanceEligible: false,
++ Warmup: Dur(5*time.Second), Measure: Dur(20*time.Second), Recovery: Dur(2*time.Second),
++ ReloadMeasure: Dur(40*time.Second), ReloadRecovery: Dur(15*time.Second), StepWarmup: Dur(2*time.Second),
++ F3Duration: Dur(20*time.Second), F4ClientLimit: Dur(20*time.Second),
++ Description: "CPU-affinity-separated local paired diagnostic; no cgroup qualification"},
+ 	"qualification": {Name: "qualification", AcceptanceEligible: true,
+ 		Warmup: Dur(5 * time.Second), Measure: Dur(20 * time.Second), Recovery: Dur(10 * time.Second),
+ 		ReloadMeasure: Dur(40 * time.Second), ReloadRecovery: Dur(15 * time.Second), StepWarmup: Dur(2 * time.Second),
+--- a/scripts/inspection-assessment/jul.go
++++ b/scripts/inspection-assessment/jul.go
+@@ -249,7 +249,7 @@
+ 			"-p", "CPUQuota=" + env.CPUQuota, "-p", "MemoryMax=" + env.MemoryMax, "-p", "MemorySwapMax=0", "--"}, args...)
+ 		args = append(args, "taskset", "-c", env.CPUs)
+ 	}
+-	args = append(args, jul, "serve", "-config", cfg)
++	if env.Mode == "none" { args = append(args, "taskset", "-c", "0,1") }; args = append(args, jul, "serve", "-config", cfg)
+ 	return exec.Command(args[0], args[1:]...) //nolint:gosec // operator-selected binaries
+ }
+ 

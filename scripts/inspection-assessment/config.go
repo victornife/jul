@@ -62,10 +62,11 @@ type ConfigParams struct {
 	PluginNoBody   string
 	InspectionMode string
 	MaxBuffered    string
-	// PluginTimeout and PluginMaxInstances set both load fixture plugins'
-	// per-invocation timeout and live instance cap (the guest-pool static term).
-	PluginTimeout      string
-	PluginMaxInstances int
+	// The plugin settings apply to both load fixture plugins: invocation
+	// timeout, live instance cap and reuse interval. Zero preserves defaults.
+	PluginTimeout        string
+	PluginMaxInstances   int
+	PluginMaxInvocations int
 }
 
 // VariantFlags maps a variant to its inspection layers.
@@ -133,28 +134,32 @@ config = { name = "b", state_bytes = "4096" }
 path = "{{.Plugin}}"
 abi = "jul-abi/v2"{{if .PluginTimeout}}
 timeout = "{{.PluginTimeout}}"{{end}}{{if .PluginMaxInstances}}
-max_instances = {{.PluginMaxInstances}}{{end}}
+max_instances = {{.PluginMaxInstances}}{{end}}{{if .PluginMaxInvocations}}
+max_invocations = {{.PluginMaxInvocations}}{{end}}
 config = { name = "{{.NameA}}", read_body = "true" }
 
 [plugins.inspect-b]
 path = "{{.Plugin}}"
 abi = "jul-abi/v2"{{if .PluginTimeout}}
 timeout = "{{.PluginTimeout}}"{{end}}{{if .PluginMaxInstances}}
-max_instances = {{.PluginMaxInstances}}{{end}}
+max_instances = {{.PluginMaxInstances}}{{end}}{{if .PluginMaxInvocations}}
+max_invocations = {{.PluginMaxInvocations}}{{end}}
 config = { name = "b", read_body = "true" }
 {{else}}
 [plugins.inspect-a]
 path = "{{.Plugin}}"
 abi = "jul-abi/v2"
 {{if .PluginTimeout}}timeout = "{{.PluginTimeout}}"{{end}}{{if .PluginMaxInstances}}
-max_instances = {{.PluginMaxInstances}}{{end}}
+max_instances = {{.PluginMaxInstances}}{{end}}{{if .PluginMaxInvocations}}
+max_invocations = {{.PluginMaxInvocations}}{{end}}
 config = { name = "{{.NameA}}", read_body = "true", subscribe = "true" }
 
 [plugins.inspect-b]
 path = "{{.Plugin}}"
 abi = "jul-abi/v2"
 {{if .PluginTimeout}}timeout = "{{.PluginTimeout}}"{{end}}{{if .PluginMaxInstances}}
-max_instances = {{.PluginMaxInstances}}{{end}}
+max_instances = {{.PluginMaxInstances}}{{end}}{{if .PluginMaxInvocations}}
+max_invocations = {{.PluginMaxInvocations}}{{end}}
 config = { name = "b", read_body = "true", subscribe = "true", replace = "true" }
 {{end}}{{end}}
 {{define "locs"}}
@@ -241,8 +246,8 @@ func RenderConfig(p ConfigParams) ([]byte, error) {
 	if !slices.Contains(Fixtures, p.Fixture) {
 		return nil, fmt.Errorf("unknown plugin fixture %q", p.Fixture)
 	}
-	if (p.PluginTimeout != "" || p.PluginMaxInstances != 0) && p.Fixture != FixtureRequestOnly && p.Fixture != FixtureFull {
-		return nil, fmt.Errorf("plugin timeout and max_instances are only rendered for %s or %s fixtures", FixtureRequestOnly, FixtureFull)
+	if (p.PluginTimeout != "" || p.PluginMaxInstances != 0 || p.PluginMaxInvocations != 0) && p.Fixture != FixtureRequestOnly && p.Fixture != FixtureFull {
+		return nil, fmt.Errorf("plugin timeout, max_instances and max_invocations are only rendered for %s or %s fixtures", FixtureRequestOnly, FixtureFull)
 	}
 	if p.WASM && p.Fixture == FixtureNoBody && p.PluginNoBody == "" {
 		return nil, fmt.Errorf("fixture %s needs the inspect-nobody guest", FixtureNoBody)

@@ -1,5 +1,5 @@
 {
-  "version": "inspection-assessment-plan/v6",
+  "version": "inspection-assessment-plan/v7",
   "interpretation": {
     "min_repetitions": 3,
     "max_median_regression": 0.1,
@@ -1545,6 +1545,7 @@
         "fixture": "request-only",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -1570,7 +1571,8 @@
         "recovery": "10s",
         "comparison": "record",
         "changes_from_archive": [
-          "static footprint sized per ADR 0032 §10: with default plugin pools (2 × 64 × 16 MiB) pre-freeze envelope smokes were OOM-killed on both the candidate and d8d0520b; max_instances 4 per plugin, a 2s plugin timeout (also bounding the finite instance wait) and GOMEMLIMIT=480MiB apply to both variants; a sized smoke with the 100ms default was dominated by pool-wait 503s and contained timeouts; the 256m budget stays at its default"
+          "static footprint sized per ADR 0032 §10: with default plugin pools (2 × 64 × 16 MiB) pre-freeze envelope smokes were OOM-killed on both the candidate and d8d0520b; max_instances 4 per plugin, a 2s plugin timeout (also bounding the finite instance wait) and GOMEMLIMIT=480MiB apply to both variants; a sized smoke with the 100ms default was dominated by pool-wait 503s and contained timeouts; the 256m budget stays at its default",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ]
       },
       {
@@ -1586,6 +1588,7 @@
         "max_buffered_bytes": "128m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -1636,7 +1639,8 @@
           "static footprint sized per ADR 0032 §10 (not guaranteed: guest pools and GC headroom): with default pools (2 × 64 × 16 MiB = 2 GiB) a pre-freeze envelope smoke was OOM-killed at 593 MiB heap with 37 instances and 50 MiB governed; with 2 × 8 instances and no GOMEMLIMIT it was OOM-killed at 532 MiB heap with 126 MiB governed (GC headroom over a ~420 MiB live set)",
           "max_instances 4 per plugin (128 MiB guest pool) and GOMEMLIMIT=480MiB, the ADR's recommendation: about 128 MiB governed + 128 MiB pool + baseline stays well below the limit, and the limit is below the 576 MiB objective",
           "only a 503 with Retry-After: 1 and the inspection_overloaded body is the expected overload class; any other 503 is a finding",
-          "load and probe workers wait the advertised Retry-After after an overload response; p2h keeps the no-backoff shape as a separate record"
+          "load and probe workers wait the advertised Retry-After after an overload response; p2h keeps the no-backoff shape as a separate record",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ],
         "exercise_requirements": [
           {
@@ -1666,6 +1670,7 @@
         "max_buffered_bytes": "128m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -1711,7 +1716,8 @@
         "comparison": "record",
         "changes_from_archive": [
           "pre-freeze envelope smokes of the no-backoff shape were OOM-killed with governed bytes at 126 MiB: about 1300 rejected 960 KiB uploads per second each leave a connection in net/http's 500 ms close-write linger while the client keeps sending, and the unread bytes sit in kernel socket buffers charged to Jul's cgroup (memory.stat sock reached 286 MiB beside 393 MiB anon)",
-          "connection and kernel buffers are outside the governor (ADR 0032 §10); this cell is a record for I6 sizing, never a protection claim, and an OOM here is preserved as a finding"
+          "connection and kernel buffers are outside the governor (ADR 0032 §10); this cell is a record for I6 sizing, never a protection claim, and an OOM here is preserved as a finding",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ],
         "exercise_requirements": [
           {
@@ -1738,6 +1744,7 @@
         "max_buffered_bytes": "128m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -1776,6 +1783,9 @@
         ],
         "recovery": "10s",
         "comparison": "record",
+        "changes_from_archive": [
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
+        ],
         "exercise_requirements": [
           {
             "counter": "inspection_rejected_observe",
@@ -2149,6 +2159,7 @@
         "max_buffered_bytes": "448m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -2180,7 +2191,8 @@
           "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
           "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
           "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
-          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ]
       },
       {
@@ -2196,6 +2208,7 @@
         "max_buffered_bytes": "448m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -2315,7 +2328,8 @@
           "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
           "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
           "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
-          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ]
       }
     ],
@@ -3734,6 +3748,7 @@
         "fixture": "request-only",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -3759,7 +3774,8 @@
         "recovery": "2s",
         "comparison": "record",
         "changes_from_archive": [
-          "static footprint sized per ADR 0032 §10: with default plugin pools (2 × 64 × 16 MiB) pre-freeze envelope smokes were OOM-killed on both the candidate and d8d0520b; max_instances 4 per plugin, a 2s plugin timeout (also bounding the finite instance wait) and GOMEMLIMIT=480MiB apply to both variants; a sized smoke with the 100ms default was dominated by pool-wait 503s and contained timeouts; the 256m budget stays at its default"
+          "static footprint sized per ADR 0032 §10: with default plugin pools (2 × 64 × 16 MiB) pre-freeze envelope smokes were OOM-killed on both the candidate and d8d0520b; max_instances 4 per plugin, a 2s plugin timeout (also bounding the finite instance wait) and GOMEMLIMIT=480MiB apply to both variants; a sized smoke with the 100ms default was dominated by pool-wait 503s and contained timeouts; the 256m budget stays at its default",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ]
       },
       {
@@ -3775,6 +3791,7 @@
         "max_buffered_bytes": "128m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -3825,7 +3842,8 @@
           "static footprint sized per ADR 0032 §10 (not guaranteed: guest pools and GC headroom): with default pools (2 × 64 × 16 MiB = 2 GiB) a pre-freeze envelope smoke was OOM-killed at 593 MiB heap with 37 instances and 50 MiB governed; with 2 × 8 instances and no GOMEMLIMIT it was OOM-killed at 532 MiB heap with 126 MiB governed (GC headroom over a ~420 MiB live set)",
           "max_instances 4 per plugin (128 MiB guest pool) and GOMEMLIMIT=480MiB, the ADR's recommendation: about 128 MiB governed + 128 MiB pool + baseline stays well below the limit, and the limit is below the 576 MiB objective",
           "only a 503 with Retry-After: 1 and the inspection_overloaded body is the expected overload class; any other 503 is a finding",
-          "load and probe workers wait the advertised Retry-After after an overload response; p2h keeps the no-backoff shape as a separate record"
+          "load and probe workers wait the advertised Retry-After after an overload response; p2h keeps the no-backoff shape as a separate record",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ],
         "exercise_requirements": [
           {
@@ -3855,6 +3873,7 @@
         "max_buffered_bytes": "128m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -3900,7 +3919,8 @@
         "comparison": "record",
         "changes_from_archive": [
           "pre-freeze envelope smokes of the no-backoff shape were OOM-killed with governed bytes at 126 MiB: about 1300 rejected 960 KiB uploads per second each leave a connection in net/http's 500 ms close-write linger while the client keeps sending, and the unread bytes sit in kernel socket buffers charged to Jul's cgroup (memory.stat sock reached 286 MiB beside 393 MiB anon)",
-          "connection and kernel buffers are outside the governor (ADR 0032 §10); this cell is a record for I6 sizing, never a protection claim, and an OOM here is preserved as a finding"
+          "connection and kernel buffers are outside the governor (ADR 0032 §10); this cell is a record for I6 sizing, never a protection claim, and an OOM here is preserved as a finding",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ],
         "exercise_requirements": [
           {
@@ -3927,6 +3947,7 @@
         "max_buffered_bytes": "128m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -3965,6 +3986,9 @@
         ],
         "recovery": "2s",
         "comparison": "record",
+        "changes_from_archive": [
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
+        ],
         "exercise_requirements": [
           {
             "counter": "inspection_rejected_observe",
@@ -4338,6 +4362,7 @@
         "max_buffered_bytes": "448m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -4369,7 +4394,8 @@
           "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
           "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
           "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
-          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ]
       },
       {
@@ -4385,6 +4411,7 @@
         "max_buffered_bytes": "448m",
         "plugin_timeout": "2s",
         "plugin_max_instances": 4,
+        "plugin_max_invocations": 16,
         "gomemlimit": "480MiB",
         "phases": [
           {
@@ -4504,10 +4531,11 @@
           "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
           "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
           "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
-          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds",
+          "plan v7: recycle each allocation-heavy Go fixture instance after 16 calls, before the reproduced guest allocator exhaustion; applies equally to both targets, costs additional instantiations, and does not change Jul's default"
         ]
       }
     ]
   },
-  "config_template_sha256": "4450374ceb9e32b1daf4957576c5b4d479c8eb5e98b2331a646a41594288cbc4"
+  "config_template_sha256": "17492a7a75372a0bef40d15054eaefbd28ed5f3c25e7b57fe49a2cf8afb34dc8"
 }

@@ -1,0 +1,10 @@
+Bounded local diagnostic, declared before measurement.
+Targets: main 155b6d94dfde580a9332c3a985c8ce156563fd20 and candidate 91ed8858d114c99608f1e2fb750a5e92d233d244 (production source identical to e8b6c0c4).
+Matched Go 1.27.4 Linux/amd64, CGO_ENABLED=0, full feature tags, trimpath, buildvcs=false, same ldflags/version.
+No builds or other local load during measurement.
+Jul: GOMAXPROCS=2, taskset CPUs 0,1. Origin: CPUs 2,3. Client: CPUs 4-8.
+No cgroup controls accessible: no hard memory or CPU-quota qualification claimed.
+1. u1-normal-h1/none, C=16, 5 s warmup +20 s measure +2 s recovery, three paired interleaved repetitions.
+Retain all outcomes. Compare medians and existing <=10% spread/regression objectives as diagnostic thresholds; investigate a repeated >10% decrease with CPU/alloc profiles.
+2. p1-large-body-plugin-h1/wasm, original 768 KiB bodies and C=64, bounded pools, max_invocations=16 on both targets, one 20-second measured repetition each. Verify only successful traffic, canaries, expected origin effects and drained accounting. Configuration precheck required.
+Historical results remain unchanged. New results do not retroactively qualify historical A1/A2/A13 or establish a 768 MiB fit.

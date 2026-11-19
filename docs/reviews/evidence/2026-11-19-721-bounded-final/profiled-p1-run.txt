@@ -1,0 +1,3 @@
+2026-11-19T19:15:39Z p1-large-body-plugin-h1/wasm/candidate rep1: state=completed valid=true correct=true load/load=111.8rps(2300/2300) cpu=0.97
+2026-11-19T19:16:11Z p1-large-body-plugin-h1/wasm/main rep1: state=completed valid=true correct=true load/load=114.3rps(2351/2351) cpu=0.96
+run profiled-p1: complete, 2 results in /workspace/scratch/fecc8ca1efe5/721-bounded-final/profiled-p1

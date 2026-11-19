@@ -142,6 +142,40 @@ The archived reproducer driver was also executed successfully. Documentation
 validation passed; final-head hosted checks remain the merge gate. Production
 Go code, defaults and logging were not changed by this clarification.
 
+### Applied mitigation and bounded performance check — 2026-11-19
+
+Assessment plan v7 now renders `max_invocations = 16` for **both** plugins in
+the heavy p1/p2/p2o/p2h and additional bounded s3/s4 scenarios. Runtime defaults
+and ordinary/historical profiles remain unchanged. Tests cover scenario scope,
+both renderers, default preservation and the complete scenario-to-runner config
+path. The [bounded run record](evidence/2026-11-19-721-bounded-final/README.md)
+retains the declared matrix, full-tag build identities, configs and all results.
+
+Both actual binaries accepted the mitigated p1 configurations. Across the
+initial and reverse-order profiled pairs, all **9065/9065** load requests were
+verified with no unexpected responses, canary failures or request-accounting
+residue. Candidate guest reservations matched idle ownership with no retained
+failed tickets. This applies the mitigation rather than leaving it as advice;
+earlier recycling's instantiation cost remains explicit.
+
+The targeted H1/C=16 uninspected repeat had main/candidate median goodputs of
+6691.15/6797.20 requests/s (+1.58% candidate); all three paired changes were
+within 10%. Candidate spread was 13.19%, so this is **not** a formal A13 pass.
+The old 33.6% drop did not reproduce on this CPU-separated Linux/amd64 host;
+its historical ARM/WSL2 cause remains unproven. The initial saturated p1 sample
+was 15.7% lower on candidate; a declared reverse-order CPU-profiled pair was
+2.2% lower. Both profiles were dominated by external/JIT and wazero call-engine
+execution, not a leading Jul accounting hotspot. These limited samples do not
+justify a speculative runtime optimization or erase the original observations.
+
+The local runner used a temporary first-party diagnostic profile and CPU
+affinity, with no accessible cgroup quota/memory controls. No historical
+physical-memory or whole-programme qualification is claimed. The maintained
+verifier accepted all three result directories. The complete harness suite
+passed at 91.3% statement coverage; all 11 measured added Go production
+statements were covered (100%, above the 90% gate). Final-head hosted checks
+remain the routine merge prerequisite.
+
 ## Current recovery status — 2026-11-17
 
 **Historical status:** superseded by the reduced-scope closeout above.

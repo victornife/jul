@@ -1,0 +1,136 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "perf",
+  "started": "2026-11-19T19:09:18.624265597Z",
+  "ended": "2026-11-19T19:12:04.177852137Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v7",
+  "plan_sha256": "069a72c43386c2478c62c3eb23ca10f1f0f6c85d1b123e605ad4fc19cb45d5b8",
+  "interpretation_sha256": "ee32d6ef4f0098920f5beee542ad75cd43f6b5ab1e8dee526ee7c07ac4da4c63",
+  "profile": {
+    "name": "bounded-local",
+    "acceptance_eligible": false,
+    "warmup": "5s",
+    "measure": "20s",
+    "recovery": "2s",
+    "reload_measure": "40s",
+    "reload_recovery": "15s",
+    "step_warmup": "2s",
+    "f3_duration": "20s",
+    "f4_client_limit": "20s",
+    "description": "CPU-affinity-separated local paired diagnostic; no cgroup qualification"
+  },
+  "repetitions": 3,
+  "selection": [
+    "u1-normal-h1/none"
+  ],
+  "scenario_sha256": {
+    "u1-normal-h1/none": "b0f9e0e5b33a1407f7817703a9a0445e93de5e6ebc3094089fba99546124d3c6"
+  },
+  "targets": [
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/workspace/scratch/fecc8ca1efe5/721-bounded-final/jul-main",
+      "binary": {
+        "path": "/workspace/scratch/fecc8ca1efe5/721-bounded-final/jul-main",
+        "sha256": "a11c0b21ce29f6b167e26e8369a4fe0a70013a8486c18954c2ddc33c00efdc2f",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOAMD64": "v1",
+          "GOARCH": "amd64",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "candidate",
+      "adapter": "current",
+      "path": "/workspace/scratch/fecc8ca1efe5/721-bounded-final/jul-candidate",
+      "binary": {
+        "path": "/workspace/scratch/fecc8ca1efe5/721-bounded-final/jul-candidate",
+        "sha256": "9f2325d850a153cb5fd74f29feaecace7ef3bb09b01500c20fa9a6a97de2c71a",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOAMD64": "v1",
+          "GOARCH": "amd64",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/workspace/scratch/fecc8ca1efe5/721-bounded-final/ia-diagnostic",
+    "sha256": "45504887cd55766780868f7e5a64a08a44ad44c306a4cbc1100120fb75d3e82f",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "-trimpath": "true",
+      "CGO_ENABLED": "1",
+      "GOAMD64": "v1",
+      "GOARCH": "amd64",
+      "GOOS": "linux"
+    }
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/workspace/scratch/fecc8ca1efe5/jul-review-latest/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "amd64",
+    "cpus": 5,
+    "kernel": "6.18.57",
+    "machine": "x86_64",
+    "mem_total": "10206472 kB",
+    "swap_total": "0 kB"
+  },
+  "requested_envelope": {
+    "mode": "none",
+    "jul_cpus": "",
+    "cpu_quota": "",
+    "memory_max": "",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "4-8",
+    "jul": "unconstrained (envelope none)",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/u1-normal-h1/none/main/rep1/result.json",
+    "cells/u1-normal-h1/none/candidate/rep1/result.json",
+    "cells/u1-normal-h1/none/main/rep2/result.json",
+    "cells/u1-normal-h1/none/candidate/rep2/result.json",
+    "cells/u1-normal-h1/none/main/rep3/result.json",
+    "cells/u1-normal-h1/none/candidate/rep3/result.json"
+  ],
+  "interrupted": false
+}
