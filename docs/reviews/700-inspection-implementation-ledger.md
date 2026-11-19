@@ -90,11 +90,128 @@ rejects `picomatch` in the production dependency tree, while other advisories
 remain enforced. Untrusted glob patterns can still hang development or build
 tools. Remove the exception and production check when a patched release is
 available; no dependency patch was added. The [assessment commands](../../scripts/inspection-assessment/README.md#combined-functional-soak)
-describe how to reproduce the soak. Linux/cgroup qualification remains unrun because this host is
-macOS and its Docker daemon is unavailable. The integrated A1–A22 campaign
-also remains outstanding. Do not claim
-original A19/A20 completion or close #700/#711/#713/#712 based on these checks;
-record the reduced guarantees and pending qualification explicitly.
+describe how to reproduce the soak. At that stage Linux/cgroup qualification
+was unrun because the host was macOS and its Docker daemon was unavailable.
+The later Linux work is recorded below. The integrated campaign remains
+outstanding; do not claim original A19/A20 completion or close
+#700/#711/#713/#712 based on these checks.
+
+## Linux follow-up — 2026-11-19
+
+The production candidate was built from clean commit
+`60415e5a71fd8ec26a7559424e3f43e6406738fe`. Follow-up `79d8797f` changes
+only the D11 certification asset inventory. The host is shared Linux/arm64
+WSL2 with cgroup v2 and a systemd user manager. The paired assessment binaries
+use baseline `858590dc7c430d24cd33b096a81ca6051591b427` and the candidate,
+both built with Go 1.27.4, full tags, static linking, `-trimpath` and matching
+strip/version flags. The clean harness and both binary identities are recorded
+in the [preflight manifest](evidence/2026-11-19-721-linux/preflight/manifest.json).
+An earlier one-target smoke used a Go 1.27.3 baseline; it was not used for
+comparison. The baseline was rebuilt with the candidate's Go version before
+the paired preflight and qualification runs.
+
+The focused test binaries were compiled from the clean `79d8797f` checkout
+with Go 1.27.4 and full tags. Their SHA-256 values were
+`82a37ccb6bf0701b214a637f401662902993d60f4c5bdf814581b9e54f475d47`
+(`internal/inspection`) and
+`b528ab7232ede76891f751ba96a4dfcaf32e58b97195ac667e41f48563ff9bb0`
+(`internal/waf`); the binaries themselves were not retained as evidence.
+
+| Verification | Result |
+| --- | --- |
+| `taskset -c 4-9 env PATH="$HOME/go/bin:$PATH" GOMAXPROCS=2 make ci-pr` | Passed: full-tag tests, lint, security coverage, vulnerability checks, vet, generated/config checks and 2,726 documentation checks. The D11-only inventory correction was committed during the run. |
+| `GOMAXPROCS=2 go test -race -p 2 -tags 'waf wasmplugins console' -count=1 -run '^(TestFailedGuestTeardown.*\|TestInspectionStatusReportsLiveGuestTeardownGate\|TestGlobalSetGuestCapacityOnly\|TestGovernedWAFBodyProcessingFailure.*\|TestGovernedWAFMissingBodyErrorStateDoesNotDispatch\|TestRequestBodyProcessingFailureRequiresTransactionState\|TestWAFRequestVsResponseInterruptionAndBodyErrors)$' ./internal/inspection ./internal/admin ./internal/waf` | Passed, including rule-removal, skip and allow counterexamples and the live teardown-gate status. |
+| `taskset -c 10,11 env JUL_INSPECTION_SOAK_DURATION=30m GOMAXPROCS=2 go test -p 2 -tags 'soak waf wasmplugins' -run '^TestInspectionCombinedSoak$' -count=1 -timeout=40m -v ./internal/app` | Passed: 30m0.035s, 60 reloads, 43,165 successful requests (14,389 GET, 14,388 form, 14,388 multipart), 14,389 expected denials and zero blocked requests at origin. [Output](evidence/2026-11-19-721-linux/functional-soak.txt). This functional run was CPU-pinned, not run in the 768 MiB cgroup. |
+| Focused governor and WAF test binaries, three repetitions | Passed in a verified 2-CPU, 768 MiB, zero-swap cgroup with `GOMAXPROCS=2`; includes H1/H2/H3, cancellation, audit abandonment, body-error and teardown-gate cases. [Raw output](evidence/2026-11-19-721-linux/focused-cgroup-tests.txt). These are functional tests, not the integrated acceptance matrix. |
+| Assessment harness quick preflight, one `none` cell per target | Passed with `memory.max=805306368`, `memory.swap.max=0`, `cpu.max=200000 100000` and Jul pinned to CPUs 0–1. Both cells and [checksums](evidence/2026-11-19-721-linux/preflight/SHA256SUMS) verified. This three-second profile is smoke evidence, not a throughput comparison. |
+| `taskset -c 0-3 node --test scripts/coverage-report.test.mjs scripts/audit-exception.test.mjs && taskset -c 0-3 pnpm exec vitest run --coverage --maxWorkers=2 && taskset -c 0-3 node scripts/coverage-report.mjs` (from `internal/admin/ui`) | Passed, 1,088 UI tests and the coverage contract. An earlier run under concurrent load failed a timing-sensitive Overview test. |
+| `xvfb-run -a env CI=1 GOMAXPROCS=2 pnpm exec playwright test --headed --project=inspection-real-server --repeat-each=1 --retries=0 --reporter=list` (from `internal/admin/ui`) | Passed against the packaged server. Headless Chromium could not advance animation frames on this host, even on a minimal page; Xvfb with headed Chromium was used instead. |
+| `python3 scripts/check-d11-certification.py`; `python3 scripts/test_d11_certification.py` | Passed with zero inventory errors and 22 tests against a clean tracked-file export containing the inventory correction. |
+
+[Hosted `docs-check`](https://github.com/victornife/jul/actions/runs/44517856150/job/135538442096)
+at `60415e5a` failed because the Console rebuild changed 36 content-hashed
+asset paths. `79d8797f` reconciles D11-104 current paths and records the
+exact mappings without recertifying historical evidence.
+[Its hosted D11 stage](https://github.com/victornife/jul/actions/runs/44519048757/job/135542755065)
+passed, but the same job later failed the unrelated
+`test_dashboard_backend_endpoints_counters_and_idle_websocket_survival` on a
+greeting-read timeout. The
+[rerun](https://github.com/victornife/jul/actions/runs/44519048757/job/135554050697)
+passed. At `79d8797f`, all checks completed with 63 successes and two skips;
+Codecov patch coverage was 98.48% (90% target). Checks on the later evidence
+commit must still be recorded.
+
+The [A1 `s11` run](evidence/2026-11-19-721-linux/a1-s11/) and its
+[summary](evidence/2026-11-19-721-linux/a1-summary/summary.md) were verified
+after three interleaved repetitions per variant and target. The frozen
+`s11/waf` fixture uses a 512 MiB inspection budget and leaves `GOMEMLIMIT`
+unset. The functional soak overlapped the first two A1 repetitions on separate
+CPUs; shared-host interference remains possible:
+
+| Candidate `waf` | Rep 1 | Rep 2 | Rep 3 | Median (range) |
+| --- | ---: | ---: | ---: | ---: |
+| Cgroup peak, MiB | 627.1 | 666.5 | 529.9 | 627.1 (529.9–666.5) |
+| C=16 legitimate goodput, requests/s | 7.6 | 6.7 | 5.4 | 6.7 (5.4–7.6) |
+| C=16 overload 503 p99, ms | 60.814 | 60.342 | 60.649 | 60.649 (60.342–60.814) |
+| C=16 overload 503 count | 7,590 | 7,197 | 5,845 | 7,197 (5,845–7,590) |
+
+The candidate survived without an OOM-kill delta, but two peaks exceeded
+576 MiB and all three C=16 overload p99s exceeded 50 ms. C=16 goodput spread
+was 32.8% of its median; shared-host noise is not a pass. In all three
+baseline `waf` repetitions the process was killed at C=8 and the hierarchical
+parent cgroup's OOM-kill count increased by one; that count can include sibling
+scopes. The frozen fixture does not list overload 503s as an expected class,
+so the harness also records them as findings. Their counts and latencies
+remain in the raw evidence. A1 is **not passed**.
+
+The [normal-traffic comparison](evidence/2026-11-19-721-linux/a13-normal/)
+completed three repetitions for all 11 cells per target: all 66 results were
+instrument-valid and correct. The frozen-plan
+[summary](evidence/2026-11-19-721-linux/a13-summary/summary.md) reports six
+`fail-regression` and five `inconclusive-noise` verdicts, with no passing
+comparisons. For example, H1 `none` median goodput was 5,167.2 requests/s
+for the baseline and 3,740.8 for the candidate (27.6% regression); candidate
+spread was 90.5%. The verdict order treats a median regression over 10% as a
+failure before applying the noise rule. These comparisons are informational,
+not A13 acceptance; shared-host variability must be investigated rather than
+discarded.
+
+The [post-soak A1 diagnostic](evidence/2026-11-19-721-linux/a1-post-soak/)
+interleaved three repetitions of the pre-fix PR head `ffbff4d0` and the
+corrected candidate, built with matching flags. No functional soak overlapped
+this run. Both heads exceeded the A1 limits in every repetition, without an
+OOM-kill delta:
+
+| `s11/waf` | Cgroup peak MiB, median (range) | C=16 overload 503 p99 ms, median (range) | C=16 goodput requests/s, median (range) |
+| --- | ---: | ---: | ---: |
+| Pre-fix `ffbff4d0` | 599.7 (598.4–603.0) | 60.964 (60.814–61.744) | 5.7 (5.4–7.7) |
+| Corrected `60415e5a` | 603.1 (599.2–604.6) | 61.446 (60.609–74.048) | 5.9 (4.7–6.6) |
+
+This reproduces the threshold overruns on both heads in this environment; it
+does not identify their cause. The pre-fix head retains the rule-control
+fail-open and is not an acceptance baseline.
+
+The A2 [s3](evidence/2026-11-19-721-linux/a2-s3/) and
+[s4](evidence/2026-11-19-721-linux/a2-s4/) runs each exercised `none` and
+`both` for three repetitions per target. The
+[combined summary](evidence/2026-11-19-721-linux/a2-summary/summary.md)
+retains invalid and failed cells. On s3 `both`, the candidate survived with
+no OOM-kill delta and peaked at 518.7–539.2 MiB; the baseline process was
+killed with a parent OOM-kill increment in all three repetitions. The s3
+fixture also marks candidate overload 503s as unexpected. On s3 `none`, the
+baseline and candidate median legitimate goodput was 318.35 and 232.35
+requests/s respectively (27.0% regression); spreads were 15.1% and 65.5%.
+Removal of a temporary worktree overlapped the first candidate s3 cell's
+startup; the shared host can add other interference.
+
+On s4 `both`, all three candidate processes were killed during C=128 or
+C=192 with a parent OOM-kill increment; their cgroup peaks were 712.6, 740.7
+and 763.1 MiB. All three baseline processes were also killed with a parent
+OOM-kill increment, and two baseline cells were instrument-invalid because
+no attempts started in the C=16 and C=32 windows. The hierarchical parent
+counter can include sibling scopes. **A2 is not passed.** Reduced-scope
+A1–A18/A21/A22 qualification remains incomplete. Original A19/A20 remain
+explicitly deferred.
 
 ## Historical evidence — fork-dependent #721/#713 draft (superseded)
 

@@ -1,0 +1,136 @@
+{
+  "scenario": "s3-large-h2",
+  "scenario_sha256": "6326a5d88871c9ae5b8693972247a256b3bbb7033df74efbacb233c166455c01",
+  "comparison": "capacity",
+  "variant": "both",
+  "target": "base",
+  "rep": 2,
+  "profile": "qualification",
+  "started": "2026-11-19T13:07:10.509656858Z",
+  "ended": "2026-11-19T13:07:47.902495031Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase load class load: error:refused ×463809",
+    "phase load class load: error:reset ×3",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "2b71c27cc7f21348e01a02a13fd668f90d570aadbf09f126ab0bb12d15d97278",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-82539-723807266.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 4
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "load",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 32,
+          "window_seconds": 20,
+          "attempts": 463812,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:refused": 463809,
+            "error:reset": 3
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 32,
+          "outstanding_at_window_end": 32,
+          "response_protos": {},
+          "connections_dialled": 32,
+          "error_samples": {
+            "error:refused": "Post \"https://localhost:44663/proxy/echo?resp=1048576\u0026chunked=1\": dial tcp 127.0.0.1:44663: connect: connection refused",
+            "error:reset": "Post \"https://localhost:44663/proxy/echo?resp=1048576\u0026chunked=1\": read tcp 127.0.0.1:35246-\u003e127.0.0.1:44663: read: connection reset by peer"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 463809,
+              "p50": 0.241,
+              "p95": 0.853,
+              "p99": 1.644,
+              "max": 27.525
+            },
+            "error:reset": {
+              "n": 3,
+              "p50": 619.825,
+              "p95": 619.825,
+              "p99": 619.825,
+              "max": 619.995
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 805306368,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 825630720,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "heap_after_two_gcs_unavailable": "jul exited during the run",
+  "rss_after_two_gcs": null,
+  "samples": 34
+}

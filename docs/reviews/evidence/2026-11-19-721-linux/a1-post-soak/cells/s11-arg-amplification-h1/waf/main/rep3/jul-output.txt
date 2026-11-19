@@ -1,0 +1,8 @@
+time=2026-11-19T14:01:28.628+01:00 level=WARN msg="waf rule matched" rule_id=1695101 path=/proxy/echo query_omitted=true mode=block phase=2 severity=unknown
+time=2026-11-19T14:01:28.635+01:00 level=WARN msg="waf rule matched" rule_id=1695102 path=/proxy/echo query_omitted=true mode=block phase=4 severity=unknown
+time=2026-11-19T14:01:53.223+01:00 level=WARN msg="inspection budget saturated; request rejected" class=evaluation mode=enforce max_buffered_bytes=536870912
+time=2026-11-19T14:02:03.227+01:00 level=WARN msg="inspection budget saturated; request rejected" class=evaluation mode=enforce max_buffered_bytes=536870912
+time=2026-11-19T14:02:13.228+01:00 level=WARN msg="inspection budget saturated; request rejected" class=evaluation mode=enforce max_buffered_bytes=536870912
+time=2026-11-19T14:02:23.238+01:00 level=WARN msg="inspection budget saturated; request rejected" class=evaluation mode=enforce max_buffered_bytes=536870912
+time=2026-11-19T14:02:39.841+01:00 level=WARN msg="waf rule matched" rule_id=1695101 path=/proxy/echo query_omitted=true mode=block phase=2 severity=unknown
+time=2026-11-19T14:02:39.849+01:00 level=WARN msg="waf rule matched" rule_id=1695102 path=/proxy/echo query_omitted=true mode=block phase=4 severity=unknown

@@ -1,0 +1,288 @@
+{
+  "scenario": "s11-arg-amplification-h1",
+  "scenario_sha256": "b7466beaecd44a3b986f007d42c4659a566589778c2c69e8918d23aaad892e4d",
+  "comparison": "record",
+  "variant": "none",
+  "target": "main",
+  "rep": 2,
+  "profile": "qualification",
+  "started": "2026-11-19T12:04:51.163076485Z",
+  "ended": "2026-11-19T12:06:01.748585057Z",
+  "state": "completed",
+  "valid": true,
+  "correct": true,
+  "config_sha256": "bf338a927045d19e59ed6d3f31b4d8768e336bd18e500eaf3640582954c46b20",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-76978-180887784.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 1
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "post_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "c1",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 1,
+          "window_seconds": 10,
+          "attempts": 12965,
+          "verified": 12965,
+          "verified_in_window": 12964,
+          "goodput_rps": 1296.4,
+          "goodput_bytes_per_second": 5310054.4,
+          "classes": {
+            "ok": 12965
+          },
+          "p50_ms": 0.693,
+          "p95_ms": 1.068,
+          "p99_ms": 2.092,
+          "max_ms": 10.336,
+          "crossed_in_from_warmup": 1,
+          "outstanding_at_window_end": 1,
+          "response_protos": {
+            "HTTP/1.1": 12965
+          },
+          "connections_dialled": 1
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.376,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    },
+    {
+      "name": "c2",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 2,
+          "window_seconds": 10,
+          "attempts": 33119,
+          "verified": 33119,
+          "verified_in_window": 33117,
+          "goodput_rps": 3311.7,
+          "goodput_bytes_per_second": 13564723.2,
+          "classes": {
+            "ok": 33119
+          },
+          "p50_ms": 0.533,
+          "p95_ms": 0.923,
+          "p99_ms": 1.868,
+          "max_ms": 17.885,
+          "crossed_in_from_warmup": 2,
+          "outstanding_at_window_end": 2,
+          "response_protos": {
+            "HTTP/1.1": 33119
+          },
+          "connections_dialled": 2
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.492,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    },
+    {
+      "name": "c4",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 4,
+          "window_seconds": 10,
+          "attempts": 62856,
+          "verified": 62856,
+          "verified_in_window": 62852,
+          "goodput_rps": 6285.2,
+          "goodput_bytes_per_second": 25744179.2,
+          "classes": {
+            "ok": 62856
+          },
+          "p50_ms": 0.531,
+          "p95_ms": 1.165,
+          "p99_ms": 2.537,
+          "max_ms": 9.529,
+          "crossed_in_from_warmup": 4,
+          "outstanding_at_window_end": 4,
+          "response_protos": {
+            "HTTP/1.1": 62856
+          },
+          "connections_dialled": 4
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.568,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    },
+    {
+      "name": "c8",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 8,
+          "window_seconds": 10,
+          "attempts": 77890,
+          "verified": 77890,
+          "verified_in_window": 77882,
+          "goodput_rps": 7788.2,
+          "goodput_bytes_per_second": 31900467.2,
+          "classes": {
+            "ok": 77890
+          },
+          "p50_ms": 0.738,
+          "p95_ms": 2.468,
+          "p99_ms": 5.829,
+          "max_ms": 19.496,
+          "crossed_in_from_warmup": 8,
+          "outstanding_at_window_end": 8,
+          "response_protos": {
+            "HTTP/1.1": 77890
+          },
+          "connections_dialled": 8
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.661,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    },
+    {
+      "name": "c16",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 10,
+          "attempts": 67584,
+          "verified": 67584,
+          "verified_in_window": 67568,
+          "goodput_rps": 6756.8,
+          "goodput_bytes_per_second": 27675852.8,
+          "classes": {
+            "ok": 67584
+          },
+          "p50_ms": 1.713,
+          "p95_ms": 6.471,
+          "p99_ms": 10.947,
+          "max_ms": 29.024,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/1.1": 67584
+          },
+          "connections_dialled": 16
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.741,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    }
+  ],
+  "jul_exit": "exit 0",
+  "jul_exited_during_run": false,
+  "oom_kill_delta": 0,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 25341952,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 51937280,
+  "heap_inuse_after_two_gcs": 9494528,
+  "heap_alloc_after_two_gcs": 7086944,
+  "rss_after_two_gcs": 47951872,
+  "counter_deltas": {
+    "inspection_body_timeout": 0,
+    "inspection_body_unsupported": 0,
+    "inspection_body_would_timeout": 0,
+    "inspection_rejected_enforce": 0,
+    "inspection_rejected_observe": 0,
+    "waf_tx_all": 0,
+    "waf_tx_body_limit": 0,
+    "waf_tx_clean": 0,
+    "waf_tx_inspection_error": 0
+  },
+  "unavailable_metrics": [
+    "plugin_invocations",
+    "plugin_invocations_error",
+    "plugin_panics",
+    "plugin_resp_invocations",
+    "plugin_resp_error",
+    "plugin_resp_unavailable",
+    "plugin_waits_acquired",
+    "plugin_waits_rejected",
+    "admission_rejected",
+    "cache_hit",
+    "cache_miss",
+    "reload_applied",
+    "reload_not_applied",
+    "transport_retired"
+  ],
+  "inspection_foundation_series_after": {
+    "jul_inspection_abandoned_evaluations": 0,
+    "jul_inspection_audit_abandoned{measure=\"bytes\"}": 0,
+    "jul_inspection_audit_abandoned{measure=\"calls\"}": 0,
+    "jul_inspection_audit_drops_total{reason=\"abandoned_full\"}": 0,
+    "jul_inspection_audit_drops_total{reason=\"budget\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h1\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h2\",result=\"would_timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"timeout\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"unsupported\"}": 0,
+    "jul_inspection_body_timeouts_total{protocol=\"h3\",result=\"would_timeout\"}": 0,
+    "jul_inspection_bytes_limit": 268435456,
+    "jul_inspection_bytes{class=\"audit\"}": 0,
+    "jul_inspection_bytes{class=\"base\"}": 0,
+    "jul_inspection_bytes{class=\"buffer\"}": 0,
+    "jul_inspection_bytes{class=\"waf_state\"}": 0,
+    "jul_inspection_committed_overruns_total": 0,
+    "jul_inspection_evaluations_limit": 2,
+    "jul_inspection_evaluations{state=\"active\"}": 0,
+    "jul_inspection_evaluations{state=\"waiting\"}": 0,
+    "jul_inspection_guest_capacity_bytes": 0,
+    "jul_inspection_guest_capacity_bytes_limit": 1073741824,
+    "jul_inspection_guest_instances{state=\"busy\"}": 0,
+    "jul_inspection_guest_instances{state=\"closing\"}": 0,
+    "jul_inspection_guest_instances{state=\"failed_retained\"}": 0,
+    "jul_inspection_guest_instances{state=\"idle\"}": 0,
+    "jul_inspection_guest_instances{state=\"starting\"}": 0,
+    "jul_inspection_leases": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"audit\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"guest_capacity\"}": 0,
+    "jul_inspection_rejections_total{mode=\"enforce\",reason=\"waf_state\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"audit\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"bytes\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"evaluation\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"guest_capacity\"}": 0,
+    "jul_inspection_rejections_total{mode=\"observe\",reason=\"waf_state\"}": 0,
+    "jul_inspection_unslotted_logging_total": 0
+  },
+  "samples": 141
+}

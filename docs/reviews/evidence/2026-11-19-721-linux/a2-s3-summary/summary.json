@@ -1,0 +1,617 @@
+{
+  "plan_version": "inspection-assessment-plan/v3",
+  "profile": "qualification",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta, a nonzero governor lease/bytes/evaluation gauge after recovery (plan v3)) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "ia-a2-s3-large-h2"
+  ],
+  "targets": [
+    {
+      "label": "base",
+      "adapter": "baseline-858590dc",
+      "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-base-go1274",
+      "binary": {
+        "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-base-go1274",
+        "sha256": "99941b713dc26a5a321bf82be689b4b05c42bf08a911b0769714c50e0948ef33",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "858590dc7c430d24cd33b096a81ca6051591b427",
+          "vcs.time": "2026-11-10T14:59:56Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "baseline-858590dc",
+        "global_inspection": false,
+        "description": "ADR 0032 comparison baseline (#702, #703); no [global.inspection] table"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-candidate",
+      "binary": {
+        "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-candidate",
+        "sha256": "13a7660d8fb18ddf3e172088a58d662adea0aa45c043a86fb2c37c1b5714995c",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "60415e5a71fd8ec26a7559424e3f43e6406738fe",
+          "vcs.time": "2026-11-19T11:41:09Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "base",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 0,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.997,
+          "peak_cg_memory_bytes": 805310464,
+          "state": "completed",
+          "runtime_findings": [
+            "jul exited during the run: signal killed",
+            "phase load class load: error:eof ×1",
+            "phase load class load: status:500 ×5",
+            "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+          ]
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 2,
+          "goodput_rps": 0,
+          "valid": true,
+          "correct": false,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": 805306368,
+          "state": "completed",
+          "runtime_findings": [
+            "jul exited during the run: signal killed",
+            "phase load class load: error:refused ×463809",
+            "phase load class load: error:reset ×3",
+            "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+          ]
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 3,
+          "goodput_rps": 0,
+          "valid": true,
+          "correct": false,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": 743866368,
+          "state": "completed",
+          "runtime_findings": [
+            "jul exited during the run: signal killed",
+            "phase load class load: error:refused ×357838",
+            "phase load class load: error:reset ×3",
+            "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 0,
+        "median_goodput_rps": 0.25,
+        "min_goodput_rps": 0.15,
+        "max_goodput_rps": 0.3,
+        "relative_spread": 0.6
+      },
+      "points": [
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 1,
+          "goodput_rps": 0.15,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.998,
+          "peak_cg_memory_bytes": 565391360,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: status:503-inspection-overloaded ×393"
+          ]
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 2,
+          "goodput_rps": 0.25,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.994,
+          "peak_cg_memory_bytes": 550789120,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: status:503-inspection-overloaded ×374"
+          ]
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 3,
+          "goodput_rps": 0.3,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.997,
+          "peak_cg_memory_bytes": 543854592,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: status:503-inspection-overloaded ×364"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "base",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 318.35,
+        "min_goodput_rps": 276.35,
+        "max_goodput_rps": 324.55,
+        "relative_spread": 0.151
+      },
+      "points": [
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 1,
+          "goodput_rps": 276.35,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.656,
+          "peak_cg_memory_bytes": 47616000,
+          "state": "completed"
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 2,
+          "goodput_rps": 324.55,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.645,
+          "peak_cg_memory_bytes": 47411200,
+          "state": "completed"
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 3,
+          "goodput_rps": 318.35,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.642,
+          "peak_cg_memory_bytes": 44937216,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 232.35,
+        "min_goodput_rps": 98.6,
+        "max_goodput_rps": 250.8,
+        "relative_spread": 0.655
+      },
+      "points": [
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 1,
+          "goodput_rps": 98.6,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.714,
+          "peak_cg_memory_bytes": 42811392,
+          "state": "completed"
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 2,
+          "goodput_rps": 250.8,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.653,
+          "peak_cg_memory_bytes": 45641728,
+          "state": "completed"
+        },
+        {
+          "run": "ia-a2-s3-large-h2",
+          "rep": 3,
+          "goodput_rps": 232.35,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.659,
+          "peak_cg_memory_bytes": 44765184,
+          "state": "completed"
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "base",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 6,
+      "verified_in_window": 0,
+      "goodput_rps": 0,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 1,
+      "p99_ms": null,
+      "outcomes": "error:eof ×1, status:500 ×5",
+      "outcome_latency_ms": {
+        "error:eof": {
+          "n": 1,
+          "p50": 26198.691,
+          "p95": 26198.691,
+          "p99": 26198.691,
+          "max": 26198.691
+        },
+        "status:500": {
+          "n": 5,
+          "p50": 1065.627,
+          "p95": 1425.394,
+          "p99": 1425.394,
+          "max": 1509.894
+        }
+      }
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "base",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 463812,
+      "verified_in_window": 0,
+      "goodput_rps": 0,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": null,
+      "outcomes": "error:refused ×463809, error:reset ×3",
+      "outcome_latency_ms": {
+        "error:refused": {
+          "n": 463809,
+          "p50": 0.241,
+          "p95": 0.853,
+          "p99": 1.644,
+          "max": 27.525
+        },
+        "error:reset": {
+          "n": 3,
+          "p50": 619.825,
+          "p95": 619.825,
+          "p99": 619.825,
+          "max": 619.995
+        }
+      }
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "base",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 357841,
+      "verified_in_window": 0,
+      "goodput_rps": 0,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 31,
+      "p99_ms": null,
+      "outcomes": "error:refused ×357838, error:reset ×3",
+      "outcome_latency_ms": {
+        "error:refused": {
+          "n": 357838,
+          "p50": 0.24,
+          "p95": 0.855,
+          "p99": 1.639,
+          "max": 19.776
+        },
+        "error:reset": {
+          "n": 3,
+          "p50": 182.616,
+          "p95": 182.616,
+          "p99": 182.616,
+          "max": 465.433
+        }
+      }
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "main",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 399,
+      "verified_in_window": 3,
+      "goodput_rps": 0.15,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 3846.398,
+      "outcomes": "ok ×6, status:503-inspection-overloaded ×393",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 393,
+          "p50": 1312.792,
+          "p95": 3173.308,
+          "p99": 4489.099,
+          "max": 5149.86
+        }
+      }
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "main",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 383,
+      "verified_in_window": 5,
+      "goodput_rps": 0.25,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 4590.988,
+      "outcomes": "ok ×9, status:503-inspection-overloaded ×374",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 374,
+          "p50": 1315.09,
+          "p95": 2687.684,
+          "p99": 3851.882,
+          "max": 3890.508
+        }
+      }
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "both",
+      "target": "main",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 373,
+      "verified_in_window": 6,
+      "goodput_rps": 0.3,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 3959.89,
+      "outcomes": "ok ×9, status:503-inspection-overloaded ×364",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 364,
+          "p50": 1307.628,
+          "p95": 2628.278,
+          "p99": 3914.343,
+          "max": 5162.138
+        }
+      }
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "base",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 5559,
+      "verified_in_window": 5527,
+      "goodput_rps": 276.35,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 188.61,
+      "outcomes": "ok ×5559"
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "base",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 6523,
+      "verified_in_window": 6491,
+      "goodput_rps": 324.55,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 148.156,
+      "outcomes": "ok ×6523"
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "base",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 6399,
+      "verified_in_window": 6367,
+      "goodput_rps": 318.35,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 132.708,
+      "outcomes": "ok ×6399"
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "main",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 2003,
+      "verified_in_window": 1972,
+      "goodput_rps": 98.6,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 31,
+      "p99_ms": 571.765,
+      "outcomes": "ok ×2003"
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "main",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 5048,
+      "verified_in_window": 5016,
+      "goodput_rps": 250.8,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 162.596,
+      "outcomes": "ok ×5048"
+    },
+    {
+      "scenario": "s3-large-h2",
+      "variant": "none",
+      "target": "main",
+      "run": "ia-a2-s3-large-h2",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 4679,
+      "verified_in_window": 4647,
+      "goodput_rps": 232.35,
+      "crossed_in_from_warmup": 31,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 173.019,
+      "outcomes": "ok ×4679"
+    }
+  ],
+  "failed_or_invalid_runs": [
+    "ia-a2-s3-large-h2 s3-large-h2/both/base rep1: runtime-finding: jul exited during the run: signal killed; phase load class load: error:eof ×1; phase load class load: status:500 ×5; oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+    "ia-a2-s3-large-h2 s3-large-h2/both/base rep2: runtime-finding: jul exited during the run: signal killed; phase load class load: error:refused ×463809; phase load class load: error:reset ×3; oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+    "ia-a2-s3-large-h2 s3-large-h2/both/base rep3: runtime-finding: jul exited during the run: signal killed; phase load class load: error:refused ×357838; phase load class load: error:reset ×3; oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+    "ia-a2-s3-large-h2 s3-large-h2/both/main rep1: runtime-finding: phase load class load: status:503-inspection-overloaded ×393",
+    "ia-a2-s3-large-h2 s3-large-h2/both/main rep2: runtime-finding: phase load class load: status:503-inspection-overloaded ×374",
+    "ia-a2-s3-large-h2 s3-large-h2/both/main rep3: runtime-finding: phase load class load: status:503-inspection-overloaded ×364"
+  ],
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

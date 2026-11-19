@@ -1,0 +1,1 @@
+/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/ia-a13-normal/cells/u10-normal-h3/none/main/rep3/config.toml is valid (structural + runtime)

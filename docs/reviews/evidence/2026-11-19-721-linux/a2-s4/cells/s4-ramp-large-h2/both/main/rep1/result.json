@@ -1,0 +1,327 @@
+{
+  "scenario": "s4-ramp-large-h2",
+  "scenario_sha256": "cb406853883cac24dd09bb2333f87c408e10a2ce8cc8de53546ee2b1c56b82f8",
+  "comparison": "capacity",
+  "variant": "both",
+  "target": "main",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-19T13:14:43.073582019Z",
+  "ended": "2026-11-19T13:16:02.226387949Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase c16 class load: status:503-inspection-overloaded ×66",
+    "phase c32 class load: status:503-inspection-overloaded ×184",
+    "phase c64 class load: status:503-inspection-overloaded ×935",
+    "phase c128 class load: error:eof ×128",
+    "phase c128 class load: error:refused ×218009",
+    "phase c128 class load: status:500 ×1",
+    "phase c128 class load: status:503-inspection-overloaded ×448",
+    "phase c192 class load: error:refused ×827248",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "d78c434ec4a214c921d41bb28b7f8324a8f4fc5ffde1ab230fd2758b0dd09735",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-83065-681302525.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 7
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "wasm-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "wasm-on-static",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "c16",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 16,
+          "window_seconds": 10,
+          "attempts": 70,
+          "verified": 4,
+          "verified_in_window": 1,
+          "goodput_rps": 0.1,
+          "goodput_bytes_per_second": 104857.6,
+          "classes": {
+            "ok": 4,
+            "status:503-inspection-overloaded": 66
+          },
+          "p50_ms": 3189.22,
+          "p95_ms": 3189.22,
+          "p99_ms": 3189.22,
+          "max_ms": 3189.22,
+          "crossed_in_from_warmup": 16,
+          "outstanding_at_window_end": 16,
+          "response_protos": {
+            "HTTP/2.0": 70
+          },
+          "connections_dialled": 16,
+          "outcome_latency_ms": {
+            "status:503-inspection-overloaded": {
+              "n": 66,
+              "p50": 1754.039,
+              "p95": 3353.235,
+              "p99": 3737.834,
+              "max": 3739.442
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.995,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    },
+    {
+      "name": "c32",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 32,
+          "window_seconds": 10,
+          "attempts": 188,
+          "verified": 4,
+          "verified_in_window": 2,
+          "goodput_rps": 0.2,
+          "goodput_bytes_per_second": 209715.2,
+          "classes": {
+            "ok": 4,
+            "status:503-inspection-overloaded": 184
+          },
+          "p50_ms": 3002.967,
+          "p95_ms": 3002.967,
+          "p99_ms": 3002.967,
+          "max_ms": 4032.595,
+          "crossed_in_from_warmup": 32,
+          "outstanding_at_window_end": 32,
+          "response_protos": {
+            "HTTP/2.0": 188
+          },
+          "connections_dialled": 28,
+          "outcome_latency_ms": {
+            "status:503-inspection-overloaded": {
+              "n": 184,
+              "p50": 1418.816,
+              "p95": 2703.232,
+              "p99": 3750.396,
+              "max": 4275.189
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.997,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    },
+    {
+      "name": "c64",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 64,
+          "window_seconds": 10,
+          "attempts": 938,
+          "verified": 3,
+          "verified_in_window": 1,
+          "goodput_rps": 0.1,
+          "goodput_bytes_per_second": 104857.6,
+          "classes": {
+            "ok": 3,
+            "status:503-inspection-overloaded": 935
+          },
+          "p50_ms": 2423.906,
+          "p95_ms": 2423.906,
+          "p99_ms": 2423.906,
+          "max_ms": 2423.906,
+          "crossed_in_from_warmup": 64,
+          "outstanding_at_window_end": 64,
+          "response_protos": {
+            "HTTP/2.0": 938
+          },
+          "connections_dialled": 60,
+          "outcome_latency_ms": {
+            "status:503-inspection-overloaded": {
+              "n": 935,
+              "p50": 383.216,
+              "p95": 1780.626,
+              "p99": 2463.666,
+              "max": 5008.9
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.996,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    },
+    {
+      "name": "c128",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 128,
+          "window_seconds": 10,
+          "attempts": 218586,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:eof": 128,
+            "error:refused": 218009,
+            "status:500": 1,
+            "status:503-inspection-overloaded": 448
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 128,
+          "outstanding_at_window_end": 128,
+          "response_protos": {
+            "HTTP/2.0": 449
+          },
+          "connections_dialled": 98,
+          "error_samples": {
+            "error:eof": "Post \"https://localhost:37197/proxy/echo?resp=1048576\u0026chunked=1\": unexpected EOF",
+            "error:refused": "Post \"https://localhost:37197/proxy/echo?resp=1048576\u0026chunked=1\": dial tcp 127.0.0.1:37197: connect: connection refused"
+          },
+          "outcome_latency_ms": {
+            "error:eof": {
+              "n": 128,
+              "p50": 1254.917,
+              "p95": 3036.241,
+              "p99": 3926.772,
+              "max": 4078.028
+            },
+            "error:refused": {
+              "n": 218009,
+              "p50": 1.171,
+              "p95": 9.883,
+              "p99": 18.445,
+              "max": 64.727
+            },
+            "status:500": {
+              "n": 1,
+              "p50": 1773.767,
+              "p95": 1773.767,
+              "p99": 1773.767,
+              "max": 1773.767
+            },
+            "status:503-inspection-overloaded": {
+              "n": 448,
+              "p50": 794.678,
+              "p95": 2274.72,
+              "p99": 3206.802,
+              "max": 4510.405
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    },
+    {
+      "name": "c192",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h2",
+          "concurrency": 192,
+          "window_seconds": 10,
+          "attempts": 827248,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:refused": 827248
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 192,
+          "outstanding_at_window_end": 192,
+          "response_protos": {},
+          "connections_dialled": 0,
+          "error_samples": {
+            "error:refused": "Post \"https://localhost:37197/proxy/echo?resp=1048576\u0026chunked=1\": dial tcp 127.0.0.1:37197: connect: connection refused"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 827248,
+              "p50": 1.662,
+              "p95": 6.134,
+              "p99": 9.528,
+              "max": 193.145
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 747204608,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 775913472,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "heap_after_two_gcs_unavailable": "jul exited during the run",
+  "rss_after_two_gcs": null,
+  "samples": 95
+}
