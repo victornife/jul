@@ -243,7 +243,7 @@ test("inspection mode and settings navigation reflect the real server", async ({
     await page.goto("/?inspection=1");
     const inspection = page.getByRole("region", { name: "Inspection resources" });
     await expect(inspection.getByText(/Mode: observe\./)).toBeVisible();
-    await expect(inspection.getByText(/without governor-driven request refusal/)).toBeVisible();
+    await expect(inspection.getByText(/configured-limit pressure without refusing it/)).toBeVisible();
     await expect(inspection.getByText(/Guest capacity is a Jul-managed logical reservation/)).toBeVisible();
     await expect(inspection.getByText(/Jul does not enforce an aggregate Coraza temporary-file quota/)).toBeVisible();
 
@@ -254,6 +254,7 @@ test("inspection mode and settings navigation reflect the real server", async ({
     const editor = page.getByRole("dialog", { name: "Edit global settings" });
     await expect(editor.getByLabel("Inspection mode")).toHaveValue("observe");
     await expect(editor.getByLabel("Inspection evaluation slots")).toHaveValue("0");
+    await expect(editor.getByLabel(/Guest capacity budget/)).toBeEnabled();
   } finally {
     if (applyAttempted) {
       const currentResponse = await request.get("/api/config");

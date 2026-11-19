@@ -28,6 +28,7 @@ const inspectionCurrent = GlobalSettingsProjectionSchema.parse({
   inspection: {
     mode: "enforce",
     max_buffered_bytes: "256m",
+    max_guest_capacity_bytes: "1g",
     max_response_header_bytes: "64k",
     max_concurrent_evaluations: 4,
     evaluation_queue_timeout: "1s",
@@ -76,6 +77,7 @@ describe("global configuration UI uses sparse server-owned previews", () => {
     mount(true, inspectionCurrent, "managed");
     fireEvent.change(screen.getByLabelText("Inspection mode"), { target: { value: "observe" } });
     fireEvent.change(screen.getByLabelText(/Inspection byte budget/), { target: { value: "512m" } });
+    fireEvent.change(screen.getByLabelText(/Guest capacity budget/), { target: { value: "2g" } });
     fireEvent.change(screen.getByLabelText(/Inspection response-header budget/), { target: { value: "128k" } });
     fireEvent.change(screen.getByLabelText(/Inspection evaluation slots/), { target: { value: "" } });
     expect(screen.getByRole("button", { name: "Review changes" })).toBeDisabled();
@@ -90,6 +92,7 @@ describe("global configuration UI uses sparse server-owned previews", () => {
         inspection: {
           mode: "observe",
           max_buffered_bytes: "512m",
+          max_guest_capacity_bytes: "2g",
           max_response_header_bytes: "128k",
           max_concurrent_evaluations: 0,
           evaluation_queue_timeout: "0s",
@@ -117,6 +120,20 @@ describe("global configuration UI uses sparse server-owned previews", () => {
     mount(true, old, "managed");
     expect(screen.getByText("Inspection settings are unavailable on this server.")).toBeVisible();
     expect(screen.queryByLabelText("Inspection mode")).toBeNull();
+  });
+
+  it("keeps guest capacity unavailable on older servers without hiding other settings", () => {
+    const old = GlobalSettingsProjectionSchema.parse({ inspection: {
+      mode: "enforce",
+      max_buffered_bytes: "256m",
+      max_response_header_bytes: "64k",
+      max_concurrent_evaluations: 4,
+      evaluation_queue_timeout: "1s",
+      body_timeout: "1m0s",
+    } });
+    mount(true, old, "managed");
+    expect(screen.getByLabelText(/Guest capacity budget/)).toBeDisabled();
+    expect(screen.getByLabelText("Inspection mode")).toBeEnabled();
   });
 
   it("keeps inspection read-only when the editable base version is missing", () => {

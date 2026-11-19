@@ -45,13 +45,12 @@ func (f *Firewall) newTransaction() types.Transaction {
 	return f.waf.NewTransaction()
 }
 
-func requestBodyProcessingFailed(tx types.Transaction) bool {
-	for _, matched := range tx.MatchedRules() {
-		if matched != nil && matched.Rule() != nil && matched.Rule().ID() == config.WAFRequestBodyErrorRuleID {
-			return true
-		}
+func requestBodyProcessingFailed(tx types.Transaction) (bool, error) {
+	state, ok := txState(tx)
+	if !ok || state.Variables() == nil || state.Variables().RequestBodyError() == nil {
+		return false, fmt.Errorf("waf: Coraza request body error state unavailable (%T)", tx)
 	}
-	return false
+	return state.Variables().RequestBodyError().Get() == "1", nil
 }
 
 func detectionOnlyInterruption(tx types.Transaction) *types.Interruption {
@@ -278,12 +277,22 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		supportHeaderEmitted = true
 	}
 
-	rejectBodyProcessingFailure := func() {
+	rejectBodyProcessingFailure := func() bool {
+		failed, err := requestBodyProcessingFailed(tx)
+		if !failed && err == nil {
+			return false
+		}
 		outcome = OutcomeInspectionError
-		errorCategory = "request_body_processing_error"
-		clientStatus = http.StatusBadRequest
+		if err != nil {
+			errorCategory = "transaction_state_unavailable"
+			clientStatus = http.StatusInternalServerError
+		} else {
+			errorCategory = "request_body_processing_error"
+			clientStatus = http.StatusBadRequest
+		}
 		mintSupportHeader(w.Header())
 		w.WriteHeader(clientStatus)
+		return true
 	}
 
 	// refuse answers a governor refusal or body-arrival failure after the
@@ -514,10 +523,6 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			w.WriteHeader(clientStatus)
 			return
 		}
-		if requestBodyProcessingFailed(tx) {
-			rejectBodyProcessingFailure()
-			return
-		}
 		if it := res.it; it != nil {
 			if isBodyLimitInterruption(it) {
 				outcome = OutcomeRejectedBodyLimit
@@ -528,6 +533,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			clientStatus = interruptionStatus(it, f.info.BlockStatus)
 			mintSupportHeader(w.Header())
 			w.WriteHeader(clientStatus)
+			return
+		}
+		if rejectBodyProcessingFailure() {
 			return
 		}
 		rbr, err := tx.RequestBodyReader()
@@ -570,10 +578,6 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	if n, ok := argsHeld(tx, false); ok {
 		a.trueDown(a.r2, &a.r2Amount, r2Estimate(n, a.bodyBytes))
 	}
-	if requestBodyProcessingFailed(tx) {
-		rejectBodyProcessingFailure()
-		return
-	}
 	if err != nil && it == nil {
 		outcome = OutcomeInspectionError
 		errorCategory = "request_body_process_error"
@@ -595,6 +599,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		clientStatus = interruptionStatus(it, f.info.BlockStatus)
 		mintSupportHeader(w.Header())
 		w.WriteHeader(clientStatus)
+		return
+	}
+	if rejectBodyProcessingFailure() {
 		return
 	}
 

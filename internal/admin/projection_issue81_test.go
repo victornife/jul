@@ -134,12 +134,13 @@ redact_min_secret_length = 8
 		t.Fatal("global projection is nil")
 	}
 	paths := map[string]string{
-		"worker_threads":           "global.worker_threads",
-		"log_level":                "global.log_level",
-		"log_format":               "global.log_format",
-		"shutdown_timeout":         "global.shutdown_timeout",
-		"reload_timeout":           "global.reload_timeout",
-		"redact_min_secret_length": "global.redact_min_secret_length",
+		"worker_threads":                      "global.worker_threads",
+		"log_level":                           "global.log_level",
+		"log_format":                          "global.log_format",
+		"shutdown_timeout":                    "global.shutdown_timeout",
+		"reload_timeout":                      "global.reload_timeout",
+		"redact_min_secret_length":            "global.redact_min_secret_length",
+		"inspection.max_guest_capacity_bytes": "global.inspection.max_guest_capacity_bytes",
 	}
 	for field, path := range paths {
 		entry, ok := lifecycle.Lookup(path)
@@ -162,6 +163,7 @@ func TestIssue81InspectionProjectionPreservesExplicitZero(t *testing.T) {
 [global.inspection]
 mode = "observe"
 max_buffered_bytes = "128m"
+max_guest_capacity_bytes = "48m"
 max_response_header_bytes = "32k"
 max_concurrent_evaluations = 0
 evaluation_queue_timeout = "0s"
@@ -177,6 +179,7 @@ body_timeout = "0s"
 	}
 	want := map[string]any{
 		"mode": "observe", "max_buffered_bytes": "128m",
+		"max_guest_capacity_bytes":  "48m",
 		"max_response_header_bytes": "32k", "max_concurrent_evaluations": float64(0),
 		"evaluation_queue_timeout": "0s", "body_timeout": "0s",
 	}

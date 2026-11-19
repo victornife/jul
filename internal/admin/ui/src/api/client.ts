@@ -639,6 +639,8 @@ export const OverviewSchema = z.object({
       minimum_request_route: z.string().optional(),
       plugin_guest_reserved_bytes: z.number().nonnegative().optional(),
       plugin_guest_capacity_limit_bytes: z.number().nonnegative().optional(),
+      plugin_guest_failed_teardowns: z.number().nonnegative().optional(),
+      plugin_guest_admission_blocked_reason: z.string().optional(),
       plugin_guest_live_instances: z.number().nonnegative().optional(),
       plugin_guest_max_instances: z.number().nonnegative().optional(),
       plugin_guest_actual_bytes_state: z.string().optional(),
@@ -1253,6 +1255,7 @@ export type LifecycleFieldProjection = z.infer<typeof LifecycleFieldProjectionSc
 const InspectionSettingsProjectionSchema = z.object({
   mode: z.enum(["enforce", "observe"]),
   max_buffered_bytes: z.string().nullable(),
+  max_guest_capacity_bytes: z.string().nullable().optional(),
   max_response_header_bytes: z.string().nullable(),
   max_concurrent_evaluations: z.number().int().nonnegative(),
   evaluation_queue_timeout: z.string().nullable(),
@@ -2559,6 +2562,7 @@ export type GlobalPatch = {
   inspection?: {
     mode?: "enforce" | "observe";
     max_buffered_bytes?: string;
+    max_guest_capacity_bytes?: string;
     max_response_header_bytes?: string;
     max_concurrent_evaluations?: number;
     evaluation_queue_timeout?: string;

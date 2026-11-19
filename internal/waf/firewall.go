@@ -146,6 +146,11 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		return nil, err
 	}
 	probe := w.NewTransaction()
+	if _, err := requestBodyProcessingFailed(probe); err != nil {
+		_ = probe.Close()
+		_ = closeWAF(w)
+		return nil, err
+	}
 	if _, ok := innerTx(probe); !ok && opts.Governor != nil {
 		_ = probe.Close()
 		_ = closeWAF(w)
@@ -288,9 +293,8 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 		}
 	}
 	if info.Rules.Inline > 0 {
-		// buildDirectives always emits Jul's request-body processing guard
-		// after user directives, so it remains active even if user rules try to
-		// remove its reserved ID.
+		// This generated rule logs body errors; enforcement reads transaction
+		// state independently of whether the rule executes.
 		info.Rules.Inline--
 		info.Rules.Generated++
 	}
@@ -340,9 +344,8 @@ func canonicalPolicyBytes(cfg config.WAFConfig, info PolicyInfo, rawExternalSum 
 	writeFramed("detection_paranoia", strconv.Itoa(info.DetectionParanoia))
 	writeFramed("request_body_limit", strconv.FormatInt(info.RequestBodyLimitBytes, 10))
 	writeFramed("response_body_inspection", strconv.FormatBool(info.ResponseBodyInspection))
-	// Version 3 adds the request-body failure guard (#713), so policies evaluated
-	// before fail-closed body handling are stale even when TOML and engine match.
-	writeFramed("generated_directives", "3")
+	// Version 4 makes request-body failure handling independent of rule execution.
+	writeFramed("generated_directives", "4")
 	writeFramed("response_body_mime_types", strings.Join(info.ResponseBodyMimeTypes, " "))
 	writeFramed("argument_limit", strconv.Itoa(info.ArgumentLimit))
 	writeFramed("argument_limit_guard", strconv.FormatBool(info.ArgumentLimitGuard))
@@ -437,8 +440,8 @@ func rootFS(cfg config.WAFConfig, rec *sourceRecorder) fs.FS {
 //     argument-limit guard (id 900001, #697);
 //  3. Jul's response-body inspection default from response_body_check (#698);
 //  4. each user directive file;
-//  5. the inline rules snippet, then Jul's request-body failure guard (id
-//     900002), so later user directives cannot remove it;
+//  5. the inline rules snippet, then Jul's request-body failure log rule (id
+//     900002); enforcement does not depend on this rule matching;
 //  6. the enforcement-mode override last, so "block"/"detect" always wins.
 func buildDirectives(cfg config.WAFConfig) (string, error) {
 	var b strings.Builder

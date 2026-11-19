@@ -39,6 +39,7 @@ type GlobalSettingsProjection struct {
 type InspectionSettingsProjection struct {
 	Mode                     string           `json:"mode"`
 	MaxBufferedBytes         *config.Size     `json:"max_buffered_bytes"`
+	MaxGuestCapacityBytes    *config.Size     `json:"max_guest_capacity_bytes"`
 	MaxResponseHeaderBytes   *config.Size     `json:"max_response_header_bytes"`
 	MaxConcurrentEvaluations int              `json:"max_concurrent_evaluations"`
 	EvaluationQueueTimeout   *config.Duration `json:"evaluation_queue_timeout"`
@@ -148,6 +149,7 @@ func projectGlobalSettings(c *config.Config) *GlobalSettingsProjection {
 		Inspection: InspectionSettingsProjection{
 			Mode:                     c.Global.Inspection.Mode,
 			MaxBufferedBytes:         c.Global.Inspection.MaxBufferedBytes,
+			MaxGuestCapacityBytes:    c.Global.Inspection.MaxGuestCapacityBytes,
 			MaxResponseHeaderBytes:   c.Global.Inspection.MaxResponseHeaderBytes,
 			MaxConcurrentEvaluations: c.Global.Inspection.MaxConcurrentEvaluations,
 			EvaluationQueueTimeout:   c.Global.Inspection.EvaluationQueueTimeout,
@@ -162,6 +164,7 @@ func projectGlobalSettings(c *config.Config) *GlobalSettingsProjection {
 			"redact_min_secret_length":              lifecycleFieldProjection("global.redact_min_secret_length"),
 			"inspection.mode":                       lifecycleFieldProjection("global.inspection.mode"),
 			"inspection.max_buffered_bytes":         lifecycleFieldProjection("global.inspection.max_buffered_bytes"),
+			"inspection.max_guest_capacity_bytes":   lifecycleFieldProjection("global.inspection.max_guest_capacity_bytes"),
 			"inspection.max_response_header_bytes":  lifecycleFieldProjection("global.inspection.max_response_header_bytes"),
 			"inspection.max_concurrent_evaluations": lifecycleFieldProjection("global.inspection.max_concurrent_evaluations"),
 			"inspection.evaluation_queue_timeout":   lifecycleFieldProjection("global.inspection.evaluation_queue_timeout"),

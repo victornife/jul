@@ -178,6 +178,19 @@ func applyGlobalSet(c *config.Config, p *globalPatch) (string, error) {
 			}
 			inspection.MaxBufferedBytes = &value
 		}
+		if ip.MaxGuestCapacityBytes != nil {
+			var value config.Size
+			if err := value.UnmarshalText([]byte(strings.TrimSpace(*ip.MaxGuestCapacityBytes))); err != nil {
+				return "", fmt.Errorf("global_set: inspection.max_guest_capacity_bytes: %w", err)
+			}
+			if value <= 0 {
+				return "", fmt.Errorf("global_set: inspection.max_guest_capacity_bytes must be positive")
+			}
+			if inspection.MaxGuestCapacityBytes == nil || *inspection.MaxGuestCapacityBytes != value {
+				changed = append(changed, "inspection.max_guest_capacity_bytes")
+			}
+			inspection.MaxGuestCapacityBytes = &value
+		}
 		if ip.MaxResponseHeaderBytes != nil {
 			var value config.Size
 			if err := value.UnmarshalText([]byte(strings.TrimSpace(*ip.MaxResponseHeaderBytes))); err != nil {
@@ -398,7 +411,7 @@ func hasGlobalFields(p *globalPatch) bool {
 }
 
 func hasInspectionFields(p *inspectionPatch) bool {
-	return p != nil && (p.Mode != nil || p.MaxBufferedBytes != nil ||
+	return p != nil && (p.Mode != nil || p.MaxBufferedBytes != nil || p.MaxGuestCapacityBytes != nil ||
 		p.MaxResponseHeaderBytes != nil || p.MaxConcurrentEvaluations != nil ||
 		p.EvaluationQueueTimeout != nil || p.BodyTimeout != nil)
 }

@@ -265,6 +265,13 @@ export function GlobalSettingsEditor({ current, configAuthority, baseVersion, on
                   <input className={inputClass} value={draft.inspection.maxBufferedBytes}
                     placeholder="Unavailable" onChange={(event) => { updateInspection("maxBufferedBytes", event.target.value); }} />
                 </FieldShell>
+                <FieldShell label="Guest capacity budget" metadata={current.lifecycle["inspection.max_guest_capacity_bytes"]}
+                  error={fieldError("global.inspection.max_guest_capacity_bytes")}
+                  hint="Positive logical reservation ceiling, not a process-memory limit.">
+                  <input className={inputClass} value={draft.inspection.maxGuestCapacityBytes ?? ""}
+                    disabled={draft.inspection.maxGuestCapacityBytes === undefined}
+                    placeholder="Unavailable" onChange={(event) => { updateInspection("maxGuestCapacityBytes", event.target.value); }} />
+                </FieldShell>
                 <FieldShell label="Inspection response-header budget" metadata={current.lifecycle["inspection.max_response_header_bytes"]}
                   error={fieldError("global.inspection.max_response_header_bytes")}>
                   <input className={inputClass} value={draft.inspection.maxResponseHeaderBytes}

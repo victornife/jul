@@ -23,6 +23,7 @@ export interface GlobalSettingsDraft {
 export interface InspectionSettingsDraft {
   mode: "enforce" | "observe";
   maxBufferedBytes: string;
+  maxGuestCapacityBytes: string | undefined;
   maxResponseHeaderBytes: string;
   maxConcurrentEvaluations: string;
   evaluationQueueTimeout: string;
@@ -94,6 +95,7 @@ export function seedGlobalSettings(current: GlobalSettingsProjection): GlobalSet
     inspection: current.inspection === undefined ? undefined : {
       mode: current.inspection.mode,
       maxBufferedBytes: current.inspection.max_buffered_bytes ?? "",
+      maxGuestCapacityBytes: current.inspection.max_guest_capacity_bytes ?? undefined,
       maxResponseHeaderBytes: current.inspection.max_response_header_bytes ?? "",
       maxConcurrentEvaluations: String(current.inspection.max_concurrent_evaluations),
       evaluationQueueTimeout: current.inspection.evaluation_queue_timeout ?? "",
@@ -126,6 +128,9 @@ export function buildGlobalPatch(
     if (after.mode !== before.mode) inspection.mode = after.mode;
     if (after.maxBufferedBytes !== before.maxBufferedBytes)
       inspection.max_buffered_bytes = after.maxBufferedBytes;
+    if (before.maxGuestCapacityBytes !== undefined && after.maxGuestCapacityBytes !== undefined &&
+      after.maxGuestCapacityBytes !== before.maxGuestCapacityBytes)
+      inspection.max_guest_capacity_bytes = after.maxGuestCapacityBytes;
     if (after.maxResponseHeaderBytes !== before.maxResponseHeaderBytes)
       inspection.max_response_header_bytes = after.maxResponseHeaderBytes;
     if (after.maxConcurrentEvaluations !== before.maxConcurrentEvaluations) {

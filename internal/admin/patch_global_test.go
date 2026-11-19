@@ -158,6 +158,7 @@ func TestApplyGlobalSetRejectsInvalidFieldsWithoutMutation(t *testing.T) {
 func TestGlobalSetSupportsInspectionFields(t *testing.T) {
 	mode := "observe"
 	maxBytes := "32m"
+	maxGuestBytes := "48m"
 	maxResponseHeaderBytes := "96k"
 	slots := 4
 	queueTimeout := "0s"
@@ -165,6 +166,7 @@ func TestGlobalSetSupportsInspectionFields(t *testing.T) {
 	patch := globalPatch{Inspection: &inspectionPatch{
 		Mode:                     &mode,
 		MaxBufferedBytes:         &maxBytes,
+		MaxGuestCapacityBytes:    &maxGuestBytes,
 		MaxResponseHeaderBytes:   &maxResponseHeaderBytes,
 		MaxConcurrentEvaluations: &slots,
 		EvaluationQueueTimeout:   &queueTimeout,
@@ -176,6 +178,7 @@ func TestGlobalSetSupportsInspectionFields(t *testing.T) {
 	}
 	got := cfg.Global.Inspection
 	if got.Mode != mode || got.MaxBufferedBytes == nil || *got.MaxBufferedBytes != config.Size(32<<20) ||
+		got.MaxGuestCapacityBytes == nil || *got.MaxGuestCapacityBytes != config.Size(48<<20) ||
 		got.MaxResponseHeaderBytes == nil || *got.MaxResponseHeaderBytes != config.Size(96<<10) ||
 		got.MaxConcurrentEvaluations != slots || got.EvaluationQueueTimeout == nil || *got.EvaluationQueueTimeout != 0 ||
 		got.BodyTimeout == nil || *got.BodyTimeout != 0 {
@@ -183,6 +186,21 @@ func TestGlobalSetSupportsInspectionFields(t *testing.T) {
 	}
 	if summary, err := applyPatch(cfg, patchRequest{Op: "global_set", Global: &patch}); err != nil || summary != "global fields changed: none" {
 		t.Fatalf("reapplying unchanged inspection fields = %q, %v", summary, err)
+	}
+}
+
+func TestGlobalSetGuestCapacityOnly(t *testing.T) {
+	cfg := issue80BaseConfig()
+	mode := cfg.Global.Inspection.Mode
+	patch := globalPatch{Inspection: &inspectionPatch{MaxGuestCapacityBytes: ptr("48m")}}
+	summary, err := applyPatch(cfg, patchRequest{Op: "global_set", Global: &patch})
+	if err != nil || summary != "global fields changed: inspection.max_guest_capacity_bytes" {
+		t.Fatalf("guest capacity patch = %q, %v", summary, err)
+	}
+	if cfg.Global.Inspection.MaxGuestCapacityBytes == nil ||
+		*cfg.Global.Inspection.MaxGuestCapacityBytes != config.Size(48<<20) ||
+		cfg.Global.Inspection.Mode != mode {
+		t.Fatalf("guest capacity patch changed other settings: %+v", cfg.Global.Inspection)
 	}
 }
 
@@ -197,6 +215,8 @@ func TestGlobalSetRejectsInvalidInspectionFields(t *testing.T) {
 		{name: "invalid mode", ip: &inspectionPatch{Mode: ptr("bad")}, want: "mode must be enforce or observe"},
 		{name: "malformed byte size", ip: &inspectionPatch{MaxBufferedBytes: ptr("bad")}, want: "max_buffered_bytes"},
 		{name: "zero byte size", ip: &inspectionPatch{MaxBufferedBytes: ptr("0")}, want: "max_buffered_bytes must be positive"},
+		{name: "malformed guest capacity", ip: &inspectionPatch{MaxGuestCapacityBytes: ptr("bad")}, want: "max_guest_capacity_bytes"},
+		{name: "zero guest capacity", ip: &inspectionPatch{MaxGuestCapacityBytes: ptr("0")}, want: "max_guest_capacity_bytes must be positive"},
 		{name: "malformed response ceiling", ip: &inspectionPatch{MaxResponseHeaderBytes: ptr("bad")}, want: "max_response_header_bytes"},
 		{name: "negative slots", ip: &inspectionPatch{MaxConcurrentEvaluations: &negativeSlots}, want: "max_concurrent_evaluations"},
 		{name: "too many slots", ip: &inspectionPatch{MaxConcurrentEvaluations: &tooManySlots}, want: "max_concurrent_evaluations"},
@@ -238,6 +258,7 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 	}
 	workerThreadsText := strconv.Itoa(workerThreads)
 	responseHeaderBytes := "96k"
+	guestCapacityBytes := "128m"
 
 	hot, err := executePatchBatch(context.Background(), patchBatchBaseline{
 		Config: issue80BaseConfig(),
@@ -251,6 +272,7 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 			ReloadTimeout:   ptr("25s"),
 			Inspection: &inspectionPatch{
 				MaxResponseHeaderBytes: &responseHeaderBytes,
+				MaxGuestCapacityBytes:  &guestCapacityBytes,
 			},
 		},
 	}})
@@ -266,6 +288,7 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 		"global.shutdown_timeout",
 		"global.reload_timeout",
 		"global.inspection.max_response_header_bytes",
+		"global.inspection.max_guest_capacity_bytes",
 	} {
 		found := false
 		for _, ch := range hot.Lifecycle.Changes {
@@ -285,6 +308,9 @@ func TestGlobalSetBatchLifecycleAndRoundTrip(t *testing.T) {
 	}
 	if got := hot.CandidateConfig.Global.Inspection.MaxResponseHeaderBytes; got == nil || *got != config.Size(96<<10) {
 		t.Fatalf("candidate response-header ceiling = %v, want 96 KiB", got)
+	}
+	if got := hot.CandidateConfig.Global.Inspection.MaxGuestCapacityBytes; got == nil || *got != config.Size(128<<20) {
+		t.Fatalf("candidate guest-capacity ceiling = %v, want 128 MiB", got)
 	}
 	if _, err := config.Parse(hot.CandidateRaw); err != nil {
 		t.Fatalf("candidate does not round-trip: %v", err)

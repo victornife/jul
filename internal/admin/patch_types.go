@@ -320,6 +320,7 @@ type globalPatch struct {
 type inspectionPatch struct {
 	Mode                     *string `json:"mode,omitempty"`
 	MaxBufferedBytes         *string `json:"max_buffered_bytes,omitempty"`
+	MaxGuestCapacityBytes    *string `json:"max_guest_capacity_bytes,omitempty"`
 	MaxResponseHeaderBytes   *string `json:"max_response_header_bytes,omitempty"`
 	MaxConcurrentEvaluations *int    `json:"max_concurrent_evaluations,omitempty"`
 	EvaluationQueueTimeout   *string `json:"evaluation_queue_timeout,omitempty"`

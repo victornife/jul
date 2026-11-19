@@ -115,7 +115,7 @@ func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) 
 	payload := strings.TrimSuffix(statusJSON("file_owned", "clean"), "}") +
 		`,"inspection":{"configured":{"mode":"enforce","max_buffered_bytes":268435456,"max_response_header_bytes":65536,"max_concurrent_evaluations":0,"evaluation_queue_timeout":"1s","body_timeout":"60s"},` +
 		`"effective":{"mode":"enforce","max_buffered_bytes":268435456,"max_response_header_bytes":65536,"max_concurrent_evaluations":4,"evaluation_queue_timeout":"1s","body_timeout":"60s"},` +
-		`"usage":{"base_bytes":16384,"buffer_bytes":0,"waf_state_bytes":0},"active_leases":1,"active_evaluations":0,"waiting_evaluations":0,"draining":false,"request_path_integration":"partial","base_charge_bytes":16384,"base_charge_scope":"governor lease/context scaffolding only; excludes request buffers and process memory","plugin_guest_reserved_bytes":16777216,"plugin_guest_capacity_limit_bytes":1073741824,"plugin_guest_live_instances":1,"plugin_guest_max_instances":64,"plugin_guest_actual_bytes_state":"unavailable_engine_measurement","plugin_guest_reservation_scope":"logical managed-instance capacity; excludes engine-internal retained references and is not RSS/heap"}}`
+		`"usage":{"base_bytes":16384,"buffer_bytes":0,"waf_state_bytes":0},"active_leases":1,"active_evaluations":0,"waiting_evaluations":0,"draining":false,"request_path_integration":"partial","base_charge_bytes":16384,"base_charge_scope":"governor lease/context scaffolding only; excludes request buffers and process memory","plugin_guest_reserved_bytes":16777216,"plugin_guest_capacity_limit_bytes":1073741824,"plugin_guest_failed_teardowns":64,"plugin_guest_admission_blocked_reason":"unresolved_teardowns","plugin_guest_live_instances":1,"plugin_guest_max_instances":64,"plugin_guest_actual_bytes_state":"unavailable_engine_measurement","plugin_guest_reservation_scope":"logical managed-instance capacity; excludes engine-internal retained references and is not RSS/heap"}}`
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, payload)
@@ -132,6 +132,7 @@ func TestRemoteStatusPrintsInspectionConfiguredAndEffectiveLimits(t *testing.T) 
 			"evaluations=0 waiting=0",
 			"request_path_integration=partial",
 			"inspection guest capacity: reserved=16777216B limit=1073741824B live_instances=1 max_instances=64 actual_memory=unavailable_engine_measurement",
+			"inspection guest admission: failed_teardowns=64 blocked_reason=unresolved_teardowns",
 			"inspection guest reservation scope: logical managed-instance capacity; excludes engine-internal retained references",
 			"inspection base charge: 16384B",
 			"inspection single-request minimum: unavailable",
@@ -159,6 +160,7 @@ func TestRemoteStatusMarksMissingGuestCapacityAsUnavailable(t *testing.T) {
 		}
 		for _, want := range []string{
 			"inspection guest capacity: reserved=unavailable limit=unavailable live_instances=unavailable max_instances=unavailable actual_memory=unavailable",
+			"inspection guest admission: failed_teardowns=unavailable blocked_reason=unavailable",
 			"inspection guest reservation scope: unavailable",
 		} {
 			if !strings.Contains(out.String(), want) {

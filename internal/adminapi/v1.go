@@ -45,16 +45,18 @@ type InspectionStatus struct {
 	MinimumRequestRoute    string                     `json:"minimum_request_route,omitempty"`
 	// PluginGuestMaxBytes is a projected configured maximum, not a reservation
 	// or measurement of memory currently retained by the engine.
-	PluginGuestMaxBytes             *uint64 `json:"plugin_guest_max_bytes,omitempty"`
-	PluginGuestReservedBytes        uint64  `json:"plugin_guest_reserved_bytes"`
-	PluginGuestCapacityLimitBytes   uint64  `json:"plugin_guest_capacity_limit_bytes"`
-	PluginGuestReservationScope     string  `json:"plugin_guest_reservation_scope"`
-	PluginGuestLiveInstances        *uint64 `json:"plugin_guest_live_instances,omitempty"`
-	PluginGuestMaxInstances         *uint64 `json:"plugin_guest_max_instances,omitempty"`
-	PluginGuestActualBytes          *uint64 `json:"plugin_guest_actual_bytes,omitempty"`
-	PluginGuestActualBytesState     string  `json:"plugin_guest_actual_bytes_state"`
-	EvaluationHeadroomEstimateBytes *uint64 `json:"evaluation_headroom_estimate_bytes,omitempty"`
-	EvaluationHeadroomEstimateState string  `json:"evaluation_headroom_estimate_state"`
+	PluginGuestMaxBytes               *uint64 `json:"plugin_guest_max_bytes,omitempty"`
+	PluginGuestReservedBytes          uint64  `json:"plugin_guest_reserved_bytes"`
+	PluginGuestCapacityLimitBytes     uint64  `json:"plugin_guest_capacity_limit_bytes"`
+	PluginGuestFailedTeardowns        uint64  `json:"plugin_guest_failed_teardowns"`
+	PluginGuestAdmissionBlockedReason string  `json:"plugin_guest_admission_blocked_reason"`
+	PluginGuestReservationScope       string  `json:"plugin_guest_reservation_scope"`
+	PluginGuestLiveInstances          *uint64 `json:"plugin_guest_live_instances,omitempty"`
+	PluginGuestMaxInstances           *uint64 `json:"plugin_guest_max_instances,omitempty"`
+	PluginGuestActualBytes            *uint64 `json:"plugin_guest_actual_bytes,omitempty"`
+	PluginGuestActualBytesState       string  `json:"plugin_guest_actual_bytes_state"`
+	EvaluationHeadroomEstimateBytes   *uint64 `json:"evaluation_headroom_estimate_bytes,omitempty"`
+	EvaluationHeadroomEstimateState   string  `json:"evaluation_headroom_estimate_state"`
 }
 
 type InspectionPluginGuestCapacity struct {

@@ -9,7 +9,7 @@ qualification, soak or maturity change.
 ## Current recovery status — 2026-11-17
 
 The reduced-scope recovery implementation is published on draft #721; #724
-remains a separate partial draft. Published head `7f6628c2` passed hosted HR-05
+remains a separate partial draft. Earlier head `7f6628c2` passed hosted HR-05
 at 508/548 statements (92.7007%) and Codecov patch coverage at 99.06%. Its
 Console audit failed on the upstream dependency advisory described below.
 A corrective follow-up retains guest capacity on real close failures and
@@ -17,6 +17,14 @@ refuses new guest reservations at 64 unresolved guest tickets in every mode;
 already-admitted work may add further failed tickets. Candidate prewarming
 shares that safety boundary. Terminal runtime failures require a process
 restart if the count cannot drain below the boundary.
+The follow-up checks Coraza's transaction state independently of rule
+execution, preserving existing interruptions; rule `900002` only supplies
+diagnostic logging. API, CLI and Console expose the unresolved count and
+mode-independent admission gate, and the guided editor supports the logical
+guest-capacity limit. #721 already includes much of #724's shared
+status and guided-settings work; #724 remains separate and needs its remaining
+diff reconciled against this reduced scope rather than being treated as an
+independent completed checkpoint.
 The 2026-11-17 amendment in
 [ADR 0032](../adr/0032-aggregate-inspection-resource-governor.md) governs this
 scope; earlier fork-dependent plans and checks below are historical only. No
@@ -26,14 +34,14 @@ merge, issue closure or release has occurred.
 | --- | --- |
 | KEEP | Existing process governor, request leases, WAF/plugin accounting, audit ownership, reload publication/version checks, candidate isolation, exact no-op comparisons, and #724's shared API/CLI/Console, RBAC, accessibility and navigation work. |
 | SIMPLIFY | Guest tickets reserve page-rounded ceilings for Jul-managed starting/live instances, with a 1 GiB parsed-config default. Stock cancellation remains enabled. The reservation excludes asynchronous engine-retained references and is not physical memory/RSS. |
-| SIMPLIFY | Stock-Coraza public request-body processing failure results trigger a generated fail-closed guard before origin dispatch. The generic result does not identify a storage cause and does not guarantee all I/O failures are detected. |
+| SIMPLIFY | Jul checks stock Coraza's public request-body error state before origin dispatch, independently of SecLang control flow. The generic flag does not identify a storage cause and does not guarantee all I/O failures are detected. |
 | REMOVE | Wazero/Coraza local replacements and copied source, provider-specific temporary-file plumbing, spool controller/debt/recovery machinery, unsupported spool settings/metrics/API/UI, and replacement-only build/coverage machinery. |
 | DEFER | Original A20 last-alias/retained-memory proof; original A19 exact aggregate spool byte/file quotas, Jul-owned file lifecycle, typed storage failures and crash recovery. No renamed substitute is accepted. |
 
 | Work item | Current disposition |
 | --- | --- |
 | #711 / original A20 | Managed logical capacity is implemented in the draft; original A20 is deferred, not passed. |
-| #713 / original A19 | Public-result failure guard is the reduced scope; original A19 is deferred, not passed. |
+| #713 / original A19 | Public-transaction-state failure guard is the reduced scope; original A19 is deferred, not passed. |
 | #712 / A22 | Real API/CLI/Console agreement has focused coverage; full qualification remains pending. |
 | #700 | Revised scope only; A1–A18/A21/A22 qualification and integrated acceptance remain pending. |
 

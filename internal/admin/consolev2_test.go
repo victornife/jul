@@ -395,6 +395,10 @@ func TestRuntimeOverviewInspection(t *testing.T) {
 		Limits:   inspection.Limits{Mode: inspection.Observe, MaxBytes: 1234},
 		Usage:    [4]uint64{1, 2, 3, 4},
 		Draining: true,
+		GuestCapacity: inspection.GuestCapacitySnapshot{
+			FailedTeardowns:        64,
+			AdmissionBlockedReason: inspection.GuestAdmissionBlockedTeardowns,
+		},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		BootID:             func() string { return "test-boot" },
@@ -413,6 +417,8 @@ func TestRuntimeOverviewInspection(t *testing.T) {
 		out.Inspection.Effective.Mode != "observe" ||
 		out.Inspection.Effective.MaxBufferedBytes != 1234 ||
 		out.Inspection.Usage.AuditBytes != 4 || !out.Inspection.Draining ||
+		out.Inspection.PluginGuestFailedTeardowns != 64 ||
+		out.Inspection.PluginGuestAdmissionBlockedReason != inspection.GuestAdmissionBlockedTeardowns ||
 		out.Inspection.PluginGuestMaxBytes == nil || *out.Inspection.PluginGuestMaxBytes != 5678 {
 		t.Fatalf("overview = %d %+v", rr.Code, out.Inspection)
 	}

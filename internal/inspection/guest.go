@@ -13,6 +13,9 @@ import (
 // Bound newly admitted work when repeated real teardown failures accumulate.
 const maxRetainedGuestFailures = 64
 
+// GuestAdmissionBlockedTeardowns identifies the mode-independent safety gate.
+const GuestAdmissionBlockedTeardowns = "unresolved_teardowns"
+
 // GuestState describes one reserved guest instance's lifetime.
 type GuestState uint8
 
@@ -33,16 +36,24 @@ type guestCapacity struct {
 
 // GuestCapacitySnapshot reports Jul-managed reservations, not committed guest memory.
 type GuestCapacitySnapshot struct {
-	ReservedBytes uint64
-	Instances     [GuestClosed]uint64
-	Draining      bool
+	ReservedBytes          uint64
+	Instances              [GuestClosed]uint64
+	FailedTeardowns        uint64
+	AdmissionBlockedReason string
+	Draining               bool
 }
 
 func (g *Governor) guestSnapshotLocked() GuestCapacitySnapshot {
+	var blockedReason string
+	if g.guest.failed >= maxRetainedGuestFailures {
+		blockedReason = GuestAdmissionBlockedTeardowns
+	}
 	return GuestCapacitySnapshot{
-		ReservedBytes: g.guest.reserved,
-		Instances:     g.guest.instances,
-		Draining:      g.limits.Mode == Enforce && g.limits.MaxGuestCapacityBytes > 0 && g.guest.reserved > g.limits.MaxGuestCapacityBytes,
+		ReservedBytes:          g.guest.reserved,
+		Instances:              g.guest.instances,
+		FailedTeardowns:        g.guest.failed,
+		AdmissionBlockedReason: blockedReason,
+		Draining:               g.limits.Mode == Enforce && g.limits.MaxGuestCapacityBytes > 0 && g.guest.reserved > g.limits.MaxGuestCapacityBytes,
 	}
 }
 

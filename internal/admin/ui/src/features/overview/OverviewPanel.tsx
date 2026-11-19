@@ -225,8 +225,8 @@ function InspectionCard({
           </p>
           {inspection.effective.mode === "observe" && (
             <p className="mt-1 text-sm">
-              Observe mode reports pressure without governor-driven request refusal. Audit records
-              can still be dropped and counted when output is full.
+              Observe mode reports configured-limit pressure without refusing it. Unresolved guest
+              teardowns can still block new instances; audit records can be dropped when output is full.
             </p>
           )}
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -373,7 +373,28 @@ function InspectionCard({
               <dt>Actual guest memory</dt>
               <dd>{inspection.plugin_guest_actual_bytes_state ?? "Unavailable"}</dd>
             </div>
+            <div>
+              <dt>Unresolved guest teardowns</dt>
+              <dd>{inspection.plugin_guest_failed_teardowns?.toLocaleString() ?? "Unavailable"}</dd>
+            </div>
+            <div>
+              <dt>Guest admission safety gate</dt>
+              <dd>
+                {inspection.plugin_guest_admission_blocked_reason === undefined
+                  ? "Unavailable"
+                  : inspection.plugin_guest_admission_blocked_reason === ""
+                    ? "Clear"
+                    : `Blocked: ${inspection.plugin_guest_admission_blocked_reason === "unresolved_teardowns"
+                      ? "unresolved teardowns"
+                      : inspection.plugin_guest_admission_blocked_reason}`}
+              </dd>
+            </div>
           </dl>
+          {inspection.plugin_guest_admission_blocked_reason === "unresolved_teardowns" && (
+            <p className="mt-2 text-sm text-jul-warning">
+              New guest reservations are blocked in all modes; a restart may be needed.
+            </p>
+          )}
           <p className="mt-2 text-xs text-jul-muted">
             The logical reservation excludes engine-internal references that Wazero may retain
             asynchronously; it is not heap or RSS. Jul does not enforce an aggregate Coraza

@@ -245,6 +245,8 @@ func cmdRemoteStatus(args []string) int {
 			} `json:"audit_output"`
 			GuestReservedBytes      *uint64 `json:"plugin_guest_reserved_bytes"`
 			GuestCapacityLimitBytes *uint64 `json:"plugin_guest_capacity_limit_bytes"`
+			GuestFailedTeardowns    *uint64 `json:"plugin_guest_failed_teardowns"`
+			GuestBlockedReason      *string `json:"plugin_guest_admission_blocked_reason"`
 			GuestLiveInstances      *uint64 `json:"plugin_guest_live_instances"`
 			GuestMaxInstances       *uint64 `json:"plugin_guest_max_instances"`
 			GuestActualBytesState   *string `json:"plugin_guest_actual_bytes_state"`
@@ -276,6 +278,7 @@ func cmdRemoteStatus(args []string) int {
 		reserved, capacityLimit := "unavailable", "unavailable"
 		liveInstances, maxInstances := "unavailable", "unavailable"
 		actualState, reservationScope := "unavailable", "unavailable"
+		failedTeardowns, blockedReason := "unavailable", "unavailable"
 		if guest.GuestReservedBytes != nil {
 			reserved = fmt.Sprintf("%dB", *guest.GuestReservedBytes)
 		}
@@ -294,8 +297,18 @@ func cmdRemoteStatus(args []string) int {
 		if guest.GuestReservationScope != nil {
 			reservationScope = *guest.GuestReservationScope
 		}
+		if guest.GuestFailedTeardowns != nil {
+			failedTeardowns = fmt.Sprint(*guest.GuestFailedTeardowns)
+		}
+		if guest.GuestBlockedReason != nil {
+			blockedReason = *guest.GuestBlockedReason
+			if blockedReason == "" {
+				blockedReason = "none"
+			}
+		}
 		fmt.Fprintf(stdout, "inspection guest capacity: reserved=%s limit=%s live_instances=%s max_instances=%s actual_memory=%s\n",
 			reserved, capacityLimit, liveInstances, maxInstances, actualState)
+		fmt.Fprintf(stdout, "inspection guest admission: failed_teardowns=%s blocked_reason=%s\n", failedTeardowns, blockedReason)
 		fmt.Fprintf(stdout, "inspection guest reservation scope: %s\n", reservationScope)
 		fmt.Fprintf(stdout, "inspection base charge: %dB (%s)\n", i.BaseChargeBytes, i.BaseChargeScope)
 		switch {

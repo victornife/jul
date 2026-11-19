@@ -2,7 +2,7 @@
 
 - **Status:** Accepted design, amended 2026-11-17 to prohibit engine forks and narrow the
   #700 completion scope. I1/I2/I3a/I4 foundations and I5 tooling are merged; recovery work for
-  managed guest reservations and the public-result WAF body-failure guard is under review.
+  managed guest reservations and the public-state WAF body-failure guard is under review.
   Original A19/A20 are deferred, not passed; integrated A1–A18/A21/A22 qualification remains
   incomplete. The 2026-11-13 amendment was accepted when #714 merged as `16d98258`.
 - **Date:** 2026-11-10
@@ -54,7 +54,7 @@ or lifecycle subsystem.
 | Work item | Revised disposition |
 | --- | --- |
 | #711 / original A20 | Deliver process-wide logical admission for page-rounded ceilings of Jul-managed starting/live guest instances. The original hard last-alias/retained-memory guarantee is deferred and not marked passed. |
-| #713 / original A19 | Deliver a public-result-based fail-closed guard for detected request-body processing errors before origin dispatch. Exact aggregate spool quotas, file ownership, crash recovery and typed storage-error accounting are deferred and not marked passed. |
+| #713 / original A19 | Deliver a public-transaction-state fail-closed guard for detected request-body processing errors before origin dispatch. Exact aggregate spool quotas, file ownership, crash recovery and typed storage-error accounting are deferred and not marked passed. |
 | #712 / A22 | Project actual governor accounting, logical guest reservations, permission-safe route minimums and explicit unavailable/limited states through shared API/CLI/Console surfaces. Qualification remains pending. |
 | #700 | Complete only the explicitly revised supported scope after focused tests, adversarial review and qualification; preserve links and acceptance traceability for deferred strict capabilities. |
 
@@ -82,8 +82,9 @@ limits are a separate external safeguard and may terminate the process.
 
 ### Revised WAF body-failure contract
 
-With stock Coraza, Jul checks its public matched-rule results for the generated
-`REQBODY_ERROR` guard after body processing and before dispatch. A detected
+With stock Coraza, Jul checks its public transaction state for `REQBODY_ERROR`
+after body processing and before dispatch, independently of SecLang control
+flow. An existing interruption keeps its original outcome; otherwise a detected
 failure returns a generic `400` irrespective of CRS presence, WAF block/detect
 mode or governor enforce/observe mode. Clean multipart and supported partial
 processing remain supported. The generic public flag cannot distinguish disk

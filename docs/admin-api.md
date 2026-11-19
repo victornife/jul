@@ -244,7 +244,13 @@ Two fields exist for clients that poll or retry:
   candidates being prepared and compiled, unclosed plugin generations;
   `plugin_guest_live_instances` reports live instance counts across compiled,
   unclosed plugin generations. `plugin_guest_actual_bytes` is omitted because
-  actual guest-memory allocation is not measured. `evaluation_headroom_estimate_bytes` is omitted
+  actual guest-memory allocation is not measured.
+  `plugin_guest_failed_teardowns` counts unresolved teardown failures, including
+  failures being retried. `plugin_guest_admission_blocked_reason` is
+  `unresolved_teardowns` when 64 or more failures block new guest reservations
+  in every mode, and is empty otherwise. Already admitted work can raise the
+  count further; a restart may be needed. Capacity limits can separately refuse
+  individual reservations. `evaluation_headroom_estimate_bytes` is omitted
   with state `not_calibrated`. Unknown numeric values are omitted rather than
   emitted as `null` or a measured zero. The configured budget is validated
   against the route-aware minimum described in

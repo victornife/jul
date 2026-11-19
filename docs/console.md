@@ -183,7 +183,9 @@ collapse the entire detail area.
 **Inspection resources** is a separate expandable section in this area. The WAF
 and Plugins panels link to it; following either link opens the shared section
 and focuses it when no other control has focus. It reports logical charges and
-limits, not process memory. Missing inspection data is shown as unavailable.
+limits, not process memory. It also reports unresolved guest teardowns and the
+mode-independent admission safety gate; at 64 failures new guest reservations
+are blocked and a restart may be needed. Missing inspection data is shown as unavailable.
 When boot identity and all charge classes are available, the section plots up
 to 60 browser-local accounted-byte samples, labels their request-start window,
 and reports the first, latest, minimum and maximum values in text. These are not
@@ -194,7 +196,7 @@ when the last successful Overview request started over six seconds ago. This
 conservatively includes time spent waiting for the response.
 
 The inspection section links to **Global & Traffic Controls → Global
-settings**, where inspection mode, byte and header budgets, evaluation slots,
+settings**, where inspection mode, byte, guest-capacity and header budgets, evaluation slots,
 and queue and body timeouts use the existing sparse preview and Config
 workflow. Editing requires managed configuration and `config:write` plus
 `config:raw`; file-owned or unknown authority is read-only. Older servers

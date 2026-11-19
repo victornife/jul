@@ -137,7 +137,9 @@ func TestV1StatusReportsInspectionLimitsAndGuestReservation(t *testing.T) {
 		ActiveEvaluations:  2,
 		WaitingEvaluations: 1,
 		GuestCapacity: inspection.GuestCapacitySnapshot{
-			ReservedBytes: 16 << 20,
+			ReservedBytes:          16 << 20,
+			FailedTeardowns:        64,
+			AdmissionBlockedReason: inspection.GuestAdmissionBlockedTeardowns,
 		},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
@@ -171,6 +173,7 @@ func TestV1StatusReportsInspectionLimitsAndGuestReservation(t *testing.T) {
 	}
 	if i.PluginGuestMaxBytes == nil || *i.PluginGuestMaxBytes != 56<<20 ||
 		i.PluginGuestReservedBytes != 16<<20 || i.PluginGuestCapacityLimitBytes != 64<<20 ||
+		i.PluginGuestFailedTeardowns != 64 || i.PluginGuestAdmissionBlockedReason != inspection.GuestAdmissionBlockedTeardowns ||
 		i.PluginGuestLiveInstances == nil || *i.PluginGuestLiveInstances != 3 ||
 		i.PluginGuestMaxInstances == nil || *i.PluginGuestMaxInstances != 5 ||
 		i.PluginGuestActualBytes != nil || i.PluginGuestActualBytesState != "unavailable_engine_measurement" ||
@@ -200,6 +203,64 @@ func TestV1StatusDoesNotRepresentUnavailableGuestCapacityAsZero(t *testing.T) {
 	if strings.Contains(rr.Body.String(), `"plugin_guest_max_bytes"`) {
 		t.Fatalf("unavailable guest capacity must be omitted, not encoded as zero: %s", rr.Body.String())
 	}
+}
+
+func TestInspectionStatusReportsLiveGuestTeardownGate(t *testing.T) {
+	g, err := inspection.New(inspection.Limits{
+		Mode:                   inspection.Observe,
+		MaxBytes:               1 << 20,
+		MaxGuestCapacityBytes:  1 << 20,
+		MaxResponseHeaderBytes: 1 << 10,
+		EvaluationSlots:        1,
+		BaseChargeBytes:        1,
+	}, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, config.AdminConfig{}, Deps{InspectionSnapshot: g.Snapshot})
+	check := func(wantCount uint64, wantReason string) {
+		t.Helper()
+		for _, path := range []string{"/api/v1/status", "/api/runtime/overview"} {
+			rr := getV1(t, s, path, "")
+			if rr.Code != http.StatusOK {
+				t.Fatalf("%s: %d %s", path, rr.Code, rr.Body.String())
+			}
+			got := decodeInto[struct {
+				Inspection *adminapi.InspectionStatus `json:"inspection"`
+			}](t, rr).Inspection
+			if got == nil || got.PluginGuestFailedTeardowns != wantCount ||
+				got.PluginGuestAdmissionBlockedReason != wantReason {
+				t.Fatalf("%s: inspection=%+v, want %d/%q", path, got, wantCount, wantReason)
+			}
+		}
+	}
+	check(0, "")
+	var last *inspection.GuestTicket
+	for i := 0; i < 64; i++ {
+		ticket, err := g.ReserveGuestCapacity(1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ticket.Transition(inspection.GuestClosing); err != nil {
+			t.Fatal(err)
+		}
+		if err := ticket.ResolveTeardown(errors.New("close failed")); err != nil {
+			t.Fatal(err)
+		}
+		last = ticket
+	}
+	check(64, inspection.GuestAdmissionBlockedTeardowns)
+	if _, err := g.ReserveGuestCapacity(1, 1); !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
+		t.Fatalf("observe-mode admission at the teardown gate: %v", err)
+	}
+	if err := last.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	check(64, inspection.GuestAdmissionBlockedTeardowns)
+	if err := last.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+	check(63, "")
 }
 
 func TestInspectionMinimumStatusPermissionsAndAvailability(t *testing.T) {

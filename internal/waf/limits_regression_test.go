@@ -505,9 +505,9 @@ func TestGeneratedPolicyChangeMakesEvaluationStale(t *testing.T) {
 	}
 
 	currentPolicy := canonicalPolicyBytes(config.WAFConfig{Enabled: true, CRSEnabled: true}, base.Info(), [32]byte{})
-	oldPolicy := bytes.Replace(currentPolicy, []byte("generated_directives=1:3\n"), []byte("generated_directives=1:2\n"), 1)
+	oldPolicy := bytes.Replace(currentPolicy, []byte("generated_directives=1:4\n"), []byte("generated_directives=1:3\n"), 1)
 	if bytes.Equal(oldPolicy, currentPolicy) {
-		t.Fatal("canonical policy does not include generated-directives epoch 3")
+		t.Fatal("canonical policy does not include generated-directives epoch 4")
 	}
 	oldSummary := *summary
 	oldSummary.PolicyDigest = vctx.Digest("waf-compiled-policy-v1", oldPolicy)

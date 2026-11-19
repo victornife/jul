@@ -147,6 +147,7 @@ describe("issue #81 sparse patch builders", () => {
       inspection: {
         mode: "enforce",
         max_buffered_bytes: "256m",
+        max_guest_capacity_bytes: "1g",
         max_response_header_bytes: null,
         max_concurrent_evaluations: 4,
         evaluation_queue_timeout: "1s",
@@ -161,12 +162,13 @@ describe("issue #81 sparse patch builders", () => {
       inspection: {
         ...inspection,
         mode: "observe",
+        maxGuestCapacityBytes: "2g",
         maxConcurrentEvaluations: "0",
         bodyTimeout: "0s",
       },
     })).toEqual({
       op: "global_set",
-      global: { inspection: { mode: "observe", max_concurrent_evaluations: 0, body_timeout: "0s" } },
+      global: { inspection: { mode: "observe", max_guest_capacity_bytes: "2g", max_concurrent_evaluations: 0, body_timeout: "0s" } },
     });
     expect(() => buildGlobalPatch(initial, {
       ...initial,

@@ -137,6 +137,8 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
         active_leases: number;
         plugin_guest_reserved_bytes: number;
         plugin_guest_capacity_limit_bytes: number;
+        plugin_guest_failed_teardowns: number;
+        plugin_guest_admission_blocked_reason: string;
         plugin_guest_actual_bytes_state: string;
       } };
       const apiStatus = await response.json() as Status;
@@ -149,6 +151,8 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
         expect(status.active_leases).toBe(overview.active_leases);
         expect(status.plugin_guest_reserved_bytes).toBe(overview.plugin_guest_reserved_bytes);
         expect(status.plugin_guest_capacity_limit_bytes).toBe(overview.plugin_guest_capacity_limit_bytes);
+        expect(status.plugin_guest_failed_teardowns).toBe(overview.plugin_guest_failed_teardowns);
+        expect(status.plugin_guest_admission_blocked_reason).toBe(overview.plugin_guest_admission_blocked_reason);
         expect(status.plugin_guest_actual_bytes_state).toBe(overview.plugin_guest_actual_bytes_state);
       }
     };
@@ -156,8 +160,14 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     expect(initial.minimum_request_bytes).toBeGreaterThan(0);
     expect(initial.plugin_guest_reserved_bytes).toBe(16 * 1024 * 1024);
     expect(initial.plugin_guest_capacity_limit_bytes).toBe(64 * 1024 * 1024);
+    expect(initial.plugin_guest_failed_teardowns).toBe(0);
+    expect(initial.plugin_guest_admission_blocked_reason).toBe("");
     expect(initial.plugin_guest_actual_bytes_state).toBe("unavailable_engine_measurement");
     await checkStatusAgreement(initial);
+    const cliText = execFileSync(binary, ["status", "--endpoint", adminURL], {
+      cwd: root, env: { ...env, JUL_TOKEN: token }, timeout: 15_000, encoding: "utf8",
+    });
+    expect(cliText).toContain("inspection guest admission: failed_teardowns=0 blocked_reason=none");
     const beforeInvalid = RawConfigSchema.parse(await (await api.get("/api/config")).json());
     const invalid = await api.post("/api/config/patch/apply", {
       data: {
@@ -206,6 +216,8 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     await expect(card.getByText(/Mode: enforce\..*Draining\./)).toBeVisible();
     await expect(card.getByText("16.0 MiB / 64.0 MiB")).toBeVisible();
     await expect(card.getByText("unavailable_engine_measurement")).toBeVisible();
+    await expect(card.getByText("Unresolved guest teardowns").locator("..").getByText("0", { exact: true })).toBeVisible();
+    await expect(card.getByText("Guest admission safety gate").locator("..").getByText("Clear")).toBeVisible();
     const callsBefore = originCalls;
     const refused = await traffic.get(servingURL);
     expect(refused.status()).toBe(503);
@@ -227,7 +239,7 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     sendTraffic();
     await expect.poll(() => originCalls).toBe(callsBefore + 1);
     await expect(card.getByText(/Mode: observe\..*Draining\./)).toBeVisible();
-    await expect(card.getByText(/without governor-driven request refusal/)).toBeVisible();
+    await expect(card.getByText(/configured-limit pressure without refusing it/)).toBeVisible();
     for (const response of held) response.writeHead(204).end();
     expect(await Promise.all(pending)).toEqual(
       Array<{ status: number; plugin: string }>(pending.length).fill({ status: 204, plugin: "header-inject" }),
@@ -312,6 +324,33 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     await expect(page.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
     await page.getByRole("link", { name: "History", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Config History" })).toBeVisible();
+
+    await page.unroute("**/TrafficControlsPanel-*.js");
+    await page.goto(`${adminURL}/?inspection=1`);
+    await card.getByRole("link", { name: "Configure inspection in Global settings" }).click();
+    const globalCard = page.locator(".rounded-lg").filter({ hasText: "Global settings" }).first();
+    await globalCard.getByRole("button", { name: "Edit" }).click();
+    const editor = page.getByRole("dialog", { name: "Edit global settings" });
+    await editor.getByLabel(/Guest capacity budget/).fill("96m");
+    const previewRequest = page.waitForRequest((req) =>
+      req.url().includes("/api/config/patch/preview") && req.method() === "POST",
+    );
+    await editor.getByRole("button", { name: "Review changes" }).click();
+    const previewBody = (await previewRequest).postDataJSON() as { ops: unknown };
+    expect(previewBody.ops).toEqual([
+      { op: "global_set", global: { inspection: { max_guest_capacity_bytes: "96m" } } },
+    ]);
+    await expect(page).toHaveURL(/\/config$/);
+    await page.getByRole("button", { name: "Apply live", exact: true }).click();
+    const applyDialog = page.getByRole("dialog", { name: "Apply live?" });
+    const acknowledgment = applyDialog.getByRole("checkbox");
+    if (await acknowledgment.count() > 0) await acknowledgment.check();
+    await applyDialog.getByRole("button", { name: "Apply live", exact: true }).click();
+    await expect(applyDialog).not.toBeVisible();
+    await expect.poll(async () => (await snapshot()).plugin_guest_capacity_limit_bytes).toBe(96 * 1024 * 1024);
+    const updated = await snapshot();
+    expect(updated.plugin_guest_reserved_bytes).toBe(initial.plugin_guest_reserved_bytes);
+    await checkStatusAgreement(updated);
   } finally {
     for (const response of held) {
       if (!response.writableEnded) response.end();

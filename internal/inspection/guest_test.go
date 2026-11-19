@@ -190,6 +190,16 @@ func TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved(t *testing.T) {
 						t.Fatal(err)
 					}
 					tickets = append(tickets, ticket)
+					if i == maxRetainedGuestFailures-2 {
+						got := g.Snapshot().GuestCapacity
+						if got.FailedTeardowns != maxRetainedGuestFailures-1 || got.AdmissionBlockedReason != "" {
+							t.Fatalf("below-threshold status = %+v", got)
+						}
+					}
+				}
+				if got := g.Snapshot().GuestCapacity; got.FailedTeardowns != maxRetainedGuestFailures ||
+					got.AdmissionBlockedReason != GuestAdmissionBlockedTeardowns {
+					t.Fatalf("blocked teardown status = %+v", got)
 				}
 				for i := 0; i < 2; i++ {
 					if _, err := g.ReserveGuestCapacity(2, 10); !IsOutcome(err, GuestCapacitySaturated) {
@@ -199,6 +209,10 @@ func TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved(t *testing.T) {
 				ticket := tickets[len(tickets)-1]
 				if err := ticket.Transition(GuestClosing); err != nil {
 					t.Fatal(err)
+				}
+				if got := g.Snapshot().GuestCapacity; got.FailedTeardowns != maxRetainedGuestFailures ||
+					got.AdmissionBlockedReason != GuestAdmissionBlockedTeardowns {
+					t.Fatalf("closing teardown status = %+v", got)
 				}
 				if _, err := g.ReserveGuestCapacity(2, 10); !IsOutcome(err, GuestCapacitySaturated) {
 					t.Fatalf("admission during teardown resolution = %v, want refusal", err)
@@ -211,6 +225,10 @@ func TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved(t *testing.T) {
 				}
 				if err := ticket.ResolveTeardown(nil); err != nil {
 					t.Fatal(err)
+				}
+				if got := g.Snapshot().GuestCapacity; got.FailedTeardowns != maxRetainedGuestFailures-1 ||
+					got.AdmissionBlockedReason != "" {
+					t.Fatalf("resolved teardown status = %+v", got)
 				}
 				next, err := g.ReserveGuestCapacity(2, 10)
 				if err != nil {

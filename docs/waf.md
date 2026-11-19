@@ -73,10 +73,11 @@ to run it. The check is performed once at startup by `waf.Check`.
    (phases 1–4: request line, request headers, request body, and — when
    `response_body_check` is set — the response). Coraza buffers the request body
    up to `request_body_limit` for inspection.
-3. Before dispatching to the origin, Jul checks Coraza's public matched-rule
-   results for its generated request-body processing error guard. A detected
-   `REQBODY_ERROR` fails closed with `400`, regardless of CRS presence, WAF
-   block/detect mode, or inspection governor enforce/observe mode. Clean
+3. Before dispatching to the origin, Jul checks Coraza's transaction state
+   directly for `REQBODY_ERROR`, independently of rule removal, skips or
+   `allow`. A detected error fails closed with `400`, regardless of CRS
+   presence, WAF block/detect mode, or inspection governor enforce/observe
+   mode; an existing interruption retains its original outcome. Clean
    multipart uploads and supported partial-body policies remain available.
    The signal is intentionally conservative: it does not distinguish storage
    failures from malformed syntax, and cannot detect failures Coraza does not

@@ -214,8 +214,9 @@ describe("operator-centred Overview", () => {
     fireEvent.click(screen.getByText("Show inspection resources"));
     const card = screen.getByRole("region", { name: "Inspection resources" });
     expect(within(card).getByText(/Mode: observe.*Draining/)).toBeVisible();
-    expect(within(card).getByText(/without governor-driven request refusal/)).toBeVisible();
-    expect(within(card).getByText(/Audit records can still be dropped/)).toBeVisible();
+    expect(within(card).getByText(/configured-limit pressure without refusing it/)).toBeVisible();
+    expect(within(card).getByText(/audit records can be dropped when output is full/)).toBeVisible();
+    expect(within(card).getByText(/Unresolved guest teardowns can still block new instances/)).toBeVisible();
     expect(within(card).getByText("WAF state estimate")).toBeVisible();
     expect(within(card).getByText(/Configured evaluation slots: automatic/)).toBeVisible();
     expect(within(card).getByText(/Limiting route: servers\[0\].locations\[0\]/)).toBeVisible();
@@ -500,7 +501,7 @@ describe("operator-centred Overview", () => {
       overview({
         inspection: {
           effective: {
-            mode: "enforce",
+            mode: "observe",
             max_buffered_bytes: 256,
             max_concurrent_evaluations: 2,
           },
@@ -517,6 +518,8 @@ describe("operator-centred Overview", () => {
           request_path_integration: "partial",
           plugin_guest_reserved_bytes: 16 << 20,
           plugin_guest_capacity_limit_bytes: 1 << 30,
+          plugin_guest_failed_teardowns: 64,
+          plugin_guest_admission_blocked_reason: "unresolved_teardowns",
           plugin_guest_live_instances: 1,
           plugin_guest_max_instances: 64,
           plugin_guest_actual_bytes_state: "unavailable_engine_measurement",
@@ -530,6 +533,9 @@ describe("operator-centred Overview", () => {
     expect(within(card).getByText("16.0 MiB / 1.0 GiB")).toBeVisible();
     expect(within(card).getByText("1 / 64")).toBeVisible();
     expect(within(card).getByText("unavailable_engine_measurement")).toBeVisible();
+    expect(within(card).getByText("Blocked: unresolved teardowns")).toBeVisible();
+    expect(within(card).getByText(/New guest reservations are blocked in all modes/)).toBeVisible();
+    expect(within(card).getByText("Unresolved guest teardowns").nextElementSibling).toHaveTextContent("64");
     expect(within(card).getByText(/excludes engine-internal references/)).toBeVisible();
     expect(within(card).getByText(/aggregate Coraza temporary-file quota/)).toBeVisible();
     expect(screen.queryByText("WAF temporary-file spool")).not.toBeInTheDocument();
