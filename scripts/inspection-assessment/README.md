@@ -124,6 +124,7 @@ envelope, so smoke and unconstrained runs never receive a verdict.
 | `fidelity` | `r1`, `s8`, `s11l`, `s9`, F3 pending 16 and 0, F4, `s6`, `s7`, `r2`: instrument fidelity smokes. Their outcomes are recorded without a pass verdict. |
 | `historical-695`, `historical-699` | The archived s1–s11 and r1–r3 definitions. |
 | `destructive` | `s3`, `s4`, full `s11`. They OOM uncapped runtimes and are kept for I6 runs in an isolated envelope. |
+| `bounded-envelope-diagnostic` | Plan v6 copies of `s11`, `s3` and `s4`; the WAF-only A1 diagnostic uses 320 MiB, while full-fixture A2 proposes 448 MiB after `jul check` measured a 406503427 B route minimum. This A2 configuration has not been run or validated; check it with the target binary. A2 also uses four instances per plugin, a 2 s timeout and `GOMEMLIMIT=480MiB`. Frozen historical scenarios remain unchanged. |
 
 `f4-body-deadline-5s` is in no suite; select it with `-scenario`. It sets
 `[global.inspection].body_timeout = "5s"`, well inside its 20 s watchdog, because the 60 s default
@@ -131,7 +132,7 @@ outlasts every F4 watchdog. Only the `current` adapter can express it, and `run`
 targets before starting. Post-I1 main records a runtime finding for `both` (no 408; the watchdog
 ends the upload) until I2/I3 implement the deadline.
 
-`plan.json` is the frozen plan (`inspection-assessment-plan/v3`): scenarios, profiles, suites,
+`plan.json` is the frozen plan (`inspection-assessment-plan/v6`): scenarios, profiles, suites,
 interpretation rules and the configuration-template hash. A test fails when the code and `plan.json` disagree. Any change to
 scenarios or rules must regenerate `plan.json` (`/tmp/ia plan > scripts/inspection-assessment/plan.json`)
 and be reviewed. Runs made under another plan hash are not comparable.
@@ -143,8 +144,13 @@ new one are unchanged, and every existing cell renders a byte-identical configur
 #700 I5 baseline campaign ran under v1. Its stored results lack the new fields, and `summarize`
 does not re-judge them or merge them with v2 runs.
 
-Plan v3 (#700 I2) adds plugin fixtures, explicit inspection limits and plugin-only cells. Runs
-under v1, v2 and v3 have different plan hashes and are never merged.
+Plan v3 (#700 I2) adds plugin fixtures, explicit inspection limits and plugin-only cells. Plan v4
+adds separately named bounded-envelope diagnostics and protocol validation for non-2xx responses.
+Plan v5 applies the diagnostic plugin timeout and instance cap to the full fixture as well as the
+request-only fixture. Plan v6 proposes a higher A2 diagnostic budget after the v5 real-binary
+check reported a 406503427 B route minimum, and requires the exact overload body including its
+newline. Earlier versions trimmed whitespace; their aggregate results cannot prove the exact body.
+Runs under different plan versions have different hashes and are never merged.
 
 - `fixture` selects the plugin pair for `wasm`/`both`: `full` (the default, unchanged),
   `request-only` (inspect-load reading only the request body; no response subscription, so
@@ -224,11 +230,22 @@ under v1, v2 and v3 have different plan hashes and are never merged.
 - Every non-2xx response is classified by `StatusClass`. A governor overload answer is
   `status:503-inspection-overloaded` in every scenario, so a governor 503 in a cell that expects
   only pool or admission 503s (for example F3) is a finding rather than an expected outcome.
+- Plan v4 and later require each non-2xx response's negotiated protocol to match the requested H1/H2/H3
+  protocol. The overload class requires the matching protocol, HTTP 503, `Retry-After: 1`, and the
+  body `inspection_overloaded\n` (v6; v4/v5 trimmed whitespace); a mismatch cannot be accepted as a governor reject.
 - Summaries refuse to merge runs whose `guest` or `guest_nobody` identities differ.
 
 Every v2 cell with the default fixture renders a byte-identical configuration under v3. The
 origin echoes `X-Echo-A-Req-Len` from `a1`/`a2` as well as `a`, which changes only s9's
 responses, and adds the state echoes only when they are present.
+
+## Current-main qualification
+
+The dated [#721 current-main campaign record](../../docs/reviews/evidence/2026-11-19-721-current-main/README.md)
+pins the matrix, thresholds, target SHAs, commands and results. Its comparison uses current `main`
+against the candidate, not the ADR baseline or pre-fix PR head. Plan v4-v6 diagnostics are additive:
+the frozen A1/A2 runs and thresholds are retained, and a sized diagnostic does not retroactively
+pass them.
 
 ## What a run records
 

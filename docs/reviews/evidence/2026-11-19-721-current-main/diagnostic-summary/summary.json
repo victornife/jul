@@ -1,0 +1,1904 @@
+{
+  "plan_version": "inspection-assessment-plan/v4",
+  "profile": "qualification",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta, a nonzero governor lease/bytes/evaluation gauge after recovery (plan v3)) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "bounded-diagnostic"
+  ],
+  "targets": [
+    {
+      "label": "candidate",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+        "sha256": "c96daf7a91d04f46f99148dd21859f62f6576a45558b255748fe67184090a902",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-main",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-main",
+        "sha256": "cbc506c19b48a910342e4c4a07f6e3919f6ff524eeaff384a9b1ce95274da609",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 873.5,
+        "min_goodput_rps": 868.4,
+        "max_goodput_rps": 1136.4,
+        "relative_spread": 0.307
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 1136.4,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.388,
+          "peak_cg_memory_bytes": 24666112,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 873.5,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.413,
+          "peak_cg_memory_bytes": 25137152,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 868.4,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.407,
+          "peak_cg_memory_bytes": 25153536,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 1542.5,
+        "min_goodput_rps": 1202.7,
+        "max_goodput_rps": 1703,
+        "relative_spread": 0.324
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 1202.7,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.381,
+          "peak_cg_memory_bytes": 25153536,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 1542.5,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.381,
+          "peak_cg_memory_bytes": 24600576,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 1703,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.36,
+          "peak_cg_memory_bytes": 25595904,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 3.6,
+        "min_goodput_rps": 3.2,
+        "max_goodput_rps": 3.9,
+        "relative_spread": 0.194
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 3.9,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.519,
+          "peak_cg_memory_bytes": 496005120,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 3.2,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.524,
+          "peak_cg_memory_bytes": 490344448,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 3.6,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.522,
+          "peak_cg_memory_bytes": 495554560,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 3.3,
+        "min_goodput_rps": 2.8,
+        "max_goodput_rps": 3.5,
+        "relative_spread": 0.212
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 2.8,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.53,
+          "peak_cg_memory_bytes": 498872320,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 3.3,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.515,
+          "peak_cg_memory_bytes": 496676864,
+          "state": "completed"
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 3.5,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.518,
+          "peak_cg_memory_bytes": 499212288,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "both",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 0,
+        "correct": 3,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "both",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 0,
+        "correct": 3,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 0,
+        "correct": 3,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 0,
+        "correct": 3,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 2,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        },
+        {
+          "run": "bounded-diagnostic",
+          "rep": 3,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "both",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 0,
+        "correct": 1,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "both",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 0,
+        "correct": 1,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 0,
+        "correct": 1,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 0,
+        "correct": 1,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "bounded-diagnostic",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "render: plugin timeout and max_instances are only rendered for the request-only fixture"
+          ]
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 11365,
+      "verified_in_window": 11364,
+      "goodput_rps": 1136.4,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 1.875,
+      "outcomes": "ok ×11365"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 28020,
+      "verified_in_window": 28018,
+      "goodput_rps": 2801.8,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 2.006,
+      "outcomes": "ok ×28020"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 56861,
+      "verified_in_window": 56857,
+      "goodput_rps": 5685.7,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 2.945,
+      "outcomes": "ok ×56861"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 66640,
+      "verified_in_window": 66633,
+      "goodput_rps": 6663.3,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 7,
+      "p99_ms": 7.324,
+      "outcomes": "ok ×66640"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 61978,
+      "verified_in_window": 61962,
+      "goodput_rps": 6196.2,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 11.373,
+      "outcomes": "ok ×61978"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 8736,
+      "verified_in_window": 8735,
+      "goodput_rps": 873.5,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 3.406,
+      "outcomes": "ok ×8736"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 25348,
+      "verified_in_window": 25346,
+      "goodput_rps": 2534.6,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 2.344,
+      "outcomes": "ok ×25348"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 59446,
+      "verified_in_window": 59442,
+      "goodput_rps": 5944.2,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 2.667,
+      "outcomes": "ok ×59446"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 77986,
+      "verified_in_window": 77978,
+      "goodput_rps": 7797.8,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 5.817,
+      "outcomes": "ok ×77986"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 82995,
+      "verified_in_window": 82979,
+      "goodput_rps": 8297.9,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 9.378,
+      "outcomes": "ok ×82995"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 8685,
+      "verified_in_window": 8684,
+      "goodput_rps": 868.4,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 3.535,
+      "outcomes": "ok ×8685"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 26842,
+      "verified_in_window": 26840,
+      "goodput_rps": 2684,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 2.038,
+      "outcomes": "ok ×26842"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 55508,
+      "verified_in_window": 55504,
+      "goodput_rps": 5550.4,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 3.479,
+      "outcomes": "ok ×55508"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 70210,
+      "verified_in_window": 70203,
+      "goodput_rps": 7020.3,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 7,
+      "p99_ms": 7.37,
+      "outcomes": "ok ×70210"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 78196,
+      "verified_in_window": 78180,
+      "goodput_rps": 7818,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 9.525,
+      "outcomes": "ok ×78196"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 12028,
+      "verified_in_window": 12027,
+      "goodput_rps": 1202.7,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 2.211,
+      "outcomes": "ok ×12028"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 27871,
+      "verified_in_window": 27869,
+      "goodput_rps": 2786.9,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 2.473,
+      "outcomes": "ok ×27871"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 44570,
+      "verified_in_window": 44566,
+      "goodput_rps": 4456.6,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 4.811,
+      "outcomes": "ok ×44570"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 49172,
+      "verified_in_window": 49164,
+      "goodput_rps": 4916.4,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 9.353,
+      "outcomes": "ok ×49172"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 55516,
+      "verified_in_window": 55500,
+      "goodput_rps": 5550,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 12.375,
+      "outcomes": "ok ×55516"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 15426,
+      "verified_in_window": 15425,
+      "goodput_rps": 1542.5,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 1.492,
+      "outcomes": "ok ×15426"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 33494,
+      "verified_in_window": 33492,
+      "goodput_rps": 3349.2,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 1.581,
+      "outcomes": "ok ×33494"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 59098,
+      "verified_in_window": 59094,
+      "goodput_rps": 5909.4,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 2.829,
+      "outcomes": "ok ×59098"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 51491,
+      "verified_in_window": 51483,
+      "goodput_rps": 5148.3,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 9.108,
+      "outcomes": "ok ×51491"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 48010,
+      "verified_in_window": 47994,
+      "goodput_rps": 4799.4,
+      "crossed_in_from_warmup": 15,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 14.407,
+      "outcomes": "ok ×48010"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 17031,
+      "verified_in_window": 17030,
+      "goodput_rps": 1703,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 1.356,
+      "outcomes": "ok ×17031"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 34105,
+      "verified_in_window": 34103,
+      "goodput_rps": 3410.3,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 1.52,
+      "outcomes": "ok ×34105"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 52029,
+      "verified_in_window": 52025,
+      "goodput_rps": 5202.5,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 3.64,
+      "outcomes": "ok ×52029"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 56701,
+      "verified_in_window": 56693,
+      "goodput_rps": 5669.3,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 7.554,
+      "outcomes": "ok ×56701"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "none",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 44094,
+      "verified_in_window": 44078,
+      "goodput_rps": 4407.8,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 16.239,
+      "outcomes": "ok ×44094"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 40,
+      "verified_in_window": 39,
+      "goodput_rps": 3.9,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 285.971,
+      "outcomes": "ok ×40"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 79,
+      "verified_in_window": 77,
+      "goodput_rps": 7.7,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 389.363,
+      "outcomes": "ok ×79"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 658,
+      "verified_in_window": 70,
+      "goodput_rps": 7,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 629.81,
+      "outcomes": "ok ×72, status:503-inspection-overloaded ×586",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 586,
+          "p50": 20.191,
+          "p95": 41.435,
+          "p99": 52.769,
+          "max": 81.118
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 3412,
+      "verified_in_window": 60,
+      "goodput_rps": 6,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 631.836,
+      "outcomes": "ok ×64, status:503-inspection-overloaded ×3348",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 3348,
+          "p50": 10.18,
+          "p95": 47.944,
+          "p99": 55.878,
+          "max": 78.528
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 7138,
+      "verified_in_window": 53,
+      "goodput_rps": 5.3,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 775.58,
+      "outcomes": "ok ×56, status:503-inspection-overloaded ×7082",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 7082,
+          "p50": 15.567,
+          "p95": 51.898,
+          "p99": 61.347,
+          "max": 79.217
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 33,
+      "verified_in_window": 32,
+      "goodput_rps": 3.2,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 367.671,
+      "outcomes": "ok ×33"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 67,
+      "verified_in_window": 65,
+      "goodput_rps": 6.5,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 350.296,
+      "outcomes": "ok ×67"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 629,
+      "verified_in_window": 63,
+      "goodput_rps": 6.3,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 642.748,
+      "outcomes": "ok ×65, status:503-inspection-overloaded ×564",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 564,
+          "p50": 20.139,
+          "p95": 40.546,
+          "p99": 55.761,
+          "max": 90.829
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 3090,
+      "verified_in_window": 70,
+      "goodput_rps": 7,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 597.415,
+      "outcomes": "ok ×74, status:503-inspection-overloaded ×3016",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 3016,
+          "p50": 15.511,
+          "p95": 41.69,
+          "p99": 53.403,
+          "max": 68.752
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 6380,
+      "verified_in_window": 70,
+      "goodput_rps": 7,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 598.048,
+      "outcomes": "ok ×72, status:503-inspection-overloaded ×6308",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 6308,
+          "p50": 19.784,
+          "p95": 53.298,
+          "p99": 65.916,
+          "max": 114.004
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 37,
+      "verified_in_window": 36,
+      "goodput_rps": 3.6,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 332.718,
+      "outcomes": "ok ×37"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 78,
+      "verified_in_window": 76,
+      "goodput_rps": 7.6,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 321.439,
+      "outcomes": "ok ×78"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 629,
+      "verified_in_window": 79,
+      "goodput_rps": 7.9,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 510.53,
+      "outcomes": "ok ×82, status:503-inspection-overloaded ×547",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 547,
+          "p50": 20.184,
+          "p95": 52.681,
+          "p99": 55.627,
+          "max": 71.14
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 2757,
+      "verified_in_window": 73,
+      "goodput_rps": 7.3,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 649.251,
+      "outcomes": "ok ×76, status:503-inspection-overloaded ×2681",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 2681,
+          "p50": 19.799,
+          "p95": 42.95,
+          "p99": 58.729,
+          "max": 77.132
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "candidate",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 6597,
+      "verified_in_window": 60,
+      "goodput_rps": 6,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 690.931,
+      "outcomes": "ok ×62, status:503-inspection-overloaded ×6535",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 6535,
+          "p50": 19.831,
+          "p95": 46.429,
+          "p99": 59.608,
+          "max": 80.449
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 29,
+      "verified_in_window": 28,
+      "goodput_rps": 2.8,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 377.19,
+      "outcomes": "ok ×29"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 72,
+      "verified_in_window": 70,
+      "goodput_rps": 7,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 371.657,
+      "outcomes": "ok ×72"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 680,
+      "verified_in_window": 84,
+      "goodput_rps": 8.4,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 481.692,
+      "outcomes": "ok ×87, status:503-inspection-overloaded ×593",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 593,
+          "p50": 20.135,
+          "p95": 40.574,
+          "p99": 45.142,
+          "max": 58.416
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 3148,
+      "verified_in_window": 82,
+      "goodput_rps": 8.2,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 521.596,
+      "outcomes": "ok ×85, status:503-inspection-overloaded ×3063",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 3063,
+          "p50": 14.41,
+          "p95": 43.197,
+          "p99": 55.137,
+          "max": 70.724
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 8158,
+      "verified_in_window": 73,
+      "goodput_rps": 7.3,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 651.379,
+      "outcomes": "ok ×75, status:503-inspection-overloaded ×8083",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 8083,
+          "p50": 9.332,
+          "p95": 54.21,
+          "p99": 61.317,
+          "max": 84.758
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 34,
+      "verified_in_window": 33,
+      "goodput_rps": 3.3,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 323.008,
+      "outcomes": "ok ×34"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 74,
+      "verified_in_window": 72,
+      "goodput_rps": 7.2,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 320.29,
+      "outcomes": "ok ×74"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 696,
+      "verified_in_window": 78,
+      "goodput_rps": 7.8,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 490.856,
+      "outcomes": "ok ×81, status:503-inspection-overloaded ×615",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 615,
+          "p50": 20.117,
+          "p95": 40.545,
+          "p99": 55.16,
+          "max": 83.427
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 2455,
+      "verified_in_window": 76,
+      "goodput_rps": 7.6,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 551.433,
+      "outcomes": "ok ×78, status:503-inspection-overloaded ×2377",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 2377,
+          "p50": 20.128,
+          "p95": 45.861,
+          "p99": 59.768,
+          "max": 66.147
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 2,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 7263,
+      "verified_in_window": 71,
+      "goodput_rps": 7.1,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 584.031,
+      "outcomes": "ok ×73, status:503-inspection-overloaded ×7190",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 7190,
+          "p50": 15.168,
+          "p95": 44.091,
+          "p99": 59.932,
+          "max": 130.702
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 36,
+      "verified_in_window": 35,
+      "goodput_rps": 3.5,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 314.333,
+      "outcomes": "ok ×36"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 78,
+      "verified_in_window": 76,
+      "goodput_rps": 7.6,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 341.242,
+      "outcomes": "ok ×78"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 634,
+      "verified_in_window": 81,
+      "goodput_rps": 8.1,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 471.028,
+      "outcomes": "ok ×83, status:503-inspection-overloaded ×551",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 551,
+          "p50": 20.202,
+          "p95": 48.736,
+          "p99": 56.18,
+          "max": 70.129
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 3033,
+      "verified_in_window": 69,
+      "goodput_rps": 6.9,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 626.152,
+      "outcomes": "ok ×71, status:503-inspection-overloaded ×2962",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 2962,
+          "p50": 14.55,
+          "p95": 45.587,
+          "p99": 59.123,
+          "max": 80.921
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1-320m",
+      "variant": "waf",
+      "target": "main",
+      "run": "bounded-diagnostic",
+      "rep": 3,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 7627,
+      "verified_in_window": 61,
+      "goodput_rps": 6.1,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 720.61,
+      "outcomes": "ok ×64, status:503-inspection-overloaded ×7563",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 7563,
+          "p50": 9.827,
+          "p95": 45.443,
+          "p99": 60.436,
+          "max": 89.716
+        }
+      }
+    }
+  ],
+  "failed_or_invalid_runs": [
+    "bounded-diagnostic s3-large-h2-bounded/both/candidate rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/both/candidate rep2: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/both/candidate rep3: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/both/main rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/both/main rep2: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/both/main rep3: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/none/candidate rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/none/candidate rep2: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/none/candidate rep3: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/none/main rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/none/main rep2: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s3-large-h2-bounded/none/main rep3: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s4-ramp-large-h2-bounded/both/candidate rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s4-ramp-large-h2-bounded/both/main rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s4-ramp-large-h2-bounded/none/candidate rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture",
+    "bounded-diagnostic s4-ramp-large-h2-bounded/none/main rep1: instrument-invalid: render: plugin timeout and max_instances are only rendered for the request-only fixture"
+  ],
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

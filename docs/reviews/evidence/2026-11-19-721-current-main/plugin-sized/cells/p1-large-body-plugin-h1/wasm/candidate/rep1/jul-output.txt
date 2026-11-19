@@ -1,0 +1,4 @@
+time=2026-11-19T16:15:34.846+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=unknown
+time=2026-11-19T16:15:34.996+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=unknown
+time=2026-11-19T16:15:50.538+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-b reason=unknown
+time=2026-11-19T16:15:51.548+01:00 level=WARN msg="plugin guest failure contained; request answered 500" plugin=inspect-a reason=unknown

@@ -1,0 +1,11 @@
+2026-11-19T15:08:12Z u1b-normal-h1-none-c8/none/main rep1: state=completed valid=true correct=true load/load=4315.9rps(86326/86326) cpu=0.62
+2026-11-19T15:08:48Z u1b-normal-h1-none-c8/none/candidate rep1: state=completed valid=true correct=true load/load=2733.3rps(54674/54674) cpu=0.65
+2026-11-19T15:09:23Z u1b-normal-h1-none-c8/none/main rep2: state=completed valid=true correct=true load/load=4545.5rps(90918/90918) cpu=0.61
+2026-11-19T15:09:59Z u1b-normal-h1-none-c8/none/candidate rep2: state=completed valid=true correct=true load/load=4450.4rps(89016/89016) cpu=0.60
+2026-11-19T15:10:34Z u1b-normal-h1-none-c8/none/main rep3: state=completed valid=true correct=true load/load=4785.1rps(95711/95711) cpu=0.60
+2026-11-19T15:11:10Z u1b-normal-h1-none-c8/none/candidate rep3: state=completed valid=true correct=true load/load=3997.1rps(79949/79949) cpu=0.61
+2026-11-19T15:11:45Z u1b-normal-h1-none-c8/none/main rep4: state=completed valid=true correct=true load/load=3200.4rps(64017/64017) cpu=0.64
+2026-11-19T15:12:21Z u1b-normal-h1-none-c8/none/candidate rep4: state=completed valid=true correct=true load/load=4517.8rps(90363/90363) cpu=0.60
+2026-11-19T15:12:56Z u1b-normal-h1-none-c8/none/main rep5: state=completed valid=true correct=true load/load=3908.4rps(78176/78176) cpu=0.61
+2026-11-19T15:13:32Z u1b-normal-h1-none-c8/none/candidate rep5: state=completed valid=true correct=true load/load=4333.6rps(86678/86678) cpu=0.60
+run u1b: complete, 10 results in /home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/pr-721-work/docs/reviews/evidence/2026-11-19-721-current-main/u1b

@@ -30,6 +30,24 @@ The 2026-11-17 amendment in
 scope; earlier fork-dependent plans and checks below are historical only. No
 merge, issue closure or release has occurred.
 
+### Current-main qualification follow-up — 2026-11-19
+
+**HOLD:** the bounded paired comparison is noisy and does not establish no material regression;
+the sized p1 guest workload produced unexpected 500s on both current main and the candidate.
+The first A2 diagnostic could not render; its single targeted correction still failed the
+actual combined-route config check. See the [campaign and all attempts](evidence/2026-11-19-721-current-main/README.md)
+for exact SHAs, limitations and the next action. No production code was changed by this follow-up.
+Historical A1/A2 remain failed; A1–A18/A21/A22 are not fully qualified. Original A19 and A20
+remain deferred.
+
+| Tracking | Reduced-scope evidence and disposition |
+| --- | --- |
+| #711 / A20 | Guest reservations, failure gate and recycling have focused/race and soak evidence; this is logical accounting, not retained-memory proof. Keep strict A20 deferred. |
+| #713 / A19 | Upstream transaction-state body failure guard and control-flow bypass tests are covered; unreported/late failures and spool ownership are outside the contract. Keep strict A19 deferred. |
+| #712 / A22 | Existing real-server API/CLI/Console tests cover enforcement, observe, drainage and rejected reload; focused tests cover the teardown gate and guided setting. Full A22 checklist/qualification is not established; keep open. |
+| #724 | Separate draft overlaps status, CLI and settings already in #721; reconcile its remaining actual delta before recommending supersession; do not close it. |
+| #700 | Remains open: comparison, p1 failure, combined diagnostic and other applicable programme criteria remain unresolved. |
+
 | Disposition | Scope |
 | --- | --- |
 | KEEP | Existing process governor, request leases, WAF/plugin accounting, audit ownership, reload publication/version checks, candidate isolation, exact no-op comparisons, and #724's shared API/CLI/Console, RBAC, accessibility and navigation work. |

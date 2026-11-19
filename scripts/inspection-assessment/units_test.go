@@ -1068,8 +1068,9 @@ func TestPlanV3FixturesAndLimits(t *testing.T) {
 		t.Errorf("request-only pool settings must apply to both plugins:\n%s", ro)
 	}
 	p.Fixture = FixtureFull
-	if _, err := RenderConfig(p); err == nil {
-		t.Error("pool settings rendered outside the request-only fixture")
+	if full := render(p); strings.Count(full, "timeout = \"2s\"\nmax_instances = 4\nconfig = ") != 2 ||
+		!strings.Contains(full, `subscribe = "true", replace = "true"`) {
+		t.Errorf("full fixture pool settings must apply to both plugins:\n%s", full)
 	}
 	p = base
 	p.Fixture, p.WAF = FixtureNoBody, true
@@ -1149,23 +1150,32 @@ func TestPlanV3ExerciseChecksAndGuestIdentity(t *testing.T) {
 	}
 
 	// Only the governor's exact overload answer is the overload class.
-	mk := func(code int, retry, body string) string {
+	mk := func(code int, retry, body, expectedProto string) string {
 		h := http.Header{}
 		if retry != "" {
 			h.Set("Retry-After", retry)
 		}
-		return StatusClass(&http.Response{StatusCode: code, Header: h}, []byte(body))
+		major := map[string]int{"h1": 1, "h2": 2, "h3": 3}[expectedProto]
+		return StatusClass(&http.Response{StatusCode: code, Header: h, ProtoMajor: major}, []byte(body), expectedProto)
 	}
-	if got := mk(503, "1", "inspection_overloaded\n"); got != OverloadClass {
-		t.Errorf("governor overload classified %q", got)
+	for _, proto := range []string{"h1", "h2", "h3"} {
+		if got := mk(503, "1", "inspection_overloaded\n", proto); got != OverloadClass {
+			t.Errorf("%s governor overload classified %q", proto, got)
+		}
 	}
-	for _, c := range [][3]string{{"503", "", "inspection_overloaded\n"}, {"503", "1", "plugin pool exhausted\n"}, {"503", "2", "inspection_overloaded"}} {
-		if got := mk(503, c[1], c[2]); got != "status:503" {
+	for _, c := range [][3]string{{"503", "", "inspection_overloaded\n"}, {"503", "1", "plugin pool exhausted\n"}, {"503", "2", "inspection_overloaded\n"}, {"503", "1", " inspection_overloaded\n"}, {"503", "1", "inspection_overloaded"}} {
+		if got := mk(503, c[1], c[2], "h2"); got != "status:503" {
 			t.Errorf("%v classified %q, want status:503", c, got)
 		}
 	}
-	if got := mk(408, "1", "inspection_overloaded"); got != "status:408" {
+	if got := mk(408, "1", "inspection_overloaded", "h2"); got != "status:408" {
 		t.Errorf("408 classified %q", got)
+	}
+	if got := StatusClass(&http.Response{StatusCode: 503, Header: http.Header{"Retry-After": []string{"1"}}, ProtoMajor: 2}, []byte("inspection_overloaded"), "h1"); got != "status:503-protocol-mismatch" {
+		t.Errorf("mismapped overload classified %q", got)
+	}
+	if got := mk(503, "1", "inspection_overloaded", "spdy"); got != "status:503-protocol-mismatch" {
+		t.Errorf("unknown protocol classified %q", got)
 	}
 
 	// Exercise requirements: unmet minimums are instrument invalidity,
@@ -1230,6 +1240,42 @@ func TestPlanV3ExerciseChecksAndGuestIdentity(t *testing.T) {
 	}
 	if p2o.Phases[0].Workloads[0].Path != load.Path || p2o.InspectionMode != "observe" || len(p2.Require) == 0 || len(p2o.Require) == 0 {
 		t.Errorf("p2o is not p2's observe twin: %+v", p2o)
+	}
+
+	var a1, a2s3, a2s4 Scenario
+	for _, sc := range BuildScenarios(Profiles["qualification"]) {
+		switch sc.ID {
+		case "s11-arg-amplification-h1-320m":
+			a1 = sc
+		case "s3-large-h2-bounded":
+			a2s3 = sc
+		case "s4-ramp-large-h2-bounded":
+			a2s4 = sc
+		}
+	}
+	for _, sc := range []Scenario{a1, a2s3, a2s4} {
+		wantBuffered := "448m"
+		if sc.ID == a1.ID {
+			wantBuffered = "320m"
+		}
+		if sc.ID == "" || sc.MaxBuffered != wantBuffered || sc.GoMemLimit != "480MiB" {
+			t.Errorf("bounded diagnostic profile missing or mis-sized: %+v", sc)
+		}
+		for _, ph := range sc.Phases {
+			for _, w := range ph.Workloads {
+				if !slices.Contains(w.Expect, OverloadClass) {
+					t.Errorf("%s workload does not explicitly classify governor overload: %+v", sc.ID, w)
+				}
+			}
+		}
+	}
+	if a1.Reps != 3 || a1.PluginMaxInstances != 0 ||
+		a2s3.PluginMaxInstances != 4 || a2s3.PluginTimeout != "2s" ||
+		a2s4.PluginMaxInstances != 4 || a2s4.PluginTimeout != "2s" ||
+		!slices.Equal(a2s3.Variants, []string{"none", "both"}) ||
+		!slices.Equal(a2s4.Variants, []string{"none", "both"}) ||
+		!slices.Contains(Suites["bounded-envelope-diagnostic"], a1.ID) {
+		t.Errorf("bounded diagnostics do not preserve the intended A1/A2 profiles: A1=%+v A2s3=%+v A2s4=%+v", a1, a2s3, a2s4)
 	}
 }
 

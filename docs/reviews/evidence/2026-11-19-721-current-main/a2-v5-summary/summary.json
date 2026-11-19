@@ -1,0 +1,718 @@
+{
+  "plan_version": "inspection-assessment-plan/v5",
+  "profile": "qualification",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta, a nonzero governor lease/bytes/evaluation gauge after recovery (plan v3)) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "a2-targeted-v5"
+  ],
+  "targets": [
+    {
+      "label": "candidate",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+        "sha256": "c96daf7a91d04f46f99148dd21859f62f6576a45558b255748fe67184090a902",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-main",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-main",
+        "sha256": "cbc506c19b48a910342e4c4a07f6e3919f6ff524eeaff384a9b1ce95274da609",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "both",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 0,
+        "correct": 3,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 2,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 3,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "both",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 0,
+        "correct": 3,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 2,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 3,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 238.1,
+        "min_goodput_rps": 173.25,
+        "max_goodput_rps": 259,
+        "relative_spread": 0.36
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 173.25,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.671,
+          "peak_cg_memory_bytes": 42827776,
+          "state": "completed"
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 2,
+          "goodput_rps": 259,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.659,
+          "peak_cg_memory_bytes": 48750592,
+          "state": "completed"
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 3,
+          "goodput_rps": 238.1,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.669,
+          "peak_cg_memory_bytes": 49504256,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 3,
+        "median_goodput_rps": 258.6,
+        "min_goodput_rps": 243.8,
+        "max_goodput_rps": 265.55,
+        "relative_spread": 0.084
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 265.55,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.665,
+          "peak_cg_memory_bytes": 45154304,
+          "state": "completed"
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 2,
+          "goodput_rps": 243.8,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.664,
+          "peak_cg_memory_bytes": 47644672,
+          "state": "completed"
+        },
+        {
+          "run": "a2-targeted-v5",
+          "rep": 3,
+          "goodput_rps": 258.6,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.656,
+          "peak_cg_memory_bytes": 43597824,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "both",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 0,
+        "correct": 1,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "both",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 0,
+        "correct": 1,
+        "median_goodput_rps": 0,
+        "min_goodput_rps": 0,
+        "max_goodput_rps": 0,
+        "relative_spread": null
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 0,
+          "valid": false,
+          "correct": true,
+          "saturated": null,
+          "cpu_fraction": null,
+          "peak_cg_memory_bytes": null,
+          "state": "failed",
+          "invalid_reasons": [
+            "jul check rejected the generated configuration: exit status 1"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 229.2,
+        "min_goodput_rps": 229.2,
+        "max_goodput_rps": 229.2,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 229.2,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.665,
+          "peak_cg_memory_bytes": 86630400,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "comparison": "capacity",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 240.5,
+        "min_goodput_rps": 240.5,
+        "max_goodput_rps": 240.5,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "a2-targeted-v5",
+          "rep": 1,
+          "goodput_rps": 240.5,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.657,
+          "peak_cg_memory_bytes": 91799552,
+          "state": "completed"
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 3497,
+      "verified_in_window": 3465,
+      "goodput_rps": 173.25,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 307.337,
+      "outcomes": "ok ×3497"
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 5212,
+      "verified_in_window": 5180,
+      "goodput_rps": 259,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 162.646,
+      "outcomes": "ok ×5212"
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 4794,
+      "verified_in_window": 4762,
+      "goodput_rps": 238.1,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 246.41,
+      "outcomes": "ok ×4794"
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 5343,
+      "verified_in_window": 5311,
+      "goodput_rps": 265.55,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 187.3,
+      "outcomes": "ok ×5343"
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 2,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 4908,
+      "verified_in_window": 4876,
+      "goodput_rps": 243.8,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 211.378,
+      "outcomes": "ok ×4908"
+    },
+    {
+      "scenario": "s3-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 3,
+      "phase": "load",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 5204,
+      "verified_in_window": 5172,
+      "goodput_rps": 258.6,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 157.795,
+      "outcomes": "ok ×5204"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 2308,
+      "verified_in_window": 2292,
+      "goodput_rps": 229.2,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 109.912,
+      "outcomes": "ok ×2308"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c32",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 2216,
+      "verified_in_window": 2184,
+      "goodput_rps": 218.4,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 261.251,
+      "outcomes": "ok ×2216"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c64",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 64,
+      "attempts": 2255,
+      "verified_in_window": 2191,
+      "goodput_rps": 219.1,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 434.184,
+      "outcomes": "ok ×2255"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c128",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 128,
+      "attempts": 2025,
+      "verified_in_window": 1897,
+      "goodput_rps": 189.7,
+      "crossed_in_from_warmup": 127,
+      "outstanding_at_window_end": 128,
+      "p99_ms": 879.492,
+      "outcomes": "ok ×2025"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "candidate",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c192",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 192,
+      "attempts": 1836,
+      "verified_in_window": 1644,
+      "goodput_rps": 164.4,
+      "crossed_in_from_warmup": 192,
+      "outstanding_at_window_end": 192,
+      "p99_ms": 1250.939,
+      "outcomes": "ok ×1836"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 16,
+      "attempts": 2421,
+      "verified_in_window": 2405,
+      "goodput_rps": 240.5,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 120.828,
+      "outcomes": "ok ×2421"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c32",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 32,
+      "attempts": 2314,
+      "verified_in_window": 2282,
+      "goodput_rps": 228.2,
+      "crossed_in_from_warmup": 32,
+      "outstanding_at_window_end": 32,
+      "p99_ms": 280.802,
+      "outcomes": "ok ×2314"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c64",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 64,
+      "attempts": 2328,
+      "verified_in_window": 2264,
+      "goodput_rps": 226.4,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 480.243,
+      "outcomes": "ok ×2328"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c128",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 128,
+      "attempts": 2105,
+      "verified_in_window": 1977,
+      "goodput_rps": 197.7,
+      "crossed_in_from_warmup": 128,
+      "outstanding_at_window_end": 128,
+      "p99_ms": 736.805,
+      "outcomes": "ok ×2105"
+    },
+    {
+      "scenario": "s4-ramp-large-h2-bounded",
+      "variant": "none",
+      "target": "main",
+      "run": "a2-targeted-v5",
+      "rep": 1,
+      "phase": "c192",
+      "class": "load",
+      "proto": "h2",
+      "concurrency": 192,
+      "attempts": 1826,
+      "verified_in_window": 1634,
+      "goodput_rps": 163.4,
+      "crossed_in_from_warmup": 192,
+      "outstanding_at_window_end": 192,
+      "p99_ms": 1495.138,
+      "outcomes": "ok ×1826"
+    }
+  ],
+  "failed_or_invalid_runs": [
+    "a2-targeted-v5 s3-large-h2-bounded/both/candidate rep1: instrument-invalid: jul check rejected the generated configuration: exit status 1",
+    "a2-targeted-v5 s3-large-h2-bounded/both/candidate rep2: instrument-invalid: jul check rejected the generated configuration: exit status 1",
+    "a2-targeted-v5 s3-large-h2-bounded/both/candidate rep3: instrument-invalid: jul check rejected the generated configuration: exit status 1",
+    "a2-targeted-v5 s3-large-h2-bounded/both/main rep1: instrument-invalid: jul check rejected the generated configuration: exit status 1",
+    "a2-targeted-v5 s3-large-h2-bounded/both/main rep2: instrument-invalid: jul check rejected the generated configuration: exit status 1",
+    "a2-targeted-v5 s3-large-h2-bounded/both/main rep3: instrument-invalid: jul check rejected the generated configuration: exit status 1",
+    "a2-targeted-v5 s4-ramp-large-h2-bounded/both/candidate rep1: instrument-invalid: jul check rejected the generated configuration: exit status 1",
+    "a2-targeted-v5 s4-ramp-large-h2-bounded/both/main rep1: instrument-invalid: jul check rejected the generated configuration: exit status 1"
+  ],
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

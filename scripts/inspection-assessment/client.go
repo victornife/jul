@@ -257,7 +257,7 @@ func Do(ctx context.Context, c *Client, w Workload, body []byte, fixture string)
 			o.Class = "error:body-" + strings.TrimPrefix(o.Class, "error:")
 		}
 	case resp.StatusCode/100 != 2:
-		o.Class = StatusClass(resp, got)
+		o.Class = StatusClass(resp, got, c.Proto)
 	default:
 		o.Class = "ok"
 		if why := Verify(resp, got, w, len(body), fixture, c.Proto); why != "" {
@@ -273,9 +273,13 @@ func Do(ctx context.Context, c *Client, w Workload, body []byte, fixture string)
 const OverloadClass = "status:503-inspection-overloaded"
 
 // StatusClass classifies a non-2xx response.
-func StatusClass(resp *http.Response, got []byte) string {
+func StatusClass(resp *http.Response, got []byte, expectedProto string) string {
+	wantProto := map[string]int{"h1": 1, "h2": 2, "h3": 3}[expectedProto]
+	if wantProto == 0 || resp.ProtoMajor != wantProto {
+		return "status:" + strconv.Itoa(resp.StatusCode) + "-protocol-mismatch"
+	}
 	if resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get("Retry-After") == "1" &&
-		strings.TrimSpace(string(got)) == "inspection_overloaded" {
+		string(got) == "inspection_overloaded\n" {
 		return OverloadClass
 	}
 	return "status:" + strconv.Itoa(resp.StatusCode)

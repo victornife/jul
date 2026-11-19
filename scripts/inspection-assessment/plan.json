@@ -1,5 +1,5 @@
 {
-  "version": "inspection-assessment-plan/v3",
+  "version": "inspection-assessment-plan/v6",
   "interpretation": {
     "min_repetitions": 3,
     "max_median_regression": 0.1,
@@ -18,6 +18,11 @@
     "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
   },
   "suites": {
+    "bounded-envelope-diagnostic": [
+      "s11-arg-amplification-h1-320m",
+      "s3-large-h2-bounded",
+      "s4-ramp-large-h2-bounded"
+    ],
     "calibration": [
       "cal-normal-h1",
       "cal-normal-h2",
@@ -1998,6 +2003,320 @@
           "added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart",
           "plan v3 adds the plugin-only wasm variant (I2 governs the plugin request path; a WAF-only body deadline is I3)"
         ]
+      },
+      {
+        "id": "s11-arg-amplification-h1-320m",
+        "source": "#700 bounded diagnostic (plan v4)",
+        "kind": "load",
+        "purpose": "A1 diagnostic with a valid 320 MiB inspection ceiling",
+        "variants": [
+          "none",
+          "waf"
+        ],
+        "repetitions": 3,
+        "max_buffered_bytes": "320m",
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "additional plan v4 diagnostic; the frozen s11 scenario and its historical results are unchanged",
+          "320m is above the compiled route minimum; every unexpected status remains a finding, and only the exact inspection-overload signature is an expected rejection",
+          "GOMEMLIMIT=480MiB is a soft Go runtime target, not a process or cgroup limit"
+        ]
+      },
+      {
+        "id": "s3-large-h2-bounded",
+        "source": "#700 bounded diagnostic (plan v6)",
+        "kind": "load",
+        "purpose": "A2 diagnostic with bounded plugin pools and a 448 MiB inspection ceiling, subject to binary validation",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 3,
+        "max_buffered_bytes": "448m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "5s",
+            "measure": "20s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
+          "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
+          "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+        ]
+      },
+      {
+        "id": "s4-ramp-large-h2-bounded",
+        "source": "#700 bounded diagnostic (plan v6)",
+        "kind": "load",
+        "purpose": "A2 diagnostic with bounded plugin pools and a 448 MiB inspection ceiling, subject to binary validation",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "max_buffered_bytes": "448m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "c16",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 16,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c32",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c64",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 64,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c128",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 128,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c192",
+            "warmup": "2s",
+            "measure": "10s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 192,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "10s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
+          "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
+          "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+        ]
       }
     ],
     "quick": [
@@ -3873,8 +4192,322 @@
           "added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart",
           "plan v3 adds the plugin-only wasm variant (I2 governs the plugin request path; a WAF-only body deadline is I3)"
         ]
+      },
+      {
+        "id": "s11-arg-amplification-h1-320m",
+        "source": "#700 bounded diagnostic (plan v4)",
+        "kind": "load",
+        "purpose": "A1 diagnostic with a valid 320 MiB inspection ceiling",
+        "variants": [
+          "none",
+          "waf"
+        ],
+        "repetitions": 3,
+        "max_buffered_bytes": "320m",
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "c1",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 1,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c2",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 2,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c4",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 4,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c8",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 8,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c16",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h1",
+                "method": "POST",
+                "path": "/proxy/echo?resp=4096",
+                "body_bytes": 16384,
+                "body_shape": "items",
+                "resp_bytes": 4096,
+                "concurrency": 16,
+                "timeout": "30s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "record",
+        "changes_from_archive": [
+          "additional plan v4 diagnostic; the frozen s11 scenario and its historical results are unchanged",
+          "320m is above the compiled route minimum; every unexpected status remains a finding, and only the exact inspection-overload signature is an expected rejection",
+          "GOMEMLIMIT=480MiB is a soft Go runtime target, not a process or cgroup limit"
+        ]
+      },
+      {
+        "id": "s3-large-h2-bounded",
+        "source": "#700 bounded diagnostic (plan v6)",
+        "kind": "load",
+        "purpose": "A2 diagnostic with bounded plugin pools and a 448 MiB inspection ceiling, subject to binary validation",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 3,
+        "max_buffered_bytes": "448m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "load",
+            "warmup": "1s",
+            "measure": "3s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
+          "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
+          "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+        ]
+      },
+      {
+        "id": "s4-ramp-large-h2-bounded",
+        "source": "#700 bounded diagnostic (plan v6)",
+        "kind": "load",
+        "purpose": "A2 diagnostic with bounded plugin pools and a 448 MiB inspection ceiling, subject to binary validation",
+        "variants": [
+          "none",
+          "both"
+        ],
+        "repetitions": 1,
+        "max_buffered_bytes": "448m",
+        "plugin_timeout": "2s",
+        "plugin_max_instances": 4,
+        "gomemlimit": "480MiB",
+        "phases": [
+          {
+            "name": "c16",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 16,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c32",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 32,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c64",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 64,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c128",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 128,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          },
+          {
+            "name": "c192",
+            "warmup": "1s",
+            "measure": "1.5s",
+            "workloads": [
+              {
+                "name": "load",
+                "proto": "h2",
+                "method": "POST",
+                "path": "/proxy/echo?resp=1048576\u0026chunked=1",
+                "body_bytes": 262144,
+                "body_shape": "wide",
+                "resp_bytes": 1048576,
+                "concurrency": 192,
+                "timeout": "1m0s",
+                "want_origin_echo": true,
+                "expected_classes": [
+                  "status:503-inspection-overloaded"
+                ]
+              }
+            ]
+          }
+        ],
+        "recovery": "2s",
+        "comparison": "capacity",
+        "changes_from_archive": [
+          "additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
+          "both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
+          "only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
+          "four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"
+        ]
       }
     ]
   },
-  "config_template_sha256": "fa3523a08b339919b287c33b6cda5dfa045ea97c66fb58091ca104f20a1fda62"
+  "config_template_sha256": "4450374ceb9e32b1daf4957576c5b4d479c8eb5e98b2331a646a41594288cbc4"
 }

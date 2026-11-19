@@ -1,0 +1,174 @@
+{
+  "schema": "jul-inspection-assessment/run/v1",
+  "run_id": "bounded-diagnostic",
+  "started": "2026-11-19T15:18:48.516868569Z",
+  "ended": "2026-11-19T15:33:10.233600554Z",
+  "state": "complete",
+  "plan_version": "inspection-assessment-plan/v4",
+  "plan_sha256": "b2aa9881ffa94c3b32fb9d092da6818a6da46d81cce304aad21c0b6637429530",
+  "interpretation_sha256": "ee32d6ef4f0098920f5beee542ad75cd43f6b5ab1e8dee526ee7c07ac4da4c63",
+  "profile": {
+    "name": "qualification",
+    "acceptance_eligible": true,
+    "warmup": "5s",
+    "measure": "20s",
+    "recovery": "10s",
+    "reload_measure": "40s",
+    "reload_recovery": "15s",
+    "step_warmup": "2s",
+    "f3_duration": "20s",
+    "f4_client_limit": "20s",
+    "description": "the archived #695/#700 windows; eligible as acceptance evidence only inside the verified envelope"
+  },
+  "repetitions": 3,
+  "selection": [
+    "s11-arg-amplification-h1-320m/none",
+    "s11-arg-amplification-h1-320m/waf",
+    "s3-large-h2-bounded/none",
+    "s3-large-h2-bounded/both",
+    "s4-ramp-large-h2-bounded/none",
+    "s4-ramp-large-h2-bounded/both"
+  ],
+  "scenario_sha256": {
+    "s11-arg-amplification-h1-320m/none": "749ba01200b602f4dae250aeb8de12a639ea7a9531227c587a97fffd43412ac3",
+    "s11-arg-amplification-h1-320m/waf": "749ba01200b602f4dae250aeb8de12a639ea7a9531227c587a97fffd43412ac3",
+    "s3-large-h2-bounded/both": "75f20dc66ba8857a8a5ec7af2b01bcbec33a10474b1d39e21dd1b85541903683",
+    "s3-large-h2-bounded/none": "75f20dc66ba8857a8a5ec7af2b01bcbec33a10474b1d39e21dd1b85541903683",
+    "s4-ramp-large-h2-bounded/both": "caa24b6ef85cc675575d91e229442a5b8e311683a756777a195df78506f283ce",
+    "s4-ramp-large-h2-bounded/none": "caa24b6ef85cc675575d91e229442a5b8e311683a756777a195df78506f283ce"
+  },
+  "targets": [
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-main",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-main",
+        "sha256": "cbc506c19b48a910342e4c4a07f6e3919f6ff524eeaff384a9b1ce95274da609",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "candidate",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+        "sha256": "c96daf7a91d04f46f99148dd21859f62f6576a45558b255748fe67184090a902",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "harness": {
+    "path": "/tmp/jul-721-qualification/bin/ia",
+    "sha256": "e5ee93e02fa0e832f1af9fffccae23612dd75d7e1e57447e0e2da5deba819e81",
+    "go_version": "go1.27.4",
+    "module": "jul",
+    "build_settings": {
+      "-buildmode": "exe",
+      "-trimpath": "true",
+      "CGO_ENABLED": "1",
+      "GOARCH": "arm64",
+      "GOARM64": "v8.0",
+      "GOOS": "linux"
+    }
+  },
+  "guest": {
+    "path": "/tmp/jul-721-qualification/bin/inspect-load.wasm",
+    "sha256": "27b016a775020dca6cea66fdb98a836d1afbf056b2ac9883c142e4969c41034a",
+    "source_tree_sha256": "217eb5033fa205bb2ca702c908e03294c59b849d6ba61a0e41b9de8f24ecf3c0",
+    "source": "examples/plugins/inspect-load"
+  },
+  "static_page": {
+    "path": "generated: Filler(256 KiB)",
+    "sha256": "34ec2c23ddb73aab9106614724974ae607d1e7c450f2d4d4a994cb70e0049a5a"
+  },
+  "tls_certificate": {
+    "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/pr-721-work/testdata/tls/localhost.crt",
+    "sha256": "096ebc5b789bb83bec3f5a11b2dbb78d03ac3c8380034e1b856e93c8b8600c77"
+  },
+  "platform": {
+    "GOOS": "linux",
+    "GOARCH": "arm64",
+    "cpus": 6,
+    "kernel": "6.18.58.1-microsoft-standard-WSL2",
+    "machine": "aarch64",
+    "mem_total": "16122328 kB",
+    "swap_total": "4194304 kB"
+  },
+  "requested_envelope": {
+    "mode": "required",
+    "jul_cpus": "0,1",
+    "cpu_quota": "200%",
+    "memory_max": "768M",
+    "gomaxprocs": 2
+  },
+  "placement": {
+    "client": "4-9",
+    "jul": "0,1",
+    "origin": "2,3"
+  },
+  "results": [
+    "cells/s11-arg-amplification-h1-320m/none/main/rep1/result.json",
+    "cells/s11-arg-amplification-h1-320m/none/candidate/rep1/result.json",
+    "cells/s11-arg-amplification-h1-320m/waf/main/rep1/result.json",
+    "cells/s11-arg-amplification-h1-320m/waf/candidate/rep1/result.json",
+    "cells/s3-large-h2-bounded/none/main/rep1/result.json",
+    "cells/s3-large-h2-bounded/none/candidate/rep1/result.json",
+    "cells/s3-large-h2-bounded/both/main/rep1/result.json",
+    "cells/s3-large-h2-bounded/both/candidate/rep1/result.json",
+    "cells/s4-ramp-large-h2-bounded/none/main/rep1/result.json",
+    "cells/s4-ramp-large-h2-bounded/none/candidate/rep1/result.json",
+    "cells/s4-ramp-large-h2-bounded/both/main/rep1/result.json",
+    "cells/s4-ramp-large-h2-bounded/both/candidate/rep1/result.json",
+    "cells/s11-arg-amplification-h1-320m/none/main/rep2/result.json",
+    "cells/s11-arg-amplification-h1-320m/none/candidate/rep2/result.json",
+    "cells/s11-arg-amplification-h1-320m/waf/main/rep2/result.json",
+    "cells/s11-arg-amplification-h1-320m/waf/candidate/rep2/result.json",
+    "cells/s3-large-h2-bounded/none/main/rep2/result.json",
+    "cells/s3-large-h2-bounded/none/candidate/rep2/result.json",
+    "cells/s3-large-h2-bounded/both/main/rep2/result.json",
+    "cells/s3-large-h2-bounded/both/candidate/rep2/result.json",
+    "cells/s11-arg-amplification-h1-320m/none/main/rep3/result.json",
+    "cells/s11-arg-amplification-h1-320m/none/candidate/rep3/result.json",
+    "cells/s11-arg-amplification-h1-320m/waf/main/rep3/result.json",
+    "cells/s11-arg-amplification-h1-320m/waf/candidate/rep3/result.json",
+    "cells/s3-large-h2-bounded/none/main/rep3/result.json",
+    "cells/s3-large-h2-bounded/none/candidate/rep3/result.json",
+    "cells/s3-large-h2-bounded/both/main/rep3/result.json",
+    "cells/s3-large-h2-bounded/both/candidate/rep3/result.json"
+  ],
+  "interrupted": false
+}

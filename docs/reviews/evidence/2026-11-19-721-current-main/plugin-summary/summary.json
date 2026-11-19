@@ -1,0 +1,570 @@
+{
+  "plan_version": "inspection-assessment-plan/v4",
+  "profile": "qualification",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta, a nonzero governor lease/bytes/evaluation gauge after recovery (plan v3)) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "plugin-sized"
+  ],
+  "targets": [
+    {
+      "label": "candidate",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-candidate",
+        "sha256": "c96daf7a91d04f46f99148dd21859f62f6576a45558b255748fe67184090a902",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/tmp/jul-721-qualification/bin/jul-main",
+      "binary": {
+        "path": "/tmp/jul-721-qualification/bin/jul-main",
+        "sha256": "cbc506c19b48a910342e4c4a07f6e3919f6ff524eeaff384a9b1ce95274da609",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "candidate",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 2262.35,
+        "min_goodput_rps": 2262.35,
+        "max_goodput_rps": 2262.35,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 2262.35,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.964,
+          "peak_cg_memory_bytes": 52686848,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 2433.95,
+        "min_goodput_rps": 2433.95,
+        "max_goodput_rps": 2433.95,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 2433.95,
+          "valid": true,
+          "correct": true,
+          "saturated": true,
+          "cpu_fraction": 0.954,
+          "peak_cg_memory_bytes": 57884672,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 0,
+        "median_goodput_rps": 146.35,
+        "min_goodput_rps": 146.35,
+        "max_goodput_rps": 146.35,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 146.35,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.964,
+          "peak_cg_memory_bytes": 534204416,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: status:500 ×18"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "wasm",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 0,
+        "median_goodput_rps": 126.35,
+        "min_goodput_rps": 126.35,
+        "max_goodput_rps": 126.35,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 126.35,
+          "valid": true,
+          "correct": false,
+          "saturated": true,
+          "cpu_fraction": 0.981,
+          "peak_cg_memory_bytes": 511193088,
+          "state": "completed",
+          "runtime_findings": [
+            "phase load class load: status:500 ×16"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "p2-saturation-plugin-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 19.95,
+        "min_goodput_rps": 19.95,
+        "max_goodput_rps": 19.95,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 19.95,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.713,
+          "peak_cg_memory_bytes": 550440960,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "p2-saturation-plugin-h1",
+      "variant": "wasm",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 19.95,
+        "min_goodput_rps": 19.95,
+        "max_goodput_rps": 19.95,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 19.95,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.672,
+          "peak_cg_memory_bytes": 566386688,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "p2o-saturation-plugin-observe-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 24,
+        "min_goodput_rps": 24,
+        "max_goodput_rps": 24,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 24,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.728,
+          "peak_cg_memory_bytes": 535105536,
+          "state": "completed"
+        }
+      ]
+    },
+    {
+      "scenario": "p2o-saturation-plugin-observe-h1",
+      "variant": "wasm",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 1,
+        "valid": 1,
+        "correct": 1,
+        "median_goodput_rps": 24,
+        "min_goodput_rps": 24,
+        "max_goodput_rps": 24,
+        "relative_spread": 0
+      },
+      "points": [
+        {
+          "run": "plugin-sized",
+          "rep": 1,
+          "goodput_rps": 24,
+          "valid": true,
+          "correct": true,
+          "saturated": false,
+          "cpu_fraction": 0.706,
+          "peak_cg_memory_bytes": 530669568,
+          "state": "completed"
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "candidate",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 45311,
+      "verified_in_window": 45247,
+      "goodput_rps": 2262.35,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 67.313,
+      "outcomes": "ok ×45311"
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "none",
+      "target": "main",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 48743,
+      "verified_in_window": 48679,
+      "goodput_rps": 2433.95,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 78.803,
+      "outcomes": "ok ×48743"
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 3008,
+      "verified_in_window": 2927,
+      "goodput_rps": 146.35,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 677.631,
+      "outcomes": "ok ×2990, status:500 ×18",
+      "outcome_latency_ms": {
+        "status:500": {
+          "n": 18,
+          "p50": 262.477,
+          "p95": 376.718,
+          "p99": 376.718,
+          "max": 397.413
+        }
+      }
+    },
+    {
+      "scenario": "p1-large-body-plugin-h1",
+      "variant": "wasm",
+      "target": "main",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 64,
+      "attempts": 2607,
+      "verified_in_window": 2527,
+      "goodput_rps": 126.35,
+      "crossed_in_from_warmup": 64,
+      "outstanding_at_window_end": 64,
+      "p99_ms": 685.824,
+      "outcomes": "ok ×2591, status:500 ×16",
+      "outcome_latency_ms": {
+        "status:500": {
+          "n": 16,
+          "p50": 413.69,
+          "p95": 485.947,
+          "p99": 485.947,
+          "max": 501.882
+        }
+      }
+    },
+    {
+      "scenario": "p2-saturation-plugin-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 160,
+      "attempts": 1070,
+      "verified_in_window": 399,
+      "goodput_rps": 19.95,
+      "crossed_in_from_warmup": 133,
+      "outstanding_at_window_end": 133,
+      "p99_ms": 5402.627,
+      "outcomes": "ok ×532, status:503-inspection-overloaded ×538",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 538,
+          "p50": 2.511,
+          "p95": 82.07,
+          "p99": 176.436,
+          "max": 176.953
+        }
+      }
+    },
+    {
+      "scenario": "p2-saturation-plugin-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "probe",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 22073,
+      "verified_in_window": 22071,
+      "goodput_rps": 1103.55,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 19.425,
+      "outcomes": "ok ×22073"
+    },
+    {
+      "scenario": "p2-saturation-plugin-h1",
+      "variant": "wasm",
+      "target": "main",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 160,
+      "attempts": 1046,
+      "verified_in_window": 399,
+      "goodput_rps": 19.95,
+      "crossed_in_from_warmup": 133,
+      "outstanding_at_window_end": 133,
+      "p99_ms": 5750.741,
+      "outcomes": "ok ×532, status:503-inspection-overloaded ×514",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 514,
+          "p50": 1.886,
+          "p95": 170.398,
+          "p99": 192.43,
+          "max": 222.256
+        }
+      }
+    },
+    {
+      "scenario": "p2-saturation-plugin-h1",
+      "variant": "wasm",
+      "target": "main",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "probe",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 35800,
+      "verified_in_window": 35798,
+      "goodput_rps": 1789.9,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 5.246,
+      "outcomes": "ok ×35800"
+    },
+    {
+      "scenario": "p2o-saturation-plugin-observe-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 160,
+      "attempts": 640,
+      "verified_in_window": 480,
+      "goodput_rps": 24,
+      "crossed_in_from_warmup": 160,
+      "outstanding_at_window_end": 160,
+      "p99_ms": 5410.176,
+      "outcomes": "ok ×640"
+    },
+    {
+      "scenario": "p2o-saturation-plugin-observe-h1",
+      "variant": "wasm",
+      "target": "candidate",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "probe",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 20839,
+      "verified_in_window": 20837,
+      "goodput_rps": 1041.85,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 20.581,
+      "outcomes": "ok ×20839"
+    },
+    {
+      "scenario": "p2o-saturation-plugin-observe-h1",
+      "variant": "wasm",
+      "target": "main",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 160,
+      "attempts": 640,
+      "verified_in_window": 480,
+      "goodput_rps": 24,
+      "crossed_in_from_warmup": 160,
+      "outstanding_at_window_end": 160,
+      "p99_ms": 5193.655,
+      "outcomes": "ok ×640"
+    },
+    {
+      "scenario": "p2o-saturation-plugin-observe-h1",
+      "variant": "wasm",
+      "target": "main",
+      "run": "plugin-sized",
+      "rep": 1,
+      "phase": "load",
+      "class": "probe",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 27270,
+      "verified_in_window": 27268,
+      "goodput_rps": 1363.4,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 17.35,
+      "outcomes": "ok ×27270"
+    }
+  ],
+  "failed_or_invalid_runs": [
+    "plugin-sized p1-large-body-plugin-h1/wasm/candidate rep1: runtime-finding: phase load class load: status:500 ×18",
+    "plugin-sized p1-large-body-plugin-h1/wasm/main rep1: runtime-finding: phase load class load: status:500 ×16"
+  ],
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

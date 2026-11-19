@@ -19,7 +19,7 @@ import (
 // PlanVersion identifies the scenario semantics. Change it whenever a
 // workload, phase, variant set, verification rule or interpretation rule
 // changes; runs with different plan identities are never merged or compared.
-const PlanVersion = "inspection-assessment-plan/v3"
+const PlanVersion = "inspection-assessment-plan/v6"
 
 // Variants are the four inspection configurations preserved from #695.
 var Variants = []string{"none", "waf", "wasm", "both"}
@@ -350,15 +350,19 @@ func BuildScenarios(p Profile) []Scenario {
 				"plan v3 adds the plugin-only wasm variant"}}
 	}
 	all := Variants
-	return []Scenario{
+	s3 := Scenario{ID: "s3-large-h2", Source: "#695 s3", Kind: "load", Purpose: "large bodies and responses (destructive on uncapped runtimes)", Variants: all, Reps: 3,
+		Phases: one("load", stress), Recovery: rec, Comparison: "capacity"}
+	s4 := Scenario{ID: "s4-ramp-large-h2", Source: "#695 s4", Kind: "load", Purpose: "concurrency ramp of large inspected bodies (destructive)", Variants: []string{"none", "both"}, Reps: 1,
+		Phases: ramp, Recovery: rec, Comparison: "capacity"}
+	s11 := Scenario{ID: "s11-arg-amplification-h1", Source: "#695 s11", Kind: "load", Purpose: "many-argument JSON at C=1..16 (destructive on uncapped runtimes)", Variants: []string{"none", "waf"}, Reps: 1,
+		Phases: amp(1, 2, 4, 8, 16), Recovery: rec, Comparison: "record"}
+	scenarios := []Scenario{
 		{ID: "s1-normal-h1", Source: "#695 s1", Kind: "load", Purpose: "historical normal H1 shape (C=16; CPU-saturated for inspected variants)", Variants: all, Reps: 3,
 			Phases: one("load", norm("load", "h1")), Recovery: rec, Comparison: "capacity"},
 		{ID: "s2-normal-h2", Source: "#695 s2", Kind: "load", Purpose: "historical normal H2 shape (C=16; CPU-saturated for inspected variants)", Variants: all, Reps: 3,
 			Phases: one("load", norm("load", "h2")), Recovery: rec, Comparison: "capacity"},
-		{ID: "s3-large-h2", Source: "#695 s3", Kind: "load", Purpose: "large bodies and responses (destructive on uncapped runtimes)", Variants: all, Reps: 3,
-			Phases: one("load", stress), Recovery: rec, Comparison: "capacity"},
-		{ID: "s4-ramp-large-h2", Source: "#695 s4", Kind: "load", Purpose: "concurrency ramp of large inspected bodies (destructive)", Variants: []string{"none", "both"}, Reps: 1,
-			Phases: ramp, Recovery: rec, Comparison: "capacity"},
+		s3,
+		s4,
 		{ID: "s5-admission-h2", Source: "#695 s5", Kind: "load", Purpose: "ADR 0017 admission behind a slow origin", Variants: []string{"none", "both"}, Reps: 1,
 			Phases: one("load", adm), Recovery: rec, Comparison: "capacity",
 			Changes: []string{"body is 256 KiB as in the archived code; the #695 plan text said 64 KiB"}},
@@ -375,8 +379,7 @@ func BuildScenarios(p Profile) []Scenario {
 			Changes: []string{"in-flight requests on the policy-changed route are retired within 2s by design (#642/#562; WAF rules and plugin modules are access inputs), so the inflight class expects error:stream-reset; the archived #695 runtime already contained it (#653) but the archive counted every non-200 as an error and s9 was OOM-killed before per-class outcomes were captured"}},
 		{ID: "s10-normal-h3", Source: "#695 s10", Kind: "load", Purpose: "historical normal H3 shape (C=16)", Variants: []string{"none", "both"}, Reps: 1,
 			Phases: one("load", norm("load", "h3")), Recovery: rec, Comparison: "capacity"},
-		{ID: "s11-arg-amplification-h1", Source: "#695 s11", Kind: "load", Purpose: "many-argument JSON at C=1..16 (destructive on uncapped runtimes)", Variants: []string{"none", "waf"}, Reps: 1,
-			Phases: amp(1, 2, 4, 8, 16), Recovery: rec, Comparison: "record"},
+		s11,
 		{ID: "s11l-arg-amplification-low-h1", Source: "#695 s11 (C=1,2 subset)", Kind: "load", Purpose: "non-destructive amplification smoke", Variants: []string{"none", "waf"}, Reps: 1,
 			Phases: amp(1, 2), Recovery: rec, Comparison: "record",
 			Changes: []string{"only the C=1 and C=2 steps; the full s11 ramp is the destructive I6 profile"}},
@@ -447,20 +450,66 @@ func BuildScenarios(p Profile) []Scenario {
 			Changes: []string{"added in plan v2: the 60 s default body_timeout outlasts the 20 s F4 watchdog, so the deadline is measured with an explicit 5 s value; no archived counterpart",
 				"plan v3 adds the plugin-only wasm variant (I2 governs the plugin request path; a WAF-only body deadline is I3)"}},
 	}
+	clone := func(src Scenario) Scenario {
+		src.Variants = slices.Clone(src.Variants)
+		src.Changes = slices.Clone(src.Changes)
+		src.Phases = slices.Clone(src.Phases)
+		for i := range src.Phases {
+			src.Phases[i].Workloads = slices.Clone(src.Phases[i].Workloads)
+			for j := range src.Phases[i].Workloads {
+				src.Phases[i].Workloads[j].Expect = slices.Clone(src.Phases[i].Workloads[j].Expect)
+			}
+		}
+		return src
+	}
+	expectOverload := func(sc *Scenario) {
+		for i := range sc.Phases {
+			for j := range sc.Phases[i].Workloads {
+				w := &sc.Phases[i].Workloads[j]
+				if !slices.Contains(w.Expect, OverloadClass) {
+					w.Expect = append(w.Expect, OverloadClass)
+				}
+			}
+		}
+	}
+	a1 := clone(s11)
+	a1.ID, a1.Source = "s11-arg-amplification-h1-320m", "#700 bounded diagnostic (plan v4)"
+	a1.Purpose = "A1 diagnostic with a valid 320 MiB inspection ceiling"
+	a1.Reps, a1.MaxBuffered, a1.GoMemLimit = 3, "320m", "480MiB"
+	a1.Changes = []string{"additional plan v4 diagnostic; the frozen s11 scenario and its historical results are unchanged",
+		"320m is above the compiled route minimum; every unexpected status remains a finding, and only the exact inspection-overload signature is an expected rejection",
+		"GOMEMLIMIT=480MiB is a soft Go runtime target, not a process or cgroup limit"}
+	expectOverload(&a1)
+
+	sizedA2 := func(src Scenario, id string) Scenario {
+		sc := clone(src)
+		sc.ID, sc.Source = id, "#700 bounded diagnostic (plan v6)"
+		sc.Variants = []string{"none", "both"}
+		sc.MaxBuffered, sc.PluginMaxInstances, sc.PluginTimeout, sc.GoMemLimit = "448m", 4, "2s", "480MiB"
+		sc.Changes = []string{"additional plan v6 diagnostic; frozen A2 scenarios and their historical results are unchanged",
+			"both targets use the same 448m inspection ceiling, four instances per plugin, 2s plugin timeout, and GOMEMLIMIT=480MiB; the ceiling exceeds the measured 406503427 B route minimum but must be checked before use",
+			"only the exact inspection-overload signature is an expected rejection; other 503s, failed probes, Jul exits, cgroup peaks and OOM events remain findings",
+			"four 16 MiB instances per each of two plugins imply a 128 MiB theoretical guest pool before runtime and other memory; the soft Go limit and logical governor are not whole-process memory bounds"}
+		sc.Purpose = "A2 diagnostic with bounded plugin pools and a 448 MiB inspection ceiling, subject to binary validation"
+		expectOverload(&sc)
+		return sc
+	}
+	return append(scenarios, a1, sizedA2(s3, "s3-large-h2-bounded"), sizedA2(s4, "s4-ramp-large-h2-bounded"))
 }
 
 // Suites name frozen scenario/variant selections.
 var Suites = map[string][]string{
-	"campaign-normal": {"u1-normal-h1", "u2-normal-h2", "u10-normal-h3"},
-	"calibration":     {"cal-normal-h1", "cal-normal-h2", "cal-normal-h3"},
-	"fidelity":        {"r1-slow-upload-c16-h1", "s8-slow-clients-h1", "s11l-arg-amplification-low-h1", "s9-reload-churn", "f3-admission-pending16", "f3-admission-pending0", "f4-stalled-body", "s6-static-h2", "s7-cache-h1", "r2-fast-nobody-h1"},
-	"historical-695":  {"s1-normal-h1", "s2-normal-h2", "s3-large-h2", "s4-ramp-large-h2", "s5-admission-h2", "s6-static-h2", "s7-cache-h1", "s8-slow-clients-h1", "s9-reload-churn", "s10-normal-h3", "s11-arg-amplification-h1"},
-	"historical-699":  {"r1-slow-upload-c16-h1", "r2-fast-nobody-h1", "r3-fast-body-h1"},
-	"destructive":     {"s3-large-h2", "s4-ramp-large-h2", "s11-arg-amplification-h1"},
-	"i2-normal":       {"u1-normal-h1", "u1b-normal-h1-none-c8", "u2-normal-h2", "u10-normal-h3"},
-	"i2-plugin":       {"r1-slow-upload-c16-h1", "s8-slow-clients-h1", "r2-fast-nobody-h1", "s6-static-h2", "s7-cache-h1", "p1-large-body-plugin-h1", "p2-saturation-plugin-h1", "p2o-saturation-plugin-observe-h1", "p2h-saturation-hostile-h1", "p3-nobody-plugin-h1", "p4-reload-budget-plugin"},
-	"i2-deadline":     {"f4-stalled-body", "f4-body-deadline-5s"},
-	"smoke":           {"u1-normal-h1", "u2-normal-h2", "u10-normal-h3", "s8-slow-clients-h1", "s9-reload-churn", "f3-admission-pending0", "f4-stalled-body"},
+	"campaign-normal":             {"u1-normal-h1", "u2-normal-h2", "u10-normal-h3"},
+	"calibration":                 {"cal-normal-h1", "cal-normal-h2", "cal-normal-h3"},
+	"fidelity":                    {"r1-slow-upload-c16-h1", "s8-slow-clients-h1", "s11l-arg-amplification-low-h1", "s9-reload-churn", "f3-admission-pending16", "f3-admission-pending0", "f4-stalled-body", "s6-static-h2", "s7-cache-h1", "r2-fast-nobody-h1"},
+	"historical-695":              {"s1-normal-h1", "s2-normal-h2", "s3-large-h2", "s4-ramp-large-h2", "s5-admission-h2", "s6-static-h2", "s7-cache-h1", "s8-slow-clients-h1", "s9-reload-churn", "s10-normal-h3", "s11-arg-amplification-h1"},
+	"historical-699":              {"r1-slow-upload-c16-h1", "r2-fast-nobody-h1", "r3-fast-body-h1"},
+	"destructive":                 {"s3-large-h2", "s4-ramp-large-h2", "s11-arg-amplification-h1"},
+	"i2-normal":                   {"u1-normal-h1", "u1b-normal-h1-none-c8", "u2-normal-h2", "u10-normal-h3"},
+	"i2-plugin":                   {"r1-slow-upload-c16-h1", "s8-slow-clients-h1", "r2-fast-nobody-h1", "s6-static-h2", "s7-cache-h1", "p1-large-body-plugin-h1", "p2-saturation-plugin-h1", "p2o-saturation-plugin-observe-h1", "p2h-saturation-hostile-h1", "p3-nobody-plugin-h1", "p4-reload-budget-plugin"},
+	"i2-deadline":                 {"f4-stalled-body", "f4-body-deadline-5s"},
+	"smoke":                       {"u1-normal-h1", "u2-normal-h2", "u10-normal-h3", "s8-slow-clients-h1", "s9-reload-churn", "f3-admission-pending0", "f4-stalled-body"},
+	"bounded-envelope-diagnostic": {"s11-arg-amplification-h1-320m", "s3-large-h2-bounded", "s4-ramp-large-h2-bounded"},
 }
 
 // Interpretation holds the frozen summary rules.
