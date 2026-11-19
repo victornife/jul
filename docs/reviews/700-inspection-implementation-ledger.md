@@ -68,9 +68,12 @@ python3 -u "$C/smoke.py"
 
 Focused Go race tests for guest reservations, teardown and cancellation,
 WAF errors and rule controls, status/settings, and reload passed on the same
-production source. The earlier 101,000-call recycling regression and both
-30-minute functional soaks remain applicable; the existing real-server
-API/CLI/Console agreement and guided-settings tests cover the operator surface.
+production source. The earlier 101,000-call recycling regression and Linux
+30-minute functional soak remain applicable. The macOS 30-minute soak remains
+evidence for the guest lifecycle it exercised, but predates the independent
+body-error guard in `60415e5a` and does not qualify that correction. Existing
+real-server API/CLI/Console agreement and guided-settings tests cover the
+operator surface.
 
 The p1 run observed pre-existing contained guest-failure 500s on current main
 (`16/2607`) and also on candidate (`18/3008`), with unresolved causes. Similar
