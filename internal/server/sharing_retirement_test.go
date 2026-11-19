@@ -112,7 +112,7 @@ func TestSharedH2StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 
 	baseCfg := func() *config.Config {
 		return &config.Config{
-			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Global: serverTestGlobalConfig(),
 			Servers: []config.ServerConfig{
 				{
 					Name:        "portal",
@@ -806,6 +806,7 @@ func TestPublishClassificationAllSubsystems(t *testing.T) {
 func audit653Config() *config.Config {
 	id := "portal"
 	return &config.Config{
+		Global: serverTestGlobalConfig(),
 		Servers: []config.ServerConfig{{
 			Listen: "127.0.0.1:8080",
 			Locations: []config.LocationConfig{{
@@ -943,7 +944,7 @@ func TestRealH1StreamRetirementAndPerRequestCertRecheck(t *testing.T) {
 
 	baseCfg := func() *config.Config {
 		return &config.Config{
-			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Global: serverTestGlobalConfig(),
 			Servers: []config.ServerConfig{{
 				Name:        "dash",
 				Listen:      addr,
@@ -1074,7 +1075,7 @@ func TestSharedH2MultiHostStreamRetirement(t *testing.T) {
 
 	baseCfg := func() *config.Config {
 		return &config.Config{
-			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Global: serverTestGlobalConfig(),
 			Servers: []config.ServerConfig{
 				{
 					Name:        "portal",
@@ -1199,7 +1200,7 @@ func TestReaudit653ListenerRemovalSendsGoingAway(t *testing.T) {
 	addr, otherAddr := freePort(t), freePort(t)
 	id := "ws"
 	cfg := &config.Config{
-		Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+		Global: serverTestGlobalConfig(),
 		Servers: []config.ServerConfig{
 			{Listen: addr, Locations: []config.LocationConfig{{RouteID: &id, Match: config.MatchConfig{Type: "prefix", Path: "/"}, ProxyPass: backend.URL}}},
 			{Listen: otherAddr, Locations: []config.LocationConfig{{Match: config.MatchConfig{Type: "prefix", Path: "/"}, Return: 200}}},
@@ -1278,7 +1279,10 @@ func TestReaudit653ListenerRemovalSendsGoingAway(t *testing.T) {
 
 func TestReaudit653MetadataReloadDoesNotAbortFreshRequests(t *testing.T) {
 	addr := freePort(t)
-	cfg := &config.Config{Servers: []config.ServerConfig{{Listen: addr}}}
+	cfg := &config.Config{
+		Global:  serverTestGlobalConfig(),
+		Servers: []config.ServerConfig{{Listen: addr}},
+	}
 	for i := 0; i < 200; i++ {
 		rid := fmt.Sprintf("r%d", i)
 		cfg.Servers[0].Locations = append(cfg.Servers[0].Locations, config.LocationConfig{RouteID: &rid, Match: config.MatchConfig{Type: "exact", Path: "/" + rid}, ProxyPass: "http://127.0.0.1:9001"})
@@ -1372,7 +1376,7 @@ func fourth653MTLSRotation(t *testing.T, twoReloadRace bool, crlOnly bool) {
 	strPtr := func(s string) *string { return &s }
 	baseCfg := func() *config.Config {
 		return &config.Config{
-			Global: config.GlobalConfig{ShutdownTimeout: config.Duration(2 * time.Second)},
+			Global: serverTestGlobalConfig(),
 			Servers: []config.ServerConfig{{
 				Name:        "dash",
 				Listen:      addr,

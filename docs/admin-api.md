@@ -228,25 +228,55 @@ Two fields exist for clients that poll or retry:
   limits, current charged classes, leases, active/waiting evaluations and the
   draining state. A configured slot value of `0` remains visible as `0` while
   the effective object reports its resolved count. Its
-  `request_path_integration` is `partial`: live plugin request paths acquire
-  leases and charge their buffers, but WAF request state, evaluation slots and
-  response-side buffering are not governed yet. `enforce` mode is therefore
-  not evidence that WAF traffic is gated, and zero usage does not mean traffic
-  is protected. `base_charge_bytes` and `base_charge_scope` describe the measured
-  governor/context scaffolding only. `configured.max_response_header_bytes`
+  `request_path_integration` is `partial`: request and response accounting
+  covers implemented plugin and WAF paths. Guest reservation fields report
+  Jul-managed page-rounded capacity and instance lifecycle counts, not actual
+  engine memory; they exclude references the engine may retain asynchronously.
+  `plugin_guest_actual_bytes_state` is `unavailable_engine_measurement`.
+  `enforce` mode and zero usage do not imply protection beyond those stated
+  logical controls. `base_charge_bytes` and `base_charge_scope` describe the
+  measured governor/context scaffolding only. `configured.max_response_header_bytes`
   and `effective.max_response_header_bytes` report the complete accounted
-  response-header ceiling used for the R3 worst-case term; runtime will reserve
-  the measured R3 amount, not the ceiling, before Coraza ingestion. This ceiling
-  does not raise `max_buffered_bytes`. `plugin_guest_max_bytes`,
-  `plugin_guest_live_instances`, and `plugin_guest_max_instances` report the
-  configured aggregate capacity and live instance counts across compiled,
-  unclosed plugin generations; `plugin_guest_actual_bytes` is omitted with
-  `plugin_guest_actual_bytes_state: "not_sampled"` because actual guest-memory
-  allocation is not measured. `evaluation_headroom_estimate_bytes` is omitted
+  response-header ceiling used for the R3 worst-case term; runtime reserves
+  an R3 estimate based on measured header shape before Coraza ingestion. This ceiling
+  does not raise `max_buffered_bytes`. `plugin_guest_max_bytes` and
+  `plugin_guest_max_instances` report configured aggregate capacity, including
+  candidates being prepared and compiled, unclosed plugin generations;
+  `plugin_guest_live_instances` reports live instance counts across compiled,
+  unclosed plugin generations. `plugin_guest_actual_bytes` is omitted because
+  actual guest-memory allocation is not measured.
+  `plugin_guest_failed_teardowns` counts unresolved teardown failures, including
+  failures being retried. `plugin_guest_admission_blocked_reason` is
+  `unresolved_teardowns` when 64 or more failures block new guest reservations
+  in every mode, and is empty otherwise. Already admitted work can raise the
+  count further; a restart may be needed. Capacity limits can separately refuse
+  individual reservations. `evaluation_headroom_estimate_bytes` is omitted
   with state `not_calibrated`. Unknown numeric values are omitted rather than
   emitted as `null` or a measured zero. The configured budget is validated
   against the route-aware minimum described in
   [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
+
+The Console Overview includes an expandable inspection-resources section backed
+by the same status projection. Charged bytes are not process memory or RSS.
+Audit-output calls past their deadline retain their audit charge until the writer
+returns; abandoned bytes are included in, not added to, the audit charge. The
+output threshold counts detached record bytes held by both in-flight and
+abandoned writers; it is not the same measure as the audit charge. In either
+mode, audit records can be dropped when output is full.
+The output byte threshold can be exceeded by one oversized record when the output
+set is empty. The drop counter covers governor budget and output-set refusals,
+not formatter or writer failures; it resets on process restart. The text form of
+`jul status` reports these signals and marks fields absent from older servers
+as unavailable rather than zero.
+The compiled single-request minimum is omitted until available; a reported
+zero means no inspected routes. During a generation transition it is omitted
+until the governor and serving snapshot agree. A route index, without the
+resolved address or path, is disclosed only with `config:read`. This minimum
+is not a concurrency or process-memory sizing recommendation.
+The view reports Jul-managed logical guest reservations, not engine-retained
+memory or physical storage quotas. If inspection status cannot be reported,
+the Console shows an unavailable warning without discarding the rest of the
+Overview.
 
 ### `GET /api/v1/capabilities`
 

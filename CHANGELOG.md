@@ -11,6 +11,24 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- The Console CI audit temporarily accepts only development-dependency advisory
+  GHSA-fc5q-39xc-vjpf for `picomatch`: no patched release is published.
+  Malicious glob patterns can still cause build or development processes to
+  hang. A CI check rejects `picomatch` in production dependencies; remove the
+  exception and check when an upstream fix is available.
+- **Unmerged inspection recovery:** Jul uses stock wazero and Coraza. Managed
+  guest instances reserve logical page-rounded capacity; this is not an RSS
+  bound or proof that engine references have been released. At 64 unresolved
+  guest teardown tickets, new reservations are refused in all modes. Jul also
+  rejects detected request-body processing failures before origin dispatch,
+  including in detect/observe mode. Coraza's hidden or late I/O failures and
+  aggregate temporary-file usage remain outside these controls. Original
+  A19/A20 and integrated A1–A22 qualification remain pending.
+- Plugin `memory_limit` values below one 64 KiB WebAssembly page are now
+  rejected instead of silently selecting the 16 MiB default. Limits whose
+  page-rounded value exceeds 4 GiB are also rejected before wazero can panic.
+- Cancel on-demand plugin instance startup when its requesting context ends;
+  release its slot only after a successfully started instance is closed.
 - Report and apply changes to serving order or duplicate route/backend entries
   on reload instead of continuing with stale routing or weights (#700).
   Duplicate route declarations retain their own authentication and WAF
@@ -200,8 +218,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   `jul status` projections. In `enforce` mode a WAF route whose
   `request_body_limit` exceeds about 329 KiB (with otherwise default limits)
   needs a larger `max_buffered_bytes` than the 256 MiB default. This does
-  **not** yet gate live WAF/plugin paths, apply body deadlines or reserve
-  actual-size R3 usage; configured `enforce` mode is not runtime protection. See [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
+  **not** by itself gate live WAF/plugin paths, apply body deadlines or reserve
+  actual-size R3 usage; later slices provide those controls. See
+  [ADR 0032](docs/adr/0032-aggregate-inspection-resource-governor.md)
   for the R3 contract and remaining implementation slices.
 
 - Maintained inspection assessment tooling for #700 (ADR 0032 slice I5):

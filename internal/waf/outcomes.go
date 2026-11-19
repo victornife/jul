@@ -20,9 +20,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/corazawaf/coraza/v3/experimental"
 	"github.com/corazawaf/coraza/v3/types"
 
+	"jul/internal/clientaddr"
 	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/middleware"
@@ -41,13 +41,16 @@ type unwrappedTx interface {
 	Unwrap() types.Transaction
 }
 
-func (f *Firewall) newTransaction(r *http.Request) types.Transaction {
-	if ctxwaf, ok := f.waf.(experimental.WAFWithOptions); ok {
-		return ctxwaf.NewTransactionWithOptions(experimental.Options{
-			Context: r.Context(),
-		})
-	}
+func (f *Firewall) newTransaction() types.Transaction {
 	return f.waf.NewTransaction()
+}
+
+func requestBodyProcessingFailed(tx types.Transaction) (bool, error) {
+	state, ok := txState(tx)
+	if !ok || state.Variables() == nil || state.Variables().RequestBodyError() == nil {
+		return false, fmt.Errorf("waf: Coraza request body error state unavailable (%T)", tx)
+	}
+	return state.Variables().RequestBodyError().Get() == "1", nil
 }
 
 func detectionOnlyInterruption(tx types.Transaction) *types.Interruption {
@@ -86,7 +89,8 @@ func isBodyLimitInterruption(it *types.Interruption) bool {
 }
 
 func classifyRuleSource(id int, file string) string {
-	if id == 900000 || id == config.WAFArgumentLimitGuardRuleID || (id >= 890001 && id <= 899999) {
+	if id == 900000 || id == config.WAFArgumentLimitGuardRuleID ||
+		id == config.WAFRequestBodyErrorRuleID || (id >= 890001 && id <= 899999) {
 		return "generated"
 	}
 	switch {
@@ -233,7 +237,7 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	endLease := sync.OnceFunc(admitted)
 	defer endLease()
 
-	tx := f.newTransaction(r)
+	tx := f.newTransaction()
 	if a.governed() && f.audit.writer.hasOutput() {
 		a.txID = tx.ID()
 		a.audit = &auditTxCtx{gov: a.gov, lease: a.lease}
@@ -271,6 +275,24 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		}
 		hdr.Set(HeaderWAFEvent, eventID)
 		supportHeaderEmitted = true
+	}
+
+	rejectBodyProcessingFailure := func() bool {
+		failed, err := requestBodyProcessingFailed(tx)
+		if !failed && err == nil {
+			return false
+		}
+		outcome = OutcomeInspectionError
+		if err != nil {
+			errorCategory = "transaction_state_unavailable"
+			clientStatus = http.StatusInternalServerError
+		} else {
+			errorCategory = "request_body_processing_error"
+			clientStatus = http.StatusBadRequest
+		}
+		mintSupportHeader(w.Header())
+		w.WriteHeader(clientStatus)
+		return true
 	}
 
 	// refuse answers a governor refusal or body-arrival failure after the
@@ -320,6 +342,11 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			it := tx.Interruption()
 			detIt := detectionOnlyInterruption(tx)
 			rules, totalMatched, matchesTruncated := extractMatchedRules(tx.MatchedRules(), it, detIt)
+			txCloseErr := tx.Close()
+			if txCloseErr != nil {
+				outcome = OutcomeInspectionError
+				errorCategory = "transaction_close_error"
+			}
 
 			wouldInterrupt := false
 			interruptedAction := ""
@@ -403,7 +430,6 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 				}
 			}
 
-			_ = tx.Close()
 			// Only now is the transaction state unreachable.
 			a.release()
 		})
@@ -423,6 +449,10 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	if idx := strings.LastIndexByte(r.RemoteAddr, ':'); idx != -1 {
 		client = r.RemoteAddr[:idx]
 		cport, _ = strconv.Atoi(r.RemoteAddr[idx+1:])
+	}
+	if id, ok := clientaddr.FromContext(r.Context()); ok && id.Client.IsValid() {
+		client = id.Client.String()
+		cport = 0
 	}
 	uri := requestTargetURI(r)
 	var h uint64
@@ -505,6 +535,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 			w.WriteHeader(clientStatus)
 			return
 		}
+		if rejectBodyProcessingFailure() {
+			return
+		}
 		rbr, err := tx.RequestBodyReader()
 		if err != nil {
 			outcome = OutcomeInspectionError
@@ -566,6 +599,9 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 		clientStatus = interruptionStatus(it, f.info.BlockStatus)
 		mintSupportHeader(w.Header())
 		w.WriteHeader(clientStatus)
+		return
+	}
+	if rejectBodyProcessingFailure() {
 		return
 	}
 

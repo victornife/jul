@@ -664,7 +664,7 @@
       "kind": "duration",
       "constraint": "non-negative",
       "zero_semantics": "omitted defaults to 60s; explicit 0s disables the inspection body-arrival deadline",
-      "active_when": "enforce mode bounds plugin request-body arrival from its first read; observe counts would_timeout instead; WAF-only routes do not apply it yet"
+      "active_when": "enforce mode bounds inspected plugin and WAF request-body arrival from its first read; observe counts would_timeout instead"
     },
     {
       "go_field": "InspectionConfig.EvaluationQueueTimeout",
@@ -672,7 +672,7 @@
       "kind": "duration",
       "constraint": "between 0s and 10s",
       "zero_semantics": "omitted defaults to 1s; explicit 0s disables waiting",
-      "active_when": "applied by the governor API; live requests do not acquire governor slots yet"
+      "active_when": "bounds waiting for live WAF evaluation slots; observe does not wait"
     },
     {
       "go_field": "InspectionConfig.MaxBufferedBytes",
@@ -680,7 +680,7 @@
       "kind": "size",
       "constraint": "positive size",
       "zero_semantics": "omitted defaults to 256 MiB; explicit zero is invalid",
-      "active_when": "applied by governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet"
+      "active_when": "applied by governor accounting and configuration validation on supported plugin and WAF paths"
     },
     {
       "go_field": "InspectionConfig.MaxConcurrentEvaluations",
@@ -688,7 +688,15 @@
       "kind": "integer",
       "constraint": "0 or between 1 and 1024",
       "zero_semantics": "0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting",
-      "active_when": "applied by the governor API; live WAF evaluations do not acquire slots yet"
+      "active_when": "limits live WAF evaluations in enforce mode; observe records would-refuse decisions"
+    },
+    {
+      "go_field": "InspectionConfig.MaxGuestCapacityBytes",
+      "path": "global.inspection.max_guest_capacity_bytes",
+      "kind": "size",
+      "constraint": "positive size; process-wide ceiling for page-rounded Jul-managed starting/live plugin instances",
+      "zero_semantics": "omitted defaults to 1 GiB; explicit zero is invalid",
+      "active_when": "enforce mode rejects excess managed guest reservations; observe records would-refuse decisions"
     },
     {
       "go_field": "InspectionConfig.MaxResponseHeaderBytes",
@@ -696,7 +704,7 @@
       "kind": "size",
       "constraint": "positive size",
       "zero_semantics": "omitted defaults to 64 KiB; explicit zero is invalid",
-      "active_when": "used by configuration validation; live response-header accounting is pending"
+      "active_when": "used by configuration validation and before WAF response-header inspection"
     },
     {
       "go_field": "InspectionConfig.Mode",
@@ -704,7 +712,7 @@
       "kind": "enum",
       "constraint": "exact lowercase enum",
       "zero_semantics": "omitted defaults to enforce",
-      "active_when": "controls governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet",
+      "active_when": "controls governor accounting and configuration validation on supported plugin and WAF paths",
       "allowed": [
         "enforce",
         "observe"
@@ -1015,7 +1023,7 @@
       "go_field": "PluginConfig.MemoryLimit",
       "path": "plugins.<name>.memory_limit",
       "kind": "size",
-      "constraint": "non-negative",
+      "constraint": "zero, or at least 64 KiB; rounded down to whole 64 KiB pages with a maximum effective ceiling of 4 GiB",
       "zero_semantics": "omitted/zero applies the documented plugin default",
       "active_when": "always"
     },

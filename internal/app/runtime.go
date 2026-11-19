@@ -103,7 +103,8 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 	}
 	b.Metrics.SetInspectionSource(func() observability.InspectionMetricsSnapshot {
 		snapshot := rt.Inspection.Snapshot()
-		return observability.InspectionMetricsSnapshot{
+		metricsSnapshot := observability.InspectionMetricsSnapshot{
+			Mode:                 string(snapshot.Limits.Mode),
 			BaseBytes:            snapshot.Usage[inspection.BaseBytes],
 			BufferBytes:          snapshot.Usage[inspection.BufferBytes],
 			WAFStateBytes:        snapshot.Usage[inspection.WAFStateBytes],
@@ -117,7 +118,11 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 			WaitingEvaluations:   snapshot.WaitingEvaluations,
 			EvaluationLimit:      snapshot.Limits.EvaluationSlots,
 			AbandonedEvaluations: snapshot.AbandonedEvaluations,
+			GuestCapacityBytes:   snapshot.GuestCapacity.ReservedBytes,
+			GuestCapacityLimit:   snapshot.Limits.MaxGuestCapacityBytes,
+			GuestInstances:       snapshot.GuestCapacity.Instances,
 		}
+		return metricsSnapshot
 	})
 
 	// Tracing is initialised once at startup (like ACME): the OTLP pipeline and
@@ -141,7 +146,6 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 		_ = tracer.Shutdown(shutCtx)
 		return nil, err
 	}
-
 	// Build the ACME manager once from the startup configuration. It covers the
 	// union of acme-enabled domains, caches certificates on disk, auto-renews,
 	// and answers HTTP-01 challenges. nil means no block enables ACME; an error

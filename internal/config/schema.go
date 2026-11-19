@@ -137,7 +137,9 @@ type PluginConfig struct {
 	// Config is an arbitrary string map handed to the guest as a JSON object via
 	// the get_config host function.
 	Config map[string]string `toml:"config"`
-	// MemoryLimit caps the guest's linear memory. Zero applies a 16 MiB default.
+	// MemoryLimit caps the guest's linear memory, rounded down to whole 64 KiB
+	// pages. Positive values must be at least one page, with a maximum
+	// effective ceiling of 4 GiB. Zero applies a 16 MiB default.
 	MemoryLimit Size `toml:"memory_limit"`
 	// Timeout bounds a single guest invocation. Zero applies a 100ms default.
 	Timeout Duration `toml:"timeout"`
@@ -321,37 +323,40 @@ type GlobalConfig struct {
 	// restart-required: changing it moves ownership of the configuration file
 	// and can only be staged through stage_restart (ADR 0019 §9.2).
 	ConfigAuthority string `toml:"config_authority"`
-	// Inspection configures process-wide admission accounting for future WAF
-	// and plugin integrations. I1 publishes and reports the limits, but does not
-	// yet gate live requests.
+	// Inspection configures process-wide admission accounting for WAF and
+	// plugin inspection.
 	Inspection InspectionConfig `toml:"inspection"`
 }
 
 // InspectionConfig holds process-wide inspection-governor limits. It is
 // intentionally global rather than listener- or route-scoped.
 type InspectionConfig struct {
-	// Mode is "enforce" (default) or "observe" for governor accounting; live
-	// plugin requests are governed, WAF requests are not yet.
+	// Mode is "enforce" (default) or "observe" for governor accounting on
+	// supported WAF and plugin paths.
 	Mode string `toml:"mode"`
 	// MaxBufferedBytes is the shared governor ceiling for base, buffer and
-	// estimated WAF state; it governs live plugin requests, not WAF requests
-	// yet. It must be
-	// positive, and in enforce mode at least the largest inspected route's
+	// estimated WAF state and audit; plugin and WAF paths consume it. It must
+	// be positive, and in enforce mode at least the largest inspected route's
 	// worst-case single-request charge (observe only warns).
 	MaxBufferedBytes *Size `toml:"max_buffered_bytes,omitempty"`
+	// MaxGuestCapacityBytes is the process-wide ceiling for page-rounded
+	// logical reservations for Jul-managed plugin instances across names and
+	// generations. Omission defaults to 1 GiB. It excludes engine-internal
+	// memory references that may outlive managed teardown.
+	MaxGuestCapacityBytes *Size `toml:"max_guest_capacity_bytes,omitempty"`
 	// MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and
-	// values plus 64 bytes per occurrence); it is not yet applied to live
-	// responses. It is not a wire-size or actual-memory bound.
+	// values plus 64 bytes per occurrence) checked before WAF response-header
+	// inspection; it is not a wire-size or actual-memory bound.
 	MaxResponseHeaderBytes *Size `toml:"max_response_header_bytes,omitempty"`
-	// MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations
-	// do not acquire slots yet. Zero resolves to the candidate
-	// worker_threads/GOMAXPROCS setting.
+	// MaxConcurrentEvaluations is the governor slot limit for live WAF
+	// evaluations; zero resolves to the candidate worker_threads/GOMAXPROCS
+	// setting.
 	MaxConcurrentEvaluations int `toml:"max_concurrent_evaluations"`
-	// EvaluationQueueTimeout bounds governor slot waiting; live requests do not
-	// acquire slots yet. Explicit zero disables queueing.
+	// EvaluationQueueTimeout bounds WAF evaluation slot waiting; explicit zero
+	// disables queueing.
 	EvaluationQueueTimeout *Duration `toml:"evaluation_queue_timeout,omitempty"`
-	// BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only
-	// routes do not apply it yet. Explicit zero disables that deadline.
+	// BodyTimeout bounds inspected plugin and WAF request-body arrival in
+	// enforce mode. Explicit zero disables that deadline.
 	BodyTimeout *Duration `toml:"body_timeout,omitempty"`
 }
 
@@ -361,6 +366,7 @@ const (
 	InspectionResponseHeaderFieldOverheadBytes int64 = 64
 	InspectionResponseHeaderEstimateFactor     int64 = 48
 	InspectionDefaultMaxResponseHeaderBytes    int64 = 64 << 10
+	InspectionDefaultMaxGuestCapacityBytes     int64 = 1 << 30
 )
 
 // ServerConfig is a virtual host bound to one listen address.

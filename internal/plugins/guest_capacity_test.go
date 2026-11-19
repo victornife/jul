@@ -56,3 +56,23 @@ func TestGuestCapacityStatsRejectsAggregateOverflow(t *testing.T) {
 		t.Fatal("GuestCapacityStats accepted aggregate capacity overflow")
 	}
 }
+
+func TestGuestCapacityStatsIncludesRetainedCloseFailures(t *testing.T) {
+	p := &plugin{name: "retained", memoryLimitBytes: 16 << 20, slots: make(chan struct{}, 2)}
+	p.slots <- struct{}{}
+	manager := &Manager{
+		live:     map[*plugin]struct{}{},
+		retained: map[*plugin]struct{}{p: {}},
+	}
+	got, err := manager.GuestCapacityStats()
+	if err != nil {
+		t.Fatalf("GuestCapacityStats: %v", err)
+	}
+	if got.MaxPermittedBytes != 32<<20 || got.LiveInstances != 1 || got.MaxInstances != 2 {
+		t.Fatalf("retained plugin capacity stats = %+v", got)
+	}
+	stats := manager.InstanceStats()
+	if len(stats) != 1 || stats[0] != (InstanceStats{Plugin: "retained", Live: 1}) {
+		t.Fatalf("retained plugin instance stats = %+v", stats)
+	}
+}

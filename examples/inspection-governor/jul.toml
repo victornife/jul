@@ -1,11 +1,12 @@
 # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 # SPDX-License-Identifier: agpl
 
-# I1 foundation example only: the limits are configured and reported, but no
-# live WAF or plugin request path consumes the governor yet.
+# Inspection governor example: the managed guest reservation ceiling is
+# separate from request/WAF byte accounting.
 [global.inspection]
 mode = "enforce"
 max_buffered_bytes = "16m"
+max_guest_capacity_bytes = "1g"
 max_concurrent_evaluations = 0
 evaluation_queue_timeout = "1s"
 body_timeout = "60s"

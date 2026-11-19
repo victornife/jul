@@ -6,6 +6,9 @@ FULL_TAGS="${FULL_TAGS:-brotli zstd acme console otel grpc http3 importer wasmpl
 cover="$(mktemp "${TMPDIR:-/tmp}/jul-security-cover.XXXXXX")"
 trap 'rm -f "$cover"' EXIT
 
+printf '%s\n' '== supported upstream module replacements'
+python3 scripts/check_upstream_module_replacements.py
+
 printf '%s\n' '== security negative tests: lean'
 go test -count=1 ./internal/rbac ./internal/waf ./internal/plugins
 go test -count=1 -run '^(TestRouteTransportPolicyInventory|TestCatalog)' ./internal/admin

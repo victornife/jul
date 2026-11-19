@@ -1,0 +1,1 @@
+/workspace/scratch/fecc8ca1efe5/721-bounded-final/recycled-p1/cells/p1-large-body-plugin-h1/wasm/candidate/rep1/config.toml is valid (structural + runtime)

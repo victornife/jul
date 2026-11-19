@@ -406,6 +406,29 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_inspection_guest_capacity_bytes",
+      "type": "gauge",
+      "help": "Jul-managed reserved effective linear-memory ceilings for plugin instances; not actual memory or RSS.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_guest_capacity_bytes_limit",
+      "type": "gauge",
+      "help": "Configured process-wide plugin guest-capacity ceiling; zero means no finite ceiling is configured.",
+      "labels": [],
+      "state": "merged_release_pending"
+    },
+    {
+      "name": "jul_inspection_guest_instances",
+      "type": "gauge",
+      "help": "Plugin instances by Jul-managed reserved lifecycle state; failed_retained remains charged.",
+      "labels": [
+        "state"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_inspection_leases",
       "type": "gauge",
       "help": "Current outer request leases held by the inspection governor.",
@@ -415,7 +438,7 @@
     {
       "name": "jul_inspection_rejections_total",
       "type": "counter",
-      "help": "Inspection admission rejections in enforce mode and would-reject decisions in observe mode.",
+      "help": "Inspection admission rejections and observe-only would-reject decisions, including guest-capacity reservations.",
       "labels": [
         "mode",
         "reason"

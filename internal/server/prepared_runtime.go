@@ -14,8 +14,8 @@ import (
 // prepared type/setter/accessor, an explicit Prepare call site, a publication
 // order entry and a retirement category — never a runtime registration.
 //
-// ComponentStaticCertificates (#100, see cert_rotation.go) and
-// ComponentInspectionLimits are production components. Values are added only
+// ComponentStaticCertificates (#100, see cert_rotation.go) is a production
+// component. Values are added only
 // with their implementation; do not add a value merely because a gated issue
 // exists (egress, tracing, ACME, cache and the admin listener remain
 // restart-required until their own issue lands).

@@ -1,0 +1,24 @@
+File: jul-candidate
+Build ID: 413e61758e267dd77ad1bc1c935b9d8e0f9ea1f7
+Type: cpu
+Time: 2026-11-19 20:15:16 CET
+Duration: 15.13s, Total samples = 29.13s (192.49%)
+Showing nodes accounting for 27.23s, 93.48% of 29.13s total
+Dropped 463 nodes (cum <= 0.15s)
+Showing top 15 nodes out of 122
+      flat  flat%   sum%        cum   cum%
+    11.81s 40.54% 40.54%     11.81s 40.54%  runtime._ExternalCode
+     9.58s 32.89% 73.43%     11.75s 40.34%  github.com/tetratelabs/wazero/internal/engine/wazevo.(*callEngine).callWithStack
+     1.72s  5.90% 79.33%      1.72s  5.90%  runtime.memmove
+     1.21s  4.15% 83.49%      1.21s  4.15%  github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/amd64.afterGoFunctionCallEntrypoint
+     0.72s  2.47% 85.96%      0.72s  2.47%  runtime.memclrNoHeapPointers
+     0.63s  2.16% 88.12%      0.63s  2.16%  internal/runtime/syscall/linux.Syscall6
+     0.61s  2.09% 90.22%      0.62s  2.13%  github.com/tetratelabs/wazero/internal/wasm.(*ModuleInstance).FailIfClosed
+     0.36s  1.24% 91.45%      0.47s  1.61%  runtime.tryDeferToSpanScan
+     0.22s  0.76% 92.21%      0.22s  0.76%  runtime.madvise
+     0.10s  0.34% 92.55%      0.58s  1.99%  runtime.scanObject
+     0.09s  0.31% 92.86%      0.15s  0.51%  runtime.mallocgcTinySC2
+     0.08s  0.27% 93.13%      0.37s  1.27%  github.com/tetratelabs/wazero/internal/wasm.evaluateConstExpr
+     0.05s  0.17% 93.31%      0.49s  1.68%  github.com/tetratelabs/wazero/internal/wasm.(*ModuleInstance).applyData
+     0.03s   0.1% 93.41%      0.16s  0.55%  runtime.scanSpan
+     0.02s 0.069% 93.48%      0.47s  1.61%  runtime.memclrNoHeapPointersChunked

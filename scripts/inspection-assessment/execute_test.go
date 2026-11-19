@@ -328,6 +328,12 @@ func TestExecutePluginFixtures(t *testing.T) {
 			if r.Failure != "" || len(r.Invalid) > 0 {
 				t.Fatalf("failure %q invalid %v", r.Failure, r.Invalid)
 			}
+			if tc.scenario == "p1-large-body-plugin-h1" {
+				cfg, err := os.ReadFile(filepath.Join(opt.Out, filepath.Dir(m.Results[0]), "config.toml"))
+				if err != nil || strings.Count(string(cfg), "max_invocations = 16\n") != 2 {
+					t.Fatalf("runner lost the fixture recycling setting: %v\n%s", err, cfg)
+				}
+			}
 			for _, cn := range append(r.PreCanaries, r.PostCanaries...) {
 				if !cn.OK {
 					t.Errorf("canary %+v", cn)

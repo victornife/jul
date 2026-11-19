@@ -1,0 +1,5 @@
+--- FAIL: TestJoinProbeGuestStartupAndRetirement (0.32s)
+    zz_join_probe_test.go:54: startup returned before watcher exited: {set:0x7474e9bb4028 err:<nil>}
+FAIL
+FAIL	jul/internal/plugins	2.637s
+FAIL

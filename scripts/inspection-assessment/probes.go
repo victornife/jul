@@ -220,7 +220,7 @@ func RunF4(ctx context.Context, t Target, f F4, proto, mode, expect string, dead
 		case rerr != nil:
 			o.Class = "error:body-" + strings.TrimPrefix(errClass(rerr, false), "error:")
 		case resp.StatusCode/100 != 2:
-			o.Class = StatusClass(resp, got)
+			o.Class = StatusClass(resp, got, c.Proto)
 		default:
 			o.Class = "ok"
 			if why := Verify(resp, got, upload, len(body), t.Fixture, c.Proto); why != "" {

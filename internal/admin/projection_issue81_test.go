@@ -134,12 +134,13 @@ redact_min_secret_length = 8
 		t.Fatal("global projection is nil")
 	}
 	paths := map[string]string{
-		"worker_threads":           "global.worker_threads",
-		"log_level":                "global.log_level",
-		"log_format":               "global.log_format",
-		"shutdown_timeout":         "global.shutdown_timeout",
-		"reload_timeout":           "global.reload_timeout",
-		"redact_min_secret_length": "global.redact_min_secret_length",
+		"worker_threads":                      "global.worker_threads",
+		"log_level":                           "global.log_level",
+		"log_format":                          "global.log_format",
+		"shutdown_timeout":                    "global.shutdown_timeout",
+		"reload_timeout":                      "global.reload_timeout",
+		"redact_min_secret_length":            "global.redact_min_secret_length",
+		"inspection.max_guest_capacity_bytes": "global.inspection.max_guest_capacity_bytes",
 	}
 	for field, path := range paths {
 		entry, ok := lifecycle.Lookup(path)
@@ -154,6 +155,48 @@ redact_min_secret_length = 8
 			metadata.Reason != entry.Reason {
 			t.Fatalf("metadata for %s is not registry-derived: %#v vs %#v", field, metadata, entry)
 		}
+	}
+}
+
+func TestIssue81InspectionProjectionPreservesExplicitZero(t *testing.T) {
+	cfg := parseIssue81Config(t, `
+[global.inspection]
+mode = "observe"
+max_buffered_bytes = "128m"
+max_guest_capacity_bytes = "48m"
+max_response_header_bytes = "32k"
+max_concurrent_evaluations = 0
+evaluation_queue_timeout = "0s"
+body_timeout = "0s"
+`)
+	encoded, err := json.Marshal(projectGlobalSettings(cfg).Inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"mode": "observe", "max_buffered_bytes": "128m",
+		"max_guest_capacity_bytes":  "48m",
+		"max_response_header_bytes": "32k", "max_concurrent_evaluations": float64(0),
+		"evaluation_queue_timeout": "0s", "body_timeout": "0s",
+	}
+	for field, value := range want {
+		if got[field] != value {
+			t.Errorf("%s = %#v, want %#v", field, got[field], value)
+		}
+	}
+	empty, err := json.Marshal(projectGlobalSettings(&config.Config{}).Inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(empty, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["body_timeout"] != nil || got["evaluation_queue_timeout"] != nil {
+		t.Fatalf("absent timeouts must not become explicit zero: %s", empty)
 	}
 }
 

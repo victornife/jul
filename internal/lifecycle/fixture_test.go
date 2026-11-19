@@ -47,6 +47,7 @@ func fullConfig() *config.Config {
 			Inspection: config.InspectionConfig{
 				Mode:                     "enforce",
 				MaxBufferedBytes:         sizePtr(256 << 20),
+				MaxGuestCapacityBytes:    sizePtr(128 << 20),
 				MaxResponseHeaderBytes:   sizePtr(64 << 10),
 				MaxConcurrentEvaluations: 4,
 				EvaluationQueueTimeout:   durationPtr(time.Second),

@@ -6,17 +6,24 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 
 	"jul/internal/config"
 	"jul/internal/inspection"
+	"jul/internal/plugins/wasmtest"
 )
 
 // hostFn is one imported host function whose parameters and results are all
@@ -224,4 +231,1407 @@ func assertDrained(t *testing.T, g *inspection.Governor) {
 	if s.ActiveLeases != 0 || s.Usage != ([len(s.Usage)]uint64{}) {
 		t.Fatalf("governor not drained: leases=%d usage=%v", s.ActiveLeases, s.Usage)
 	}
+}
+
+func TestGuestCapacityEnforceTracksReuseAndCleansFailedCandidate(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 32 << 20
+	m, _, g, _ := govManager(t, limits)
+	old, err := m.Build(context.Background(), map[string]config.PluginConfig{
+		"old": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = old.Close() })
+	oldPlugin := old.plugins["old"]
+	oldTicket := onlyGuestTicket(t, oldPlugin)
+	if oldTicket.Generation() != oldPlugin.generation {
+		t.Fatalf("old ticket generation = %d, plugin generation = %d", oldTicket.Generation(), oldPlugin.generation)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestIdle] != 1 {
+		t.Fatalf("old generation reservation = %+v", got)
+	}
+
+	pm, err := oldPlugin.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestBusy] != 1 {
+		t.Fatalf("busy reuse changed capacity accounting: %+v", got)
+	}
+	oldPlugin.release(pm)
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 || got.Instances[inspection.GuestIdle] != 1 {
+		t.Fatalf("idle reuse changed capacity accounting: %+v", got)
+	}
+
+	_, err = m.Build(context.Background(), map[string]config.PluginConfig{
+		"candidate-a": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+		"candidate-b": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+	})
+	if !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
+		t.Fatalf("candidate build error = %v, want guest-capacity refusal", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestIdle] != 1 {
+		t.Fatalf("failed candidate cleanup = %+v", got)
+	}
+
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("retired generation capacity = %+v", got)
+	}
+}
+
+func TestFailedGuestCandidateReportsPriorRuntimeCloseFailure(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 64 << 20
+	m, _, g, _ := govManager(t, limits)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	closeErr := errors.New("candidate runtime close failed")
+	var actualRuntime wazero.Runtime
+	var reads int
+	afterModuleRead = func(string) {
+		reads++
+		if reads != 2 {
+			return
+		}
+		m.liveMu.Lock()
+		for p := range m.live {
+			actualRuntime = p.runtime
+			p.runtime = closeErrorRuntime{Runtime: actualRuntime, err: closeErr}
+		}
+		m.liveMu.Unlock()
+		cancel()
+	}
+	t.Cleanup(func() {
+		afterModuleRead = nil
+		if actualRuntime != nil {
+			_ = actualRuntime.Close(context.Background())
+		}
+	})
+	_, err := m.Build(ctx, map[string]config.PluginConfig{
+		"a": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+		"b": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+	})
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, closeErr) {
+		t.Errorf("failed candidate = %v, want cancellation and prior runtime close failure", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Errorf("runtime close error did not retain candidate capacity: %+v", got)
+	}
+}
+
+func TestGuestCapacityStatsIncludeStartingCandidate(t *testing.T) {
+	m, _, g, _ := govManager(t, testLimits())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var buildErr error
+	go func() {
+		set, err := m.Build(ctx, map[string]config.PluginConfig{
+			"starting": pcfg("", inlineSrc(wasmtest.StartLoopV2()), func(pc *config.PluginConfig) {
+				pc.Path = ""
+				pc.ABI = ABIJulV2
+				pc.MemoryLimit = config.Size(16 << 20)
+			}),
+		})
+		if set != nil {
+			_ = set.Close()
+		}
+		buildErr = err
+		close(done)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("starting candidate did not stop after cancellation")
+		}
+	}()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for g.Snapshot().GuestCapacity.Instances[inspection.GuestStarting] == 0 {
+		select {
+		case <-done:
+			t.Fatalf("candidate startup ended before observation: %v", buildErr)
+		case <-timer.C:
+			t.Fatal("candidate startup did not reserve guest capacity")
+		case <-ticker.C:
+		}
+	}
+	stats, err := m.GuestCapacityStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.LiveInstances != 1 || stats.MaxInstances != defaultMaxInstances ||
+		stats.MaxPermittedBytes != defaultMaxInstances*(16<<20) {
+		t.Fatalf("starting candidate missing from manager capacity stats: %+v", stats)
+	}
+}
+
+func TestGuestCapacityObserveAllowsAndCountsOverLimitGenerations(t *testing.T) {
+	limits := testLimits()
+	limits.Mode = inspection.Observe
+	limits.MaxGuestCapacityBytes = 16 << 20
+	m, _, g, recorder := govManager(t, limits)
+	cfg := func(name string) map[string]config.PluginConfig {
+		return map[string]config.PluginConfig{
+			name: pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+		}
+	}
+	old, err := m.Build(context.Background(), cfg("old"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = old.Close() })
+	candidate, err := m.Build(context.Background(), cfg("candidate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = candidate.Close() })
+	oldTicket := onlyGuestTicket(t, old.plugins["old"])
+	candidateTicket := onlyGuestTicket(t, candidate.plugins["candidate"])
+	if oldTicket.Generation() == candidateTicket.Generation() {
+		t.Fatalf("overlapping sets share generation %d", oldTicket.Generation())
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 32<<20 ||
+		got.Instances[inspection.GuestIdle] != 2 || got.Draining {
+		t.Fatalf("observe-mode overlap = %+v", got)
+	}
+	rejections, _ := recorder.snapshot()
+	if got := rejections["guest_capacity/observe"]; got != 1 {
+		t.Fatalf("observe guest-capacity decisions = %d, want 1", got)
+	}
+}
+
+func TestGuestRetirementReleasesCapacityAfterTeardown(t *testing.T) {
+	for _, mode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+		t.Run(string(mode), func(t *testing.T) {
+			limits := testLimits()
+			limits.Mode = mode
+			limits.MaxGuestCapacityBytes = 16 << 20
+			m, _, g, recorder := govManager(t, limits)
+			cfg := map[string]config.PluginConfig{
+				"guest": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+			}
+			old, err := m.Build(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := old.Close(); err != nil {
+				t.Fatal(err)
+			}
+			candidate, err := m.Build(context.Background(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+				got.Instances[inspection.GuestIdle] != 1 {
+				t.Fatalf("candidate after teardown = %+v", got)
+			}
+			rejections, _ := recorder.snapshot()
+			if got := rejections["guest_capacity/"+string(mode)]; got != 0 {
+				t.Fatalf("saturation decisions = %d, want 0", got)
+			}
+			if err := candidate.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+				t.Fatalf("candidate retirement capacity = %+v", got)
+			}
+		})
+	}
+}
+
+func TestFailedGuestCandidateDebtRespectsModes(t *testing.T) {
+	for _, mode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+		t.Run(string(mode), func(t *testing.T) {
+			limits := testLimits()
+			limits.Mode = mode
+			limits.MaxGuestCapacityBytes = 64 << 10
+			m, _, g, recorder := govManager(t, limits)
+			wasm := assemble(nil, []wasmFunc{{export: "_initialize", body: []byte{opUnreachable}}, fnRequest})
+			cfg := map[string]config.PluginConfig{"bad": pcfg("", inlineSrc(wasm), func(pc *config.PluginConfig) {
+				pc.Path = ""
+				pc.MemoryLimit = config.Size(64 << 10)
+			})}
+			if set, err := m.Build(context.Background(), cfg); err == nil || set != nil {
+				t.Fatalf("trapping candidate = %v, %v", set, err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+				t.Fatalf("trapping candidate cleanup = %+v", got)
+			}
+			set, err := m.Build(context.Background(), cfg)
+			if set != nil || err == nil {
+				t.Fatalf("second trapping candidate = %v, %v", set, err)
+			}
+			if inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
+				t.Fatalf("second candidate unexpectedly saturated: %v", err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+				t.Fatalf("repeated candidate cleanup = %+v", got)
+			}
+			rejections, _ := recorder.snapshot()
+			if got := rejections["guest_capacity/"+string(mode)]; got != 0 {
+				t.Fatalf("saturation decisions = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestGuestHelpersWithoutGovernorAreNoops(t *testing.T) {
+	p := &plugin{}
+	if ticket, err := p.reserveGuest(); ticket != nil || err != nil {
+		t.Fatalf("reserve without governor = %v, %v", ticket, err)
+	}
+	if err := p.transitionGuest(nil, inspection.GuestIdle); err != nil {
+		t.Fatalf("nil-ticket transition = %v", err)
+	}
+	if released, err := p.resolveGuest(nil, nil); !released || err != nil {
+		t.Fatalf("nil-ticket teardown = %v, %v", released, err)
+	}
+	if released, err := p.resolveGuest(nil, errors.New("unconfirmed")); released || err != nil {
+		t.Fatalf("failed nil-ticket teardown = %v, %v", released, err)
+	}
+	if released, err := p.releaseClosedGuest(nil, errors.New("close failed")); !released || err != nil {
+		t.Fatalf("nil-ticket module close = %v, %v", released, err)
+	}
+	if p.hasGuestTickets() {
+		t.Fatal("empty plugin has guest tickets")
+	}
+	p.finishGuestClose()
+	p.discard(nil)
+
+	var nilPlugin *plugin
+	if nilPlugin.hasGuestTickets() {
+		t.Fatal("nil plugin has guest tickets")
+	}
+	nilPlugin.discard(nil)
+}
+
+func TestGuestCloseFailureWithoutGovernorReleasesSlot(t *testing.T) {
+	var logs bytes.Buffer
+	p := &plugin{
+		name: "without-governor", slots: make(chan struct{}, 1),
+		log: slog.New(slog.NewTextHandler(&logs, nil)),
+	}
+	p.slots <- struct{}{}
+	closeErr := errors.New("module close failed")
+	p.discard(&pooledModule{mod: &closeErrorModule{err: closeErr}})
+	if len(p.slots) != 0 || !strings.Contains(logs.String(), closeErr.Error()) {
+		t.Fatalf("failed close left slots=%d, logs=%q", len(p.slots), logs.String())
+	}
+}
+
+func TestGuestAccountingResolutionPaths(t *testing.T) {
+	g := testGovernor(t)
+	p := &plugin{guestTickets: make(map[*inspection.GuestTicket]*guestOwnership)}
+
+	orphan, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.resolveGuest(orphan, nil); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("resolve orphan = %t, %v", released, err)
+	}
+	if released, err := p.releaseClosedGuest(orphan, nil); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("release orphan = %t, %v", released, err)
+	}
+	if err := orphan.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := orphan.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.guestTickets[ticket] = &guestOwnership{active: true}
+	if released, err := p.resolveGuest(ticket, nil); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("premature resolve = %t, %v", released, err)
+	}
+	if err := ticket.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.resolveGuest(ticket, nil); !released || err != nil {
+		t.Fatalf("successful resolve = %t, %v", released, err)
+	}
+	if p.hasGuestTickets() {
+		t.Fatal("successful resolve retained its owner")
+	}
+
+	retained, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.guestTickets[retained] = &guestOwnership{active: true}
+	if err := retained.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("module cleanup is unconfirmed")
+	if released, err := p.resolveGuest(retained, closeErr); released || err != nil {
+		t.Fatalf("failed teardown resolve = %t, %v", released, err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Fatalf("failed teardown did not retain capacity: %+v", got)
+	}
+	if err := retained.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.resolveGuest(retained, nil); released || err != nil {
+		t.Fatalf("repeated failed teardown resolve = %t, %v", released, err)
+	}
+	if err := retained.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.releaseClosedGuest(retained, nil); !released || err != nil {
+		t.Fatalf("confirmed runtime teardown = %t, %v", released, err)
+	}
+	if p.hasGuestTickets() || g.Snapshot().GuestCapacity.ReservedBytes != 0 {
+		t.Fatal("confirmed teardown retained guest accounting")
+	}
+
+	if released, err := p.releaseClosedGuest(nil, nil); !released || err != nil {
+		t.Fatalf("nil-ticket release = %t, %v", released, err)
+	}
+}
+
+func TestGuestAccountingRejectsInvalidOwnershipTransitions(t *testing.T) {
+	g := testGovernor(t)
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &plugin{
+		gov:          g,
+		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {active: true}},
+	}
+	if err := p.transitionGuest(ticket, inspection.GuestClosed); !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("invalid guest transition = %v", err)
+	}
+	if released, err := p.releaseClosedGuest(ticket, nil); released || !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("premature closed-ticket release = %t, %v", released, err)
+	}
+
+	orphan, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.transitionGuest(orphan, inspection.GuestIdle); !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+		t.Fatalf("unowned guest transition = %v", err)
+	}
+	if err := orphan.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := orphan.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	closed := &plugin{gov: g}
+	closed.closed.Store(true)
+	if got, err := closed.reserveGuest(); got != nil || !errors.Is(err, errPluginClosed) {
+		t.Fatalf("closed-plugin reservation = %v, %v", got, err)
+	}
+
+	if err := ticket.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if released, err := p.releaseClosedGuest(ticket, nil); !released || err != nil {
+		t.Fatalf("closed-ticket release = %t, %v", released, err)
+	}
+}
+
+func TestGuestCapacityRetainedAfterModuleAndRuntimeCloseFailure(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	g, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(&logs, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtCloseErr := errors.New("runtime close failed")
+	p := &plugin{
+		name:         "close-failure",
+		runtime:      closeErrorRuntime{err: rtCloseErr},
+		gov:          g,
+		mgr:          m,
+		log:          m.log,
+		generation:   1,
+		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {active: true}},
+		slots:        make(chan struct{}, 1),
+	}
+	p.slots <- struct{}{}
+	moduleCloseErr := errors.New("module close failed")
+	module := &closeErrorModule{err: moduleCloseErr}
+	p.discard(&pooledModule{mod: module, ticket: ticket})
+	if !module.closed {
+		t.Fatal("close-error module was not marked removed")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Fatalf("module close error did not retain capacity: %+v", got)
+	}
+	if len(p.guestTickets) != 1 || len(p.slots) != 1 {
+		t.Fatalf("failed module lost owner/slot: tickets=%d slots=%d", len(p.guestTickets), len(p.slots))
+	}
+	if _, err := g.ReserveGuestCapacity(2, 16<<20); !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
+		t.Fatalf("admission after failed module close = %v, want capacity refusal", err)
+	}
+	firstClose := p.close()
+	if !errors.Is(firstClose, rtCloseErr) || !errors.Is(firstClose, moduleCloseErr) {
+		t.Fatalf("plugin close error = %v, want module and runtime close failures", firstClose)
+	}
+	if !strings.Contains(logs.String(), moduleCloseErr.Error()) {
+		t.Error("module close error was not logged")
+	}
+	if !strings.Contains(logs.String(), "plugin runtime teardown failed") {
+		t.Error("runtime close failure was not logged")
+	}
+	if stats, err := m.GuestCapacityStats(); err != nil || stats.LiveInstances != 1 {
+		t.Fatalf("failed plugin missing from capacity stats: %+v, %v", stats, err)
+	}
+	if err := m.Close(); !errors.Is(err, rtCloseErr) || !errors.Is(err, moduleCloseErr) {
+		t.Fatalf("manager close = %v, want both close failures", err)
+	}
+	m.retainedMu.Lock()
+	defer m.retainedMu.Unlock()
+	if len(m.retained) != 1 {
+		t.Fatalf("manager retained %d failed plugins, want 1", len(m.retained))
+	}
+}
+
+func TestGuestRuntimeCloseFailureRetainsIdleCapacity(t *testing.T) {
+	g := testGovernor(t)
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ticket.Transition(inspection.GuestIdle); err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("runtime close failed")
+	p := &plugin{
+		name: "idle-close", runtime: closeErrorRuntime{err: closeErr},
+		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {}},
+		pool:         make(chan *pooledModule, 1), slots: make(chan struct{}, 1),
+	}
+	p.pool <- &pooledModule{ticket: ticket}
+	p.slots <- struct{}{}
+	first := p.close()
+	if !errors.Is(first, closeErr) || inspection.IsOutcome(first, inspection.InvalidAccounting) {
+		t.Fatalf("first close = %v, want runtime failure without accounting error", first)
+	}
+	before := g.Snapshot().GuestCapacity
+	if before.ReservedBytes != 16<<20 || before.Instances[inspection.GuestFailedRetained] != 1 || len(p.slots) != 1 {
+		t.Fatalf("runtime close error did not retain idle guest: %+v, slots=%d", before, len(p.slots))
+	}
+	retry := p.closeRuntime(context.Background())
+	if !errors.Is(retry, closeErr) {
+		t.Fatalf("runtime retry = %v, want original failure %v", retry, first)
+	}
+	if got := g.Snapshot().GuestCapacity; got != before || len(p.slots) != 1 {
+		t.Fatalf("runtime retry changed retained capacity/slot: %+v, slots=%d", got, len(p.slots))
+	}
+}
+
+type poolWaitContext struct {
+	context.Context
+	waiting chan struct{}
+	once    sync.Once
+}
+
+func (c *poolWaitContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.waiting) })
+	return c.Context.Done()
+}
+
+func TestGuestCapacityRemainsChargedDuringPoolHandoff(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	m, _, g, _ := govManager(t, limits)
+	set, err := m.Build(context.Background(), map[string]config.PluginConfig{
+		"guest": pcfg("header-inject", func(pc *config.PluginConfig) {
+			pc.MemoryLimit = config.Size(16 << 20)
+			pc.MaxInstances = 1
+			pc.Timeout = config.Duration(10 * time.Second)
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = set.Close() })
+	p := set.plugins["guest"]
+	pm, err := p.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if pm != nil {
+			p.release(pm)
+		}
+	})
+
+	received, resume := make(chan struct{}), make(chan struct{})
+	var resumeOnce sync.Once
+	t.Cleanup(func() { resumeOnce.Do(func() { close(resume) }) })
+	p.onWait = func(_ string, result string) {
+		if result == instanceWaitAcquired {
+			close(received)
+			<-resume
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waitCtx := &poolWaitContext{Context: ctx, waiting: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.acquire(waitCtx)
+		done <- err
+	}()
+	select {
+	case <-waitCtx.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second acquisition did not begin waiting")
+	}
+	p.release(pm)
+	pm = nil
+	select {
+	case <-received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second acquisition did not receive the pooled guest")
+	}
+
+	closeErr := p.close()
+	during := g.Snapshot().GuestCapacity
+	candidate, admissionErr := g.ReserveGuestCapacity(2, 16<<20)
+	if candidate != nil {
+		if err := candidate.Transition(inspection.GuestClosing); err != nil {
+			t.Errorf("close unexpectedly admitted candidate: %v", err)
+		} else if err := candidate.ResolveTeardown(nil); err != nil {
+			t.Errorf("release unexpectedly admitted candidate: %v", err)
+		}
+	}
+	resumeOnce.Do(func() { close(resume) })
+	select {
+	case err := <-done:
+		if !errors.Is(err, errPluginClosed) {
+			t.Errorf("acquisition during retirement = %v, want plugin closed", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("acquisition did not finish after retirement")
+	}
+	if !errors.Is(closeErr, errGuestWorkInFlight) || during.ReservedBytes != 16<<20 {
+		t.Errorf("retirement during pool handoff = %v, capacity = %+v; want in-flight error and 16 MiB retained",
+			closeErr, during)
+	}
+	if !inspection.IsOutcome(admissionErr, inspection.GuestCapacitySaturated) {
+		t.Errorf("candidate admission during pool handoff = %v, want guest-capacity refusal", admissionErr)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("completed pool handoff retained capacity: %+v", got)
+	}
+	if err := m.Close(); err != nil {
+		t.Errorf("manager close after pool handoff: %v", err)
+	}
+}
+
+func TestGuestRetirementClearsReleasedModuleAlias(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	m, _, g, _ := govManager(t, limits)
+	set, err := m.Build(context.Background(), map[string]config.PluginConfig{
+		"guest": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = set.Close() })
+	p := set.plugins["guest"]
+	pm, err := p.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.release(pm)
+	if err := p.close(); err != nil {
+		t.Fatal(err)
+	}
+	if pm.mod != nil {
+		t.Fatalf("released wrapper still retained %d bytes",
+			pm.mod.Memory().Size())
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("retired guest capacity = %+v", got)
+	}
+}
+
+func TestGuestRetirementWakesCapacityWaiters(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	m, _, g, _ := govManager(t, limits)
+	set, err := m.Build(context.Background(), map[string]config.PluginConfig{
+		"guest": pcfg("header-inject", func(pc *config.PluginConfig) {
+			pc.MemoryLimit = config.Size(16 << 20)
+			pc.MaxInstances = 1
+			pc.Timeout = config.Duration(30 * time.Second)
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = set.Close() })
+	p := set.plugins["guest"]
+	pm, err := p.acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { p.release(pm) }) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waitCtx := &poolWaitContext{Context: ctx, waiting: make(chan struct{})}
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.acquire(waitCtx)
+		done <- err
+	}()
+	select {
+	case <-waitCtx.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("second acquisition did not begin waiting")
+	}
+	if err := p.close(); !errors.Is(err, errGuestWorkInFlight) {
+		t.Errorf("retirement with a busy guest = %v, want in-flight error", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, errInstanceLimit) {
+			t.Errorf("waiting acquisition after retirement = %v, want instance limit", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("retirement did not wake the waiting acquisition")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 {
+		t.Errorf("retirement refunded the busy guest: %+v", got)
+	}
+	releaseOnce.Do(func() { p.release(pm) })
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("guest release after retirement retained capacity: %+v", got)
+	}
+	if err := m.Close(); err != nil {
+		t.Errorf("manager close after guest release: %v", err)
+	}
+}
+
+func TestGuestCapacityRemainsChargedWhileClosedCallIsRunning(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	entered, unblock := make(chan struct{}), make(chan struct{})
+	var unblockOnce sync.Once
+	t.Cleanup(func() {
+		unblockOnce.Do(func() { close(unblock) })
+		_ = rt.Close(ctx)
+	})
+	_, err := rt.NewHostModuleBuilder(hostModuleV1).NewFunctionBuilder().
+		WithFunc(func(_ context.Context, mod api.Module) {
+			memory, ok := mod.Memory().Read(0, 1)
+			if !ok {
+				panic("guest memory unavailable")
+			}
+			close(entered)
+			<-unblock
+			memory[0] = 1
+		}).Export("hold").Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guest := hostGuest{
+		abi:  ABIJulV1,
+		fns:  []hostFn{{name: "hold"}},
+		body: []byte{0x10, 0x00, 0x41, 0x01},
+	}
+	compiled, err := rt.CompileModule(ctx, guest.wasm())
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGovernor(t)
+	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	p := &plugin{
+		name:                   "active",
+		runtime:                rt,
+		compiled:               compiled,
+		pool:                   make(chan *pooledModule, 1),
+		slots:                  make(chan struct{}, 1),
+		gov:                    g,
+		mgr:                    m,
+		generation:             1,
+		memoryLimitBytes:       64 << 10,
+		guestTickets:           make(map[*inspection.GuestTicket]*guestOwnership),
+		timeout:                5 * time.Second,
+		maxInstanceInvocations: 100,
+		log:                    slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	m.track(p)
+	callDone := make(chan struct{})
+	go func() {
+		defer close(callDone)
+		_, _, _, _ = p.call(ctx, exportHandleRequest, &invocation{}, nil)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest did not enter the host call")
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- p.close() }()
+	select {
+	case err := <-closeDone:
+		if !errors.Is(err, errGuestWorkInFlight) {
+			t.Fatalf("close runtime = %v, want in-flight guest error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime close did not return while the host call was blocked")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 {
+		t.Errorf("runtime close refunded a running guest: %+v", got)
+	}
+	if err := m.Close(); !errors.Is(err, errGuestWorkInFlight) {
+		t.Errorf("manager close with active guest = %v, want in-flight error", err)
+	}
+	if stats, err := m.GuestCapacityStats(); err != nil || stats.LiveInstances != 1 {
+		t.Errorf("manager lost active owner: stats=%+v err=%v", stats, err)
+	}
+	unblockOnce.Do(func() { close(unblock) })
+	select {
+	case <-callDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest call did not finish")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Errorf("completed guest call retained capacity: %+v", got)
+	}
+	if err := m.Close(); err != nil {
+		t.Errorf("manager close after guest finished: %v", err)
+	}
+}
+
+func TestGuestCapacityReleasedAfterModuleCloseFailureAndRuntimeClose(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	g, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("module close failed")
+	var logs bytes.Buffer
+	p := &plugin{
+		name:         "failed-module-close",
+		runtime:      successfulCloseRuntime{},
+		log:          slog.New(slog.NewTextHandler(&logs, nil)),
+		gov:          g,
+		generation:   1,
+		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {active: true}},
+		slots:        make(chan struct{}, 1),
+	}
+	p.slots <- struct{}{}
+	module := &closeErrorModule{err: closeErr}
+	p.discard(&pooledModule{mod: module, ticket: ticket})
+	if !module.closed || !strings.Contains(logs.String(), closeErr.Error()) {
+		t.Fatalf("module closure/error not recorded: closed=%t logs=%q", module.closed, logs.String())
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Fatalf("module close failure did not retain capacity: %+v", got)
+	}
+	if err := p.close(); !errors.Is(err, closeErr) {
+		t.Fatalf("runtime close after module removal = %v, want %v", err, closeErr)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("module close error retained capacity: %+v", got)
+	}
+	if len(p.guestTickets) != 0 || len(p.slots) != 0 {
+		t.Fatalf("closed module retained owner/slot: tickets=%d slots=%d", len(p.guestTickets), len(p.slots))
+	}
+	next, err := g.ReserveGuestCapacity(2, 16<<20)
+	if err != nil {
+		t.Fatalf("admission after successful runtime close: %v", err)
+	}
+	if err := next.Transition(inspection.GuestClosing); err != nil {
+		t.Fatal(err)
+	}
+	if err := next.ResolveTeardown(nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGuestStartupCloseFailureRetainsCapacity(t *testing.T) {
+	for _, scenario := range []string{"canceled", "invalid-transition"} {
+		t.Run(scenario, func(t *testing.T) {
+			limits := testLimits()
+			limits.MaxGuestCapacityBytes = 16 << 20
+			g, err := inspection.New(limits, inspection.Hooks{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			closeErr := errors.New("startup module close failed")
+			module := &closeErrorModule{err: closeErr}
+			p := &plugin{
+				gov: g, generation: 1, memoryLimitBytes: 16 << 20,
+				guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
+			}
+			p.runtime = instantiateResultRuntime{
+				module: module,
+				beforeReturn: func() {
+					if scenario == "canceled" {
+						cancel()
+						return
+					}
+					for ticket := range p.guestTickets {
+						if err := ticket.Transition(inspection.GuestClosing); err != nil {
+							t.Fatal(err)
+						}
+					}
+				},
+			}
+			_, err, retained := p.instantiateGuest(ctx, inspection.GuestBusy)
+			if !retained || !errors.Is(err, closeErr) {
+				t.Fatalf("startup = %v, retained = %t; want close error and retained capacity", err, retained)
+			}
+			if scenario == "canceled" && !errors.Is(err, context.Canceled) {
+				t.Fatalf("startup = %v, want cancellation", err)
+			}
+			if scenario == "invalid-transition" && !inspection.IsOutcome(err, inspection.InvalidAccounting) {
+				t.Fatalf("startup = %v, want invalid accounting", err)
+			}
+			if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+				got.Instances[inspection.GuestFailedRetained] != 1 {
+				t.Fatalf("failed startup close did not retain capacity: %+v", got)
+			}
+			if _, err := g.ReserveGuestCapacity(2, 16<<20); !inspection.IsOutcome(err, inspection.GuestCapacitySaturated) {
+				t.Fatalf("admission after failed startup close = %v, want capacity refusal", err)
+			}
+		})
+	}
+}
+
+func TestGuestStartupDoesNotInheritRetainingAllocator(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+	wasm := []byte{
+		0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+		0x03, 0x02, 0x01, 0x00,
+		0x05, 0x03, 0x01, 0x00, 0x01,
+		0x08, 0x01, 0x00,
+		0x0a, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0b,
+	}
+	compiled, err := rt.CompileModule(ctx, wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGovernor(t)
+	p := &plugin{
+		runtime:          rt,
+		compiled:         compiled,
+		pool:             make(chan *pooledModule, 1),
+		slots:            make(chan struct{}, 1),
+		gov:              g,
+		generation:       1,
+		memoryLimitBytes: 64 << 10,
+		guestTickets:     make(map[*inspection.GuestTicket]*guestOwnership),
+	}
+	var used atomic.Bool
+	mem := &retainingLinearMemory{}
+	parent := experimental.WithMemoryAllocator(ctx, experimental.MemoryAllocatorFunc(func(_, _ uint64) experimental.LinearMemory {
+		used.Store(true)
+		return mem
+	}))
+	if _, err := p.acquire(parent); err == nil {
+		t.Fatal("trapping guest start unexpectedly succeeded")
+	}
+	if used.Load() || mem.buffer != nil {
+		t.Fatal("guest startup inherited an allocator that could retain guest memory")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Fatalf("failed startup capacity/slots: %+v, slots=%d", got, len(p.slots))
+	}
+}
+
+func TestGuestStartupRejectsModuleClosedByInitialize(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+	_, err := rt.NewHostModuleBuilder("test").NewFunctionBuilder().
+		WithFunc(func(ctx context.Context, mod api.Module) { _ = mod.Close(ctx) }).
+		Export("close").Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wasm := assemble([]wasmImport{{module: "test", name: "close"}}, []wasmFunc{
+		{export: "_initialize", body: []byte{0x10, 0x00}},
+		fnRequest,
+	})
+	compiled, err := rt.CompileModule(ctx, wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGovernor(t)
+	p := &plugin{
+		runtime:          rt,
+		compiled:         compiled,
+		pool:             make(chan *pooledModule, 1),
+		slots:            make(chan struct{}, 1),
+		gov:              g,
+		generation:       1,
+		memoryLimitBytes: 64 << 10,
+		guestTickets:     make(map[*inspection.GuestTicket]*guestOwnership),
+	}
+	if _, err := p.acquire(ctx); err == nil {
+		t.Fatal("initialization returned a closed module as usable")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Fatalf("closed initialization capacity/slots: %+v, slots=%d", got, len(p.slots))
+	}
+}
+
+func TestGuestCapacityRemainsChargedDuringRetiredStartup(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	entered, unblock := make(chan struct{}), make(chan struct{})
+	var unblockOnce sync.Once
+	t.Cleanup(func() {
+		unblockOnce.Do(func() { close(unblock) })
+		_ = rt.Close(ctx)
+	})
+	_, err := rt.NewHostModuleBuilder("test").NewFunctionBuilder().
+		WithFunc(func(_ context.Context, mod api.Module) {
+			memory, ok := mod.Memory().Read(0, 1)
+			if !ok {
+				panic("guest memory unavailable")
+			}
+			close(entered)
+			<-unblock
+			memory[0] = 1
+		}).Export("wait").Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wasm := []byte{
+		0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+		0x02, 0x0d, 0x01, 0x04, 't', 'e', 's', 't', 0x04, 'w', 'a', 'i', 't', 0x00, 0x00,
+		0x03, 0x02, 0x01, 0x00,
+		0x05, 0x03, 0x01, 0x00, 0x01,
+		0x08, 0x01, 0x01,
+		0x0a, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0b,
+	}
+	compiled, err := rt.CompileModule(ctx, wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGovernor(t)
+	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	p := &plugin{
+		name:             "starting",
+		runtime:          rt,
+		compiled:         compiled,
+		pool:             make(chan *pooledModule, 1),
+		slots:            make(chan struct{}, 1),
+		gov:              g,
+		mgr:              m,
+		generation:       1,
+		memoryLimitBytes: 64 << 10,
+		guestTickets:     make(map[*inspection.GuestTicket]*guestOwnership),
+	}
+	m.track(p)
+	done := make(chan error, 1)
+	go func() {
+		_, err := p.acquire(ctx)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest did not enter startup")
+	}
+	if err := p.close(); !errors.Is(err, errGuestWorkInFlight) {
+		t.Fatalf("retire while starting = %v, want in-flight error", err)
+	}
+	if err := m.Close(); !errors.Is(err, errGuestWorkInFlight) {
+		t.Fatalf("manager close while starting = %v, want in-flight error", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 64<<10 ||
+		got.Instances[inspection.GuestStarting] != 1 {
+		t.Fatalf("retirement refunded starting guest: %+v", got)
+	}
+	unblockOnce.Do(func() { close(unblock) })
+	select {
+	case err := <-done:
+		if !errors.Is(err, errPluginClosed) {
+			t.Errorf("retired startup = %v, want plugin closed", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("retired guest startup did not finish")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Errorf("retired startup capacity/slots: %+v, slots=%d", got, len(p.slots))
+	}
+	if err := m.Close(); err != nil {
+		t.Errorf("manager close after startup finished: %v", err)
+	}
+}
+
+type retainingLinearMemory struct {
+	buffer []byte
+}
+
+func (m *retainingLinearMemory) Reallocate(size uint64) []byte {
+	m.buffer = make([]byte, size)
+	return m.buffer
+}
+
+func (m *retainingLinearMemory) Free() {}
+
+type successfulCloseRuntime struct{ wazero.Runtime }
+
+func (successfulCloseRuntime) Close(context.Context) error { return nil }
+
+func TestGuestCapacityRetainedAfterFailedRuntimeClose(t *testing.T) {
+	g := testGovernor(t)
+	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := g.ReserveGuestCapacity(1, 16<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeErr := errors.New("runtime close failed")
+	p := &plugin{
+		name:         "failed-close",
+		runtime:      &failedOnceRuntime{err: closeErr},
+		gov:          g,
+		mgr:          m,
+		generation:   1,
+		guestTickets: map[*inspection.GuestTicket]*guestOwnership{ticket: {}},
+		slots:        make(chan struct{}, 1),
+	}
+	p.slots <- struct{}{}
+	if err := p.close(); !errors.Is(err, closeErr) {
+		t.Fatalf("first close = %v, want %v", err, closeErr)
+	}
+	if err := m.Close(); !errors.Is(err, closeErr) {
+		t.Errorf("manager close = %v, want %v", err, closeErr)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 16<<20 ||
+		got.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Errorf("runtime close error did not retain capacity: %+v", got)
+	}
+}
+
+func TestManagerCloseAfterRuntimeCloseErrorWithoutGuestTickets(t *testing.T) {
+	g := testGovernor(t)
+	m, err := NewManager(Options{Inspection: g, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.cache.Close(context.Background()) })
+	closeErr := errors.New("runtime close failed")
+	p := &plugin{
+		name:         "empty-failed-close",
+		runtime:      &failedOnceRuntime{err: closeErr},
+		mgr:          m,
+		guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
+	}
+	if err := p.close(); !errors.Is(err, closeErr) {
+		t.Fatalf("first close = %v, want %v", err, closeErr)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatalf("manager close after completed runtime teardown: %v", err)
+	}
+}
+
+func TestGuestCapacityRetainsFailedInstantiationWithoutModule(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().WithCloseOnContextDone(true).WithMemoryLimitPages(1))
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+	wasm := []byte{0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00,
+		0x05, 0x03, 0x01, 0x00, 0x01, 0x08, 0x01, 0x00,
+		0x0a, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0b}
+	compiled, err := rt.CompileModule(ctx, wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGovernor(t)
+	p := &plugin{
+		name: "failed-start", runtime: rt, compiled: compiled,
+		pool: make(chan *pooledModule, 1), slots: make(chan struct{}, 1),
+		gov: g, generation: 1, memoryLimitBytes: 64 << 10,
+		guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
+	}
+	p.slots <- struct{}{}
+	_, err, retained := p.instantiateGuest(ctx, inspection.GuestBusy)
+	if err == nil || retained {
+		t.Fatalf("failed start = (%v, slot retained=%t), want error and reusable slot", err, retained)
+	}
+	got := g.Snapshot().GuestCapacity
+	if got.ReservedBytes != 0 || len(p.slots) != 1 {
+		t.Errorf("failed start cleanup did not release capacity: capacity=%+v slots=%d", got, len(p.slots))
+	}
+}
+
+func TestGuestCancellationJoinsTeardownBeforeReplacement(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().WithCloseOnContextDone(true).WithMemoryLimitPages(2))
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+	entered := make(chan struct{})
+	_, err := rt.NewHostModuleBuilder(hostModuleV1).NewFunctionBuilder().
+		WithFunc(func(ctx context.Context) {
+			close(entered)
+			<-ctx.Done()
+		}).Export("wait").Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := rt.CompileModule(ctx, (hostGuest{
+		abi: ABIJulV1, fns: []hostFn{{name: "wait"}},
+		body: []byte{0x10, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b, 0x41, 0x00},
+	}).wasm())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 128 << 10
+	g, err := inspection.New(limits, inspection.Hooks{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &plugin{
+		name: "cancelled", runtime: rt, compiled: compiled,
+		pool: make(chan *pooledModule, 1), slots: make(chan struct{}, 1),
+		gov: g, generation: 1, memoryLimitBytes: 128 << 10,
+		guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
+		timeout:      5 * time.Second, log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	request, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := p.call(request, exportHandleRequest, &invocation{}, nil)
+		done <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest did not enter host call")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancelled guest call succeeded")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest call did not stop after cancellation")
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 || len(p.slots) != 0 {
+		t.Fatalf("cancelled call capacity/slots = %+v, %d", got, len(p.slots))
+	}
+	pm, err := p.acquire(ctx)
+	if err != nil {
+		t.Fatalf("replacement after cancellation = %v", err)
+	}
+	p.release(pm)
+	if err := p.close(); err != nil {
+		t.Fatalf("close after replacement = %v", err)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("replacement teardown retained capacity: %+v", got)
+	}
+}
+
+func TestGuestCapacityRecyclesAcross100KInvocations(t *testing.T) {
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 256 << 20
+	m, _, g, _ := govManager(t, limits)
+	guest := hostGuest{abi: ABIJulV2, body: []byte{0x41, 0x01}}
+	set := buildSet(t, m, map[string]config.PluginConfig{
+		"guest": guest.config(func(pc *config.PluginConfig) {
+			pc.MemoryLimit = config.Size(16 << 20)
+			pc.MaxInvocations = 1000
+		}),
+	})
+	p := set.plugins["guest"]
+	call := func(i int) {
+		result, _, outcome, err := p.call(context.Background(), exportHandleRequest, &invocation{},
+			func(v uint32) bool { return v == actionContinue })
+		if err != nil || outcome != callOK || result != actionContinue {
+			t.Fatalf("invocation %d = (%d, %d, %v), want a successful recycled call", i, result, outcome, err)
+		}
+	}
+	for i := 0; i < 100_000; i++ {
+		call(i)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("100,000 recycled invocations retained guest capacity: %+v", got)
+	}
+	p.maxInstanceInvocations = 1
+	for i := 0; i < 1000; i++ {
+		call(100_000 + i)
+	}
+	if got := g.Snapshot().GuestCapacity; got.ReservedBytes != 0 {
+		t.Fatalf("accelerated recycling retained guest capacity: %+v", got)
+	}
+}
+
+func TestGuestCapacityStatsIncludesCompilingCandidate(t *testing.T) {
+	m, _, _, _ := govManager(t, testLimits())
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	var release sync.Once
+	afterModuleRead = func(string) {
+		close(entered)
+		<-resume
+	}
+	t.Cleanup(func() {
+		afterModuleRead = nil
+		release.Do(func() { close(resume) })
+	})
+	type buildResult struct {
+		set *Set
+		err error
+	}
+	built := make(chan buildResult, 1)
+	go func() {
+		set, err := m.Build(context.Background(), map[string]config.PluginConfig{
+			"candidate": pcfg("header-inject", func(pc *config.PluginConfig) {
+				pc.MemoryLimit = config.Size(16 << 20)
+			}),
+		})
+		built <- buildResult{set: set, err: err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("candidate did not reach the compilation barrier")
+	}
+	stats, err := m.GuestCapacityStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.MaxPermittedBytes != 1<<30 || stats.MaxInstances != 64 || stats.LiveInstances != 0 {
+		t.Errorf("compiling candidate potential = %+v, want 1 GiB / 64 slots / no live instances", stats)
+	}
+	release.Do(func() { close(resume) })
+	result := <-built
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if err := result.set.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = m.GuestCapacityStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.MaxPermittedBytes != 0 || stats.MaxInstances != 0 {
+		t.Errorf("candidate potential remained after close: %+v", stats)
+	}
+}
+
+type closeErrorModule struct {
+	api.Module
+	err    error
+	closed bool
+}
+
+func (m *closeErrorModule) Close(context.Context) error {
+	m.closed = true
+	return m.err
+}
+
+func (m *closeErrorModule) IsClosed() bool { return m.closed }
+
+type closeErrorRuntime struct {
+	wazero.Runtime
+	err error
+}
+
+func (r closeErrorRuntime) Close(ctx context.Context) error {
+	if r.Runtime != nil {
+		return errors.Join(r.Runtime.Close(ctx), r.err)
+	}
+	return r.err
+}
+
+type instantiateResultRuntime struct {
+	wazero.Runtime
+	module       api.Module
+	beforeReturn func()
+}
+
+func (r instantiateResultRuntime) InstantiateModule(context.Context, wazero.CompiledModule, wazero.ModuleConfig) (api.Module, error) {
+	r.beforeReturn()
+	return r.module, nil
+}
+
+type failedOnceRuntime struct {
+	wazero.Runtime
+	err    error
+	closed bool
+}
+
+func (r *failedOnceRuntime) Close(context.Context) error {
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	return r.err
+}
+
+func onlyGuestTicket(t *testing.T, p *plugin) *inspection.GuestTicket {
+	t.Helper()
+	p.guestMu.Lock()
+	defer p.guestMu.Unlock()
+	if len(p.guestTickets) != 1 {
+		t.Fatalf("plugin guest tickets = %d, want 1", len(p.guestTickets))
+	}
+	for ticket := range p.guestTickets {
+		return ticket
+	}
+	return nil
 }

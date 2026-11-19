@@ -52,31 +52,37 @@ func (c ByteClass) String() string {
 type Outcome string
 
 const (
-	Acquired            Outcome = "acquired"
-	WouldReject         Outcome = "would_reject"
-	Unslotted           Outcome = "unslotted"
-	ByteSaturated       Outcome = "bytes"
-	WAFStateSaturated   Outcome = "waf_state"
-	EvaluationSaturated Outcome = "evaluation"
-	AuditSaturated      Outcome = "audit"
-	QueueExhausted      Outcome = "queue_exhausted"
-	WaitExpired         Outcome = "wait_expired"
-	Cancelled           Outcome = "cancelled"
-	LeaseClosed         Outcome = "lease_closed"
-	InvalidAccounting   Outcome = "invalid_accounting"
+	Acquired               Outcome = "acquired"
+	WouldReject            Outcome = "would_reject"
+	Unslotted              Outcome = "unslotted"
+	ByteSaturated          Outcome = "bytes"
+	WAFStateSaturated      Outcome = "waf_state"
+	EvaluationSaturated    Outcome = "evaluation"
+	AuditSaturated         Outcome = "audit"
+	GuestCapacitySaturated Outcome = "guest_capacity"
+	QueueExhausted         Outcome = "queue_exhausted"
+	WaitExpired            Outcome = "wait_expired"
+	Cancelled              Outcome = "cancelled"
+	LeaseClosed            Outcome = "lease_closed"
+	InvalidAccounting      Outcome = "invalid_accounting"
 )
 
 var (
-	ErrInvalidLimits = errors.New("inspection: invalid limits")
-	ErrForeignLease  = errors.New("inspection: foreign lease in context")
+	ErrInvalidLimits          = errors.New("inspection: invalid limits")
+	ErrForeignLease           = errors.New("inspection: foreign lease in context")
+	ErrLimitsVersionConflict  = errors.New("inspection: limits publication version conflict")
+	ErrLimitsVersionExhausted = errors.New("inspection: limits publication version exhausted")
 )
 
 // Limits is an immutable candidate for the process-wide governor. Configured
 // slots preserve the operator's 0=auto choice; EvaluationSlots is the resolved
 // process-wide value used by admission.
 type Limits struct {
-	Mode                      Mode
-	MaxBytes                  uint64
+	Mode     Mode
+	MaxBytes uint64
+	// MaxGuestCapacityBytes is the process-wide ceiling for live guest
+	// instances. Zero tracks reservations without limiting them.
+	MaxGuestCapacityBytes     uint64
 	MaxResponseHeaderBytes    uint64
 	ConfiguredEvaluationSlots int
 	EvaluationSlots           int
@@ -84,9 +90,12 @@ type Limits struct {
 	BodyTimeout               time.Duration
 	BaseChargeBytes           uint64
 	// MinimumBytes is the effective-route worst-case single-request charge
-	// of the generation these limits are published with (ADR 0032 §7). Zero
-	// means no inspected route; enforce mode rejects MaxBytes below it.
-	MinimumBytes uint64
+	// of the generation these limits are published with (ADR 0032 §7). When
+	// MinimumKnown is true, zero means no inspected route; enforce mode
+	// rejects MaxBytes below the minimum.
+	MinimumBytes      uint64
+	MinimumKnown      bool
+	MinimumGeneration uint64
 	// MinimumRoute names the route that sets MinimumBytes, for errors.
 	MinimumRoute string
 }
@@ -142,13 +151,14 @@ type Hooks struct {
 }
 
 type Governor struct {
-	mu      sync.Mutex
-	limits  Limits
-	hooks   Hooks
-	usage   [byteClassCount]uint64
-	leases  uint64
-	active  uint64
-	waiters []*evaluationWaiter
+	mu            sync.Mutex
+	limits        Limits
+	limitsVersion uint64
+	hooks         Hooks
+	usage         [byteClassCount]uint64
+	leases        uint64
+	active        uint64
+	waiters       []*evaluationWaiter
 
 	rejections [rejectionReasons][2]uint64
 	abandoned  uint64
@@ -157,30 +167,40 @@ type Governor struct {
 	committedOverruns uint64
 
 	audit auditOutput
+	guest guestCapacity
 }
 
 func New(limits Limits, hooks Hooks) (*Governor, error) {
 	if err := limits.validate(); err != nil {
 		return nil, err
 	}
-	return &Governor{limits: limits, hooks: hooks}, nil
+	return &Governor{limits: limits, limitsVersion: 1, hooks: hooks}, nil
 }
 
-// PublishLimits changes the coherent policy snapshot without resetting usage,
-// leases, reservations, waiters, or counters. Held work drains naturally after
-// a limit decrease; no new work is granted until it fits the published limit.
-func (g *Governor) PublishLimits(limits Limits) error {
+// PublishLimitsIfVersion atomically publishes limits only if no intervening
+// publication has changed the version observed by the caller.
+func (g *Governor) PublishLimitsIfVersion(expected uint64, limits Limits) error {
 	if err := limits.validate(); err != nil {
 		return err
 	}
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.limitsVersion != expected {
+		return fmt.Errorf("%w: expected %d, current %d", ErrLimitsVersionConflict, expected, g.limitsVersion)
+	}
+	return g.publishLimitsLocked(limits)
+}
+
+func (g *Governor) publishLimitsLocked(limits Limits) error {
 	if g.limits == limits {
-		g.mu.Unlock()
 		return nil
 	}
+	if g.limitsVersion == math.MaxUint64 {
+		return ErrLimitsVersionExhausted
+	}
 	g.limits = limits
+	g.limitsVersion++
 	g.grantWaitersLocked()
-	g.mu.Unlock()
 	return nil
 }
 
@@ -201,6 +221,7 @@ func (g *Governor) RecordBodyTimeout(protocol, result string) {
 
 type Snapshot struct {
 	Limits               Limits
+	LimitsVersion        uint64
 	Usage                [byteClassCount]uint64
 	ActiveLeases         uint64
 	ActiveEvaluations    uint64
@@ -212,6 +233,8 @@ type Snapshot struct {
 	// AuditOutput is the bounded audit-output set: writes in flight, writes
 	// abandoned at their deadline and still charged, and dropped records.
 	AuditOutput AuditOutputSnapshot
+	// GuestCapacity reports process-owned guest reservations, not actual memory.
+	GuestCapacity GuestCapacitySnapshot
 	// CommittedOverruns counts non-refusable charges (ChargeCommitted) that
 	// exceeded the ceiling.
 	CommittedOverruns uint64
@@ -222,6 +245,7 @@ func (g *Governor) Snapshot() Snapshot {
 	defer g.mu.Unlock()
 	return Snapshot{
 		Limits:               g.limits,
+		LimitsVersion:        g.limitsVersion,
 		Usage:                g.usage,
 		ActiveLeases:         g.leases,
 		ActiveEvaluations:    g.active,
@@ -231,13 +255,16 @@ func (g *Governor) Snapshot() Snapshot {
 		UnslottedLogging:     g.unslotted,
 		Rejections:           g.rejections,
 		AuditOutput:          g.auditSnapshotLocked(),
+		GuestCapacity:        g.guestSnapshotLocked(),
 		CommittedOverruns:    g.committedOverruns,
 	}
 }
 
 func (g *Governor) overLimitLocked() bool {
 	total, ok := sumBytes(g.usage[:])
-	return !ok || total > g.limits.MaxBytes || g.active > uint64(g.limits.EvaluationSlots)
+	return !ok || total > g.limits.MaxBytes || g.active > uint64(g.limits.EvaluationSlots) ||
+		(g.limits.Mode == Enforce && g.limits.MaxGuestCapacityBytes > 0 &&
+			g.guest.reserved > g.limits.MaxGuestCapacityBytes)
 }
 
 type contextKey struct{}
@@ -960,6 +987,7 @@ const (
 	RejectWAFState
 	RejectEvaluation
 	RejectAudit
+	RejectGuestCapacity
 	rejectionReasons
 )
 
@@ -987,7 +1015,7 @@ func (g *Governor) RecordRejection(reason Outcome, mode Mode) error {
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
 	switch reason {
-	case ByteSaturated, WAFStateSaturated, EvaluationSaturated, AuditSaturated:
+	case ByteSaturated, WAFStateSaturated, EvaluationSaturated, AuditSaturated, GuestCapacitySaturated:
 	default:
 		return &AdmissionError{Outcome: InvalidAccounting}
 	}
@@ -1010,6 +1038,8 @@ func (g *Governor) noteRejectionForModeLocked(reason Outcome, mode Mode) {
 		index = RejectEvaluation
 	case AuditSaturated:
 		index = RejectAudit
+	case GuestCapacitySaturated:
+		index = RejectGuestCapacity
 	}
 	modeIndex := 0
 	if mode == Observe {

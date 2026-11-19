@@ -8909,6 +8909,9 @@
                           "type": "integer",
                           "format": "int64"
                         },
+                        "max_guest_capacity_bytes": {
+                          "type": "string"
+                        },
                         "max_response_header_bytes": {
                           "type": "string"
                         },
@@ -11528,12 +11531,30 @@
               "evaluation_headroom_estimate_state": {
                 "type": "string"
               },
+              "minimum_request_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "minimum_request_route": {
+                "type": "string"
+              },
               "plugin_guest_actual_bytes": {
                 "type": "integer",
                 "format": "int64"
               },
               "plugin_guest_actual_bytes_state": {
                 "type": "string"
+              },
+              "plugin_guest_admission_blocked_reason": {
+                "type": "string"
+              },
+              "plugin_guest_capacity_limit_bytes": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "plugin_guest_failed_teardowns": {
+                "type": "integer",
+                "format": "int64"
               },
               "plugin_guest_live_instances": {
                 "type": "integer",
@@ -11544,6 +11565,13 @@
                 "format": "int64"
               },
               "plugin_guest_max_instances": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "plugin_guest_reservation_scope": {
+                "type": "string"
+              },
+              "plugin_guest_reserved_bytes": {
                 "type": "integer",
                 "format": "int64"
               },
@@ -11594,6 +11622,11 @@
               "effective",
               "evaluation_headroom_estimate_state",
               "plugin_guest_actual_bytes_state",
+              "plugin_guest_admission_blocked_reason",
+              "plugin_guest_capacity_limit_bytes",
+              "plugin_guest_failed_teardowns",
+              "plugin_guest_reservation_scope",
+              "plugin_guest_reserved_bytes",
               "request_path_integration",
               "usage",
               "waiting_evaluations"

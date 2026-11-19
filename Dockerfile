@@ -15,8 +15,8 @@ WORKDIR /src
 
 # Cache module downloads.
 COPY go.mod go.sum ./
-# go.mod replaces gofast with a local module; its manifest must be present
-# before `go mod download`, while the rest of the source can remain uncopied.
+# The local replacement manifest must be present before `go mod download`,
+# while the rest of the source can remain uncopied.
 COPY third_party/gofast/go.mod ./third_party/gofast/go.mod
 RUN go mod download
 

@@ -90,8 +90,8 @@ func TestPolicyInfoCRSDefaults(t *testing.T) {
 		t.Fatalf("request body limit = %d", info.RequestBodyLimitBytes)
 	}
 	r := info.Rules
-	// The only non-embedded rule is the generated argument-limit guard (#697).
-	if r.Embedded < 100 || r.External != 0 || r.Inline != 0 || r.Generated != 1 || r.Total != r.Embedded+1 {
+	// Jul emits both the generated argument-limit and request-body failure guards.
+	if r.Embedded < 100 || r.External != 0 || r.Inline != 0 || r.Generated != 2 || r.Total != r.Embedded+2 {
 		t.Fatalf("CRS rule counts = %+v", r)
 	}
 	if !info.ArgumentLimitGuard || info.ArgumentLimit != 1000 {
@@ -112,7 +112,7 @@ func TestPolicyInfoParanoiaIsJulGenerated(t *testing.T) {
 	if info.Paranoia != 3 || info.ParanoiaDefault || info.Mode != "detect" {
 		t.Fatalf("info = %+v", info)
 	}
-	if info.Rules.Generated != 2 || info.Rules.Inline != 1 || !info.InlineRules {
+	if info.Rules.Generated != 3 || info.Rules.Inline != 1 || !info.InlineRules {
 		t.Fatalf("rule counts = %+v", info.Rules)
 	}
 	if got := info.Rules.Embedded + info.Rules.External + info.Rules.Inline + info.Rules.Generated; got != info.Rules.Total {
@@ -131,11 +131,11 @@ SecAction "id:10002,phase:1,pass,nolog"`,
 	if info.CRSEnabled || info.CRSVersion != "" || info.Paranoia != 0 || info.BlockStatus != 418 || !info.ResponseBodyInspection {
 		t.Fatalf("info = %+v", info)
 	}
-	if info.Rules != (RuleCounts{Total: 2, Inline: 2}) {
+	if info.Rules != (RuleCounts{Total: 3, Inline: 2, Generated: 1}) {
 		t.Fatalf("rule counts = %+v", info.Rules)
 	}
-	// Without CRS there is no generated guard, but response_body_check = true
-	// still compiles a usable MIME selection (#698).
+	// The request-body failure guard is generated without CRS too, and
+	// response_body_check = true compiles a usable MIME selection (#698).
 	if info.ArgumentLimitGuard || info.ArgumentLimit != 1000 {
 		t.Fatalf("argument limit = %d guard %v", info.ArgumentLimit, info.ArgumentLimitGuard)
 	}
@@ -165,7 +165,7 @@ SecRule REQUEST_URI "@contains /admin" "id:20002,phase:1,deny,status:403"
 	cfg := config.WAFConfig{Enabled: true, DirectivesFiles: []string{rules, " "}}
 
 	first := buildInfo(t, cfg)
-	if first.RuleFilesConfigured != 1 || first.ExternalFiles != 2 || first.Rules.External != 2 || first.Rules.Total != 2 {
+	if first.RuleFilesConfigured != 1 || first.ExternalFiles != 2 || first.Rules.External != 2 || first.Rules.Total != 3 || first.Rules.Generated != 1 {
 		t.Fatalf("external info = %+v", first)
 	}
 	if _, ok := versionid.Parse(first.ExternalDigest); !ok {

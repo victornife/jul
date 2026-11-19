@@ -1,0 +1,932 @@
+{
+  "plan_version": "inspection-assessment-plan/v3",
+  "profile": "qualification",
+  "interpretation": {
+    "min_repetitions": 3,
+    "max_median_regression": 0.1,
+    "max_relative_spread": 0.1,
+    "saturated_cpu_fraction": 0.85,
+    "calibration_cpu_fraction": 0.7,
+    "envelope_cpus": 2,
+    "envelope_memory_bytes": 805306368,
+    "target_peak_bytes": 603979776,
+    "spread_definition": "(max - min) / median of a side's useful-goodput values",
+    "regression_rule": "regression = 1 - median(candidate)/median(baseline); above max_median_regression fails even when ranges overlap",
+    "saturation_rule": "a run whose Jul CPU use over the measurement window is at least saturated_cpu_fraction of envelope_cpus is saturated; a throughput cell containing a saturated run is inconclusive",
+    "calibration_rule": "per protocol and variant, the largest calibration concurrency whose measured Jul CPU fraction on the ADR baseline is at most calibration_cpu_fraction with every response verified",
+    "validity_rule": "instrument validity: the run completed, canaries ran, the envelope was verified when required, every class started attempts inside its window using the planned protocol and connection count, and the client could build its requests. Runtime findings (unexpected status or error, unverified content, failed canary, Jul exit, OOM-kill delta, a nonzero governor lease/bytes/evaluation gauge after recovery (plan v3)) are recorded separately: a valid run with findings is evidence of incorrect behaviour and fails correctness in a comparison; it is never counted as goodput or dropped",
+    "no_subset_selection": "every attempted repetition is reported; an invalid, failed or inconclusive run is never dropped or replaced; added repetitions supplement it",
+    "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+  },
+  "runs": [
+    "ia-a1-after-soak"
+  ],
+  "targets": [
+    {
+      "label": "before",
+      "adapter": "current",
+      "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-before",
+      "binary": {
+        "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-before",
+        "sha256": "50a49b0bd2689f094b21c329ed3f0a51ef628799ef2c77f1cb4f222e46af51ab",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "ffbff4d05316ef6f2e01692cbf0e6582030d2d4e",
+          "vcs.time": "2026-11-18T10:10:05Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    },
+    {
+      "label": "main",
+      "adapter": "current",
+      "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-candidate",
+      "binary": {
+        "path": "/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/qualification-bin/jul-candidate",
+        "sha256": "13a7660d8fb18ddf3e172088a58d662adea0aa45c043a86fb2c37c1b5714995c",
+        "go_version": "go1.27.4",
+        "module": "jul",
+        "build_settings": {
+          "-buildmode": "exe",
+          "-tags": "brotli,zstd,acme,console,otel,grpc,http3,importer,wasmplugins,stream,consul,kubernetes,waf",
+          "-trimpath": "true",
+          "CGO_ENABLED": "0",
+          "GOARCH": "arm64",
+          "GOARM64": "v8.0",
+          "GOOS": "linux",
+          "vcs": "git",
+          "vcs.modified": "false",
+          "vcs.revision": "60415e5a71fd8ec26a7559424e3f43e6406738fe",
+          "vcs.time": "2026-11-19T11:41:09Z"
+        }
+      },
+      "adapter_definition": {
+        "name": "current",
+        "global_inspection": true,
+        "waf_max_buffered_bytes": "512m",
+        "description": "post-I1 main; [global.inspection] defaults (enforce, 256m, body_timeout 60s, 64 KiB header ceiling) except an explicit 512m budget for WAF variants"
+      }
+    }
+  ],
+  "cells": [
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 0,
+        "median_goodput_rps": 3.2,
+        "min_goodput_rps": 3,
+        "max_goodput_rps": 3.6,
+        "relative_spread": 0.188
+      },
+      "points": [
+        {
+          "run": "ia-a1-after-soak",
+          "rep": 1,
+          "goodput_rps": 3,
+          "valid": true,
+          "correct": false,
+          "saturated": false,
+          "cpu_fraction": 0.523,
+          "peak_cg_memory_bytes": 628838400,
+          "state": "completed",
+          "runtime_findings": [
+            "phase c4 class load: status:503-inspection-overloaded ×576",
+            "phase c8 class load: status:503-inspection-overloaded ×2650",
+            "phase c16 class load: status:503-inspection-overloaded ×6138"
+          ]
+        },
+        {
+          "run": "ia-a1-after-soak",
+          "rep": 2,
+          "goodput_rps": 3.2,
+          "valid": true,
+          "correct": false,
+          "saturated": false,
+          "cpu_fraction": 0.519,
+          "peak_cg_memory_bytes": 632250368,
+          "state": "completed",
+          "runtime_findings": [
+            "phase c4 class load: status:503-inspection-overloaded ×538",
+            "phase c8 class load: status:503-inspection-overloaded ×3669",
+            "phase c16 class load: status:503-inspection-overloaded ×7511"
+          ]
+        },
+        {
+          "run": "ia-a1-after-soak",
+          "rep": 3,
+          "goodput_rps": 3.6,
+          "valid": true,
+          "correct": false,
+          "saturated": false,
+          "cpu_fraction": 0.519,
+          "peak_cg_memory_bytes": 627503104,
+          "state": "completed",
+          "runtime_findings": [
+            "phase c4 class load: status:503-inspection-overloaded ×640",
+            "phase c8 class load: status:503-inspection-overloaded ×2509",
+            "phase c16 class load: status:503-inspection-overloaded ×7107"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "comparison": "record",
+      "stats": {
+        "n": 3,
+        "valid": 3,
+        "correct": 0,
+        "median_goodput_rps": 3.7,
+        "min_goodput_rps": 2.9,
+        "max_goodput_rps": 3.8,
+        "relative_spread": 0.243
+      },
+      "points": [
+        {
+          "run": "ia-a1-after-soak",
+          "rep": 1,
+          "goodput_rps": 3.7,
+          "valid": true,
+          "correct": false,
+          "saturated": false,
+          "cpu_fraction": 0.518,
+          "peak_cg_memory_bytes": 628301824,
+          "state": "completed",
+          "runtime_findings": [
+            "phase c4 class load: status:503-inspection-overloaded ×605",
+            "phase c8 class load: status:503-inspection-overloaded ×2490",
+            "phase c16 class load: status:503-inspection-overloaded ×6915"
+          ]
+        },
+        {
+          "run": "ia-a1-after-soak",
+          "rep": 2,
+          "goodput_rps": 3.8,
+          "valid": true,
+          "correct": false,
+          "saturated": false,
+          "cpu_fraction": 0.515,
+          "peak_cg_memory_bytes": 632446976,
+          "state": "completed",
+          "runtime_findings": [
+            "phase c4 class load: status:503-inspection-overloaded ×617",
+            "phase c8 class load: status:503-inspection-overloaded ×2441",
+            "phase c16 class load: status:503-inspection-overloaded ×6038"
+          ]
+        },
+        {
+          "run": "ia-a1-after-soak",
+          "rep": 3,
+          "goodput_rps": 2.9,
+          "valid": true,
+          "correct": false,
+          "saturated": false,
+          "cpu_fraction": 0.534,
+          "peak_cg_memory_bytes": 633929728,
+          "state": "completed",
+          "runtime_findings": [
+            "phase c4 class load: status:503-inspection-overloaded ×679",
+            "phase c8 class load: status:503-inspection-overloaded ×3164",
+            "phase c16 class load: status:503-inspection-overloaded ×6784"
+          ]
+        }
+      ]
+    }
+  ],
+  "comparisons": null,
+  "classes": [
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 31,
+      "verified_in_window": 30,
+      "goodput_rps": 3,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 357.492,
+      "outcomes": "ok ×31"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 60,
+      "verified_in_window": 58,
+      "goodput_rps": 5.8,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 393.577,
+      "outcomes": "ok ×60"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 631,
+      "verified_in_window": 52,
+      "goodput_rps": 5.2,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 767.492,
+      "outcomes": "ok ×55, status:503-inspection-overloaded ×576",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 576,
+          "p50": 20.331,
+          "p95": 45.999,
+          "p99": 55.893,
+          "max": 59.979
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 2701,
+      "verified_in_window": 48,
+      "goodput_rps": 4.8,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 842.364,
+      "outcomes": "ok ×51, status:503-inspection-overloaded ×2650",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 2650,
+          "p50": 19.827,
+          "p95": 45.557,
+          "p99": 57.047,
+          "max": 62.182
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 6197,
+      "verified_in_window": 57,
+      "goodput_rps": 5.7,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 721.673,
+      "outcomes": "ok ×59, status:503-inspection-overloaded ×6138",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 6138,
+          "p50": 20.496,
+          "p95": 45.211,
+          "p99": 60.964,
+          "max": 66.033
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 33,
+      "verified_in_window": 32,
+      "goodput_rps": 3.2,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 352.095,
+      "outcomes": "ok ×33"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 78,
+      "verified_in_window": 76,
+      "goodput_rps": 7.6,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 317.088,
+      "outcomes": "ok ×78"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 622,
+      "verified_in_window": 81,
+      "goodput_rps": 8.1,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 504.349,
+      "outcomes": "ok ×84, status:503-inspection-overloaded ×538",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 538,
+          "p50": 20.198,
+          "p95": 40.808,
+          "p99": 55.232,
+          "max": 140.8
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 3755,
+      "verified_in_window": 84,
+      "goodput_rps": 8.4,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 522.51,
+      "outcomes": "ok ×86, status:503-inspection-overloaded ×3669",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 3669,
+          "p50": 10.022,
+          "p95": 40.576,
+          "p99": 45.213,
+          "max": 70.556
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 7590,
+      "verified_in_window": 77,
+      "goodput_rps": 7.7,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 572.167,
+      "outcomes": "ok ×79, status:503-inspection-overloaded ×7511",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 7511,
+          "p50": 10.6,
+          "p95": 50.927,
+          "p99": 60.814,
+          "max": 85.862
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 37,
+      "verified_in_window": 36,
+      "goodput_rps": 3.6,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 316.327,
+      "outcomes": "ok ×37"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 81,
+      "verified_in_window": 79,
+      "goodput_rps": 7.9,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 307.689,
+      "outcomes": "ok ×81"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 719,
+      "verified_in_window": 77,
+      "goodput_rps": 7.7,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 533.26,
+      "outcomes": "ok ×79, status:503-inspection-overloaded ×640",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 640,
+          "p50": 20.087,
+          "p95": 40.428,
+          "p99": 44.538,
+          "max": 60.929
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 2586,
+      "verified_in_window": 75,
+      "goodput_rps": 7.5,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 591.08,
+      "outcomes": "ok ×77, status:503-inspection-overloaded ×2509",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 2509,
+          "p50": 20.115,
+          "p95": 41.897,
+          "p99": 53.038,
+          "max": 67.778
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "before",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 7164,
+      "verified_in_window": 54,
+      "goodput_rps": 5.4,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 790.138,
+      "outcomes": "ok ×57, status:503-inspection-overloaded ×7107",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 7107,
+          "p50": 15.306,
+          "p95": 45.293,
+          "p99": 61.744,
+          "max": 83.585
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 38,
+      "verified_in_window": 37,
+      "goodput_rps": 3.7,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 308.381,
+      "outcomes": "ok ×38"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 79,
+      "verified_in_window": 77,
+      "goodput_rps": 7.7,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 326.027,
+      "outcomes": "ok ×79"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 685,
+      "verified_in_window": 77,
+      "goodput_rps": 7.7,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 543.61,
+      "outcomes": "ok ×80, status:503-inspection-overloaded ×605",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 605,
+          "p50": 20.196,
+          "p95": 40.586,
+          "p99": 44.171,
+          "max": 68.012
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 2562,
+      "verified_in_window": 69,
+      "goodput_rps": 6.9,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 616.796,
+      "outcomes": "ok ×72, status:503-inspection-overloaded ×2490",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 2490,
+          "p50": 20.074,
+          "p95": 41.307,
+          "p99": 50.235,
+          "max": 78.772
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 1,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 6977,
+      "verified_in_window": 59,
+      "goodput_rps": 5.9,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 767.78,
+      "outcomes": "ok ×62, status:503-inspection-overloaded ×6915",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 6915,
+          "p50": 14.698,
+          "p95": 55.563,
+          "p99": 74.048,
+          "max": 96.167
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 39,
+      "verified_in_window": 38,
+      "goodput_rps": 3.8,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 290.575,
+      "outcomes": "ok ×39"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 66,
+      "verified_in_window": 64,
+      "goodput_rps": 6.4,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 397.054,
+      "outcomes": "ok ×66"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 682,
+      "verified_in_window": 62,
+      "goodput_rps": 6.2,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 645.497,
+      "outcomes": "ok ×65, status:503-inspection-overloaded ×617",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 617,
+          "p50": 20.14,
+          "p95": 40.493,
+          "p99": 45.69,
+          "max": 60.876
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 2505,
+      "verified_in_window": 61,
+      "goodput_rps": 6.1,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 641.119,
+      "outcomes": "ok ×64, status:503-inspection-overloaded ×2441",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 2441,
+          "p50": 20.269,
+          "p95": 45.581,
+          "p99": 59.454,
+          "max": 65.746
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 2,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 6089,
+      "verified_in_window": 47,
+      "goodput_rps": 4.7,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 885.329,
+      "outcomes": "ok ×51, status:503-inspection-overloaded ×6038",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 6038,
+          "p50": 20.354,
+          "p95": 48.296,
+          "p99": 60.609,
+          "max": 88.526
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c1",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 1,
+      "attempts": 30,
+      "verified_in_window": 29,
+      "goodput_rps": 2.9,
+      "crossed_in_from_warmup": 1,
+      "outstanding_at_window_end": 1,
+      "p99_ms": 392.821,
+      "outcomes": "ok ×30"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c2",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 2,
+      "attempts": 70,
+      "verified_in_window": 68,
+      "goodput_rps": 6.8,
+      "crossed_in_from_warmup": 2,
+      "outstanding_at_window_end": 2,
+      "p99_ms": 401.649,
+      "outcomes": "ok ×70"
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c4",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 4,
+      "attempts": 753,
+      "verified_in_window": 72,
+      "goodput_rps": 7.2,
+      "crossed_in_from_warmup": 4,
+      "outstanding_at_window_end": 4,
+      "p99_ms": 531.414,
+      "outcomes": "ok ×74, status:503-inspection-overloaded ×679",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 679,
+          "p50": 20.164,
+          "p95": 40.709,
+          "p99": 48.608,
+          "max": 59.098
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c8",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 8,
+      "attempts": 3239,
+      "verified_in_window": 72,
+      "goodput_rps": 7.2,
+      "crossed_in_from_warmup": 8,
+      "outstanding_at_window_end": 8,
+      "p99_ms": 477.482,
+      "outcomes": "ok ×75, status:503-inspection-overloaded ×3164",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 3164,
+          "p50": 13.617,
+          "p95": 41.262,
+          "p99": 50.757,
+          "max": 66.887
+        }
+      }
+    },
+    {
+      "scenario": "s11-arg-amplification-h1",
+      "variant": "waf",
+      "target": "main",
+      "run": "ia-a1-after-soak",
+      "rep": 3,
+      "phase": "c16",
+      "class": "load",
+      "proto": "h1",
+      "concurrency": 16,
+      "attempts": 6852,
+      "verified_in_window": 66,
+      "goodput_rps": 6.6,
+      "crossed_in_from_warmup": 16,
+      "outstanding_at_window_end": 16,
+      "p99_ms": 642.057,
+      "outcomes": "ok ×68, status:503-inspection-overloaded ×6784",
+      "outcome_latency_ms": {
+        "status:503-inspection-overloaded": {
+          "n": 6784,
+          "p50": 15.334,
+          "p95": 55.369,
+          "p99": 61.446,
+          "max": 90.601
+        }
+      }
+    }
+  ],
+  "failed_or_invalid_runs": [
+    "ia-a1-after-soak s11-arg-amplification-h1/waf/before rep1: runtime-finding: phase c4 class load: status:503-inspection-overloaded ×576; phase c8 class load: status:503-inspection-overloaded ×2650; phase c16 class load: status:503-inspection-overloaded ×6138",
+    "ia-a1-after-soak s11-arg-amplification-h1/waf/before rep2: runtime-finding: phase c4 class load: status:503-inspection-overloaded ×538; phase c8 class load: status:503-inspection-overloaded ×3669; phase c16 class load: status:503-inspection-overloaded ×7511",
+    "ia-a1-after-soak s11-arg-amplification-h1/waf/before rep3: runtime-finding: phase c4 class load: status:503-inspection-overloaded ×640; phase c8 class load: status:503-inspection-overloaded ×2509; phase c16 class load: status:503-inspection-overloaded ×7107",
+    "ia-a1-after-soak s11-arg-amplification-h1/waf/main rep1: runtime-finding: phase c4 class load: status:503-inspection-overloaded ×605; phase c8 class load: status:503-inspection-overloaded ×2490; phase c16 class load: status:503-inspection-overloaded ×6915",
+    "ia-a1-after-soak s11-arg-amplification-h1/waf/main rep2: runtime-finding: phase c4 class load: status:503-inspection-overloaded ×617; phase c8 class load: status:503-inspection-overloaded ×2441; phase c16 class load: status:503-inspection-overloaded ×6038",
+    "ia-a1-after-soak s11-arg-amplification-h1/waf/main rep3: runtime-finding: phase c4 class load: status:503-inspection-overloaded ×679; phase c8 class load: status:503-inspection-overloaded ×3164; phase c16 class load: status:503-inspection-overloaded ×6784"
+  ],
+  "acceptance_boundary": "an I5 result shows that the instrument captured a runtime; it is not A1-A18 acceptance. Throughput verdicts between the ADR baseline and post-I1 main are informational because I1 has no request-path enforcement"
+}

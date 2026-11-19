@@ -30,7 +30,20 @@ type GlobalSettingsProjection struct {
 	ShutdownTimeout       string                              `json:"shutdown_timeout"`
 	ReloadTimeout         string                              `json:"reload_timeout"`
 	RedactMinSecretLength int                                 `json:"redact_min_secret_length"`
+	Inspection            InspectionSettingsProjection        `json:"inspection"`
 	Lifecycle             map[string]LifecycleFieldProjection `json:"lifecycle"`
+}
+
+// InspectionSettingsProjection retains the editable baseline's resolved
+// values. Nil pointers remain distinguishable from explicit zero durations.
+type InspectionSettingsProjection struct {
+	Mode                     string           `json:"mode"`
+	MaxBufferedBytes         *config.Size     `json:"max_buffered_bytes"`
+	MaxGuestCapacityBytes    *config.Size     `json:"max_guest_capacity_bytes"`
+	MaxResponseHeaderBytes   *config.Size     `json:"max_response_header_bytes"`
+	MaxConcurrentEvaluations int              `json:"max_concurrent_evaluations"`
+	EvaluationQueueTimeout   *config.Duration `json:"evaluation_queue_timeout"`
+	BodyTimeout              *config.Duration `json:"body_timeout"`
 }
 
 // CompleteCompressionProjection retains every editable compression value even
@@ -93,13 +106,15 @@ type ServerLimitsProjection struct {
 // Global & Traffic Controls area. Keeping it separate from the legacy internal
 // projection avoids widening the per-location rate-limit contract.
 type issue81TrafficControlsProjection struct {
-	Global      *GlobalSettingsProjection      `json:"global"`
-	Compression *CompleteCompressionProjection `json:"compression"`
-	RateLimit   *GlobalRateLimitProjection     `json:"rate_limit"`
-	Cache       *CompleteCacheProjection       `json:"cache"`
-	Servers     []ServerLimitsProjection       `json:"servers"`
-	Tracing     *TracingProjection             `json:"tracing,omitempty"`
-	AccessLog   *AccessLogProjection           `json:"access_log,omitempty"`
+	ConfigAuthority string                         `json:"config_authority,omitempty"`
+	BaseVersion     string                         `json:"base_version,omitempty"`
+	Global          *GlobalSettingsProjection      `json:"global"`
+	Compression     *CompleteCompressionProjection `json:"compression"`
+	RateLimit       *GlobalRateLimitProjection     `json:"rate_limit"`
+	Cache           *CompleteCacheProjection       `json:"cache"`
+	Servers         []ServerLimitsProjection       `json:"servers"`
+	Tracing         *TracingProjection             `json:"tracing,omitempty"`
+	AccessLog       *AccessLogProjection           `json:"access_log,omitempty"`
 }
 
 func lifecycleFieldProjection(path string) LifecycleFieldProjection {
@@ -131,13 +146,29 @@ func projectGlobalSettings(c *config.Config) *GlobalSettingsProjection {
 		ShutdownTimeout:       string(mustMarshal(c.Global.ShutdownTimeout.MarshalText())),
 		ReloadTimeout:         string(mustMarshal(c.Global.ReloadTimeout.MarshalText())),
 		RedactMinSecretLength: c.Global.RedactMinSecretLength,
+		Inspection: InspectionSettingsProjection{
+			Mode:                     c.Global.Inspection.Mode,
+			MaxBufferedBytes:         c.Global.Inspection.MaxBufferedBytes,
+			MaxGuestCapacityBytes:    c.Global.Inspection.MaxGuestCapacityBytes,
+			MaxResponseHeaderBytes:   c.Global.Inspection.MaxResponseHeaderBytes,
+			MaxConcurrentEvaluations: c.Global.Inspection.MaxConcurrentEvaluations,
+			EvaluationQueueTimeout:   c.Global.Inspection.EvaluationQueueTimeout,
+			BodyTimeout:              c.Global.Inspection.BodyTimeout,
+		},
 		Lifecycle: map[string]LifecycleFieldProjection{
-			"worker_threads":           lifecycleFieldProjection("global.worker_threads"),
-			"log_level":                lifecycleFieldProjection("global.log_level"),
-			"log_format":               lifecycleFieldProjection("global.log_format"),
-			"shutdown_timeout":         lifecycleFieldProjection("global.shutdown_timeout"),
-			"reload_timeout":           lifecycleFieldProjection("global.reload_timeout"),
-			"redact_min_secret_length": lifecycleFieldProjection("global.redact_min_secret_length"),
+			"worker_threads":                        lifecycleFieldProjection("global.worker_threads"),
+			"log_level":                             lifecycleFieldProjection("global.log_level"),
+			"log_format":                            lifecycleFieldProjection("global.log_format"),
+			"shutdown_timeout":                      lifecycleFieldProjection("global.shutdown_timeout"),
+			"reload_timeout":                        lifecycleFieldProjection("global.reload_timeout"),
+			"redact_min_secret_length":              lifecycleFieldProjection("global.redact_min_secret_length"),
+			"inspection.mode":                       lifecycleFieldProjection("global.inspection.mode"),
+			"inspection.max_buffered_bytes":         lifecycleFieldProjection("global.inspection.max_buffered_bytes"),
+			"inspection.max_guest_capacity_bytes":   lifecycleFieldProjection("global.inspection.max_guest_capacity_bytes"),
+			"inspection.max_response_header_bytes":  lifecycleFieldProjection("global.inspection.max_response_header_bytes"),
+			"inspection.max_concurrent_evaluations": lifecycleFieldProjection("global.inspection.max_concurrent_evaluations"),
+			"inspection.evaluation_queue_timeout":   lifecycleFieldProjection("global.inspection.evaluation_queue_timeout"),
+			"inspection.body_timeout":               lifecycleFieldProjection("global.inspection.body_timeout"),
 		},
 	}
 }

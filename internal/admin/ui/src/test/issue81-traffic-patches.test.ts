@@ -141,6 +141,41 @@ describe("issue #81 sparse patch builders", () => {
     });
   });
 
+  it("sends only changed inspection values, including explicit zero", () => {
+    const initial = seedGlobalSettings({
+      ...globalProjection,
+      inspection: {
+        mode: "enforce",
+        max_buffered_bytes: "256m",
+        max_guest_capacity_bytes: "1g",
+        max_response_header_bytes: null,
+        max_concurrent_evaluations: 4,
+        evaluation_queue_timeout: "1s",
+        body_timeout: "1m0s",
+      },
+    });
+    if (initial.inspection === undefined) throw new Error("Missing inspection draft");
+    const inspection = initial.inspection;
+    expect(buildGlobalPatch(initial, initial)).toBeNull();
+    expect(buildGlobalPatch(initial, {
+      ...initial,
+      inspection: {
+        ...inspection,
+        mode: "observe",
+        maxGuestCapacityBytes: "2g",
+        maxConcurrentEvaluations: "0",
+        bodyTimeout: "0s",
+      },
+    })).toEqual({
+      op: "global_set",
+      global: { inspection: { mode: "observe", max_guest_capacity_bytes: "2g", max_concurrent_evaluations: 0, body_timeout: "0s" } },
+    });
+    expect(() => buildGlobalPatch(initial, {
+      ...initial,
+      inspection: { ...inspection, maxConcurrentEvaluations: "" },
+    })).toThrow("non-negative integer");
+  });
+
   it("seeds server limits from projection and never overwrites a no-op", () => {
     const initial = seedServerLimits(server);
     expect(initial).toEqual({

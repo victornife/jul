@@ -26,10 +26,13 @@ func (s *Set) Close() error {
 	if s == nil {
 		return nil
 	}
+	var errs []error
 	for _, p := range s.plugins {
-		p.close()
+		if err := p.close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // Identities returns the content identity of every plugin's compiled module.

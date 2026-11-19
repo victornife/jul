@@ -5,6 +5,25 @@ This is the authoritative ownership model for Jul's mutable runtime resources
 identity is, what decides reuse versus replacement, and how it moves through
 **Prepare → Publish → Abort → Retire → drain → close**.
 
+The I2b implementation reserves logical capacity for Jul-managed guests
+until their calls and callbacks finish, managed cleanup succeeds and Jul-owned
+aliases are dropped. A close failure retains the reservation until successful
+runtime cleanup; a runtime close failure cannot be retried safely and its
+reservation remains visible and charged until process restart. Stock Wazero may
+retain references asynchronously, so this is not a
+last-alias or physical-memory bound. Parsed configuration defaults to 1 GiB;
+observe mode does not enforce the limit, but 64 guest tickets with unresolved
+teardown refuse new reservations, including candidate prewarming, in every
+mode. Work already admitted may also fail; if the count cannot drain below 64,
+restart is required before new instances can start. See the
+[inspection ledger](reviews/700-inspection-implementation-ledger.md#reduced-scope-closeout--2026-11-19).
+Successful cleanup decrements the unresolved count and returns the logical
+reservation. Admission resumes automatically below 64 when the remaining
+byte and per-plugin limits permit; a ticket merely re-entering `closing` is
+not resolved. A terminal runtime-close failure can exhaust the byte ceiling
+below 64 and needs restart to reclaim that retained capacity. Reload or a
+mode change does not erase it. See the [recovery table](plugins.md#guest-admission-recovery-and-restart).
+
 It deliberately does **not** repeat which configuration fields are hot-reloaded
 or restart-required. That truth is generated from one registry and lives in:
 
@@ -62,7 +81,7 @@ field up in the generated table rather than here.
 | Admin runtime (auth snapshot, audit sink, upload dir) | `admin.PreparedCommit`, `auditFileOwner` | admin generation | admin listener | `auditSinkConfig` equality; admin TLS content | `AdminRuntimeHealthy` (audit sink writable, upload dir usable) — #415 | admin |
 | Access-log sinks | `observability.BuildAccessSinks` closers | generation lease; shared file backing for identical policy | sink kind + absolute path + rotation settings | sink formatting rebuilt; identical file policy retains one rotating writer | writable-directory probe at Prepare | observability |
 | Response cache | `cache.Cache` | process | the process cache | none | none | cache (restart boundary for the store) |
-| Inspection governor | `inspection.Governor` owned by `app.Runtime` | process | the process governor shared by listeners and generations | never recreated on reload; immutable limits publish through `PreparedRuntime` | counters, leases and charges survive reload; plugin request paths acquire leases (I2); WAF request paths do not yet | `global.inspection` |
+| Inspection governor | `inspection.Governor` owned by `app.Runtime` | process | the process governor shared by listeners and generations | never recreated on reload; version-checked immutable limits publish through `PreparedRuntime` | counters, leases, charges and Jul-managed guest reservations survive reload; WAF and plugin inspection share a request lease; guest reservations exclude asynchronous engine-retained references | `global.inspection` |
 | Cache revalidation | `internal/background` lease on `handlerGen` | generation | (effective key, generation) | — | lease refused by a retiring generation | cache |
 | Upstream pool | `upstream.Registry` / `upstream.Pool` | pool (survives reloads while its shape is equal) | `(name, scheme)` | `upstreamMeta` equality: scheme, strategy, health config, discovery, backend-TLS policy signature | none needed: only the registry closes a pool, and it never keeps a closed one | upstreams |
 | Active health checker (HTTP/TCP/gRPC) | `upstream.healthChecker` | pool | pool | part of `upstreamMeta` | pool retirement cancels in-flight probes and fences their verdicts (#428) | upstreams |
@@ -77,9 +96,9 @@ field up in the generated table rather than here.
 | L4 upstream pools | `stream.Server.reg` (its own `upstream.Registry`) | pool | as upstream pools | as upstream pools | as upstream pools | stream, upstreams |
 | WASM plugin manager | `plugins.Manager` (compilation cache, KV store, KV quota ledgers) | process | the process manager | none | none | plugins (process boundary) |
 | WASM plugin set | `plugins.Set` (one wazero runtime + compiled module per plugin) | generation | plugin name | rebuilt with the generation; the no-op proof compares every module's current digest with the serving one | module content identity: SHA-256 of the exact compiled bytes, snapshotted once per build (#429) | plugins |
-| WASM module instance | `plugins.pooledModule` | instance | — | — | retired after `max_invocations`, a trap, or a full pool (#420); at most `max_instances` live per plugin (#506) | plugins |
+| WASM module instance | `plugins.pooledModule` and its `inspection.GuestTicket` | instance | — | — | its effective memory ceiling is reserved before startup and remains charged through idle/busy work, pool handoffs and teardown; cancellation watcher completion and cleanup precede refund, while unresolved close failures remain charged; Go heap reclamation is asynchronous. Retirement wakes instance waiters and follows `max_invocations`, traps, or a full pool (#420), with at most `max_instances` per plugin (#506) | plugins, `global.inspection` |
 | Inspection request lease | `inspection.Lease`, acquired by the outermost plugin wrapper (`plugins.(*plugin).requestLease`) and carried in the request context | request | the request | — | owns every request-side host charge of every plugin in the chain; only the acquiring wrapper closes it, after the whole downstream handler and its response callbacks return (ADR 0032 §4, #700) | plugins |
-| Request deadline owner | `reqdeadline.Owner`, created by `server.dynamicHandler` on the raw transport writer and carried in the request context | request (one per HTTP/2 or HTTP/3 stream) | the request | — | arms the absolute `body_timeout` and applies the sticky retirement abort through the transport's per-request read deadline; never extends or restores a transport deadline; inert after the handler returns | server, plugins |
+| Request deadline owner | `reqdeadline.Owner`, created by `server.dynamicHandler` on the raw transport writer and carried in the request context | request (one per HTTP/2 or HTTP/3 stream) | the request | — | arms the absolute `body_timeout` and applies the sticky retirement abort through the transport's per-request read deadline; never extends or restores a transport deadline; inert after the handler returns | server, plugins, WAF |
 | WASM prepared request body | `plugins.preparedBody` replacing the request's `Body` (≤ the preparing plugin's `max_request_body`) | request | the request | — | prepared before instance acquisition and outside the guest deadline; reused unconsumed by later body-reading plugins, each enforcing its own limit (#699); its capacity is charged to the request lease before each allocation (#700) | plugins |
 | WASM response subscription | `plugins.subscription` in the request's phase record (subscription mode + ≤ 4 KiB request state) | request | plugin name within the request | — | pins the plugin of the generation that ran `handle_request`; no instance is held between phases (ADR 0020 §4, §11) | plugins |
 | WAF engine | `waf.Firewall` | generation | location scope | rebuilt with the generation | — | waf |
@@ -104,7 +123,7 @@ field up in the generated table rather than here.
 | Admin runtime | `PrepareAdmin` / `PrepareAdminRuntime` | `PreparedAdmin.Commit` | `PreparedAdmin.Abort` (once) | next Commit | `RetirePreparedRuntime`, asynchronous and bounded | audit file owner reference-counted | `TestRuntimeHealthyDetectsDegradedAuditSinkAndRepairAfterFix`, `TestServingChangeForcesReloadWhenAdminRuntimeDegraded` |
 | Access-log sinks | acquired in `buildHandlers`, lease staged | adopted with the generation | lease released by `Generation.Abort` | generation lease released; backing closes after the last owner | old generation keeps its lease until it drains; identical file policies share one writer ([policy-change limitation](known-limitations.md)) | yes, on last file owner | `TestBuildAccessSinksSamePathGenerationsPreserveJSON`, `TestBuildAccessSinksSharedFileLeaseLifetime`, `TestAccessLogCandidateAbortLeavesNoRealFile`, `TestFakeAccessSinkClosesOnlyAfterOldRequestsDrain` |
 | Response cache | — | — | — | process exit | — | at shutdown | [churn_test.go](../internal/cache/churn_test.go) |
-| Inspection governor | candidate limits are resolved without mutating the governor | `inspectionLimitsComponent.commit` publishes limits in the reload transaction | no-op; candidate holds no live resources | process exit | existing leases and evaluation holders keep their accounting until explicit release; decreases drain above-limit usage | no | `TestInspectionLimitsPublishWithReloadAndPreserveProcessGovernor` ([inspection_reload_test.go](../internal/server/inspection_reload_test.go)) |
+| Inspection governor | candidate limits are resolved without mutating the governor; replacement guests reserve against published limits | version-checked publication installs the limits; limits-only changes preserve the handler generation | candidate guest debt remains charged | process exit | leases and evaluation holders release normally; guest teardown debt persists until process exit, including after decreases | no | `TestInspectionLimitsPublishWithReloadAndPreserveProcessGovernor` ([inspection_reload_test.go](../internal/server/inspection_reload_test.go)) |
 | Cache revalidation | — | lease admitted by the live generation | — | generation retirement cancels leases | bounded by `MaxOperation` and `shutdown_timeout` | context cancel | `TestRevalidationRefusedByRetiringGeneration`, `TestRepeatedRetirementWithActiveLeases`, `TestDrainCancelsAndBoundsLiveBackgroundWork` |
 | Upstream pool | `Registry.Begin`/`For` stage fresh pools; reused pools defer `UpdateBackends` | `Registry.Commit`, then `Activate` starts workers | `Registry.Abort` closes fresh pools only | `Commit` closes pools no longer wanted | old generations keep their pool snapshots; parked admission waiters are rejected | `Pool.Close`, `closeOnce` | `TestRegistryAbortKeepsLiveClosesStaged` |
 | Active health checker | health config is part of the pool shape | started by `Activate` | never started for aborted pools | pool `Close` | in-flight probe cancelled and its verdict dropped | goroutine exits on `Done` | `TestHealthProbeCancelledAndFencedOnPoolRetirement` ([health_retirement_test.go](../internal/upstream/health_retirement_test.go)), `TestProbeGRPCChurnQuiescence` |

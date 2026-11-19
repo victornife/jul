@@ -18,9 +18,10 @@ The harness includes:
 - versioned run manifests with checksums;
 - deterministic summaries.
 
-It measures Jul; it does not make Jul enforce anything. Until I2–I4 land, the live WAF and plugin
-request paths are not governed. That holds even in post-I1 builds that export governor metrics or
-accept `mode = "enforce"`, and no result from this harness says otherwise.
+It measures Jul; it does not make Jul enforce anything. I2, I3a and I4 govern parts of the
+plugin and WAF paths. Draft #721 adds logical guest-capacity reservations; exact aggregate
+inspection spool protection remains unimplemented. A harness result alone does not establish an
+enforcement or qualification claim.
 
 ## Prerequisites
 
@@ -75,6 +76,17 @@ taskset -c 4-9 /tmp/ia run -out /tmp/ia-run -profile qualification -suite campai
 /tmp/ia calibrate -target base /tmp/ia-cal
 ```
 
+### Combined functional soak
+
+The in-process real-server test exercises stock WAF/WASM, normal and multipart
+traffic, deliberate WAF denials, guest recycling, and repeated serving reloads.
+It checks goodput separately from denials and verifies logical pool and shutdown
+drainage. It does not replace the Linux envelope or throughput qualification.
+
+```sh
+JUL_INSPECTION_SOAK_DURATION=30m GOMAXPROCS=2 go test -tags 'soak waf wasmplugins' -run '^TestInspectionCombinedSoak$' -count=1 -timeout=40m -v ./internal/app
+```
+
 ### Targets
 
 `-target label:adapter:path` names a binary, its configuration adapter and its label. Each target
@@ -112,6 +124,7 @@ envelope, so smoke and unconstrained runs never receive a verdict.
 | `fidelity` | `r1`, `s8`, `s11l`, `s9`, F3 pending 16 and 0, F4, `s6`, `s7`, `r2`: instrument fidelity smokes. Their outcomes are recorded without a pass verdict. |
 | `historical-695`, `historical-699` | The archived s1–s11 and r1–r3 definitions. |
 | `destructive` | `s3`, `s4`, full `s11`. They OOM uncapped runtimes and are kept for I6 runs in an isolated envelope. |
+| `bounded-envelope-diagnostic` | Plan v6 copies of `s11`, `s3` and `s4`; the WAF-only A1 diagnostic uses 320 MiB, while full-fixture A2 proposes 448 MiB after `jul check` measured a 406503427 B route minimum. This A2 configuration has not been run or validated; check it with the target binary. A2 also uses four instances per plugin, a 2 s timeout and `GOMEMLIMIT=480MiB`. Frozen historical scenarios remain unchanged. |
 
 `f4-body-deadline-5s` is in no suite; select it with `-scenario`. It sets
 `[global.inspection].body_timeout = "5s"`, well inside its 20 s watchdog, because the 60 s default
@@ -119,7 +132,7 @@ outlasts every F4 watchdog. Only the `current` adapter can express it, and `run`
 targets before starting. Post-I1 main records a runtime finding for `both` (no 408; the watchdog
 ends the upload) until I2/I3 implement the deadline.
 
-`plan.json` is the frozen plan (`inspection-assessment-plan/v3`): scenarios, profiles, suites,
+`plan.json` is the frozen plan (`inspection-assessment-plan/v6`): scenarios, profiles, suites,
 interpretation rules and the configuration-template hash. A test fails when the code and `plan.json` disagree. Any change to
 scenarios or rules must regenerate `plan.json` (`/tmp/ia plan > scripts/inspection-assessment/plan.json`)
 and be reviewed. Runs made under another plan hash are not comparable.
@@ -131,8 +144,13 @@ new one are unchanged, and every existing cell renders a byte-identical configur
 #700 I5 baseline campaign ran under v1. Its stored results lack the new fields, and `summarize`
 does not re-judge them or merge them with v2 runs.
 
-Plan v3 (#700 I2) adds plugin fixtures, explicit inspection limits and plugin-only cells. Runs
-under v1, v2 and v3 have different plan hashes and are never merged.
+Plan v3 (#700 I2) adds plugin fixtures, explicit inspection limits and plugin-only cells. Plan v4
+adds separately named bounded-envelope diagnostics and protocol validation for non-2xx responses.
+Plan v5 applies the diagnostic plugin timeout and instance cap to the full fixture as well as the
+request-only fixture. Plan v6 proposes a higher A2 diagnostic budget after the v5 real-binary
+check reported a 406503427 B route minimum, and requires the exact overload body including its
+newline. Earlier versions trimmed whitespace; their aggregate results cannot prove the exact body.
+Runs under different plan versions have different hashes and are never merged.
 
 - `fixture` selects the plugin pair for `wasm`/`both`: `full` (the default, unchanged),
   `request-only` (inspect-load reading only the request body; no response subscription, so
@@ -144,16 +162,20 @@ under v1, v2 and v3 have different plan hashes and are never merged.
   because the guest cannot see the body.
 - `inspection_mode` and `max_buffered_bytes` write `[global.inspection]`. They replace the
   adapter's WAF budget, and only the `current` adapter can express them.
-- `plugin_timeout`, `plugin_max_instances` and `gomemlimit` size a plugin-only cell's static
-  footprint. The first two render `timeout`/`max_instances` for both request-only plugins and are
-  refused for other fixtures. `gomemlimit` sets Jul's `GOMEMLIMIT`, as ADR 0032 §10 recommends.
+- `plugin_timeout`, `plugin_max_instances`, `plugin_max_invocations` and `gomemlimit` size a cell's
+  plugin footprint and reuse interval. The first three render the existing
+  `timeout`/`max_instances`/`max_invocations` settings for both request-only or full-fixture plugins
+  and are refused for the nobody fixture. `gomemlimit` sets Jul's `GOMEMLIMIT`, as ADR 0032 §10 recommends.
   `Launch` otherwise starts Jul with `GOMEMLIMIT` unset, and the envelope check reads the value
   from `/proc/<pid>/environ` (`gomemlimit_env`). Guest pools (`max_instances × memory_limit` per
   plugin), Go GC headroom and kernel socket buffers are outside the governor. With the default
   pools (2 × 64 × 16 MiB) the pre-freeze smokes of p1 and p2 were OOM-killed in the 768 MiB
   envelope, and p1 was killed in the same way on pre-I2 main `d8d0520b`.
 - `p1-large-body-plugin-h1`: 768 KiB bodies at C=64 through two request-only plugins at the
-  default budget. Four instances per plugin, a 2 s plugin timeout and `GOMEMLIMIT=480MiB`.
+  default budget. Four instances per plugin, a 2 s plugin timeout, `GOMEMLIMIT=480MiB` and,
+  from plan v7, `max_invocations = 16` for each instance. Earlier Go guest allocator exhaustion
+  produced contained 500s before the default 1000-call retirement point. The 16-call mitigation
+  applies equally to both targets and incurs more instantiations; it is not a product default.
 - `p2-saturation-plugin-h1` and its observe twin `p2o-…`: 160 concurrent 960 KiB bodies, each held
   5 s at the origin, against `max_buffered_bytes = "128m"`, with the p1 sizing. A known-length
   prepared body is charged at about its length, so the retained bodies need about 150 MiB for the
@@ -163,6 +185,25 @@ under v1, v2 and v3 have different plan hashes and are never merged.
   exhaustion, stays `status:503` and is a finding. p2o records would-reject decisions instead.
   Their clients set `honor_retry_after`: after an overload-class answer a worker waits at least 1 s
   before its next request.
+  Plan v7 applies the same 16-call reuse bound to p2/p2o/p2h and the additional bounded s3/s4
+  diagnostics. Original destructive s3/s4 fixtures and their historical results are unchanged.
+
+The generated body-heavy fixture now includes these existing settings for **both** plugins:
+
+```toml
+[plugins.inspect-a]
+path = "/tmp/inspect-load.wasm"
+abi = "jul-abi/v2"
+timeout = "2s"
+max_instances = 4
+max_invocations = 16
+config = { name = "a", read_body = "true" }
+```
+
+Use the same sizing/reuse settings for `inspect-b`. The full fixture retains its response
+subscription/replacement configuration. This trades additional initialization work for avoiding
+the reproduced allocator exhaustion; validate the interval for other guest/body combinations.
+
 - `p2h-saturation-hostile-h1` is p2 without that backoff. It is a record-only I6 sizing cell. A
   closed-loop client resends rejected 960 KiB uploads at about 1300 per second. net/http keeps each
   rejected connection open for its 500 ms close linger while unread body bytes arrive, so socket
@@ -212,11 +253,22 @@ under v1, v2 and v3 have different plan hashes and are never merged.
 - Every non-2xx response is classified by `StatusClass`. A governor overload answer is
   `status:503-inspection-overloaded` in every scenario, so a governor 503 in a cell that expects
   only pool or admission 503s (for example F3) is a finding rather than an expected outcome.
+- Plan v4 and later require each non-2xx response's negotiated protocol to match the requested H1/H2/H3
+  protocol. The overload class requires the matching protocol, HTTP 503, `Retry-After: 1`, and the
+  body `inspection_overloaded\n` (v6; v4/v5 trimmed whitespace); a mismatch cannot be accepted as a governor reject.
 - Summaries refuse to merge runs whose `guest` or `guest_nobody` identities differ.
 
 Every v2 cell with the default fixture renders a byte-identical configuration under v3. The
 origin echoes `X-Echo-A-Req-Len` from `a1`/`a2` as well as `a`, which changes only s9's
 responses, and adds the state echoes only when they are present.
+
+## Current-main qualification
+
+The dated [#721 current-main campaign record](../../docs/reviews/evidence/2026-11-19-721-current-main/README.md)
+pins the matrix, thresholds, target SHAs, commands and results. Its comparison uses current `main`
+against the candidate, not the ADR baseline or pre-fix PR head. Plan v4-v6 diagnostics are additive:
+the frozen A1/A2 runs and thresholds are retained, and a sized diagnostic does not retroactively
+pass them.
 
 ## What a run records
 

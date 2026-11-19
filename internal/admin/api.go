@@ -18,7 +18,6 @@ import (
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/rbac"
-	"jul/internal/server"
 	"jul/internal/waf"
 )
 
@@ -112,14 +111,18 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	out := RuntimeOverview{
 		Product:  s.deps.Product,
 		Version:  s.deps.Version,
+		BootID:   s.bootID(),
 		Status:   status,
 		CertRisk: certRisk,
 	}
+	live := s.liveSnapshot()
+	inspection, err := s.currentInspectionStatus(r, live)
+	if err != nil {
+		out.InspectionError = "could not report plugin guest capacity"
+	} else {
+		out.Inspection = inspection
+	}
 	if s.deps.PendingRestartCheck != nil {
-		var live server.LiveSnapshot
-		if s.deps.LiveSnapshot != nil {
-			live = s.deps.LiveSnapshot()
-		}
 		if subsystems := s.deps.PendingRestartCheck(live); len(subsystems) > 0 {
 			out.PendingRestart = subsystems
 		}
@@ -333,7 +336,12 @@ func (s *Server) handleTrafficControls(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, projectIssue81TrafficControls(state.Config))
+	projection := projectIssue81TrafficControls(state.Config)
+	projection.ConfigAuthority = s.currentAuthority().Mode
+	if id, ok := rbac.IdentityFromContext(r.Context()); !ok || id.Has(rbac.ConfigRaw) {
+		projection.BaseVersion = state.Version
+	}
+	writeJSON(w, http.StatusOK, projection)
 }
 
 // handleConfigValidate accepts a candidate config and returns structured

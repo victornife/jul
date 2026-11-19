@@ -4,7 +4,7 @@
 # Own the test context outside reports and the operator's persistent state.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-fixture="$(mktemp -d)"
+fixture="$(cd "$(mktemp -d)" && pwd -P)"
 pid=''
 cleanup() {
   if [[ -n "$pid" ]]; then kill -TERM "$pid" 2>/dev/null || true; wait "$pid" 2>/dev/null || true; fi

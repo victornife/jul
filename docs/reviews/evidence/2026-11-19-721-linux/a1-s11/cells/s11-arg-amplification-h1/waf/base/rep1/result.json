@@ -1,0 +1,275 @@
+{
+  "scenario": "s11-arg-amplification-h1",
+  "scenario_sha256": "b7466beaecd44a3b986f007d42c4659a566589778c2c69e8918d23aaad892e4d",
+  "comparison": "record",
+  "variant": "waf",
+  "target": "base",
+  "rep": 1,
+  "profile": "qualification",
+  "started": "2026-11-19T12:01:14.521824402Z",
+  "ended": "2026-11-19T12:02:26.847428781Z",
+  "state": "completed",
+  "valid": true,
+  "correct": false,
+  "runtime_findings": [
+    "jul exited during the run: signal killed",
+    "phase c8 class load: error:eof ×6",
+    "phase c8 class load: error:refused ×397384",
+    "phase c8 class load: error:reset ×2",
+    "phase c16 class load: error:refused ×565605",
+    "oom_kill delta 1 in /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)"
+  ],
+  "config_sha256": "18bfb5395cba3ff53e8711cd145796e336d6f42a86969c576833a35a349ad09b",
+  "config_check_ok": true,
+  "effective_envelope": {
+    "cgroup": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/jul-ia-76978-816844093.scope",
+    "memory_max_bytes": 805306368,
+    "memory_swap_max_bytes": 0,
+    "cpu_max": "200000 100000",
+    "cpu_quota_cpus": 2,
+    "cpus_allowed_list": "0-1",
+    "gomaxprocs_env": "2",
+    "verified": true,
+    "oom_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice",
+    "parent_oom_kill_at_start": 0
+  },
+  "pre_canaries": [
+    {
+      "name": "clean-proxy",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    },
+    {
+      "name": "waf-request-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-response-body",
+      "status": 403,
+      "want": 403,
+      "ok": true
+    },
+    {
+      "name": "waf-static-response-clean",
+      "status": 200,
+      "want": 200,
+      "ok": true
+    }
+  ],
+  "phases": [
+    {
+      "name": "c1",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 1,
+          "window_seconds": 10,
+          "attempts": 31,
+          "verified": 31,
+          "verified_in_window": 30,
+          "goodput_rps": 3,
+          "goodput_bytes_per_second": 12288,
+          "classes": {
+            "ok": 31
+          },
+          "p50_ms": 334.902,
+          "p95_ms": 375.309,
+          "p99_ms": 388.516,
+          "max_ms": 396.123,
+          "crossed_in_from_warmup": 1,
+          "outstanding_at_window_end": 1,
+          "response_protos": {
+            "HTTP/1.1": 31
+          },
+          "connections_dialled": 1
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.524,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": false
+    },
+    {
+      "name": "c2",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 2,
+          "window_seconds": 10,
+          "attempts": 73,
+          "verified": 73,
+          "verified_in_window": 71,
+          "goodput_rps": 7.1,
+          "goodput_bytes_per_second": 29081.6,
+          "classes": {
+            "ok": 73
+          },
+          "p50_ms": 261.789,
+          "p95_ms": 324.666,
+          "p99_ms": 342.885,
+          "max_ms": 376.284,
+          "crossed_in_from_warmup": 2,
+          "outstanding_at_window_end": 2,
+          "response_protos": {
+            "HTTP/1.1": 73
+          },
+          "connections_dialled": 2
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.992,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    },
+    {
+      "name": "c4",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 4,
+          "window_seconds": 10,
+          "attempts": 73,
+          "verified": 73,
+          "verified_in_window": 69,
+          "goodput_rps": 6.9,
+          "goodput_bytes_per_second": 28262.4,
+          "classes": {
+            "ok": 73
+          },
+          "p50_ms": 546.34,
+          "p95_ms": 703.31,
+          "p99_ms": 755.566,
+          "max_ms": 783.242,
+          "crossed_in_from_warmup": 4,
+          "outstanding_at_window_end": 4,
+          "response_protos": {
+            "HTTP/1.1": 73
+          },
+          "connections_dialled": 4
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": 0.997,
+      "cpu_source": "cgroup cpu.stat usage_usec",
+      "saturated": true
+    },
+    {
+      "name": "c8",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 8,
+          "window_seconds": 10,
+          "attempts": 397407,
+          "verified": 15,
+          "verified_in_window": 15,
+          "goodput_rps": 1.5,
+          "goodput_bytes_per_second": 6144,
+          "classes": {
+            "error:eof": 6,
+            "error:refused": 397384,
+            "error:reset": 2,
+            "ok": 15
+          },
+          "p50_ms": 1149.353,
+          "p95_ms": 1355.213,
+          "p99_ms": 1355.213,
+          "max_ms": 1443.904,
+          "crossed_in_from_warmup": 8,
+          "outstanding_at_window_end": 8,
+          "response_protos": {
+            "HTTP/1.1": 15
+          },
+          "connections_dialled": 8,
+          "error_samples": {
+            "error:eof": "Post \"http://127.0.0.1:46767/proxy/echo?resp=4096\": EOF",
+            "error:refused": "Post \"http://127.0.0.1:46767/proxy/echo?resp=4096\": dial tcp 127.0.0.1:46767: connect: connection refused",
+            "error:reset": "Post \"http://127.0.0.1:46767/proxy/echo?resp=4096\": read tcp 127.0.0.1:44526-\u003e127.0.0.1:46767: read: connection reset by peer"
+          },
+          "outcome_latency_ms": {
+            "error:eof": {
+              "n": 6,
+              "p50": 377.9,
+              "p95": 499.119,
+              "p99": 499.119,
+              "max": 1070.566
+            },
+            "error:refused": {
+              "n": 397384,
+              "p50": 0.061,
+              "p95": 0.292,
+              "p99": 0.831,
+              "max": 26.171
+            },
+            "error:reset": {
+              "n": 2,
+              "p50": 129.912,
+              "p95": 129.912,
+              "p99": 129.912,
+              "max": 171.689
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    },
+    {
+      "name": "c16",
+      "classes": [
+        {
+          "workload": "load",
+          "proto": "h1",
+          "concurrency": 16,
+          "window_seconds": 10,
+          "attempts": 565605,
+          "verified": 0,
+          "verified_in_window": 0,
+          "goodput_rps": 0,
+          "goodput_bytes_per_second": 0,
+          "classes": {
+            "error:refused": 565605
+          },
+          "p50_ms": null,
+          "p95_ms": null,
+          "p99_ms": null,
+          "max_ms": null,
+          "crossed_in_from_warmup": 13,
+          "outstanding_at_window_end": 14,
+          "response_protos": {},
+          "connections_dialled": 0,
+          "error_samples": {
+            "error:refused": "Post \"http://127.0.0.1:46767/proxy/echo?resp=4096\": dial tcp 127.0.0.1:46767: connect: connection refused"
+          },
+          "outcome_latency_ms": {
+            "error:refused": {
+              "n": 565605,
+              "p50": 0.165,
+              "p95": 0.678,
+              "p99": 1.459,
+              "max": 28.382
+            }
+          }
+        }
+      ],
+      "jul_cpu_fraction_of_envelope": null,
+      "saturated": null
+    }
+  ],
+  "jul_exit": "signal killed",
+  "jul_exited_during_run": true,
+  "oom_kill_delta": 1,
+  "oom_kill_scope": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice (hierarchical memory.events oom_kill; includes sibling scopes)",
+  "peak_cg_memory_bytes": 791011328,
+  "peak_source": "cgroup memory.peak",
+  "peak_rss_bytes": 817876992,
+  "heap_inuse_after_two_gcs": null,
+  "heap_alloc_after_two_gcs": null,
+  "heap_after_two_gcs_unavailable": "jul exited during the run",
+  "rss_after_two_gcs": null,
+  "samples": 85
+}

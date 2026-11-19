@@ -1,14 +1,12 @@
 # ADR 0032 — Aggregate inspection resource governor
 
-- **Status:** Accepted — I1 merged (#706, `a57afa4d`); I5 tooling merged (#708, `d8d0520b`); I2
-  merged (#710, `c8bba7f2`); I3a merged (#715, `def419f5`); I4 merged (#716, `daa06bdc`);
-  I3b is blocked and I2b and I6 remain pending. The
-  2026-11-13 amendment below was accepted when #714 merged as `16d98258` from head `faf3ead4`;
-  implementation remains incomplete
-  until the scheduled checkpoints and qualification gates pass.
+- **Status:** Accepted design, amended 2026-11-19 to close out #721 with the reduced contract
+  below. Managed guest reservations and the public-state WAF body-failure guard are under review.
+  Original A19/A20 are deferred, not passed; integrated A1–A18/A21/A22 qualification remains
+  incomplete and is not a prerequisite for this closeout.
 - **Date:** 2026-11-10
-- **Revised:** 2026-11-10, after the maintainer's review of #704 (changes requested). The
-  maintainer's decisions are recorded in §Maintainer decisions.
+- **Revised:** 2026-11-19. The closeout amendment supersedes conflicting scope and merge gates
+  below; earlier amendments and acceptance criteria remain as historical records.
 - **Accepted:** 2026-11-10 by the maintainer. PR #704 merged as `8c483be2` from head
   `81f07e75`. The PR proposed the ADR; this acceptance is recorded separately.
 - **Deciders:** Victor Niharra (`@victornife`)
@@ -35,12 +33,97 @@
   - [ADR 0031](0031-waf-operations-posture-isolation-and-alerting.md): WAF transaction outcomes;
   - [resource ownership](../resource-ownership.md).
 
-> **Accepted design record.** This ADR is the implementation contract for #700. Acceptance adds no
-> configuration fields, enforcement or metrics. It does not establish protection, release readiness,
-> a maturity change or soak. Those require implementation slices I1–I6 and the acceptance plan
-> (A1–A18; if the 2026-11-13 proposed amendment is accepted, also A19–A22 for the controls it
-> adds). Until then, current operator guidance in `docs/waf.md`, `docs/plugins.md` and
-> `docs/known-limitations.md` still applies.
+> **Accepted design record.** The current contract is the 2026-11-19 amendment below. The earlier
+> programme and A1–A22 are retained for traceability, not as #721 merge gates. This ADR alone
+> does not establish release readiness, a maturity change or performance qualification.
+
+## 2026-11-19 closeout amendment — reduced contract
+
+The maintainer has stopped pursuing the full #700 programme; it is not a
+prerequisite for #721. The supported change is logical admission for
+Jul-managed guests, with cancellation, recycling, reload safety and retained charges for genuine
+teardown failures; and pre-dispatch rejection of body errors actually surfaced
+by stock Coraza, independent of rule-control flow. Existing API/CLI/Console
+status and settings describe those controls. Official, unmodified Wazero and
+Coraza remain mandatory.
+
+Merge readiness requires correct reduced-scope behavior, a supported combined
+functional smoke, affected tests and final-head CI/coverage, with no concrete
+security or correctness blocker. The historical A1–A22 programme, a dedicated
+benchmark host, physical-memory or engine last-alias proofs, and complete
+Coraza temporary-file ownership are not prerequisites. Original A19/A20 remain
+deferred. Historical failures and inconclusive results remain unchanged,
+including the unmet 50 ms overload objective; no unrun or failed criterion is
+relabeled as passed. Unqualified performance and resource risks are accepted
+for this narrower change.
+
+This reduces exposure, not the whole process's resource use. Wazero may retain
+memory asynchronously; Coraza may hide or report storage errors too late for
+pre-dispatch rejection. Size the deployment for its actual workload and use
+external process-memory and temporary-file byte/inode containment where bounds
+are required. The [ledger](../reviews/700-inspection-implementation-ledger.md)
+records the evidence and issue dispositions.
+
+## 2026-11-17 recovery amendment — official engines, bounded first-party scope
+
+The maintainer rejected the lifetime cost of maintaining modified Coraza and
+Wazero engines. Jul must use official, unmodified upstream modules and public
+APIs; no local replacement, copied engine source, dependency patch, reflection
+or private hook is permitted. The original strict storage and last-alias
+memory guarantees are not achievable through the currently supported public
+interfaces and are explicitly deferred rather than simulated by a new service
+or lifecycle subsystem.
+
+| Work item | Revised disposition |
+| --- | --- |
+| #711 / original A20 | Deliver process-wide logical admission for page-rounded ceilings of Jul-managed starting/live guest instances. The original hard last-alias/retained-memory guarantee is deferred and not marked passed. |
+| #713 / original A19 | Deliver a public-transaction-state fail-closed guard for detected request-body processing errors before origin dispatch. Exact aggregate spool quotas, file ownership, crash recovery and typed storage-error accounting are deferred and not marked passed. |
+| #712 / A22 | Project actual governor accounting, logical guest reservations, permission-safe route minimums and explicit unavailable/limited states through shared API/CLI/Console surfaces. Qualification remains pending. |
+| #700 | Complete only the explicitly revised supported scope after focused tests, adversarial review and qualification; preserve links and acceptance traceability for deferred strict capabilities. |
+
+### Revised guest-capacity contract
+
+The default `max_guest_capacity_bytes` is 1 GiB, representing a logical
+reservation for Jul-managed instances, not a physical-memory recommendation.
+Each instance reserves its page-rounded configured ceiling before startup.
+Normal successful teardown releases the logical ticket only after managed
+calls/callbacks return, required stock close operations succeed and Jul drops
+its aliases. A module close failure retains its reservation and local instance
+slot until successful runtime cleanup; a runtime close failure cannot be
+retried safely and remains charged and visible until process restart. At 64
+guest tickets with unresolved teardown,
+new guest reservations are refused even in observe mode or with an unlimited
+programmatic limit, including candidate prewarming; existing idle guests can
+still be reused. Work already admitted can also fail during teardown, so the
+number of retained tickets can exceed 64. If it cannot drain below 64, a
+restart is required before new instances or candidates can start.
+Cancellation remains enabled. Unmodified Wazero may retain references
+asynchronously after that boundary; Jul cannot prove the original
+last-alias release or a fixed reclamation time. The engine tail is outside the
+logical guarantee and is not a fixed extra bound. Process/container memory
+limits are a separate external safeguard and may terminate the process.
+
+### Revised WAF body-failure contract
+
+With stock Coraza, Jul checks its public transaction state for `REQBODY_ERROR`
+after body processing and before dispatch, independently of SecLang control
+flow. An existing interruption keeps its original outcome; otherwise a detected
+failure returns a generic `400` irrespective of CRS presence, WAF block/detect
+mode or governor enforce/observe mode. Clean multipart and supported partial
+processing remain supported. The generic public flag cannot distinguish disk
+I/O, storage exhaustion and malformed syntax, and cannot reveal hidden or late
+failures. Jul therefore does not claim exact aggregate temporary-file quotas,
+complete file ownership or original A19.
+
+This amendment changes compatibility for requests whose body processor reports
+an error in detect/observe mode: they are no longer forwarded to the origin.
+It does not undo data already dispatched and provides no post-dispatch
+guarantee. The #725 OS-level containment guidance remains an optional external
+deployment safeguard, not a Jul logical quota.
+
+Qualification, coverage, adversarial review and current-head CI evidence must
+be recorded separately from implementation. A passing test or representative
+soak does not prove either deferred strict guarantee.
 
 ## Context
 
@@ -1061,9 +1144,9 @@ and guest capacity under the 2026-11-13 proposed amendment, by A19–A22):
    `evaluation_queue_timeout`. Plugin-instance waiters are bounded by leases and each waits at most
    one call timeout.
 4. With `body_timeout > 0`, every inspection body-arrival phase ends within `body_timeout`, per
-   stream, on H1, H2 and H3. Today this is applied on plugin routes only; WAF-only routes are
-   covered once I3a ships the Jul-owned request-body read loop, and I3a must prove the H3 path
-   (including deadline forwarding through Jul's HTTP/3 wrappers) before this item is claimed.
+   stream, on H1, H2 and H3. Plugin and WAF-only body readers apply the deadline since I2 and
+   I3a, respectively. The WAF H3 path, including forwarding through Jul's HTTP/3 wrappers, remains
+   for I6b verification before this item is claimed.
 5. A charge is released only when the request can no longer reach the represented memory and
    the work is finished. Reload never multiplies capacity.
 
@@ -1249,7 +1332,7 @@ the table apply to every applicable row.
 | WAF transaction state | Cumulative `waf_state` **estimated** bytes R1–R4; reserve each phase's worst case before its Coraza call while holding the slot, then true down only as calibrated. `B_total` includes spilled input. | Hold until the synchronous work has returned and the owning goroutine closes the transaction. Cancellation or a reset is not a refund. `ARGS_PATH` remains empty unless its term and tests change. | I3a request, I4 response |
 | Phase-5 rules, audit construction and output | New `audit` **estimated reservation** R5, charged against the same `max_buffered_bytes`, not a second limit or an addition outside the accounted total. Reserve the complete per-transaction worst case before creating/entering a WAF transaction and before any response can make refusal impossible. | Retain through slotted or unslotted `ProcessLogging`, formatting and synchronous writer completion. Detach the immutable snapshot before transaction reset/pool reuse. If serialized bytes are asynchronously queued, transfer ownership to a distinct bounded queue; unsupported aliases cannot be refunded or claimed covered. Closing a request lease cannot refund an unowned retained record. | I3a request and I4 response calibration; integrated A21 qualification remains pending |
 | WAF execution | Process `slots`, one per synchronous rule-evaluating call, including implicit evaluations in body writes. No network read is performed while holding one. | Release only on actual return. Phases 1–4 try-acquire while request data is unread, otherwise use the existing bounded FIFO. Phase 5 never skips rules: it uses the same eligibility rule, but visibly runs unslotted if no slot is obtained. It is not strictly bounded by the slot count. | I3a/I4 |
-| Guest instances | Process `guest_capacity` bytes: the effective `WithMemoryLimitPages` ceiling, in 64 KiB pages, for **each** starting, idle, busy or closing instance across candidate/current/retiring generations. This is neither actual guest allocation nor RSS. | Reserve before instantiation and `_initialize`; reuse a pooled instance without another reservation. Release exactly once only after the module/runtime has stopped and no owner can use its memory. A failed close remains accounted and visible. | I2b |
+| Guest instances | Process `guest_capacity` bytes: the effective `WithMemoryLimitPages` ceiling, in 64 KiB pages, for **each** starting, idle, busy or closing instance across candidate/current/retiring generations. This is neither actual guest allocation nor RSS. | Reserve before instantiation and `_initialize`; reuse a pooled instance without another reservation. Release exactly once after guest execution and asynchronous engine work that can access the module have quiesced, represented cleanup has completed and Jul-owned aliases have been dropped. Go heap reclamation and return of pages to the OS remain asynchronous. An unresolved cleanup failure remains charged and visible. | I2b |
 | Compiled rules/modules and transaction pools | Generation-owned compiled state and process/GC-retained pool capacity; configured capacity, calibrated estimates or observations where available, **not** a guest or request reservation. | Retire only after actual generation users and resources finish; a reset pooled transaction can retain backing arrays. Unmeasured baseline is unavailable, not zero. | Existing lifecycle; A9/A15 and I6b |
 | Body spill and multipart files | Process `spool` logical reserved bytes and file count, independent of the request lease. Before every supported create, reserve a file; before a write/growth, reserve its possible resulting extent, including buffered-prefix copies and simultaneously retained multipart files. | A file remains charged through open handles, unlink/close, partial writes and failed cleanup. Refund only after all Jul-owned handles/aliases are closed and removal is confirmed. Crash leftovers are reconciled before new reservations. | I3b, blocked on the integration boundary below |
 | Audit output and other persistent storage | R5 covers in-process audit construction, the detached snapshot, synchronous formatter copies and any serialized buffer until its ownership is transferred. The configured sink's durable files/remote destination and other Jul-owned storage categories are separate external boundaries, not inspection spool and not bounded by R5. | Their configured owners, retention and I/O health remain responsible; a spool quota is not a filesystem-wide or durable-audit quota. tmpfs and page cache can still count against a cgroup. | Existing sink/storage owners; I6a exposes the distinction |
@@ -1622,8 +1705,8 @@ unchanged. Add the following unused identifiers:
 
 | # | Case | Pass condition |
 | --- | --- | --- |
-| A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing reservations/debt draining after a decrease or an observe-to-enforce transition, including when the numerical ceiling is unchanged; after either transition, no new acquisition may exceed the enforced ceiling. No early refund, unsafe deletion or partial inspection. Observe reports would-refuse while real I/O failures remain visible. Owned leftovers are reconciled before admission. Test observe-to-enforce with existing over-limit bytes/files and verify new acquisitions are refused. |
-| A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. A failed close stays charged; concurrent limit publications never let a stale candidate overwrite a newer limit. |
+| A19 | Inspection spool, including spill plus multipart, zero-byte files, faults, overlap and restart | In enforce, logical byte and file reservations never exceed the published ceilings except pre-existing reservations/debt draining after a decrease or an observe-to-enforce transition, including when the numerical ceiling is unchanged; after either transition, no new acquisition may exceed the enforced ceiling. No early refund or unsafe deletion. A storage failure detected before origin dispatch prevents dispatch and partial inspection; a failure discovered only during later replay, response delivery or cleanup stops affected further I/O, retains visible debt and does not claim already-sent work was undone. Observe reports would-refuse while real I/O failures remain visible. Same-deployment owned leftovers are reconciled before admission. Test observe-to-enforce with existing over-limit bytes/files and verify new acquisitions are refused. |
+| A20 | Guest instance capacity across plugins and generations | Every starting/live instance is reserved at its effective ceiling before instantiation; no double charge on reuse or early refund on failure/retirement. Enforce refuses over-capacity, observe records it, and candidate failure preserves the current generation. Idle-pool refusal is exercised and documented. Refund follows proven guest/watcher quiescence, represented cleanup and dropping Jul-owned aliases; it does not claim synchronous Go heap or OS-page reclamation. An unresolved cleanup failure stays charged; concurrent limit publications never let a stale candidate overwrite a newer limit. |
 | A21 | Phase-5 audit pressure and blocked output | R5 is reserved before transaction entry, covers the supported calibrated request/response audit construction and immutable detached record, and remains owned through the last bounded output alias; transaction reuse cannot mutate a prior record. Phase-5 rules are never skipped and saturation cannot create a governor wait cycle. A hung writer is abandoned at its deadline: the slot is released when the Coraza call returns, but the abandoned writer's retained audit charge stays bounded, charged and visible until the call actually returns, and only then drains. Once every abandoned or queued output has actually finished (returned, written or dropped and counted), slot, R5 and queue counters return to baseline. Long-lived exchanges release transaction ownership at their commit point, while pending output stays charged to its owner. When the abandonment set or output queue is saturated, enforce refuses with `audit` and observe admits, counts would-refuse and audit drops, and creates no unbounded writers or queue entries. Unsupported unbounded policies do not receive a protection claim. |
 | A22 | Operational usability and migration | API, CLI and Console agree with real producer state and permissions; units and unavailable/observe/draining/debt states are truthful; defaults, directive and directory migration are actionable; alerts use real bounded signals and do not claim a general notification or audit product. |
 
@@ -1891,6 +1974,66 @@ The review also required these contracts to be settled in the ADR. This revision
    (§7).
 8. **Deadline ownership.** Wrappers forward `SetReadDeadline` narrowly, without `Unwrap`, and a
    retirement abort cannot be undone (H6; restore replaced by the 2026-11-12 amendment, H6 item 8).
+
+## Accepted bounded execution amendment — 2026-11-17
+
+**Superseded:** the recovery amendment at the start of this ADR withdraws the
+dependency patches and strict spool/last-alias implementation described below.
+This section is retained as historical design evidence.
+
+The maintainer authorized implementation of the bounded approach in the #700 completion prompt.
+This amendment changes the integration boundary and clarifies the physical-resource limits; it
+does not claim that any implementation or A1–A22 criterion has passed.
+
+- **Dependency ownership.** Keep wazero and Coraza. Jul may carry source-pinned local patches
+  under the existing `third_party` replacement convention: wazero exposes synchronous completion
+  of cancellation-watcher module access; Coraza accepts a transaction-scoped temporary-storage
+  provider and preserves typed storage failures out of band. Jul retains all policy, quotas,
+  ticket ownership, error mapping and status. Neither dependency imports Jul. Each patch must have
+  reproducible upstream provenance, focused tests/coverage, update instructions and a removal
+  criterion tied to upstream passing the same contract tests.
+- **Guest refund boundary.** Capacity is a reservation of page-rounded guest ceilings, not RSS,
+  committed pages, compiled-code memory or proof of physical reclamation. A reservation is
+  refundable only after guest execution and asynchronous engine work that can access the module
+  are quiescent, represented cleanup completes and Jul-owned aliases are dropped. Failed starts
+  use the same verified teardown boundary. Go heap collection and OS-page return are asynchronous;
+  GC, weak pointers and sleeps are diagnostic only. An unresolved cleanup failure remains charged.
+- **Spool boundary.** The controller owns inspection temporary files for body spill, multipart and
+  any enabled response spill through the same provider. Logical byte/file ceilings cover only
+  Jul-controlled files; filesystem allocation rounding, page cache/tmpfs accounting, external
+  processes and malicious same-user interference remain outside that guarantee. Pre-dispatch
+  storage errors fail closed before origin dispatch. A failure first discovered during later
+  replay, response delivery or cleanup cannot undo bytes already sent; abort further affected I/O,
+  retain debt and report the stage. Cleanup failure after a successful response does not replace
+  that response.
+- **Root identity and recovery.** Support recovery for one fixed private root associated with a
+  stable deployment identity. Same-identity startup acquires exclusive ownership and reconciles
+  attributable leftovers before admission. Root changes use an explicit offline procedure that
+  verifies the prior root/state, drains or accounts for cleanup debt and updates the durable
+  association; there is no live cross-root migration. Deletion/replacement of the stable identity,
+  independent snapshot rollback or out-of-band relocation is an operator recovery boundary, not a
+  promise of universal directory discovery. Unknown or unattributable files are preserved, not
+  deleted.
+- **No broadened claim.** These limits refine A19/A20 and supersede any conflicting wording in
+  this ADR that implies physical memory reclamation before refund, pre-dispatch detection of every
+  future I/O/cleanup failure, or automatic discovery after the deployment identity is replaced.
+  They do not waive logical quota admission, fail-closed handling of errors detectable before
+  dispatch, truthful cleanup debt, same-identity recovery or the focused and integrated tests.
+
+## Historical implementation status — 2026-11-17 (superseded)
+
+The earlier fork-dependent draft followed the then-accepted amendment: pinned local Coraza and Wazero patches exposed the
+two required lifecycle seams, while Jul retained policy, quotas, admission, failure mapping and
+operability. That draft included transaction-owned spool files for body spill and multipart, a
+process-wide logical byte/file controller, watcher-joined guest refunds, and cleanup after failed
+instantiation. Its spool quota fields could be published as limits-only changes without rebuilding
+the serving generation; `spool_dir` was restart-bound.
+
+The focused reload regression, `make security-gates`, and full-tag repository test suite pass after
+test fixtures were aligned with the restart-bound spool-root default. This is implementation
+evidence, not acceptance: hosted checks, the Codecov threshold, combined 30-minute soak and A1–A22
+integrated campaign remain outstanding. A19 and A20 are not claimed as passed, and #700/#62 remain
+open until the ledger records completed qualification evidence.
 
 ## Related
 

@@ -27,28 +27,36 @@ type LedgerRetention struct {
 	Policy             string `json:"policy"`
 }
 
-// InspectionStatus reports the process inspection governor.
-// RequestPathIntegration is "partial": plugin and WAF request paths are
-// governed; response-side accounting is not yet.
+// InspectionStatus reports process-owned inspection accounting. Guest capacity
+// is a logical reservation and excludes engine-internal retained references.
 type InspectionStatus struct {
-	Configured                      InspectionConfiguredLimits `json:"configured"`
-	Effective                       InspectionEffectiveLimits  `json:"effective"`
-	Usage                           InspectionUsage            `json:"usage"`
-	AuditOutput                     InspectionAuditOutput      `json:"audit_output"`
-	ActiveLeases                    uint64                     `json:"active_leases"`
-	ActiveEvaluations               uint64                     `json:"active_evaluations"`
-	WaitingEvaluations              uint64                     `json:"waiting_evaluations"`
-	Draining                        bool                       `json:"draining"`
-	RequestPathIntegration          string                     `json:"request_path_integration"`
-	BaseChargeBytes                 uint64                     `json:"base_charge_bytes"`
-	BaseChargeScope                 string                     `json:"base_charge_scope"`
-	PluginGuestMaxBytes             *uint64                    `json:"plugin_guest_max_bytes,omitempty"`
-	PluginGuestLiveInstances        *uint64                    `json:"plugin_guest_live_instances,omitempty"`
-	PluginGuestMaxInstances         *uint64                    `json:"plugin_guest_max_instances,omitempty"`
-	PluginGuestActualBytes          *uint64                    `json:"plugin_guest_actual_bytes,omitempty"`
-	PluginGuestActualBytesState     string                     `json:"plugin_guest_actual_bytes_state"`
-	EvaluationHeadroomEstimateBytes *uint64                    `json:"evaluation_headroom_estimate_bytes,omitempty"`
-	EvaluationHeadroomEstimateState string                     `json:"evaluation_headroom_estimate_state"`
+	Configured             InspectionConfiguredLimits `json:"configured"`
+	Effective              InspectionEffectiveLimits  `json:"effective"`
+	Usage                  InspectionUsage            `json:"usage"`
+	AuditOutput            InspectionAuditOutput      `json:"audit_output"`
+	ActiveLeases           uint64                     `json:"active_leases"`
+	ActiveEvaluations      uint64                     `json:"active_evaluations"`
+	WaitingEvaluations     uint64                     `json:"waiting_evaluations"`
+	Draining               bool                       `json:"draining"`
+	RequestPathIntegration string                     `json:"request_path_integration"`
+	BaseChargeBytes        uint64                     `json:"base_charge_bytes"`
+	BaseChargeScope        string                     `json:"base_charge_scope"`
+	MinimumRequestBytes    *uint64                    `json:"minimum_request_bytes,omitempty"`
+	MinimumRequestRoute    string                     `json:"minimum_request_route,omitempty"`
+	// PluginGuestMaxBytes is a projected configured maximum, not a reservation
+	// or measurement of memory currently retained by the engine.
+	PluginGuestMaxBytes               *uint64 `json:"plugin_guest_max_bytes,omitempty"`
+	PluginGuestReservedBytes          uint64  `json:"plugin_guest_reserved_bytes"`
+	PluginGuestCapacityLimitBytes     uint64  `json:"plugin_guest_capacity_limit_bytes"`
+	PluginGuestFailedTeardowns        uint64  `json:"plugin_guest_failed_teardowns"`
+	PluginGuestAdmissionBlockedReason string  `json:"plugin_guest_admission_blocked_reason"`
+	PluginGuestReservationScope       string  `json:"plugin_guest_reservation_scope"`
+	PluginGuestLiveInstances          *uint64 `json:"plugin_guest_live_instances,omitempty"`
+	PluginGuestMaxInstances           *uint64 `json:"plugin_guest_max_instances,omitempty"`
+	PluginGuestActualBytes            *uint64 `json:"plugin_guest_actual_bytes,omitempty"`
+	PluginGuestActualBytesState       string  `json:"plugin_guest_actual_bytes_state"`
+	EvaluationHeadroomEstimateBytes   *uint64 `json:"evaluation_headroom_estimate_bytes,omitempty"`
+	EvaluationHeadroomEstimateState   string  `json:"evaluation_headroom_estimate_state"`
 }
 
 type InspectionPluginGuestCapacity struct {

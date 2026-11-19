@@ -1,0 +1,351 @@
+verified test scope: memory.max=805306368 memory.swap.max=0 cpu.max=200000/100000 cpus=0-1 GOMAXPROCS=2
+=== RUN   TestAuditWriteAbandonedChargeStaysVisibleUntilReturn
+--- PASS: TestAuditWriteAbandonedChargeStaysVisibleUntilReturn (0.00s)
+=== RUN   TestAuditOutputSaturationByMode
+=== RUN   TestAuditOutputSaturationByMode/enforce
+=== RUN   TestAuditOutputSaturationByMode/observe
+--- PASS: TestAuditOutputSaturationByMode (0.00s)
+    --- PASS: TestAuditOutputSaturationByMode/enforce (0.00s)
+    --- PASS: TestAuditOutputSaturationByMode/observe (0.00s)
+=== RUN   TestEvaluationQueueIsFIFOAndHonorsCancellation
+--- PASS: TestEvaluationQueueIsFIFOAndHonorsCancellation (0.00s)
+=== RUN   TestClosingLeaseCancelsQueuedEvaluation
+--- PASS: TestClosingLeaseCancelsQueuedEvaluation (0.00s)
+=== RUN   TestObserveMakesDeterministicWouldRejectDecisionWithoutWaiting
+--- PASS: TestObserveMakesDeterministicWouldRejectDecisionWithoutWaiting (0.00s)
+=== RUN   TestWaiterGrantAndAbandonmentAccountingEdges
+--- PASS: TestWaiterGrantAndAbandonmentAccountingEdges (0.00s)
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/0
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/1000
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/0
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/1000
+--- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/0 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/1000 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/0 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/1000 (0.00s)
+=== RUN   TestFailedGuestTeardownsCanExceedBoundForAdmittedWork
+--- PASS: TestFailedGuestTeardownsCanExceedBoundForAdmittedWork (0.00s)
+=== RUN   TestAuditWriteAbandonedChargeStaysVisibleUntilReturn
+--- PASS: TestAuditWriteAbandonedChargeStaysVisibleUntilReturn (0.00s)
+=== RUN   TestAuditOutputSaturationByMode
+=== RUN   TestAuditOutputSaturationByMode/enforce
+=== RUN   TestAuditOutputSaturationByMode/observe
+--- PASS: TestAuditOutputSaturationByMode (0.00s)
+    --- PASS: TestAuditOutputSaturationByMode/enforce (0.00s)
+    --- PASS: TestAuditOutputSaturationByMode/observe (0.00s)
+=== RUN   TestEvaluationQueueIsFIFOAndHonorsCancellation
+--- PASS: TestEvaluationQueueIsFIFOAndHonorsCancellation (0.00s)
+=== RUN   TestClosingLeaseCancelsQueuedEvaluation
+--- PASS: TestClosingLeaseCancelsQueuedEvaluation (0.00s)
+=== RUN   TestObserveMakesDeterministicWouldRejectDecisionWithoutWaiting
+--- PASS: TestObserveMakesDeterministicWouldRejectDecisionWithoutWaiting (0.00s)
+=== RUN   TestWaiterGrantAndAbandonmentAccountingEdges
+--- PASS: TestWaiterGrantAndAbandonmentAccountingEdges (0.00s)
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/0
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/1000
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/0
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/1000
+--- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/0 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/1000 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/0 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/1000 (0.00s)
+=== RUN   TestFailedGuestTeardownsCanExceedBoundForAdmittedWork
+--- PASS: TestFailedGuestTeardownsCanExceedBoundForAdmittedWork (0.00s)
+=== RUN   TestAuditWriteAbandonedChargeStaysVisibleUntilReturn
+--- PASS: TestAuditWriteAbandonedChargeStaysVisibleUntilReturn (0.00s)
+=== RUN   TestAuditOutputSaturationByMode
+=== RUN   TestAuditOutputSaturationByMode/enforce
+=== RUN   TestAuditOutputSaturationByMode/observe
+--- PASS: TestAuditOutputSaturationByMode (0.00s)
+    --- PASS: TestAuditOutputSaturationByMode/enforce (0.00s)
+    --- PASS: TestAuditOutputSaturationByMode/observe (0.00s)
+=== RUN   TestEvaluationQueueIsFIFOAndHonorsCancellation
+--- PASS: TestEvaluationQueueIsFIFOAndHonorsCancellation (0.00s)
+=== RUN   TestClosingLeaseCancelsQueuedEvaluation
+--- PASS: TestClosingLeaseCancelsQueuedEvaluation (0.00s)
+=== RUN   TestObserveMakesDeterministicWouldRejectDecisionWithoutWaiting
+--- PASS: TestObserveMakesDeterministicWouldRejectDecisionWithoutWaiting (0.00s)
+=== RUN   TestWaiterGrantAndAbandonmentAccountingEdges
+--- PASS: TestWaiterGrantAndAbandonmentAccountingEdges (0.00s)
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/0
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/1000
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/0
+=== RUN   TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/1000
+--- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/0 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/enforce/1000 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/0 (0.00s)
+    --- PASS: TestFailedGuestTeardownBoundBlocksAdmissionUntilResolved/observe/1000 (0.00s)
+=== RUN   TestFailedGuestTeardownsCanExceedBoundForAdmittedWork
+--- PASS: TestFailedGuestTeardownsCanExceedBoundForAdmittedWork (0.00s)
+PASS
+=== RUN   TestGovernedWAFResponseHeaderCeilingOverH3
+--- PASS: TestGovernedWAFResponseHeaderCeilingOverH3 (0.02s)
+=== RUN   TestGovernedWAFOutcomesOverH1H2
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h1/overload
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h1/body_timeout
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h2/overload
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h2/body_timeout
+--- PASS: TestGovernedWAFOutcomesOverH1H2 (1.46s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h1/overload (0.13s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h1/body_timeout (0.88s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h2/overload (0.08s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h2/body_timeout (0.37s)
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=observe
+--- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch (0.28s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=enforce (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=observe (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=enforce (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=observe (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=enforce (0.07s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=observe (0.07s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=enforce (0.07s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=observe (0.07s)
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/allow
+--- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls (0.01s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/allow (0.00s)
+=== RUN   TestGovernedWAFBodyProcessingFailurePreservesInterruption
+--- PASS: TestGovernedWAFBodyProcessingFailurePreservesInterruption (0.00s)
+=== RUN   TestRequestBodyProcessingFailureRequiresTransactionState
+--- PASS: TestRequestBodyProcessingFailureRequiresTransactionState (0.00s)
+=== RUN   TestGovernedWAFMissingBodyErrorStateDoesNotDispatch
+--- PASS: TestGovernedWAFMissingBodyErrorStateDoesNotDispatch (0.00s)
+=== RUN   TestGovernedWAFResponseBodyEvaluationSlotRefusal
+--- PASS: TestGovernedWAFResponseBodyEvaluationSlotRefusal (0.01s)
+=== RUN   TestGovernedWAFSlotSaturation
+=== RUN   TestGovernedWAFSlotSaturation/enforce
+=== RUN   TestGovernedWAFSlotSaturation/observe
+--- PASS: TestGovernedWAFSlotSaturation (0.15s)
+    --- PASS: TestGovernedWAFSlotSaturation/enforce (0.07s)
+    --- PASS: TestGovernedWAFSlotSaturation/observe (0.08s)
+=== RUN   TestGovernedWAFPartialProcessingForwardsWholeBody
+--- PASS: TestGovernedWAFPartialProcessingForwardsWholeBody (0.00s)
+=== RUN   TestGovernedWAFWritesAuditRecord
+=== RUN   TestGovernedWAFWritesAuditRecord/Native
+=== RUN   TestGovernedWAFWritesAuditRecord/JSON
+--- PASS: TestGovernedWAFWritesAuditRecord (0.00s)
+    --- PASS: TestGovernedWAFWritesAuditRecord/Native (0.00s)
+    --- PASS: TestGovernedWAFWritesAuditRecord/JSON (0.00s)
+=== RUN   TestGovernedWAFAbandonsBlockedAuditWriter
+--- PASS: TestGovernedWAFAbandonsBlockedAuditWriter (0.04s)
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/response_header_and_response_body_interruption_after_origin
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/partial_response_delivery_and_websocket_hijack
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/request_body_limit_413_and_read_error_400_and_json_parse_error
+--- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors (0.07s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/response_header_and_response_body_interruption_after_origin (0.00s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/partial_response_delivery_and_websocket_hijack (0.00s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/request_body_limit_413_and_read_error_400_and_json_parse_error (0.07s)
+=== RUN   TestGovernedWAFResponseHeaderCeilingOverH3
+--- PASS: TestGovernedWAFResponseHeaderCeilingOverH3 (0.00s)
+=== RUN   TestGovernedWAFOutcomesOverH1H2
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h1/overload
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h1/body_timeout
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h2/overload
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h2/body_timeout
+--- PASS: TestGovernedWAFOutcomesOverH1H2 (1.18s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h1/overload (0.02s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h1/body_timeout (0.82s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h2/overload (0.02s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h2/body_timeout (0.32s)
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=observe
+--- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch (0.07s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=enforce (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=observe (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=enforce (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=observe (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=enforce (0.02s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=observe (0.01s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=enforce (0.01s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=observe (0.02s)
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/allow
+--- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls (0.01s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/allow (0.00s)
+=== RUN   TestGovernedWAFBodyProcessingFailurePreservesInterruption
+--- PASS: TestGovernedWAFBodyProcessingFailurePreservesInterruption (0.00s)
+=== RUN   TestRequestBodyProcessingFailureRequiresTransactionState
+--- PASS: TestRequestBodyProcessingFailureRequiresTransactionState (0.00s)
+=== RUN   TestGovernedWAFMissingBodyErrorStateDoesNotDispatch
+--- PASS: TestGovernedWAFMissingBodyErrorStateDoesNotDispatch (0.00s)
+=== RUN   TestGovernedWAFResponseBodyEvaluationSlotRefusal
+--- PASS: TestGovernedWAFResponseBodyEvaluationSlotRefusal (0.01s)
+=== RUN   TestGovernedWAFSlotSaturation
+=== RUN   TestGovernedWAFSlotSaturation/enforce
+=== RUN   TestGovernedWAFSlotSaturation/observe
+--- PASS: TestGovernedWAFSlotSaturation (0.03s)
+    --- PASS: TestGovernedWAFSlotSaturation/enforce (0.01s)
+    --- PASS: TestGovernedWAFSlotSaturation/observe (0.01s)
+=== RUN   TestGovernedWAFPartialProcessingForwardsWholeBody
+--- PASS: TestGovernedWAFPartialProcessingForwardsWholeBody (0.00s)
+=== RUN   TestGovernedWAFWritesAuditRecord
+=== RUN   TestGovernedWAFWritesAuditRecord/Native
+=== RUN   TestGovernedWAFWritesAuditRecord/JSON
+--- PASS: TestGovernedWAFWritesAuditRecord (0.00s)
+    --- PASS: TestGovernedWAFWritesAuditRecord/Native (0.00s)
+    --- PASS: TestGovernedWAFWritesAuditRecord/JSON (0.00s)
+=== RUN   TestGovernedWAFAbandonsBlockedAuditWriter
+--- PASS: TestGovernedWAFAbandonsBlockedAuditWriter (0.04s)
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/response_header_and_response_body_interruption_after_origin
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/partial_response_delivery_and_websocket_hijack
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/request_body_limit_413_and_read_error_400_and_json_parse_error
+--- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors (0.01s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/response_header_and_response_body_interruption_after_origin (0.00s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/partial_response_delivery_and_websocket_hijack (0.00s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/request_body_limit_413_and_read_error_400_and_json_parse_error (0.01s)
+=== RUN   TestGovernedWAFResponseHeaderCeilingOverH3
+--- PASS: TestGovernedWAFResponseHeaderCeilingOverH3 (0.01s)
+=== RUN   TestGovernedWAFOutcomesOverH1H2
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h1/overload
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h1/body_timeout
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h2/overload
+=== RUN   TestGovernedWAFOutcomesOverH1H2/h2/body_timeout
+--- PASS: TestGovernedWAFOutcomesOverH1H2 (1.17s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h1/overload (0.02s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h1/body_timeout (0.81s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h2/overload (0.03s)
+    --- PASS: TestGovernedWAFOutcomesOverH1H2/h2/body_timeout (0.32s)
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=observe
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=enforce
+=== RUN   TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=observe
+--- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch (0.08s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=enforce (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=block/governor=observe (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=enforce (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=false/mode=detect/governor=observe (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=enforce (0.04s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=block/governor=observe (0.01s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=enforce (0.01s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch/crs=true/mode=detect/governor=observe (0.01s)
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/allow
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/remove
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/skip
+=== RUN   TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/allow
+--- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls (0.01s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/enforce/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/block/observe/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/enforce/allow (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/remove (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/skip (0.00s)
+    --- PASS: TestGovernedWAFBodyProcessingFailureIgnoresRuleControls/detect/observe/allow (0.00s)
+=== RUN   TestGovernedWAFBodyProcessingFailurePreservesInterruption
+--- PASS: TestGovernedWAFBodyProcessingFailurePreservesInterruption (0.00s)
+=== RUN   TestRequestBodyProcessingFailureRequiresTransactionState
+--- PASS: TestRequestBodyProcessingFailureRequiresTransactionState (0.00s)
+=== RUN   TestGovernedWAFMissingBodyErrorStateDoesNotDispatch
+--- PASS: TestGovernedWAFMissingBodyErrorStateDoesNotDispatch (0.00s)
+=== RUN   TestGovernedWAFResponseBodyEvaluationSlotRefusal
+--- PASS: TestGovernedWAFResponseBodyEvaluationSlotRefusal (0.01s)
+=== RUN   TestGovernedWAFSlotSaturation
+=== RUN   TestGovernedWAFSlotSaturation/enforce
+=== RUN   TestGovernedWAFSlotSaturation/observe
+--- PASS: TestGovernedWAFSlotSaturation (0.03s)
+    --- PASS: TestGovernedWAFSlotSaturation/enforce (0.01s)
+    --- PASS: TestGovernedWAFSlotSaturation/observe (0.02s)
+=== RUN   TestGovernedWAFPartialProcessingForwardsWholeBody
+--- PASS: TestGovernedWAFPartialProcessingForwardsWholeBody (0.00s)
+=== RUN   TestGovernedWAFWritesAuditRecord
+=== RUN   TestGovernedWAFWritesAuditRecord/Native
+=== RUN   TestGovernedWAFWritesAuditRecord/JSON
+--- PASS: TestGovernedWAFWritesAuditRecord (0.00s)
+    --- PASS: TestGovernedWAFWritesAuditRecord/Native (0.00s)
+    --- PASS: TestGovernedWAFWritesAuditRecord/JSON (0.00s)
+=== RUN   TestGovernedWAFAbandonsBlockedAuditWriter
+--- PASS: TestGovernedWAFAbandonsBlockedAuditWriter (0.04s)
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/response_header_and_response_body_interruption_after_origin
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/partial_response_delivery_and_websocket_hijack
+=== RUN   TestWAFRequestVsResponseInterruptionAndBodyErrors/request_body_limit_413_and_read_error_400_and_json_parse_error
+--- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors (0.01s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/response_header_and_response_body_interruption_after_origin (0.00s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/partial_response_delivery_and_websocket_hijack (0.00s)
+    --- PASS: TestWAFRequestVsResponseInterruptionAndBodyErrors/request_body_limit_413_and_read_error_400_and_json_parse_error (0.01s)
+PASS

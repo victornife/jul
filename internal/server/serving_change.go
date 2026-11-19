@@ -51,14 +51,16 @@ func (p *ReloadPlan) AssessServingChange() error {
 			return err
 		}
 
+		limitsOnly := inspectionLimitsOnlyChanges(classified.Changes) &&
+			inspectionLimitsOnlyConfig(live.EffectiveConfig, p.Candidate.Effective)
 		for _, change := range classified.Changes {
-			if !change.Ignored {
+			if !change.Ignored && !limitsOnly {
 				p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
 				return nil
 			}
 		}
-		if !servingServersEqual(live.EffectiveConfig, p.Candidate.Effective) ||
-			!servingBackendsEqual(live.EffectiveConfig, p.Candidate.Effective) {
+		if !limitsOnly && (!servingServersEqual(live.EffectiveConfig, p.Candidate.Effective) ||
+			!servingBackendsEqual(live.EffectiveConfig, p.Candidate.Effective)) {
 			p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
 			return nil
 		}
@@ -96,6 +98,19 @@ func (p *ReloadPlan) AssessServingChange() error {
 			return nil
 		}
 
+		if limitsOnly {
+			if p.s.Inspection == nil {
+				p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
+				return nil
+			}
+			snapshot := p.s.Inspection.Snapshot()
+			p.inspectionLimitsOnly = true
+			p.inspectionLimitsVersion = snapshot.LimitsVersion
+			p.inspectionGeneration = live.Generation
+			p.ServingChange = ServingChangeAssessment{Evidence: ServingConfigChanged}
+			return nil
+		}
+
 		evidence := ServingEffectiveEqual
 		if len(classified.Changes) > 0 {
 			evidence = ServingIgnoredOnly
@@ -105,16 +120,44 @@ func (p *ReloadPlan) AssessServingChange() error {
 	})
 }
 
+func inspectionLimitsOnlyChanges(changes []lifecycle.Change) bool {
+	if len(changes) == 0 {
+		return false
+	}
+	for _, change := range changes {
+		if change.Ignored || !isInspectionLimitPath(change.Path) {
+			return false
+		}
+	}
+	return true
+}
+
+func inspectionLimitsOnlyConfig(current, candidate *config.Config) bool {
+	if current == nil || candidate == nil {
+		return false
+	}
+	// Keyed lifecycle extraction can hide meaningful route order or duplicates.
+	normalized := *candidate
+	normalized.Global.Inspection.Mode = current.Global.Inspection.Mode
+	normalized.Global.Inspection.MaxBufferedBytes = current.Global.Inspection.MaxBufferedBytes
+	normalized.Global.Inspection.MaxGuestCapacityBytes = current.Global.Inspection.MaxGuestCapacityBytes
+	normalized.Global.Inspection.MaxResponseHeaderBytes = current.Global.Inspection.MaxResponseHeaderBytes
+	normalized.Global.Inspection.MaxConcurrentEvaluations = current.Global.Inspection.MaxConcurrentEvaluations
+	normalized.Global.Inspection.EvaluationQueueTimeout = current.Global.Inspection.EvaluationQueueTimeout
+	normalized.Global.Inspection.BodyTimeout = current.Global.Inspection.BodyTimeout
+	return reflect.DeepEqual(current, &normalized)
+}
+
 // Lifecycle's keyed extraction can collapse duplicate entries and lose route order.
 func servingServersEqual(current, candidate *config.Config) bool {
 	if current == nil || candidate == nil || len(current.Servers) != len(candidate.Servers) {
 		return false
 	}
 	for i := range current.Servers {
-		server := candidate.Servers[i]
-		server.AccessLog = current.Servers[i].AccessLog
-		server.ErrorLog = current.Servers[i].ErrorLog
-		if !reflect.DeepEqual(current.Servers[i], server) {
+		normalized := candidate.Servers[i]
+		normalized.AccessLog = current.Servers[i].AccessLog
+		normalized.ErrorLog = current.Servers[i].ErrorLog
+		if !reflect.DeepEqual(current.Servers[i], normalized) {
 			return false
 		}
 	}
@@ -145,6 +188,21 @@ func servingBackendsEqual(current, candidate *config.Config) bool {
 		}
 	}
 	return len(byName) == 0
+}
+
+func isInspectionLimitPath(path string) bool {
+	switch path {
+	case "global.inspection.mode",
+		"global.inspection.max_buffered_bytes",
+		"global.inspection.max_guest_capacity_bytes",
+		"global.inspection.max_response_header_bytes",
+		"global.inspection.max_concurrent_evaluations",
+		"global.inspection.evaluation_queue_timeout",
+		"global.inspection.body_timeout":
+		return true
+	default:
+		return false
+	}
 }
 
 // staticCertificatesUnchanged compares candidate file content with the

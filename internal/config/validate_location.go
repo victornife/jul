@@ -242,6 +242,38 @@ func validateGRPCTranscode(g *GRPCTranscodeConfig, where string, upstreamNames m
 	return errs
 }
 
+// PluginMemoryPageSize is the size of one WebAssembly linear-memory page.
+const PluginMemoryPageSize = 1 << 16
+
+const pluginMemoryMaxPages = 1 << 16
+
+// ValidatePluginMemoryLimit checks the page-rounded limit accepted by wazero.
+func ValidatePluginMemoryLimit(limit Size) error {
+	bytes := limit.Bytes()
+	switch {
+	case bytes < 0:
+		return errors.New("memory_limit must not be negative")
+	case bytes > 0 && bytes < PluginMemoryPageSize:
+		return errors.New("memory_limit must be zero or at least 64 KiB")
+	case bytes/PluginMemoryPageSize > pluginMemoryMaxPages:
+		return errors.New("memory_limit must round down to at most 4 GiB")
+	default:
+		return nil
+	}
+}
+
+// EffectivePluginMemoryPages returns the validated, page-rounded guest ceiling.
+func EffectivePluginMemoryPages(limit Size) (uint32, error) {
+	if err := ValidatePluginMemoryLimit(limit); err != nil {
+		return 0, err
+	}
+	pages := uint32(limit.Bytes() / PluginMemoryPageSize)
+	if pages == 0 {
+		pages = 256
+	}
+	return pages, nil
+}
+
 // validatePlugins checks each [plugins.NAME] declaration: a valid type, exactly
 // one module source (path or inline), a readable path when given, sane limits,
 // and that the fetch capability comes with an allowed-hosts allowlist. Whether
@@ -288,8 +320,8 @@ func validatePlugins(plugins map[string]PluginConfig) []error {
 				errs = append(errs, fmt.Errorf("%s: path %q is a directory, not a .wasm file", where, p.Path))
 			}
 		}
-		if p.MemoryLimit.Bytes() < 0 {
-			errs = append(errs, fmt.Errorf("%s: memory_limit must not be negative", where))
+		if err := ValidatePluginMemoryLimit(p.MemoryLimit); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", where, err))
 		}
 		if p.Timeout.Std() < 0 {
 			errs = append(errs, fmt.Errorf("%s: timeout must not be negative", where))

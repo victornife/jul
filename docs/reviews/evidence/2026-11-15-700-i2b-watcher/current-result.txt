@@ -1,0 +1,6 @@
+--- FAIL: TestOverlayRetainsClosedGuestFromWatcher (0.37s)
+    zz_evidence_watcher_test.go:122: guest close refunded capacity=0 while 2424832 bytes of guest memory remained reachable after GC
+FAIL
+FAIL	jul/internal/plugins	1.116s
+FAIL
+Normal-retirement premature refund reproduced; failed-start retention held.

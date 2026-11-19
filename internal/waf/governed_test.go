@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -20,6 +21,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/corazawaf/coraza/v3"
+	"github.com/corazawaf/coraza/v3/types"
 
 	"jul/internal/config"
 	"jul/internal/inspection"
@@ -115,6 +119,185 @@ func TestGovernedWAFChargesAndReleasesTransaction(t *testing.T) {
 	assertDrained(t, g)
 }
 
+func TestGovernedWAFBodyProcessingFailureRefusesBeforeOriginDispatch(t *testing.T) {
+	const boundary = "jul-body-error-test-boundary"
+	body := "--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"one.txt\"\r\n" +
+		"Content-Type: text/plain\r\n\r\none\r\n" +
+		"--" + boundary + "--\r\n"
+	for _, crs := range []bool{false, true} {
+		for _, mode := range []string{"block", "detect"} {
+			for _, governorMode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+				t.Run(fmt.Sprintf("crs=%t/mode=%s/governor=%s", crs, mode, governorMode), func(t *testing.T) {
+					uploadDir := filepath.Join(t.TempDir(), "uploads")
+					if err := os.Mkdir(uploadDir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					g := newGovernor(t, governedLimits(governorMode))
+					fw := governedFirewall(t, config.WAFConfig{
+						CRSEnabled:       crs,
+						Mode:             mode,
+						InlineRules:      "SecUploadDir " + uploadDir,
+						RequestBodyLimit: config.Size(256 << 10),
+					}, g, Hooks{OnTransaction: func(_, outcome string) {
+						if outcome == OutcomeInspectionError || crs && outcome == OutcomeInterruptedRequest {
+							return
+						}
+						t.Errorf("transaction outcome = %q, want an inspection error or CRS interruption", outcome)
+					}})
+					if err := os.Remove(uploadDir); err != nil {
+						t.Fatal(err)
+					}
+					originCalls, originBytes := 0, int64(0)
+					h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						originCalls++
+						n, err := io.Copy(io.Discard, r.Body)
+						if err != nil {
+							t.Errorf("read origin body: %v", err)
+						}
+						originBytes += n
+						w.WriteHeader(http.StatusNoContent)
+					}))
+					req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+					req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+					rr := httptest.NewRecorder()
+					h.ServeHTTP(rr, req)
+					if rr.Code != http.StatusBadRequest || originCalls != 0 || originBytes != 0 {
+						t.Fatalf("body processing failure status=%d calls=%d bytes=%d, want 400 with no origin dispatch (body %q)",
+							rr.Code, originCalls, originBytes, rr.Body.String())
+					}
+					assertDrained(t, g)
+				})
+			}
+		}
+	}
+}
+
+func TestGovernedWAFBodyProcessingFailureIgnoresRuleControls(t *testing.T) {
+	const boundary = "jul-body-error-controls"
+	body := "--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"one.txt\"\r\n" +
+		"Content-Type: text/plain\r\n\r\none\r\n" +
+		"--" + boundary + "--\r\n"
+	policies := []struct {
+		name string
+		rule string
+	}{
+		{"remove", `SecAction "id:98701,phase:1,pass,nolog,ctl:ruleRemoveById=900002"`},
+		{"skip", `SecAction "id:98702,phase:2,pass,nolog,skip:1"`},
+		{"allow", `SecAction "id:98703,phase:2,allow,nolog"`},
+	}
+	for _, mode := range []string{"block", "detect"} {
+		for _, governorMode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
+			for _, policy := range policies {
+				t.Run(fmt.Sprintf("%s/%s/%s", mode, governorMode, policy.name), func(t *testing.T) {
+					uploadDir := filepath.Join(t.TempDir(), "uploads")
+					if err := os.Mkdir(uploadDir, 0o700); err != nil {
+						t.Fatal(err)
+					}
+					g := newGovernor(t, governedLimits(governorMode))
+					var outcome string
+					fw := governedFirewall(t, config.WAFConfig{
+						Mode:             mode,
+						InlineRules:      "SecUploadDir " + uploadDir + "\n" + policy.rule,
+						RequestBodyLimit: config.Size(256 << 10),
+					}, g, Hooks{OnTransaction: func(_, got string) { outcome = got }})
+					if err := os.Remove(uploadDir); err != nil {
+						t.Fatal(err)
+					}
+					originCalls := 0
+					h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						originCalls++
+						w.WriteHeader(http.StatusNoContent)
+					}))
+					req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+					req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+					rr := httptest.NewRecorder()
+					h.ServeHTTP(rr, req)
+					if rr.Code != http.StatusBadRequest || originCalls != 0 || outcome != OutcomeInspectionError {
+						t.Fatalf("status=%d origin_calls=%d outcome=%q, want 400, no dispatch and inspection error",
+							rr.Code, originCalls, outcome)
+					}
+					assertDrained(t, g)
+				})
+			}
+		}
+	}
+}
+
+func TestGovernedWAFBodyProcessingFailurePreservesInterruption(t *testing.T) {
+	const boundary = "jul-body-error-interruption"
+	body := "--" + boundary + "\r\n" +
+		"Content-Disposition: form-data; name=\"file\"; filename=\"one.txt\"\r\n\r\none\r\n" +
+		"--" + boundary + "--\r\n"
+	uploadDir := filepath.Join(t.TempDir(), "uploads")
+	if err := os.Mkdir(uploadDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	var outcome string
+	fw := governedFirewall(t, config.WAFConfig{
+		Mode: "block",
+		InlineRules: "SecUploadDir " + uploadDir + "\n" +
+			`SecRule REQBODY_ERROR "@eq 1" "id:98704,phase:2,deny,status:418,log"`,
+		RequestBodyLimit: config.Size(256 << 10),
+	}, g, Hooks{OnTransaction: func(_, got string) { outcome = got }})
+	if err := os.Remove(uploadDir); err != nil {
+		t.Fatal(err)
+	}
+	originCalls := 0
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		originCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusTeapot || originCalls != 0 || outcome != OutcomeInterruptedRequest {
+		t.Fatalf("status=%d origin_calls=%d outcome=%q, want 418, no dispatch and interruption",
+			rr.Code, originCalls, outcome)
+	}
+	assertDrained(t, g)
+}
+
+func TestRequestBodyProcessingFailureRequiresTransactionState(t *testing.T) {
+	opaque := struct{ types.Transaction }{}
+	if _, err := requestBodyProcessingFailed(opaque); err == nil {
+		t.Fatal("transaction without Coraza state must fail explicitly")
+	}
+}
+
+type opaqueTransactionWAF struct{ coraza.WAF }
+
+func (w opaqueTransactionWAF) NewTransaction() types.Transaction {
+	return struct{ types.Transaction }{w.WAF.NewTransaction()}
+}
+
+func TestGovernedWAFMissingBodyErrorStateDoesNotDispatch(t *testing.T) {
+	g := newGovernor(t, governedLimits(inspection.Enforce))
+	var outcome string
+	fw := governedFirewall(t, config.WAFConfig{Mode: "block"}, g, Hooks{
+		OnTransaction: func(_, got string) { outcome = got },
+	})
+	original := fw.waf
+	fw.waf = opaqueTransactionWAF{original}
+	defer func() { fw.waf = original }()
+
+	originCalls := 0
+	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		originCalls++
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("body")))
+	if rr.Code != http.StatusInternalServerError || originCalls != 0 || outcome != OutcomeInspectionError {
+		t.Fatalf("status=%d origin_calls=%d outcome=%q, want 500, no dispatch and inspection error",
+			rr.Code, originCalls, outcome)
+	}
+	assertDrained(t, g)
+}
+
 func TestGovernedWAFResponseHeaderCeilingModes(t *testing.T) {
 	for _, mode := range []inspection.Mode{inspection.Enforce, inspection.Observe} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -170,7 +353,7 @@ func TestGovernedWAFResponseHeaderLimitUsesAdmissionSnapshot(t *testing.T) {
 	h := fw.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		next := limits
 		next.MaxResponseHeaderBytes = 1 << 20
-		if err := g.PublishLimits(next); err != nil {
+		if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, next); err != nil {
 			t.Error(err)
 		}
 		w.Header().Set("X-Large", strings.Repeat("x", 256))

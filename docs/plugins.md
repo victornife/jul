@@ -103,7 +103,7 @@ plugins = ["header-inject"]             # middleware for every location here
 | `type` | `middleware` (default) or `handler` |
 | `abi` | `jul-abi/v1` (default) or `jul-abi/v2`; must match the SDK the module was built with, checked before Publish. See [abi.md](abi.md#selecting-an-abi) |
 | `config` | String map handed to the guest as a JSON object via `get_config` |
-| `memory_limit` | Guest linear-memory ceiling (default 16 MiB) |
+| `memory_limit` | Guest linear-memory ceiling (default 16 MiB); positive values must be at least 64 KiB and are rounded down to whole 64 KiB pages, with an effective maximum of 4 GiB |
 | `timeout` | Deadline for a single invocation (default 100ms) |
 | `kv` | Grant the key/value store host functions (namespaced per plugin) |
 | `kv_max_entries` / `kv_max_bytes` | Per-plugin KV quota (defaults 1024 keys / 1 MiB); a `kv_set` past either is rejected |
@@ -535,7 +535,8 @@ inspection governor configured by
 read or guest runs, and later plugins in the chain reuse it. The lease is held
 until the whole downstream handler, including response-phase callbacks, has
 returned, so a prepared body stays charged while an origin may still replay
-it. Routes with no plugin take no lease and are not charged.
+it. WAF-only routes also acquire a lease; routes with neither plugin nor WAF
+take no inspection lease.
 
 **What is charged, before it is allocated.**
 
@@ -547,19 +548,20 @@ it. Routes with no plugin take no lease and are not charged.
 | Per-request state (`set_request_state`) | Its length; an overwrite replaces the charge | When the downstream handler returns, if a response callback is subscribed; otherwise before the request continues |
 | Generated response body (`write_response_body`) | Its capacity, before each growth | After the response is written |
 | `jul-abi/v2` response-body replacement | Its length | After it is written, or replaced again |
+| `jul-abi/v2` response subscription | Its buffer capacity, including both arrays while growing | After the subscription no longer owns the buffer |
 
 Not charged: short strings copied from guest memory (header names and values,
-URIs, KV keys), KV values (persistent, bounded by the KV quotas), the
-`jul-abi/v2` response-subscription buffer (up to `max_response_body`;
-slice I4), WAF request state (slice I3), and guest linear memory, compiled
-modules and idle instances, which are sized statically (see
-[Sizing instances and memory](#sizing-instances-and-memory)).
+URIs, KV keys), KV values (persistent, bounded by the KV quotas), or compiled
+modules. Guest linear-memory ceilings are tracked separately from request
+bytes; see [Sizing instances and memory](#sizing-instances-and-memory).
 
 **Outcomes.**
 
 | Condition | `enforce` | `observe` |
 | --- | --- | --- |
-| Budget exhausted at admission, while a body arrives, or in a host call | `503`, `Retry-After: 1`, body `inspection_overloaded`; gRPC `UNAVAILABLE`. No guest or origin call follows. On HTTP/1 the connection is closed, so a stalled upload cannot delay the response | Request continues; `jul_inspection_rejections_total{mode="observe"}` counts each charge enforce would refuse, so one request can count several |
+| Budget exhausted at admission, while a body arrives, or in a host call | `503`, `Retry-After: 1`, body `inspection_overloaded`; gRPC `UNAVAILABLE`. Refusal before guest or origin admission prevents that work; a host-call refusal fails the invocation. On HTTP/1 the connection is closed, so a stalled upload cannot delay the response | Request continues; `jul_inspection_rejections_total{mode="observe"}` counts each charge enforce would refuse, so one request can count several |
+| Configured guest-capacity ceiling prevents a new instance | `503` / gRPC `UNAVAILABLE` with `inspection_overloaded`; the metric reason is `guest_capacity`. A failed reload candidate leaves the old generation serving | Instantiation continues and the would-refuse decision is counted |
+| At least 64 guest tickets have unresolved teardown | New guest reservations, including candidate prewarming, are refused with the same overload response and an enforced `guest_capacity` decision; already-idle instances remain reusable. Restart if unresolved runtime errors prevent the count from draining | Same safety refusal; `observe` does not bypass this ownership bound |
 | Body still arriving after `body_timeout` | `408` (HTTP/1.1 adds `Connection: close`); gRPC `DEADLINE_EXCEEDED` | Request continues; `would_timeout` counted once |
 | Response writer cannot set a read deadline, or refuses the abort when `body_timeout` expires | `500`, `unsupported` counted; a refused abort still ends the upload, through the connection's read deadline on HTTP/1 and by closing the request body on HTTP/2 and HTTP/3. An HTTP/1 request on a server that does not register its connections (an embedding, not Jul's own listeners) fails before its body is read, and the connection is closed | Request continues; `unsupported` counted |
 | Plugin limits, guest traps, timeouts, instance exhaustion | Unchanged: `500`, or `503` for instance exhaustion | Unchanged |
@@ -583,7 +585,9 @@ plugin retirement. On HTTP/2 and HTTP/3 it ends only the affected stream.
 **Reloads.** A reload publishes new limits for new admissions and new body
 reads only. Requests already admitted keep their charges, and a body already
 arriving keeps the deadline it started with. A lowered budget is drained, not
-revoked.
+revoked. A limits-only change can publish without rebuilding guest instances;
+other candidates warm against the currently published guest ceiling and cannot
+borrow an increase that has not yet been published.
 
 A slow upload therefore holds governed bytes, not an instance or guest time:
 the budget, not `max_instances`, bounds concurrent body preparation.
@@ -604,11 +608,72 @@ Host-side buffers are separate and follow request concurrency: up to
 the chain and kept until the request ends) and, for a `jul-abi/v2`
 body subscription, up to `max_response_body` per subscribed response.
 Request-side buffers are capped together by `max_buffered_bytes` (see
-[Inspection governor](#inspection-governor)); response-subscription buffers
-and WAF state are not yet. Upstream admission occurs after request plugins
-and WAF on proxy routes and does not cap earlier inspection or routes without
-an upstream. Account for all enabled layers and overlapping generations when
-sizing the host.
+[Inspection governor](#inspection-governor)), as are response-subscription
+buffers and calibrated WAF-state charges. Upstream admission occurs after
+request plugins and WAF on proxy routes and does not cap earlier inspection
+or routes without an upstream. Account for all enabled layers and overlapping
+generations when sizing the host.
+
+`[global.inspection].max_guest_capacity_bytes` defaults to 1 GiB and reserves
+the effective page-rounded `memory_limit` for each Jul-managed starting/live
+instance across plugin names and generations. Reservation happens before
+instantiation; idle reuse is not charged twice. Successful managed teardown
+releases the logical reservation after calls and host callbacks return, stock
+module close succeeds, and Jul drops its aliases. Startup/close failures retain
+known outstanding ownership until cleanup resolves.
+
+This is a logical capacity reservation, not a hard ceiling on memory that
+unmodified Wazero may still reference asynchronously, nor a measurement of
+committed memory, Go heap or RSS. Jul cannot prove the engine's last-alias
+release or bound its reclamation time through the examined public API. The
+engine tail is outside this guarantee; use process/container limits as a
+separate deployment safeguard. Cancellation remains enabled. `jul check`
+validates that the ceiling fits one eager instance of each configured plugin.
+The limit is published across reloads; candidates warm against the currently
+published ceiling. Size for expected pools and old/candidate overlap.
+
+#### Guest admission recovery and restart
+
+The `unresolved_teardowns` safety gate blocks **new reservations** at 64
+unresolved failed guest teardowns, in both enforce and observe modes. It does
+not disable reuse of an already-idle instance. Work admitted earlier can take
+the count above 64. Merely moving a failed ticket back to `closing` does not
+clear the gate: successful managed cleanup must refund its reservation and
+decrement the unresolved count. Once the count is below 64, the gate clears
+automatically; the byte ceiling and ordinary per-plugin instance limits still
+apply. No manual reset or process restart is needed for that recovery, and it
+does not reactivate a plugin that has already been retired.
+
+| Condition | Recovery |
+| --- | --- |
+| Calls/callbacks or pool handoffs are still active | Keep ownership and charges until the work ends and managed teardown can finish. This is drainage, not proof that a failed runtime can be retried. |
+| A module close failed, but its owning runtime subsequently closes successfully | Release the retained tickets and slots; new reservations can succeed subject to the remaining limits. The original close error is still reported. |
+| The owning runtime's close failed | Jul caches the error and does not call that runtime's close again. Its retained charges require process restart to clear. This can exhaust the byte ceiling even with fewer than 64 unresolved tickets. |
+| The count cannot fall below 64 through successful cleanup | Restart the process to restore new-reservation admission. Hot reload, increasing the byte ceiling or switching to observe mode does not override this gate. |
+
+There is no administrative operation that discards an unresolved ownership
+charge. See [resource ownership](resource-ownership.md).
+
+#### Guest allocation failures and recycling
+
+The default `max_invocations = 1000` is a recycling interval, not a guarantee
+that every guest can handle 1000 calls within its `memory_limit`. A Go guest
+can exhaust its own linear-memory allocator and return a contained `500`
+before that interval, independently of Jul's host-buffer budget.
+
+The [closeout diagnostic](reviews/evidence/2026-11-19-721-guest-diagnostic/README.md)
+used the assessment's byte-identical Go guest with repeated 768 KiB bodies.
+Both main and #721 trapped in the guest allocator at call 322 with a 16 MiB
+ceiling, and at call 333 with 32 MiB. Setting `max_invocations = 16` completed
+1000 calls in that synthetic workload. This is a tested workload-specific
+mitigation, not a new default: earlier recycling incurs more instantiation
+work, and guest size, body size and response callbacks change the appropriate
+interval. Increasing the memory ceiling alone need not eliminate the failure.
+Plan v7 of the [maintained assessment](../scripts/inspection-assessment/README.md)
+applies this setting to both plugins in the allocation-heavy p1/p2 and additional
+bounded s3/s4 profiles; it is no longer only a diagnostic recommendation.
+Production logs retain only bounded trap reasons; raw guest errors can contain
+request data and are captured only by the synthetic diagnostic.
 
 Size `max_instances` to peak concurrent guest calls, roughly request rate ×
 call latency, with headroom. `jul_plugin_instance_waits_total{result="rejected"}`
@@ -630,7 +695,8 @@ limits how many requests prepare bodies at once. In `enforce` mode,
 allocations of all concurrent plugin requests together; excess requests get
 `503`. In `observe` mode, concurrent body-reading requests ×
 `max_request_body` remains the bound. The guest-memory product above is not
-part of that budget.
+part of that byte budget; `max_guest_capacity_bytes` is the separate logical
+reservation ceiling described above, not a physical-memory bound.
 
 ## Uploading modules (Console API)
 
@@ -801,7 +867,7 @@ are addressed by design, configuration, or runtime containment:
 | Guest escape via memory corruption | Malformed `.wasm`, or a bug in wazero's code generator or interpreter | Where the platform allows it, wazero compiles each module ahead of time to native machine code in executable memory (the "compiler" engine); otherwise, and under W^X policies such as systemd `MemoryDenyWriteExecute=yes`, it interprets (see [WASM engine](#wasm-engine)). No cgo in either mode. The linear-memory cap bounds the blast radius, and Go memory safety protects the host runtime | Unknown bug in wazero's compiler or interpreter (defense in depth: keep wazero updated; the interpreter avoids generated native code) |
 | Infinite loop / CPU exhaustion | Guest spins without yielding | Per-invocation `timeout` (default 100 ms) enforced by context cancellation; guest torn down on overrun | Very short spike before cancellation (~timeout + scheduler jitter) |
 | Slow request body to a body-reading plugin | Client trickles a valid upload | Body prepared before instance acquisition and outside `timeout`; bounded by `max_request_body`, the absolute inspection `body_timeout` (`408`), client disconnect, a finite `read_timeout` (H1/H2) and plugin retirement (#699, #700) | With `observe` mode or `body_timeout = "0s"` and `read_timeout = 0`, a stalled upload keeps its bytes until the client gives up |
-| Memory exhaustion by concurrent plugin requests | Many concurrent body-reading or allocating requests | Request-side host buffers are charged to `max_buffered_bytes` before allocation; excess requests get `503` (#700) | Response-subscription buffers and WAF state are not charged yet; `observe` mode does not refuse |
+| Memory exhaustion by concurrent plugin requests | Many concurrent body-reading or allocating requests | Request-side host buffers and response-subscription buffers are charged to `max_buffered_bytes`; Jul-managed instance ceilings are reserved against `max_guest_capacity_bytes` (#700) | WAF state is an estimate; engine-retained references are outside the logical guest reservation, and `observe` mode does not enforce ordinary capacity limits |
 | Memory or CPU exhaustion by concurrency | Many concurrent requests on a plugin route, each instantiating a module | `max_instances` (default 64) caps live instances per plugin; excess calls wait one `timeout`, then get `503` and are counted in `jul_plugin_instance_waits_total` (#506) | Operator sets `max_instances × memory_limit` above what the host can hold |
 | SSRF via `fetch` | Guest calls allowed host that redirects to private or special-use IP | `dialValidatedIPs` blocks loopback/private/link-local/CGNAT/multicast, `0.0.0.0/8`, `240.0.0.0/4`, and `198.18.0.0/15` at dial time; redirect targets re-check allow-list | DNS rebinding to a *public* IP that later changes (low probability; TTL-dependent) |
 | KV DoS (unbounded growth) | Guest fills KV with unbounded keys/values | `kv_max_entries` (default 1024) and `kv_max_bytes` (default 1 MiB) enforced per plugin; `kv_set` returns "quota exceeded" | Admin misconfigures quotas to very large values |

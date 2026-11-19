@@ -1,0 +1,36 @@
+Fixture retained for inspection: <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/.work
+go: go version go1.27.4 darwin/arm64
+host: Darwin arm64
+wazero: v1.12.0
+head: 81337764ecff8e8637900508c8c29bb2d8273ac4
+versioned status:
+input SHA-256:
+08992991f961b2a5c7cfcb0f05574931cb44c180fad3e0c169e43fa039d96f65  go.mod
+d5d4aacd98cf11a6dcde4397024beb1f4a3fe340f48d54c15db565e3261faf40  go.sum
+6051809cbedc7380b4180d3ffdde676313f671a7344c7718a160f3aa676da0b1  internal/plugins/runtime.go
+3f1d2e6000c957d93ab19ab51807277877c5a4246048772c4a5baee349cc42ba  <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/probe.go.txt
+f784e3f5a74775e61d52d178c7101c506120e1a5cbc628d40f15c1ca0a30d63c  <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/runner.py
+e54b7a0badb4aff4f6333ae8b0af03d80ef70deaa6561d19c84fd10c29b227f3  <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/reproduce.sh
+command: go build -o <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/.work/probe <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/.work/probe.go
+command: python3 <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/runner.py <repo>/docs/reviews/evidence/2026-11-16-700-i2b-public-close/.work/probe (5s timeout per child)
+exit=0 engine=interpreter enabled=false mode=direct case=call close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=interpreter enabled=false mode=direct case=start close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=interpreter enabled=false mode=cancel case=call close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=interpreter enabled=false mode=cancel case=start close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=interpreter enabled=true mode=direct case=call close_returned=true close_error=<nil> execution_stopped=true result_module_nil=false error="module closed with exit_code(0)"
+exit=0 engine=interpreter enabled=true mode=direct case=start close_returned=true close_error=<nil> execution_stopped=true result_module_nil=true error="module closed with exit_code(0)"
+exit=0 engine=interpreter enabled=true mode=cancel case=call close_returned=true close_error=<nil> execution_stopped=true result_module_nil=false error="module closed with context canceled"
+exit=0 engine=interpreter enabled=true mode=cancel case=start close_returned=true close_error=<nil> execution_stopped=true result_module_nil=true error="module closed with context canceled"
+exit=0 engine=compiler enabled=false mode=direct case=call close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=compiler enabled=false mode=direct case=start close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=compiler enabled=false mode=cancel case=call close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=compiler enabled=false mode=cancel case=start close_returned=true close_error=<nil> execution_stopped=false within=750ms
+exit=0 engine=compiler enabled=true mode=direct case=call close_returned=true close_error=<nil> execution_stopped=true result_module_nil=false error="module closed with exit_code(0)"
+exit=0 engine=compiler enabled=true mode=direct case=start close_returned=true close_error=<nil> execution_stopped=true result_module_nil=true error="module closed with exit_code(0)"
+exit=0 engine=compiler enabled=true mode=cancel case=call close_returned=true close_error=<nil> execution_stopped=true result_module_nil=false error="module closed with context canceled"
+exit=0 engine=compiler enabled=true mode=cancel case=start close_returned=true close_error=<nil> execution_stopped=true result_module_nil=true error="module closed with context canceled"
+exit=0 engine=interpreter enabled=false mode=direct case=start-trap result_module_nil=true error="start function[1] failed: wasm error: unreachable\nwasm stack trace:\n\t.$1()" close_error=<nil> explicit_memory_alias_alive=true
+exit=0 engine=interpreter enabled=false mode=direct case=init-trap result_module_nil=false error="module[] function[_initialize] failed: wasm error: unreachable\nwasm stack trace:\n\t.$1()" close_error=<nil> explicit_memory_alias_alive=true
+exit=0 engine=compiler enabled=false mode=direct case=start-trap result_module_nil=true error="start function[1] failed: wasm error: unreachable\nwasm stack trace:\n\t.$1()" close_error=<nil> explicit_memory_alias_alive=true
+exit=0 engine=compiler enabled=false mode=direct case=init-trap result_module_nil=false error="module[] function[_initialize] failed: wasm error: unreachable\nwasm stack trace:\n\t.$1()" close_error=<nil> explicit_memory_alias_alive=true
+RESULT: PASS

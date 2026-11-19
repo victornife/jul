@@ -99,6 +99,9 @@ func TestLimitsFromConfigDefaultsAndAutoSlots(t *testing.T) {
 			if limits.MaxResponseHeaderBytes != uint64(config.InspectionDefaultMaxResponseHeaderBytes) {
 				t.Fatalf("default response-header ceiling = %d, want %d", limits.MaxResponseHeaderBytes, config.InspectionDefaultMaxResponseHeaderBytes)
 			}
+			if limits.MaxGuestCapacityBytes != uint64(config.InspectionDefaultMaxGuestCapacityBytes) {
+				t.Fatalf("default guest-capacity ceiling = %d, want %d", limits.MaxGuestCapacityBytes, config.InspectionDefaultMaxGuestCapacityBytes)
+			}
 		})
 	}
 }
@@ -144,6 +147,12 @@ func TestLimitsFromConfigRejectsInvalidInputs(t *testing.T) {
 			}}},
 		},
 		{
+			name: "zero guest-capacity ceiling",
+			cfg: &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
+				MaxGuestCapacityBytes: sizePointer(0),
+			}}},
+		},
+		{
 			name: "response-header estimate overflow",
 			cfg: &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
 				MaxResponseHeaderBytes: sizePointer(int64(^uint64(0) >> 1)),
@@ -165,6 +174,19 @@ func TestLimitsFromConfigRejectsInvalidInputs(t *testing.T) {
 		if err != nil || limits.MaxBytes != 1024 || limits.MinimumBytes != 0 {
 			t.Fatalf("%s: configuration-only limits applied a route-independent floor: limits=%+v err=%v", mode, limits, err)
 		}
+	}
+}
+
+func TestLimitsFromConfigReadsGuestCapacityCeiling(t *testing.T) {
+	cfg := &config.Config{Global: config.GlobalConfig{Inspection: config.InspectionConfig{
+		MaxGuestCapacityBytes: sizePointer(64 << 20),
+	}}}
+	limits, err := LimitsFromConfig(cfg, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limits.MaxGuestCapacityBytes != 64<<20 {
+		t.Fatalf("guest-capacity ceiling = %d, want %d", limits.MaxGuestCapacityBytes, 64<<20)
 	}
 }
 

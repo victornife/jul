@@ -1,0 +1,24 @@
+File: jul-main
+Build ID: 3d4c4fc10338a319e0f3ebe595b6e0d426babc27
+Type: cpu
+Time: 2026-11-19 20:15:48 CET
+Duration: 15.06s, Total samples = 28.77s (191.05%)
+Showing nodes accounting for 26.84s, 93.29% of 28.77s total
+Dropped 465 nodes (cum <= 0.14s)
+Showing top 15 nodes out of 118
+      flat  flat%   sum%        cum   cum%
+    11.62s 40.39% 40.39%     11.62s 40.39%  runtime._ExternalCode
+     9.59s 33.33% 73.72%     11.53s 40.08%  github.com/tetratelabs/wazero/internal/engine/wazevo.(*callEngine).callWithStack
+     1.59s  5.53% 79.25%      1.59s  5.53%  runtime.memmove
+     1.16s  4.03% 83.28%      1.16s  4.03%  github.com/tetratelabs/wazero/internal/engine/wazevo/backend/isa/amd64.afterGoFunctionCallEntrypoint
+     0.77s  2.68% 85.96%      0.77s  2.68%  internal/runtime/syscall/linux.Syscall6
+     0.75s  2.61% 88.56%      0.75s  2.61%  runtime.memclrNoHeapPointers
+     0.50s  1.74% 90.30%      0.50s  1.74%  github.com/tetratelabs/wazero/internal/wasm.(*ModuleInstance).FailIfClosed
+     0.32s  1.11% 91.41%      0.37s  1.29%  runtime.tryDeferToSpanScan
+     0.17s  0.59% 92.01%      0.17s  0.59%  runtime.madvise
+     0.10s  0.35% 92.35%      0.57s  1.98%  github.com/tetratelabs/wazero/internal/wasm.(*ModuleInstance).applyData
+     0.09s  0.31% 92.67%      0.48s  1.67%  github.com/tetratelabs/wazero/internal/wasm.evaluateConstExpr
+     0.09s  0.31% 92.98%      0.44s  1.53%  runtime.scanObject
+     0.07s  0.24% 93.22%      1.01s  3.51%  runtime.growslice
+     0.01s 0.035% 93.26%      0.21s  0.73%  bufio.(*Reader).Read
+     0.01s 0.035% 93.29%      0.63s  2.19%  bufio.(*Writer).ReadFrom

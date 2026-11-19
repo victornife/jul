@@ -602,7 +602,59 @@ export type ConfigAuthority = z.infer<typeof ConfigAuthoritySchema>;
 export const OverviewSchema = z.object({
   product: z.string(),
   version: z.string(),
+  boot_id: z.string().optional(),
   status: z.array(FeatureStatusSchema),
+  inspection: z
+    .object({
+      configured: z
+        .object({
+          max_buffered_bytes: z.number(),
+          max_concurrent_evaluations: z.number(),
+        })
+        .optional(),
+      effective: z.object({
+        mode: z.string(),
+        max_buffered_bytes: z.number(),
+        max_concurrent_evaluations: z.number(),
+      }),
+      usage: z.object({
+        base_bytes: z.number(),
+        buffer_bytes: z.number(),
+        waf_state_bytes: z.number(),
+        audit_bytes: z.number().optional(),
+      }),
+      audit_output: z
+        .object({
+          in_flight_calls: z.number(),
+          abandoned_calls: z.number(),
+          abandoned_bytes: z.number(),
+          max_calls: z.number(),
+          max_bytes: z.number(),
+          drops: z.number(),
+        })
+        .nullable()
+        .optional()
+        .catch(null),
+      minimum_request_bytes: z.number().optional(),
+      minimum_request_route: z.string().optional(),
+      plugin_guest_reserved_bytes: z.number().nonnegative().optional(),
+      plugin_guest_capacity_limit_bytes: z.number().nonnegative().optional(),
+      plugin_guest_failed_teardowns: z.number().nonnegative().optional(),
+      plugin_guest_admission_blocked_reason: z.string().optional(),
+      plugin_guest_live_instances: z.number().nonnegative().optional(),
+      plugin_guest_max_instances: z.number().nonnegative().optional(),
+      plugin_guest_actual_bytes_state: z.string().optional(),
+      plugin_guest_reservation_scope: z.string().optional(),
+      active_leases: z.number(),
+      active_evaluations: z.number(),
+      waiting_evaluations: z.number(),
+      draining: z.boolean(),
+      request_path_integration: z.string(),
+    })
+    .nullable()
+    .optional()
+    .catch(null),
+  inspection_error: z.string().optional(),
   stats: StatsSnapshotSchema.optional(),
   traffic_sources: TrafficSourcesSchema.optional(),
   // stream_status is the most recent L4 stream-proxy reload outcome: "ok",
@@ -1200,6 +1252,16 @@ export const LifecycleFieldProjectionSchema = z.object({
 });
 export type LifecycleFieldProjection = z.infer<typeof LifecycleFieldProjectionSchema>;
 
+const InspectionSettingsProjectionSchema = z.object({
+  mode: z.enum(["enforce", "observe"]),
+  max_buffered_bytes: z.string().nullable(),
+  max_guest_capacity_bytes: z.string().nullable().optional(),
+  max_response_header_bytes: z.string().nullable(),
+  max_concurrent_evaluations: z.number().int().nonnegative(),
+  evaluation_queue_timeout: z.string().nullable(),
+  body_timeout: z.string().nullable(),
+});
+
 export const GlobalSettingsProjectionSchema = z.object({
   worker_threads: z.string().default("auto"),
   log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
@@ -1207,6 +1269,7 @@ export const GlobalSettingsProjectionSchema = z.object({
   shutdown_timeout: z.string().default("0s"),
   reload_timeout: z.string().default("0s"),
   redact_min_secret_length: z.number().int().nonnegative().default(0),
+  inspection: InspectionSettingsProjectionSchema.optional().catch(undefined),
   lifecycle: z.record(z.string(), LifecycleFieldProjectionSchema).default({}),
 });
 export type GlobalSettingsProjection = z.infer<typeof GlobalSettingsProjectionSchema>;
@@ -1315,6 +1378,8 @@ export const AccessLogProjectionSchema = z.object({
 
 export const TrafficControlsSchema = z.object({
   inspection_only: z.boolean().optional(),
+  config_authority: z.enum(["managed", "file_owned"]).optional().catch(undefined),
+  base_version: z.string().optional().catch(undefined),
   global: GlobalSettingsProjectionSchema.optional(),
   compression: CompressionProjectionSchema.optional(),
   rate_limit: GlobalRateLimitProjectionSchema.optional(),
@@ -1491,8 +1556,12 @@ export function fetchPoolResilience(name: string) {
   );
 }
 
-export function fetchOverview(): Promise<Overview> {
-  return api<unknown>("/runtime/overview").then((d) => OverviewSchema.parse(d));
+export function fetchOverview(): Promise<Overview & { clientRequestStartedAt: number }> {
+  const clientRequestStartedAt = Date.now();
+  return api<unknown>("/runtime/overview").then((d) => ({
+    ...OverviewSchema.parse(d),
+    clientRequestStartedAt,
+  }));
 }
 
 export function fetchRoutes(): Promise<RouteProjection[]> {
@@ -2490,6 +2559,15 @@ export type GlobalPatch = {
   shutdown_timeout?: string;
   reload_timeout?: string;
   redact_min_secret_length?: number;
+  inspection?: {
+    mode?: "enforce" | "observe";
+    max_buffered_bytes?: string;
+    max_guest_capacity_bytes?: string;
+    max_response_header_bytes?: string;
+    max_concurrent_evaluations?: number;
+    evaluation_queue_timeout?: string;
+    body_timeout?: string;
+  };
 };
 
 export type CompressionPatch = {

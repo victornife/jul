@@ -1,0 +1,63 @@
+[global]
+log_level = "warn"
+
+[global.inspection]
+max_buffered_bytes = "448m"
+
+[admin]
+enabled = true
+listen = "127.0.0.1:33567"
+token = "assessment-695-token-not-a-secret"
+console = false
+
+[[upstreams]]
+name = "origin"
+strategy = "round_robin"
+servers = [{ address = "127.0.0.1:32977" }]
+
+[plugins.inspect-a]
+path = "/tmp/jul-721-qualification/bin/inspect-load.wasm"
+abi = "jul-abi/v2"
+timeout = "2s"
+max_instances = 4
+config = { name = "a", read_body = "true", subscribe = "true" }
+
+[plugins.inspect-b]
+path = "/tmp/jul-721-qualification/bin/inspect-load.wasm"
+abi = "jul-abi/v2"
+timeout = "2s"
+max_instances = 4
+config = { name = "b", read_body = "true", subscribe = "true", replace = "true" }
+
+[[servers]]
+listen = "127.0.0.1:35747"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/proxy/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "block"
+  crs_enabled = true
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecRule REQUEST_BODY|ARGS_POST "@contains ASSESS-WAF-REQ-BLOCK" "id:1695101,phase:2,deny,status:403,log,msg:'assessment request canary'"
+SecRule RESPONSE_BODY "@contains ASSESS-WAF-RESP-BLOCK" "id:1695102,phase:4,deny,status:403,log,msg:'assessment response canary'"
+'''
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/fault/" }
+  proxy_pass = "http://origin"
+  plugins = ["inspect-a", "inspect-b"]
+  [servers.locations.waf]
+  enabled = true
+  mode = "detect"
+  crs_enabled = false
+  request_body_limit = "1mb"
+  response_body_check = true
+  inline_rules = '''
+SecUploadDir /home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/pr-721-closeout/upload
+SecAction "id:98701,phase:1,pass,nolog,ctl:ruleRemoveById=900002"
+'''

@@ -1,0 +1,1 @@
+docs/reviews/evidence/2026-11-19-721-current-main/a2-targeted-v5/cells/s3-large-h2-bounded/none/main/rep3/config.toml is valid (structural + runtime)

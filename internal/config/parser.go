@@ -241,6 +241,10 @@ func (c *Config) applyDefaultsWithPresence(tracingSampleRatioPresent bool) {
 		maxBytes := Size(256 << 20)
 		c.Global.Inspection.MaxBufferedBytes = &maxBytes
 	}
+	if c.Global.Inspection.MaxGuestCapacityBytes == nil {
+		maxBytes := Size(InspectionDefaultMaxGuestCapacityBytes)
+		c.Global.Inspection.MaxGuestCapacityBytes = &maxBytes
+	}
 	if c.Global.Inspection.MaxResponseHeaderBytes == nil {
 		maxBytes := Size(InspectionDefaultMaxResponseHeaderBytes)
 		c.Global.Inspection.MaxResponseHeaderBytes = &maxBytes

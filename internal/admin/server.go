@@ -362,11 +362,10 @@ type Deps struct {
 	// "unavailable" snapshot so the console can render an empty state.
 	Stats func() observability.StatsSnapshot
 	// InspectionSnapshot reports process-wide governor limits and charged
-	// usage. Its request-path integration state remains pending until later
-	// implementation slices connect live WAF/plugin calls.
+	// usage.
 	InspectionSnapshot func() inspection.Snapshot
-	// InspectionPluginGuestCapacity reports configured guest-memory capacity
-	// across every compiled plugin generation not yet closed.
+	// InspectionPluginGuestCapacity reports the projected configured guest
+	// capacity across every compiled or preparing plugin generation.
 	InspectionPluginGuestCapacity func() (adminapi.InspectionPluginGuestCapacity, error)
 	// TrafficSources returns the bounded top-N projection of request hosts,
 	// origins, and referers for the Console Overview Traffic Sources panel

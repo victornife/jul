@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 398 configurable leaves.
+Coverage: 399 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -1061,7 +1061,7 @@ ErrorLog is the legacy destination for error records, kept for v1 compatibility.
 
 ## `global.inspection.body_timeout` {#global-inspection-body_timeout}
 
-BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only routes do not apply it yet.
+BodyTimeout bounds inspected plugin and WAF request-body arrival in enforce mode.
 
 | | |
 | --- | --- |
@@ -1073,11 +1073,11 @@ BodyTimeout bounds plugin request-body arrival in enforce mode; WAF-only routes 
 | Default | 60s |
 | Constraint | non-negative |
 | Zero/empty semantics | omitted defaults to 60s; explicit 0s disables the inspection body-arrival deadline |
-| Active when | enforce mode bounds plugin request-body arrival from its first read; observe counts would_timeout instead; WAF-only routes do not apply it yet |
+| Active when | enforce mode bounds inspected plugin and WAF request-body arrival from its first read; observe counts would_timeout instead |
 
 ## `global.inspection.evaluation_queue_timeout` {#global-inspection-evaluation_queue_timeout}
 
-EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquire slots yet.
+EvaluationQueueTimeout bounds WAF evaluation slot waiting; explicit zero disables queueing.
 
 | | |
 | --- | --- |
@@ -1089,11 +1089,11 @@ EvaluationQueueTimeout bounds governor slot waiting; live requests do not acquir
 | Default | 1s |
 | Constraint | between 0s and 10s |
 | Zero/empty semantics | omitted defaults to 1s; explicit 0s disables waiting |
-| Active when | applied by the governor API; live requests do not acquire governor slots yet |
+| Active when | bounds waiting for live WAF evaluation slots; observe does not wait |
 
 ## `global.inspection.max_buffered_bytes` {#global-inspection-max_buffered_bytes}
 
-MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state; it governs live plugin requests, not WAF requests yet.
+MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated WAF state and audit; plugin and WAF paths consume it.
 
 | | |
 | --- | --- |
@@ -1105,11 +1105,11 @@ MaxBufferedBytes is the shared governor ceiling for base, buffer and estimated W
 | Default | 256m |
 | Constraint | positive size |
 | Zero/empty semantics | omitted defaults to 256 MiB; explicit zero is invalid |
-| Active when | applied by governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet |
+| Active when | applied by governor accounting and configuration validation on supported plugin and WAF paths |
 
 ## `global.inspection.max_concurrent_evaluations` {#global-inspection-max_concurrent_evaluations}
 
-MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations do not acquire slots yet.
+MaxConcurrentEvaluations is the governor slot limit for live WAF evaluations; zero resolves to the candidate worker_threads/GOMAXPROCS setting.
 
 | | |
 | --- | --- |
@@ -1119,11 +1119,27 @@ MaxConcurrentEvaluations is the governor slot limit; live WAF evaluations do not
 | Why | The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads. |
 | Constraint | 0 or between 1 and 1024 |
 | Zero/empty semantics | 0 selects auto, resolved from the candidate worker_threads/GOMAXPROCS setting |
-| Active when | applied by the governor API; live WAF evaluations do not acquire slots yet |
+| Active when | limits live WAF evaluations in enforce mode; observe records would-refuse decisions |
+
+## `global.inspection.max_guest_capacity_bytes` {#global-inspection-max_guest_capacity_bytes}
+
+MaxGuestCapacityBytes is the process-wide ceiling for page-rounded logical reservations for Jul-managed plugin instances across names and generations.
+
+| | |
+| --- | --- |
+| Type | `size` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `inspection` |
+| Why | The process-owned governor publishes the logical managed-instance capacity ceiling during the no-fail reload transaction; live reservations persist across reloads and candidates warm against the currently published ceiling. |
+| Default | 1g |
+| Constraint | positive size; process-wide ceiling for page-rounded Jul-managed starting/live plugin instances |
+| Zero/empty semantics | omitted defaults to 1 GiB; explicit zero is invalid |
+| Active when | enforce mode rejects excess managed guest reservations; observe records would-refuse decisions |
 
 ## `global.inspection.max_response_header_bytes` {#global-inspection-max_response_header_bytes}
 
-MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence); it is not yet applied to live responses.
+MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and values plus 64 bytes per occurrence) checked before WAF response-header inspection; it is not a wire-size or actual-memory bound.
 
 | | |
 | --- | --- |
@@ -1135,11 +1151,11 @@ MaxResponseHeaderBytes is the positive R3 ceiling (decoded field names and value
 | Default | 64k |
 | Constraint | positive size |
 | Zero/empty semantics | omitted defaults to 64 KiB; explicit zero is invalid |
-| Active when | used by configuration validation; live response-header accounting is pending |
+| Active when | used by configuration validation and before WAF response-header inspection |
 
 ## `global.inspection.mode` {#global-inspection-mode}
 
-Mode is "enforce" (default) or "observe" for governor accounting; live plugin requests are governed, WAF requests are not yet.
+Mode is "enforce" (default) or "observe" for governor accounting on supported WAF and plugin paths.
 
 | | |
 | --- | --- |
@@ -1151,7 +1167,7 @@ Mode is "enforce" (default) or "observe" for governor accounting; live plugin re
 | Allowed values | `enforce`, `observe` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted defaults to enforce |
-| Active when | controls governor accounting, configuration validation and live plugin requests; live WAF requests are not governed yet |
+| Active when | controls governor accounting and configuration validation on supported plugin and WAF paths |
 
 ## `global.log_format` {#global-log_format}
 
@@ -1676,7 +1692,7 @@ MaxResponseBody caps the response body a guest may accumulate.
 
 ## `plugins.*.memory_limit` {#plugins-x-memory_limit}
 
-MemoryLimit caps the guest's linear memory.
+MemoryLimit caps the guest's linear memory, rounded down to whole 64 KiB pages.
 
 | | |
 | --- | --- |
@@ -1686,7 +1702,7 @@ MemoryLimit caps the guest's linear memory.
 | Why | the plugin set is rebuilt and re-instantiated on each successful reload |
 | Requires | `wasm_plugins` |
 | Default | 16m |
-| Constraint | non-negative |
+| Constraint | zero, or at least 64 KiB; rounded down to whole 64 KiB pages with a maximum effective ceiling of 4 GiB |
 | Zero/empty semantics | omitted/zero applies the documented plugin default |
 | Active when | always |
 

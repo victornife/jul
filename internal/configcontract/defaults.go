@@ -32,6 +32,7 @@ var DefaultOverrides = map[string]string{
 	"global.worker_threads":                       "auto",
 	"global.inspection.mode":                      "enforce",
 	"global.inspection.max_buffered_bytes":        "256m",
+	"global.inspection.max_guest_capacity_bytes":  "1g",
 	"global.inspection.max_response_header_bytes": "64k",
 	"global.inspection.evaluation_queue_timeout":  "1s",
 	"global.inspection.body_timeout":              "60s",

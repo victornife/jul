@@ -196,6 +196,7 @@ type RuleCounts struct {
 	External int
 	// Inline rules come from inline_rules.
 	Inline int
-	// Generated rules are emitted by Jul itself (the CRS paranoia SecAction).
+	// Generated rules are emitted by Jul itself (the request-body error guard,
+	// optional CRS paranoia SecAction, and argument-limit guard).
 	Generated int
 }

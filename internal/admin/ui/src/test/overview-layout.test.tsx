@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { Overview, StatsSnapshot } from "@/api/client.ts";
+import { OverviewSchema, TrafficControlsSchema, type Overview, type StatsSnapshot } from "@/api/client.ts";
 import { App } from "@/app/App.tsx";
 import { OverviewPanel } from "@/features/overview/OverviewPanel.tsx";
 import { openResourceDisclosure } from "@/features/overview/resourceDisclosure.ts";
@@ -43,14 +43,14 @@ const permission = (manage: boolean): PermissionState => ({
   has: (value) => value === "admin:manage" && manage,
 });
 
-function show(overview: Overview, perms = permission(false)) {
+function show(overview: Overview, perms = permission(false), location = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
   client.setQueryData(["overview"], overview);
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[location]}>
         <PermissionContext.Provider value={perms}>
           <OverviewPanel />
         </PermissionContext.Provider>
@@ -74,6 +74,388 @@ describe("operator-centred Overview", () => {
     vi.unstubAllGlobals();
   });
 
+  it("navigates from inspection resources to the shared global settings editor", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["overview"], overview());
+    client.setQueryData(["traffic-controls"], TrafficControlsSchema.parse({
+      config_authority: "managed",
+      base_version: "v1",
+      global: { inspection: {
+        mode: "enforce", max_buffered_bytes: "256m", max_response_header_bytes: "64k",
+        max_concurrent_evaluations: 0, evaluation_queue_timeout: "1s", body_timeout: "1m0s",
+      } },
+    }));
+    const perms: PermissionState = {
+      ...permission(false),
+      has: (value) => value === "config:write" || value === "config:raw",
+    };
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <PermissionContext.Provider value={perms}><App /></PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    fireEvent.click(screen.getByRole("link", { name: "Configure inspection in Global settings" }));
+    const card = (await screen.findByText("Global settings")).closest(".rounded-lg");
+    if (card === null) throw new Error("Missing global settings card");
+    fireEvent.click(within(card as HTMLElement).getByRole("button", { name: "Edit" }));
+    expect(await screen.findByLabelText("Inspection mode")).toBeEnabled();
+  });
+
+  it("opens and focuses inspection resources for a shared link without reopening on refresh", () => {
+    const client = show(overview(), permission(false), "/?inspection=1");
+    const summary = screen.getByText("Show inspection resources");
+    const details = summary.closest("details");
+    expect(details).toHaveAttribute("open");
+    expect(summary).toHaveFocus();
+    fireEvent.click(summary);
+    expect(details).not.toHaveAttribute("open");
+    act(() => { client.setQueryData(["overview"], overview()); });
+    expect(details).not.toHaveAttribute("open");
+  });
+
+  it("opens the shared inspection link after the overview loads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/?inspection=1"]}>
+          <PermissionContext.Provider value={permission(false)}>
+            <OverviewPanel />
+          </PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Loading overview…")).toBeVisible();
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const summary = await screen.findByText("Show inspection resources");
+    await waitFor(() => { expect(summary.closest("details")).toHaveAttribute("open"); });
+    expect(summary).toHaveFocus();
+  });
+
+  it("does not steal focus from another control while the overview loads", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/?inspection=1"]}>
+          <PermissionContext.Provider value={permission(false)}>
+            <button type="button">Other control</button>
+            <OverviewPanel />
+          </PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const other = screen.getByRole("button", { name: "Other control" });
+    other.focus();
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const summary = await screen.findByText("Show inspection resources");
+    await waitFor(() => { expect(summary.closest("details")).toHaveAttribute("open"); });
+    expect(other).toHaveFocus();
+  });
+
+  it("does not reopen the shared inspection link after a polling error recovers", async () => {
+    const client = show(overview(), permission(false), "/?inspection=1");
+    const summary = screen.getByText("Show inspection resources");
+    fireEvent.click(summary);
+    const query = client.getQueryCache().find({ queryKey: ["overview"] });
+    expect(query).toBeDefined();
+    act(() => {
+      query?.setState({ status: "error", error: new Error("temporarily unavailable") });
+    });
+    await screen.findByText(/temporarily unavailable/);
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const recovered = await screen.findByText("Show inspection resources");
+    expect(recovered.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("preserves an open inspection disclosure after a polling error recovers", async () => {
+    const client = show(overview(), permission(false), "/?inspection=1");
+    const query = client.getQueryCache().find({ queryKey: ["overview"] });
+    expect(query).toBeDefined();
+    act(() => {
+      query?.setState({ status: "error", error: new Error("temporarily unavailable") });
+    });
+    await screen.findByText(/temporarily unavailable/);
+    act(() => { client.setQueryData(["overview"], overview()); });
+    const recovered = await screen.findByText("Show inspection resources");
+    expect(recovered.closest("details")).toHaveAttribute("open");
+  });
+
+  it("shows observe and draining inspection charges without calling them process memory", () => {
+    show(
+      overview({
+        inspection: {
+          configured: { max_buffered_bytes: 4096, max_concurrent_evaluations: 0 },
+          minimum_request_bytes: 1048578,
+          minimum_request_route: "servers[0].locations[0]",
+          effective: { mode: "observe", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+          audit_output: {
+            in_flight_calls: 2,
+            abandoned_calls: 1,
+            abandoned_bytes: 3,
+            max_calls: 64,
+            max_bytes: 4096,
+            drops: 5,
+          },
+          active_leases: 1,
+          active_evaluations: 2,
+          waiting_evaluations: 1,
+          draining: true,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Mode: observe.*Draining/)).toBeVisible();
+    expect(within(card).getByText(/configured-limit pressure without refusing it/)).toBeVisible();
+    expect(within(card).getByText(/audit records can be dropped when output is full/)).toBeVisible();
+    expect(within(card).getByText(/Unresolved guest teardowns can still block new instances/)).toBeVisible();
+    expect(within(card).getByText("WAF state estimate")).toBeVisible();
+    expect(within(card).getByText(/Configured evaluation slots: automatic/)).toBeVisible();
+    expect(within(card).getByText(/Limiting route: servers\[0\].locations\[0\]/)).toBeVisible();
+    expect(within(card).getByText(/1,048,578 B/)).toBeVisible();
+    expect(within(card).getByText(/not a concurrency or process-memory recommendation/)).toBeVisible();
+    expect(within(card).getByText(/1 past deadline and still running/)).toBeVisible();
+    expect(
+      within(card).getByText(/Governor-dropped audit records since process start: 5/),
+    ).toBeVisible();
+    expect(within(card).getByText(/drop count excludes formatter and writer failures/)).toBeVisible();
+    expect(within(card).getByText(/not an additional charge/)).toBeVisible();
+    expect(within(card).getByText(/not process memory/)).toBeVisible();
+  });
+
+  it("shows an enforce snapshot without claiming it is draining", () => {
+    show(
+      overview({
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0, audit_bytes: 0 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Mode: enforce/)).toBeVisible();
+    expect(within(card).queryByText(/Draining/)).not.toBeInTheDocument();
+    expect(
+      within(card).queryByText(/without governor-driven request refusal/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces inspection errors without losing the overview", () => {
+    show(overview({ inspection_error: "could not report plugin guest capacity" }));
+    expect(screen.getByText("Inspection status unavailable")).toBeVisible();
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Inspection status unavailable/)).toBeVisible();
+    expect(screen.getByText("Requests/sec")).toBeVisible();
+  });
+
+  it("labels the observed inspection window and warns when the last poll is stale", async () => {
+    const snapshot = overview({
+      boot_id: "test-boot",
+      inspection: {
+        effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+        usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+        active_leases: 0,
+        active_evaluations: 0,
+        waiting_evaluations: 0,
+        draining: false,
+        request_path_integration: "partial",
+      },
+    });
+    const client = show(snapshot);
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    if (!snapshot.inspection) throw new Error("Missing inspection fixture");
+    const later = {
+      ...snapshot,
+      inspection: {
+        ...snapshot.inspection,
+        usage: { ...snapshot.inspection.usage, buffer_bytes: 10 },
+      },
+    };
+    act(() => { client.setQueryData(["overview"], later, { updatedAt: Date.now() + 1000 }); });
+    expect(await screen.findByText(/2 samples; request-start window: 1 s/)).toBeVisible();
+    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() + 2000 }); });
+    expect(await screen.findByText(/3 samples; request-start window: 2 s/)).toBeVisible();
+    expect(screen.getByRole("img", { name: /Accounted inspection bytes across/ })).toBeVisible();
+    expect(screen.getByText(/First sample: 10 B; latest sample: 10 B/)).toBeVisible();
+    expect(screen.getByText(/Minimum: 10 B; maximum: 18 B/)).toBeVisible();
+    expect(screen.getByText(/not a process high-water mark/)).toBeVisible();
+    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() - 10000 }); });
+    expect(await screen.findByText(/Inspection data may be stale/)).toBeVisible();
+    expect(screen.queryByRole("img", { name: /Accounted inspection bytes across/ })).not.toBeInTheDocument();
+  });
+
+  it("treats a delayed inspection response as stale on receipt", async () => {
+    const snapshot = {
+      ...overview({
+        boot_id: "test-boot",
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+      clientRequestStartedAt: Date.now() - 10_000,
+    };
+    show(snapshot, permission(false), "/?inspection=1");
+    expect(await screen.findByText(/Inspection data may be stale/)).toBeVisible();
+    expect(screen.queryByRole("img", { name: /Accounted inspection bytes across/ })).not.toBeInTheDocument();
+  });
+
+  it("marks a stalled overview poll stale after the six-second threshold", () => {
+    vi.useFakeTimers();
+    try {
+      show(overview());
+      fireEvent.click(screen.getByText("Show inspection resources"));
+      act(() => { vi.advanceTimersByTime(6000); });
+      expect(screen.queryByText(/Inspection data may be stale/)).not.toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(screen.getByText(/Inspection data may be stale/)).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the trend when a poll fails before its retry succeeds", async () => {
+    const snapshot = overview({
+      boot_id: "test-boot",
+      inspection: {
+        effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+        usage: { base_bytes: 1, buffer_bytes: 2, waf_state_bytes: 3, audit_bytes: 4 },
+        active_leases: 0,
+        active_evaluations: 0,
+        waiting_evaluations: 0,
+        draining: false,
+        request_path_integration: "partial",
+      },
+    });
+    const client = show(snapshot);
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    act(() => { client.setQueryData(["overview"], snapshot, { updatedAt: Date.now() + 1000 }); });
+    await screen.findByRole("img", { name: /Accounted inspection bytes across/ });
+    const query = client.getQueryCache().find({ queryKey: ["overview"] });
+    expect(query).toBeDefined();
+    act(() => {
+      query?.setState({ fetchFailureCount: 1, fetchFailureReason: new Error("temporary failure") });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("img", { name: /Accounted inspection bytes across/ })).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/last overview poll failed and is being retried/)).toBeVisible();
+    act(() => {
+      query?.setState({ fetchFailureCount: 0, fetchFailureReason: null, dataUpdatedAt: Date.now() + 2000 });
+    });
+    await waitFor(() => { expect(screen.getByText(/Inspection trend unavailable or awaiting samples/)).toBeVisible(); });
+  });
+
+  it("distinguishes missing inspection data from an idle snapshot", () => {
+    show(overview());
+    expect(screen.getByText("Inspection status unavailable")).toBeVisible();
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    expect(
+      within(screen.getByRole("region", { name: "Inspection resources" })).getByText(
+        "Inspection status unavailable.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("reports missing older audit fields as unavailable rather than zero", () => {
+    show(
+      overview({
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText("Audit output status unavailable.")).toBeVisible();
+    expect(within(card).getByText("Audit").nextElementSibling).toHaveTextContent("Unavailable");
+    expect(within(card).getByText(/Single-request minimum: unavailable/)).toBeVisible();
+  });
+
+  it.each([
+    [0, "no inspected routes"],
+    [2048, "Limiting route: unavailable or restricted"],
+  ])("reports a minimum of %i without a route as %s", (minimum, message) => {
+    show(
+      overview({
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0 },
+          minimum_request_bytes: minimum,
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    expect(within(screen.getByRole("region", { name: "Inspection resources" })).getByText(
+      new RegExp(message),
+    )).toBeVisible();
+  });
+
+  it("isolates incomplete audit output from otherwise valid inspection status", () => {
+    show(
+      OverviewSchema.parse({
+        ...overview(),
+        inspection: {
+          effective: { mode: "enforce", max_buffered_bytes: 4096, max_concurrent_evaluations: 4 },
+          usage: { base_bytes: 0, buffer_bytes: 0, waf_state_bytes: 0 },
+          audit_output: { abandoned_calls: 1 },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText(/Mode: enforce/)).toBeVisible();
+    expect(within(card).getByText("Audit output status unavailable.")).toBeVisible();
+  });
+
+  it("isolates an incompatible inspection projection from the rest of the overview", () => {
+    show(OverviewSchema.parse({ ...overview(), inspection: { effective: {} } }));
+    expect(screen.getByText("Inspection status unavailable")).toBeVisible();
+    expect(screen.getByText("Requests/sec")).toBeVisible();
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    expect(
+      within(screen.getByRole("region", { name: "Inspection resources" })).getByText(
+        "Inspection status unavailable.",
+      ),
+    ).toBeVisible();
+  });
+
   it("opens an available resource disclosure and tolerates an absent one", () => {
     const details = document.createElement("details");
     expect(details.open).toBe(false);
@@ -94,11 +476,14 @@ describe("operator-centred Overview", () => {
     expect(
       within(traffic).getByRole("region", { name: "Connection lifecycle across reloads" }),
     ).toBeVisible();
-    const resourceSummary = screen.getByText("Show resource and storage details", { selector: "summary" });
+    const resourceSummary = screen.getByText("Show resource and storage details", {
+      selector: "summary",
+    });
     expect(resourceSummary.parentElement).not.toHaveAttribute("open");
     fireEvent.click(resourceSummary);
     expect(resourceSummary.parentElement).toHaveAttribute("open");
     expect(screen.getByText("Runtime Resources")).toBeVisible();
+    expect(screen.queryByText("WAF temporary-file spool")).not.toBeInTheDocument();
     fireEvent.click(resourceSummary);
     expect(resourceSummary.parentElement).not.toHaveAttribute("open");
     const trend = await screen.findByText("2-Minute Trends");
@@ -109,6 +494,51 @@ describe("operator-centred Overview", () => {
     ).not.toHaveAttribute("open");
     expect(screen.getByText("No guidance is elevated now.")).toBeVisible();
     expect(screen.getByText(/within hints, 0 not judged/)).toBeVisible();
+  });
+
+  it("reports logical guest reservations without implying engine memory or spool quotas", () => {
+    show(
+      overview({
+        inspection: {
+          effective: {
+            mode: "observe",
+            max_buffered_bytes: 256,
+            max_concurrent_evaluations: 2,
+          },
+          usage: {
+            base_bytes: 0,
+            buffer_bytes: 0,
+            waf_state_bytes: 0,
+            audit_bytes: 0,
+          },
+          active_leases: 0,
+          active_evaluations: 0,
+          waiting_evaluations: 0,
+          draining: false,
+          request_path_integration: "partial",
+          plugin_guest_reserved_bytes: 16 << 20,
+          plugin_guest_capacity_limit_bytes: 1 << 30,
+          plugin_guest_failed_teardowns: 64,
+          plugin_guest_admission_blocked_reason: "unresolved_teardowns",
+          plugin_guest_live_instances: 1,
+          plugin_guest_max_instances: 64,
+          plugin_guest_actual_bytes_state: "unavailable_engine_measurement",
+          plugin_guest_reservation_scope:
+            "logical managed-instance capacity; excludes engine-internal retained references and is not RSS/heap",
+        },
+      }),
+    );
+    fireEvent.click(screen.getByText("Show inspection resources"));
+    const card = screen.getByRole("region", { name: "Inspection resources" });
+    expect(within(card).getByText("16.0 MiB / 1.0 GiB")).toBeVisible();
+    expect(within(card).getByText("1 / 64")).toBeVisible();
+    expect(within(card).getByText("unavailable_engine_measurement")).toBeVisible();
+    expect(within(card).getByText("Blocked: unresolved teardowns")).toBeVisible();
+    expect(within(card).getByText(/New guest reservations are blocked in all modes/)).toBeVisible();
+    expect(within(card).getByText("Unresolved guest teardowns").nextElementSibling).toHaveTextContent("64");
+    expect(within(card).getByText(/excludes engine-internal references/)).toBeVisible();
+    expect(within(card).getByText(/aggregate Coraza temporary-file quota/)).toBeVisible();
+    expect(screen.queryByText("WAF temporary-file spool")).not.toBeInTheDocument();
   });
 
   it("keeps unavailable traffic distinct from an idle snapshot", () => {
@@ -209,8 +639,22 @@ describe("operator-centred Overview", () => {
         stats: {
           ...stats,
           cacheTiers: [
-            { tier: "memory", bytes: 90, maxBytes: 100, entries: 3, evictions: 0, occupancyRatio: 0.9 },
-            { tier: "disk", bytes: 89, maxBytes: 100, entries: 4, evictions: 0, occupancyRatio: 0.89 },
+            {
+              tier: "memory",
+              bytes: 90,
+              maxBytes: 100,
+              entries: 3,
+              evictions: 0,
+              occupancyRatio: 0.9,
+            },
+            {
+              tier: "disk",
+              bytes: 89,
+              maxBytes: 100,
+              entries: 4,
+              evictions: 0,
+              occupancyRatio: 0.89,
+            },
           ],
           upstreamWorstActive: { pool: "api", current: 9, max: 10, ratio: 0.9 },
           upstreamWorstPending: { pool: "billing", current: 10, max: 10, ratio: 1 },
@@ -258,11 +702,9 @@ describe("operator-centred Overview", () => {
     const client = show(overview({ stats: { ...stats, requestsPerSec: 2 } }));
     await screen.findByText("2-Minute Trends");
     act(() => {
-      client.setQueryData(
-        ["overview"],
-        overview({ stats: { ...stats, requestsPerSec: 4 } }),
-        { updatedAt: Date.now() + 1000 },
-      );
+      client.setQueryData(["overview"], overview({ stats: { ...stats, requestsPerSec: 4 } }), {
+        updatedAt: Date.now() + 1000,
+      });
     });
     fireEvent.click(screen.getByText("2-Minute Trends"));
     const trigger = await screen.findByRole("button", { name: /Request Rate trend\. 2 samples/ });
@@ -298,6 +740,23 @@ describe("operator-centred Overview", () => {
       </QueryClientProvider>,
     );
     expect(await screen.findByRole("heading", { name: "Setup Wizard" })).toBeVisible();
+  });
+
+  it("loads configuration history through its app route", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    client.setQueryData(["history"], []);
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/history"]}>
+          <PermissionContext.Provider value={permission(false)}>
+            <App />
+          </PermissionContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: "Config History" })).toBeVisible();
   });
 
   it("renders a trend summary once sufficient samples have been collected", async () => {

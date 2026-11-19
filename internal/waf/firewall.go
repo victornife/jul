@@ -52,6 +52,10 @@ var argumentLimitGuardRule = fmt.Sprintf(
 	`SecRule ARGUMENTS_LIMIT_REACHED "@eq 1" "id:%d,phase:2,deny,status:413,log,t:none,msg:'Request argument limit reached; arguments beyond SecArgumentsLimit were not inspected',tag:'jul/argument-limit'"`,
 	config.WAFArgumentLimitGuardRuleID)
 
+var requestBodyErrorGuardRule = fmt.Sprintf(
+	`SecRule REQBODY_ERROR "@eq 1" "id:%d,phase:2,pass,log,t:none,msg:'Jul detected request body processing failure',tag:'jul/request-body-processing-error'"`,
+	config.WAFRequestBodyErrorRuleID)
+
 // Firewall wraps a configured Coraza engine and exposes it as a middleware.
 type Firewall struct {
 	waf         coraza.WAF
@@ -142,6 +146,11 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		return nil, err
 	}
 	probe := w.NewTransaction()
+	if _, err := requestBodyProcessingFailed(probe); err != nil {
+		_ = probe.Close()
+		_ = closeWAF(w)
+		return nil, err
+	}
 	if _, ok := innerTx(probe); !ok && opts.Governor != nil {
 		_ = probe.Close()
 		_ = closeWAF(w)
@@ -153,12 +162,12 @@ func New(ctx context.Context, cfg config.WAFConfig, opts Options) (*Firewall, er
 		return nil, err
 	}
 	_ = probe.Close()
-	// Wrap the engine so rules see Jul's canonical client address rather than
-	// Coraza's own parse of RemoteAddr (see clientaddr.go).
+	// The request path supplies Jul's canonical client address through
+	// ProcessConnection, using the identity already attached to the request.
 	state.argumentLimitGuard = cfg.CRSEnabled && activeRuleIDs[config.WAFArgumentLimitGuardRuleID]
 	info, rawSum, polSum := policyInfo(cfg, counter.counts, rec, opts.Versions, state)
 	return &Firewall{
-		waf:         &clientAddrWAF{WAF: w},
+		waf:         w,
 		info:        info,
 		facts:       inspectionFacts(state),
 		opts:        opts,
@@ -283,6 +292,12 @@ func policyInfo(cfg config.WAFConfig, counts RuleCounts, rec *sourceRecorder, ve
 			info.Rules.Generated++
 		}
 	}
+	if info.Rules.Inline > 0 {
+		// This generated rule logs body errors; enforcement reads transaction
+		// state independently of whether the rule executes.
+		info.Rules.Inline--
+		info.Rules.Generated++
+	}
 	if n := len(cfg.Exceptions); n > 0 {
 		info.ExceptionsCount, info.ExceptionsReviewDue = SummarizeExceptions(cfg.Exceptions, time.Now())
 		for i := 0; i < n && info.Rules.Inline > 0; i++ {
@@ -329,10 +344,8 @@ func canonicalPolicyBytes(cfg config.WAFConfig, info PolicyInfo, rawExternalSum 
 	writeFramed("detection_paranoia", strconv.Itoa(info.DetectionParanoia))
 	writeFramed("request_body_limit", strconv.FormatInt(info.RequestBodyLimitBytes, 10))
 	writeFramed("response_body_inspection", strconv.FormatBool(info.ResponseBodyInspection))
-	// Version 2 of Jul's generated directives adds the argument-limit guard and
-	// the response-inspection default (#697, #698), so an evaluation of a
-	// version-1 policy is stale even when the TOML and engine are unchanged.
-	writeFramed("generated_directives", "2")
+	// Version 4 makes request-body failure handling independent of rule execution.
+	writeFramed("generated_directives", "4")
 	writeFramed("response_body_mime_types", strings.Join(info.ResponseBodyMimeTypes, " "))
 	writeFramed("argument_limit", strconv.Itoa(info.ArgumentLimit))
 	writeFramed("argument_limit_guard", strconv.FormatBool(info.ArgumentLimitGuard))
@@ -390,9 +403,6 @@ func closeWAF(w coraza.WAF) error {
 	if w == nil {
 		return nil
 	}
-	if cw, ok := w.(*clientAddrWAF); ok {
-		w = cw.WAF
-	}
 	err := closeAuditWriter(w)
 	if closer, ok := w.(io.Closer); ok {
 		err = errors.Join(err, closer.Close())
@@ -430,7 +440,8 @@ func rootFS(cfg config.WAFConfig, rec *sourceRecorder) fs.FS {
 //     argument-limit guard (id 900001, #697);
 //  3. Jul's response-body inspection default from response_body_check (#698);
 //  4. each user directive file;
-//  5. the inline rules snippet;
+//  5. the inline rules snippet, then Jul's request-body failure log rule (id
+//     900002); enforcement does not depend on this rule matching;
 //  6. the enforcement-mode override last, so "block"/"detect" always wins.
 func buildDirectives(cfg config.WAFConfig) (string, error) {
 	var b strings.Builder
@@ -453,7 +464,6 @@ func buildDirectives(cfg config.WAFConfig) (string, error) {
 			fmt.Fprintf(&b, "SecDefaultAction \"phase:%d,deny,status:%d,log\"\n", phase, bs)
 		}
 	}
-
 	excLines, _, err := BuildExceptionDirectives(cfg.Exceptions)
 	if err != nil {
 		return "", err
@@ -507,6 +517,9 @@ func buildDirectives(cfg config.WAFConfig) (string, error) {
 		b.WriteString(r)
 		b.WriteByte('\n')
 	}
+
+	b.WriteString(requestBodyErrorGuardRule)
+	b.WriteByte('\n')
 
 	// Enforce the configured mode last so it overrides any engine state set by
 	// the included rule files.

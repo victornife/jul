@@ -135,7 +135,10 @@ func TestGovernedWAFResponseAdmissionPreservesNativeGRPCStatusAndConnection(t *t
 	cfg := config.WAFConfig{}
 	applyTestDefaults(&cfg)
 	cfg.Enabled = true
-	fw, err := New(context.Background(), cfg, Options{Governor: g, Investigation: investigation})
+	fw, err := New(context.Background(), cfg, Options{
+		Governor:      g,
+		Investigation: investigation,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

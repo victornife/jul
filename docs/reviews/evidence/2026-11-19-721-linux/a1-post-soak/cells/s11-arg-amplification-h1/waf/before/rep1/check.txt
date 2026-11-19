@@ -1,0 +1,1 @@
+/home/victornf/.copilot/session-state/81ab5976-605d-4542-a731-cd69382adaff/files/ia-a1-after-soak/cells/s11-arg-amplification-h1/waf/before/rep1/config.toml is valid (structural + runtime)

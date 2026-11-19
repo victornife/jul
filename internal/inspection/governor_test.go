@@ -323,7 +323,7 @@ func TestQueueTimeoutAndLimitDecrease(t *testing.T) {
 	if snapshot := g.Snapshot(); snapshot.Rejections[2][0] != 1 || rejectionHooks != 1 {
 		t.Fatalf("timed-out evaluation was not counted exactly once: snapshot=%+v hooks=%d", snapshot, rejectionHooks)
 	}
-	if err := g.PublishLimits(testLimits(Enforce, 1, 0, 100, 1)); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, testLimits(Enforce, 1, 0, 100, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if !g.Snapshot().Draining {
@@ -447,7 +447,7 @@ func TestQueueCapacityAndZeroWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := g.PublishLimits(testLimits(Enforce, 1, 0, 100, 1)); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, testLimits(Enforce, 1, 0, 100, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if _, outcome, err := g.AcquireEvaluation(context.Background(), leases[17]); outcome != EvaluationSaturated || !IsOutcome(err, EvaluationSaturated) {
@@ -477,7 +477,7 @@ func TestIncreaseWakesWaitersAndObserveEnforceTransition(t *testing.T) {
 		result <- token
 	}()
 	waitForWaiters(t, g, 1)
-	if err := g.PublishLimits(testLimits(Enforce, 2, time.Second, 60, 10)); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, testLimits(Enforce, 2, time.Second, 60, 10)); err != nil {
 		t.Fatal(err)
 	}
 	waiting := <-result
@@ -491,7 +491,7 @@ func TestIncreaseWakesWaitersAndObserveEnforceTransition(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := g.PublishLimits(testLimits(Observe, 1, 0, 58, 10)); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, testLimits(Observe, 1, 0, 58, 10)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := first.Charge(BufferBytes, 50); err != nil {
@@ -500,7 +500,7 @@ func TestIncreaseWakesWaitersAndObserveEnforceTransition(t *testing.T) {
 	if !g.Snapshot().Draining {
 		t.Fatal("observe mode should report over-budget usage")
 	}
-	if err := g.PublishLimits(testLimits(Enforce, 1, 0, 58, 10)); err != nil {
+	if err := g.PublishLimitsIfVersion(g.Snapshot().LimitsVersion, testLimits(Enforce, 1, 0, 58, 10)); err != nil {
 		t.Fatal(err)
 	}
 	if !g.Snapshot().Draining {
@@ -877,10 +877,10 @@ func TestWaiterGrantAndAbandonmentAccountingEdges(t *testing.T) {
 func TestDefensiveAccountingAndWaiterRaceBranches(t *testing.T) {
 	g := newTestGovernor(t, testLimits(Enforce, 1, 0, 100, 1), Hooks{})
 	before := g.Snapshot()
-	if err := g.PublishLimits(Limits{}); !errors.Is(err, ErrInvalidLimits) {
+	if err := g.PublishLimitsIfVersion(before.LimitsVersion, Limits{}); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("invalid PublishLimits() = %v", err)
 	}
-	if err := g.PublishLimits(before.Limits); err != nil || g.Snapshot() != before {
+	if err := g.PublishLimitsIfVersion(before.LimitsVersion, before.Limits); err != nil || g.Snapshot() != before {
 		t.Fatalf("no-op PublishLimits() = %v snapshot=%+v", err, g.Snapshot())
 	}
 

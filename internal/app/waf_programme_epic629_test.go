@@ -969,7 +969,7 @@ func TestWAFProgrammeIntegratedOperatorJourneyEpic629(t *testing.T) {
 		rec := httptest.NewRecorder()
 		hGen1.ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden {
-			t.Fatalf("Gen 1 bio POST status = %d, want 403", rec.Code)
+			t.Fatalf("Gen 1 bio POST status = %d, want 403 (body %q)", rec.Code, rec.Body.String())
 		}
 		supportEventID = rec.Header().Get(waf.HeaderWAFEvent)
 		if !strings.HasPrefix(supportEventID, "wev_") {

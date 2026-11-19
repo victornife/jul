@@ -208,7 +208,7 @@ func TestArgumentLimitGuardModesRemovalAndLimits(t *testing.T) {
 	t.Run("deliberate removal is honoured and reported", func(t *testing.T) {
 		cfg := config.WAFConfig{Enabled: true, CRSEnabled: true, InlineRules: "SecRuleRemoveById 900001"}
 		fw := assessmentFirewall(t, cfg)
-		if info := fw.Info(); info.ArgumentLimitGuard || info.Rules.Generated != 1 || info.Rules.Inline != 0 {
+		if info := fw.Info(); info.ArgumentLimitGuard || info.Rules.Generated != 2 || info.Rules.Inline != 0 {
 			t.Fatalf("removed guard reported as guard=%v rules=%+v", info.ArgumentLimitGuard, info.Rules)
 		}
 		// Removal restores the engine's partial inspection: documented, not hidden.
@@ -256,10 +256,10 @@ func TestArgumentLimitGuardModesRemovalAndLimits(t *testing.T) {
 		}
 	})
 
-	t.Run("non-CRS policy has no generated guard", func(t *testing.T) {
+	t.Run("non-CRS policy still has the request-body failure guard", func(t *testing.T) {
 		cfg := config.WAFConfig{Enabled: true, InlineRules: `SecRule ARGS "@contains <script>" "id:1697002,phase:2,deny,status:403"`}
 		info := assessmentFirewall(t, cfg).Info()
-		if info.ArgumentLimitGuard || info.Rules.Generated != 0 || info.ArgumentLimit != 1000 {
+		if info.ArgumentLimitGuard || info.Rules.Generated != 1 || info.Rules.Inline != 1 || info.ArgumentLimit != 1000 {
 			t.Fatalf("non-CRS policy info = %+v", info)
 		}
 	})
@@ -502,6 +502,17 @@ func TestGeneratedPolicyChangeMakesEvaluationStale(t *testing.T) {
 	summary := &WAFEvaluationSummary{State: "current", PolicyDigest: base.Info().PolicyDigest, EngineVersion: EngineVersion(), EmbeddedCRSVersion: EmbeddedCRSVersion(), TotalCases: 1, PassedCases: 1}
 	if got := VerifyEvaluationBinding(summary, base.RawPolicyDigest(), "", same.Info(), same.RawPolicyDigest(), ""); got.State != "current" {
 		t.Fatalf("same policy evaluation = %q", got.State)
+	}
+
+	currentPolicy := canonicalPolicyBytes(config.WAFConfig{Enabled: true, CRSEnabled: true}, base.Info(), [32]byte{})
+	oldPolicy := bytes.Replace(currentPolicy, []byte("generated_directives=1:4\n"), []byte("generated_directives=1:3\n"), 1)
+	if bytes.Equal(oldPolicy, currentPolicy) {
+		t.Fatal("canonical policy does not include generated-directives epoch 4")
+	}
+	oldSummary := *summary
+	oldSummary.PolicyDigest = vctx.Digest("waf-compiled-policy-v1", oldPolicy)
+	if got := VerifyEvaluationBinding(&oldSummary, "", "", base.Info(), "", ""); got.State != "stale_policy_changed" {
+		t.Fatalf("pre-guard evaluation = %q, want stale_policy_changed", got.State)
 	}
 
 	// The pre-fix canonical policy (no generated-directives version, guard or

@@ -846,7 +846,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return nil, err
 	}
 	if inspectionWarning != nil && f.Log != nil {
-		f.Log.Warn("inspection budget below route minimum", "error", inspectionWarning)
+		f.Log.Warn("inspection configuration below a minimum", "error", inspectionWarning)
 	}
 	gen.inspectionReq = inspectionReq
 	locWAF := func(i, j int) middleware.Middleware {

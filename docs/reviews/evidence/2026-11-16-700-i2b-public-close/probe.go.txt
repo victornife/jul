@@ -1,0 +1,146 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"runtime"
+	"time"
+	"weak"
+
+	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
+)
+
+func section(id byte, body []byte) []byte {
+	return append([]byte{id, byte(len(body))}, body...)
+}
+
+func guest(kind string) []byte {
+	b := []byte{0, 'a', 's', 'm', 1, 0, 0, 0}
+	b = append(b, section(1, []byte{1, 0x60, 0, 0})...)
+	b = append(b, section(2, []byte{1, 3, 'e', 'n', 'v', 5, 'r', 'e', 'a', 'd', 'y', 0, 0})...)
+	b = append(b, section(3, []byte{1, 0})...)
+	b = append(b, section(5, []byte{1, 0, 1})...)
+	name := []byte("run")
+	if kind == "init-trap" {
+		name = []byte("_initialize")
+	}
+	exports := append([]byte{1, byte(len(name))}, name...)
+	exports = append(exports, 0, 1)
+	b = append(b, section(7, exports)...)
+	if kind == "start" || kind == "start-trap" {
+		b = append(b, section(8, []byte{1})...)
+	}
+	body := []byte{0, 0x10, 0, 0x03, 0x40, 0x0c, 0, 0x0b, 0x0b}
+	if kind == "start-trap" || kind == "init-trap" {
+		body = []byte{0, 0x10, 0, 0x00, 0x0b}
+	}
+	code := append([]byte{1, byte(len(body))}, body...)
+	return append(b, section(10, code)...)
+}
+
+type result struct {
+	mod api.Module
+	err error
+}
+
+func main() {
+	if len(os.Args) != 5 {
+		panic("usage: probe interpreter|compiler false|true direct|cancel call|start|start-trap|init-trap")
+	}
+	runtime.GOMAXPROCS(2)
+	engine, enabled, mode, kind := os.Args[1], os.Args[2] == "true", os.Args[3], os.Args[4]
+	cfg := wazero.NewRuntimeConfigInterpreter()
+	if engine == "compiler" {
+		cfg = wazero.NewRuntimeConfigCompiler()
+	}
+	cfg = cfg.WithCloseOnContextDone(enabled).WithMemoryLimitPages(1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := wazero.NewRuntimeWithConfig(context.Background(), cfg)
+	ready := make(chan api.Module, 1)
+	_, err := r.NewHostModuleBuilder("env").NewFunctionBuilder().
+		WithFunc(func(_ context.Context, m api.Module) { ready <- m }).
+		Export("ready").Instantiate(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	compiled, err := r.CompileModule(context.Background(), guest(kind))
+	if err != nil {
+		panic(err)
+	}
+	config := wazero.NewModuleConfig().WithName("").WithStartFunctions()
+	if kind == "init-trap" {
+		config = config.WithStartFunctions("_initialize")
+	}
+	done := make(chan result, 1)
+	if kind == "call" {
+		mod, err := r.InstantiateModule(context.Background(), compiled, config)
+		if err != nil {
+			panic(err)
+		}
+		go func() {
+			_, err := mod.ExportedFunction("run").Call(ctx)
+			done <- result{mod, err}
+		}()
+	} else {
+		go func() {
+			mod, err := r.InstantiateModule(ctx, compiled, config)
+			done <- result{mod, err}
+		}()
+	}
+	var module api.Module
+	select {
+	case module = <-ready:
+	case <-time.After(2 * time.Second):
+		fmt.Println("ERROR guest did not reach host barrier")
+		os.Exit(2)
+	}
+	if kind == "start-trap" || kind == "init-trap" {
+		select {
+		case res := <-done:
+			data, ok := module.Memory().Read(0, 1)
+			if !ok {
+				fmt.Println("ERROR cannot read captured module memory")
+				os.Exit(2)
+			}
+			pointer := weak.Make(&data[0])
+			closeErr := module.Close(context.Background())
+			runtime.GC()
+			alive := pointer.Value() != nil
+			runtime.KeepAlive(data)
+			fmt.Printf("engine=%s enabled=%t mode=%s case=%s result_module_nil=%t error=%q close_error=%v explicit_memory_alias_alive=%t\n",
+				engine, enabled, mode, kind, res.mod == nil, fmt.Sprint(res.err), closeErr, alive)
+			return
+		case <-time.After(2 * time.Second):
+			fmt.Println("ERROR trapping start did not return")
+			os.Exit(2)
+		}
+	}
+	closeDone := make(chan error, 1)
+	go func() {
+		if mode == "cancel" {
+			<-ctx.Done()
+		}
+		closeDone <- module.Close(context.Background())
+	}()
+	if mode == "cancel" {
+		cancel()
+	}
+	select {
+	case err := <-closeDone:
+		fmt.Printf("engine=%s enabled=%t mode=%s case=%s close_returned=true close_error=%v ",
+			engine, enabled, mode, kind, err)
+	case <-time.After(time.Second):
+		fmt.Printf("engine=%s enabled=%t mode=%s case=%s close_returned=false execution_stopped=unknown\n",
+			engine, enabled, mode, kind)
+		return
+	}
+	select {
+	case res := <-done:
+		fmt.Printf("execution_stopped=true result_module_nil=%t error=%q\n", res.mod == nil, fmt.Sprint(res.err))
+	case <-time.After(750 * time.Millisecond):
+		fmt.Println("execution_stopped=false within=750ms")
+	}
+}

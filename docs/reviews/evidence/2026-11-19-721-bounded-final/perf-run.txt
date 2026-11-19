@@ -1,0 +1,7 @@
+2026-11-19T19:09:46Z u1-normal-h1/none/main rep1: state=completed valid=true correct=true load/load=6319.3rps(126402/126402) cpu=0.59
+2026-11-19T19:10:13Z u1-normal-h1/none/candidate rep1: state=completed valid=true correct=true load/load=5954.8rps(119112/119112) cpu=0.57
+2026-11-19T19:10:41Z u1-normal-h1/none/main rep2: state=completed valid=true correct=true load/load=6691.1rps(133839/133839) cpu=0.58
+2026-11-19T19:11:09Z u1-normal-h1/none/candidate rep2: state=completed valid=true correct=true load/load=6797.2rps(135959/135959) cpu=0.57
+2026-11-19T19:11:36Z u1-normal-h1/none/main rep3: state=completed valid=true correct=true load/load=6911.7rps(138250/138250) cpu=0.59
+2026-11-19T19:12:04Z u1-normal-h1/none/candidate rep3: state=completed valid=true correct=true load/load=6851.1rps(137039/137039) cpu=0.59
+run perf: complete, 6 results in /workspace/scratch/fecc8ca1efe5/721-bounded-final/perf

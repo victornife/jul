@@ -200,8 +200,9 @@ var EmbeddedCRSVersion = sync.OnceValue(func() string {
 	return string(m[1])
 })
 
-// EngineVersion returns the linked Coraza module version from the binary's
-// build information, or "" when the build carries none.
+// EngineVersion returns the pinned Coraza module version from build
+// information. Local source replacements have no module version, so their
+// declared requirement remains the truthful upstream base version.
 var EngineVersion = sync.OnceValue(func() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -209,7 +210,7 @@ var EngineVersion = sync.OnceValue(func() string {
 	}
 	for _, dep := range info.Deps {
 		if dep.Path == "github.com/corazawaf/coraza/v3" {
-			if dep.Replace != nil {
+			if dep.Replace != nil && dep.Replace.Version != "" && dep.Replace.Version != "(devel)" {
 				dep = dep.Replace
 			}
 			return dep.Version

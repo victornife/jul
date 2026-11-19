@@ -17,6 +17,7 @@ import (
 
 	"jul/internal/cache"
 	"jul/internal/config"
+	"jul/internal/inspection"
 	"jul/internal/observability"
 	"jul/internal/server"
 	"jul/internal/upstream"
@@ -127,6 +128,17 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 	var lastStreamReload atomic.Pointer[string]
 	initial := ""
 	lastStreamReload.Store(&initial)
+	governor, err := inspection.New(inspection.Limits{
+		Mode:                   inspection.Enforce,
+		MaxBytes:               1 << 20,
+		MaxResponseHeaderBytes: 1 << 20,
+		EvaluationSlots:        1,
+		EvaluationQueueTimeout: time.Second,
+		BaseChargeBytes:        16 << 10,
+	}, inspection.Hooks{})
+	if err != nil {
+		t.Fatalf("inspection.New: %v", err)
+	}
 
 	subsystems := Subsystems{
 		ResponseCache:    responseCache,
@@ -136,6 +148,7 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 		PluginsCompiled:  false,
 		StreamCompiled:   false,
 		WAFCompiled:      false,
+		Inspection:       governor,
 		LastStreamReload: &lastStreamReload,
 	}
 
@@ -163,6 +176,9 @@ func TestBuildAdminDepsWiringCompleteness(t *testing.T) {
 	requireNonNil("RecentLogs", deps.RecentLogs)
 	requireNonNil("SubscribeLogs", deps.SubscribeLogs)
 	requireNonNil("Upstreams", deps.Upstreams)
+	if deps.InspectionSnapshot == nil || deps.InspectionSnapshot().Limits.MaxBytes != 1<<20 {
+		t.Error("inspection governor snapshot was not wired")
+	}
 	requireNonNil("Certs", deps.Certs)
 	requireNonNil("StreamStatus", deps.StreamStatus)
 	requireNonNil("Reload", deps.Reload)

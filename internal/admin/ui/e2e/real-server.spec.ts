@@ -214,6 +214,61 @@ test("GET /api/runtime/overview matches OverviewSchema", async ({ request }) => 
   expect(overview.status.length).toBeGreaterThan(0);
 });
 
+test("inspection mode and settings navigation reflect the real server", async ({ page, request }) => {
+  const configResponse = await request.get("/api/config");
+  expect(configResponse.status()).toBe(200);
+  const initial = RawConfigSchema.parse(await configResponse.json());
+  expect(initial.raw).toBeTruthy();
+  const initialOverview = await request.get("/api/runtime/overview");
+  expect(initialOverview.status()).toBe(200);
+  expect(OverviewSchema.parse(await initialOverview.json()).inspection?.effective.mode).toBe("enforce");
+
+  let applyAttempted = false;
+  try {
+    applyAttempted = true;
+    const apply = await request.post("/api/config/patch/apply", {
+      data: {
+        base_version: initial.base_version,
+        ops: [{ op: "global_set", global: { inspection: { mode: "observe" } } }],
+      },
+    });
+    expect(apply.status(), await apply.text()).toBe(200);
+
+    await expect.poll(async () => {
+      const response = await request.get("/api/runtime/overview");
+      expect(response.status()).toBe(200);
+      return OverviewSchema.parse(await response.json()).inspection?.effective.mode;
+    }).toBe("observe");
+
+    await page.goto("/?inspection=1");
+    const inspection = page.getByRole("region", { name: "Inspection resources" });
+    await expect(inspection.getByText(/Mode: observe\./)).toBeVisible();
+    await expect(inspection.getByText(/configured-limit pressure without refusing it/)).toBeVisible();
+    await expect(inspection.getByText(/Guest capacity is a Jul-managed logical reservation/)).toBeVisible();
+    await expect(inspection.getByText(/Jul does not enforce an aggregate Coraza temporary-file quota/)).toBeVisible();
+
+    await inspection.getByRole("link", { name: "Configure inspection in Global settings" }).click();
+    await expect(page).toHaveURL(/\/traffic$/);
+    const globalCard = page.locator(".rounded-lg").filter({ hasText: "Global settings" }).first();
+    await globalCard.getByRole("button", { name: "Edit" }).click();
+    const editor = page.getByRole("dialog", { name: "Edit global settings" });
+    await expect(editor.getByLabel("Inspection mode")).toHaveValue("observe");
+    await expect(editor.getByLabel("Inspection evaluation slots")).toHaveValue("0");
+    await expect(editor.getByLabel(/Guest capacity budget/)).toBeEnabled();
+  } finally {
+    if (applyAttempted) {
+      const currentResponse = await request.get("/api/config");
+      expect(currentResponse.status()).toBe(200);
+      const current = RawConfigSchema.parse(await currentResponse.json());
+      const restore = await request.post(
+        `/api/config/apply?base_version=${encodeURIComponent(current.base_version ?? "")}`,
+        { headers: { "Content-Type": "application/toml" }, data: initial.raw },
+      );
+      expect(restore.status(), await restore.text()).toBe(200);
+    }
+  }
+});
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 test("GET /api/routes matches RouteProjectionSchema[]", async ({ request }) => {

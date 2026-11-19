@@ -1,0 +1,10 @@
+healthy combined route: HTTP 200, origin calls 1, both guest request/response echoes verified
+WAF request denial: HTTP 403, origin calls 1
+WASM request denial: HTTP 403, origin calls 1
+WAF response denial: HTTP 403, origin calls 2
+healthy upload before fault: HTTP 200, origin calls 3, both guest request/response echoes verified
+surfaced body error with ruleRemoveById in detect mode: HTTP 400, origin calls 3
+body-error outcome: inspection_error 0 -> 1
+upload recovery: HTTP 200, origin calls 4, both guest request/response echoes verified
+combined route recovery: HTTP 200, origin calls 5, both guest request/response echoes verified
+recovery: all six request-lease, byte and evaluation gauges drained to zero

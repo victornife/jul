@@ -39,7 +39,7 @@ subsystems:
   headers: "Headers added to the upstream request, and response-header add/set/remove operations."
   health_check: "Active health probing for an upstream pool."
   http3: "The HTTP/3 (QUIC) listener and its Alt-Svc advertisement."
-  inspection: "Process-wide inspection-governor limits and accounting; request-path enforcement is pending."
+  inspection: "Process-wide inspection-governor limits and accounting, including Jul-owned Coraza temporary-file storage."
   listener: "The listen address a socket binds to."
   listener_limits: "Byte limits fixed when a listener binds."
   listener_timeouts: "Timeouts fixed when a listener binds."
@@ -77,12 +77,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 469
-  schema_leaves: 398
-  registry_entries: 398
+  schema_paths: 470
+  schema_leaves: 399
+  registry_entries: 399
   startup_consumed: 29
   by_class:
-    hot_reload: 355
+    hot_reload: 356
     restart_required: 29
     new_listener_only: 7
     ignored_deprecated: 4
@@ -457,6 +457,10 @@ fields:
     class: hot_reload
     subsystem: inspection
     reason: "The process-owned governor publishes the complete candidate limit set during the no-fail reload transaction; usage and counters persist across reloads."
+  - path: "global.inspection.max_guest_capacity_bytes"
+    class: hot_reload
+    subsystem: inspection
+    reason: "The process-owned governor publishes the logical managed-instance capacity ceiling during the no-fail reload transaction; live reservations persist across reloads and candidates warm against the currently published ceiling."
   - path: "global.inspection.max_response_header_bytes"
     class: hot_reload
     subsystem: inspection

@@ -8,6 +8,13 @@ allowBuilds:
 # limit on every platform instead of platform-dependent 60/120 defaults.
 virtualStoreDirMaxLength: 60
 
+# Development tooling only; no patched picomatch release is available. Remove
+# this exception when upstream fixes GHSA-fc5q-39xc-vjpf. The coverage checks
+# reject picomatch in the production dependency tree while it is excepted.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf
+
 overrides:
   # minimatch is a build-time dependency of eslint and TypeScript tooling.
   # Require the globparts-amplification fix (GHSA-g3hv-75wg-m249).

@@ -11,7 +11,7 @@
     "lint": "eslint . --cache",
     "test": "vitest run",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "test:coverage": "node --test scripts/coverage-report.test.mjs && vitest run --coverage && node scripts/coverage-report.mjs",
+    "test:coverage": "node --test scripts/coverage-report.test.mjs scripts/audit-exception.test.mjs && vitest run --coverage && node scripts/coverage-report.mjs",
     "e2e": "playwright test",
     "e2e:ci": "playwright test --project=chromium --reporter=github",
     "test:coverage:probes": "python3 ../../../../scripts/probe-console-coverage.py"

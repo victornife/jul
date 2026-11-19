@@ -24,18 +24,24 @@ published package contains the fix. Bodies are prepared before the guest call
 ([plugins.md](plugins.md#request-bodies);
 [revalidation](reviews/2026-11-10-699-plugin-body-preparation-revalidation.md)).
 On a published package, set `timeout` above the slowest legitimate upload for
-body-reading plugins and set a finite server `read_timeout`. The missing
-aggregate inspection bound remains
-[#700](https://github.com/victornife/jul/issues/700). On unreleased `main`,
+body-reading plugins and set a finite server `read_timeout`. On unreleased `main`,
 the I1 foundation publishes process-wide limits, and I2 makes the WASM plugin
 request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
-`body_timeout` bounds body-reading plugin uploads); the WAF path (I3) and
-plugin response-subscription buffers (I4) are not yet governed, so
-configured `enforce` mode does not yet protect WAF traffic.
-The R3 response-header ceiling now has an explicit 64 KiB accounting default,
-but actual response-path reservation/enforcement remains pending. The
-route-aware minimum budget is validated statically from compiled limits, which
+`body_timeout` bounds inspected uploads). I3a and I4 also account WAF
+request/response work and plugin response-subscription buffers. The recovery
+adds a 1 GiB default logical reservation ceiling for Jul-managed plugin
+instances and a fail-closed guard for public request-body processing errors
+exposed by stock Coraza before dispatch. Neither control is a hard bound on all
+engine memory or all temporary-file I/O. Exact aggregate spool byte/file
+quotas and proof of Wazero's last-alias release are deferred; the original
+A19/A20 guarantees are not claimed. Historical #700 memory and performance
+objectives remain unmet or unqualified, including the 50 ms overload target.
+These controls reduce exposure, not whole-process resource use: size for the
+workload and provide external process-memory and temporary-file containment
+when hard bounds are required. The R3 response-header accounting ceiling
+has an explicit 64 KiB default. The route-aware minimum budget is validated
+statically from compiled limits, which
 also cap per-transaction `ctl:requestBodyLimit`/`ctl:responseBodyLimit` raises:
 a raised body beyond the compiled limit is refused, not buffered (see
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)).
@@ -666,8 +672,10 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   (and optionally response) body to inspect it. Large uploads or responses
   consume proportional memory. Tune `request_body_limit` and
   `response_body_check` for your workload.
-- **Detect mode does not block.** Requests in `detect` mode always reach the
-  upstream; WAF findings are logged/metrics-only.
+- **Detect mode does not enforce rule findings.** Security-rule findings are
+  logged/metrics-only. This does not bypass Jul's inspection safety checks:
+  surfaced request-body processing errors can still fail closed before
+  upstream dispatch, including when the diagnostic rule was removed.
 - **CRS rule updates require a rebuild.** The OWASP Core Rule Set is embedded
   in the binary; updating it requires rebuilding with the `waf` tag.
 - **SecLang parser errors fail closed at startup.** A malformed directive file
@@ -683,14 +691,23 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   512 KiB response limit (then partial); other types, including JSON, need an
   explicit `SecResponseBodyMimeType`. The effective policy reports compiled
   settings, not per-transaction `ctl:` changes (#698).
-- **No aggregate WAF inspection enforcement yet.** The process-owned governor
-  gates the WASM plugin request path (I2, unreleased) but not WAF request or
-  response paths (I3/I4). WAF inspection still runs before upstream admission,
-  on cache hits and no-upstream routes, and can continue after client
-  disconnect; configured limits do not protect it. The route-aware minimum budget is
-  validated, but actual response-header reservations remain pending under
-  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule)
-  (#700). Size per [waf.md](waf.md#sizing-and-concurrency).
+- **Inspection protection is not a whole-process bound.** The governor accounts
+  supported WAF and plugin request/response work; WAF state is estimated, not
+  measured heap. The guest capacity limit covers Jul-managed page-rounded
+  instance reservations only. Stock Wazero may retain engine references
+  asynchronously beyond Jul teardown, with no proven reclamation-time bound.
+  The WAF body guard rejects public request-body processing failures it detects
+  before dispatch, but cannot distinguish disk I/O, storage exhaustion and
+  malformed input or detect hidden/late failures. Jul does not enforce exact
+  aggregate temporary-file quotas or own crash-safe Coraza file cleanup.
+  An error surfaced only after origin dispatch cannot undo that dispatch;
+  rejecting a surfaced error is not proof that other storage failures are
+  surfaced. External storage containment needs both byte and inode/file bounds;
+  a memory-backed temporary filesystem also consumes the deployment's memory.
+  WAF work can continue after client disconnect and remains charged while it
+  runs; phase-5 logging may run without a slot. See
+  [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md) and
+  [waf.md](waf.md#sizing-and-concurrency).
 
 ---
 
@@ -710,11 +727,22 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
 - **Plugin concurrency is capped per plugin.** At most `max_instances` module
   instances (default 64) exist per plugin; a call that finds them all busy
   waits one `timeout`, then its request fails with `503` and `Retry-After: 1`
-  (#506). Guest memory is bounded by `max_instances × memory_limit` per plugin name.
+  (#506). Live instances are limited to `max_instances × memory_limit` per
+  plugin name and generation; closed instances can still have retained memory.
   On unreleased `main`, request-side host buffers (prepared bodies, `fetch`
   copies, request state, generated and replacement bodies) are charged to the
   process-wide inspection budget and refused with `503` when it is exhausted;
-  response-subscription buffers are not yet charged (#700 I4).
+  response-subscription buffers are also charged (#700 I4). A finite 1 GiB
+  process-wide logical instance reservation is enforced by default; it does
+  not bound asynchronous engine-retained memory, and observe is not a limit.
+- **Guest recycling is workload-dependent.** Go guests can fail allocation
+  within their linear-memory ceiling before the default 1000-call recycle
+  interval. The assessment guest reproduces this on both main and #721;
+  earlier recycling is a tested mitigation for that fixture, with additional
+  instantiation cost. See [guest allocation failures](plugins.md#guest-allocation-failures-and-recycling).
+  Successful managed cleanup restores logical admission; a failed runtime
+  close retains capacity until restart and can exhaust the byte ceiling even
+  below the 64-ticket safety threshold. See the [recovery table](plugins.md#guest-admission-recovery-and-restart).
 - **WASM binary must be pre-compiled.** Modules are compiled when a
   configuration is activated, not on first use, and a malformed WASM binary
   prevents that configuration from starting. Depending on platform and sandbox,

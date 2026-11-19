@@ -38,6 +38,13 @@ func LimitsFromConfig(cfg *config.Config, startupProcs int) (Limits, error) {
 		}
 		maxBytes = uint64(inspection.MaxBufferedBytes.Bytes())
 	}
+	maxGuestCapacityBytes := uint64(config.InspectionDefaultMaxGuestCapacityBytes)
+	if inspection.MaxGuestCapacityBytes != nil {
+		if *inspection.MaxGuestCapacityBytes <= 0 {
+			return Limits{}, fmt.Errorf("%w: global.inspection.max_guest_capacity_bytes must be positive", ErrInvalidLimits)
+		}
+		maxGuestCapacityBytes = uint64(inspection.MaxGuestCapacityBytes.Bytes())
+	}
 	maxResponseHeaderBytes := uint64(config.InspectionDefaultMaxResponseHeaderBytes)
 	if inspection.MaxResponseHeaderBytes != nil {
 		if *inspection.MaxResponseHeaderBytes <= 0 {
@@ -68,6 +75,7 @@ func LimitsFromConfig(cfg *config.Config, startupProcs int) (Limits, error) {
 	limits := Limits{
 		Mode:                      mode,
 		MaxBytes:                  maxBytes,
+		MaxGuestCapacityBytes:     maxGuestCapacityBytes,
 		MaxResponseHeaderBytes:    maxResponseHeaderBytes,
 		ConfiguredEvaluationSlots: inspection.MaxConcurrentEvaluations,
 		EvaluationSlots:           effectiveSlots,

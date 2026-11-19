@@ -1,0 +1,1 @@
+Supplement declared after the initial p1 functional pair showed a 15.7% candidate slowdown in a single CPU-saturated sample. One reverse-order pair, identical configuration, with a 15-second CPU profile per target. All samples retained; profiling results are diagnostic, not throughput acceptance.

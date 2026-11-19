@@ -174,27 +174,35 @@ max_response_header_bytes = "64k"
 | --- | --- | --- |
 | `mode` | string | `enforce` (default) or `observe`; other values are rejected |
 | `max_buffered_bytes` | size | `256m` (256 MiB); must be positive. In `enforce` mode it must also fit the largest single-request worst-case charge of any inspected (WAF or plugin) route; `observe` only warns. Uninspected configurations have no minimum |
-| `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled |
+| `max_guest_capacity_bytes` | size | `1g` (1 GiB); positive process-wide ceiling for page-rounded logical reservations of Jul-managed starting/live plugin instances across names and generations. This is not a hard bound on engine-retained memory, process heap or RSS. At 64 guest tickets with unresolved teardown, new reservations are refused even in observe mode |
+| `max_response_header_bytes` | size | `64k` (64 KiB); positive accounting ceiling for decoded response-header names and values plus 64 bytes per field occurrence; may be raised, but not disabled. Enforce refuses an oversized WAF response before inspection; observe records the decision |
 | `max_concurrent_evaluations` | int | `0` means auto, resolved from the configured `worker_threads` value or the startup container-aware `GOMAXPROCS`; explicit values are 1–1024 |
 | `evaluation_queue_timeout` | duration | `1s`; 0 disables waiting; explicit values are 0–10s |
 | `body_timeout` | duration | `60s`; explicit `0s` disables it; negative values are rejected |
 
-These fields have process scope and hot-reload together. A reload publishes the
+The limits have process scope and hot-reload together. A reload publishes the
 complete limit set without recreating the governor or resetting its counters;
 automatic slots resolve against the candidate `worker_threads` value, or the
-startup `GOMAXPROCS` when worker threads are `auto`.
+startup `GOMAXPROCS` when worker threads are `auto`. Limits-only changes do
+not rebuild plugin instances. Other reload candidates warm against the
+currently published guest ceiling, not an increase in the candidate.
 
-**Only the plugin request path is governed so far.** The status API marks
-request-path integration as `partial`. A route with WASM plugins holds one
-lease for the whole request, charges prepared bodies, fetch results,
-per-request state and generated or replaced bodies before allocating them, and
-in `enforce` mode answers saturation with `503` plus `Retry-After: 1` and a
-stalled body upload with `408` once `body_timeout` has passed since the first
-read. `observe` mode counts the same decisions without refusing. WAF request
-state, evaluation slots, response-subscription buffers and the response-header
-gate are not governed yet, so `mode = "enforce"` does not protect WAF-only
-routes. See [Plugins](plugins.md#inspection-governor) for the exact
-behaviour.
+The status API marks request-path integration as `partial`. The governor
+accounts the implemented plugin and WAF request/response work. The guest
+capacity limit reserves page-rounded ceilings for Jul-managed starting/live
+instances; it is not a hard bound on engine-retained references, heap or RSS.
+With stock Coraza, Jul also fails closed when public request-body processing
+results expose a body-processing error before dispatch. That generic signal
+does not identify the underlying I/O cause and cannot enforce exact aggregate
+temporary-file quotas or detect failures the engine does not expose.
+
+In `enforce` mode, governor saturation refuses governed work with `503` plus
+`Retry-After: 1`; a stalled body upload can answer `408` once `body_timeout`
+has passed since the first read. `observe` records would-refuse decisions
+without governor-driven refusal; audit records can still be dropped under
+output saturation. See [Plugins](plugins.md#inspection-governor),
+[WAF](waf.md) and [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md)
+for the exact boundaries.
 
 `jul check`, startup, reload and admin apply compute each inspected route's
 worst-case single-request charge from the compiled WAF limits, plugin limits
@@ -203,9 +211,10 @@ and its largest terms. The default CRS route needs about 246.7 MiB; with
 otherwise default limits, a WAF `request_body_limit` above 327 KiB needs a
 larger `max_buffered_bytes` (1 MiB needs about 288.7 MiB), as does a default
 WAF route that also runs a response-generating plugin (about 270.7 MiB). Raise the budget,
-lower that route's limits, or use `mode = "observe"` while sizing. Actual-size
-R3 reservations remain pending, and the 64 KiB ceiling is a compatibility
-policy default, not an experimentally established optimum. See
+lower that route's limits, or use `mode = "observe"` while sizing. R3 reserves
+an estimate based on measured header shape before WAF ingestion; the 64 KiB
+ceiling is a compatibility policy default, not an experimentally established
+optimum. See
 [ADR 0032](adr/0032-aggregate-inspection-resource-governor.md#minimum-budget-rule).
 
 The legacy `[global].access_log` / `error_log` values are known no-ops retained for compatibility in the current major version. They emit lint warnings, do not cause a restart, and do not select a sink. Use `[observability.access_log].enabled` and `sinks` for request records; route process stderr through the service supervisor.
@@ -1899,7 +1908,7 @@ kv = true
 | `path` / `inline` | Module source — supply exactly one |
 | `type` | `middleware` (wraps a handler) or `handler` (terminal location action) |
 | `config` | String map handed to the guest as JSON via `get_config` |
-| `memory_limit` | Guest linear-memory ceiling (default 16 MiB) |
+| `memory_limit` | Guest linear-memory ceiling (default 16 MiB); positive values must be at least 64 KiB and are rounded down to whole 64 KiB pages, with an effective maximum of 4 GiB |
 | `timeout` | Deadline for a single invocation; guest is torn down on overrun (default 100ms) |
 | `kv` | Grant the key/value store host functions (namespaced per plugin) |
 | `fetch` / `allowed_hosts` | Grant guarded outbound HTTP to the listed hosts |

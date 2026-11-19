@@ -1,0 +1,124 @@
+package plugins
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+	"weak"
+
+	"github.com/tetratelabs/wazero"
+
+	"jul/internal/config"
+	"jul/internal/inspection"
+)
+
+func watcherProbeMemory(t *testing.T, dir string) []byte {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(filepath.Join(dir, "memory"))
+		if err == nil {
+			return data
+		}
+		if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("runtime watcher did not reach the barrier")
+	return nil
+}
+
+func releaseWatcher(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "release"), []byte("release"), 0o600); err != nil {
+		t.Errorf("release runtime watcher: %v", err)
+	}
+}
+
+func TestOverlayRetainsUnreturnedStartModule(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("JUL_GUEST_WATCHER_PROBE", dir)
+	t.Setenv("JUL_GUEST_WATCHER_CAPTURE_MEMORY", "1")
+	ctx := context.Background()
+	rt := wazero.NewRuntimeWithConfig(ctx, newRuntimeConfig().WithCloseOnContextDone(true))
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+	t.Cleanup(func() { releaseWatcher(t, dir) })
+	wasm := []byte{0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00,
+		0x05, 0x03, 0x01, 0x00, 0x01, 0x08, 0x01, 0x00,
+		0x0a, 0x05, 0x01, 0x03, 0x00, 0x00, 0x0b}
+	compiled, err := rt.CompileModule(ctx, wasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := testGovernor(t)
+	p := &plugin{
+		runtime: rt, compiled: compiled, pool: make(chan *pooledModule, 1),
+		slots: make(chan struct{}, 1), gov: g, generation: 1,
+		memoryLimitBytes: 64 << 10, closeOnContextDone: true,
+		guestTickets: make(map[*inspection.GuestTicket]*guestOwnership),
+	}
+	if _, err := p.acquire(ctx); err == nil {
+		t.Fatal("start trap unexpectedly succeeded")
+	}
+	data := watcherProbeMemory(t, dir)
+	during := g.Snapshot().GuestCapacity
+	releaseWatcher(t, dir)
+	if string(data) != "65536" {
+		t.Fatalf("watcher-held guest memory = %q, want 65536", data)
+	}
+	if during.ReservedBytes != 64<<10 || during.Instances[inspection.GuestFailedRetained] != 1 {
+		t.Errorf("start failure teardown debt = %+v, want the 64 KiB ticket retained", during)
+	}
+}
+
+func guestMemoryWeakPointer(t *testing.T, p *plugin) (weak.Pointer[byte], uint32) {
+	t.Helper()
+	pooled := <-p.pool
+	defer func() { p.pool <- pooled }()
+	memory := pooled.mod.Memory()
+	raw, ok := memory.Read(0, 1)
+	if !ok {
+		t.Fatal("cannot read guest memory")
+	}
+	return weak.Make(&raw[0]), memory.Size()
+}
+
+func TestOverlayRetainsClosedGuestFromWatcher(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("JUL_GUEST_WATCHER_PROBE", dir)
+	t.Setenv("JUL_GUEST_WATCHER_CAPTURE_MEMORY", "")
+	limits := testLimits()
+	limits.MaxGuestCapacityBytes = 16 << 20
+	m, _, g, _ := govManager(t, limits)
+	set, err := m.Build(context.Background(), map[string]config.PluginConfig{
+		"guest": pcfg("header-inject", func(pc *config.PluginConfig) { pc.MemoryLimit = config.Size(16 << 20) }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = set.Close() })
+	t.Cleanup(func() { releaseWatcher(t, dir) })
+	data := watcherProbeMemory(t, dir)
+	mem, memorySize := guestMemoryWeakPointer(t, set.plugins["guest"])
+	if err := set.plugins["guest"].close(); err != nil {
+		t.Fatal(err)
+	}
+	during := g.Snapshot().GuestCapacity
+	runtime.GC()
+	retained := mem.Value() != nil
+	releaseWatcher(t, dir)
+	if string(data) != "ready" {
+		t.Fatalf("runtime watcher readiness = %q, want ready", data)
+	}
+	if !retained {
+		t.Fatal("guest memory did not remain reachable at the paused watcher")
+	}
+	if during.ReservedBytes != 16<<20 {
+		t.Errorf("guest close refunded capacity=%d while %d bytes of guest memory remained reachable after GC", during.ReservedBytes, memorySize)
+	}
+}
