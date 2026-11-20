@@ -28,7 +28,8 @@ def main():
     args.directory.mkdir(parents=True, exist_ok=True)
     command("gh", "release", "download", tag, "--repo", "victornife/jul", "--pattern",
             f"jul_{tag}_{args.os}_{args.arch}_full.*", "--pattern", "SHA256SUMS", "--dir", args.directory)
-    binary, evidence = verifier.verify_archive(args.directory.resolve(), tag, source, args.os, args.arch, "full")
+    binary, evidence = verifier.verify_archive(args.directory.resolve(), tag, source, args.os, args.arch, "full",
+                                               legacy="v2.2.0")
     evidence["harness_source"] = command("git", "rev-parse", "HEAD")
     write_report(args.report, evidence)
     args.path_output.write_text(str(binary.parent) + "\n")

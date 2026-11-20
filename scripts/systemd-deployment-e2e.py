@@ -114,7 +114,8 @@ def prepare_binary(arguments, temporary):
         spec.loader.exec_module(verifier)
         architecture = verifier.native_architecture(platform.machine(), {}, False)
         binary, evidence = verifier.verify_archive(arguments.package_directory.resolve(), arguments.tag,
-                                                   arguments.source, "linux", architecture, "full")
+                                                   arguments.source, "linux", architecture, "full",
+                                                   legacy="v2.2.0" if arguments.legacy_v220 else None)
         evidence["kind"] = "published-package"
         return binary, evidence
     binary = temporary / "jul"
@@ -210,6 +211,8 @@ def main():
                         help="Directory containing the published full Linux archive, its .sha256 and SHA256SUMS; requires gh")
     parser.add_argument("--tag", default="v2.2.0")
     parser.add_argument("--source", default="b12e051139f652b400cff37d9f063f5637a7d550")
+    parser.add_argument("--legacy-v220", action="store_true",
+                        help="allow the pinned historical v2.2.0 archive without archive provenance")
     parser.add_argument("--wasm-module", type=Path, default=Path("testdata/plugins/v1-current-header-inject.wasm"))
     parser.add_argument("--report", type=Path)
     parser.add_argument("--ci-network", action="store_true", help="Exercise a controlled CI private CA, routed namespace and scoped firewall")

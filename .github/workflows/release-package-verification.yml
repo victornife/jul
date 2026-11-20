@@ -34,8 +34,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: refs/tags/${{ inputs.tag }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.13"
@@ -45,8 +43,11 @@ jobs:
           EXPECTED_SOURCE: ${{ inputs.source }}
           EXPECTED_TAG: ${{ inputs.tag }}
         run: |
-          [[ "$EXPECTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SOURCE" ]]
+          [[ "$EXPECTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+          [[ "$EXPECTED_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --no-tags origin "refs/tags/$EXPECTED_TAG:refs/tags/$EXPECTED_TAG"
+          [[ "$(git rev-parse "refs/tags/$EXPECTED_TAG^{commit}")" == "$EXPECTED_SOURCE" ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
       - name: Verify actual downloads, startup and upgrade/rollback
         shell: bash
         env:

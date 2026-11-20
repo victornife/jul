@@ -51,11 +51,13 @@ gh release download v2.2.0 --repo victornife/jul \
 python3 scripts/systemd-deployment-e2e.py \
   --package-directory systemd-package --tag v2.2.0 \
   --source b12e051139f652b400cff37d9f063f5637a7d550 \
-  --report systemd-package.json
+  --legacy-v220 --report systemd-package.json
 ```
 
 For arm64, change the download pattern to `linux_arm64`; the verifier checks
-the actual native architecture. The script validates archive checksums,
+the actual native architecture. The script checks the historical archive digest
+against the existing committed v2.2.0 release evidence before extraction;
+archive provenance is unavailable for that release. It also validates checksums,
 binary identity, full profile, bundled SPDX and signed provenance/SBOM through
 the existing release verifier. Do not substitute a locally rebuilt binary.
 
