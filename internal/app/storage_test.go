@@ -204,8 +204,11 @@ func TestStorageProbeWriteHealthOverlays(t *testing.T) {
 		startup: []storageTarget{{"cache", filepath.Join(dir, "cache")}},
 		admin:   func() []admin.StorageTarget { return []admin.StorageTarget{{Category: "audit_log", Path: dir}} },
 		audit:   func() (uint64, bool, bool) { return 0, false, false },
-		cache:   c,
-		hints:   storagefs.DefaultHints,
+		auditWrite: func() (bool, bool, bool) {
+			return false, false, true
+		},
+		cache: c,
+		hints: storagefs.DefaultHints,
 	}
 	got := p.headroom()
 	if len(got) != 2 {
@@ -216,6 +219,24 @@ func TestStorageProbeWriteHealthOverlays(t *testing.T) {
 	}
 	if got[1].Category != "audit_log" || got[1].WriteFailures != nil {
 		t.Fatalf("audit without a durable sink = %+v", got[1])
+	}
+	if got := p.writeHealth(); !reflect.DeepEqual(got, []observability.StorageWriteHealth{
+		{Sink: "cache", State: observability.StorageWriteUnknown},
+		{Sink: "audit_log", State: observability.StorageWriteUnknown},
+	}) {
+		t.Fatalf("initial write health = %+v", got)
+	}
+
+	p.auditWrite = func() (bool, bool, bool) { return true, true, true }
+	if got := p.writeHealth(); !reflect.DeepEqual(got, []observability.StorageWriteHealth{
+		{Sink: "cache", State: observability.StorageWriteUnknown},
+		{Sink: "audit_log", State: observability.StorageWriteFailing},
+	}) {
+		t.Fatalf("failing write health = %+v", got)
+	}
+	p.auditWrite = func() (bool, bool, bool) { return true, false, true }
+	if got := p.writeHealth(); got[1].State != observability.StorageWriteOK {
+		t.Fatalf("recovered audit write health = %+v", got)
 	}
 	// Real filesystem: the values are real, not fabricated.
 	if got[0].Reason == "" && (got[0].AvailableBytes == nil || got[0].TotalBytes == nil || *got[0].TotalBytes <= 0) {

@@ -7,32 +7,446 @@
 
 rule_files:
   - security-alerts.rules.yml
+  - operational-alerts.rules.yml
 
 evaluation_interval: 1m
 
 tests:
+  # 0a. Rate-based rejection alerts remain isolated to the target that saw
+  # rejected traffic; a second healthy Jul target is not merged into it.
+  # Recent counter samples must not keep the alert firing after discovery loss.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1 1 1 1 stale"
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
+        values: "0 60 120 180 stale"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="interrupted_request"}'
+        values: "0 10 20 30 stale"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-b:9090",mode="block",outcome="clean"}'
+        values: "0 60 120 180 240 300"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-b:9090",mode="block",outcome="interrupted_request"}'
+        values: "0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              severity: warning
+              category: waf_outcomes
+              symptom: waf_rejection_elevated
+            exp_annotations:
+              summary: "Elevated actual WAF request/response rejections (>5% of inspected traffic over 5m)."
+              description: "WAF block-mode interruptions or body-limit rejections exceed 5% of inspected transactions. This is an operational symptom — it may indicate an active attack, a recent policy/paranoia change, or a false positive on legitimate traffic. Query `GET /api/v1/waf/events` or `jul waf events` before tuning."
+              runbook_url: "http://127.0.0.1:9090/security"
+      - eval_time: 4m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts: []
+
+  # 0. Scrape failure differs from an expected target disappearing; grouping
+  # retains target identity so the healthy target does not inherit the alert.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="127.0.0.1:9090"}'
+        values: "1 0 0 0"
+      - series: 'up{job="jul-admin-metrics",instance="127.0.0.1:9091"}'
+        values: "1 1 1 1"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulTargetUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: 127.0.0.1:9090
+              severity: critical
+              category: availability
+            exp_annotations:
+              summary: "Jul target 127.0.0.1:9090 is not scrapeable."
+              description: "Prometheus still knows the declared target but its scrape failed. Check Jul process health, loopback/TLS reachability, scrape token and /metrics response."
+      - eval_time: 2m
+        alertname: JulExpectedTargetMissing
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="127.0.0.1:9090"}'
+        values: "_ _ _ _ _ _ _ _ 1 1"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: JulExpectedTargetMissing
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: 127.0.0.1:9090
+              severity: critical
+              category: availability
+            exp_annotations:
+              summary: "Expected Jul target 127.0.0.1:9090 has disappeared from Prometheus discovery."
+              description: "This differs from a failed scrape: the configured expected target no longer has an up series. Check Prometheus target configuration and service discovery."
+      - eval_time: 8m
+        alertname: JulExpectedTargetMissing
+        exp_alerts: []
+
+  # A failed Jul scrape suppresses dependent signals only for that target;
+  # another live target with the same backend fault still notifies.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "0+0x3"
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x3"
+      - series: 'jul_upstream_backends_eligible{job="jul-admin-metrics",instance="jul-a:9090",pool="pool-a"}'
+        values: "0+0x3"
+      - series: 'jul_upstream_backends_eligible{job="jul-admin-metrics",instance="jul-b:9090",pool="pool-b"}'
+        values: "0+0x3"
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="block"}'
+        values: "0+0x3"
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="unprotected"}'
+        values: "1+0x3"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulTargetUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              severity: critical
+              category: availability
+            exp_annotations:
+              summary: "Jul target jul-a:9090 is not scrapeable."
+              description: "Prometheus still knows the declared target but its scrape failed. Check Jul process health, loopback/TLS reachability, scrape token and /metrics response."
+      - eval_time: 2m
+        alertname: JulPoolNoEligibleBackend
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-b:9090
+              pool: pool-b
+              severity: critical
+              category: backend
+            exp_annotations:
+              summary: "Active Jul pool pool-b has no eligible backends."
+              description: "Inspect backend health, circuit state, capacity and discovery for this pool. An absent pool or absent metric is not interpreted as zero eligible backends."
+      - eval_time: 2m
+        alertname: JulWAFProtectionWeakened
+        exp_alerts: []
+
+  # 1. Leaf expiry thresholds are exclusive; a certificate at exactly 7 days
+  # leaves warning and enters critical rather than firing both alerts.
+  - interval: 1m
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: JulCertificateExpiryWarning
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: JulCertificateExpiryCritical
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_tls_cert_expiry_seconds{job="jul-admin-metrics",instance="jul-a:9090",domain="warning.test"}'
+        values: "2505600+0x12"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: JulCertificateExpiryWarning
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              domain: warning.test
+              severity: warning
+              category: certificate
+            exp_annotations:
+              summary: "Jul leaf certificate warning.test expires within 30 days."
+              description: "Review renewal readiness and confirm a renewed leaf certificate advances the expiry signal. Missing or unsupported certificate data is unknown."
+      - eval_time: 11m
+        alertname: JulCertificateExpiryCritical
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_tls_cert_expiry_seconds{job="jul-admin-metrics",instance="jul-a:9090",domain="boundary.test"}'
+        values: "604800+0x12"
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: JulCertificateExpiryWarning
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: JulCertificateExpiryCritical
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              domain: boundary.test
+              severity: critical
+              category: certificate
+            exp_annotations:
+              summary: "Jul leaf certificate boundary.test expires within 7 days or has expired."
+              description: "Inspect the served certificate and renewal path; rotate or renew it before expiry. Missing or unsupported certificate data is unknown, not healthy."
+
+  # 2. Only an in-scope pool with an explicit zero eligible count fires.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
+      - series: 'jul_upstream_backends_eligible{job="jul-admin-metrics",instance="jul-a:9090",pool="active"}'
+        values: "0+0x3"
+      - series: 'jul_upstream_backends_eligible{job="jul-admin-metrics",instance="jul-b:9090",pool="healthy"}'
+        values: "2+0x3"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulPoolNoEligibleBackend
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              pool: active
+              severity: critical
+              category: backend
+            exp_annotations:
+              summary: "Active Jul pool active has no eligible backends."
+              description: "Inspect backend health, circuit state, capacity and discovery for this pool. An absent pool or absent metric is not interpreted as zero eligible backends."
+  - interval: 1m
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulPoolNoEligibleBackend
+        exp_alerts: []
+
+  # 2b. A pool series disappearing is not interpreted as zero eligible.
+  - interval: 1m
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulPoolNoEligibleBackend
+        exp_alerts: []
+
+  # 3. Storage uses available/total only with positive totals. Critical data
+  # cannot also fire the warning; missing totals are unknown.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
+      - series: 'up{job="jul-admin-metrics",instance="jul-c:9090"}'
+        values: "1+0x30"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="available"}'
+        values: "90+0x12"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="total"}'
+        values: "1000+0x12"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-b:9090",category="audit_log",kind="available"}'
+        values: "40+0x12"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-b:9090",category="audit_log",kind="total"}'
+        values: "1000+0x12"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-c:9090",category="config",kind="available"}'
+        values: "0+0x12"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-c:9090",category="config",kind="total"}'
+        values: "0+0x12"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: JulStorageLow
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              category: cache
+              severity: warning
+              alert_category: storage
+            exp_annotations:
+              summary: "Jul-owned cache storage has less than 10% headroom."
+              description: "Plan to free or expand the filesystem used by this category. Critical headroom has a separate alert and does not also fire this warning."
+      - eval_time: 6m
+        alertname: JulStorageCritical
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-b:9090
+              category: audit_log
+              severity: critical
+              alert_category: storage
+            exp_annotations:
+              summary: "Jul-owned audit_log storage has less than 5% headroom."
+              description: "Free or expand the filesystem used by this Jul-owned category. This threshold is an example, not a capacity guarantee."
+      - eval_time: 6m
+        alertname: JulStorageLow
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="access_log",kind="available"}'
+        values: "50+0x12"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="access_log",kind="total"}'
+        values: "1000+0x12"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: JulStorageLow
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              category: access_log
+              severity: warning
+              alert_category: storage
+            exp_annotations:
+              summary: "Jul-owned access_log storage has less than 10% headroom."
+              description: "Plan to free or expand the filesystem used by this category. Critical headroom has a separate alert and does not also fire this warning."
+      - eval_time: 11m
+        alertname: JulStorageCritical
+        exp_alerts: []
+
+  # A warning that crosses into the critical band resolves rather than
+  # overlapping the critical notification.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="available"}'
+        values: "90 90 90 90 90 90 90 90 90 90 90 90 40 40 40 40 40 40"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="total"}'
+        values: "1000+0x17"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: JulStorageLow
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              category: cache
+              severity: warning
+              alert_category: storage
+            exp_annotations:
+              summary: "Jul-owned cache storage has less than 10% headroom."
+              description: "Plan to free or expand the filesystem used by this category. Critical headroom has a separate alert and does not also fire this warning."
+      - eval_time: 17m
+        alertname: JulStorageCritical
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              category: cache
+              severity: critical
+              alert_category: storage
+            exp_annotations:
+              summary: "Jul-owned cache storage has less than 5% headroom."
+              description: "Free or expand the filesystem used by this Jul-owned category. This threshold is an example, not a capacity guarantee."
+      - eval_time: 17m
+        alertname: JulStorageLow
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-b:9090",category="cache",kind="available"}'
+        values: "100+0x12"
+      - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-b:9090",category="cache",kind="total"}'
+        values: "1000+0x12"
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: JulStorageLow
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: JulStorageCritical
+        exp_alerts: []
+
+  # 4. A failure alert clears on ok, unknown, or absence. Neither unknown
+  # nor absence represents a successful write.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="cache",state="failing"}'
+        values: "stale 1 1 stale 1 1 stale 1 1 stale"
+      - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="cache",state="ok"}'
+        values: "1 stale _ 1 stale"
+      - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="cache",state="unknown"}'
+        values: "_ _ _ _ _ _ 1 stale"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulStorageWriteFailing
+        exp_alerts: &cache_failing
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              sink: cache
+              state: failing
+              severity: critical
+              category: storage_write
+            exp_annotations:
+              summary: "Jul cache writes are failing."
+              description: "Inspect this sink's Jul-owned path and filesystem. A resolved notification is not proof of recovery; confirm state=ok on a successful scrape. Cache health also includes cleanup and recovery failures."
+      - eval_time: 3m
+        alertname: JulStorageWriteFailing
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: JulStorageWriteFailing
+        exp_alerts: *cache_failing
+      - eval_time: 6m
+        alertname: JulStorageWriteFailing
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: JulStorageWriteStatusUnknown
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: JulStorageWriteFailing
+        exp_alerts: *cache_failing
+      - eval_time: 9m
+        alertname: JulStorageWriteFailing
+        exp_alerts: []
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="audit_log",state="unknown"}'
+        values: "1+0x20"
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: JulStorageWriteStatusUnknown
+        exp_alerts:
+          - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
+              sink: audit_log
+              state: unknown
+              severity: warning
+              category: storage_write
+            exp_annotations:
+              summary: "Jul audit_log write health has not been observed."
+              description: "This configured sink has not yet produced a write result since startup. Generate expected sink activity and verify a successful write; unknown is not success."
+
   # 1. Quiet/healthy traffic, detect-only rule matches, and auth/origin 403s must NOT fire WAF rejection alerts.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
         values: "0+60x10"
-      - series: 'jul_waf_transactions_total{mode="detect",outcome="matched_observed"}'
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="detect",outcome="matched_observed"}'
         values: "0+30x10"
-      - series: 'jul_waf_events_total{action="detect",rule="942100"}'
+      - series: 'jul_waf_events_total{job="jul-admin-metrics",instance="jul-a:9090",action="detect",rule="942100"}'
         values: "0+90x10"
-      - series: 'jul_http_requests_total{method="GET",host="example.test",code="403"}'
+      - series: 'jul_http_requests_total{job="jul-admin-metrics",instance="jul-a:9090",method="GET",host="example.test",code="403"}'
         values: "0+50x10"
-      - series: 'jul_waf_serving_routes{state="block"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="block"}'
         values: "2+0x10"
-      - series: 'jul_waf_serving_routes{state="detect"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="detect"}'
         values: "0+0x10"
-      - series: 'jul_waf_serving_routes{state="disabled_override"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="disabled_override"}'
         values: "0+0x10"
-      - series: 'jul_waf_serving_routes{state="unprotected"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="unprotected"}'
         values: "0+0x10"
-      - series: 'jul_security_posture_findings{area="waf",severity="error"}'
+      - series: 'jul_security_posture_findings{job="jul-admin-metrics",instance="jul-a:9090",area="waf",severity="error"}'
         values: "0+0x10"
-      - series: 'jul_security_evidence_state{producer="waf_effective",state="ok"}'
+      - series: 'jul_security_evidence_state{job="jul-admin-metrics",instance="jul-a:9090",producer="waf_effective",state="ok"}'
         values: "1+0x10"
     alert_rule_test:
       - eval_time: 6m
@@ -45,25 +459,42 @@ tests:
         alertname: JulSecurityPostureErrorPresent
         exp_alerts: []
 
+  # 1b. A process restart resets the cumulative traffic counter; clean traffic
+  # after reset still must not create a rejection-ratio notification.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
+        values: "0 120 240 360 10 130 250 370"
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts: []
+
   # 2. Actual WAF block-mode rejection spike fires JulWAFRejectionSymptomElevated and resolves after traffic recovers.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
         values: "0 60 120 180 240 300 360 420 480 540 600 660 720"
-      - series: 'jul_waf_transactions_total{mode="block",outcome="interrupted_request"}'
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="interrupted_request"}'
         values: "0 10 20 30 40 50 50 50 50 50 50 50 50"
     alert_rule_test:
       - eval_time: 3m
         alertname: JulWAFRejectionSymptomElevated
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               severity: warning
               category: waf_outcomes
               symptom: waf_rejection_elevated
             exp_annotations:
               summary: "Elevated actual WAF request/response rejections (>5% of inspected traffic over 5m)."
               description: "WAF block-mode interruptions or body-limit rejections exceed 5% of inspected transactions. This is an operational symptom — it may indicate an active attack, a recent policy/paranoia change, or a false positive on legitimate traffic. Query `GET /api/v1/waf/events` or `jul waf events` before tuning."
-              runbook_url: "https://127.0.0.1:9090/security"
+              runbook_url: "http://127.0.0.1:9090/security"
       - eval_time: 12m
         alertname: JulWAFRejectionSymptomElevated
         exp_alerts: []
@@ -71,34 +502,40 @@ tests:
   # 3. Protection weakening, posture error finding, and stale evidence fire and resolve after remediation.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_serving_routes{state="block"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="block"}'
         values: "0 0 0 2 2 2"
-      - series: 'jul_waf_serving_routes{state="detect"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="detect"}'
         values: "1 1 1 0 0 0"
-      - series: 'jul_waf_serving_routes{state="disabled_override"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="disabled_override"}'
         values: "0 0 0 0 0 0"
-      - series: 'jul_waf_serving_routes{state="unprotected"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="unprotected"}'
         values: "1 1 1 0 0 0"
-      - series: 'jul_security_posture_findings{area="intent",severity="error"}'
+      - series: 'jul_security_posture_findings{job="jul-admin-metrics",instance="jul-a:9090",area="intent",severity="error"}'
         values: "1 1 1 0 0 0"
-      - series: 'jul_security_evidence_state{producer="waf_effective",state="stale"}'
+      - series: 'jul_security_evidence_state{job="jul-admin-metrics",instance="jul-a:9090",producer="waf_effective",state="stale"}'
         values: "1 1 1 0 0 0"
     alert_rule_test:
       - eval_time: 2m
         alertname: JulWAFProtectionWeakened
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               severity: warning
               category: security_protection
               symptom: waf_protection_weakened
             exp_annotations:
               summary: "Jul.IA serving WAF protection was weakened or has zero block-mode routes."
               description: "A committed reload reduced block-mode route coverage or switched enforcement to detect-only/disabled. Inspect /security and configuration history to verify whether this change was intentional."
-              runbook_url: "https://127.0.0.1:9090/security"
+              runbook_url: "http://127.0.0.1:9090/security"
       - eval_time: 2m
         alertname: JulSecurityPostureErrorPresent
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               area: intent
               severity: critical
               category: security_posture
@@ -106,11 +543,13 @@ tests:
             exp_annotations:
               summary: "Jul.IA gateway security posture reports an active error finding in area intent."
               description: "Run `jul posture` or open the Console Security Posture drawer (`GET /api/v1/security/posture`) to inspect the finding and apply its remediation."
-              runbook_url: "https://127.0.0.1:9090/security"
+              runbook_url: "http://127.0.0.1:9090/security"
       - eval_time: 2m
         alertname: JulSecurityEvidenceUnavailableOrDegraded
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               producer: waf_effective
               state: stale
               severity: warning
@@ -119,7 +558,7 @@ tests:
             exp_annotations:
               summary: "Jul.IA security evidence producer waf_effective is stale."
               description: "Required security evidence (WAF fixture evaluation, bounded investigation ring, or admin audit log sink) is stale, degraded, or unavailable. Check `GET /api/v1/security/posture` and `GET /api/security`."
-              runbook_url: "https://127.0.0.1:9090/security"
+              runbook_url: "http://127.0.0.1:9090/security"
       - eval_time: 5m
         alertname: JulWAFProtectionWeakened
         exp_alerts: []
@@ -133,9 +572,11 @@ tests:
   # 4. Flapping spike (< for: 1m window) and process restart / counter reset must NOT cause false firing.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
         values: "0 60 120 180 0 60 120 180 240"
-      - series: 'jul_waf_transactions_total{mode="block",outcome="interrupted_request"}'
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="interrupted_request"}'
         values: "0 10 10 10 0 0 0 0 0"
     alert_rule_test:
       - eval_time: 1m
@@ -148,7 +589,9 @@ tests:
   # 5. Sustained posture warning fires after 5m and resolves after remediation.
   - interval: 1m
     input_series:
-      - series: 'jul_security_posture_findings{area="waf",severity="warning"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_security_posture_findings{job="jul-admin-metrics",instance="jul-a:9090",area="waf",severity="warning"}'
         values: "1 1 1 1 1 1 1 0 0 0"
     alert_rule_test:
       - eval_time: 3m
@@ -158,6 +601,8 @@ tests:
         alertname: JulSecurityPostureWarningSustained
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               area: waf
               severity: warning
               category: security_posture
@@ -165,7 +610,7 @@ tests:
             exp_annotations:
               summary: "Jul.IA gateway security posture reports sustained warning(s) in area waf."
               description: "Inspect `GET /api/v1/security/posture` or `jul posture` to review the warning and its epistemic state."
-              runbook_url: "https://127.0.0.1:9090/security"
+              runbook_url: "http://127.0.0.1:9090/security"
       - eval_time: 9m
         alertname: JulSecurityPostureWarningSustained
         exp_alerts: []

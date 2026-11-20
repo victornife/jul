@@ -71,14 +71,57 @@ func liveStorageTargets(cfg *config.Config) []storageTarget {
 // storageProbe builds the storage headroom projection on demand. Every input
 // is read at call time so hot-applied paths follow the serving generation.
 type storageProbe struct {
-	startup []storageTarget
-	live    func() *config.Config
-	admin   func() []admin.StorageTarget
-	cache   *cache.Cache
-	audit   func() (failures uint64, failing, ok bool)
-	hints   storagefs.Hints
+	startup    []storageTarget
+	live       func() *config.Config
+	admin      func() []admin.StorageTarget
+	cache      *cache.Cache
+	audit      func() (failures uint64, failing, ok bool)
+	auditWrite func() (observed, failing, configured bool)
+	hints      storagefs.Hints
 	// probe is storagefs.Probe; tests substitute a deterministic filesystem.
 	probe func([]string) []storagefs.Result
+}
+
+func (p *storageProbe) writeHealth() []observability.StorageWriteHealth {
+	configured := make(map[string]string)
+	for _, target := range p.targets() {
+		if target.category == "cache" || target.category == "access_log" || target.category == "audit_log" {
+			configured[target.category] = target.path
+		}
+	}
+
+	var out []observability.StorageWriteHealth
+	for _, sink := range []string{"cache", "access_log", "audit_log"} {
+		path, isConfigured := configured[sink]
+		if !isConfigured {
+			continue
+		}
+		observed, failing := false, false
+		switch sink {
+		case "cache":
+			observed, failing, _ = p.cache.DiskWriteStatus()
+		case "access_log":
+			_, observed, failing = observability.AccessLogWriteHealthForPath(path)
+		case "audit_log":
+			if p.auditWrite != nil {
+				var applicable bool
+				observed, failing, applicable = p.auditWrite()
+				if !applicable {
+					continue
+				}
+			}
+		}
+
+		state := observability.StorageWriteUnknown
+		if observed {
+			state = observability.StorageWriteOK
+			if failing {
+				state = observability.StorageWriteFailing
+			}
+		}
+		out = append(out, observability.StorageWriteHealth{Sink: sink, State: state})
+	}
+	return out
 }
 
 // stateSeverity orders states for picking a category's worst location.
@@ -91,6 +134,7 @@ var stateSeverity = map[storagefs.State]int{
 }
 
 type storageReading struct {
+	target storageTarget
 	result storagefs.Result
 	state  storagefs.State
 	ratio  *float64
@@ -136,7 +180,7 @@ func (p *storageProbe) headroom() []observability.StorageHeadroom {
 	worst := map[string]storageReading{}
 	for i, t := range targets {
 		state, ratio := p.hints.Classify(results[i])
-		r := storageReading{result: results[i], state: state, ratio: ratio}
+		r := storageReading{target: t, result: results[i], state: state, ratio: ratio}
 		if prev, ok := worst[t.category]; !ok || worseReading(r, prev) {
 			worst[t.category] = r
 		}
@@ -171,7 +215,7 @@ func (p *storageProbe) headroom() []observability.StorageHeadroom {
 			}
 			slices.Sort(h.SharedWith)
 		}
-		p.overlayWriteHealth(&h)
+		p.overlayWriteHealth(&h, r.target.path)
 		out = append(out, h)
 	}
 	return out
@@ -179,7 +223,7 @@ func (p *storageProbe) headroom() []observability.StorageHeadroom {
 
 // overlayWriteHealth adds the owning subsystem's own write-failure signal,
 // for the subsystems that track one.
-func (p *storageProbe) overlayWriteHealth(h *observability.StorageHeadroom) {
+func (p *storageProbe) overlayWriteHealth(h *observability.StorageHeadroom, path string) {
 	var (
 		failures float64
 		failing  bool
@@ -192,7 +236,7 @@ func (p *storageProbe) overlayWriteHealth(h *observability.StorageHeadroom) {
 		}
 		failures, failing = float64(n), f
 	case "access_log":
-		n, f := observability.AccessLogFileWriteHealth.Snapshot()
+		n, _, f := observability.AccessLogWriteHealthForPath(path)
 		failures, failing = float64(n), f
 	case "audit_log":
 		if p.audit == nil {

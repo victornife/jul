@@ -117,6 +117,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Web application firewall (WAF) | [waf.md](waf.md) | `GA` / `soaked` |
 | WAF policy evaluation, tuning, and outcome investigation | [waf.md](waf.md) | `Beta` / `merged` |
 | Security posture review, isolation evidence, and security alerting | [security-posture.md](security-posture.md) | `Beta` / `merged` |
+| Optional operational notifications (Prometheus + Alertmanager) | [alerting recipe](../examples/alerting/security/README.md) | `optional` / `merged` |
 | mTLS client auth | [mtls.md](mtls.md) | `GA` / `soaked` |
 | Client-certificate policy and CRL hot reload | [mtls.md](mtls.md) | `Beta` / `released` |
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |

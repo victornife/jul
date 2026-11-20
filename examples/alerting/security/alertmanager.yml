@@ -1,13 +1,13 @@
 # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 # SPDX-License-Identifier: agpl
 #
-# Alertmanager configuration for Jul.IA Security Operations Alerting (#628-B + #632).
+# Alertmanager configuration for Jul.IA operational/security alerting (#628-A/B + #632).
 # Delivers grouped firing and resolved notifications to a local disposable receiver
 # by default, with a commented external destination example using secret placeholders.
 
 route:
   receiver: "local-disposable-receiver"
-  group_by: ["alertname", "category", "symptom", "area", "producer"]
+  group_by: ["alertname", "job", "instance", "category", "alert_category", "symptom", "area", "producer", "domain", "pool", "sink"]
   group_wait: 5s
   group_interval: 30s
   repeat_interval: 4h
@@ -16,6 +16,14 @@ inhibit_rules:
   # When WAF evidence is unavailable (e.g. on a lean build without -tags waf),
   # inhibit only causally related WAF posture warnings (area = "waf"); never
   # suppress independent trust, certificate, admin, cache, intent, or maintenance warnings.
+  # Inhibit dependent symptoms only on the failed target; another Jul target
+  # with an independent fault still reaches the local receiver.
+  - source_matchers:
+      - alertname =~ "JulTargetUnavailable|JulExpectedTargetMissing"
+      - category = "availability"
+    target_matchers:
+      - alertname =~ "JulCertificateExpiryCritical|JulCertificateExpiryWarning|JulPoolNoEligibleBackend|JulStorageCritical|JulStorageLow|JulStorageWriteFailing|JulStorageWriteStatusUnknown|JulWAFProtectionWeakened|JulSecurityPostureErrorPresent|JulSecurityPostureWarningSustained|JulSecurityEvidenceUnavailableOrDegraded|JulWAFRejectionSymptomElevated"
+    equal: ["job", "instance"]
   - source_matchers:
       - alertname = "JulSecurityEvidenceUnavailableOrDegraded"
       - producer =~ "waf_.*"
@@ -23,6 +31,7 @@ inhibit_rules:
     target_matchers:
       - alertname = "JulSecurityPostureWarningSustained"
       - area = "waf"
+    equal: ["job", "instance"]
 
 receivers:
   - name: "local-disposable-receiver"

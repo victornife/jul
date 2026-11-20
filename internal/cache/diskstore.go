@@ -321,9 +321,14 @@ type diskStore struct {
 	writeFailLog logthrottle.Limiter
 	writeFails   atomic.Int64
 	reported     atomic.Int64
-	// failing is true while the most recent store failed (#437).
-	failing atomic.Bool
+	writeState   atomic.Uint32
 }
+
+const (
+	diskWriteUnknown uint32 = iota
+	diskWriteOK
+	diskWriteFailing
+)
 
 // diskWriteFailureLogInterval is the minimum spacing of write-failure warnings.
 const diskWriteFailureLogInterval = 10 * time.Second
@@ -1704,7 +1709,7 @@ func safeDiskError(err error) error {
 }
 
 func (d *diskStore) recordWriteFailure(err error) {
-	d.failing.Store(true)
+	d.writeState.Store(diskWriteFailing)
 	total := d.writeFails.Add(1)
 	if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
 		suppressed := total - d.reported.Swap(total) - 1
@@ -2187,8 +2192,13 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 	}
 	s.published = true
 	s.acct.release()
-	if d.failing.Load() && !d.tombstoneDirty && !d.unrecoverableInvalidation.Load() {
-		d.failing.Store(false)
+	if !d.tombstoneDirty && !d.unrecoverableInvalidation.Load() {
+		if d.writeState.Load() != diskWriteOK {
+			d.writeState.Store(diskWriteOK)
+		}
+	} else {
+		// A store does not clear an outstanding persistence failure.
+		d.writeState.CompareAndSwap(diskWriteUnknown, diskWriteOK)
 	}
 
 	blob := d.newBlob(hash, finalPath, s.bodyLen, totalSize)

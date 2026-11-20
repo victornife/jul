@@ -6,7 +6,7 @@ with pluggable access-log sinks). All three are served from the admin listener
 (`[admin]`), which should be bound to loopback in production.
 
 
-> **Durable audit sink (HR-07C).** Runtime status reports whether the durable sink is configured/active, current active health, generation, cumulative write/rotation/retention-cleanup/retirement failure counters, and the bounded category/time of the last observed failure. Public readiness exposes only the bounded `audit_sink` reason. #160 intentionally adds no Prometheus family: the existing status/health surfaces already provide the required operator signal, avoiding path/error labels and unnecessary cardinality. See [audit sink hot reload](audit-sink-hot-reload.md).
+> **Durable audit sink (HR-07C).** Runtime status reports whether the durable sink is configured/active, current active health, generation, cumulative write/rotation/retention-cleanup/retirement failure counters, and the bounded category/time of the last observed failure. `jul_storage_write_health{sink,state}` separately reports current durable write state for alerting; maintenance-only degradation remains visible in runtime status but does not claim that a record failed to persist. Public readiness exposes only the bounded `audit_sink` reason. See [audit sink hot reload](audit-sink-hot-reload.md).
 
 ## Prometheus metrics
 
@@ -242,6 +242,7 @@ or actual-memory measurement. See the
 | `jul_reload_timeout_total` | Counter | `phase` | Released `v2.0.0` | Configuration reloads that exceeded their deadline, labeled by the phase that timed out. |
 | `jul_reload_total` | Counter | `outcome`, `source` | Released `v2.0.0` | Configuration reloads, labeled by source (admin/sighup/watch) and outcome (applied_live/applied_degraded/no_change/not_applied/saved_not_live). |
 | `jul_storage_bytes` | Gauge | `category`, `kind` | Merged / release pending | Capacity of the filesystem holding a Jul-owned storage category, labeled by category (`cache`/`access_log`/`audit_log`/`config`/`config_history`/`plugin_upload`/`acme`) and kind (`available`/`total`). Absent when the platform cannot report it. Never labeled by path, mount or device (#437). |
+| `jul_storage_write_health` | Gauge | `sink`, `state` | Merged / release pending | Current owner-observed persistence state for configured disk cache, file access log and durable audit log sinks. Exactly one state (`unknown`/`ok`/`failing`) is exported per configured sink. `unknown` means the current owner has not observed a result; unconfigured sinks are absent. Cache health includes store, cleanup and recovery failures. An active cache failure clears on a successful store once outstanding persistence failures no longer block recovery. Access-log recovery requires a successful line write, and audit recovery an ordered durable record write. Audit failures that prevent durability are `failing`; retention-cleanup failure after a durable record is not. |
 | `jul_stream_active_conns` | Gauge | `proto` | Released `v1.32.0` | Current active L4 stream connections/sessions, labeled by protocol (tcp/udp). |
 | `jul_stream_backend_dial_failures_total` | Counter | `proto`, `reason` | Released `v2.0.0` | L4 stream backend dial/connect failures, labeled by protocol (tcp/udp) and a bounded reason (timeout/refused/no_backend/other). The accompanying log line is throttled once a backend is already known to be down; this counter is not. |
 | `jul_stream_bytes_total` | Counter | `direction`, `proto` | Released `v1.32.0` | Bytes relayed by the L4 stream proxy, labeled by protocol (tcp/udp) and direction (up to backend / down to client). |
@@ -703,6 +704,9 @@ to disable a specific limit.
 - [ ] Enable tracing (`otel` tag) in staging first to validate overhead.
 - [ ] Monitor `jul_tls_cert_expiry_seconds` for upcoming certificate renewals.
 - [ ] Use `/readyz` for orchestrator readiness probes.
+- [ ] For an optional local notification journey, start and validate the
+      [operational alerting recipe](../examples/alerting/security/README.md);
+      reuse existing monitoring where available.
 
 ## Benchmarks & tuning
 

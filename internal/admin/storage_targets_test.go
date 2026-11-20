@@ -4,6 +4,7 @@
 package admin
 
 import (
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"reflect"
@@ -67,8 +68,64 @@ func TestAuditWriteHealthWithoutDurableSink(t *testing.T) {
 	if _, _, ok := s.AuditWriteHealth(); ok {
 		t.Fatal("memory-only audit reported a durable sink")
 	}
+	if _, _, configured := s.AuditWriteStatus(); configured {
+		t.Fatal("memory-only audit reported a configured durable sink")
+	}
 	s.audit = nil
 	if _, _, ok := s.AuditWriteHealth(); ok {
 		t.Fatal("nil audit reported a durable sink")
+	}
+	if _, _, configured := s.AuditWriteStatus(); configured {
+		t.Fatal("nil audit reported a configured durable sink")
+	}
+
+	failedStartup := newAuditLog(auditCap)
+	failedStartup.setStartupSinkFailure(auditSinkConfig{publicPath: "configured"}, auditFailureOpen)
+	failedServer := &Server{audit: failedStartup}
+	if observed, failing, configured := failedServer.AuditWriteStatus(); !configured || !observed || !failing {
+		t.Fatalf("configured sink with observed startup open failure = (%v, %v, %v)", observed, failing, configured)
+	}
+	_ = failedStartup.Close()
+}
+
+func TestAuditWriteStatusSeparatesDurabilityFromMaintenance(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	s := New(config.AdminConfig{
+		Enabled:             true,
+		Listen:              "127.0.0.1:0",
+		AuditLogFile:        path,
+		AuditLogRotateMaxMB: 1,
+		AuditLogRotateKeep:  2,
+	}, slog.New(slog.DiscardHandler), Deps{})
+	t.Cleanup(func() { _ = s.audit.Close() })
+
+	if observed, failing, configured := s.AuditWriteStatus(); !configured || observed || failing {
+		t.Fatalf("initial audit write state = (%v, %v, %v), want unknown", observed, failing, configured)
+	}
+	s.audit.record(AuditEvent{Operation: "write-health", Result: "success"})
+	if observed, failing, configured := s.AuditWriteStatus(); !configured || !observed || failing {
+		t.Fatalf("successful audit write state = (%v, %v, %v)", observed, failing, configured)
+	}
+
+	owner := s.audit.currentSink.owner
+	owner.noteOrderedHealth(auditWriteResult{
+		category: auditFailureCleanup,
+		err:      errors.New("retention cleanup failed"),
+		durable:  true,
+	})
+	if _, failing, configured := s.AuditWriteHealth(); !configured || !failing {
+		t.Fatal("retention failure should remain visible to the broader audit-health surface")
+	}
+	if observed, failing, configured := s.AuditWriteStatus(); !configured || !observed || failing {
+		t.Fatalf("maintenance-only state = (%v, %v, %v), want observed success", observed, failing, configured)
+	}
+
+	owner.noteOrderedHealth(auditWriteResult{category: auditFailureWrite, err: errors.New("injected write failure")})
+	if observed, failing, configured := s.AuditWriteStatus(); !configured || !observed || !failing {
+		t.Fatalf("failed audit write state = (%v, %v, %v)", observed, failing, configured)
+	}
+	owner.noteOrderedHealth(auditWriteResult{durable: true})
+	if observed, failing, configured := s.AuditWriteStatus(); !configured || !observed || failing {
+		t.Fatalf("recovered audit write state = (%v, %v, %v)", observed, failing, configured)
 	}
 }

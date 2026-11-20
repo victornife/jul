@@ -687,6 +687,16 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_storage_write_health",
+      "type": "gauge",
+      "help": "Current observed persistence state of a configured Jul-owned disk cache, file access log, or durable audit log. Cache includes store, cleanup and recovery failures. Unobserved state is unknown; unconfigured sinks are absent.",
+      "labels": [
+        "sink",
+        "state"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_stream_active_conns",
       "type": "gauge",
       "help": "Current active L4 stream connections/sessions, labeled by protocol (tcp/udp).",

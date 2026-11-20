@@ -231,6 +231,13 @@ func exerciseAllMetrics(m *Metrics) {
 	m.SetStorageSource(func() []StorageHeadroom {
 		return []StorageHeadroom{{Category: "cache", State: "ok", AvailableBytes: &avail, TotalBytes: &total}}
 	}, StorageHints{LowRatio: 0.1, CriticalRatio: 0.05})
+	m.SetStorageWriteHealthSource(func() []StorageWriteHealth {
+		return []StorageWriteHealth{
+			{Sink: "cache", State: StorageWriteOK},
+			{Sink: "access_log", State: StorageWriteUnknown},
+			{Sink: "audit_log", State: StorageWriteFailing},
+		}
+	})
 	m.ObserveGRPCTranscode("pkg.Svc/Method", "200")
 	m.ObserveGRPCTranscodeStreamMsg("pkg.Svc/Method", "sent")
 	m.ObserveGRPCProxyStream()

@@ -47,3 +47,13 @@ func (s *Server) AuditWriteHealth() (failures uint64, failing, ok bool) {
 	}
 	return st.WriteFailures, !st.Healthy, true
 }
+
+// AuditWriteStatus reports only ordered durable-write observations. Sink
+// maintenance failures that did not prevent a durable write are not write
+// failures. configured is false when no durable sink is configured.
+func (s *Server) AuditWriteStatus() (observed, failing, configured bool) {
+	if s == nil || s.audit == nil {
+		return false, false, false
+	}
+	return s.audit.writeHealthState()
+}

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,8 +27,10 @@ import (
 	"jul/internal/adminapi"
 	"jul/internal/cachemeta"
 	"jul/internal/config"
+	"jul/internal/observability"
 	"jul/internal/rbac"
 	"jul/internal/server"
+	"jul/internal/upstream"
 	"jul/internal/waf"
 )
 
@@ -51,11 +54,12 @@ func TestSecurityAlertingPromtoolRules(t *testing.T) {
 	root := filepath.Join("..", "..")
 	rulesDir := filepath.Join(root, "examples", "alerting", "security")
 	rulesFile := filepath.Join(rulesDir, "security-alerts.rules.yml")
+	operationalRulesFile := filepath.Join(rulesDir, "operational-alerts.rules.yml")
 	testFile := filepath.Join(rulesDir, "security-alerts.test.yml")
 	promCfg := filepath.Join(rulesDir, "prometheus.yml")
 	amCfg := filepath.Join(rulesDir, "alertmanager.yml")
 
-	for _, p := range []string{rulesFile, testFile, promCfg, amCfg} {
+	for _, p := range []string{rulesFile, operationalRulesFile, testFile, promCfg, amCfg} {
 		data, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatalf("read %s: %v", p, err)
@@ -66,13 +70,23 @@ func TestSecurityAlertingPromtoolRules(t *testing.T) {
 	}
 
 	rulesBytes, _ := os.ReadFile(rulesFile)
-	rulesText := string(rulesBytes)
+	operationalRulesBytes, _ := os.ReadFile(operationalRulesFile)
+	rulesText := string(rulesBytes) + string(operationalRulesBytes)
 	for _, wantAlert := range []string{
 		"JulWAFProtectionWeakened",
 		"JulSecurityPostureErrorPresent",
 		"JulSecurityPostureWarningSustained",
 		"JulSecurityEvidenceUnavailableOrDegraded",
 		"JulWAFRejectionSymptomElevated",
+		"JulTargetUnavailable",
+		"JulExpectedTargetMissing",
+		"JulCertificateExpiryCritical",
+		"JulCertificateExpiryWarning",
+		"JulPoolNoEligibleBackend",
+		"JulStorageCritical",
+		"JulStorageLow",
+		"JulStorageWriteFailing",
+		"JulStorageWriteStatusUnknown",
 	} {
 		if !strings.Contains(rulesText, wantAlert) {
 			t.Fatalf("security-alerts.rules.yml missing alert %q", wantAlert)
@@ -82,6 +96,62 @@ func TestSecurityAlertingPromtoolRules(t *testing.T) {
 	if strings.Contains(rulesText, "jul_waf_events_total") {
 		t.Fatal("security-alerts.rules.yml must use jul_waf_transactions_total for rejection rates, not jul_waf_events_total")
 	}
+	var metricContract struct {
+		Metrics []struct {
+			Name   string   `json:"name"`
+			Type   string   `json:"type"`
+			Labels []string `json:"labels"`
+		} `json:"metrics"`
+	}
+	contractBytes, err := os.ReadFile(filepath.Join(root, "docs", "metrics-contract.json"))
+	if err != nil {
+		t.Fatalf("read metric contract: %v", err)
+	}
+	if err := json.Unmarshal(contractBytes, &metricContract); err != nil {
+		t.Fatalf("decode metric contract: %v", err)
+	}
+	contract := make(map[string]struct {
+		metricType string
+		labels     map[string]bool
+	}, len(metricContract.Metrics))
+	for _, metric := range metricContract.Metrics {
+		labels := make(map[string]bool, len(metric.Labels))
+		for _, label := range metric.Labels {
+			labels[label] = true
+		}
+		contract[metric.Name] = struct {
+			metricType string
+			labels     map[string]bool
+		}{metric.Type, labels}
+	}
+	for metricName, expected := range map[string]struct {
+		metricType string
+		labels     []string
+	}{
+		"jul_tls_cert_expiry_seconds":      {"gauge", []string{"domain"}},
+		"jul_upstream_backends_eligible":   {"gauge", []string{"pool"}},
+		"jul_storage_bytes":                {"gauge", []string{"category", "kind"}},
+		"jul_storage_write_health":         {"gauge", []string{"sink", "state"}},
+		"jul_waf_protection_changes_total": {"counter", []string{"transition"}},
+		"jul_waf_serving_routes":           {"gauge", []string{"state"}},
+		"jul_security_posture_findings":    {"gauge", []string{"area", "severity"}},
+		"jul_security_evidence_state":      {"gauge", []string{"producer", "state"}},
+		"jul_waf_transactions_total":       {"counter", []string{"mode", "outcome"}},
+	} {
+		actual, ok := contract[metricName]
+		if !ok {
+			t.Errorf("alert rule producer %q is absent from docs/metrics-contract.json", metricName)
+			continue
+		}
+		if actual.metricType != expected.metricType {
+			t.Errorf("alert rule producer %q type = %q, want %q", metricName, actual.metricType, expected.metricType)
+		}
+		for _, label := range expected.labels {
+			if !actual.labels[label] {
+				t.Errorf("alert rule producer %q is missing contract label %q", metricName, label)
+			}
+		}
+	}
 
 	// Execute promtool check/test and amtool check-config via native binaries or pinned containers.
 	ranToolValidation := false
@@ -89,6 +159,10 @@ func TestSecurityAlertingPromtoolRules(t *testing.T) {
 		cmdCheck := exec.Command(promtoolPath, "check", "rules", rulesFile)
 		if out, err := cmdCheck.CombinedOutput(); err != nil {
 			t.Fatalf("promtool check rules failed: %v\n%s", err, string(out))
+		}
+		cmdOperationalCheck := exec.Command(promtoolPath, "check", "rules", operationalRulesFile)
+		if out, err := cmdOperationalCheck.CombinedOutput(); err != nil {
+			t.Fatalf("promtool check operational rules failed: %v\n%s", err, string(out))
 		}
 		cmdTest := exec.Command(promtoolPath, "test", "rules", filepath.Base(testFile))
 		cmdTest.Dir = rulesDir
@@ -113,6 +187,16 @@ func TestSecurityAlertingPromtoolRules(t *testing.T) {
 			)
 			if out, err := cmdCheck.CombinedOutput(); err != nil {
 				t.Fatalf("docker promtool check rules failed: %v\n%s", err, string(out))
+			}
+			cmdOperationalCheck := exec.CommandContext(ctx, dockerPath, "run", "--rm",
+				"-v", absRulesDir+":/rules:ro",
+				"--workdir", "/rules",
+				"--entrypoint", "promtool",
+				"prom/prometheus:v3.11.2",
+				"check", "rules", "operational-alerts.rules.yml",
+			)
+			if out, err := cmdOperationalCheck.CombinedOutput(); err != nil {
+				t.Fatalf("docker promtool check operational rules failed: %v\n%s", err, string(out))
 			}
 			cmdTest := exec.CommandContext(ctx, dockerPath, "run", "--rm",
 				"-v", absRulesDir+":/rules:ro",
@@ -191,7 +275,7 @@ func canRunRealAlertContainers(t *testing.T) bool {
 	return true
 }
 
-func startRealPrometheusAndAlertmanagerE2E(t *testing.T, factory *HandlerFactory, receiverURL string) (promURL, amURL string, adminSrv *admin.Server, auditDir, auditFile string) {
+func startRealPrometheusAndAlertmanagerE2E(t *testing.T, factory *HandlerFactory, receiverURL string) (promURL, amURL string, adminSrv *admin.Server, auditDir, auditFile string, setTargetRunning func(bool), setIndependentPoolEligible func(int64)) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("real Prometheus/Alertmanager --network host container E2E requires linux")
@@ -236,12 +320,85 @@ func startRealPrometheusAndAlertmanagerE2E(t *testing.T, factory *HandlerFactory
 		},
 	)
 	factory.SetAuditHealthSource(adminSrv.AuditWriteHealth)
+	factory.Metrics.SetStorageWriteHealthSource(func() []observability.StorageWriteHealth {
+		observed, failing, configured := adminSrv.AuditWriteStatus()
+		if !configured {
+			return nil
+		}
+		state := observability.StorageWriteUnknown
+		if observed {
+			state = observability.StorageWriteOK
+			if failing {
+				state = observability.StorageWriteFailing
+			}
+		}
+		return []observability.StorageWriteHealth{{Sink: "audit_log", State: state}}
+	})
 	adminHandler := adminSrv.Handler()
-	metricsSrv := httptest.NewServer(adminHandler)
-	t.Cleanup(metricsSrv.Close)
+	targetAddr := "127.0.0.1:0"
+	var targetMu sync.Mutex
+	var targetServer *http.Server
+	startTarget := func() error {
+		targetMu.Lock()
+		defer targetMu.Unlock()
+		if targetServer != nil {
+			return nil
+		}
+		listener, err := net.Listen("tcp", targetAddr)
+		if err != nil {
+			return fmt.Errorf("listen for Jul metrics target: %w", err)
+		}
+		targetAddr = listener.Addr().String()
+		targetServer = &http.Server{Handler: adminHandler}
+		server := targetServer
+		go func() {
+			if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				t.Errorf("serve Jul metrics target: %v", err)
+			}
+		}()
+		return nil
+	}
+	stopTarget := func() error {
+		targetMu.Lock()
+		server := targetServer
+		targetServer = nil
+		targetMu.Unlock()
+		if server == nil {
+			return nil
+		}
+		return server.Close()
+	}
+	if err := startTarget(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := stopTarget(); err != nil {
+			t.Errorf("stop Jul metrics target during cleanup: %v", err)
+		}
+	})
+	setTargetRunning = func(running bool) {
+		var err error
+		if running {
+			err = startTarget()
+		} else {
+			err = stopTarget()
+		}
+		if err != nil {
+			t.Fatalf("set Jul metrics target running=%t: %v", running, err)
+		}
+	}
+	var independentPoolEligible atomic.Int64
+	independentPoolEligible.Store(1)
+	independentMetricsSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		fmt.Fprintf(w, "# HELP jul_upstream_backends_eligible Backends currently able to take a request, labeled by pool.\n# TYPE jul_upstream_backends_eligible gauge\njul_upstream_backends_eligible{pool=\"independent-pool\"} %d\n", independentPoolEligible.Load())
+	}))
+	t.Cleanup(independentMetricsSrv.Close)
+	setIndependentPoolEligible = independentPoolEligible.Store
 
 	// Verify Jul's real admin transport/auth gate rejects unauthenticated /metrics scrapes with 401.
-	unauthResp, err := http.Get(metricsSrv.URL + "/metrics")
+	metricsURL := "http://" + targetAddr
+	unauthResp, err := http.Get(metricsURL + "/metrics")
 	if err != nil {
 		t.Fatalf("unauthenticated /metrics probe: %v", err)
 	}
@@ -250,7 +407,7 @@ func startRealPrometheusAndAlertmanagerE2E(t *testing.T, factory *HandlerFactory
 		t.Fatalf("unauthenticated /metrics status = %d, want 401", unauthResp.StatusCode)
 	}
 
-	julTarget := strings.TrimPrefix(metricsSrv.URL, "http://")
+	julTarget := targetAddr
 
 	promPort := allocateLocalPort(t)
 	amPort := allocateLocalPort(t)
@@ -279,6 +436,17 @@ func startRealPrometheusAndAlertmanagerE2E(t *testing.T, factory *HandlerFactory
 	fastRules = strings.ReplaceAll(fastRules, `transition="weakened"}[5m]`, `transition="weakened"}[3s]`)
 	fastRules = strings.ReplaceAll(fastRules, "[5m]", "[20s]")
 
+	shippedOperationalRules, err := os.ReadFile(filepath.Join(root, "examples", "alerting", "security", "operational-alerts.rules.yml"))
+	if err != nil {
+		t.Fatalf("read operational rules: %v", err)
+	}
+	fastOperationalRules := string(shippedOperationalRules)
+	fastOperationalRules = strings.ReplaceAll(fastOperationalRules, "interval: 15s", "interval: 1s")
+	for _, duration := range []string{"30s", "1m", "5m", "10m", "15m"} {
+		fastOperationalRules = strings.ReplaceAll(fastOperationalRules, "for: "+duration, "for: 1s")
+	}
+	fastOperationalRules = strings.ReplaceAll(fastOperationalRules, `instance="127.0.0.1:9090"`, `instance="`+julTarget+`"`)
+
 	shippedAM, err := os.ReadFile(filepath.Join(root, "examples", "alerting", "security", "alertmanager.yml"))
 	if err != nil {
 		t.Fatalf("read shipped alertmanager.yml: %v", err)
@@ -294,6 +462,7 @@ func startRealPrometheusAndAlertmanagerE2E(t *testing.T, factory *HandlerFactory
 
 rule_files:
   - /etc/prometheus/security-alerts.rules.yml
+  - /etc/prometheus/operational-alerts.rules.yml
 
 alerting:
   alertmanagers:
@@ -311,13 +480,18 @@ scrape_configs:
     static_configs:
       - targets:
           - "%s"
-`, amPort, julTarget)
+  - job_name: "jul-independent-fixture"
+    static_configs:
+      - targets:
+          - "%s"
+`, amPort, julTarget, strings.TrimPrefix(independentMetricsSrv.URL, "http://"))
 
 	for name, content := range map[string]string{
-		"security-alerts.rules.yml": fastRules,
-		"alertmanager.yml":          fastAM,
-		"prometheus.yml":            promYML,
-		"metrics-token":             bearerToken + "\n",
+		"security-alerts.rules.yml":    fastRules,
+		"operational-alerts.rules.yml": fastOperationalRules,
+		"alertmanager.yml":             fastAM,
+		"prometheus.yml":               promYML,
+		"metrics-token":                bearerToken + "\n",
 	} {
 		p := filepath.Join(cfgDir, name)
 		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
@@ -369,12 +543,12 @@ scrape_configs:
 			_ = r2.Body.Close()
 		}
 		if err1 == nil && r1.StatusCode == http.StatusOK && err2 == nil && r2.StatusCode == http.StatusOK && scrapeCount.Load() >= 2 {
-			return promURL, amURL, adminSrv, auditDir, auditFile
+			return promURL, amURL, adminSrv, auditDir, auditFile, setTargetRunning, setIndependentPoolEligible
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
 	t.Fatalf("Prometheus/Alertmanager did not become ready and scrape Jul within 20s (scrapes=%d)", scrapeCount.Load())
-	return "", "", nil, "", ""
+	return "", "", nil, "", "", nil, nil
 }
 
 func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
@@ -413,6 +587,42 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 
 	factory, cleanup := minimalFactory(t)
 	defer cleanup()
+
+	var poolHealthy atomic.Bool
+	poolHealthy.Store(true)
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if !poolHealthy.Load() {
+			http.Error(w, "backend unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(healthServer.Close)
+	poolRegistry := upstream.NewRegistry(upstream.RegistryOptions{Logger: factory.Log})
+	t.Cleanup(poolRegistry.CloseAll)
+	poolRegistry.Begin()
+	_, err := poolRegistry.For(ctx, config.UpstreamConfig{
+		Name:     "integration-pool",
+		Strategy: "round_robin",
+		Servers:  []config.UpstreamServer{{Address: healthServer.Listener.Addr().String(), Weight: 1}},
+		HealthCheck: &config.HealthCheckConfig{
+			Enabled:            true,
+			Type:               "http",
+			Path:               "/",
+			Interval:           config.Duration(100 * time.Millisecond),
+			Timeout:            config.Duration(50 * time.Millisecond),
+			HealthyThreshold:   1,
+			UnhealthyThreshold: 1,
+		},
+	}, "http")
+	if err != nil {
+		t.Fatalf("build integration upstream pool: %v", err)
+	}
+	poolRegistry.Commit()
+	poolRegistry.Activate()
+	factory.Metrics.SetUpstreamStatsSource(func() []observability.UpstreamPoolStats {
+		return upstreamStats(poolRegistry)
+	})
 
 	makeCfg := func(wafMode string, wafEnabled bool) *config.Config {
 		return &config.Config{
@@ -469,7 +679,7 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 	defer retire1()
 	hBlock := hMap[":8080"]
 
-	_, amURL, adminSrv, auditDir, auditFile := startRealPrometheusAndAlertmanagerE2E(t, factory, receiver.URL+"/alerts")
+	_, amURL, adminSrv, auditDir, auditFile, setTargetRunning, setIndependentPoolEligible := startRealPrometheusAndAlertmanagerE2E(t, factory, receiver.URL+"/alerts")
 
 	// Send clean requests and auth 401 denials -> must NOT fire JulWAFRejectionSymptomElevated.
 	for i := 0; i < 6; i++ {
@@ -528,6 +738,125 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 			time.Sleep(250 * time.Millisecond)
 		}
 		return false
+	}
+	countGroupedWebhooks := func(alertName, wantStatus, job, instance string) int {
+		mu.Lock()
+		defer mu.Unlock()
+		count := 0
+		for _, notification := range notifications {
+			if notification.Status == wantStatus &&
+				notification.GroupLabels["alertname"] == alertName &&
+				notification.GroupLabels["job"] == job &&
+				notification.GroupLabels["instance"] == instance {
+				count++
+			}
+		}
+		return count
+	}
+
+	// Stop/restart the real Jul metrics listener so Prometheus observes a
+	// connection failure rather than an HTTP response from an injected handler.
+	setTargetRunning(false)
+	if !waitForWebhook("JulTargetUnavailable", "firing", 15*time.Second, nil) {
+		t.Fatal("real failed Jul scrape did not deliver JulTargetUnavailable")
+	}
+	mu.Lock()
+	foundTargetIdentity := false
+	for _, notification := range notifications {
+		if notification.Status == "firing" && notification.GroupLabels["alertname"] == "JulTargetUnavailable" &&
+			notification.GroupLabels["job"] == "jul-admin-metrics" && notification.GroupLabels["instance"] != "" {
+			foundTargetIdentity = true
+		}
+	}
+	mu.Unlock()
+	if !foundTargetIdentity {
+		t.Fatal("target outage notification lost its job/instance grouping labels")
+	}
+	targetInstance := ""
+	mu.Lock()
+	for _, notification := range notifications {
+		if notification.Status == "firing" && notification.GroupLabels["alertname"] == "JulTargetUnavailable" {
+			targetInstance = notification.GroupLabels["instance"]
+			break
+		}
+	}
+	mu.Unlock()
+	if count := countGroupedWebhooks("JulTargetUnavailable", "firing", "jul-admin-metrics", targetInstance); count != 1 {
+		t.Fatalf("initial target outage was delivered %d times, want one grouped firing notification", count)
+	}
+	time.Sleep(2500 * time.Millisecond)
+	if count := countGroupedWebhooks("JulTargetUnavailable", "firing", "jul-admin-metrics", targetInstance); count != 1 {
+		t.Fatalf("unchanged target outage was redelivered %d times before repeat_interval, want one", count)
+	}
+	// While the Jul target is down, a separate synthetic target faults its
+	// backend pool. Target-aware inhibition must not suppress this independent
+	// alert.
+	setIndependentPoolEligible(0)
+	if !waitForWebhook("JulPoolNoEligibleBackend", "firing", 15*time.Second, nil) {
+		t.Fatal("independent fixture pool fault was hidden while the Jul target was unavailable")
+	}
+	mu.Lock()
+	foundIndependentPool := false
+	for _, notification := range notifications {
+		if notification.Status != "firing" || notification.GroupLabels["alertname"] != "JulPoolNoEligibleBackend" {
+			continue
+		}
+		if notification.GroupLabels["job"] == "jul-independent-fixture" && notification.GroupLabels["instance"] != "" {
+			foundIndependentPool = true
+		}
+	}
+	mu.Unlock()
+	if !foundIndependentPool {
+		t.Fatal("independent pool notification lost its distinct target identity")
+	}
+	setIndependentPoolEligible(1)
+	setTargetRunning(true)
+	if !waitForWebhook("JulTargetUnavailable", "resolved", 15*time.Second, nil) {
+		t.Fatal("recovered Jul target did not deliver a resolved notification")
+	}
+	if !waitForWebhook("JulPoolNoEligibleBackend", "resolved", 15*time.Second, nil) {
+		t.Fatal("independent pool recovery did not deliver a resolved notification")
+	}
+
+	// This certificate gauge is synthetic on Jul's real /metrics endpoint. It
+	// verifies rule evaluation and delivery, not certificate parsing.
+	factory.Metrics.ObserveCertExpiry("synthetic-expiry.test", time.Now().Add(6*24*time.Hour))
+	if !waitForWebhook("JulCertificateExpiryCritical", "firing", 15*time.Second, nil) {
+		t.Fatal("synthetic near-expiry leaf signal did not deliver a critical notification")
+	}
+	factory.Metrics.ObserveCertExpiry("synthetic-expiry.test", time.Now().Add(90*24*time.Hour))
+	if !waitForWebhook("JulCertificateExpiryCritical", "resolved", 15*time.Second, nil) {
+		t.Fatal("synthetic renewed leaf signal did not deliver a resolved notification")
+	}
+
+	waitPoolEligibility := func(want int) bool {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			for _, pool := range upstreamStats(poolRegistry) {
+				if pool.Name == "integration-pool" && pool.Eligible == want {
+					return true
+				}
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		return false
+	}
+	if !waitPoolEligibility(1) {
+		t.Fatal("real Jul upstream health-check producer did not report the healthy fixture backend")
+	}
+	poolHealthy.Store(false)
+	if !waitPoolEligibility(0) {
+		t.Fatal("real Jul upstream health-check producer did not report zero eligible backends")
+	}
+	if !waitForWebhook("JulPoolNoEligibleBackend", "firing", 15*time.Second, nil) {
+		t.Fatal("real Jul zero-eligible pool did not deliver a critical notification")
+	}
+	poolHealthy.Store(true)
+	if !waitPoolEligibility(1) {
+		t.Fatal("real Jul upstream health-check producer did not restore backend eligibility")
+	}
+	if !waitForWebhook("JulPoolNoEligibleBackend", "resolved", 15*time.Second, nil) {
+		t.Fatal("real Jul pool recovery did not deliver a resolved notification")
 	}
 
 	var sentAttacks atomic.Int32
@@ -705,6 +1034,12 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 		mu.Unlock()
 		t.Fatalf("real Prometheus -> Alertmanager did not deliver firing JulSecurityEvidenceUnavailableOrDegraded{producer=\"audit_sink\"} without posture reads; got=%+v", got)
 	}
+	if !waitForWebhookMatching("JulStorageWriteFailing", "firing", "sink", "audit_log", 15*time.Second) {
+		mu.Lock()
+		got := append([]alertNotificationPayload(nil), notifications...)
+		mu.Unlock()
+		t.Fatalf("real audit rotation failure did not deliver JulStorageWriteFailing{sink=\"audit_log\"}; got=%+v", got)
+	}
 
 	if err := os.WriteFile(auditFile, nil, 0o600); err != nil {
 		t.Fatalf("restore auditFile: %v", err)
@@ -740,6 +1075,9 @@ func TestSecurityAlertingEndToEndLocalReceiver(t *testing.T) {
 		got := append([]alertNotificationPayload(nil), notifications...)
 		mu.Unlock()
 		t.Fatalf("real Prometheus -> Alertmanager did not deliver resolved JulSecurityEvidenceUnavailableOrDegraded{producer=\"audit_sink\"}; got=%+v", got)
+	}
+	if !waitForWebhookMatching("JulStorageWriteFailing", "resolved", "sink", "audit_log", 15*time.Second) {
+		t.Fatal("a subsequent successful durable audit write did not resolve JulStorageWriteFailing")
 	}
 
 	// 6. Item 8: Causal Alertmanager inhibition:

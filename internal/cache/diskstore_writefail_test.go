@@ -63,12 +63,18 @@ func TestCacheDiskWriteHealthTracksFailureAndRecovery(t *testing.T) {
 	if _, _, ok := nilCache.DiskWriteHealth(); ok {
 		t.Fatal("nil cache reported a disk tier")
 	}
+	if _, _, ok := nilCache.DiskWriteStatus(); ok {
+		t.Fatal("nil cache reported a disk-tier write status")
+	}
 	memOnly, err := New(config.CacheConfig{Enabled: true}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := memOnly.DiskWriteHealth(); ok {
 		t.Fatal("memory-only cache reported a disk tier")
+	}
+	if _, _, ok := memOnly.DiskWriteStatus(); ok {
+		t.Fatal("memory-only cache reported a disk-tier write status")
 	}
 
 	dir := t.TempDir()
@@ -80,13 +86,22 @@ func TestCacheDiskWriteHealthTracksFailureAndRecovery(t *testing.T) {
 	if n, failing, ok := c.DiskWriteHealth(); !ok || n != 0 || failing {
 		t.Fatalf("fresh disk tier = (%d, %v, %v)", n, failing, ok)
 	}
+	if observed, failing, ok := c.DiskWriteStatus(); !ok || observed || failing {
+		t.Fatalf("fresh disk-tier write status = (%v, %v, %v), want unknown", observed, failing, ok)
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		t.Fatal(err)
 	}
 	c.disk.set("a", entry())
+	if observed, failing, ok := c.DiskWriteStatus(); !ok || !observed || !failing {
+		t.Fatalf("first failed store reported (%v, %v, %v), want failing", observed, failing, ok)
+	}
 	c.disk.set("b", entry())
 	if n, failing, _ := c.DiskWriteHealth(); n != 2 || !failing {
 		t.Fatalf("after failures = (%d, %v), want (2, true)", n, failing)
+	}
+	if observed, failing, ok := c.DiskWriteStatus(); !ok || !observed || !failing {
+		t.Fatalf("failed disk-tier write status = (%v, %v, %v)", observed, failing, ok)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -94,5 +109,8 @@ func TestCacheDiskWriteHealthTracksFailureAndRecovery(t *testing.T) {
 	c.disk.set("c", entry())
 	if n, failing, _ := c.DiskWriteHealth(); n != 2 || failing {
 		t.Fatalf("after recovery = (%d, %v), want (2, false)", n, failing)
+	}
+	if observed, failing, ok := c.DiskWriteStatus(); !ok || !observed || failing {
+		t.Fatalf("recovered disk-tier write status = (%v, %v, %v)", observed, failing, ok)
 	}
 }
