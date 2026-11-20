@@ -52,17 +52,43 @@ type StorageHints struct {
 // storage category. It is called per StatsSnapshot and per scrape.
 type StorageSource func() []StorageHeadroom
 
+// StorageWriteHealth is the current observed write state of one configured
+// Jul-owned sink. Unobserved means Jul has not seen a write result yet.
+type StorageWriteHealth struct {
+	Sink  string
+	State StorageWriteState
+}
+
+// StorageWriteHealthSource returns the configured cache, access-log and
+// durable-audit sinks. Unconfigured sinks are omitted.
+type StorageWriteHealthSource func() []StorageWriteHealth
+
+// StorageWriteState is one of StorageWriteUnknown, StorageWriteOK, or
+// StorageWriteFailing.
+type StorageWriteState string
+
+const (
+	StorageWriteUnknown StorageWriteState = "unknown"
+	StorageWriteOK      StorageWriteState = "ok"
+	StorageWriteFailing StorageWriteState = "failing"
+)
+
 type storageSource struct {
 	src   StorageSource
 	hints StorageHints
 }
 
-// storageCollector exports jul_storage_bytes{category,kind} at scrape time.
-// Both labels are closed sets; a field the platform cannot report is simply
-// absent rather than exported as zero.
+type storageWriteHealthSource struct {
+	src StorageWriteHealthSource
+}
+
+// storageCollector exports Jul-owned storage and write-health gauges at scrape
+// time. Labels are closed sets; unavailable values are absent, never zero.
 type storageCollector struct {
-	source atomic.Pointer[storageSource]
-	bytes  *prometheus.Desc
+	source      atomic.Pointer[storageSource]
+	writeHealth atomic.Pointer[storageWriteHealthSource]
+	bytes       *prometheus.Desc
+	writeState  *prometheus.Desc
 }
 
 func newStorageCollector() *storageCollector {
@@ -70,12 +96,20 @@ func newStorageCollector() *storageCollector {
 		bytes: prometheus.NewDesc("jul_storage_bytes",
 			"Capacity of the filesystem holding a Jul-owned storage category, labeled by category (cache/access_log/audit_log/config/config_history/plugin_upload/acme) and kind (available/total). Absent when the platform cannot report it.",
 			[]string{"category", "kind"}, nil),
+		writeState: prometheus.NewDesc("jul_storage_write_health",
+			"Current observed write state of a configured Jul-owned disk cache, file access log, or durable audit log. State is unknown until a write result is observed; unconfigured sinks are absent.",
+			[]string{"sink", "state"}, nil),
 	}
 }
 
 // SetStorageSource wires the Jul-owned storage headroom reader (#437).
 func (m *Metrics) SetStorageSource(src StorageSource, hints StorageHints) {
 	m.storage.source.Store(&storageSource{src: src, hints: hints})
+}
+
+// SetStorageWriteHealthSource wires the owner-side write-health reader.
+func (m *Metrics) SetStorageWriteHealthSource(src StorageWriteHealthSource) {
+	m.storage.writeHealth.Store(&storageWriteHealthSource{src: src})
 }
 
 // storageSnapshot returns the current categories and hints, or nil before a
@@ -93,19 +127,27 @@ func (m *Metrics) storageSnapshot() ([]StorageHeadroom, *StorageHints) {
 	return cats, &hints
 }
 
-func (c *storageCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.bytes }
+func (c *storageCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.bytes
+	ch <- c.writeState
+}
 
 func (c *storageCollector) Collect(ch chan<- prometheus.Metric) {
 	s := c.source.Load()
-	if s == nil {
-		return
-	}
-	for _, h := range s.src() {
-		if h.AvailableBytes != nil {
-			ch <- prometheus.MustNewConstMetric(c.bytes, prometheus.GaugeValue, *h.AvailableBytes, h.Category, "available")
+	if s != nil {
+		for _, h := range s.src() {
+			if h.AvailableBytes != nil {
+				ch <- prometheus.MustNewConstMetric(c.bytes, prometheus.GaugeValue, *h.AvailableBytes, h.Category, "available")
+			}
+			if h.TotalBytes != nil {
+				ch <- prometheus.MustNewConstMetric(c.bytes, prometheus.GaugeValue, *h.TotalBytes, h.Category, "total")
+			}
 		}
-		if h.TotalBytes != nil {
-			ch <- prometheus.MustNewConstMetric(c.bytes, prometheus.GaugeValue, *h.TotalBytes, h.Category, "total")
+	}
+	w := c.writeHealth.Load()
+	if w != nil {
+		for _, h := range w.src() {
+			ch <- prometheus.MustNewConstMetric(c.writeState, prometheus.GaugeValue, 1, h.Sink, string(h.State))
 		}
 	}
 }
@@ -116,16 +158,19 @@ func (c *storageCollector) Collect(ch chan<- prometheus.Metric) {
 type WriteHealth struct {
 	failures atomic.Int64
 	failing  atomic.Bool
+	observed atomic.Bool
 }
 
 // Fail records one failed write and returns the running failure count.
 func (h *WriteHealth) Fail() int64 {
+	h.observed.Store(true)
 	h.failing.Store(true)
 	return h.failures.Add(1)
 }
 
 // OK records one successful write.
 func (h *WriteHealth) OK() {
+	h.observed.Store(true)
 	if h.failing.Load() {
 		h.failing.Store(false)
 	}
@@ -137,7 +182,8 @@ func (h *WriteHealth) Snapshot() (failures int64, failing bool) {
 	return h.failures.Load(), h.failing.Load()
 }
 
-// AccessLogFileWriteHealth is the process-lifetime write health of the
-// access-log file sink, shared by every sink generation so a reload does not
-// reset it.
-var AccessLogFileWriteHealth WriteHealth
+// State returns whether a write result has been observed and whether the most
+// recent write failed.
+func (h *WriteHealth) State() (observed, failing bool) {
+	return h.observed.Load(), h.failing.Load()
+}

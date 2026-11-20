@@ -3,6 +3,8 @@
 /jul.exe
 /jul_test.exe
 /dist/
+/examples/alerting/security/secrets/metrics-bearer-token.local
+/examples/alerting/security/secrets/external_webhook_url
 
 # Go test binaries (`go test -c` / ad-hoc test builds)
 *.test

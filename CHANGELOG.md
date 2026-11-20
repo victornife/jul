@@ -211,6 +211,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Add an optional Prometheus/Alertmanager operational alert recipe for expected
+  Jul target outages and missing targets, observed leaf-certificate expiry,
+  active pools with no eligible backends, Jul-owned storage headroom, and
+  owner-observed disk-cache/access-log/durable-audit write health. The recipe
+  reuses the existing metrics:read boundary, defaults to a loopback-only local
+  notification receiver, and remains separate from the Jul runtime.
+
 - Partial #700 I1 inspection-governor foundations: process-wide configuration,
   including the 64 KiB response-header accounting ceiling and a route-aware
   minimum budget checked by `jul check`, startup, reload and admin apply;

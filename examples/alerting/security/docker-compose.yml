@@ -1,7 +1,8 @@
 # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 # SPDX-License-Identifier: agpl
 #
-# Optional version-pinned Prometheus + Alertmanager recipe for Jul.IA security alerting (#628-B).
+# Optional version-pinned Prometheus + Alertmanager recipe for Jul.IA operational
+# and security alerting (#628-A/B).
 
 services:
   prometheus:
@@ -10,10 +11,12 @@ services:
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.retention.time=24h"
+      - "--web.external-url=http://127.0.0.1:9091"
       - "--web.listen-address=127.0.0.1:9091"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./security-alerts.rules.yml:/etc/prometheus/security-alerts.rules.yml:ro
+      - ./operational-alerts.rules.yml:/etc/prometheus/operational-alerts.rules.yml:ro
       - ./secrets:/etc/prometheus/secrets:ro
     restart: unless-stopped
 
@@ -22,10 +25,12 @@ services:
     network_mode: host
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--web.external-url=http://127.0.0.1:9093"
       - "--web.listen-address=127.0.0.1:9093"
       - "--cluster.listen-address="
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./secrets:/etc/alertmanager/secrets:ro
     depends_on:
       - receiver
     restart: unless-stopped

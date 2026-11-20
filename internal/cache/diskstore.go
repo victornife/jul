@@ -322,7 +322,8 @@ type diskStore struct {
 	writeFails   atomic.Int64
 	reported     atomic.Int64
 	// failing is true while the most recent store failed (#437).
-	failing atomic.Bool
+	failing       atomic.Bool
+	writeObserved atomic.Bool
 }
 
 // diskWriteFailureLogInterval is the minimum spacing of write-failure warnings.
@@ -1704,6 +1705,7 @@ func safeDiskError(err error) error {
 }
 
 func (d *diskStore) recordWriteFailure(err error) {
+	d.writeObserved.Store(true)
 	d.failing.Store(true)
 	total := d.writeFails.Add(1)
 	if d.writeFailLog.Allow(diskWriteFailureLogInterval) {
@@ -2187,6 +2189,7 @@ func (d *diskStore) publishStreamWithGenFull(key string, e *Entry, s *diskStream
 	}
 	s.published = true
 	s.acct.release()
+	d.writeObserved.Store(true)
 	if d.failing.Load() && !d.tombstoneDirty && !d.unrecoverableInvalidation.Load() {
 		d.failing.Store(false)
 	}

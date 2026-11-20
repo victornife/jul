@@ -230,6 +230,7 @@ func TestBuildAccessSinksSharedFileLeaseLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	newSinks, newClosers, err := BuildAccessSinks(cfg, newBase())
 	if err != nil {
 		_ = oldClosers[0].Close()
@@ -266,6 +267,38 @@ func TestBuildAccessSinksSharedFileLeaseLifetime(t *testing.T) {
 	accessFiles.Unlock()
 	if retained {
 		t.Fatal("last owner did not release the backing writer")
+	}
+}
+
+func TestAccessLogWriteHealthIsScopedToCurrentPath(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a.log")
+	pathB := filepath.Join(dir, "b.log")
+	_, closersA, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"file"}, File: pathA}, newBase())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sinksB, closersB, err := BuildAccessSinks(config.AccessLogConfig{Sinks: []string{"file"}, File: pathB}, newBase())
+	if err != nil {
+		_ = closersA[0].Close()
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = closersA[0].Close()
+		_ = closersB[0].Close()
+	}()
+
+	leaseA := closersA[0].(*accessFileLease)
+	leaseA.state.health.Fail()
+	if failures, observed, failing := AccessLogWriteHealthForPath(pathA); failures != 1 || !observed || !failing {
+		t.Fatalf("path A health = (%d, %v, %v)", failures, observed, failing)
+	}
+	if failures, observed, failing := AccessLogWriteHealthForPath(pathB); failures != 0 || observed || failing {
+		t.Fatalf("path B inherited path A health = (%d, %v, %v)", failures, observed, failing)
+	}
+	sinksB[0].Log(sampleRecord())
+	if failures, observed, failing := AccessLogWriteHealthForPath(pathB); failures != 0 || !observed || failing {
+		t.Fatalf("path B successful write health = (%d, %v, %v)", failures, observed, failing)
 	}
 }
 

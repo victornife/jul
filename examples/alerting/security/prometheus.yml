@@ -1,7 +1,7 @@
 # Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
 # SPDX-License-Identifier: agpl
 #
-# Prometheus configuration for Jul.IA Security Operations Alerting (#628-B + #632).
+# Prometheus configuration for Jul.IA Security Operations Alerting (#628-A/B + #632).
 # Scrapes Jul's authenticated /metrics endpoint (requires metrics:read permission
 # and loopback or TLS transport).
 
@@ -11,6 +11,7 @@ global:
 
 rule_files:
   - /etc/prometheus/security-alerts.rules.yml
+  - /etc/prometheus/operational-alerts.rules.yml
 
 alerting:
   alertmanagers:
@@ -27,7 +28,7 @@ scrape_configs:
     scheme: "http"
     authorization:
       type: "Bearer"
-      credentials_file: "/etc/prometheus/secrets/metrics-bearer-token"
+      credentials_file: "/etc/prometheus/secrets/metrics-bearer-token.local"
     static_configs:
       - targets:
           - "127.0.0.1:9090"

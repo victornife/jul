@@ -144,6 +144,8 @@ type auditFileOwner struct {
 	healthMu      sync.Mutex
 	healthFailure auditFailureCategory
 	healthAt      time.Time
+	writeObserved bool
+	writeFailing  bool
 
 	// mu serializes the physical stream. Tickets are allocated under auditLog.mu
 	// and therefore preserve global event order even though the disk write occurs
@@ -448,6 +450,21 @@ func (a *auditLog) statusReport() *AuditSinkStatus {
 	return st
 }
 
+func (a *auditLog) writeHealthState() (observed, failing, configured bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	configured = a.sinkConfigured
+	activeFailure := a.activeFailure
+	if !configured {
+		return false, false, configured
+	}
+	if a.currentSink == nil {
+		return activeFailure != "", activeFailure != "", true
+	}
+	observed, failing = a.currentSink.owner.writeHealthSnapshot()
+	return observed, failing, true
+}
+
 func auditLogWarn(log *slog.Logger, msg, path string, err error) {
 	if log != nil {
 		log.Warn(msg, "path", path, "err", err)
@@ -601,6 +618,10 @@ func (o *auditFileOwner) healthSnapshot() (auditFailureCategory, time.Time) {
 func (o *auditFileOwner) noteOrderedHealth(result auditWriteResult) {
 	o.healthMu.Lock()
 	defer o.healthMu.Unlock()
+	o.writeObserved = true
+	if result.err == nil || result.durable {
+		o.writeFailing = false
+	}
 	if result.err == nil {
 		o.healthFailure = ""
 		o.healthAt = time.Time{}
@@ -608,6 +629,13 @@ func (o *auditFileOwner) noteOrderedHealth(result auditWriteResult) {
 	}
 	o.healthFailure = result.category
 	o.healthAt = time.Now().UTC()
+	o.writeFailing = !result.durable
+}
+
+func (o *auditFileOwner) writeHealthSnapshot() (observed, failing bool) {
+	o.healthMu.Lock()
+	defer o.healthMu.Unlock()
+	return o.writeObserved, o.writeFailing
 }
 
 func (o *auditFileOwner) activate() {

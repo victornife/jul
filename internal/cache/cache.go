@@ -876,6 +876,15 @@ func (c *Cache) DiskWriteHealth() (failures int64, failing, ok bool) {
 	return c.disk.writeFails.Load(), c.disk.failing.Load(), true
 }
 
+// DiskWriteStatus reports whether a disk-tier write result has been observed,
+// whether the most recent store failed, and whether a disk tier exists.
+func (c *Cache) DiskWriteStatus() (observed, failing, ok bool) {
+	if c == nil || c.disk == nil {
+		return false, false, false
+	}
+	return c.disk.writeObserved.Load(), c.disk.failing.Load(), true
+}
+
 // key derives the primary cache key from method, host, and request URI.
 //
 // It never includes a credential, a cookie or any other request header: the key

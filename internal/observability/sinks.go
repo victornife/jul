@@ -78,7 +78,7 @@ func BuildAccessSinks(cfg config.AccessLogConfig, base *slog.Logger) (sinks []mi
 				err = acquireErr
 				return
 			}
-			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lease, log: base, sink: "file", health: &AccessLogFileWriteHealth}, cfg.Format))))
+			sinks = append(sinks, middleware.NewSlogSink(slog.New(accessHandler(&failureReportingWriter{w: lease, log: base, sink: "file", health: &lease.state.health}, cfg.Format))))
 			closers = append(closers, lease)
 		case "syslog":
 			w, serr := newSyslogWriter()
@@ -119,6 +119,7 @@ type accessFileState struct {
 	// mutating a live one: lumberjack's background pruning reads MaxBackups
 	// without its own lock.
 	writer    *lumberjack.Logger
+	health    WriteHealth
 	policy    accessFilePolicy
 	policySeq uint64
 	refs      int // guarded by accessFiles
@@ -173,6 +174,23 @@ func (lease *accessFileLease) Write(p []byte) (int, error) {
 	st := lease.state
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	return lease.writeLocked(p)
+}
+
+func (lease *accessFileLease) WriteWithHealth(p []byte, health *WriteHealth) (int, error) {
+	st := lease.state
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	n, err := lease.writeLocked(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	recordWriteHealth(health, err)
+	return n, err
+}
+
+func (lease *accessFileLease) writeLocked(p []byte) (int, error) {
+	st := lease.state
 	if lease.seq > st.policySeq {
 		if lease.policy != st.policy {
 			// Close before reopening so only one handle ever appends; the
@@ -215,18 +233,31 @@ type failureReportingWriter struct {
 	sink     string
 	limit    logthrottle.Limiter
 	failures atomic.Int64
-	// health, when set, is the process-lifetime write health surfaced in the
-	// storage headroom view (#437).
+	// health, when set, tracks the physical sink whose write is being reported.
 	health *WriteHealth
 }
 
 func (f *failureReportingWriter) Write(p []byte) (int, error) {
-	n, err := f.w.Write(p)
+	var (
+		n   int
+		err error
+	)
 	if f.health != nil {
-		if err != nil {
-			f.health.Fail()
+		if writer, ok := f.w.(interface {
+			WriteWithHealth([]byte, *WriteHealth) (int, error)
+		}); ok {
+			n, err = writer.WriteWithHealth(p, f.health)
 		} else {
-			f.health.OK()
+			n, err = f.w.Write(p)
+			if err == nil && n != len(p) {
+				err = io.ErrShortWrite
+			}
+			recordWriteHealth(f.health, err)
+		}
+	} else {
+		n, err = f.w.Write(p)
+		if err == nil && n != len(p) {
+			err = io.ErrShortWrite
 		}
 	}
 	if err != nil {
@@ -236,6 +267,35 @@ func (f *failureReportingWriter) Write(p []byte) (int, error) {
 		}
 	}
 	return n, err
+}
+
+func recordWriteHealth(health *WriteHealth, err error) {
+	if health == nil {
+		return
+	}
+	if err != nil {
+		health.Fail()
+		return
+	}
+	health.OK()
+}
+
+// AccessLogWriteHealthForPath returns the state for the writer currently leased
+// at path. A path with no active file sink has no observation.
+func AccessLogWriteHealthForPath(path string) (failures int64, observed, failing bool) {
+	abs, err := accessFileAbs(path)
+	if err != nil {
+		return 0, false, false
+	}
+	accessFiles.Lock()
+	defer accessFiles.Unlock()
+	state := accessFiles.entries[abs]
+	if state == nil {
+		return 0, false, false
+	}
+	failures, failing = state.health.Snapshot()
+	observed, _ = state.health.State()
+	return failures, observed, failing
 }
 
 // accessHandler builds an slog handler for a dedicated access-log sink. Access
