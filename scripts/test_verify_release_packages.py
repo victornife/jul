@@ -7,6 +7,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -273,6 +274,74 @@ class WorkflowTests(unittest.TestCase):
             archive.write_bytes(b"modified")
             self.assertNotEqual(run().returncode, 0)
 
+
+class RunbookTests(unittest.TestCase):
+    def test_negative_checks_distinguish_rejection_from_verifier_errors(self):
+        docs = (ROOT / "docs/release.md").read_text()
+        script = docs.split("For a reproducible Linux negative check", 1)[1].split("```bash\n", 1)[1].split("\n```", 1)[0]
+        mock_gh = r'''
+import hashlib, json, os, pathlib, sys
+args = sys.argv[1:]
+tag = os.environ["tag"]
+requested = f"jul_{tag}_linux_amd64_lean.tar.gz"
+sibling = f"jul_{tag}_linux_amd64_full.tar.gz"
+mode = os.environ["MOCK_MODE"]
+if args[:2] == ["release", "download"]:
+    pathlib.Path(requested).write_bytes(b"lean")
+    pathlib.Path(sibling).write_bytes(b"full")
+    sys.exit(0)
+path = pathlib.Path(args[2])
+digest = hashlib.sha256(path.read_bytes()).hexdigest()
+if path.parent.name == "changed":
+    if mode == "changed_accept":
+        print("[]")
+        sys.exit(0)
+    if mode == "changed_network":
+        print("Error: HTTP 503: Service Unavailable", file=sys.stderr)
+    elif mode == "wrong_404":
+        print("Error: HTTP 404: Not Found (https://api.github.com/other)", file=sys.stderr)
+    else:
+        print(f"Error: HTTP 404: Not Found (https://api.github.com/repos/victornife/jul/attestations/sha256:{digest}?x)", file=sys.stderr)
+    sys.exit(1)
+if path.parent.name == "sibling":
+    if mode == "sibling_network":
+        print("Error: network unavailable", file=sys.stderr)
+        sys.exit(1)
+    if mode == "sibling_json":
+        print("not json")
+        sys.exit(0)
+    name = requested if mode == "sibling_wrong_name" else sibling
+else:
+    if mode == "control_network" and pathlib.Path("changed.err").exists():
+        print("Error: network unavailable", file=sys.stderr)
+        sys.exit(1)
+    name = path.name
+print(json.dumps([{"verificationResult": {"statement": {
+    "predicateType": "https://slsa.dev/provenance/v1",
+    "subject": [{"name": name, "digest": {"sha256": digest}}]}}}]))
+'''
+        for mode in ("ok", "changed_accept", "changed_network", "wrong_404", "control_network",
+                     "sibling_network", "sibling_json", "sibling_wrong_name"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                tool_dir = root / "bin"
+                tool_dir.mkdir()
+                gh = tool_dir / "gh"
+                gh.write_text(f"#!{sys.executable}\n" + mock_gh)
+                gh.chmod(0o755)
+                result = subprocess.run(["bash", "-c", script], cwd=root,
+                                        env={**os.environ, "PATH": f"{tool_dir}{os.pathsep}{os.environ['PATH']}",
+                                             "tag": TAG, "commit": COMMIT, "MOCK_MODE": mode},
+                                        capture_output=True, text=True)
+                if mode == "ok":
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("PASS: changed digest", result.stdout)
+                    self.assertIn("PASS: verified sibling", result.stdout)
+                else:
+                    self.assertNotEqual(result.returncode, 0, result.stdout)
+                    self.assertNotIn("PASS: verified sibling", result.stdout)
+                    if mode.startswith("changed") or mode in ("wrong_404", "control_network"):
+                        self.assertNotIn("PASS: changed digest", result.stdout)
 
 
 if __name__ == "__main__":

@@ -410,10 +410,12 @@ evidence. Review failures before publication. If a stable tag builds new
 bytes, independently verify its actual downloaded draft assets against the
 stable tag and source before publication.
 
-For a reproducible Linux negative check, use a fresh empty directory, the same
-trusted `tag` and `commit` above, and actual draft assets. This checks both a
-modified archive and a genuine full sibling renamed to the lean name, with
-replacement unsigned checksums. Neither check extracts the archive:
+For a reproducible Linux negative check, use gh 2.102.0, a fresh empty directory,
+the same trusted `tag` and `commit` above, and actual draft assets. This checks
+both a modified archive and a genuine full sibling renamed to the lean name,
+with replacement unsigned checksums. Neither check extracts the archive.
+Unexpected CLI diagnostics, network errors, or failed positive controls are
+**inconclusive**, not negative-test passes:
 
 ```bash
 set -euo pipefail
@@ -434,21 +436,51 @@ check_subject() {
 }
 check_subject "$requested" "$requested"
 check_subject "$sibling" "$sibling"
+mkdir changed sibling
+cp "$requested" "changed/$requested"
+printf x >> "changed/$requested"
+cp "$sibling" "sibling/$requested"
 for case in changed sibling; do
-  mkdir "$case"
-  if [ "$case" = changed ]; then
-    cp "$requested" "$case/$requested"
-    printf x >> "$case/$requested"
-  else
-    cp "$sibling" "$case/$requested"
-  fi
   (cd "$case"; sha256sum "$requested" > SHA256SUMS; awk '{print $1}' SHA256SUMS > "$requested.sha256")
-  if check_subject "$case/$requested" "$requested"; then
-    echo "ERROR: $case substitution was accepted" >&2
-    exit 1
-  fi
-  echo "PASS: $case rejected before extraction"
 done
+original_digest="$(sha256sum "$requested" | awk '{print $1}')"
+changed_digest="$(sha256sum "changed/$requested" | awk '{print $1}')"
+test "$changed_digest" != "$original_digest"
+if gh attestation verify "changed/$requested" --repo victornife/jul \
+  --signer-workflow victornife/jul/.github/workflows/release.yml \
+  --source-ref "refs/tags/$tag" --source-digest "$commit" \
+  --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 \
+  --format json >changed.json 2>changed.err; then
+  echo "ERROR: changed archive was accepted" >&2
+  exit 1
+else
+  status=$?
+fi
+# gh 2.102.0 reports this exact endpoint and digest when no attestation exists.
+if [ "$status" -ne 1 ] || ! grep -Fq \
+  "Error: HTTP 404: Not Found (https://api.github.com/repos/victornife/jul/attestations/sha256:$changed_digest?" changed.err; then
+  echo "INCONCLUSIVE: unexpected verifier failure" >&2
+  cat changed.err >&2
+  exit 1
+fi
+check_subject "$requested" "$requested"
+echo "PASS: changed digest has no provenance; original still verifies"
+
+sibling_digest="$(sha256sum "sibling/$requested" | awk '{print $1}')"
+gh attestation verify "sibling/$requested" --repo victornife/jul \
+  --signer-workflow victornife/jul/.github/workflows/release.yml \
+  --source-ref "refs/tags/$tag" --source-digest "$commit" \
+  --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 \
+  --format json >sibling.json
+jq -e --arg name "$sibling" --arg digest "$sibling_digest" \
+  'any(.[]; .verificationResult.statement |
+    .predicateType == "https://slsa.dev/provenance/v1" and
+    any(.subject[]?; .name == $name and .digest.sha256 == $digest))' sibling.json >/dev/null
+jq -r --arg name "$requested" --arg digest "$sibling_digest" \
+  'any(.[]; .verificationResult.statement |
+    .predicateType == "https://slsa.dev/provenance/v1" and
+    any(.subject[]?; .name == $name and .digest.sha256 == $digest))' sibling.json | grep -Fx false
+echo "PASS: verified sibling subject is not the selected asset"
 ```
 
 Save the commands, outputs and the twelve native reports with the release
