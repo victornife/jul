@@ -65,7 +65,7 @@ jobs:
       - name: Execute controlled systemd network journey
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/systemd-deployment-e2e.py --package-directory packages --ci-network --report systemd-network.json
+        run: python scripts/systemd-deployment-e2e.py --package-directory packages --legacy-v220 --ci-network --report systemd-network.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

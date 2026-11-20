@@ -143,7 +143,7 @@ class Run:
         verifier = importlib.util.module_from_spec(verifier_spec)
         verifier_spec.loader.exec_module(verifier)
         binary, identity = verifier.verify_archive(self.args.package_directory.resolve(), "v2.2.0",
-                                                    SOURCE, "linux", self.args.arch, "full")
+                                                    SOURCE, "linux", self.args.arch, "full", legacy="v2.2.0")
         self.binary = binary
         capabilities = json.loads(command(binary, "capabilities", "-json"))
         require(all(capabilities["features"].get(name) for name in ("grpc", "stream_proxy", "consul")),

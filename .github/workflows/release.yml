@@ -176,6 +176,10 @@ jobs:
           fi
           sha256sum "${out}" | awk '{print $1}' > "${out}.sha256"
           echo "archive=${out}" >> "$GITHUB_OUTPUT"
+      - name: Attest archive provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4
+        with:
+          subject-path: ${{ steps.pkg.outputs.archive }}
       # Keyless build provenance: cryptographically links this binary to the
       # workflow run/commit that produced it (SLSA-style attestation via Sigstore).
       - name: Attest build provenance
@@ -192,7 +196,10 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: ${{ steps.prof.outputs.name }}
-          path: dist/${{ steps.prof.outputs.name }}.*
+          path: |
+            ${{ steps.pkg.outputs.archive }}
+            ${{ steps.pkg.outputs.archive }}.sha256
+          if-no-files-found: error
 
   publish:
     name: publish draft release
@@ -214,6 +221,18 @@ jobs:
         run: |
           set -euo pipefail
           cd artifacts
+          for os in linux darwin windows; do
+            for arch in amd64 arm64; do
+              for profile in lean full; do
+                ext=tar.gz
+                [ "$os" = windows ] && ext=zip
+                archive="jul_${GITHUB_REF_NAME}_${os}_${arch}_${profile}.${ext}"
+                test -f "$archive"
+                test -f "$archive.sha256"
+                test "$(sha256sum "$archive" | awk '{print $1}')" = "$(cat "$archive.sha256")"
+              done
+            done
+          done
           sha256sum jul_*.tar.gz jul_*.zip > SHA256SUMS
           cat SHA256SUMS
       # Publish a DRAFT release so a human reviews assets before going public.

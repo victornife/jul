@@ -7,6 +7,7 @@ import http.server
 import json
 import os
 import platform
+import re
 import secrets
 import signal
 import socket
@@ -19,6 +20,25 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
+
+REPOSITORY = "victornife/jul"
+WORKFLOW = "victornife/jul/.github/workflows/release.yml"
+PROVENANCE = "https://slsa.dev/provenance/v1"
+SBOM = "https://spdx.dev/Document/v2.3"
+HISTORICAL_RELEASES = {
+    "v2.1.0": "0951090a6fb7703769a15b4749be9664a9842c98",
+    "v2.2.0": "b12e051139f652b400cff37d9f063f5637a7d550",
+}
+# Digests of the full v2.2.0 archives from the committed journey-7 evidence.
+# Historical deployment journeys also execute packaged scripts and service units.
+V220_FULL_DIGESTS = {
+    ("darwin", "amd64"): "e5d43a8fb91c34e40d969753b3aeb963323e95a105c4c4ecaf5d6ce7a52e40dd",
+    ("darwin", "arm64"): "52841b1c4771483f9d3bd0cde6f947d4daa44d34600406400b53c38c79f75aa8",
+    ("linux", "amd64"): "288ffa323d92d8abb586d364954eaaaa627026304471e33a3ec1174339287862",
+    ("linux", "arm64"): "07d468c3e92232b0174cbdc66cd2abbb507719e332b3f60a5dfc60b22f172998",
+    ("windows", "amd64"): "9a841f53e6e6b9f730daa206add1df4832a840cd3d17bd6c157291b286a4664d",
+    ("windows", "arm64"): "fccc7c050d83898f3cc361c67937a0fda429b0a2c53a98efb0d6d6650232febe",
+}
 
 
 def command(*arguments, **options):
@@ -62,17 +82,42 @@ def unpack(archive, directory):
             package.extractall(directory, filter="data")
 
 
-def verify_archive(folder, tag, commit, operating_system, architecture, profile):
+def attest(subject, tag, commit, predicate, *, json_output=False):
+    args = ["gh", "attestation", "verify", subject, "--repo", REPOSITORY,
+            "--signer-workflow", WORKFLOW, "--source-ref", f"refs/tags/{tag}",
+            "--source-digest", commit, "--deny-self-hosted-runners",
+            "--predicate-type", predicate]
+    if json_output:
+        args += ["--format", "json"]
+    return command(*args)
+
+
+def verify_archive(folder, tag, commit, operating_system, architecture, profile, *, legacy=None):
+    if legacy is not None and (legacy != tag or HISTORICAL_RELEASES.get(legacy) != commit):
+        raise RuntimeError("legacy verification is restricted to pinned historical releases")
     name = f"jul_{tag}_{operating_system}_{architecture}_{profile}"
     archive = folder / (name + (".zip" if operating_system == "windows" else ".tar.gz"))
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if legacy == "v2.2.0" and (profile != "full" or
+                               V220_FULL_DIGESTS.get((operating_system, architecture)) != digest):
+        raise RuntimeError(f"historical archive digest mismatch: {archive.name}")
+    if not legacy:
+        verified = json.loads(attest(archive, tag, commit, PROVENANCE, json_output=True))
+        if not any(
+            result.get("verificationResult", {}).get("statement", {}).get("predicateType") == PROVENANCE
+            and any(subject.get("name") == archive.name and subject.get("digest", {}).get("sha256") == digest
+                    for subject in result.get("verificationResult", {}).get("statement", {}).get("subject", []))
+            for result in verified
+        ):
+            raise RuntimeError(f"verified archive subject mismatch: {archive.name}")
     individual = Path(str(archive) + ".sha256").read_text().split()[0]
     aggregate = {line.split()[1].lstrip("*"): line.split()[0]
                  for line in (folder / "SHA256SUMS").read_text().splitlines() if line.strip()}
     if digest != individual or aggregate.get(archive.name) != digest:
         raise RuntimeError(f"archive checksum mismatch: {archive.name}")
-    unpack(archive, folder)
-    package = folder / name
+    extraction = Path(tempfile.mkdtemp(prefix="release-extract-", dir=folder))
+    unpack(archive, extraction)
+    package = extraction / name
     binary = package / ("jul.exe" if operating_system == "windows" else "jul")
     for required in (binary.name, "README.md", "SECURITY.md", "server.toml", "jul.spdx.json", "LICENSE"):
         if not (package / required).is_file():
@@ -80,18 +125,20 @@ def verify_archive(folder, tag, commit, operating_system, architecture, profile)
     sbom = json.loads((package / "jul.spdx.json").read_text())
     if not sbom.get("spdxVersion", "").startswith("SPDX-"):
         raise RuntimeError("invalid bundled SPDX SBOM")
+    attest(binary, tag, commit, PROVENANCE)
+    attest(binary, tag, commit, SBOM)
     metadata = json.loads(command(binary, "version", "-json"))
     check_identity(metadata, tag, commit, operating_system, architecture)
     capabilities = json.loads(command(binary, "capabilities", "-json"))["features"]
     if capabilities.get("waf") != (profile == "full") or capabilities.get("console") != (profile == "full"):
         raise RuntimeError("package build-profile capabilities mismatch")
-    for predicate in ("https://slsa.dev/provenance/v1", "https://spdx.dev/Document/v2.3"):
-        command("gh", "attestation", "verify", binary, "--repo", "victornife/jul",
-                "--signer-workflow", "victornife/jul/.github/workflows/release.yml",
-                "--source-ref", f"refs/tags/{tag}", "--source-digest", commit,
-                "--deny-self-hosted-runners", "--predicate-type", predicate)
     return binary, {"archive": archive.name, "sha256": digest, "metadata": metadata,
-                    "checksums": "passed", "provenance": "passed", "sbom": "passed"}
+                    "checksums": "passed",
+                    "archive_provenance": "unavailable (pinned historical release)" if legacy else "passed",
+                    "archive_subject": None if legacy else archive.name,
+                    "historical_digest": "passed (committed v2.2.0 evidence)" if legacy == "v2.2.0" else "not checked",
+                    "binary_provenance": "passed", "binary_subject": binary.name,
+                    "sbom": "passed"}
 
 
 def free_port():
@@ -198,13 +245,19 @@ def main():
         return
     if not all((arguments.tag, arguments.commit, arguments.os, arguments.arch, arguments.directory, arguments.report)):
         parser.error("tag, commit, os, arch, directory and report are required")
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?", arguments.tag):
+        parser.error("tag must be a stable or rc.N version tag")
+    if not re.fullmatch(r"[0-9a-f]{40}", arguments.commit):
+        parser.error("commit must be a full lowercase commit SHA")
     host_os = {"Linux": "linux", "Darwin": "darwin", "Windows": "windows"}[platform.system()]
     host_arch = native_architecture(platform.machine(), os.environ, os.name == "nt")
     if (host_os, host_arch) != (arguments.os, arguments.arch):
         raise RuntimeError("native verification requested on a different host architecture")
     arguments.directory.mkdir(parents=True, exist_ok=True)
     previous_tag = "v2.1.0"
-    previous_commit = "0951090a6fb7703769a15b4749be9664a9842c98"
+    previous_commit = HISTORICAL_RELEASES[previous_tag]
+    if arguments.tag == previous_tag:
+        raise RuntimeError("target release must differ from the historical rollback fixture")
     downloaded = {}
     for tag, commit in ((arguments.tag, arguments.commit), (previous_tag, previous_commit)):
         folder = arguments.directory / tag
@@ -212,7 +265,8 @@ def main():
         command("gh", "release", "download", tag, "--repo", "victornife/jul", "--pattern",
                 f"jul_{tag}_{arguments.os}_{arguments.arch}_*", "--pattern", "SHA256SUMS",
                 "--dir", folder, "--clobber")
-        downloaded[tag] = {profile: verify_archive(folder, tag, commit, arguments.os, arguments.arch, profile)
+        downloaded[tag] = {profile: verify_archive(folder, tag, commit, arguments.os, arguments.arch, profile,
+                                                    legacy=previous_tag if tag == previous_tag else None)
                            for profile in ("lean", "full")}
     class Backend(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -225,7 +279,9 @@ def main():
     worker = threading.Thread(target=backend.serve_forever, daemon=True)
     worker.start()
     report = {"tag": arguments.tag, "source": arguments.commit, "os": arguments.os,
-              "arch": arguments.arch, "native": True, "profiles": {}}
+              "arch": arguments.arch, "native": True, "gh_version": command("gh", "--version").splitlines()[0],
+              "verifier_source": command("git", "rev-parse", "HEAD").strip(),
+              "profiles": {}}
     try:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -263,8 +319,9 @@ inline_rules = """
 SecRule REQUEST_URI "@streq /blocked" "id:9910201,phase:1,deny,status:403,log,msg:'release package check'"
 """
 ''')
-                old, _ = downloaded[previous_tag][profile]
+                old, historical_verification = downloaded[previous_tag][profile]
                 binary, verification = downloaded[arguments.tag][profile]
+                verification["rollback_fixture"] = historical_verification
                 for stage, executable in (("previous", old), ("upgrade", binary), ("rollback", old)):
                     exercise(executable, configuration, traffic, admin, token, profile == "full")
                     verification[stage] = "passed"

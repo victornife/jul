@@ -11,6 +11,9 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Security
 
+- Future release archives are attested as finished files, enabling keyless
+  provenance and exact asset-identity verification before extraction (#696).
+  Existing immutable archives remain unchanged and lack this evidence.
 - The Console CI audit temporarily accepts only development-dependency advisory
   GHSA-fc5q-39xc-vjpf for `picomatch`: no patched release is published.
   Malicious glob patterns can still cause build or development processes to

@@ -695,6 +695,8 @@ jobs:
         run: python scripts/docs-check.py
       - name: run docs-check unit tests
         run: python scripts/test_docs_check.py
+      - name: test release archive verification
+        run: python scripts/test_verify_release_packages.py
       - name: validate D11 inventory and evidence contract
         run: |
           python scripts/check-d11-certification.py

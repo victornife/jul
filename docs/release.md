@@ -27,7 +27,9 @@ Each release attaches, for every platform × profile:
 | `…​.sha256` | SHA-256 of that archive. |
 | `SHA256SUMS` | One file with the checksums of every archive. |
 
-In addition, each binary carries a **build-provenance** attestation and an
+For releases built with archive attestation, each finished archive has a
+keyless **build-provenance** attestation. Each binary also carries a
+**build-provenance** attestation and an
 **SBOM (SPDX JSON)** attestation, both keyless-signed via Sigstore and verifiable
 with `gh attestation verify` (see [below](#verifying-a-download)). The SPDX SBOM
 is also bundled inside each archive as `jul.spdx.json`.
@@ -77,7 +79,8 @@ flowchart LR
    soak minimums.
 4. **`build`** (matrix) — cross-compiles a static (`CGO_ENABLED=0`),
    `-trimpath` binary per cell, stamps `main.version` from the tag, generates
-   the SBOM, archives, checksums, and attests provenance + SBOM.
+   the SBOM, archives, checksums, and attests archive and binary provenance
+   plus the binary's SBOM.
 5. **`publish`** — collects every archive, writes `SHA256SUMS`, and opens a
    **draft** GitHub Release. A maintainer reviews the assets and publishes it.
 
@@ -98,13 +101,9 @@ record remains preserved; see the
 scope, macOS 13+/Go 1.27.2 compatibility, #569's seven exact HTTP/3 exceptions,
 security-advisory coordination and actual-download/upgrade acceptance.
 
-After the normal workflow creates the draft from immutable tag `v2.2.0`,
-dispatch `release-package-verification.yml` with that tag and its exact source
-SHA. It downloads the actual draft-release archives on native hosts and checks
-checksums, embedded identity, signed provenance/SBOM, startup and old-to-new-to-old
-upgrade/rollback. Review the reports before publication. No new long-running
-soak or overall coverage target is introduced; the normal short release gate
-is unchanged.
+The historical `v2.2.0` verification used the verifier available at that tag;
+its archive has no archive-level attestation. Its original evidence is not
+reclassified by the current verifier.
 
 ## Published v2.2.0 verification
 
@@ -234,7 +233,7 @@ vX.Y.Z-rc.N
 
 It runs the **same** release gate, five-minute release soak-smoke,
 cross-platform lean/full matrix, checksums, SBOM generation, and
-provenance/SBOM attestation as a stable tag. The
+archive/binary provenance and binary SBOM attestation as a stable tag. The
 workflow still creates a **draft** GitHub Release. An RC draft remains
 unpublished unless a maintainer explicitly decides otherwise; it is an artifact
 and release-path validation point, not a claim that all selected correctness or
@@ -264,9 +263,102 @@ Before creating any tag:
 
 ## Verifying a download
 
-Replace `<file>` with the archive you downloaded.
+For releases built with this archive-attestation workflow, verify **before
+extracting**. Obtain the expected immutable tag and full source commit from the
+reviewed release record or another trusted tag identity, not from the archive
+or checksum files. Select the exact OS, architecture and profile filename from
+the release asset list. The workflow's keyless identity is trusted to produce
+the claimed subject; a compromised release workflow can sign malicious bytes.
+Attestations are fetched from GitHub by digest and verified with GitHub's
+Sigstore trust material. Network access and GitHub CLI access to the repository
+and attestations are required. The commands require `gh attestation verify`
+with `--signer-workflow`, `--source-ref`, `--source-digest`,
+`--deny-self-hosted-runners` and `--format json` (tested locally with gh
+2.102.0), plus `jq` and Python 3 for the Bash example. A missing command,
+unavailable evidence, policy mismatch or absent matching subject is a failure:
+do not extract or execute.
 
-**Checksum:**
+Set the values below from the trusted release record and your selected asset.
+For example, `os=linux`, `arch=amd64`, `profile=lean`, `ext=tar.gz`;
+Windows assets use `os=windows` and `ext=zip`.
+
+```bash
+set -euo pipefail
+tag='vX.Y.Z-rc.N'                 # replace with the trusted tag
+commit='FULL_40_CHARACTER_COMMIT' # replace with the trusted source commit
+os=linux arch=amd64 profile=lean ext=tar.gz
+archive="jul_${tag}_${os}_${arch}_${profile}.${ext}"
+digest="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$archive")"
+gh attestation verify "$archive" --repo victornife/jul \
+  --signer-workflow victornife/jul/.github/workflows/release.yml \
+  --source-ref "refs/tags/$tag" --source-digest "$commit" \
+  --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 \
+  --format json |
+  jq -e --arg name "$archive" --arg digest "$digest" \
+    'any(.[]; .verificationResult.statement |
+      .predicateType == "https://slsa.dev/provenance/v1" and
+      any(.subject[]?; .name == $name and .digest.sha256 == $digest))' >/dev/null
+inspection="$(mktemp -d)"
+tar -xzf "$archive" -C "$inspection"
+cd "$inspection/jul_${tag}_${os}_${arch}_${profile}"
+for predicate in https://slsa.dev/provenance/v1 https://spdx.dev/Document/v2.3; do
+  gh attestation verify ./jul --repo victornife/jul \
+    --signer-workflow victornife/jul/.github/workflows/release.yml \
+    --source-ref "refs/tags/$tag" --source-digest "$commit" \
+    --deny-self-hosted-runners --predicate-type "$predicate"
+done
+```
+
+PowerShell (Windows; replace the tag and commit with the trusted values):
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$tag = 'vX.Y.Z-rc.N'
+$commit = 'FULL_40_CHARACTER_COMMIT'
+$arch = 'amd64'
+$profile = 'lean'
+$archive = "jul_${tag}_windows_${arch}_${profile}.zip"
+$digest = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+$json = gh attestation verify $archive --repo victornife/jul `
+  --signer-workflow victornife/jul/.github/workflows/release.yml `
+  --source-ref "refs/tags/$tag" --source-digest $commit `
+  --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 --format json
+if ($LASTEXITCODE -ne 0) { throw 'Archive provenance verification failed' }
+$verified = $json | ConvertFrom-Json
+$match = @($verified | Where-Object {
+  $_.verificationResult.statement.predicateType -eq 'https://slsa.dev/provenance/v1' -and
+  @($_.verificationResult.statement.subject | Where-Object {
+    $_.name -ceq $archive -and $_.digest.sha256 -ceq $digest
+  }).Count -gt 0
+})
+if ($match.Count -eq 0) { throw 'Archive subject or digest mismatch' }
+$inspection = Join-Path ([System.IO.Path]::GetTempPath()) ([System.IO.Path]::GetRandomFileName())
+New-Item -ItemType Directory -Path $inspection | Out-Null
+Expand-Archive -LiteralPath $archive -DestinationPath $inspection
+Set-Location (Join-Path $inspection "jul_${tag}_windows_${arch}_${profile}")
+foreach ($predicate in @('https://slsa.dev/provenance/v1', 'https://spdx.dev/Document/v2.3')) {
+  gh attestation verify .\jul.exe --repo victornife/jul `
+    --signer-workflow victornife/jul/.github/workflows/release.yml `
+    --source-ref "refs/tags/$tag" --source-digest $commit `
+    --deny-self-hosted-runners --predicate-type $predicate
+  if ($LASTEXITCODE -ne 0) { throw "Binary attestation verification failed: $predicate" }
+}
+```
+
+The verified JSON subject name and SHA-256 must occur together in the same
+verified statement. This rejects a valid sibling asset renamed to the selected
+filename. Keep downloads in a directory not writable by untrusted users while
+verifying and extracting. These examples use online evidence; offline bundle
+and trusted-root provisioning are not qualified here.
+
+**Historical releases:** v2.2.0 and older immutable archives were not
+archive-attested. Do not claim pre-extraction authentication for them. If
+needed, check their unsigned checksums, extract only in a disposable isolated
+environment as an unprivileged user, and verify binary provenance and SBOM
+against the historical tag and source before executing the binary. Isolation
+does not authenticate the archive. See the historical records above.
+
+**Optional integrity checks:**
 
 Each per-archive `.sha256` asset contains only the hash; `SHA256SUMS` has the
 usual hash-plus-filename lines. Replace `<file>` with the downloaded archive:
@@ -288,49 +380,112 @@ if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) {
 }
 ```
 
-The checksum files are published alongside the archive and are not signed:
-matching them detects corruption but does not independently authenticate the
-archive. The current workflow attests the **binary**, not the archive, so
-provenance cannot yet be verified before extraction (#526). Until an
-archive-level solution is delivered, extract only in a disposable, isolated
-environment as an unprivileged user and do not execute the binary before
-verifying it. Isolation does not itself authenticate the archive.
+The checksum files are unsigned. A match detects corruption but does not
+independently authenticate the archive.
 
-**Extract for binary verification:** after the checksum check, replace
-`<file>` and the directory placeholders with the actual archive and its name:
+### First RC qualification handoff
 
-```bash
-mkdir -p jul-inspection
-tar -xzf "<file>" -C jul-inspection
-cd jul-inspection/jul_<ver>_<os>_<arch>_<profile>
-```
-
-For Windows (PowerShell):
-
-```powershell
-New-Item -ItemType Directory -Force jul-inspection | Out-Null
-Expand-Archive -Path '<file>' -DestinationPath jul-inspection
-Set-Location 'jul-inspection\jul_<ver>_windows_<arch>_<profile>'
-```
-
-**Build provenance + SBOM** from that directory (needs the
-[GitHub CLI](https://cli.github.com/)):
+After this verifier has merged and an authorized immutable RC tag is built, record the tag, full source
+commit and release workflow run URL from the reviewed release decision. Confirm
+the tag resolves to that commit from a trusted checkout. Dispatch the native
+verifier from the current workflow definition:
 
 ```bash
-# Verify SLSA provenance:
-gh attestation verify ./jul --repo victornife/jul
-
-# Verify the separately signed SPDX SBOM attestation:
-gh attestation verify ./jul --repo victornife/jul \
-  --predicate-type https://spdx.dev/Document/v2.3
+set -euo pipefail
+tag='vX.Y.Z-rc.N'                 # authorized RC
+commit='FULL_40_CHARACTER_COMMIT' # reviewed tag's source
+test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$commit"
+gh workflow run release-package-verification.yml --ref main -f tag="$tag" -f source="$commit"
+gh run list --workflow release-package-verification.yml --limit 5
+gh release view "$tag" --json assets --jq '.assets[] | [.name, .digest] | @tsv'
 ```
 
-On Windows, use `.\jul.exe` in place of `./jul` in both commands.
+Record the verification run URL and all six native reports: twelve actual
+draft asset names and SHA-256 digests, OS/architecture/profile, gh version,
+archive pre-extraction, binary and SBOM verdicts, and upgrade/rollback results.
+Perform and retain representative negative checks against actual RC evidence,
+including changed bytes and a same-release sibling renamed to the selected
+asset. Do not count local fixtures or workflow artifacts as downloaded draft
+evidence. Review failures before publication. If a stable tag builds new
+bytes, independently verify its actual downloaded draft assets against the
+stable tag and source before publication.
 
-For a reviewed candidate or stable release, also constrain the signer workflow,
-source ref, and source digest as shown in its evidence document. This confirms
-the binary was built by this repository's release workflow from the expected
-source, with no local signing keys involved.
+For a reproducible Linux negative check, use gh 2.102.0, a fresh empty directory,
+the same trusted `tag` and `commit` above, and actual draft assets. This checks
+both a modified archive and a genuine full sibling renamed to the lean name,
+with replacement unsigned checksums. Neither check extracts the archive.
+Unexpected CLI diagnostics, network errors, or failed positive controls are
+**inconclusive**, not negative-test passes:
+
+```bash
+set -euo pipefail
+requested="jul_${tag}_linux_amd64_lean.tar.gz"
+sibling="jul_${tag}_linux_amd64_full.tar.gz"
+gh release download "$tag" --repo victornife/jul --pattern "$requested" --pattern "$sibling" --dir .
+check_subject() {
+  local file=$1 expected=$2 digest
+  digest="$(sha256sum "$file" | awk '{print $1}')"
+  gh attestation verify "$file" --repo victornife/jul \
+    --signer-workflow victornife/jul/.github/workflows/release.yml \
+    --source-ref "refs/tags/$tag" --source-digest "$commit" \
+    --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 --format json |
+    jq -e --arg name "$expected" --arg digest "$digest" \
+      'any(.[]; .verificationResult.statement |
+        .predicateType == "https://slsa.dev/provenance/v1" and
+        any(.subject[]?; .name == $name and .digest.sha256 == $digest))' >/dev/null
+}
+check_subject "$requested" "$requested"
+check_subject "$sibling" "$sibling"
+mkdir changed sibling
+cp "$requested" "changed/$requested"
+printf x >> "changed/$requested"
+cp "$sibling" "sibling/$requested"
+for case in changed sibling; do
+  (cd "$case"; sha256sum "$requested" > SHA256SUMS; awk '{print $1}' SHA256SUMS > "$requested.sha256")
+done
+original_digest="$(sha256sum "$requested" | awk '{print $1}')"
+changed_digest="$(sha256sum "changed/$requested" | awk '{print $1}')"
+test "$changed_digest" != "$original_digest"
+if gh attestation verify "changed/$requested" --repo victornife/jul \
+  --signer-workflow victornife/jul/.github/workflows/release.yml \
+  --source-ref "refs/tags/$tag" --source-digest "$commit" \
+  --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 \
+  --format json >changed.json 2>changed.err; then
+  echo "ERROR: changed archive was accepted" >&2
+  exit 1
+else
+  status=$?
+fi
+# gh 2.102.0 reports this exact endpoint and digest when no attestation exists.
+if [ "$status" -ne 1 ] || ! grep -Fq \
+  "Error: HTTP 404: Not Found (https://api.github.com/repos/victornife/jul/attestations/sha256:$changed_digest?" changed.err; then
+  echo "INCONCLUSIVE: unexpected verifier failure" >&2
+  cat changed.err >&2
+  exit 1
+fi
+check_subject "$requested" "$requested"
+echo "PASS: changed digest has no provenance; original still verifies"
+
+sibling_digest="$(sha256sum "sibling/$requested" | awk '{print $1}')"
+gh attestation verify "sibling/$requested" --repo victornife/jul \
+  --signer-workflow victornife/jul/.github/workflows/release.yml \
+  --source-ref "refs/tags/$tag" --source-digest "$commit" \
+  --deny-self-hosted-runners --predicate-type https://slsa.dev/provenance/v1 \
+  --format json >sibling.json
+jq -e --arg name "$sibling" --arg digest "$sibling_digest" \
+  'any(.[]; .verificationResult.statement |
+    .predicateType == "https://slsa.dev/provenance/v1" and
+    any(.subject[]?; .name == $name and .digest.sha256 == $digest))' sibling.json >/dev/null
+jq -r --arg name "$requested" --arg digest "$sibling_digest" \
+  'any(.[]; .verificationResult.statement |
+    .predicateType == "https://slsa.dev/provenance/v1" and
+    any(.subject[]?; .name == $name and .digest.sha256 == $digest))' sibling.json | grep -Fx false
+echo "PASS: verified sibling subject is not the selected asset"
+```
+
+Save the commands, outputs and the twelve native reports with the release
+qualification record. The two positive checks above must succeed; an
+unavailable verifier is not a successful qualification.
 
 ## Installing
 
