@@ -34,7 +34,7 @@ groups:
       - alert: JulCertificateExpiryCritical
         expr: |
           (jul_tls_cert_expiry_seconds - time() < 7 * 24 * 3600)
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 10m
         labels:
           severity: critical
@@ -46,7 +46,7 @@ groups:
       - alert: JulCertificateExpiryWarning
         expr: |
           (jul_tls_cert_expiry_seconds - time() >= 7 * 24 * 3600 and jul_tls_cert_expiry_seconds - time() < 30 * 24 * 3600)
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 10m
         labels:
           severity: warning
@@ -58,7 +58,7 @@ groups:
       - alert: JulPoolNoEligibleBackend
         expr: |
           (jul_upstream_backends_eligible == 0)
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 1m
         labels:
           severity: critical
@@ -76,7 +76,7 @@ groups:
           ) < 0.05
           and on (job, instance, category)
           jul_storage_bytes{kind="total"} > 0
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 5m
         labels:
           severity: critical
@@ -100,7 +100,7 @@ groups:
           ) < 0.10
           and on (job, instance, category)
           jul_storage_bytes{kind="total"} > 0
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 10m
         labels:
           severity: warning
@@ -112,19 +112,19 @@ groups:
       - alert: JulStorageWriteFailing
         expr: |
           (jul_storage_write_health{state="failing"} == 1)
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 30s
         labels:
           severity: critical
           category: storage_write
         annotations:
           summary: "Jul {{ $labels.sink }} writes are failing."
-          description: "Inspect this sink's Jul-owned path and filesystem. Recovery requires a producer-observed successful write; low free space and historical failure counters alone do not trigger this alert."
+          description: "Inspect this sink's Jul-owned path and filesystem. A resolved notification is not proof of recovery; confirm state=ok on a successful scrape. Cache health also includes cleanup and recovery failures."
 
       - alert: JulStorageWriteStatusUnknown
         expr: |
           (jul_storage_write_health{state="unknown"} == 1)
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 15m
         labels:
           severity: warning

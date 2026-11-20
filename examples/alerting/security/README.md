@@ -14,6 +14,10 @@ PromQL metric names, types and labels are governed by
 [`docs/metrics-contract.json`](../../../docs/metrics-contract.json). Alert
 expressions retain `job` and `instance` so target grouping and inhibition stay
 isolated. Values below are operator examples, not Jul SLOs.
+Dependent operational and security alerts require `up == 1` for the
+same `job` and `instance`. A `resolved` notification means the rule condition
+cleared, not necessarily that the underlying fault recovered: a failed scrape,
+a disappeared target, or missing producer data can also clear a symptom.
 
 | Alert / scenario | Producer, applicability and signal | Severity; trigger / resolve | Operator action and blind spots |
 | --- | --- | --- | --- |
@@ -22,7 +26,7 @@ isolated. Values below are operator examples, not Jul SLOs.
 | `JulCertificateExpiryWarning` / `JulCertificateExpiryCritical` | `jul_tls_cert_expiry_seconds{domain}` from the actual observed leaf certificate; only where Jul publishes that signal. | Warning below 30d for 10m; critical below 7d (including expired) for 10m. Warning excludes the critical band. Renewed expiry resolves the relevant alert. | Inspect served leaf and renewal. Static/unsupported certificates and a missing series are unknown, not healthy; a synthetic gauge only tests the rule and delivery path. |
 | `JulPoolNoEligibleBackend` | `jul_upstream_backends_eligible{pool}`; applies to emitted serving pools. | Critical at exactly 0 for 1m; resolves above 0. | Inspect backend health, circuit state, capacity and discovery. An absent/retired pool or missing metric does not mean zero. |
 | `JulStorageLow` / `JulStorageCritical` | Positive `jul_storage_bytes{category,kind="available|total"}` for configured Jul-owned paths. | Warning at 5–10% for 10m; critical below 5% for 5m. Exclusive bands avoid duplicate warning/critical notices. | Free/expand the category's filesystem. Missing values or nonpositive total are unknown; this is Jul-owned path capacity, not host-wide disk monitoring. |
-| `JulStorageWriteFailing` | `jul_storage_write_health{sink,state}` from the disk-cache, file access-log and durable-audit owners. A configured sink starts `unknown`, then reports the latest observed write result. | Critical when `state="failing"` persists 30s; resolves only after an owner-observed successful write. | Inspect that sink and filesystem. Cumulative old failures, low capacity, governor drops and audit maintenance-only failures do not imply this alert. A quiet sink stays unknown. |
+| `JulStorageWriteFailing` | `jul_storage_write_health{sink,state}` from the disk-cache, file access-log and durable-audit owners. Cache health covers disk persistence, including store, cleanup and recovery failures. | Critical when `state="failing"` persists 30s. The alert clears on any loss of that condition, including an unknown or disabled sink or loss of a successful scrape. | Inspect the sink and filesystem. Confirm recovery with `state="ok"` on a successful scrape: the owner observed a successful access-log or durable audit write, or a cache store with no outstanding persistence failure. Historical failure counts, low capacity, governor drops and audit maintenance-only failures do not imply this alert. |
 | `JulStorageWriteStatusUnknown` | Same producer; configured sinks with no write result yet. Unconfigured sinks have no series. | Warning when `state="unknown"` lasts 15m; resolves after an observed write. | Generate expected sink activity and verify its result. Unknown is deliberately not treated as success. |
 
 | Alert | Producer Metric(s) | Owner Issue | Severity | Window / Threshold |

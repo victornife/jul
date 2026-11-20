@@ -689,7 +689,7 @@
     {
       "name": "jul_storage_write_health",
       "type": "gauge",
-      "help": "Current observed write state of a configured Jul-owned disk cache, file access log, or durable audit log. State is unknown until a write result is observed; unconfigured sinks are absent.",
+      "help": "Current observed persistence state of a configured Jul-owned disk cache, file access log, or durable audit log. Cache includes store, cleanup and recovery failures. Unobserved state is unknown; unconfigured sinks are absent.",
       "labels": [
         "sink",
         "state"

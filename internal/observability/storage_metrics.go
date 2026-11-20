@@ -97,7 +97,7 @@ func newStorageCollector() *storageCollector {
 			"Capacity of the filesystem holding a Jul-owned storage category, labeled by category (cache/access_log/audit_log/config/config_history/plugin_upload/acme) and kind (available/total). Absent when the platform cannot report it.",
 			[]string{"category", "kind"}, nil),
 		writeState: prometheus.NewDesc("jul_storage_write_health",
-			"Current observed write state of a configured Jul-owned disk cache, file access log, or durable audit log. State is unknown until a write result is observed; unconfigured sinks are absent.",
+			"Current observed persistence state of a configured Jul-owned disk cache, file access log, or durable audit log. Cache includes store, cleanup and recovery failures. Unobserved state is unknown; unconfigured sinks are absent.",
 			[]string{"sink", "state"}, nil),
 	}
 }
@@ -153,37 +153,40 @@ func (c *storageCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 // WriteHealth tracks one storage writer's failures for the headroom view.
-// Recovery costs a load on the success path and a store only on the
-// failing→ok transition, so a hot writer does not contend on the flag.
+// The success path stores only when the state changes.
 type WriteHealth struct {
 	failures atomic.Int64
-	failing  atomic.Bool
-	observed atomic.Bool
+	state    atomic.Uint32
 }
+
+const (
+	writeUnknown uint32 = iota
+	writeOK
+	writeFailing
+)
 
 // Fail records one failed write and returns the running failure count.
 func (h *WriteHealth) Fail() int64 {
-	h.observed.Store(true)
-	h.failing.Store(true)
+	h.state.Store(writeFailing)
 	return h.failures.Add(1)
 }
 
 // OK records one successful write.
 func (h *WriteHealth) OK() {
-	h.observed.Store(true)
-	if h.failing.Load() {
-		h.failing.Store(false)
+	if h.state.Load() != writeOK {
+		h.state.Store(writeOK)
 	}
 }
 
 // Snapshot returns the cumulative failure count and whether the most recent
 // write failed.
 func (h *WriteHealth) Snapshot() (failures int64, failing bool) {
-	return h.failures.Load(), h.failing.Load()
+	return h.failures.Load(), h.state.Load() == writeFailing
 }
 
 // State returns whether a write result has been observed and whether the most
 // recent write failed.
 func (h *WriteHealth) State() (observed, failing bool) {
-	return h.observed.Load(), h.failing.Load()
+	state := h.state.Load()
+	return state != writeUnknown, state == writeFailing
 }

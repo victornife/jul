@@ -14,12 +14,17 @@ evaluation_interval: 1m
 tests:
   # 0a. Rate-based rejection alerts remain isolated to the target that saw
   # rejected traffic; a second healthy Jul target is not merged into it.
+  # Recent counter samples must not keep the alert firing after discovery loss.
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1 1 1 1 stale"
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
       - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
-        values: "0 60 120 180 240 300"
+        values: "0 60 120 180 stale"
       - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="interrupted_request"}'
-        values: "0 10 20 30 40 50"
+        values: "0 10 20 30 stale"
       - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-b:9090",mode="block",outcome="clean"}'
         values: "0 60 120 180 240 300"
       - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-b:9090",mode="block",outcome="interrupted_request"}'
@@ -38,6 +43,9 @@ tests:
               summary: "Elevated actual WAF request/response rejections (>5% of inspected traffic over 5m)."
               description: "WAF block-mode interruptions or body-limit rejections exceed 5% of inspected transactions. This is an operational symptom — it may indicate an active attack, a recent policy/paranoia change, or a false positive on legitimate traffic. Query `GET /api/v1/waf/events` or `jul waf events` before tuning."
               runbook_url: "http://127.0.0.1:9090/security"
+      - eval_time: 4m
+        alertname: JulWAFRejectionSymptomElevated
+        exp_alerts: []
 
   # 0. Scrape failure differs from an expected target disappearing; grouping
   # retains target identity so the healthy target does not inherit the alert.
@@ -140,6 +148,8 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
       - series: 'jul_tls_cert_expiry_seconds{job="jul-admin-metrics",instance="jul-a:9090",domain="warning.test"}'
         values: "2505600+0x12"
     alert_rule_test:
@@ -160,6 +170,8 @@ tests:
         exp_alerts: []
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
       - series: 'jul_tls_cert_expiry_seconds{job="jul-admin-metrics",instance="jul-a:9090",domain="boundary.test"}'
         values: "604800+0x12"
     alert_rule_test:
@@ -182,6 +194,10 @@ tests:
   # 2. Only an in-scope pool with an explicit zero eligible count fires.
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
       - series: 'jul_upstream_backends_eligible{job="jul-admin-metrics",instance="jul-a:9090",pool="active"}'
         values: "0+0x3"
       - series: 'jul_upstream_backends_eligible{job="jul-admin-metrics",instance="jul-b:9090",pool="healthy"}'
@@ -216,6 +232,12 @@ tests:
   # cannot also fire the warning; missing totals are unknown.
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
+      - series: 'up{job="jul-admin-metrics",instance="jul-c:9090"}'
+        values: "1+0x30"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="available"}'
         values: "90+0x12"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="total"}'
@@ -258,6 +280,8 @@ tests:
         exp_alerts: []
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="access_log",kind="available"}'
         values: "50+0x12"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="access_log",kind="total"}'
@@ -283,6 +307,8 @@ tests:
   # overlapping the critical notification.
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="available"}'
         values: "90 90 90 90 90 90 90 90 90 90 90 90 40 40 40 40 40 40"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-a:9090",category="cache",kind="total"}'
@@ -318,6 +344,8 @@ tests:
 
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-b:9090"}'
+        values: "1+0x30"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-b:9090",category="cache",kind="available"}'
         values: "100+0x12"
       - series: 'jul_storage_bytes{job="jul-admin-metrics",instance="jul-b:9090",category="cache",kind="total"}'
@@ -330,18 +358,22 @@ tests:
         alertname: JulStorageCritical
         exp_alerts: []
 
-  # 4. Write health is current observed state, not the cumulative failure
-  # count. Missing configured sinks do not synthesize success or failure.
+  # 4. A failure alert clears on ok, unknown, or absence. Neither unknown
+  # nor absence represents a successful write.
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
       - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="cache",state="failing"}'
-        values: "0 1 1 1 0 0"
+        values: "stale 1 1 stale 1 1 stale 1 1 stale"
       - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="cache",state="ok"}'
-        values: "1 0 0 0 1 1"
+        values: "1 stale _ 1 stale"
+      - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="cache",state="unknown"}'
+        values: "_ _ _ _ _ _ 1 stale"
     alert_rule_test:
       - eval_time: 2m
         alertname: JulStorageWriteFailing
-        exp_alerts:
+        exp_alerts: &cache_failing
           - exp_labels:
               job: jul-admin-metrics
               instance: jul-a:9090
@@ -351,15 +383,29 @@ tests:
               category: storage_write
             exp_annotations:
               summary: "Jul cache writes are failing."
-              description: "Inspect this sink's Jul-owned path and filesystem. Recovery requires a producer-observed successful write; low free space and historical failure counters alone do not trigger this alert."
+              description: "Inspect this sink's Jul-owned path and filesystem. A resolved notification is not proof of recovery; confirm state=ok on a successful scrape. Cache health also includes cleanup and recovery failures."
+      - eval_time: 3m
+        alertname: JulStorageWriteFailing
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: JulStorageWriteFailing
+        exp_alerts: *cache_failing
       - eval_time: 6m
         alertname: JulStorageWriteFailing
         exp_alerts: []
       - eval_time: 6m
         alertname: JulStorageWriteStatusUnknown
         exp_alerts: []
+      - eval_time: 8m
+        alertname: JulStorageWriteFailing
+        exp_alerts: *cache_failing
+      - eval_time: 9m
+        alertname: JulStorageWriteFailing
+        exp_alerts: []
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
       - series: 'jul_storage_write_health{job="jul-admin-metrics",instance="jul-a:9090",sink="audit_log",state="unknown"}'
         values: "1+0x20"
     alert_rule_test:
@@ -380,25 +426,27 @@ tests:
   # 1. Quiet/healthy traffic, detect-only rule matches, and auth/origin 403s must NOT fire WAF rejection alerts.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
         values: "0+60x10"
-      - series: 'jul_waf_transactions_total{mode="detect",outcome="matched_observed"}'
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="detect",outcome="matched_observed"}'
         values: "0+30x10"
-      - series: 'jul_waf_events_total{action="detect",rule="942100"}'
+      - series: 'jul_waf_events_total{job="jul-admin-metrics",instance="jul-a:9090",action="detect",rule="942100"}'
         values: "0+90x10"
-      - series: 'jul_http_requests_total{method="GET",host="example.test",code="403"}'
+      - series: 'jul_http_requests_total{job="jul-admin-metrics",instance="jul-a:9090",method="GET",host="example.test",code="403"}'
         values: "0+50x10"
-      - series: 'jul_waf_serving_routes{state="block"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="block"}'
         values: "2+0x10"
-      - series: 'jul_waf_serving_routes{state="detect"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="detect"}'
         values: "0+0x10"
-      - series: 'jul_waf_serving_routes{state="disabled_override"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="disabled_override"}'
         values: "0+0x10"
-      - series: 'jul_waf_serving_routes{state="unprotected"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="unprotected"}'
         values: "0+0x10"
-      - series: 'jul_security_posture_findings{area="waf",severity="error"}'
+      - series: 'jul_security_posture_findings{job="jul-admin-metrics",instance="jul-a:9090",area="waf",severity="error"}'
         values: "0+0x10"
-      - series: 'jul_security_evidence_state{producer="waf_effective",state="ok"}'
+      - series: 'jul_security_evidence_state{job="jul-admin-metrics",instance="jul-a:9090",producer="waf_effective",state="ok"}'
         values: "1+0x10"
     alert_rule_test:
       - eval_time: 6m
@@ -415,6 +463,8 @@ tests:
   # after reset still must not create a rejection-ratio notification.
   - interval: 1m
     input_series:
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
       - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
         values: "0 120 240 360 10 130 250 370"
     alert_rule_test:
@@ -425,15 +475,19 @@ tests:
   # 2. Actual WAF block-mode rejection spike fires JulWAFRejectionSymptomElevated and resolves after traffic recovers.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
         values: "0 60 120 180 240 300 360 420 480 540 600 660 720"
-      - series: 'jul_waf_transactions_total{mode="block",outcome="interrupted_request"}'
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="interrupted_request"}'
         values: "0 10 20 30 40 50 50 50 50 50 50 50 50"
     alert_rule_test:
       - eval_time: 3m
         alertname: JulWAFRejectionSymptomElevated
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               severity: warning
               category: waf_outcomes
               symptom: waf_rejection_elevated
@@ -448,23 +502,27 @@ tests:
   # 3. Protection weakening, posture error finding, and stale evidence fire and resolve after remediation.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_serving_routes{state="block"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="block"}'
         values: "0 0 0 2 2 2"
-      - series: 'jul_waf_serving_routes{state="detect"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="detect"}'
         values: "1 1 1 0 0 0"
-      - series: 'jul_waf_serving_routes{state="disabled_override"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="disabled_override"}'
         values: "0 0 0 0 0 0"
-      - series: 'jul_waf_serving_routes{state="unprotected"}'
+      - series: 'jul_waf_serving_routes{job="jul-admin-metrics",instance="jul-a:9090",state="unprotected"}'
         values: "1 1 1 0 0 0"
-      - series: 'jul_security_posture_findings{area="intent",severity="error"}'
+      - series: 'jul_security_posture_findings{job="jul-admin-metrics",instance="jul-a:9090",area="intent",severity="error"}'
         values: "1 1 1 0 0 0"
-      - series: 'jul_security_evidence_state{producer="waf_effective",state="stale"}'
+      - series: 'jul_security_evidence_state{job="jul-admin-metrics",instance="jul-a:9090",producer="waf_effective",state="stale"}'
         values: "1 1 1 0 0 0"
     alert_rule_test:
       - eval_time: 2m
         alertname: JulWAFProtectionWeakened
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               severity: warning
               category: security_protection
               symptom: waf_protection_weakened
@@ -476,6 +534,8 @@ tests:
         alertname: JulSecurityPostureErrorPresent
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               area: intent
               severity: critical
               category: security_posture
@@ -488,6 +548,8 @@ tests:
         alertname: JulSecurityEvidenceUnavailableOrDegraded
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               producer: waf_effective
               state: stale
               severity: warning
@@ -510,9 +572,11 @@ tests:
   # 4. Flapping spike (< for: 1m window) and process restart / counter reset must NOT cause false firing.
   - interval: 1m
     input_series:
-      - series: 'jul_waf_transactions_total{mode="block",outcome="clean"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="clean"}'
         values: "0 60 120 180 0 60 120 180 240"
-      - series: 'jul_waf_transactions_total{mode="block",outcome="interrupted_request"}'
+      - series: 'jul_waf_transactions_total{job="jul-admin-metrics",instance="jul-a:9090",mode="block",outcome="interrupted_request"}'
         values: "0 10 10 10 0 0 0 0 0"
     alert_rule_test:
       - eval_time: 1m
@@ -525,7 +589,9 @@ tests:
   # 5. Sustained posture warning fires after 5m and resolves after remediation.
   - interval: 1m
     input_series:
-      - series: 'jul_security_posture_findings{area="waf",severity="warning"}'
+      - series: 'up{job="jul-admin-metrics",instance="jul-a:9090"}'
+        values: "1+0x30"
+      - series: 'jul_security_posture_findings{job="jul-admin-metrics",instance="jul-a:9090",area="waf",severity="warning"}'
         values: "1 1 1 1 1 1 1 0 0 0"
     alert_rule_test:
       - eval_time: 3m
@@ -535,6 +601,8 @@ tests:
         alertname: JulSecurityPostureWarningSustained
         exp_alerts:
           - exp_labels:
+              job: jul-admin-metrics
+              instance: jul-a:9090
               area: waf
               severity: warning
               category: security_posture

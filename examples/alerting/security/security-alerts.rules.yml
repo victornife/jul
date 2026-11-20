@@ -23,7 +23,7 @@ groups:
               sum by (job, instance) (jul_waf_serving_routes{state=~"detect|disabled_override|unprotected"}) > 0
             )
           )
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 30s
         labels:
           severity: warning
@@ -38,7 +38,7 @@ groups:
       - alert: JulSecurityPostureErrorPresent
         expr: |
           sum by (job, instance, area) (jul_security_posture_findings{severity="error"}) > 0
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 1m
         labels:
           severity: critical
@@ -53,7 +53,7 @@ groups:
       - alert: JulSecurityPostureWarningSustained
         expr: |
           sum by (job, instance, area) (jul_security_posture_findings{severity="warning"}) > 0
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 5m
         labels:
           severity: warning
@@ -68,7 +68,7 @@ groups:
       - alert: JulSecurityEvidenceUnavailableOrDegraded
         expr: |
           max by (job, instance, producer, state) (jul_security_evidence_state{state=~"stale|degraded|unavailable"}) == 1
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 1m
         labels:
           severity: warning
@@ -91,7 +91,7 @@ groups:
           ) > 0.05
           and
           sum by (job, instance) (rate(jul_waf_transactions_total[5m])) >= 0.05
-          unless on (job, instance) (up{job="jul-admin-metrics"} == 0)
+          and on (job, instance) (up == 1)
         for: 1m
         labels:
           severity: warning

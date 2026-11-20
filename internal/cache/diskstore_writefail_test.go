@@ -93,6 +93,9 @@ func TestCacheDiskWriteHealthTracksFailureAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.disk.set("a", entry())
+	if observed, failing, ok := c.DiskWriteStatus(); !ok || !observed || !failing {
+		t.Fatalf("first failed store reported (%v, %v, %v), want failing", observed, failing, ok)
+	}
 	c.disk.set("b", entry())
 	if n, failing, _ := c.DiskWriteHealth(); n != 2 || !failing {
 		t.Fatalf("after failures = (%d, %v), want (2, true)", n, failing)

@@ -293,9 +293,8 @@ func AccessLogWriteHealthForPath(path string) (failures int64, observed, failing
 	if state == nil {
 		return 0, false, false
 	}
-	failures, failing = state.health.Snapshot()
-	observed, _ = state.health.State()
-	return failures, observed, failing
+	observed, failing = state.health.State()
+	return state.health.failures.Load(), observed, failing
 }
 
 // accessHandler builds an slog handler for a dedicated access-log sink. Access

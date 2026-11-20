@@ -144,6 +144,42 @@ func TestWriteHealth(t *testing.T) {
 	}
 }
 
+func TestFirstWriteFailureNeverReportsSuccess(t *testing.T) {
+	const attempts = 1024
+	var health [attempts]WriteHealth
+	start := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-start
+		for i := range health {
+			health[i].Fail()
+		}
+	}()
+	defer func() { <-done }()
+	close(start)
+	for i := range health {
+		for {
+			observed, failing := health[i].State()
+			if !observed {
+				select {
+				case <-done:
+					observed, failing = health[i].State()
+					if !observed {
+						t.Fatalf("writer %d remained unknown after a failed write", i)
+					}
+				default:
+					continue
+				}
+			}
+			if !failing {
+				t.Fatalf("writer %d reported success without any successful write", i)
+			}
+			break
+		}
+	}
+}
+
 func TestFailureReportingWriterFeedsWriteHealth(t *testing.T) {
 	var h WriteHealth
 	var logs bytes.Buffer

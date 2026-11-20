@@ -867,22 +867,23 @@ func (c *Cache) PurgeResult() (InvalidateResult, error) {
 }
 
 // DiskWriteHealth reports the disk tier's cumulative write failures and
-// whether its most recent write failed. ok is false when there is no disk
+// whether disk persistence is failing. ok is false when there is no disk
 // tier (or c is nil).
 func (c *Cache) DiskWriteHealth() (failures int64, failing, ok bool) {
 	if c == nil || c.disk == nil {
 		return 0, false, false
 	}
-	return c.disk.writeFails.Load(), c.disk.failing.Load(), true
+	return c.disk.writeFails.Load(), c.disk.writeState.Load() == diskWriteFailing, true
 }
 
-// DiskWriteStatus reports whether a disk-tier write result has been observed,
-// whether the most recent store failed, and whether a disk tier exists.
+// DiskWriteStatus reports whether disk persistence has been observed and if
+// it is failing, including cleanup and recovery. ok is false without a disk tier.
 func (c *Cache) DiskWriteStatus() (observed, failing, ok bool) {
 	if c == nil || c.disk == nil {
 		return false, false, false
 	}
-	return c.disk.writeObserved.Load(), c.disk.failing.Load(), true
+	state := c.disk.writeState.Load()
+	return state != diskWriteUnknown, state == diskWriteFailing, true
 }
 
 // key derives the primary cache key from method, host, and request URI.
