@@ -154,6 +154,34 @@ const PATCH_RESULT = {
         after: 'proxy_pass = "http://new-app:4000"',
       },
     ],
+    explanations: [
+      {
+        code: "routing.target_retargeted",
+        kind: "warning",
+        scope: ":8080 /",
+        evidence_source: "candidate_configuration",
+        evidence_state: "candidate_only",
+        message: "Matching traffic will use a different backend; reachability is not verified.",
+        next_action: "Verify the destination service.",
+        documentation: "docs/upstreams.md",
+      },
+      {
+        code: "waf.request_outcome_unobserved",
+        kind: "information",
+        scope: ":8080 /",
+        evidence_source: "request_event_producer",
+        evidence_state: "not_observed",
+        message: "This preview contains no request-level evidence.",
+      },
+      {
+        code: "resilience.retry_repeats_work",
+        kind: "tradeoff",
+        scope: ":8080 /",
+        evidence_source: "candidate_configuration",
+        evidence_state: "candidate_only",
+        message: "A retry can repeat upstream work.",
+      },
+    ],
   },
 };
 
@@ -423,17 +451,20 @@ async function setupApiMocks(page: Page): Promise<void> {
   await page.route("/api/config/validate", (route) =>
     json(route, { ok: true, message: "Configuration is valid." }),
   );
-  await page.route("/api/config/diff", (route) =>
+  await page.route("/api/config/preview", (route) =>
     json(route, {
-      summary: "1 modification",
-      modifications: [
-        {
-          kind: "access_log",
-          name: "observability.access_log",
-          before: "enabled = true",
-          after: "enabled = false",
-        },
-      ],
+      ...PATCH_RESULT,
+      diff: {
+        summary: "1 modification",
+        modifications: [
+          {
+            kind: "access_log",
+            name: "observability.access_log",
+            before: "enabled = true",
+            after: "enabled = false",
+          },
+        ],
+      },
     }),
   );
   await page.route("/api/traffic-controls", (route) => json(route, TRAFFIC_CONTROLS));
@@ -659,6 +690,38 @@ test.describe("Console SPA smoke (UI-1)", () => {
 
     // The dialog is dismissed after the rollback POST returns.
     await expect(page.getByText("Roll back to this snapshot?")).not.toBeVisible();
+  });
+
+  test("raw config preview exposes server consequences with keyboard disclosure", async ({
+    page,
+  }) => {
+    await setupApiMocks(page);
+    await page.route("/api/config/preview", (route) => json(route, PATCH_RESULT));
+    await page.goto("/config");
+
+    const editor = page.locator(".cm-content");
+    await expect(editor).toContainText('proxy_pass = "http://app:3000"');
+    await editor.focus();
+    const previewRequest = page.waitForRequest("/api/config/preview");
+    await page.keyboard.press("ControlOrMeta+End");
+    await page.keyboard.type(" # changed");
+    expect((await previewRequest).headers()["x-jul-base-version"]).toBe("v1");
+
+    const consequences = page.getByRole("region", { name: "Configuration consequences" });
+    await expect(
+      consequences.getByText("Matching traffic will use a different backend; reachability is not verified."),
+    ).toBeVisible();
+    await expect(consequences.getByText("docs/upstreams.md")).toBeVisible();
+    await expect(consequences.getByText("Evidence: not observed")).toBeVisible();
+
+    const supporting = consequences.getByText("A retry can repeat upstream work.");
+    await expect(supporting).toBeHidden();
+    const disclosure = consequences.getByText("More consequences (1)");
+    await disclosure.focus();
+    await page.keyboard.press("Enter");
+    await expect(supporting).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(supporting).toBeHidden();
   });
 
   test("creates routes with deterministic existing-server and new-server batches", async ({

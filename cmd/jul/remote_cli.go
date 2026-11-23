@@ -695,10 +695,30 @@ func renderRawSuccess(common remoteCommon, command string, r adminclient.RawResp
 				fmt.Fprintf(stdout, "%s: %v\n", strings.ReplaceAll(key, "_", " "), value)
 			}
 		}
+		renderConfigLifecycle(obj["lifecycle"])
 		if diff, ok := obj["diff"].(map[string]any); ok {
-			if changes, ok := diff["changes"].([]any); ok {
-				fmt.Fprintf(stdout, "changes: %d\n", len(changes))
+			if summary, ok := diff["summary"].(string); ok && summary != "" {
+				fmt.Fprintf(stdout, "diff: %s\n", summary)
 			}
+			if affected, ok := diff["affected"].([]any); ok && len(affected) > 0 {
+				const visibleAffectedLimit = 20
+				visible := affected
+				if len(visible) > visibleAffectedLimit {
+					visible = visible[:visibleAffectedLimit]
+				}
+				names := make([]string, 0, len(visible))
+				for _, item := range visible {
+					if name, ok := item.(string); ok && name != "" {
+						names = append(names, name)
+					}
+				}
+				fmt.Fprintf(stdout, "affected: %s", strings.Join(names, ", "))
+				if len(affected) > len(visible) {
+					fmt.Fprintf(stdout, " (and %d more)", len(affected)-len(visible))
+				}
+				fmt.Fprintln(stdout)
+			}
+			renderConfigExplanations(diff)
 		}
 		if findings, ok := obj["validation_errors"].([]any); ok && len(findings) != 0 {
 			fmt.Fprintf(stdout, "validation findings: %d\n", len(findings))
@@ -720,6 +740,62 @@ func renderRawSuccess(common remoteCommon, command string, r adminclient.RawResp
 		fmt.Fprintf(stderr, "operation=%s request_id=%s\n", command, r.RequestID)
 	}
 	return 0
+}
+
+func renderConfigExplanations(diff map[string]any) {
+	entries, ok := diff["explanations"].([]any)
+	if !ok {
+		fmt.Fprintln(stdout, "No consequence explanations were returned; this does not establish that the candidate has no consequences.")
+		return
+	}
+	for _, raw := range entries {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		kind, _ := entry["kind"].(string)
+		scope, _ := entry["scope"].(string)
+		message, _ := entry["message"].(string)
+		if message == "" {
+			continue
+		}
+		if kind == "" {
+			kind = "information"
+		}
+		if scope != "" {
+			fmt.Fprintf(stdout, "consequence (%s, %s): %s\n", kind, scope, message)
+		} else {
+			fmt.Fprintf(stdout, "consequence (%s): %s\n", kind, message)
+		}
+		if state, _ := entry["evidence_state"].(string); state == "not_observed" {
+			fmt.Fprintln(stdout, "  evidence: not observed")
+		}
+		if action, _ := entry["next_action"].(string); action != "" {
+			fmt.Fprintf(stdout, "  next: %s\n", action)
+		}
+		if documentation, _ := entry["documentation"].(string); documentation != "" {
+			fmt.Fprintf(stdout, "  docs: %s\n", documentation)
+		}
+	}
+}
+
+func renderConfigLifecycle(raw any) {
+	lifecycle, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	canHot, _ := lifecycle["can_apply_hot"].(bool)
+	canStage, _ := lifecycle["can_stage_restart"].(bool)
+	switch {
+	case canHot && canStage:
+		fmt.Fprintln(stdout, "apply mode: hot apply or stage_restart is available; lifecycle applies to the whole candidate")
+	case canHot:
+		fmt.Fprintln(stdout, "apply mode: hot apply is available")
+	case canStage:
+		fmt.Fprintln(stdout, "apply mode: stage_restart; the saved candidate is not serving until restart")
+	default:
+		fmt.Fprintln(stdout, "apply mode: unavailable; review validation and lifecycle findings")
+	}
 }
 
 type multiStringFlag []string

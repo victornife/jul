@@ -54,7 +54,14 @@ beforeEach(() => {
         operation_summaries: [
           { op_index: 0, op: "location_set_auth", summary: "route auth set" },
         ],
-        diff: { summary: "1 change" },
+        diff: { summary: "1 change", explanations: [{
+          code: "access.route_auth_removed",
+          kind: "critical",
+          scope: ":8080 /api",
+          evidence_source: "candidate_configuration",
+          evidence_state: "candidate_only",
+          message: "The server reports a credential consequence.",
+        }] },
         base_version: "deadbeef",
         valid: true,
         validation_errors: [],
@@ -80,6 +87,32 @@ afterEach(() => {
 });
 
 describe("AuthEditor", () => {
+  it("shows server consequences while editing and hides a stale change preview", async () => {
+    render(
+      <Wrapper>
+        <AuthEditor target={target} seed={{ method: "cidr", allow: ["10.0.0.0/8"] }} onClose={() => undefined} />
+      </Wrapper>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview consequences" }));
+    expect(await screen.findByText("The server reports a credential consequence.")).toBeVisible();
+    expect(takePendingDraft()).toBeNull();
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "basic" } });
+    expect(screen.queryByText("The server reports a credential consequence.")).not.toBeInTheDocument();
+  });
+
+  it("previews removal without handing off or applying the change", async () => {
+    render(
+      <Wrapper>
+        <AuthEditor target={target} seed={{ method: "cidr", allow: ["10.0.0.0/8"] }} onClose={() => undefined} />
+      </Wrapper>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preview removal" }));
+    expect(await screen.findByText("The server reports a credential consequence.")).toBeVisible();
+    expect(screen.getByText("Removal preview")).toBeVisible();
+    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({ op: "location_clear_auth" });
+    expect(takePendingDraft()).toBeNull();
+  });
+
   it("seeds from the projection and posts a location_set_auth patch on save", async () => {
     const seed: LocationAuthState = {
       method: "jwt",

@@ -33,6 +33,15 @@ vi.mock("@/features/config/CodeEditor.tsx", () => ({
   ),
 }));
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+const rawPreview = (baseVersion: string, diff: object) =>
+  json({
+    ok: true,
+    base_version: baseVersion,
+    valid: true,
+    validation_errors: [],
+    lifecycle: { can_apply_hot: true, can_stage_restart: true },
+    diff,
+  });
 let qc: QueryClient;
 type NetworkFetch = (url: string, init?: RequestInit) => Promise<Response>;
 let fetchMock: ReturnType<typeof vi.fn<NetworkFetch>>;
@@ -78,7 +87,10 @@ function network(
       return Promise.resolve(json({ raw: "# baseline", base_version: "v1" }));
     if (url === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
     if (url === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-    if (url === "/api/config/diff") return Promise.resolve(json({ summary: "one edit" }));
+    if (url === "/api/config/preview") {
+      const base = new Headers(init.headers).get("X-Jul-Base-Version") ?? "";
+      return Promise.resolve(rawPreview(base, { summary: "one edit" }));
+    }
     if (url === "/api/config/history")
       return Promise.resolve(json([{ id: "snap-1", time: "2026-10-13T00:00:00Z", size: 2048 }]));
     if (url === "/api/config/history/snap-1/diff")
@@ -101,7 +113,11 @@ async function edit() {
 }
 async function confirm(label = "Apply live") {
   const dialog = await screen.findByRole("dialog");
-  fireEvent.click(within(dialog).getByRole("button", { name: label }));
+  const submit = within(dialog).getByRole("button", { name: label });
+  await waitFor(() => {
+    expect(submit).toBeEnabled();
+  });
+  fireEvent.click(submit);
 }
 beforeEach(() => {
   qc = new QueryClient({
@@ -576,7 +592,7 @@ describe("one-change cache cutover controls", () => {
   it("requires a fresh raw override preview and sends the same live choice", async () => {
     let finishPreview: ((response: Response) => void) | undefined;
     network((url) => {
-      if (url === "/api/config/diff?cache_cutover=invalidate") {
+      if (url === "/api/config/preview?cache_cutover=invalidate") {
         return new Promise<Response>((resolve) => {
           finishPreview = resolve;
         });
@@ -601,7 +617,7 @@ describe("one-change cache cutover controls", () => {
     expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
     act(() => {
       finishPreview?.(
-        json({
+        rawPreview("v1", {
           summary: "cutover",
           cache_cutover: {
             default_policy: "invalidate",
@@ -615,6 +631,8 @@ describe("one-change cache cutover controls", () => {
     await waitFor(() => {
       expect(apply).toBeEnabled();
     });
+    const [, previewRequest] = mutations("/api/config/preview?cache_cutover=invalidate")[0] ?? [];
+    expect(new Headers(previewRequest?.headers).get("X-Jul-Base-Version")).toBe("v1");
     fireEvent.click(apply);
     await confirm();
     await waitFor(() => {

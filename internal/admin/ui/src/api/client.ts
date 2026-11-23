@@ -2266,6 +2266,18 @@ export type SharingPlanReport = z.infer<typeof SharingPlanReportSchema>;
 
 export type CacheCutoverMode = "" | "retain" | "invalidate";
 
+export const ConfigExplanationSchema = z.object({
+  code: z.string(),
+  kind: z.enum(["critical", "warning", "tradeoff", "information"]),
+  scope: z.string(),
+  evidence_source: z.string(),
+  evidence_state: z.string(),
+  message: z.string(),
+  next_action: z.string().optional(),
+  documentation: z.string().optional(),
+});
+export type ConfigExplanation = z.infer<typeof ConfigExplanationSchema>;
+
 export const ConfigDiffSchema = z.object({
   summary: z.string(),
   affected: z.array(z.string()).optional(),
@@ -2274,6 +2286,7 @@ export const ConfigDiffSchema = z.object({
   removals: z.array(DiffEntrySchema).optional(),
   modifications: z.array(DiffEntrySchema).optional(),
   sharing: SharingPlanReportSchema.optional(),
+  explanations: z.array(ConfigExplanationSchema).optional(),
   cache_cutover: z
     .object({
       default_policy: z.enum(["retain", "invalidate"]),

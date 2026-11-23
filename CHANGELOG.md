@@ -214,6 +214,11 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Add a server-owned, bounded explanation catalog to configuration previews
+  (#625), with candidate-bound operational consequences, explicit evidence
+  limits and next steps. The Console and remote CLI present the optional
+  explanations without changing validation or apply/stage decisions.
+
 - Add a pinned Authelia browser-login composition for a restricted dashboard
   beside an unrelated public site on one Jul instance (#627). The runnable
   headless-browser recipe documents redirect-based login, provider-owned fixed

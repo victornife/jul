@@ -387,21 +387,33 @@ func validateBackendTLS(c *BackendTLSConfig, where string) []error {
 	return errs
 }
 
-// locationUsesTLSBackend reports whether a location's backend is reached over
-// TLS, so a backend_tls block that could never apply is rejected instead of
-// silently doing nothing.
-func locationUsesTLSBackend(loc LocationConfig) bool {
+// LocationProxyBackendTLS reports the transport of HTTP, gRPC, and CGI backends.
+// The second result is false for other actions or an unrecognized scheme.
+func LocationProxyBackendTLS(loc LocationConfig) (usesTLS, known bool) {
 	if loc.GRPCTranscode != nil {
-		return loc.GRPCTranscode.TLS
+		return loc.GRPCTranscode.TLS, true
 	}
 	if loc.ProxyPass == "" {
-		return false
+		return false, loc.FastCGIPass != "" || loc.UWSGIPass != ""
 	}
 	u, err := url.Parse(loc.ProxyPass)
 	if err != nil {
-		return false
+		return false, false
 	}
-	return u.Scheme == "https"
+	switch u.Scheme {
+	case "https":
+		return true, true
+	case "http":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+// locationUsesTLSBackend rejects a backend_tls block that cannot apply.
+func locationUsesTLSBackend(loc LocationConfig) bool {
+	usesTLS, _ := LocationProxyBackendTLS(loc)
+	return usesTLS
 }
 
 // validateUnixBackends rejects the combinations a unix-socket backend cannot

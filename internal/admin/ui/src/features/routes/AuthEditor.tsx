@@ -6,13 +6,16 @@
 import { useState } from "react";
 import { Drawer } from "@/components/Drawer.tsx";
 import {
+  type ConfigDiff,
+  type ConfigPatch,
   type LocationAuthPatch,
   type LocationAuthState,
   type RouteTarget,
 } from "@/api/client.ts";
 import { ForbiddenAction } from "@/components/ForbiddenAction.tsx";
 import { usePermission } from "@/auth/usePermission.ts";
-import { useRunPatch } from "@/lib/useRunPatch.ts";
+import { describePatchBatchError, useRunPatchBatch } from "@/lib/useRunPatchBatch.ts";
+import { ConfigConsequences } from "@/features/config/DiffView.tsx";
 import {
   authWarnings,
   AUTH_METHODS,
@@ -115,19 +118,44 @@ function toPatch(d: AuthDraft): LocationAuthPatch {
  */
 export function AuthEditor({ target, baseVersion, seed, existing = Boolean(seed), onClose }: AuthEditorProps) {
   const [draft, setDraft] = useState<AuthDraft>(() => seedDraft(seed));
-  const { run: runPatch, error, busy } = useRunPatch(baseVersion);
+  const batch = useRunPatchBatch();
+  const { busy } = batch;
+  const error = describePatchBatchError(batch.error);
+  const [assessment, setAssessment] = useState<{
+    key: string;
+    diff: ConfigDiff | undefined;
+    valid: boolean;
+    action: "change" | "removal";
+  } | null>(null);
   const { has } = usePermission();
   const canWrite = has("config:write");
+  const canReadRaw = has("config:raw");
 
   const where = `${target.listen}${target.path ? ` ${target.path}` : ""}`;
   const warnings = authWarnings(draft);
+  const currentPatch: ConfigPatch = { op: "location_set_auth", ...target, auth: toPatch(draft) };
+  const clearPatch: ConfigPatch = { op: "location_clear_auth", ...target };
+  const assessmentKey = (patch: ConfigPatch) => JSON.stringify([baseVersion, patch]);
+  const displayedAssessment =
+    canReadRaw && assessment !== null && (
+      assessment.key === assessmentKey(currentPatch) ||
+      (existing && assessment.key === assessmentKey(clearPatch))
+    ) ? assessment : null;
 
   function save(): void {
-    runPatch({ op: "location_set_auth", ...target, auth: toPatch(draft) });
+    void batch.run([currentPatch], baseVersion);
   }
 
   function clearRule(): void {
-    runPatch({ op: "location_clear_auth", ...target });
+    void batch.run([clearPatch], baseVersion);
+  }
+
+  async function previewConsequences(patch: ConfigPatch, action: "change" | "removal"): Promise<void> {
+    setAssessment(null);
+    const result = await batch.preview([patch], baseVersion);
+    if (result !== null) {
+      setAssessment({ key: assessmentKey(patch), diff: result.previewDiff, valid: result.valid, action });
+    }
   }
 
   return (
@@ -139,7 +167,24 @@ export function AuthEditor({ target, baseVersion, seed, existing = Boolean(seed)
         <div className="w-full space-y-2">
           <div className="flex items-center justify-between gap-3">
             {error && <span className="text-xs text-jul-danger">{error}</span>}
+            <button
+              type="button"
+              disabled={busy || warnings.length > 0 || !canWrite}
+              onClick={() => { void previewConsequences(currentPatch, "change"); }}
+              className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text disabled:opacity-40"
+            >
+              Preview consequences
+            </button>
             {existing && (
+              <>
+              <button
+                type="button"
+                disabled={busy || !canWrite}
+                onClick={() => { void previewConsequences(clearPatch, "removal"); }}
+                className="rounded-md border border-jul-border px-3 py-1.5 text-sm text-jul-text disabled:opacity-40"
+              >
+                Preview removal
+              </button>
               <button
                 type="button"
                 disabled={busy || !canWrite}
@@ -148,6 +193,7 @@ export function AuthEditor({ target, baseVersion, seed, existing = Boolean(seed)
               >
                 Clear rule
               </button>
+              </>
             )}
             <button
               type="button"
@@ -191,6 +237,21 @@ export function AuthEditor({ target, baseVersion, seed, existing = Boolean(seed)
         </label>
 
         <AuthFields auth={draft} onChange={setDraft} />
+
+        {displayedAssessment !== null && (
+          <div className="rounded-md border border-jul-border bg-jul-bg p-3" aria-live="polite">
+            <p className="text-xs font-medium text-jul-text">
+              {displayedAssessment.action === "removal" ? "Removal preview" : "Change preview"}
+            </p>
+            <p className="text-xs text-jul-muted">This assessment uses the selected base version; review refreshes before apply.</p>
+            {!displayedAssessment.valid && (
+              <p className="text-xs text-jul-danger">The candidate is invalid; review validation before applying.</p>
+            )}
+            {displayedAssessment.diff
+              ? <ConfigConsequences diff={displayedAssessment.diff} />
+              : <p className="text-xs text-jul-muted">Consequence preview unavailable.</p>}
+          </div>
+        )}
 
         {warnings.length > 0 && (
           <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3">

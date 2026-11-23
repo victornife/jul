@@ -10,7 +10,6 @@ import {
   applyConfig,
   applyPatchBatch,
   patchConfigBatch,
-  diffConfig,
   discardPendingRestart,
   fetchOverview,
   fetchPendingRestart,
@@ -66,6 +65,24 @@ function EditorFallback() {
       Loading editor…
     </div>
   );
+}
+
+async function previewRawDiff(
+  candidate: string,
+  baseVersion: string | undefined,
+  cacheCutover: CacheCutoverMode = "",
+): Promise<ConfigDiff> {
+  if (baseVersion === undefined || baseVersion.trim() === "") {
+    throw new Error("The base version is unavailable. Reload the configuration before reviewing.");
+  }
+  const preview = await previewRawConfig(candidate, baseVersion, cacheCutover);
+  if (preview.base_version !== baseVersion) {
+    throw new Error("The preview did not match the reviewed base version.");
+  }
+  if (!preview.valid || preview.validation_errors.length > 0) {
+    throw new Error("The candidate could not be validated against its pinned base.");
+  }
+  return preview.diff;
 }
 
 function ValidationPill({ state }: { readonly state: "idle" | "checking" | "valid" | "invalid" }) {
@@ -420,12 +437,8 @@ function PatchAssessment({
 
 function RawAssessment({
   draft,
-  refreshing,
-  refreshError,
 }: {
   readonly draft: PendingRawDraft;
-  readonly refreshing: boolean;
-  readonly refreshError: Error | null;
 }) {
   const lifecycle = draft.lifecycle;
   return (
@@ -441,8 +454,6 @@ function RawAssessment({
           Cache lifecycle assessment
         </h3>
         <p className="text-sm text-jul-text">Complete [cache] candidate — stage only</p>
-        {refreshing && <p className="text-xs text-jul-muted">Refreshing preview…</p>}
-        {refreshError && <p className="text-xs text-jul-danger">{refreshError.message}</p>}
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <AssessmentPaths label="Restart-required paths" paths={lifecycle.restart_required_paths} />
@@ -542,6 +553,9 @@ function AuthorizedConfigPanel() {
   const [cacheCutover, setCacheCutover] = useState<CacheCutoverMode>("");
   const [stageConfirming, setStageConfirming] = useState(false);
   const [rawHandoff, setRawHandoff] = useState<PendingRawDraft | null>(null);
+  const [rawReloading, setRawReloading] = useState(false);
+  const [rawReloadError, setRawReloadError] = useState<string | null>(null);
+  const [rawPreviewConflict, setRawPreviewConflict] = useState(false);
 
   // AC-13: every interlocking piece of write state — operation generation, the
   // correlated apply result + its kind, the pending patch draft, the base and
@@ -716,8 +730,14 @@ function AuthorizedConfigPanel() {
     !pendingRestartSnapshotEqual(rawHandoff.pendingRestart, currentPendingSnapshot);
   const rawBaseChanged =
     rawHandoff !== null &&
+    (rawPreviewConflict ||
+      (data?.base_version !== undefined && data.base_version !== rawHandoff.baseVersion));
+  const ordinaryRawBaseChanged =
+    !isPatchMode &&
+    rawHandoff === null &&
+    baseVersion !== undefined &&
     data?.base_version !== undefined &&
-    data.base_version !== rawHandoff.baseVersion;
+    data.base_version !== baseVersion;
 
   // Old/incomplete handoffs and any pending-restart state race are re-previewed
   // with the exact ordered operations and pinned base. A moved base fails with
@@ -775,6 +795,7 @@ function AuthorizedConfigPanel() {
   const rawAssessmentRefresh = useQuery({
     queryKey: [
       "config-raw-assessment-refresh",
+      rawHandoff?.toml,
       rawHandoff?.baseVersion,
       currentPendingSnapshot?.state,
       currentPendingSnapshot?.stagedVersion,
@@ -786,6 +807,9 @@ function AuthorizedConfigPanel() {
         throw new Error("No raw candidate is available to preview.");
       }
       const preview = await previewRawConfig(rawHandoff.toml, rawHandoff.baseVersion);
+      if (preview.base_version !== rawHandoff.baseVersion) {
+        throw new Error("The raw preview did not match the reviewed base version.");
+      }
       if (!preview.valid || preview.validation_errors.length > 0) {
         throw new Error("The raw candidate is no longer valid against its pinned base.");
       }
@@ -812,7 +836,7 @@ function AuthorizedConfigPanel() {
 
   useEffect(() => {
     const refreshed = rawAssessmentRefresh.data;
-    if (refreshed === undefined || rawHandoff === null) return;
+    if (refreshed === undefined || rawHandoff === null || !rawPendingChanged) return;
     setRawHandoff({
       ...rawHandoff,
       previewDiff: refreshed.preview.diff,
@@ -820,7 +844,7 @@ function AuthorizedConfigPanel() {
       recommendedAction: refreshed.action,
       pendingRestart: refreshed.pending,
     });
-  }, [rawAssessmentRefresh.data, rawHandoff]);
+  }, [rawAssessmentRefresh.data, rawHandoff, rawPendingChanged]);
 
   const validation = useQuery({
     queryKey: ["config-validate", debounced],
@@ -868,10 +892,17 @@ function AuthorizedConfigPanel() {
   });
 
   const rawDiff = useQuery({
-    queryKey: ["config-diff", debounced],
-    queryFn: () => diffConfig(debounced),
-    enabled: !isPatchMode && rawHandoff === null && dirty && draft !== null && debounced.length > 0,
-    staleTime: Infinity,
+    queryKey: ["config-diff", debounced, baseVersion],
+    queryFn: () => previewRawDiff(debounced, baseVersion),
+    enabled:
+      !isPatchMode &&
+      rawHandoff === null &&
+      !ordinaryRawBaseChanged &&
+      !rawPreviewConflict &&
+      dirty &&
+      draft !== null &&
+      debounced.length > 0,
+    staleTime: 0,
     refetchInterval: false,
     refetchOnWindowFocus: false,
     retry: false,
@@ -889,34 +920,72 @@ function AuthorizedConfigPanel() {
         }
         return result.diff;
       }
-      return diffConfig(current, cacheCutover);
+      return previewRawDiff(current, baseVersion, cacheCutover);
     },
-    enabled: dirty && cacheCutover !== "" && canWritePerm,
+    enabled:
+      dirty &&
+      cacheCutover !== "" &&
+      canWritePerm &&
+      !ordinaryRawBaseChanged &&
+      !rawBaseChanged &&
+      !rawPreviewConflict,
     retry: false,
-    staleTime: Infinity,
+    staleTime: 0,
   });
 
-  // In patch mode the diff is pre-computed; in raw mode it is fetched.
-  const previewDiff: ConfigDiff | undefined = useMemo(
-    () =>
-      cacheCutover !== ""
-        ? cutoverAssessment.data
-        : (patchDraft?.previewDiff ?? rawHandoff?.previewDiff ?? rawDiff.data),
-    [cacheCutover, cutoverAssessment.data, patchDraft, rawHandoff, rawDiff.data],
-  );
+  useEffect(() => {
+    if (
+      !isPatchMode &&
+      ((rawHandoff === null && rawDiff.error instanceof ConfigConflictError) ||
+        (rawHandoff !== null && rawAssessmentRefresh.error instanceof ConfigConflictError) ||
+        (cacheCutover !== "" && cutoverAssessment.error instanceof ConfigConflictError))
+    ) {
+      setRawPreviewConflict(true);
+    }
+  }, [
+    isPatchMode,
+    rawHandoff,
+    rawDiff.error,
+    rawAssessmentRefresh.error,
+    cacheCutover,
+    cutoverAssessment.error,
+  ]);
+
+  const rawPreviewStale =
+    !isPatchMode &&
+    rawHandoff === null &&
+    (rawPreviewConflict ||
+      ordinaryRawBaseChanged ||
+      rawDiff.error instanceof ConfigConflictError ||
+      (cacheCutover !== "" && cutoverAssessment.error instanceof ConfigConflictError));
+  const rawPreviewReady =
+    draft !== null &&
+    draft === debounced &&
+    !rawPreviewStale &&
+    rawDiff.isSuccess &&
+    !rawDiff.isFetching;
+  const cutoverReady = cutoverAssessment.isSuccess && !cutoverAssessment.isFetching;
+  const rawHandoffDiff =
+    rawHandoff !== null && !rawGuard.blocked ? rawHandoff.previewDiff : undefined;
+  const baseDiff =
+    patchDraft?.previewDiff ??
+    rawHandoffDiff ??
+    (rawHandoff === null && rawPreviewReady ? rawDiff.data : undefined);
+  const canShowCutover =
+    cutoverReady && (isPatchMode || (rawHandoff !== null ? !rawGuard.blocked : rawPreviewReady));
+  const previewDiff =
+    cacheCutover !== "" ? (canShowCutover ? cutoverAssessment.data : undefined) : baseDiff;
 
   // Require a completed assessment for the current draft before confirmation so
-  // sharing widening acknowledgement cannot be bypassed while /api/config/diff
+  // sharing widening acknowledgement cannot be bypassed while /api/config/preview
   // (or a handoff refresh) is still pending or failed.
   const baseAssessmentReady = isPatchMode
     ? !patchNeedsAssessmentRefresh && !patchAssessmentRefresh.isFetching
     : rawHandoff !== null
-      ? !rawAssessmentRefresh.isFetching
-      : draft !== null && draft === debounced && rawDiff.isSuccess && !rawDiff.isFetching;
+      ? !rawGuard.blocked && !rawAssessmentRefresh.isFetching
+      : rawPreviewReady;
 
-  const assessmentReady =
-    baseAssessmentReady &&
-    (cacheCutover === "" || (cutoverAssessment.isSuccess && !cutoverAssessment.isFetching));
+  const assessmentReady = baseAssessmentReady && (cacheCutover === "" || cutoverReady);
 
   useEffect(() => {
     setSharingAcknowledged(false);
@@ -1151,6 +1220,42 @@ function AuthorizedConfigPanel() {
       void invalidateConfigurationState(qc);
     },
   });
+
+  const reloadLatestRawConfig = (): void => {
+    const operationID = startOperation();
+    setRawReloading(true);
+    setRawReloadError(null);
+    void fetchRawConfig()
+      .then((fresh) => {
+        if (operationIDRef.current !== operationID) return;
+        if (
+          fresh.raw === undefined ||
+          fresh.base_version === undefined ||
+          fresh.base_version.trim() === ""
+        ) {
+          throw new Error("The latest editable configuration and its base version are unavailable.");
+        }
+        qc.setQueryData(["raw-config"], fresh);
+        setBaseline(fresh.raw);
+        setDraft(fresh.raw);
+        setBaseVersion(fresh.base_version);
+        setConflictVersion(undefined);
+        setRawPreviewConflict(false);
+        setRawHandoff(null);
+        setCacheCutover("");
+        applyRaw.reset();
+        applyStage.reset();
+      })
+      .catch((error: unknown) => {
+        if (operationIDRef.current !== operationID) return;
+        setRawReloadError(
+          error instanceof Error ? error.message : "Unable to reload the configuration.",
+        );
+      })
+      .finally(() => {
+        setRawReloading(false);
+      });
+  };
 
   // Finding 13 (H-03): when a structured patch is applied while a managed staged
   // restart is pending, the backend routes it to stage_restart — it replaces the
@@ -1461,9 +1566,12 @@ function AuthorizedConfigPanel() {
       : !isPatchMode
         ? {
             tone: "persisted-editable",
-            label: "Persisted configuration — editable",
-            detail:
-              "These are the bytes currently stored in the configuration file. The runtime may differ while a staged restart or external divergence exists.",
+            label: rawPreviewStale
+              ? "Stale configuration draft — editable"
+              : "Persisted configuration — editable",
+            detail: rawPreviewStale
+              ? "This draft is based on an older persisted configuration and cannot be reviewed or applied until reloaded."
+              : "These are the bytes currently stored in the configuration file. The runtime may differ while a staged restart or external divergence exists.",
           }
         : rawForbidden || !canRawPerm || candidateForbidden || candidateFailed
           ? {
@@ -1619,6 +1727,7 @@ function AuthorizedConfigPanel() {
               !pendingRestartQuery.isSuccess ||
               primaryActionUnavailable ||
               (rawHandoff !== null && rawGuard.blocked) ||
+              (!isPatchMode && rawHandoff === null && (rawPreviewStale || rawDiff.isError)) ||
               (restartBlocked && !hasPendingRestart) ||
               (rawForbidden && !isPatchMode) ||
               !canApplyPerm
@@ -1701,6 +1810,27 @@ function AuthorizedConfigPanel() {
               {...(appliedCapabilities ? { capabilities: appliedCapabilities } : {})}
             />
           )}
+          {rawPreviewStale && (
+            <div
+              role="alert"
+              className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-sm"
+            >
+              <p className="font-medium text-jul-warning">Preview is stale</p>
+              <p className="mt-1 text-xs text-jul-muted">
+                The persisted configuration changed. Reload it and recreate the changes before
+                reviewing. Reloading discards this draft; copy it first if needed.
+              </p>
+              <button
+                type="button"
+                onClick={reloadLatestRawConfig}
+                disabled={rawReloading}
+                className="mt-2 rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg disabled:opacity-40"
+              >
+                {rawReloading ? "Reloading…" : "Reload latest config"}
+              </button>
+              {rawReloadError && <p className="mt-1 text-xs text-jul-danger">{rawReloadError}</p>}
+            </div>
+          )}
           {/* N-01 (WS05): the pinned base_version moved before the candidate
               could be computed. This is not a success — apply is disabled and the
               operator must regenerate the preview from the originating editor. */}
@@ -1748,15 +1878,7 @@ function AuthorizedConfigPanel() {
               )}
             </div>
           )}
-          {rawHandoff !== null && (
-            <RawAssessment
-              draft={rawHandoff}
-              refreshing={rawAssessmentRefresh.isFetching}
-              refreshError={
-                rawAssessmentRefresh.error instanceof Error ? rawAssessmentRefresh.error : null
-              }
-            />
-          )}
+          {rawHandoff !== null && !rawGuard.blocked && <RawAssessment draft={rawHandoff} />}
           {rawHandoff !== null && rawGuard.blocked && (
             <div
               role="status"
@@ -1764,6 +1886,9 @@ function AuthorizedConfigPanel() {
             >
               <p className="font-medium text-jul-warning">Cache candidate cannot be staged yet</p>
               <p className="mt-1 text-xs text-jul-muted">{rawGuard.reason}</p>
+              {rawAssessmentRefresh.error instanceof Error && (
+                <p className="mt-1 text-xs text-jul-danger">{rawAssessmentRefresh.error.message}</p>
+              )}
               {rawGuard.requiresRefresh && !canWritePerm && (
                 <p className="mt-1 text-xs text-jul-muted">
                   Refreshing the assessment requires <span className="font-mono">config:write</span>
@@ -1926,43 +2051,37 @@ function AuthorizedConfigPanel() {
                     </p>
                   ))}
                 {applyError instanceof ConfigConflictError && (
-                  <div className="mt-2 flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (isPatchMode) {
-                          // A structured patch may be retried only after the
-                          // originating editor produces a new preview. Never
-                          // substitute the current version into the old ops.
-                          cancelOperation();
-                          setPatchDraft(null);
-                          setConflictVersion(undefined);
-                          applyPatch.reset();
-                          applyStage.reset();
-                          void navigate(-1);
-                          return;
-                        }
+                  <div className="mt-2 space-y-1">
+                    {(isPatchMode || !rawPreviewStale) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isPatchMode) {
+                            // A structured patch may be retried only after the
+                            // originating editor produces a new preview. Never
+                            // substitute the current version into the old ops.
+                            cancelOperation();
+                            setPatchDraft(null);
+                            setConflictVersion(undefined);
+                            applyPatch.reset();
+                            applyStage.reset();
+                            void navigate(-1);
+                            return;
+                          }
 
-                        // Raw editor flow: discard the stale text and re-seed
-                        // from the latest persisted config and version.
-                        const operationID = startOperation();
-                        setConflictVersion(undefined);
-                        applyRaw.reset();
-                        void qc
-                          .fetchQuery({ queryKey: ["raw-config"], queryFn: fetchRawConfig })
-                          .then((fresh) => {
-                            if (operationIDRef.current !== operationID) return;
-                            setBaseline(fresh.raw ?? "");
-                            setDraft(fresh.raw ?? "");
-                            setBaseVersion(fresh.base_version);
-                          });
-                      }}
-                      className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
-                    >
-                      {isPatchMode
-                        ? "Discard stale patch and preview again"
-                        : "Reload latest config"}
-                    </button>
+                          reloadLatestRawConfig();
+                        }}
+                        disabled={rawReloading}
+                        className="rounded-md border border-jul-border px-2 py-0.5 text-xs text-jul-text hover:bg-jul-bg"
+                      >
+                        {isPatchMode
+                          ? "Discard stale patch and preview again"
+                          : "Reload latest config"}
+                      </button>
+                    )}
+                    {!isPatchMode && !rawPreviewStale && rawReloadError && (
+                      <p className="text-xs text-jul-danger">{rawReloadError}</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -2021,12 +2140,16 @@ function AuthorizedConfigPanel() {
               <h3 className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
                 Pending changes
               </h3>
-              {!isPatchMode && rawDiff.isFetching && (
-                <p className="text-xs text-jul-muted">Computing diff…</p>
-              )}
+              {!isPatchMode && rawHandoff === null && !rawPreviewStale &&
+                (draft !== debounced || rawDiff.isFetching) && (
+                  <p role="status" className="text-xs text-jul-muted">Computing diff…</p>
+                )}
               {previewDiff && <DiffView diff={previewDiff} />}
-              {!isPatchMode && rawDiff.isError && (
-                <p className="text-xs text-jul-danger">Unable to compute diff.</p>
+              {!isPatchMode && rawHandoff === null && !rawPreviewStale && rawDiff.isError && (
+                <p role="alert" className="text-xs text-jul-danger">
+                  Unable to compute diff.{" "}
+                  {rawDiff.error instanceof Error ? rawDiff.error.message : ""}
+                </p>
               )}
             </div>
           )}
@@ -2117,9 +2240,11 @@ function AuthorizedConfigPanel() {
           )}
           {!assessmentReady && (
             <p role="status" className="mt-2 text-xs text-jul-warning">
-              {rawDiff.isError
-                ? "Change assessment failed; resolve the diff error before applying."
-                : "Loading change assessment…"}
+              {rawPreviewStale
+                ? "The configuration changed; reload it and review a fresh preview."
+                : rawDiff.isError || cutoverAssessment.isError
+                  ? "Change assessment failed; resolve the diff error before applying."
+                  : "Loading change assessment…"}
             </p>
           )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}
@@ -2215,9 +2340,11 @@ function AuthorizedConfigPanel() {
           )}
           {!assessmentReady && (
             <p role="status" className="mt-2 text-xs text-jul-warning">
-              {rawDiff.isError
-                ? "Change assessment failed; resolve the diff error before staging."
-                : "Loading change assessment…"}
+              {rawPreviewStale
+                ? "The configuration changed; reload it and review a fresh preview."
+                : rawDiff.isError || cutoverAssessment.isError
+                  ? "Change assessment failed; resolve the diff error before staging."
+                  : "Loading change assessment…"}
             </p>
           )}
           {previewDiff && <p className="mt-2 text-jul-text">{previewDiff.summary}</p>}

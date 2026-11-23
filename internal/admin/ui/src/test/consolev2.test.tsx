@@ -247,6 +247,25 @@ describe("ConfigDiffSchema", () => {
     };
     const d = ConfigDiffSchema.parse(raw);
     expect(d.modifications).toHaveLength(1);
+    expect(d.explanations).toBeUndefined();
+  });
+
+  it("parses the additive consequence contract", () => {
+    const d = ConfigDiffSchema.parse({
+      summary: "1 route changed",
+      explanations: [{
+        code: "access.route_auth_removed",
+        kind: "critical",
+        scope: "example /admin",
+        evidence_source: "candidate_configuration",
+        evidence_state: "candidate_only",
+        message: "The route authentication check is removed.",
+        next_action: "Confirm the intended audience.",
+        documentation: "docs/auth.md",
+      }],
+    });
+    expect(d.explanations?.[0]?.kind).toBe("critical");
+    expect(d.explanations?.[0]?.evidence_state).toBe("candidate_only");
   });
 });
 

@@ -36,6 +36,34 @@ func tlsBackendConfig(t *testing.T, up *BackendTLSConfig, loc *BackendTLSConfig)
 	return cfg
 }
 
+func TestLocationProxyBackendTLS(t *testing.T) {
+	tests := []struct {
+		name      string
+		location  LocationConfig
+		wantTLS   bool
+		wantKnown bool
+	}{
+		{name: "https", location: LocationConfig{ProxyPass: "https://api"}, wantTLS: true, wantKnown: true},
+		{name: "http", location: LocationConfig{ProxyPass: "http://api"}, wantKnown: true},
+		{name: "grpc tls", location: LocationConfig{GRPCTranscode: &GRPCTranscodeConfig{TLS: true}}, wantTLS: true, wantKnown: true},
+		{name: "grpc plaintext", location: LocationConfig{GRPCTranscode: &GRPCTranscodeConfig{}}, wantKnown: true},
+		{name: "fastcgi", location: LocationConfig{FastCGIPass: "127.0.0.1:9000"}, wantKnown: true},
+		{name: "uwsgi", location: LocationConfig{UWSGIPass: "127.0.0.1:9000"}, wantKnown: true},
+		{name: "no proxy action", location: LocationConfig{}},
+		{name: "malformed proxy URL", location: LocationConfig{ProxyPass: "http://%zz"}},
+		{name: "unsupported proxy scheme", location: LocationConfig{ProxyPass: "ftp://api"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usesTLS, known := LocationProxyBackendTLS(tt.location)
+			if usesTLS != tt.wantTLS || known != tt.wantKnown {
+				t.Fatalf("LocationProxyBackendTLS() = (%t, %t), want (%t, %t)", usesTLS, known, tt.wantTLS, tt.wantKnown)
+			}
+		})
+	}
+}
+
 func TestValidateAcceptsBackendTLS(t *testing.T) {
 	ca := backendTLSFixture(t, "ca.pem")
 	cert := backendTLSFixture(t, "client.pem")

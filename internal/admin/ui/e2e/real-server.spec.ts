@@ -34,6 +34,7 @@ import {
   AppProjectionSchema,
   CertProjectionSchema,
   RawConfigSchema,
+  RawConfigPreviewSchema,
   ApplyResultSchema,
   HistoryEntrySchema,
   PluginsProjectionSchema,
@@ -41,6 +42,51 @@ import {
   PendingRestartStatusSchema,
   IdentitySchema,
 } from "../src/api/client.ts";
+
+test("real configuration consequence reaches the Console before apply", async ({ page, request }) => {
+  const response = await request.get("/api/config");
+  expect(response.ok()).toBe(true);
+  const baseline = RawConfigSchema.parse(await response.json());
+  const original = baseline.raw ?? "";
+  expect(baseline.base_version).toBeTruthy();
+  const candidate = original.replace(
+    /proxy_pass\s*=\s*['"]http:\/\/e2e-pool['"]\s*\nproxy_connect_timeout\s*=\s*['"]0s['"]\s*\nproxy_read_timeout\s*=\s*['"]0s['"]/,
+    "proxy_pass = 'http://127.0.0.1:8999'\nproxy_connect_timeout = '1s'\nproxy_read_timeout = '2s'",
+  );
+  expect(candidate).not.toBe(original);
+
+  await page.goto("/config");
+  const editor = page.locator(".cm-content");
+  await expect(editor).toContainText("[global]");
+  const previewResponse = page.waitForResponse((result) =>
+    result.url().includes("/api/config/preview") &&
+    result.request().method() === "POST" &&
+    result.request().postData() === candidate,
+  );
+  await editor.fill(candidate);
+  const preview = await previewResponse;
+  expect(preview.ok()).toBe(true);
+  expect(preview.request().headers()["x-jul-base-version"]).toBe(baseline.base_version);
+  const assessment = RawConfigPreviewSchema.parse(await preview.json());
+  expect(assessment.base_version).toBe(baseline.base_version);
+  const diff = assessment.diff;
+  const consequence = diff.explanations?.find((entry) => entry.code === "routing.target_retargeted");
+  expect(consequence).toBeDefined();
+  if (!consequence) throw new Error("The server did not return the retargeting consequence.");
+  const region = page.getByRole("region", { name: "Configuration consequences" });
+  await expect(region.getByText(consequence.message)).toBeVisible();
+  const inactivity = diff.explanations?.find((entry) => entry.code === "resilience.inactivity_timeout_semantics");
+  if (!inactivity) throw new Error("The server did not return the inactivity consequence.");
+  const supporting = region.getByText(inactivity.message);
+  await expect(supporting).toBeHidden();
+  const disclosure = region.getByText(/More consequences/);
+  await disclosure.focus();
+  await page.keyboard.press("Enter");
+  await expect(supporting).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(supporting).toBeHidden();
+  expect((RawConfigSchema.parse(await (await request.get("/api/config")).json())).raw).toBe(original);
+});
 
 const CacheGuidanceSchema = z.object({
   code: z.string(),

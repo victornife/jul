@@ -128,6 +128,18 @@ jul stage --endpoint https://jul-admin.example.net \
 For `plan`, `diff --config`, `apply` and `stage`, pass `--config -` to read
 candidate TOML from stdin (up to 2 MiB); otherwise pass a file path.
 
+Human-readable `plan` and `diff --config` output includes the server's assessed
+apply mode, affected scope, and candidate explanations when supplied. With
+`--json`, the CLI preserves the server response, including the additive
+`diff.explanations` array; it does not infer missing explanations or change
+server decisions. Human-readable output reports when no explanations were
+returned; omission can mean there were no entries or that an older server
+does not support the field, not that the candidate has no consequences.
+Explanations use configuration-only evidence where marked
+`candidate_only`; `not_observed` means the preview did not assess the outcome
+at runtime. Older servers may omit this field without breaking JSON or human
+output.
+
 `--confirm-admin` is the narrow explicit acknowledgement used only when the
 server reports that a candidate affects the current admin reachability path. It
 is not a general force switch.

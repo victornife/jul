@@ -512,6 +512,17 @@ it explains the operational consequences of changes to:
 - **Server timeouts and body limits**, and the global **cache**,
   **compression**, and **rate-limit** blocks.
 
+The server may include an additive `diff.explanations` array in its raw-TOML
+and typed-patch assessments. Each entry has a stable code and kind, safe scope,
+evidence source and state, a plain-language message, and optional next action
+and documentation reference. Domain diff owners produce these entries from the
+exact candidate; they do not replace validation, lifecycle classification,
+cache selection, or observed security outcomes. `candidate_only` means the
+statement is based on configuration or validation evidence only.
+`not_observed` means the preview did not obtain request-level evidence, not
+that runtime behavior is safe or healthy. Entries are deterministically
+ordered and bounded, with an explicit summary if affected scope is truncated.
+
 ### Atomic structured patch assessment
 
 The structured editor assesses exactly the ordered operations it will later
@@ -542,6 +553,26 @@ legacy admin tokens, RBAC principal tokens, discovery credentials, or literal
 secret values. The candidate route returns the same assessment plus the
 unresolved canonical TOML so privileged source review cannot drift from the
 previewed operations.
+
+The same `diff.explanations` contract is present in the server's raw plan and
+typed-patch assessment. The Console presents the highest-priority consequence
+before the grouped diff and keeps supporting entries in a keyboard-accessible
+disclosure. If the optional field is omitted, the Console reports that no
+explanations were returned; this does not establish that the candidate has no
+consequences. The field can be omitted because no entries were generated or
+because an older server does not support it.
+The access-control editor can also preview server consequences for the selected
+change or removal before handing the draft to Configuration. The assessment is
+bound to its base and selection; changing the selection hides its preview.
+Critical entries and a truncation summary remain visible in the final review.
+The raw editor previews the candidate and any one-change cache override with
+`POST /api/config/preview`, pinned to the editor's `base_version`. It hides
+advice while the candidate changes or the preview is stale. If the persisted
+baseline changes, reload the latest configuration and recreate the draft;
+reloading discards the old draft.
+[`testdata/config-explanations.toml`](../testdata/config-explanations.toml) is
+a runnable candidate showing several of these settings; validate it with
+`go run -tags waf ./cmd/jul check -config testdata/config-explanations.toml`.
 
 If operation *N* rejects the batch, the server returns HTTP 400 with the exact
 zero-based `op_index`, the operation discriminator in `op`, and structured
@@ -589,7 +620,7 @@ browser tab) cannot silently overwrite a change applied in between:
   (`POST /api/config/patch/preview`) return the current `base_version`. The
   fingerprint is computed over the canonical, comment-insensitive form, so a
   `base_version` is interchangeable between the raw and structured paths.
-- On a 409 the console shows a conflict banner with **Reload latest config**,
+- On a stale raw preview or a 409 the console shows a conflict banner with **Reload latest config**,
   which discards the stale draft and re-seeds the editor (both the text and the
   `base_version`) from the current configuration.
 - A successful apply returns the new `version`, so a follow-up edit in the same
@@ -1215,7 +1246,7 @@ consumes the endpoints below.
 | Search & Discovery | `GET /api/search` |
 | Operations | `GET /api/observability/{requests,failing-routes,timeline,upstream-history,cert-history,logs}`, `GET /api/observability/logs/stream` (SSE), `GET /api/admin/health`, `POST /api/admin/client-errors`, `GET /api/events` (SSE) |
 | Audit | `GET /api/audit`, `GET /api/audit/export` |
-| Config editor / History | `GET /api/config` (+ `/raw`, `/validate`, `/diff`, `POST /apply`, `/patch`, `/patch/preview`, `/patch/candidate`, `/patch/apply`, `/history`, `/history/{id}`, `/rollback`) |
+| Config editor / History | `GET /api/config`, `GET /api/config/history[/{id}]`, `POST /api/config/{raw,validate,preview,diff,apply,patch,patch/preview,patch/candidate,patch/apply,rollback}` |
 | Setup Wizard | `GET /api/wizard`, `POST /api/wizard/generate` |
 | Operational actions | `POST /api/v1/cache/purge/preview`, `POST /api/v1/cache/purge`, `GET /api/v1/cache/purges/{operation_id}`, `POST /reload` |
 

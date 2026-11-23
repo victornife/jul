@@ -49,6 +49,16 @@ func diffGlobalSettings(before, after *config.Config, d *ConfigDiff) {
 	d.cover("global.redact_min_secret_length")
 
 	bi, ai := b.Inspection, a.Inspection
+	if !reflect.DeepEqual(bi, ai) {
+		d.explain(candidateExplanation(
+			"inspection.governed_vs_physical",
+			"tradeoff",
+			"global inspection",
+			"Governed inspection budgets and logical guest reservations do not measure physical process memory or aggregate spool usage.",
+			"Review the configured limits alongside measured memory and spool capacity; preview does not run probes or estimate runtime usage.",
+			"docs/admin-runtime-hot-reload.md",
+		))
+	}
 	if bi.Mode != ai.Mode {
 		d.mod(DiffEntry{Kind: "global", Name: "global", Before: orNone(bi.Mode), After: orNone(ai.Mode), Detail: "Change process-wide inspection governor mode"}, "global inspection mode")
 	}
@@ -87,6 +97,14 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " the response cache"}, "cache")
+		d.explain(candidateExplanation(
+			"cache.shared_copy",
+			"tradeoff",
+			"global cache",
+			"Cached responses are shared copies; a configured TTL does not make every origin response cacheable or private.",
+			"Check route authentication, cookie-bypass policy, and origin cache headers for each cached route.",
+			"docs/cache.md",
+		))
 		d.cover("cache.enabled")
 		d.cover("cache.memory_max_size")
 		d.cover("cache.disk_path")
@@ -136,12 +154,30 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 	}
 	if b.DefaultTTL != a.DefaultTTL {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.DefaultTTL), After: durStr(a.DefaultTTL), Detail: "Change cache default TTL"}, "cache ttl")
+		d.explain(candidateExplanation(
+			"cache.origin_freshness",
+			"information",
+			"global cache",
+			"The default TTL is a fallback when the origin does not provide freshness; it does not override origin cacheability or make a private response safe to share.",
+			"Review the origin Cache-Control and Expires behavior for the affected routes.",
+			"docs/cache.md#freshness-and-stale-while-revalidate",
+		))
 	}
 	if b.StaleWhileRevalidate != a.StaleWhileRevalidate {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.StaleWhileRevalidate), After: durStr(a.StaleWhileRevalidate), Detail: "Change cache stale-while-revalidate window"}, "cache swr")
 	}
 	if b.StaleIfError != a.StaleIfError {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: durStr(b.StaleIfError), After: durStr(a.StaleIfError), Detail: "Change cache stale-if-error window"}, "cache sif")
+	}
+	if b.StaleWhileRevalidate != a.StaleWhileRevalidate || b.StaleIfError != a.StaleIfError {
+		d.explain(candidateExplanation(
+			"cache.stale_serving",
+			"tradeoff",
+			"global cache",
+			"Stale windows trade freshness for availability: cached content can be older while refresh runs or when the origin fails.",
+			"Choose windows that match the data's acceptable staleness.",
+			"docs/cache.md#freshness-and-stale-while-revalidate",
+		))
 	}
 	if b.Lock != a.Lock {
 		action := "Enable"
@@ -159,6 +195,16 @@ func diffGlobalCache(before, after *config.Config, d *ConfigDiff) {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Detail: action + " cache range serving"}, "cache range_enabled")
+		if a.RangeEnabled {
+			d.explain(candidateExplanation(
+				"cache.range_full_fill",
+				"tradeoff",
+				"global cache",
+				"A range miss can fetch and fill the full object, not just the requested byte range; this can increase origin transfer and cache-storage work.",
+				"Check object sizes and origin capacity before enabling range-aware caching.",
+				"docs/cache.md#range-requests",
+			))
+		}
 	}
 	if b.MaxRanges != a.MaxRanges {
 		d.mod(DiffEntry{Kind: "cache", Name: "global", Before: fmt.Sprintf("%d", b.MaxRanges), After: fmt.Sprintf("%d", a.MaxRanges), Detail: "Change cache maximum ranges"}, "cache max_ranges")
@@ -255,6 +301,27 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 		if !a.Enabled {
 			d.warn("Disabling global rate limiting removes protection against request floods.")
 		}
+		d.explain(candidateExplanation(
+			"rate.request_not_bandwidth",
+			"information",
+			"global rate limit",
+			"Rate and burst limit request counts, not bytes transferred; max_conns is a separate concurrent-connection cap.",
+			"Use a bandwidth control separately if byte throughput is the constraint.",
+			"docs/ratelimit.md",
+		))
+		if a.Enabled {
+			addRateLimitExplanations(d, "global rate limit", a.Key)
+		}
+		if b.MaxConns != a.MaxConns {
+			d.explain(candidateExplanation(
+				"limits.connection_admission",
+				"tradeoff",
+				"global listener connection cap",
+				"This is a concurrent-connection admission cap, not a request-rate or byte-throughput limit. Lowering it affects new admissions; already admitted connections are not terminated.",
+				"Check expected concurrent connections and proxy/listener sharing before lowering the cap.",
+				"docs/ratelimit.md#behaviour-matrix",
+			))
+		}
 		d.cover("rate_limit.enabled")
 		d.cover("rate_limit.key")
 		d.cover("rate_limit.rate")
@@ -268,9 +335,18 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 	}
 	if b.Key != a.Key || b.Rate != a.Rate || b.Burst != a.Burst {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: "global", Before: rlStr(&b), After: rlStr(&a), Detail: "Change global rate-limit policy"}, "rate limit policy")
+		addRateLimitExplanations(d, "global rate limit", a.Key)
 	}
 	if b.MaxConns != a.MaxConns {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: "global", Before: fmt.Sprintf("%d", b.MaxConns), After: fmt.Sprintf("%d", a.MaxConns), Detail: "Change max concurrent connections"}, "rate limit max conns")
+		d.explain(candidateExplanation(
+			"limits.connection_admission",
+			"tradeoff",
+			"global listener connection cap",
+			"This is a concurrent-connection admission cap, not a request-rate or byte-throughput limit. Lowering it affects new admissions; already admitted connections are not terminated.",
+			"Check expected concurrent connections and proxy/listener sharing before lowering the cap.",
+			"docs/ratelimit.md#behaviour-matrix",
+		))
 	}
 	d.cover("rate_limit.enabled")
 	d.cover("rate_limit.key")
@@ -290,8 +366,26 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: action + " global WAF"}, "waf global")
 		if a.Enabled {
 			d.warn("Enabling the WAF inspects requests against the configured rules; it only enforces in binaries built with the waf tag, and the apply preflight rejects an enabled WAF otherwise.")
+			d.explain(candidateExplanation(
+				"waf.build_capability",
+				"warning",
+				"global WAF",
+				"This candidate enables WAF policy. The existing validation/preflight is authoritative for build support; configuration alone does not prove that a request will be interrupted.",
+				"Check the validation result and the deployed binary's capabilities before applying.",
+				"docs/security-posture.md",
+			))
+			addWAFOutcomeLimitation(d, "global WAF")
 		} else {
 			d.warn("Disabling the global WAF removes rule inspection from routes that do not have a per-location override.")
+			d.explain(candidateExplanation(
+				"waf.effective_policy",
+				"warning",
+				"global WAF",
+				"Disabling the global policy removes inspection only from routes that do not retain a per-location WAF override.",
+				"Review the effective per-route policy in the diff.",
+				"docs/configuration.md#waf",
+			))
+			addWAFOutcomeLimitation(d, "global WAF")
 		}
 		d.cover("waf.enabled")
 		d.cover("waf.mode")
@@ -307,9 +401,31 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 		if b.Mode == "block" && a.Mode == "detect" {
 			d.warn("Switching global WAF to detect mode stops blocking threats.")
 		}
+		switch a.Mode {
+		case "detect":
+			d.explain(candidateExplanation(
+				"waf.detect_not_block",
+				"warning",
+				"global WAF",
+				"Detect mode records matches but does not block them; this is a policy change, not evidence that a specific request was interrupted.",
+				"Use block mode only after reviewing false-positive impact and the effective inherited policy.",
+				"docs/security-posture.md",
+			))
+		case "block":
+			d.explain(candidateExplanation(
+				"waf.block_policy",
+				"warning",
+				"global WAF",
+				"Block mode can interrupt requests that match the effective blocking policy; this candidate preview does not attribute or prove any individual request outcome.",
+				"Review the effective inherited rules and false-positive impact before applying.",
+				"docs/security-posture.md",
+			))
+		}
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	if b.BlockStatus != a.BlockStatus {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: fmt.Sprintf("%d", b.BlockStatus), After: fmt.Sprintf("%d", a.BlockStatus), Detail: "Change global WAF block status"}, "waf global block_status")
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	if b.Paranoia != a.Paranoia {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: fmt.Sprintf("%d", b.Paranoia), After: fmt.Sprintf("%d", a.Paranoia), Detail: "Change global WAF paranoia level"}, "waf global paranoia")
@@ -325,6 +441,26 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 	}
 	if b.DetectionParanoia != a.DetectionParanoia {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: fmt.Sprintf("%d", b.DetectionParanoia), After: fmt.Sprintf("%d", a.DetectionParanoia), Detail: "Change global WAF detection paranoia level"}, "waf global detection_paranoia")
+		d.explain(candidateExplanation(
+			"waf.detection_vs_blocking",
+			"tradeoff",
+			"global WAF",
+			"Detection and blocking paranoia levels are separate; raising detection does not by itself raise the blocking level.",
+			"Review both levels and the configured mode when changing rule coverage.",
+			"docs/security-posture.md",
+		))
+		addWAFOutcomeLimitation(d, "global WAF")
+	}
+	if b.BlockingParanoia != a.BlockingParanoia {
+		d.explain(candidateExplanation(
+			"waf.detection_vs_blocking",
+			"tradeoff",
+			"global WAF",
+			"Blocking paranoia is distinct from detection paranoia; changing it affects which matches can interrupt requests under block mode.",
+			"Review both levels and the effective mode when changing rule coverage.",
+			"docs/security-posture.md",
+		))
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	if formatWAFExceptionsDiff(b.Exceptions) != formatWAFExceptionsDiff(a.Exceptions) {
 		d.mod(DiffEntry{
@@ -339,6 +475,15 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 				d.warn("Global WAF exception removes entire rule %d (scope=rule_remove) across inheriting routes; prefer route-scoped narrow_target exceptions.", exc.RuleID)
 			}
 		}
+		d.explain(candidateExplanation(
+			"waf.exception_scope",
+			"warning",
+			"global WAF",
+			"Global exclusions affect every route inheriting this policy; review_at is a review reminder, not an automatic enforcement expiry.",
+			"Prefer a route-scoped narrow_target exclusion when only one route needs an exception.",
+			"docs/security-posture.md",
+		))
+		addWAFOutcomeLimitation(d, "global WAF")
 		d.cover("waf.exceptions")
 	}
 	if b.CRSEnabled != a.CRSEnabled {
@@ -350,12 +495,22 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 		if !a.CRSEnabled {
 			d.warn("Disabling the global CRS removes the core rule set.")
 		}
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	if b.RequestBodyLimit != a.RequestBodyLimit {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Before: sizeStr(b.RequestBodyLimit), After: sizeStr(a.RequestBodyLimit), Detail: "Change global WAF request body limit on global"}, "waf global body_limit")
 		if a.RequestBodyLimit.Bytes() == 0 && b.RequestBodyLimit.Bytes() != 0 {
 			d.warn("Removing the global WAF request body limit allows arbitrarily large uploads to be inspected.")
 		}
+		d.explain(candidateExplanation(
+			"inspection.body_resource_cost",
+			"tradeoff",
+			"global WAF body inspection",
+			"Body inspection can require buffering and delay streaming. Governed inspection budgets and logical guest reservations are distinct from physical memory and aggregate spool limits.",
+			"Review the inspection limits and the deployment's memory/spool capacity for the routes affected.",
+			"docs/admin-runtime-hot-reload.md",
+		))
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	if b.ResponseBodyCheck != a.ResponseBodyCheck {
 		action := "Enable"
@@ -363,12 +518,16 @@ func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: action + " global WAF response body inspection"}, "waf global response_body_check")
+		addBodyInspectionExplanation(d, "global WAF body inspection")
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	if strings.Join(b.DirectivesFiles, ",") != strings.Join(a.DirectivesFiles, ",") {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: "Change global WAF directives files"}, "waf global directives_files")
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	if b.InlineRules != a.InlineRules {
 		d.mod(DiffEntry{Kind: "waf", Name: "global", Detail: "Change global WAF inline rules"}, "waf global inline_rules")
+		addWAFOutcomeLimitation(d, "global WAF")
 	}
 	d.cover("waf.enabled")
 	d.cover("waf.mode")

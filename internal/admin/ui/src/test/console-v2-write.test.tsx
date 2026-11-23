@@ -10,7 +10,7 @@
  * apply/rollback confirmation gates) rather than the editor internals.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -42,6 +42,7 @@ import { WizardPanel } from "@/features/wizard/WizardPanel.tsx";
 import { DiffView } from "@/features/config/DiffView.tsx";
 import { ConfirmDialog } from "@/components/ConfirmDialog.tsx";
 import { PermissionContext } from "@/auth/usePermission.ts";
+import { invalidateConfigurationState } from "@/lib/configInvalidation.ts";
 import {
   takePendingDraft,
   setPendingDraft,
@@ -108,6 +109,17 @@ const HOT_LIFECYCLE: PatchLifecycle = {
   pending_subsystems: [],
 };
 
+function rawPreview(baseVersion: string, diff: ConfigDiff): Response {
+  return json({
+    ok: true,
+    base_version: baseVersion,
+    valid: true,
+    validation_errors: [],
+    lifecycle: HOT_LIFECYCLE,
+    diff,
+  });
+}
+
 const RESTART_LIFECYCLE: PatchLifecycle = {
   changes: [],
   can_apply_hot: false,
@@ -160,6 +172,9 @@ async function confirmApplyLive(): Promise<void> {
   const buttons = await screen.findAllByRole("button", { name: "Apply live" });
   const confirm = buttons[buttons.length - 1];
   if (confirm === undefined) throw new Error("Apply live confirmation button was not rendered.");
+  await waitFor(() => {
+    expect(confirm).toBeEnabled();
+  });
   fireEvent.click(confirm);
 }
 
@@ -185,17 +200,17 @@ function installRouter(): Counters {
   globalThis.fetch = vi.fn((input: string) => {
     const url = input;
     if (url === "/api/config") {
-      return Promise.resolve(json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml" }));
+      return Promise.resolve(json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }));
     }
     if (url === "/api/config/validate") {
       return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
     }
-    if (url === "/api/config/diff") {
+    if (url === "/api/config/preview") {
       return Promise.resolve(
-        json({ summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] }),
+        rawPreview("v1", { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] }),
       );
     }
-    if (url === "/api/config/apply") {
+    if (url === "/api/config/apply?base_version=v1") {
       counters.apply += 1;
       return Promise.resolve(
         json({ ok: true, status: [{ group: "Traffic", name: "TLS", active: true }] }),
@@ -298,6 +313,86 @@ describe("DiffView", () => {
     render(<DiffView diff={{ summary: "no changes" }} />);
     expect(screen.getByText(/No structural changes/)).toBeInTheDocument();
   });
+
+  it("reports when consequence explanations were not returned", () => {
+    const { rerender } = render(<DiffView diff={{ summary: "1 change" }} />);
+    const message = /No consequence explanations were returned/;
+    expect(screen.getByText(message)).toBeInTheDocument();
+
+    rerender(<DiffView diff={{ summary: "1 change", explanations: [] }} />);
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+  });
+
+  it("keeps all critical and truncation notices visible", () => {
+    const entry = (code: string, kind: "critical" | "warning" | "tradeoff" | "information", message: string) => ({
+      code,
+      kind,
+      scope: "route",
+      evidence_source: "candidate_configuration",
+      evidence_state: "candidate_only",
+      message,
+    });
+    render(
+      <DiffView diff={{ summary: "changes", explanations: [
+        entry("one", "warning", "First warning"),
+        entry("two", "warning", "Second warning"),
+        entry("three", "critical", "Critical consequence"),
+        entry("catalogue.scope_summarized", "information", "Additional consequences summarized"),
+      ] }} />,
+    );
+    expect(screen.getByText("Critical consequence")).toBeVisible();
+    expect(screen.getByText("Additional consequences summarized")).toBeVisible();
+    expect(screen.getByText("More consequences (2)")).toBeInTheDocument();
+  });
+
+  it("shows the leading consequence and progressively discloses supporting advice", () => {
+    render(
+      <DiffView
+        diff={{
+          summary: "1 route changed",
+          explanations: [
+            {
+              code: "access.route_auth_removed",
+              kind: "critical",
+              scope: "example /admin",
+              evidence_source: "candidate_configuration",
+              evidence_state: "candidate_only",
+              message: "This removes the route's authentication check.",
+              next_action: "Confirm the intended audience.",
+              documentation: "docs/auth.md",
+            },
+            {
+              code: "waf.request_outcome_unobserved",
+              kind: "information",
+              scope: "example /admin",
+              evidence_source: "request_event_producer",
+              evidence_state: "not_observed",
+              message: "This preview contains no request-level evidence.",
+            },
+            {
+              code: "routing.target_retargeted",
+              kind: "warning",
+              scope: "example /admin",
+              evidence_source: "candidate_configuration",
+              evidence_state: "candidate_only",
+              message: "Matching traffic uses a different target.",
+            },
+          ],
+        }}
+      />,
+    );
+
+    const consequences = screen.getByRole("region", { name: "Configuration consequences" });
+    expect(within(consequences).getByText("Critical")).toBeInTheDocument();
+    expect(
+      within(consequences).getByText("This removes the route's authentication check."),
+    ).toBeInTheDocument();
+    expect(
+      within(consequences).getByText("Next: Confirm the intended audience."),
+    ).toBeInTheDocument();
+    expect(within(consequences).getByText("docs/auth.md")).toBeInTheDocument();
+    expect(within(consequences).getByText("More consequences (1)")).toBeInTheDocument();
+  });
 });
 
 describe("ConfirmDialog", () => {
@@ -317,6 +412,311 @@ describe("ConfirmDialog", () => {
 });
 
 describe("ConfigPanel apply flow", () => {
+  it("re-previews the same raw candidate against a different baseline", async () => {
+    let version = "v1";
+    const candidate = 'listen = ":9000"\n';
+    const previews: Array<{ base: string | null; candidate: string | undefined }> = [];
+    const diff = (base: string): ConfigDiff => ({
+      summary: "1 change",
+      explanations: [{
+        code: "test.baseline",
+        kind: "critical",
+        scope: "route",
+        evidence_source: "candidate_configuration",
+        evidence_state: "candidate_only",
+        message: `Consequence for ${base}`,
+      }],
+    });
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config") return Promise.resolve(json({ raw: `# ${version}\n`, base_version: version }));
+      if (input === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/diff") return Promise.resolve(json(diff(version)));
+      if (input === "/api/config/preview") {
+        const base = new Headers(init?.headers).get("X-Jul-Base-Version");
+        previews.push({ base, candidate: typeof init?.body === "string" ? init.body : undefined });
+        return Promise.resolve(json({
+          ok: true,
+          base_version: base,
+          valid: true,
+          validation_errors: [],
+          lifecycle: HOT_LIFECYCLE,
+          diff: diff(version),
+        }));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const panel = () => (
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><ConfigPanel /></MemoryRouter>
+      </QueryClientProvider>
+    );
+
+    const first = render(panel());
+    const firstEditor = await screen.findByLabelText("editor");
+    fireEvent.change(firstEditor, { target: { value: candidate } });
+    expect(await screen.findByText("Consequence for v1")).toBeVisible();
+    fireEvent.change(firstEditor, { target: { value: `${candidate}# another edit\n` } });
+    expect(screen.queryByText("Consequence for v1")).not.toBeInTheDocument();
+    fireEvent.change(firstEditor, { target: { value: candidate } });
+    first.unmount();
+
+    version = "v2";
+    qc.setQueryData(["raw-config"], { raw: "# v2\n", base_version: "v2" });
+    render(panel());
+    fireEvent.change(await screen.findByLabelText("editor"), { target: { value: candidate } });
+    expect(await screen.findByText("Consequence for v2")).toBeVisible();
+    expect(screen.queryByText("Consequence for v1")).not.toBeInTheDocument();
+    expect(previews).toEqual([
+      { base: "v1", candidate },
+      { base: "v2", candidate },
+    ]);
+  });
+
+  it.each(["configured policy", "retained override"])(
+    "hides stale advice and blocks apply when the %s raw preview conflicts",
+    async (mode) => {
+      let version = "v1";
+      let failReload = mode === "configured policy";
+      let resolveConflict: ((response: Response) => void) | undefined;
+      const previews: Array<{ base: string | null; url: string }> = [];
+      globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+        if (input === "/api/config") {
+          if (version === "v2" && failReload) {
+            failReload = false;
+            return Promise.resolve(json({ error: "Reload unavailable" }, 503));
+          }
+          return Promise.resolve(json({ raw: `# ${version}\n`, base_version: version }));
+        }
+        if (input === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+        if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+        if (input.startsWith("/api/config/preview")) {
+          const base = new Headers(init?.headers).get("X-Jul-Base-Version");
+          previews.push({ base, url: input });
+          if (version !== base) {
+            return new Promise<Response>((resolve) => {
+              resolveConflict = resolve;
+            });
+          }
+          return Promise.resolve(json({
+            ok: true,
+            base_version: base,
+            valid: true,
+            validation_errors: [],
+            lifecycle: HOT_LIFECYCLE,
+            diff: { summary: "Old baseline advice" },
+          }));
+        }
+        throw new Error(`unexpected fetch: ${input}`);
+      }) as unknown as typeof fetch;
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(
+        <QueryClientProvider client={qc}>
+          <MemoryRouter><ConfigPanel /></MemoryRouter>
+        </QueryClientProvider>,
+      );
+
+      const editor = await screen.findByLabelText<HTMLTextAreaElement>("editor");
+      fireEvent.change(editor, { target: { value: 'listen = ":9000"\n' } });
+      expect(await screen.findByText("Old baseline advice")).toBeVisible();
+      if (mode === "retained override") {
+        fireEvent.change(screen.getByLabelText("Cache behavior for this change"), {
+          target: { value: "retain" },
+        });
+        await waitFor(() => {
+          expect(previews).toContainEqual({
+            base: "v1",
+            url: "/api/config/preview?cache_cutover=retain",
+          });
+        });
+        expect(await screen.findByText("Old baseline advice")).toBeVisible();
+      }
+
+      version = "v2";
+      act(() => {
+        void qc.invalidateQueries({
+          queryKey: [mode === "retained override" ? "config-cutover-preview" : "config-diff"],
+        });
+      });
+      await waitFor(() => {
+        expect(resolveConflict).toBeDefined();
+        expect(screen.queryByText("Old baseline advice")).not.toBeInTheDocument();
+      });
+      act(() => {
+        resolveConflict?.(json({ ok: false, conflict: true, current_version: "v2" }, 409));
+      });
+      expect(await screen.findByText("Preview is stale")).toBeVisible();
+      if (mode === "retained override") {
+        fireEvent.change(screen.getByLabelText("Cache behavior for this change"), {
+          target: { value: "" },
+        });
+        expect(screen.getByText("Preview is stale")).toBeVisible();
+      }
+      expect(screen.queryByText("Old baseline advice")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Reload latest config" }));
+      if (mode === "configured policy") {
+        expect(await screen.findByText(/Reload unavailable/)).toBeVisible();
+        expect(editor.value).toBe('listen = ":9000"\n');
+        expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Reload latest config" }));
+      }
+      await waitFor(() => {
+        expect(editor.value).toBe("# v2\n");
+      });
+    },
+  );
+
+  it("hides raw advice when configuration invalidation discovers a newer baseline", async () => {
+    let version = "v1";
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config") return Promise.resolve(json({ raw: `# ${version}\n`, base_version: version }));
+      if (input === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+      if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+      if (input === "/api/config/preview") {
+        const base = new Headers(init?.headers).get("X-Jul-Base-Version");
+        return Promise.resolve(
+          base === version
+            ? rawPreview(version, { summary: "Old baseline advice" })
+            : json({ ok: false, conflict: true, current_version: version }, 409),
+        );
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><ConfigPanel /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+    fireEvent.change(await screen.findByLabelText("editor"), {
+      target: { value: 'listen = ":9000"\n' },
+    });
+    expect(await screen.findByText("Old baseline advice")).toBeVisible();
+    version = "v2";
+    await act(async () => {
+      await invalidateConfigurationState(qc);
+    });
+    expect(await screen.findByText("Preview is stale")).toBeVisible();
+    expect(screen.queryByText("Old baseline advice")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
+  });
+
+  it.each(["missing base", "mismatched response"])(
+    "refuses raw advice when the preview has a %s",
+    async (failure) => {
+      const previews = vi.fn();
+      globalThis.fetch = vi.fn((input: string) => {
+        if (input === "/api/config") {
+          return Promise.resolve(json({
+            raw: 'listen = ":8443"\n',
+            ...(failure === "missing base" ? {} : { base_version: "v1" }),
+          }));
+        }
+        if (input === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+        if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
+        if (input === "/api/config/preview") {
+          previews();
+          return Promise.resolve(rawPreview("other-version", { summary: "Untrusted advice" }));
+        }
+        throw new Error(`unexpected fetch: ${input}`);
+      }) as unknown as typeof fetch;
+      render(<Wrapper><ConfigPanel /></Wrapper>);
+      fireEvent.change(await screen.findByLabelText("editor"), {
+        target: { value: 'listen = ":9000"\n' },
+      });
+      expect(
+        await screen.findByText(
+          failure === "missing base"
+            ? /The base version is unavailable/
+            : /The preview did not match the reviewed base version/,
+        ),
+      ).toBeVisible();
+      expect(screen.queryByText("Untrusted advice")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Apply live" })).toBeDisabled();
+      expect(previews).toHaveBeenCalledTimes(failure === "missing base" ? 0 : 1);
+    },
+  );
+
+  it("refreshes each raw handoff against its own candidate and pinned base", async () => {
+    const previews: string[] = [];
+    globalThis.fetch = vi.fn((input: string, init?: RequestInit) => {
+      if (input === "/api/config") return Promise.resolve(json({ raw: "# baseline\n", base_version: "v1" }));
+      if (input === "/api/config/pending-restart") {
+        return Promise.resolve(json({
+          pending: true,
+          status: {
+            state: "managed_staged",
+            managed: true,
+            staged: true,
+            staged_version: "v1",
+            serving_version: "serving",
+            subsystems: ["cache"],
+            discard_available: true,
+            inconsistent: false,
+          },
+        }));
+      }
+      if (input === "/api/config/preview") {
+        const candidate = typeof init?.body === "string" ? init.body : "";
+        expect(new Headers(init?.headers).get("X-Jul-Base-Version")).toBe("v1");
+        previews.push(candidate);
+        return Promise.resolve(rawPreview("v1", { summary: `Refreshed ${candidate}` }));
+      }
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const panel = () => (
+      <QueryClientProvider client={qc}>
+        <MemoryRouter><ConfigPanel /></MemoryRouter>
+      </QueryClientProvider>
+    );
+    const handoff = (toml: string) => ({
+      kind: "toml" as const,
+      toml,
+      baseVersion: "v1",
+      previewDiff: { summary: "Old pending-state assessment" },
+      lifecycle: RESTART_LIFECYCLE,
+      recommendedAction: "stage_restart" as const,
+      pendingRestart: { state: "none" as const, subsystems: [] },
+      candidateState: "memory_only" as const,
+    });
+
+    setPendingDraft(handoff("# first"));
+    const first = render(panel());
+    expect(await screen.findByText("Refreshed # first")).toBeVisible();
+    first.unmount();
+    setPendingDraft(handoff("# second"));
+    render(panel());
+    expect(await screen.findByText("Refreshed # second")).toBeVisible();
+    expect(screen.queryByText("Refreshed # first")).not.toBeInTheDocument();
+    expect(previews).toEqual(["# first", "# second"]);
+  });
+
+  it("hides a raw handoff's lifecycle assessment when its base has changed", async () => {
+    globalThis.fetch = vi.fn((input: string) => {
+      if (input === "/api/config") return Promise.resolve(json({ raw: "# latest\n", base_version: "v2" }));
+      if (input === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+      throw new Error(`unexpected fetch: ${input}`);
+    }) as unknown as typeof fetch;
+    setPendingDraft({
+      kind: "toml",
+      toml: "# candidate\n",
+      baseVersion: "v1",
+      previewDiff: { summary: "Old baseline advice" },
+      lifecycle: RESTART_LIFECYCLE,
+      recommendedAction: "stage_restart",
+      pendingRestart: { state: "none", subsystems: [] },
+      candidateState: "memory_only",
+    });
+    render(<Wrapper><ConfigPanel /></Wrapper>);
+
+    expect(await screen.findByText(/The base configuration changed/)).toBeVisible();
+    expect(screen.queryByText("Old baseline advice")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Cache lifecycle assessment" })).not.toBeInTheDocument();
+  });
+
   it("requires explicit confirmation before applying", async () => {
     const counters = installRouter();
     render(
@@ -367,8 +767,8 @@ describe("ConfigPanel apply flow", () => {
       if (input === "/api/config/validate") {
         return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
       }
-      if (input === "/api/config/diff") {
-        return Promise.resolve(json({ summary: "formatting-only change" }));
+      if (input === "/api/config/preview") {
+        return Promise.resolve(rawPreview("v1", { summary: "formatting-only change" }));
       }
       if (input.startsWith("/api/config/apply")) {
         return Promise.resolve(
@@ -449,17 +849,17 @@ describe("ConfigPanel apply flow", () => {
     globalThis.fetch = vi.fn((input: string) => {
       const url = input;
       if (url === "/api/config") {
-        return Promise.resolve(json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml" }));
+        return Promise.resolve(json({ raw: 'listen = ":8443"\n', path: "/etc/jul.toml", base_version: "v1" }));
       }
       if (url === "/api/config/validate") {
         return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
       }
-      if (url === "/api/config/diff") {
+      if (url === "/api/config/preview") {
         return Promise.resolve(
-          json({ summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] }),
+          rawPreview("v1", { summary: "1 change", additions: [{ kind: "listener", name: ":9000" }] }),
         );
       }
-      if (url === "/api/config/apply") {
+      if (url === "/api/config/apply?base_version=v1") {
         applied += 1;
         return applyInFlight;
       }
@@ -599,8 +999,8 @@ describe("ConfigPanel apply flow", () => {
       if (url === "/api/config/validate") {
         return Promise.resolve(json({ ok: true, message: "Configuration is valid." }));
       }
-      if (url === "/api/config/diff") {
-        return Promise.resolve(json({ summary: "1 change" }));
+      if (url === "/api/config/preview") {
+        return Promise.resolve(rawPreview("v2", { summary: "1 change" }));
       }
       if (url === "/api/config/pending-restart") {
         return Promise.resolve(
@@ -1495,7 +1895,7 @@ describe("ConfigPanel apply flow", () => {
         );
       }
       if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/preview") return Promise.resolve(rawPreview("v1", { summary: "change" }));
       if (input === "/api/config/apply?base_version=v1") {
         return Promise.resolve(
           json(
@@ -1610,7 +2010,7 @@ describe("ConfigPanel apply flow", () => {
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
       }
       if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/preview") return Promise.resolve(rawPreview("v1", { summary: "change" }));
       if (input === "/api/config/apply?base_version=v1") {
         return Promise.resolve(
           json(
@@ -1699,7 +2099,7 @@ describe("ConfigPanel apply flow", () => {
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
       }
       if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/preview") return Promise.resolve(rawPreview("v1", { summary: "change" }));
       if (input === "/api/config/apply?base_version=v1") {
         return Promise.resolve(
           json(
@@ -1772,7 +2172,7 @@ describe("ConfigPanel apply flow", () => {
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
       }
       if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/preview") return Promise.resolve(rawPreview("v1", { summary: "change" }));
       if (input === "/api/config/apply?base_version=v1") {
         return Promise.resolve(
           json(
@@ -1841,7 +2241,7 @@ describe("ConfigPanel apply flow", () => {
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
       }
       if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/preview") return Promise.resolve(rawPreview("v1", { summary: "change" }));
       if (input === "/api/config/apply?base_version=v1") {
         // AC-14: an immediate terminal result — the reload applied live
         // synchronously (200), NOT saved_not_live — that still carries an exact
@@ -1937,7 +2337,7 @@ describe("ConfigPanel apply flow", () => {
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
       }
       if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/preview") return Promise.resolve(rawPreview("v1", { summary: "change" }));
       if (input === "/api/config/apply?base_version=v1") {
         return Promise.resolve(
           json(
@@ -2051,7 +2451,7 @@ describe("ConfigPanel apply flow", () => {
         return Promise.resolve(json({ raw: 'listen = ":8443"\n', base_version: "v1" }));
       }
       if (input === "/api/config/validate") return Promise.resolve(json({ ok: true }));
-      if (input === "/api/config/diff") return Promise.resolve(json({ summary: "change" }));
+      if (input === "/api/config/preview") return Promise.resolve(rawPreview("v1", { summary: "change" }));
       if (input === "/api/config/apply?base_version=v1") {
         return Promise.resolve(
           json(

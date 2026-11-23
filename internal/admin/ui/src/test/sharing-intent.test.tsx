@@ -491,7 +491,7 @@ describe("DiffView and ConfigPanel widening acknowledgement gate", () => {
           }),
         );
       }
-      if (url.endsWith("/api/config/diff")) {
+      if (url.endsWith("/api/config/preview")) {
         return new Promise<Response>((resolve) => {
           resolveDiff = resolve;
         });
@@ -518,7 +518,7 @@ describe("DiffView and ConfigPanel widening acknowledgement gate", () => {
     });
     fireEvent.click(openApplyBtn);
 
-    // While /api/config/diff is still pending, confirmation must be disabled and show loading status.
+    // While the versioned raw preview is pending, confirmation stays disabled.
     expect(await screen.findByText("Loading change assessment…")).toBeInTheDocument();
     const applyButtons = screen.getAllByRole("button", { name: "Apply live" });
     const confirmBtn = applyButtons[applyButtons.length - 1];
@@ -527,14 +527,24 @@ describe("DiffView and ConfigPanel widening acknowledgement gate", () => {
     fireEvent.click(confirmBtn);
     expect(applyCalled).toBe(false);
 
-    // Resolve /api/config/diff with a widening report -> confirm button stays disabled until acknowledged.
-    if (!resolveDiff) throw new Error("diff request was not issued");
+    // A widening report keeps confirmation disabled until acknowledged.
+    await waitFor(() => {
+      expect(resolveDiff).toBeDefined();
+    });
+    if (!resolveDiff) throw new Error("preview request was not issued");
     resolveDiff(
       new Response(
         JSON.stringify({
-          summary: "1 modification",
-          modifications: [{ kind: "listener", name: "0.0.0.0:8443" }],
-          sharing: wideningReport,
+          ok: true,
+          base_version: "v1",
+          valid: true,
+          validation_errors: [],
+          lifecycle: HOT_LIFECYCLE,
+          diff: {
+            summary: "1 modification",
+            modifications: [{ kind: "listener", name: "0.0.0.0:8443" }],
+            sharing: wideningReport,
+          },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
