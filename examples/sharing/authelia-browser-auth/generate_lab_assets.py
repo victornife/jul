@@ -10,6 +10,7 @@ import argparse
 import os
 from pathlib import Path
 import json
+import re
 import secrets
 import sys
 import tempfile
@@ -154,14 +155,23 @@ def generate_runtime_files(output_dir: Path, lab_dir: Path) -> None:
     template = (SCRIPT_DIR / "authelia" / "configuration.yml.template").read_text(
         encoding="utf-8"
     )
-    for placeholder in (
+    placeholders = (
         "__RESET_PASSWORD_SECRET__",
         "__SESSION_SECRET__",
         "__STORAGE_ENCRYPTION_KEY__",
-    ):
-        template = template.replace(placeholder, secrets.token_urlsafe(48))
-    if "__" in template:
+    )
+    remaining = template
+    for placeholder in placeholders:
+        if template.count(placeholder) != 1:
+            raise RuntimeError(f"Authelia configuration template must contain {placeholder} once")
+        remaining = remaining.replace(placeholder, "")
+    if "__" in remaining:
         raise RuntimeError("Authelia configuration template has an unresolved secret placeholder")
+    template = re.sub(
+        "|".join(map(re.escape, placeholders)),
+        lambda _: secrets.token_urlsafe(48),
+        template,
+    )
     write_private(authelia_dir / "configuration.yml", template)
 
     write_private(

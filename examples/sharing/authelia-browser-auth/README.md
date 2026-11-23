@@ -14,6 +14,8 @@ status.
 
 Run these commands from this directory. The generated CA, passwords, admin
 token, provider secrets, and SQLite data stay under ignored `.lab/` files.
+The checkout must be under trusted directories without non-sticky
+group/world-writable ancestors so Jul can protect its effective-version key.
 
 ```bash
 python3 -m venv .venv
@@ -28,11 +30,12 @@ python3 dashboard_backend.py
 
 # Terminal 2: build Jul from this checkout, then start the fixture.
 go build -o jul ../../../cmd/jul
+./jul version-key init --file .lab/effective-version.key
 set -a
 . .lab/jul.env
 set +a
 ./jul check -config jul.toml
-./jul -config jul.toml
+./jul -config jul.toml --effective-version-key-file .lab/effective-version.key
 ```
 
 In another terminal, prepare a headless Chromium profile that trusts only the

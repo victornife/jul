@@ -133,7 +133,9 @@ python3 dashboard_backend.py
 ```
 
 Build Jul and initialize the protected effective-version key in this fixture
-directory, then validate and run it in another terminal:
+directory, then validate and run it in another terminal. The checkout must
+be under trusted directories without non-sticky group/world-writable
+ancestors, or Jul will refuse to initialize the key.
 
 ```bash
 go build -o jul ../../../cmd/jul
@@ -142,13 +144,13 @@ set -a
 . .lab/jul.env
 set +a
 ./jul check -config jul.toml
-./jul -config jul.toml
+./jul -config jul.toml --effective-version-key-file .lab/effective-version.key
 ```
 
 Confirm all listeners are loopback-only before using the browser:
 
 ```bash
-ss -ltn | grep -E ':(13000|18443|19091|19443)\\b'
+ss -ltn | grep -E ':(13000|18443|19091|19443)([[:space:]]|$)'
 ```
 
 The Docker-published provider port should show `127.0.0.1:19091`, not
@@ -167,8 +169,11 @@ python3 -m venv .venv-browser
 . .venv-browser/bin/activate
 python -m pip install -r requirements-browser.txt
 python -m playwright install chromium
-python run_browser_checks.py | tee browser-report.json
+python run_browser_checks.py > browser-report.json && cat browser-report.json
 ```
+
+The command returns the browser test's failure status; discard the report if
+the test fails.
 
 The report intentionally contains no password, cookie value, token, or private
 key. The deterministic browser run covers intended-user login and identity
@@ -229,9 +234,19 @@ sample-origin request count remained unchanged. Restarting Authelia restored
 its health endpoint.
 
 Restarting Jul preserves the generated configuration and provider database,
-but does not preserve active transport connections. The qualification run
-restarted Jul with the same effective-version key, rotated the local admin
-token and verified that the old token was rejected while the new token worked.
+but does not preserve active transport connections. After stopping Jul, use
+the same key and the environment from the setup step:
+
+```bash
+set -a
+. .lab/jul.env
+set +a
+./jul -config jul.toml --effective-version-key-file .lab/effective-version.key
+```
+
+The qualification run restarted Jul with the same effective-version key,
+rotated the local admin token and verified that the old token was rejected
+while the new token worked.
 The protected unauthenticated route still redirected to login. The browser
 harness also records whether a plain Authelia restart preserves the current
 browser session; session behavior is provider-configuration-specific.

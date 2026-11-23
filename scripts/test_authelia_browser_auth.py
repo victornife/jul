@@ -12,6 +12,7 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -106,6 +107,32 @@ class TestAutheliaBrowserAuthExample(unittest.TestCase):
                 path.read_text(encoding="utf-8"),
                 "session.secret: disposable-value\n",
             )
+
+    def test_secret_generation_accepts_underscores_and_rejects_unknown_placeholders(self) -> None:
+        generate = runpy.run_path(
+            str(EXAMPLE / "generate_lab_assets.py")
+        )["generate_runtime_files"]
+        template = (EXAMPLE / "authelia" / "configuration.yml.template").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "authelia").mkdir()
+            template_path = root / "authelia" / "configuration.yml.template"
+            template_path.write_text(template, encoding="utf-8")
+            with (
+                patch.dict(generate.__globals__, SCRIPT_DIR=root, random_argon2id_hash=lambda _: "hash"),
+                patch("secrets.token_urlsafe", return_value="secret__value"),
+            ):
+                generate(root, root / "valid")
+                config = (root / "valid" / "authelia" / "configuration.yml").read_text(
+                    encoding="utf-8"
+                )
+                self.assertIn("secret__value", config)
+                self.assertNotIn("__SESSION_SECRET__", config)
+                template_path.write_text(template + "\nvalue: __UNKNOWN__\n", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "unresolved secret placeholder"):
+                    generate(root, root / "invalid")
 
 
 if __name__ == "__main__":
