@@ -21,6 +21,8 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from playwright.sync_api import BrowserContext, Page, sync_playwright
 
+from generate_lab_assets import write_private
+
 
 ROOT = Path(__file__).resolve().parent
 LAB = ROOT / ".lab"
@@ -77,19 +79,11 @@ def backend_counters(context: BrowserContext) -> dict[str, int]:
 
 
 def write_user_database(content: str) -> None:
-    path = LAB / "authelia" / "users_database.yml"
-    temporary = path.with_suffix(".yml.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    temporary.chmod(0o600)
-    temporary.replace(path)
+    write_private(LAB / "authelia" / "users_database.yml", content)
 
 
 def write_provider_config(content: str) -> None:
-    path = LAB / "authelia" / "configuration.yml"
-    temporary = path.with_suffix(".yml.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    temporary.chmod(0o600)
-    temporary.replace(path)
+    write_private(LAB / "authelia" / "configuration.yml", content)
 
 
 def restart_provider() -> None:
@@ -104,14 +98,21 @@ def restart_provider() -> None:
         detail = result.stderr.strip().splitlines()
         suffix = f": {detail[-1]}" if detail else ""
         raise RuntimeError(f"Authelia restart failed with status {result.returncode}{suffix}")
-    for _ in range(50):
+    deadline = time.monotonic() + 15
+    healthy_since: float | None = None
+    while time.monotonic() < deadline:
         try:
             with urllib.request.urlopen("http://127.0.0.1:19091/api/health", timeout=1) as response:
                 if response.status == 200:
-                    return
+                    healthy_since = healthy_since or time.monotonic()
+                    if time.monotonic() - healthy_since >= 3:
+                        return
+                else:
+                    healthy_since = None
         except (urllib.error.URLError, TimeoutError, ConnectionError):
-            time.sleep(0.1)
-    raise RuntimeError("Authelia did not become healthy after restart")
+            healthy_since = None
+        time.sleep(0.1)
+    raise RuntimeError("Authelia did not remain healthy for 3 seconds after restart")
 
 
 def rotate_session_secret(config: str) -> str:

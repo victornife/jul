@@ -114,7 +114,9 @@ Generation creates a short-lived root CA and leaf certificate with the three
 test hostnames, random Authelia secrets, two random synthetic passwords,
 Argon2id hashes, and a random Jul admin token. Private materials and SQLite
 state are under ignored `.lab/`; `.env` only contains the local UID/GID used by
-Compose. The generator does not print passwords, secrets, or private-key
+Compose. Secret-bearing files are atomically published from mode-`0600`
+temporary files; newly created `.lab`, `tls`, and `data` directories use mode
+`0700`. The generator does not print passwords, secrets, or private-key
 contents. Do not copy real accounts into this lab.
 
 The provider container has a read-only root filesystem, drops Linux

@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 import secrets
 import sys
+import tempfile
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -58,8 +59,17 @@ def random_argon2id_hash(password: str) -> str:
 
 def write_private(path: Path, content: str) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
-    path.chmod(0o600)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        dir=path.parent,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            file.write(content)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def generate_tls(lab_dir: Path) -> None:

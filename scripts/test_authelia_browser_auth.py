@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import runpy
+import stat
+import tempfile
 import tomllib
 import unittest
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -90,6 +93,19 @@ class TestAutheliaBrowserAuthExample(unittest.TestCase):
         self.assertIn("certutil", harness)
         self.assertIn("cookie_metadata", harness)
         self.assertNotIn("print(cookie[", harness)
+
+    def test_generated_secret_files_are_private(self) -> None:
+        write_private = runpy.run_path(
+            str(EXAMPLE / "generate_lab_assets.py")
+        )["write_private"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "configuration.yml"
+            write_private(path, "session.secret: disposable-value\n")
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                "session.secret: disposable-value\n",
+            )
 
 
 if __name__ == "__main__":
