@@ -707,6 +707,8 @@ jobs:
         run: python scripts/conformance/test_run.py
       - name: run F1 sharing lab and validator unit tests (#581)
         run: python scripts/test_sharing_f1_lab.py
+      - name: run Authelia browser-auth composition tests (#627)
+        run: python scripts/test_authelia_browser_auth.py
 
   config-check:
     name: config-check

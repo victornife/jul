@@ -1,0 +1,17 @@
+services:
+  authelia:
+    image: ghcr.io/authelia/authelia:4.39.28@sha256:bd97cff4fcbf715b5ff1f9ae286afbe6033afce385302520b0368122d43a6f54
+    user: "${JUL627_UID:-1000}:${JUL627_GID:-1000}"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:19091:9091"
+    volumes:
+      - ./.lab/authelia:/config:ro
+      - ./.lab/authelia/data:/data:rw
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

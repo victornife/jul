@@ -1,0 +1,47 @@
+server:
+  address: "tcp://0.0.0.0:9091/"
+  disable_healthcheck: true
+
+log:
+  level: info
+
+ntp:
+  disable_startup_check: true
+
+identity_validation:
+  reset_password:
+    jwt_secret: "__RESET_PASSWORD_SECRET__"
+
+authentication_backend:
+  refresh_interval: "0"
+  file:
+    path: /config/users_database.yml
+    watch: true
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: dash.private.example.test
+      subject: "group:dashboard-users"
+      policy: one_factor
+
+session:
+  secret: "__SESSION_SECRET__"
+  cookies:
+    - name: jul627_session
+      domain: private.example.test
+      authelia_url: "https://auth.private.example.test:18443"
+      default_redirection_url: "https://dash.private.example.test:18443/"
+      same_site: lax
+      inactivity: "30 seconds"
+      expiration: "5 minutes"
+      remember_me: "-1s"
+
+storage:
+  encryption_key: "__STORAGE_ENCRYPTION_KEY__"
+  local:
+    path: /data/db.sqlite3
+
+notifier:
+  filesystem:
+    filename: /data/notifications.txt

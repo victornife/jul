@@ -186,6 +186,14 @@ You do not have to build every application yourself. These projects show how exi
 
 Each application has its own installation, hardware and maintenance requirements. These links explain those projects; they do not establish tested Jul.IA integrations. Check proxy settings, uploads, streaming and client authentication for the complete setup.
 
+## Try a self-hosted browser-login composition
+
+The [Authelia browser-auth example](../sharing/authelia-browser-auth-runbook.md)
+puts a restricted dashboard and an unrelated public site on one Jul instance.
+It uses Jul's existing forward-auth contract and a separately administered
+Authelia provider; it is a reproducible composition, not native Jul application
+OIDC or an application permission system.
+
 ## Pick something you would use tomorrow
 
 Then use our [practical guide](../practical-guide.md) to choose your setup, or our [getting-started guide](../getting-started.md) for gateway configuration.
