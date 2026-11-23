@@ -300,10 +300,10 @@ def main():
     key_root = None
     try:
         if os.name == "nt":
-            system_drive = os.environ.get("SystemDrive")
-            if not system_drive:
-                raise RuntimeError("Windows system drive is unavailable for protected key verification")
-            key_root = create_windows_key_root(Path(system_drive + "\\"))
+            user_profile = os.environ.get("USERPROFILE")
+            if not user_profile:
+                raise RuntimeError("Windows user profile is unavailable for protected key verification")
+            key_root = create_windows_key_root(user_profile)
         version_key_file = key_root / "private" / "version.key" if key_root else None
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
