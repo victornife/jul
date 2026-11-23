@@ -9,6 +9,7 @@ import os
 import platform
 import re
 import secrets
+import shutil
 import signal
 import socket
 import subprocess
@@ -47,6 +48,19 @@ def command(*arguments, **options):
     if result.returncode:
         raise RuntimeError(f"{Path(str(arguments[0])).name} failed ({result.returncode}): {result.stderr[-2000:]}")
     return result.stdout
+
+
+def create_windows_key_root(program_data):
+    root = Path(program_data) / f"jul-release-package-verification-{secrets.token_hex(16)}"
+    provisioner = Path(__file__).resolve().parent.parent / "deploy/windows/new-secure-data-dir.ps1"
+    try:
+        command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File", provisioner, "-Path", root)
+    except Exception:
+        if root.exists():
+            shutil.rmtree(root)
+        raise
+    return root
 
 
 def check_identity(metadata, tag, commit, operating_system, architecture):
@@ -153,12 +167,13 @@ def request(url, token=None):
         return response.status, response.read()
 
 
-def exercise(binary, configuration, traffic, admin, token, full):
+def exercise(binary, configuration, traffic, admin, token, full, version_key_file=None):
     command(binary, "check", "-config", configuration)
     # A source harness can also validate an older released package. Only newer
     # binaries advertise this command; any supported init failure is fatal.
     completion = subprocess.run([str(binary), "completion", "bash"], capture_output=True, text=True, check=True).stdout
-    env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str((Path(configuration).parent / "private" / "version.key").resolve()))
+    key_file = version_key_file or (Path(configuration).parent / "private" / "version.key").resolve()
+    env = dict(os.environ, JUL_EFFECTIVE_VERSION_KEY_FILE=str(key_file))
     if "version-key" in completion:
         subprocess.run([str(binary), "version-key", "init"], env=env, check=True, stdout=subprocess.DEVNULL)
     with tempfile.TemporaryFile(mode="w+t") as output:
@@ -282,7 +297,14 @@ def main():
               "arch": arguments.arch, "native": True, "gh_version": command("gh", "--version").splitlines()[0],
               "verifier_source": command("git", "rev-parse", "HEAD").strip(),
               "profiles": {}}
+    key_root = None
     try:
+        if os.name == "nt":
+            program_data = os.environ.get("ProgramData")
+            if not program_data:
+                raise RuntimeError("Windows ProgramData directory is unavailable for protected key verification")
+            key_root = create_windows_key_root(program_data)
+        version_key_file = key_root / "private" / "version.key" if key_root else None
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             site = root / "public"
@@ -323,13 +345,16 @@ SecRule REQUEST_URI "@streq /blocked" "id:9910201,phase:1,deny,status:403,log,ms
                 binary, verification = downloaded[arguments.tag][profile]
                 verification["rollback_fixture"] = historical_verification
                 for stage, executable in (("previous", old), ("upgrade", binary), ("rollback", old)):
-                    exercise(executable, configuration, traffic, admin, token, profile == "full")
+                    exercise(executable, configuration, traffic, admin, token, profile == "full",
+                             version_key_file=version_key_file)
                     verification[stage] = "passed"
                 report["profiles"][profile] = verification
     finally:
         backend.shutdown()
         backend.server_close()
         worker.join()
+        if key_root is not None:
+            shutil.rmtree(key_root)
     arguments.report.parent.mkdir(parents=True, exist_ok=True)
     arguments.report.write_text(json.dumps(report, indent=2) + "\n")
     print(f"download/startup/upgrade/rollback verified: {arguments.os}/{arguments.arch}, lean/full")
