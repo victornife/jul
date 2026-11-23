@@ -55,6 +55,9 @@ cleanup() {
 	if [ -n "${f1_dir:-}" ]; then
 		rm -rf "$f1_dir"
 	fi
+	if [ -n "${f627_dir:-}" ]; then
+		rm -rf "$f627_dir"
+	fi
 }
 trap cleanup EXIT
 
@@ -149,6 +152,26 @@ while IFS= read -r -d '' f; do
 			"$BIN" lint -config "$cfg_base" >/dev/null
 		); then
 			echo "   FAILED: examples/sharing/f1-standalone/${cfg_base}" >&2
+			fail=1
+		fi
+		continue
+		;;
+	examples/sharing/authelia-browser-auth/jul.toml)
+		# The #627 example's generated leaf certificate is required for config
+		# validation; the provider/browser credentials are unnecessary here.
+		if [ -z "${f627_dir:-}" ]; then
+			f627_dir="$(mktemp -d "${TMPDIR:-/tmp}/jul-627-config-check.XXXXXX")"
+			cp examples/sharing/authelia-browser-auth/jul.toml \
+				examples/sharing/authelia-browser-auth/generate_lab_assets.py "$f627_dir/"
+			python3 "$f627_dir/generate_lab_assets.py" --out "$f627_dir" --config-check >/dev/null
+		fi
+		echo "-- examples/sharing/authelia-browser-auth/jul.toml (with generated TLS)"
+		if ! (
+			cd "$f627_dir" &&
+			JUL627_ADMIN_TOKEN=placeholder-token-for-config-check \
+			"$BIN" check -config jul.toml -quiet -skip-static-roots
+		); then
+			echo "   FAILED: examples/sharing/authelia-browser-auth/jul.toml" >&2
 			fail=1
 		fi
 		continue

@@ -214,6 +214,13 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Add a pinned Authelia browser-login composition for a restricted dashboard
+  beside an unrelated public site on one Jul instance (#627). The runnable
+  headless-browser recipe documents redirect-based login, provider-owned fixed
+  sessions, clears the provider session cookie before the demo origin, records
+  loopback trust boundaries and unverified operational limits, and does not add
+  native application OIDC.
+
 - Add an optional Prometheus/Alertmanager operational alert recipe for expected
   Jul target outages and missing targets, observed leaf-certificate expiry,
   active pools with no eligible backends, Jul-owned storage headroom, and

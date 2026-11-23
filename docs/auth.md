@@ -295,6 +295,11 @@ compromised config. It is disabled by default.
   claim assertions.
 - Forward-auth is a **probe** (GET, no body), suited to services like Traefik
   ForwardAuth / NGINX `auth_request` — not a full OAuth2 exchange.
+- A provider's browser-login redirect must be carried by a non-2xx probe
+  response. Jul relays that denial/redirect response, but successful-probe
+  `Set-Cookie` headers are not relayed; this is not a cookie-refresh channel.
+  The [Authelia browser-login example](sharing/authelia-browser-auth-runbook.md)
+  documents a tested redirect-based composition and its fixed-session limits.
 
 The separate [admin Console OIDC](admin-oidc.md) Beta capability authenticates
 administrators into Jul RBAC. It does not change these application-route limits.

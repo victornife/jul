@@ -1,0 +1,6 @@
+.env
+.lab/
+.venv/
+.venv-browser/
+browser-report.json
+jul
