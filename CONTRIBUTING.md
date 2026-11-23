@@ -282,6 +282,12 @@ When adding a new feature, include **all** of these in your PR:
 - [ ] `CHANGELOG.md` entry under `[Unreleased]`.
 - [ ] Metrics update in `internal/observability/metrics.go` when applicable.
 
+When adding operator-facing consequences to a configuration preview, generate
+them beside the server-side domain diff or policy owner. Keep claims bound to
+candidate evidence, mark unobserved runtime outcomes explicitly, and test that
+typed and raw previews agree; do not derive policy advice from frontend
+configuration heuristics.
+
 ### Adding a configuration field
 
 The configuration lifecycle is closed-world: every public TOML leaf must have

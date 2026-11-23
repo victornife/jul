@@ -10,7 +10,7 @@
  * apply/rollback confirmation gates) rather than the editor internals.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -297,6 +297,55 @@ describe("DiffView", () => {
   it("shows an empty state when nothing changed", () => {
     render(<DiffView diff={{ summary: "no changes" }} />);
     expect(screen.getByText(/No structural changes/)).toBeInTheDocument();
+  });
+
+  it("shows the leading consequence and progressively discloses supporting advice", () => {
+    render(
+      <DiffView
+        diff={{
+          summary: "1 route changed",
+          explanations: [
+            {
+              code: "access.route_auth_removed",
+              kind: "critical",
+              scope: "example /admin",
+              evidence_source: "candidate_configuration",
+              evidence_state: "candidate_only",
+              message: "This removes the route's authentication check.",
+              next_action: "Confirm the intended audience.",
+              documentation: "docs/auth.md",
+            },
+            {
+              code: "waf.request_outcome_unobserved",
+              kind: "information",
+              scope: "example /admin",
+              evidence_source: "request_event_producer",
+              evidence_state: "not_observed",
+              message: "This preview contains no request-level evidence.",
+            },
+            {
+              code: "routing.target_retargeted",
+              kind: "warning",
+              scope: "example /admin",
+              evidence_source: "candidate_configuration",
+              evidence_state: "candidate_only",
+              message: "Matching traffic uses a different target.",
+            },
+          ],
+        }}
+      />,
+    );
+
+    const consequences = screen.getByRole("region", { name: "Configuration consequences" });
+    expect(within(consequences).getByText("Critical")).toBeInTheDocument();
+    expect(
+      within(consequences).getByText("This removes the route's authentication check."),
+    ).toBeInTheDocument();
+    expect(
+      within(consequences).getByText("Next: Confirm the intended audience."),
+    ).toBeInTheDocument();
+    expect(within(consequences).getByText("docs/auth.md")).toBeInTheDocument();
+    expect(within(consequences).getByText("More consequences (1)")).toBeInTheDocument();
   });
 });
 

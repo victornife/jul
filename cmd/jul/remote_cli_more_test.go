@@ -465,6 +465,93 @@ func TestRemotePostconditionCLIAndPlanSharingSummary(t *testing.T) {
 			t.Fatalf("code=%d out=%s", code, out)
 		}
 	})
+
+	t.Run("renders candidate consequences and whole-candidate apply mode", func(t *testing.T) {
+		withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+			rawResp := adminclient.RawResponse{Body: []byte(`{
+				"valid":true,
+				"lifecycle":{"can_apply_hot":false,"can_stage_restart":true},
+				"diff":{
+					"summary":"1 route changed",
+					"affected":["example /admin auth"],
+					"explanations":[{
+					"code":"access.route_auth_removed",
+					"kind":"critical",
+					"scope":"127.0.0.1:8080 /admin",
+					"evidence_source":"candidate_configuration",
+					"evidence_state":"candidate_only",
+					"message":"The route authentication check is removed.",
+					"next_action":"Confirm the intended audience.",
+					"documentation":"docs/auth.md"
+				}]}
+			}`)}
+			if code := renderRawSuccess(remoteCommon{}, "plan", rawResp, "assessed"); code != 0 {
+				t.Fatalf("code=%d out=%s", code, out)
+			}
+			got := out.String()
+			for _, want := range []string{
+				"apply mode: stage_restart",
+				"diff: 1 route changed",
+				"affected: example /admin auth",
+				"consequence (critical, 127.0.0.1:8080 /admin)",
+				"The route authentication check is removed.",
+				"next: Confirm the intended audience.",
+				"docs: docs/auth.md",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("output missing %q:\n%s", want, got)
+				}
+			}
+		})
+	})
+
+	t.Run("handles sparse explanations, lifecycle states, and long affected lists", func(t *testing.T) {
+		withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+			renderConfigExplanations(map[string]any{
+				"explanations": []any{
+					"not an explanation",
+					map[string]any{"message": ""},
+					map[string]any{"message": "A policy change", "evidence_state": "not_observed", "next_action": "Inspect events", "documentation": "docs/events.md"},
+					map[string]any{"kind": "warning", "scope": "route /", "message": "A route consequence"},
+				},
+			})
+			renderConfigLifecycle(map[string]any{"can_apply_hot": true, "can_stage_restart": true})
+			renderConfigLifecycle(map[string]any{"can_apply_hot": true})
+			renderConfigLifecycle(map[string]any{})
+
+			affected := make([]string, 21)
+			for i := range affected {
+				affected[i] = fmt.Sprintf("route-%02d", i)
+			}
+			body, err := json.Marshal(map[string]any{
+				"valid": true,
+				"diff":  map[string]any{"affected": affected},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code := renderRawSuccess(remoteCommon{}, "plan", adminclient.RawResponse{Body: body}, "assessed"); code != 0 {
+				t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+			}
+
+			got := out.String()
+			for _, want := range []string{
+				"consequence (information): A policy change",
+				"evidence: not observed",
+				"next: Inspect events",
+				"docs: docs/events.md",
+				"consequence (warning, route /): A route consequence",
+				"apply mode: hot apply or stage_restart is available",
+				"apply mode: hot apply is available",
+				"apply mode: unavailable",
+				"(and 1 more)",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("output missing %q:\n%s", want, got)
+				}
+			}
+		})
+	})
 }
 
 var _ = fmt.Sprintf

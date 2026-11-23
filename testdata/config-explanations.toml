@@ -1,0 +1,50 @@
+# Candidate settings used by the configuration-explanation guide.
+# Validate with: go run -tags waf ./cmd/jul check -config testdata/config-explanations.toml
+
+[global]
+log_level = "info"
+
+[global.inspection]
+max_buffered_bytes = "320m"
+
+[cache]
+enabled = true
+default_ttl = "5m"
+stale_if_error = "1m"
+range_enabled = true
+
+[rate_limit]
+enabled = true
+key = "ip"
+rate = 100
+burst = 200
+max_conns = 128
+
+[waf]
+enabled = true
+mode = "detect"
+crs_enabled = true
+request_body_limit = "1mb"
+response_body_check = true
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["example.test"]
+
+  [servers.client_address]
+  trusted_proxies = ["10.0.0.0/8"]
+  forwarded_headers = ["x-forwarded-for"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/" }
+  proxy_pass = "http://127.0.0.1:9000"
+  cache = true
+
+    [servers.locations.cache_policy]
+    bypass_any_cookie = true
+
+    [servers.locations.rate_limit]
+    enabled = true
+    key = "header:X-Client-ID"
+    rate = 10
+    burst = 20

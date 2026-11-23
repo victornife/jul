@@ -4737,6 +4737,47 @@
                 ],
                 "additionalProperties": false
               },
+              "explanations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "documentation": {
+                      "type": "string"
+                    },
+                    "evidence_source": {
+                      "type": "string"
+                    },
+                    "evidence_state": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "evidence_source",
+                    "evidence_state",
+                    "kind",
+                    "message",
+                    "scope"
+                  ],
+                  "additionalProperties": false
+                }
+              },
               "modifications": {
                 "type": "array",
                 "items": {
@@ -6822,6 +6863,47 @@
                   "disposition"
                 ],
                 "additionalProperties": false
+              },
+              "explanations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "documentation": {
+                      "type": "string"
+                    },
+                    "evidence_source": {
+                      "type": "string"
+                    },
+                    "evidence_state": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "evidence_source",
+                    "evidence_state",
+                    "kind",
+                    "message",
+                    "scope"
+                  ],
+                  "additionalProperties": false
+                }
               },
               "modifications": {
                 "type": "array",
@@ -9702,6 +9784,47 @@
                   "disposition"
                 ],
                 "additionalProperties": false
+              },
+              "explanations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "documentation": {
+                      "type": "string"
+                    },
+                    "evidence_source": {
+                      "type": "string"
+                    },
+                    "evidence_state": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "next_action": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "evidence_source",
+                    "evidence_state",
+                    "kind",
+                    "message",
+                    "scope"
+                  ],
+                  "additionalProperties": false
+                }
               },
               "modifications": {
                 "type": "array",

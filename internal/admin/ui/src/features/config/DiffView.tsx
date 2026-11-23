@@ -4,10 +4,7 @@
  */
 
 import type { ConfigDiff, SharingPlanReport } from "@/api/client.ts";
-import {
-  formatAudienceDeltaClassLabel,
-  formatSharingModeLabel,
-} from "@/lib/sharingIntent.ts";
+import { formatAudienceDeltaClassLabel, formatSharingModeLabel } from "@/lib/sharingIntent.ts";
 
 function Section({
   title,
@@ -59,16 +56,85 @@ export function DiffView({ diff }: { readonly diff: ConfigDiff }) {
   const removals = diff.removals ?? [];
   const modifications = diff.modifications ?? [];
   const warnings = diff.warnings ?? [];
-  const empty =
-    additions.length === 0 && removals.length === 0 && modifications.length === 0;
+  const explanations = diff.explanations ?? [];
+  const empty = additions.length === 0 && removals.length === 0 && modifications.length === 0;
+  const primaryExplanations = explanations.slice(0, 2);
+  const supportingExplanations = explanations.slice(2);
 
   return (
     <div className="space-y-3 rounded-md border border-jul-border bg-jul-bg p-4">
+      {explanations.length > 0 && (
+        <section
+          aria-label="Configuration consequences"
+          className="space-y-2 border-b border-jul-border pb-3"
+        >
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-jul-text">
+            Consequences to review
+          </h4>
+          <ul className="space-y-2">
+            {primaryExplanations.map((entry) => (
+              <li
+                key={`${entry.code}-${entry.scope}`}
+                className="rounded border border-jul-warning/40 bg-jul-warning/10 p-2.5 text-xs"
+              >
+                <p className="font-semibold text-jul-text">
+                  {entry.kind === "critical"
+                    ? "Critical"
+                    : entry.kind === "warning"
+                      ? "Warning"
+                      : entry.kind === "tradeoff"
+                        ? "Trade-off"
+                        : "Information"}
+                  {entry.scope && <span className="font-normal"> · {entry.scope}</span>}
+                </p>
+                <p className="mt-1 text-jul-text">{entry.message}</p>
+                {entry.evidence_state === "not_observed" && (
+                  <p className="mt-1 font-medium text-jul-warning">Evidence: not observed</p>
+                )}
+                {entry.next_action && (
+                  <p className="mt-1 text-jul-muted">Next: {entry.next_action}</p>
+                )}
+                {entry.documentation && (
+                  <p className="mt-1 text-jul-muted">
+                    Docs: <code>{entry.documentation}</code>
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+          {supportingExplanations.length > 0 && (
+            <details className="rounded border border-jul-border/60 px-2.5 py-1.5 text-xs">
+              <summary className="cursor-pointer font-medium text-jul-text">
+                More consequences ({supportingExplanations.length})
+              </summary>
+              <ul className="mt-2 space-y-2">
+                {supportingExplanations.map((entry) => (
+                  <li key={`${entry.code}-${entry.scope}`}>
+                    <p className="font-medium text-jul-text">
+                      {entry.kind} · {entry.scope}
+                    </p>
+                    <p className="mt-0.5 text-jul-muted">{entry.message}</p>
+                    {entry.evidence_state === "not_observed" && (
+                      <p className="mt-0.5 text-jul-warning">Evidence: not observed</p>
+                    )}
+                    {entry.next_action && (
+                      <p className="mt-0.5 text-jul-muted">Next: {entry.next_action}</p>
+                    )}
+                    {entry.documentation && (
+                      <p className="mt-0.5 text-jul-muted">
+                        Docs: <code>{entry.documentation}</code>
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </section>
+      )}
       <p className="text-sm text-jul-text">{diff.summary}</p>
       {diff.affected && diff.affected.length > 0 && (
-        <p className="text-xs text-jul-muted">
-          Affected: {diff.affected.join(", ")}
-        </p>
+        <p className="text-xs text-jul-muted">Affected: {diff.affected.join(", ")}</p>
       )}
       {warnings.length > 0 && (
         <ul className="space-y-1">
@@ -119,7 +185,9 @@ function SharingPlanSummary({ report }: { readonly report: SharingPlanReport }) 
         <ul className="space-y-1.5 text-xs">
           {entries.map((entry, idx) => {
             const tone =
-              entry.class === "widened" || entry.class === "uncertain" || entry.declared_mode_widened
+              entry.class === "widened" ||
+              entry.class === "uncertain" ||
+              entry.declared_mode_widened
                 ? "text-jul-warning"
                 : entry.class === "narrowed"
                   ? "text-jul-accent"
@@ -197,9 +265,7 @@ function SharingPlanSummary({ report }: { readonly report: SharingPlanReport }) 
               available ({report.postcondition.key_id})
             </span>
           ) : (
-            <span>
-              unavailable ({report.postcondition.unavailable_reason ?? "restricted"})
-            </span>
+            <span>unavailable ({report.postcondition.unavailable_reason ?? "restricted"})</span>
           )}
         </p>
       )}

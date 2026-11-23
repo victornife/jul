@@ -512,6 +512,17 @@ it explains the operational consequences of changes to:
 - **Server timeouts and body limits**, and the global **cache**,
   **compression**, and **rate-limit** blocks.
 
+The server may include an additive `diff.explanations` array in its raw-TOML
+and typed-patch assessments. Each entry has a stable code and kind, safe scope,
+evidence source and state, a plain-language message, and optional next action
+and documentation reference. Domain diff owners produce these entries from the
+exact candidate; they do not replace validation, lifecycle classification,
+cache selection, or observed security outcomes. `candidate_only` means the
+statement is based on configuration or validation evidence only.
+`not_observed` means the preview did not obtain request-level evidence, not
+that runtime behavior is safe or healthy. Entries are deterministically
+ordered and bounded, with an explicit summary if affected scope is truncated.
+
 ### Atomic structured patch assessment
 
 The structured editor assesses exactly the ordered operations it will later
@@ -542,6 +553,16 @@ legacy admin tokens, RBAC principal tokens, discovery credentials, or literal
 secret values. The candidate route returns the same assessment plus the
 unresolved canonical TOML so privileged source review cannot drift from the
 previewed operations.
+
+The same `diff.explanations` contract is present in the server's raw plan and
+typed-patch assessment. The Console presents the highest-priority consequence
+before the grouped diff and keeps supporting entries in a keyboard-accessible
+disclosure. If an older server omits this optional field, the Console treats
+the explanations as unavailable rather than assuming the candidate has no
+consequences.
+[`testdata/config-explanations.toml`](../testdata/config-explanations.toml) is
+a runnable candidate showing several of these settings; validate it with
+`go run -tags waf ./cmd/jul check -config testdata/config-explanations.toml`.
 
 If operation *N* rejects the batch, the server returns HTTP 400 with the exact
 zero-based `op_index`, the operation discriminator in `op`, and structured

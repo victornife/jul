@@ -5,7 +5,9 @@ package admin
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,20 +27,103 @@ type CacheCutoverPlan = cachemeta.CutoverPlan
 
 // ConfigDiff is a structured before/after report for the Console v2 diff view.
 type ConfigDiff struct {
-	Summary       string             `json:"summary"`
-	Affected      []string           `json:"affected,omitempty"`
-	Warnings      []string           `json:"warnings,omitempty"`
-	Additions     []DiffEntry        `json:"additions,omitempty"`
-	Removals      []DiffEntry        `json:"removals,omitempty"`
-	Modifications []DiffEntry        `json:"modifications,omitempty"`
-	Sharing       *SharingPlanReport `json:"sharing,omitempty"`
-	CacheCutover  *CacheCutoverPlan  `json:"cache_cutover,omitempty"`
+	Summary       string              `json:"summary"`
+	Affected      []string            `json:"affected,omitempty"`
+	Warnings      []string            `json:"warnings,omitempty"`
+	Additions     []DiffEntry         `json:"additions,omitempty"`
+	Removals      []DiffEntry         `json:"removals,omitempty"`
+	Modifications []DiffEntry         `json:"modifications,omitempty"`
+	Sharing       *SharingPlanReport  `json:"sharing,omitempty"`
+	CacheCutover  *CacheCutoverPlan   `json:"cache_cutover,omitempty"`
+	Explanations  []ConfigExplanation `json:"explanations,omitempty"`
 
 	// coveredPaths tracks which lifecycle registry paths have already been
 	// represented by the high-level comparators. The registry-driven
 	// completeness pass uses this to avoid duplicate entries while still
 	// reporting any registered field the comparators missed.
 	coveredPaths map[string]bool
+}
+
+// ConfigExplanation describes a material consequence without duplicating
+// validation or lifecycle decisions. Evidence is limited to the candidate
+// configuration and existing server-owned assessments.
+type ConfigExplanation struct {
+	Code           string `json:"code"`
+	Kind           string `json:"kind"`
+	Scope          string `json:"scope"`
+	EvidenceSource string `json:"evidence_source"`
+	EvidenceState  string `json:"evidence_state"`
+	Message        string `json:"message"`
+	NextAction     string `json:"next_action,omitempty"`
+	Documentation  string `json:"documentation,omitempty"`
+}
+
+const maxConfigExplanations = 64
+
+func (d *ConfigDiff) explain(entry ConfigExplanation) {
+	for _, current := range d.Explanations {
+		if current.Code == entry.Code && current.Scope == entry.Scope {
+			return
+		}
+	}
+	d.Explanations = append(d.Explanations, entry)
+}
+
+func candidateExplanation(code, kind, scope, message, nextAction, documentation string) ConfigExplanation {
+	return ConfigExplanation{
+		Code:           code,
+		Kind:           kind,
+		Scope:          scope,
+		EvidenceSource: "candidate_configuration",
+		EvidenceState:  "candidate_only",
+		Message:        message,
+		NextAction:     nextAction,
+		Documentation:  documentation,
+	}
+}
+
+func finalizeExplanations(entries []ConfigExplanation) []ConfigExplanation {
+	if len(entries) == 0 {
+		return nil
+	}
+	kindOrder := map[string]int{
+		"critical":    0,
+		"warning":     1,
+		"tradeoff":    2,
+		"information": 3,
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		left, leftOK := kindOrder[entries[i].Kind]
+		right, rightOK := kindOrder[entries[j].Kind]
+		if !leftOK {
+			left = len(kindOrder)
+		}
+		if !rightOK {
+			right = len(kindOrder)
+		}
+		if left != right {
+			return left < right
+		}
+		if entries[i].Code != entries[j].Code {
+			return entries[i].Code < entries[j].Code
+		}
+		return entries[i].Scope < entries[j].Scope
+	})
+	if len(entries) <= maxConfigExplanations {
+		return entries
+	}
+	omitted := len(entries) - maxConfigExplanations + 1
+	out := append([]ConfigExplanation(nil), entries[:maxConfigExplanations-1]...)
+	out = append(out, ConfigExplanation{
+		Code:           "catalogue.scope_summarized",
+		Kind:           "information",
+		Scope:          "configuration",
+		EvidenceSource: "candidate_configuration",
+		EvidenceState:  "candidate_only",
+		Message:        fmt.Sprintf("%d additional consequence entries are summarized; review the full diff and affected settings.", omitted),
+		NextAction:     "Review the complete configuration diff before applying.",
+	})
+	return out
 }
 
 // DiffEntry is one change entry in a structured diff.
@@ -143,6 +228,7 @@ func diffConfigs(before, after *config.Config, cutoverModes ...string) ConfigDif
 		d.Summary = fmt.Sprintf("This change affects %d items: %d additions, %d removals, %d modifications.",
 			len(d.Affected), len(d.Additions), len(d.Removals), len(d.Modifications))
 	}
+	d.Explanations = finalizeExplanations(d.Explanations)
 	return d
 }
 
@@ -356,6 +442,7 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 		diffServerNames(name, b, srv, d)
 		diffServerTimeouts(name, b, srv, d)
 		diffServerBodyLimit(name, b, srv, d)
+		diffClientAddressPolicy(name, b.ServerConfig, srv.ServerConfig, d)
 		diffServerTLS(name, b.TLS, srv.TLS, d)
 		if !slices.Equal(b.Plugins, srv.Plugins) {
 			d.mod(DiffEntry{Kind: "plugin", Name: name, Detail: "Change plugin order or membership on " + name}, "server "+name+" plugin order")
@@ -455,6 +542,23 @@ func diffServerTLS(name string, b, a *config.TLSConfig, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "tls", Name: name, Detail: fmt.Sprintf("%s TLS for %s", action, name)}, "server "+name+" TLS")
 		if action == "Disable" {
 			d.warn("Disabling TLS on %s will expose traffic in plaintext.", name)
+			d.explain(candidateExplanation(
+				"tls.inbound_weakened",
+				"critical",
+				name,
+				"Disabling inbound TLS exposes traffic on this listener in plaintext.",
+				"Confirm the listener is not reachable over an untrusted network and that plaintext is intentional.",
+				"docs/mtls.md",
+			))
+		} else {
+			d.explain(candidateExplanation(
+				"tls.certificate_prerequisite",
+				"tradeoff",
+				name,
+				"Inbound TLS requires usable certificate/key material and client trust in the presented identity. Candidate validation does not establish external reachability or client acceptance.",
+				"Verify the deployed certificate chain and names from the intended client networks.",
+				"docs/mtls.md",
+			))
 		}
 		return
 	}
@@ -463,11 +567,27 @@ func diffServerTLS(name string, b, a *config.TLSConfig, d *ConfigDiff) {
 	}
 	if b.Cert != a.Cert || b.Key != a.Key {
 		d.mod(DiffEntry{Kind: "tls", Name: name, Detail: "Change TLS certificate/key for " + name}, "server "+name+" TLS cert")
+		d.explain(candidateExplanation(
+			"tls.certificate_prerequisite",
+			"tradeoff",
+			name,
+			"Certificate configuration changes are validated against the candidate, but this preview does not prove that clients will reach the listener or accept the presented identity.",
+			"Verify the deployed certificate chain and names from the intended client networks.",
+			"docs/mtls.md",
+		))
 	}
 	if !strings.EqualFold(b.MinVersion, a.MinVersion) {
 		d.mod(DiffEntry{Kind: "tls", Name: name, Before: orNone(b.MinVersion), After: orNone(a.MinVersion), Detail: "Change TLS minimum version for " + name}, "server "+name+" TLS min version")
 		if a.MinVersion == "1.2" && b.MinVersion == "1.3" {
 			d.warn("Lowering the TLS minimum version on %s to 1.2 weakens transport security.", name)
+			d.explain(candidateExplanation(
+				"tls.inbound_weakened",
+				"warning",
+				name,
+				"Lowering the inbound TLS minimum admits older protocol versions and weakens the listener's transport policy.",
+				"Keep the stronger minimum unless compatibility evidence requires the downgrade.",
+				"docs/mtls.md",
+			))
 		}
 	}
 	diffACME(name, b.ACME, a.ACME, d)
@@ -508,8 +628,24 @@ func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Detail: fmt.Sprintf("%s mutual TLS (client certificates) for %s", action, name)}, "server "+name+" mTLS")
 		if action == "Disable" {
 			d.warn("Disabling mutual TLS on %s removes client-certificate authentication.", name)
+			d.explain(candidateExplanation(
+				"tls.mtls_weakened",
+				"critical",
+				name,
+				"Disabling mutual TLS removes client-certificate authentication on this listener.",
+				"Confirm that another intended authorization layer protects the service, or that public access is deliberate.",
+				"docs/mtls.md",
+			))
 		}
 		d.warn(mtlsBindTimeWarn, name)
+		d.explain(candidateExplanation(
+			"tls.mtls_handshake_boundary",
+			"information",
+			name,
+			"Mutual-TLS policy changes govern new handshakes; already established connections retain the identity accepted when they connected.",
+			"Account for reconnects when coordinating a client-certificate policy change.",
+			"docs/mtls.md",
+		))
 		return
 	}
 	if !aOn {
@@ -521,6 +657,14 @@ func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Before: orNone(b.Mode), After: orNone(a.Mode), Detail: "Change mutual TLS mode for " + name}, "server "+name+" mTLS mode")
 		if strings.EqualFold(a.Mode, "request") && strings.EqualFold(b.Mode, "require") {
 			d.warn("Relaxing mTLS on %s from require to request admits connections without a client certificate.", name)
+			d.explain(candidateExplanation(
+				"tls.mtls_weakened",
+				"warning",
+				name,
+				"Changing mutual TLS from require to request admits new connections without a client certificate.",
+				"Confirm the application has another authorization control for clients without certificates.",
+				"docs/mtls.md",
+			))
 		}
 	}
 	if b.CAFile != a.CAFile {
@@ -540,7 +684,37 @@ func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {
 	}
 	if changed {
 		d.warn(mtlsBindTimeWarn, name)
+		d.explain(candidateExplanation(
+			"tls.mtls_handshake_boundary",
+			"information",
+			name,
+			"Mutual-TLS policy changes govern new handshakes; already established connections retain the identity accepted when they connected.",
+			"Account for reconnects when coordinating a client-certificate policy change.",
+			"docs/mtls.md",
+		))
+		d.explain(candidateExplanation(
+			"tls.mtls_prerequisites",
+			"tradeoff",
+			name,
+			"Mutual-TLS policy depends on the configured CA, revocation list, and accepted client identities; this preview does not prove a client certificate will pass a live handshake.",
+			"Verify client certificate chains and identities against the candidate policy.",
+			"docs/mtls.md",
+		))
 	}
+}
+
+func diffClientAddressPolicy(name string, before, after *config.ServerConfig, d *ConfigDiff) {
+	if before == nil || after == nil || reflect.DeepEqual(before.ClientAddress, after.ClientAddress) {
+		return
+	}
+	d.explain(candidateExplanation(
+		"access.trusted_forwarding_identity",
+		"warning",
+		name,
+		"Changing client-address trust can change which forwarding headers are accepted as client identity. If the trusted ranges widen, more peers can assert that identity; CORS and VPN reachability do not provide per-application authorization.",
+		"Trust only proxy ranges you control, verify their header behavior, and review the route's separate authorization owner.",
+		"docs/configuration.md#client-address-and-trusted-proxies",
+	))
 }
 
 // mtlsBindTimeWarn tells the operator which connections a server-level mutual

@@ -19,6 +19,70 @@ type serverWrapper struct {
 	*config.ServerConfig
 }
 
+func addRateLimitExplanations(d *ConfigDiff, scope, key string) {
+	d.explain(candidateExplanation(
+		"rate.request_not_bandwidth",
+		"information",
+		scope,
+		"Rate and burst limit request counts, not bytes transferred; they do not cap bandwidth.",
+		"Use a bandwidth control separately if byte throughput is the constraint.",
+		"docs/ratelimit.md",
+	))
+	switch {
+	case strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "header:"):
+		d.explain(candidateExplanation(
+			"rate.header_key_untrusted",
+			"warning",
+			scope,
+			"A header-based key is client-controlled unless a trusted proxy overwrites it; a missing header falls back to the client IP.",
+			"Use only behind a verified proxy, or prefer a validated identity key.",
+			"docs/ratelimit.md#key-strategies",
+		))
+	case strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "jwt:"):
+		d.explain(candidateExplanation(
+			"rate.jwt_key_requires_auth",
+			"tradeoff",
+			scope,
+			"A JWT-claim key depends on authentication middleware running first; without a usable claim it falls back to the client IP.",
+			"Keep authentication ahead of rate limiting and account for shared client IPs.",
+			"docs/ratelimit.md#key-strategies",
+		))
+	default:
+		d.explain(candidateExplanation(
+			"rate.shared_client_ip",
+			"tradeoff",
+			scope,
+			"IP-keyed clients behind one proxy or NAT can share a bucket; forwarded identity is trusted only according to the listener's trusted-proxy policy.",
+			"Review trusted_proxies and expected client grouping for the listener.",
+			"docs/ratelimit.md#key-strategies",
+		))
+	}
+}
+
+func addBodyInspectionExplanation(d *ConfigDiff, scope string) {
+	d.explain(candidateExplanation(
+		"inspection.body_resource_cost",
+		"tradeoff",
+		scope,
+		"Body inspection can require buffering and delay streaming. Governed inspection budgets and logical guest reservations are distinct from physical memory and aggregate spool limits.",
+		"Review the inspection limits and the deployment's memory/spool capacity for the affected routes.",
+		"docs/admin-runtime-hot-reload.md",
+	))
+}
+
+func addWAFOutcomeLimitation(d *ConfigDiff, scope string) {
+	d.explain(ConfigExplanation{
+		Code:           "waf.request_outcome_unobserved",
+		Kind:           "information",
+		Scope:          scope,
+		EvidenceSource: "request_event_producer",
+		EvidenceState:  "not_observed",
+		Message:        "This preview contains candidate policy only, not request-level evidence. A logged match does not prove interruption, and auth or origin denials are not WAF decisions.",
+		NextAction:     "Use an event/result source that identifies the actual producer before attributing a request outcome.",
+		Documentation:  "docs/security-posture.md",
+	})
+}
+
 func relativeOrderChanged(before, after []string) bool {
 	beforeCounts, afterCounts := make(map[string]int), make(map[string]int)
 	for _, key := range before {
@@ -517,6 +581,18 @@ func coordinatesStillPresent(l *config.LocationConfig, after []config.LocationCo
 func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {
 	name := server + " " + key
 
+	explainBackendTLS(name, b.BackendTLS, a.BackendTLS, d)
+	if !reflect.DeepEqual(b.Resilience, a.Resilience) {
+		d.explain(candidateExplanation(
+			"resilience.location_override",
+			"tradeoff",
+			name,
+			"Route-level resilience settings override selected pool defaults; the exact effective timeout and admission behavior also depends on the upstream and protocol.",
+			"Review the route override together with its upstream pool policy.",
+			"docs/upstreams.md",
+		))
+	}
+
 	if locationAction(b) != locationAction(a) {
 		d.mod(DiffEntry{Kind: "location", Name: name, Before: locationAction(b), After: locationAction(a), Detail: "Change action of route " + key}, "route "+name+" action")
 	}
@@ -524,6 +600,14 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 	if locationTarget(b) != locationTarget(a) {
 		d.mod(DiffEntry{Kind: "location", Name: name, Before: orNone(locationTarget(b)), After: orNone(locationTarget(a)), Detail: "Change target of route " + key}, "route "+name+" target")
 		d.warn("Changing the target of route %s on %s redirects matching traffic to a different backend or destination.", key, server)
+		d.explain(candidateExplanation(
+			"routing.target_retargeted",
+			"warning",
+			name,
+			"Requests matching this route will be sent to a different backend or destination; unrelated routes are not implied to change. The preview does not establish external reachability.",
+			"Verify the target service and its expected TLS/authentication requirements.",
+			"docs/upstreams.md",
+		))
 	}
 	coverLocationTarget(b, a, d)
 
@@ -540,8 +624,26 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 		d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s WAF on route %s", action, key)}, "route "+name+" waf")
 		if action == "Enable" {
 			d.warn("Enabling WAF on route %s on %s may reject legitimate requests while rules are tuned.", key, server)
+			d.explain(candidateExplanation(
+				"waf.effective_policy",
+				"warning",
+				name,
+				"WAF is enabled for this route after applying its inherited policy and local override. The preview does not prove request-level enforcement.",
+				"Check the effective mode, build validation, and intended public/private audience.",
+				"docs/security-posture.md",
+			))
+			addWAFOutcomeLimitation(d, name)
 		} else {
 			d.warn("Disabling WAF on route %s on %s removes rule inspection for that route.", key, server)
+			d.explain(candidateExplanation(
+				"waf.effective_policy",
+				"warning",
+				name,
+				"Disabling the effective WAF policy removes rule inspection for this route, including an inherited global policy when no local override remains.",
+				"Confirm another intended control protects the route, or that public access is deliberate.",
+				"docs/security-posture.md",
+			))
+			addWAFOutcomeLimitation(d, name)
 		}
 	} else if aWAFOn && bWAFOn {
 		// Both enabled — compare effective policy fields
@@ -550,6 +652,27 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 			if bEffWAF.Mode == "block" && aEffWAF.Mode == "detect" {
 				d.warn("Switching WAF to detect mode on route %s on %s stops blocking threats.", key, server)
 			}
+			switch aEffWAF.Mode {
+			case "detect":
+				d.explain(candidateExplanation(
+					"waf.detect_not_block",
+					"warning",
+					name,
+					"The effective route mode is detect: matches are recorded but not blocked. This candidate preview does not establish whether a specific request was interrupted.",
+					"Review the inherited mode and use block only after tuning false positives.",
+					"docs/security-posture.md",
+				))
+			case "block":
+				d.explain(candidateExplanation(
+					"waf.block_policy",
+					"warning",
+					name,
+					"Block mode can interrupt requests that match this route's effective policy; this candidate preview does not attribute or prove any individual request outcome.",
+					"Review inherited rules and false-positive impact before applying.",
+					"docs/security-posture.md",
+				))
+			}
+			addWAFOutcomeLimitation(d, name)
 		}
 		if bEffWAF.BlockStatus != aEffWAF.BlockStatus {
 			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bEffWAF.BlockStatus), After: fmt.Sprintf("%d", aEffWAF.BlockStatus), Detail: "Change WAF block status on route " + key}, "route "+name+" waf block_status")
@@ -568,6 +691,14 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 		}
 		if bEffWAF.DetectionParanoia != aEffWAF.DetectionParanoia {
 			d.mod(DiffEntry{Kind: "waf", Name: name, Before: fmt.Sprintf("%d", bEffWAF.DetectionParanoia), After: fmt.Sprintf("%d", aEffWAF.DetectionParanoia), Detail: "Change WAF detection paranoia level on route " + key}, "route "+name+" waf detection_paranoia")
+			d.explain(candidateExplanation(
+				"waf.detection_vs_blocking",
+				"tradeoff",
+				name,
+				"Detection and blocking paranoia levels are separate; raising detection does not by itself raise the blocking level.",
+				"Review both levels and the effective mode when changing rule coverage.",
+				"docs/security-posture.md",
+			))
 		}
 		if formatWAFExceptionsDiff(bEffWAF.Exceptions) != formatWAFExceptionsDiff(aEffWAF.Exceptions) {
 			d.mod(DiffEntry{
@@ -582,6 +713,14 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 					d.warn("WAF exception on route %s on %s removes entire rule %d (scope=rule_remove); prefer narrow_target when possible.", key, server, exc.RuleID)
 				}
 			}
+			d.explain(candidateExplanation(
+				"waf.exception_scope",
+				"warning",
+				name,
+				"These exclusions apply to this route's effective policy; a global exclusion also affects every route inheriting the global policy. review_at is a review reminder, not an automatic enforcement expiry.",
+				"Prefer a route-scoped narrow_target exclusion when only this route needs an exception.",
+				"docs/security-posture.md",
+			))
 		}
 		if bEffWAF.CRSEnabled != aEffWAF.CRSEnabled {
 			action := "Enable"
@@ -598,6 +737,7 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 			if aEffWAF.RequestBodyLimit.Bytes() == 0 && bEffWAF.RequestBodyLimit.Bytes() != 0 {
 				d.warn("Removing the WAF request body limit on route %s on %s allows arbitrarily large uploads to be inspected.", key, server)
 			}
+			addBodyInspectionExplanation(d, name)
 		}
 		bf, af := strings.Join(bEffWAF.DirectivesFiles, ","), strings.Join(aEffWAF.DirectivesFiles, ",")
 		if bf != af {
@@ -612,6 +752,14 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 				action = "Disable"
 			}
 			d.mod(DiffEntry{Kind: "waf", Name: name, Detail: fmt.Sprintf("%s WAF response-body inspection on route %s", action, key)}, "route "+name+" waf response_body_check")
+			addBodyInspectionExplanation(d, name)
+		}
+		if bEffWAF.Mode != aEffWAF.Mode ||
+			bEffWAF.Paranoia != aEffWAF.Paranoia ||
+			bEffWAF.BlockingParanoia != aEffWAF.BlockingParanoia ||
+			bEffWAF.DetectionParanoia != aEffWAF.DetectionParanoia ||
+			formatWAFExceptionsDiff(bEffWAF.Exceptions) != formatWAFExceptionsDiff(aEffWAF.Exceptions) {
+			addWAFOutcomeLimitation(d, name)
 		}
 	}
 	d.cover("servers.*.locations.*.waf")
@@ -629,6 +777,16 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 		if a.Cache && a.Auth != nil {
 			d.warn("Enabling cache on authenticated route %s on %s risks serving private responses to other clients.", key, server)
 		}
+		if a.Cache {
+			d.explain(candidateExplanation(
+				"cache.shared_copy",
+				"warning",
+				name,
+				"This route uses a shared response cache. Authentication and cookie-session separation must be enforced by the cache policy and origin response rules.",
+				"Review authentication, cookie bypass, and origin Cache-Control behavior for this route.",
+				"docs/cache.md",
+			))
+		}
 	}
 	d.cover("servers.*.locations.*.cache")
 	diffLocationCachePolicy(server, key, b, a, d)
@@ -643,6 +801,14 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 			action = "Stop requiring"
 		}
 		d.mod(DiffEntry{Kind: "mtls", Name: name, Detail: fmt.Sprintf("%s client certificate on route %s", action, key)}, "route "+name+" client cert")
+		d.explain(candidateExplanation(
+			"tls.mtls_route_prerequisite",
+			"warning",
+			name,
+			"Changing the route's client-certificate requirement changes which handshakes or requests can proceed; this candidate does not prove that intended clients possess acceptable certificates.",
+			"Verify the listener's certificate policy and the route's intended client population.",
+			"docs/mtls.md",
+		))
 	}
 
 	// Per-route body-size override.
@@ -915,6 +1081,26 @@ func diffLocationCachePolicy(server, key string, bLoc, aLoc *config.LocationConf
 				After:  as,
 				Detail: fmt.Sprintf("Change cache_policy.%s on route %s", field.name, key),
 			}, "route "+name+" cache_policy "+field.name)
+			switch field.name {
+			case "default_ttl", "max_ttl":
+				d.explain(candidateExplanation(
+					"cache.origin_freshness",
+					"information",
+					name,
+					"Route TTL settings are bounded policy inputs, not proof that the origin response is cacheable; origin freshness directives still matter.",
+					"Review origin Cache-Control and Expires behavior for this route.",
+					"docs/cache.md#freshness-and-stale-while-revalidate",
+				))
+			case "stale_while_revalidate", "stale_if_error":
+				d.explain(candidateExplanation(
+					"cache.stale_serving",
+					"tradeoff",
+					name,
+					"Stale windows trade freshness for availability: cached content can be older while refresh runs or when the origin fails.",
+					"Choose windows that match this route's acceptable staleness.",
+					"docs/cache.md#freshness-and-stale-while-revalidate",
+				))
+			}
 		}
 	}
 	if b.BypassAnyCookie != a.BypassAnyCookie {
@@ -932,6 +1118,16 @@ func diffLocationCachePolicy(server, key string, bLoc, aLoc *config.LocationConf
 		if b.BypassAnyCookie && !a.BypassAnyCookie && len(a.BypassCookies) == 0 && aLoc.Cache {
 			d.warn("Disabling bypass_any_cookie on cached route %s on %s allows cookie-bearing requests to use the shared cache unless origin headers prohibit it.", key, server)
 		}
+		if aLoc.Cache {
+			d.explain(candidateExplanation(
+				"cache.cookie_session_boundary",
+				"warning",
+				name,
+				"Cookie bypass determines whether cookie-bearing sessions can reach the shared cache; this setting does not override origin cache directives.",
+				"Confirm that responses cannot cross user sessions and that origin headers agree with the intended policy.",
+				"docs/cache.md",
+			))
+		}
 	}
 	bCookies := normalizeCookieListForDiff(b.BypassCookies)
 	aCookies := normalizeCookieListForDiff(a.BypassCookies)
@@ -945,6 +1141,16 @@ func diffLocationCachePolicy(server, key string, bLoc, aLoc *config.LocationConf
 		}, "route "+name+" cache_policy bypass_cookies")
 		if len(bCookies) > 0 && len(aCookies) == 0 && !a.BypassAnyCookie && aLoc.Cache {
 			d.warn("Clearing bypass_cookies on cached route %s on %s allows cookie-bearing requests to use the shared cache unless origin headers prohibit it.", key, server)
+		}
+		if aLoc.Cache {
+			d.explain(candidateExplanation(
+				"cache.cookie_session_boundary",
+				"warning",
+				name,
+				"Cookie bypass determines whether cookie-bearing sessions can reach the shared cache; this setting does not override origin cache directives.",
+				"Confirm that responses cannot cross user sessions and that origin headers agree with the intended policy.",
+				"docs/cache.md",
+			))
 		}
 	}
 	bReload := orDefault(strings.ToLower(strings.TrimSpace(b.ReloadPolicy)), "(inherit)")
@@ -976,6 +1182,20 @@ func diffProxyTimeouts(server, key string, b, a *config.LocationConfig, d *Confi
 	} {
 		if p.b != p.a {
 			d.mod(DiffEntry{Kind: "timeouts", Name: name, Before: durStr(p.b), After: durStr(p.a), Detail: fmt.Sprintf("Change %s on route %s", p.label, key)}, fmt.Sprintf("route %s %s", name, p.label))
+			message := "The proxy connect timeout bounds establishing the upstream connection; it is not an end-to-end request deadline."
+			nextAction := "Use a separate overall deadline when the complete request and response need a total time bound."
+			if p.label != "proxy connect timeout" {
+				message = "Proxy read/send timeouts are progress (inactivity) bounds, not a single end-to-end deadline; a stream with no progress can be interrupted when its timeout expires."
+				nextAction = "Check the route's streaming behavior and separate retry_deadline when setting an overall work bound."
+			}
+			d.explain(candidateExplanation(
+				"resilience.timeout_semantics",
+				"tradeoff",
+				name,
+				message,
+				nextAction,
+				"docs/upstreams.md#retry",
+			))
 		}
 	}
 }
@@ -998,6 +1218,14 @@ func diffAuth(server, key string, b, a *config.AuthConfig, d *ConfigDiff) {
 		d.mod(DiffEntry{Kind: "auth", Name: name, Detail: fmt.Sprintf("%s access control on route %s", action, key)}, "route "+name+" auth")
 		if action == "Disable" {
 			d.warn("Disabling access control on route %s on %s exposes it without authentication.", key, server)
+			d.explain(candidateExplanation(
+				"access.route_auth_removed",
+				"critical",
+				name,
+				"This removes the route's authentication check. Other controls may remain, but CORS and VPN reachability do not establish per-application authorization; intentional public access is valid.",
+				"Confirm who owns application authorization and whether public access is intended.",
+				"docs/auth.md",
+			))
 		}
 		d.cover("servers.*.locations.*.auth")
 		return
@@ -1084,6 +1312,18 @@ func diffRateLimit(server, key string, b, a *config.RateLimitConfig, d *ConfigDi
 			action = "Remove"
 		}
 		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Detail: fmt.Sprintf("%s rate-limit override on route %s", action, key)}, "route "+name+" rate limit")
+		if a != nil && a.Enabled {
+			addRateLimitExplanations(d, name, a.Key)
+		} else if a != nil {
+			d.explain(candidateExplanation(
+				"rate.location_override_disabled",
+				"warning",
+				name,
+				"A disabled per-location override turns rate limiting off for this route even when the global policy is enabled.",
+				"Confirm that this route is intentionally excluded from the global request limit.",
+				"docs/ratelimit.md#policy-scope",
+			))
+		}
 		d.cover("servers.*.locations.*.rate_limit")
 		return
 	}
@@ -1097,12 +1337,22 @@ func diffRateLimit(server, key string, b, a *config.RateLimitConfig, d *ConfigDi
 			action = "Disable"
 		}
 		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Detail: fmt.Sprintf("%s rate-limit on route %s", action, key)}, "route "+name+" rate limit enabled")
+		addRateLimitExplanations(d, name, a.Key)
 	}
 	if b.Key != a.Key {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: orNone(b.Key), After: orNone(a.Key), Detail: "Change rate-limit key on route " + key}, "route "+name+" rate limit key")
+		addRateLimitExplanations(d, name, a.Key)
 	}
 	if b.Rate != a.Rate {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: fmt.Sprintf("%d/s", b.Rate), After: fmt.Sprintf("%d/s", a.Rate), Detail: "Change rate-limit rate on route " + key}, "route "+name+" rate limit rate")
+		d.explain(candidateExplanation(
+			"rate.request_not_bandwidth",
+			"information",
+			name,
+			"Rate and burst limit request counts, not bytes transferred.",
+			"Use a bandwidth control separately if byte throughput is the constraint.",
+			"docs/ratelimit.md",
+		))
 	}
 	if b.Burst != a.Burst {
 		d.mod(DiffEntry{Kind: "rate_limit", Name: name, Before: fmt.Sprintf("%d", b.Burst), After: fmt.Sprintf("%d", a.Burst), Detail: "Change rate-limit burst on route " + key}, "route "+name+" rate limit burst")
@@ -1149,6 +1399,7 @@ func diffUpstreams(before, after *config.Config, d *ConfigDiff) {
 }
 
 func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff) {
+	explainBackendTLS(name, b.BackendTLS, a.BackendTLS, d)
 	d.cover("upstreams.*.name")
 	if !strings.EqualFold(b.Strategy, a.Strategy) {
 		d.mod(DiffEntry{Kind: "upstream", Name: name, Before: orNone(b.Strategy), After: orNone(a.Strategy), Detail: "Change load-balancing strategy of " + name}, "upstream "+name+" strategy")
@@ -1186,10 +1437,26 @@ func diffUpstreamFields(name string, b, a *config.UpstreamConfig, d *ConfigDiff)
 		if a.MaxFails == 0 && b.MaxFails != 0 {
 			d.warn("Setting max_fails to 0 on %s disables passive health checking; failed backends stay in rotation.", name)
 		}
+		d.explain(candidateExplanation(
+			"resilience.passive_health",
+			"tradeoff",
+			name,
+			"max_fails and fail_timeout govern passive failure handling; they do not prove a backend is healthy or reachable.",
+			"Review the failure threshold with the separate active health-check and retry policies.",
+			"docs/upstreams.md",
+		))
 	}
 	d.cover("upstreams.*.max_fails")
 	if b.FailTimeout != a.FailTimeout {
 		d.mod(DiffEntry{Kind: "retries", Name: name, Before: durStr(b.FailTimeout), After: durStr(a.FailTimeout), Detail: "Change fail_timeout of " + name}, "upstream "+name+" fail_timeout")
+		d.explain(candidateExplanation(
+			"resilience.passive_health",
+			"tradeoff",
+			name,
+			"max_fails and fail_timeout govern passive failure handling; they do not prove a backend is healthy or reachable.",
+			"Review the failure threshold with the separate active health-check and retry policies.",
+			"docs/upstreams.md",
+		))
 	}
 	d.cover("upstreams.*.fail_timeout")
 
@@ -1378,9 +1645,20 @@ func diffResilienceFields(name string, b, a *config.ResilienceConfig, d *ConfigD
 		{"retry_attempts", b.RetryAttempts, a.RetryAttempts},
 		{"retry_budget_percent", b.RetryBudgetPercent, a.RetryBudgetPercent},
 	}
+	retryChanged := false
+	admissionChanged := false
+	queueChanged := false
 	for _, f := range ints {
 		if f.before != f.after {
 			d.mod(DiffEntry{Kind: "resilience", Name: name, Before: fmt.Sprintf("%d", f.before), After: fmt.Sprintf("%d", f.after), Detail: "Change " + f.key + " of " + name}, "upstream "+name+" "+f.key)
+			switch f.key {
+			case "retry_attempts", "retry_budget_percent":
+				retryChanged = true
+			case "max_pending_requests":
+				queueChanged = true
+			case "max_active_requests", "max_active_per_backend", "max_connections_per_backend":
+				admissionChanged = true
+			}
 		}
 	}
 	durs := []struct {
@@ -1397,7 +1675,43 @@ func diffResilienceFields(name string, b, a *config.ResilienceConfig, d *ConfigD
 	for _, f := range durs {
 		if f.before != f.after {
 			d.mod(DiffEntry{Kind: "resilience", Name: name, Before: durStr(f.before), After: durStr(f.after), Detail: "Change " + f.key + " of " + name}, "upstream "+name+" "+f.key)
+			switch f.key {
+			case "retry_deadline", "retry_backoff_initial", "retry_backoff_max":
+				retryChanged = true
+			case "pending_timeout":
+				queueChanged = true
+			}
 		}
+	}
+	if retryChanged {
+		d.explain(candidateExplanation(
+			"resilience.retry_repeats_work",
+			"warning",
+			name,
+			"Retries run only for eligible upstream failures and can repeat work after the backend has already received a request. The retry deadline bounds the whole sequence, not each attempt.",
+			"Keep retries bounded and avoid enabling them for non-idempotent operations unless duplicate work is acceptable.",
+			"docs/upstreams.md#retry",
+		))
+	}
+	if queueChanged {
+		d.explain(candidateExplanation(
+			"resilience.bounded_queue",
+			"tradeoff",
+			name,
+			"Pending-request limits and their timeout bound waiting for upstream capacity; a full or expired queue rejects work instead of waiting without bound.",
+			"Check the pool's admission caps and the application's tolerance for queued latency and rejection.",
+			"docs/upstreams.md",
+		))
+	}
+	if admissionChanged {
+		d.explain(candidateExplanation(
+			"resilience.admission_bounds",
+			"tradeoff",
+			name,
+			"Active-request and connection limits bound upstream admission independently of request rate; requests beyond available capacity may wait only within the configured pending policy.",
+			"Review active, pending, and per-backend limits together.",
+			"docs/upstreams.md",
+		))
 	}
 	// An explicit 0 asks for unbounded half-open probing, which is a different
 	// request from omitting the key, so the two must not render the same.
@@ -1407,6 +1721,42 @@ func diffResilienceFields(name string, b, a *config.ResilienceConfig, d *ConfigD
 			d.warn("Setting circuit_half_open_probes to 0 on %s makes half-open probing unbounded; a recovering backend takes the full waiting load the instant its cooldown ends.", name)
 		}
 	}
+}
+
+func explainBackendTLS(scope string, before, after *config.BackendTLSConfig, d *ConfigDiff) {
+	if reflect.DeepEqual(before, after) {
+		return
+	}
+	if after != nil && after.InsecureSkipVerify && (before == nil || !before.InsecureSkipVerify) {
+		d.explain(candidateExplanation(
+			"tls.backend_identity_unverified",
+			"critical",
+			scope,
+			"Backend TLS remains encrypted, but insecure_skip_verify disables certificate-chain and server-identity verification; encryption alone does not authenticate the backend.",
+			"Restore verification or configure the intended trust roots, server_name, and peer identities.",
+			"docs/upstreams.md#backend_tls",
+		))
+		return
+	}
+	if before != nil && before.InsecureSkipVerify && (after == nil || !after.InsecureSkipVerify) {
+		d.explain(candidateExplanation(
+			"tls.backend_verification_restored",
+			"information",
+			scope,
+			"Backend TLS certificate and server-identity verification is enabled again; encryption alone was not authenticating the peer while verification was disabled.",
+			"Confirm the configured trust roots and server name match the backend certificate.",
+			"docs/upstreams.md#backend_tls",
+		))
+		return
+	}
+	d.explain(candidateExplanation(
+		"tls.backend_trust_changed",
+		"warning",
+		scope,
+		"Backend trust, verified name, or client identity settings changed. Candidate validation does not prove that the configured backend will complete a TLS handshake.",
+		"Verify the trust roots, expected backend identity, and any client-certificate prerequisites against the intended backend.",
+		"docs/upstreams.md#backend_tls",
+	))
 }
 
 func probeStr(p *int) string {
