@@ -19,12 +19,12 @@ The plugin defect [#699](https://github.com/victornife/jul/issues/699) found by
 the [#695 resource assessment](reviews/2026-11-09-695-waf-wasm-resource-assessment.md)
 (a body-reading plugin read the client body inside its guest-call timeout, so
 slow legitimate uploads failed with `500`) is fixed by
-[PR #703](https://github.com/victornife/jul/pull/703), which is unreleased; no
-published package contains the fix. Bodies are prepared before the guest call
+[PR #703](https://github.com/victornife/jul/pull/703). The v2.2.0 and older
+packages do not contain the fix; this source does. Bodies are prepared before the guest call
 ([plugins.md](plugins.md#request-bodies);
 [revalidation](reviews/2026-11-10-699-plugin-body-preparation-revalidation.md)).
-On a published package, set `timeout` above the slowest legitimate upload for
-body-reading plugins and set a finite server `read_timeout`. On unreleased `main`,
+On v2.2.0 or an older package, set `timeout` above the slowest legitimate upload for
+body-reading plugins and set a finite server `read_timeout`. In this source,
 the I1 foundation publishes process-wide limits, and I2 makes the WASM plugin
 request path consume the governor (prepared bodies and request-side host
 copies are charged before allocation, overload answers `503`, and
@@ -49,10 +49,10 @@ a raised body beyond the compiled limit is refused, not buffered (see
 The assessment's argument-limit bypass
 ([#697](https://github.com/victornife/jul/issues/697), security) and CRS
 response-inspection mismatch
-([#698](https://github.com/victornife/jul/issues/698)) are fixed on `main`
-(unreleased; no published package contains the fix). See the
+([#698](https://github.com/victornife/jul/issues/698)) are fixed in this source;
+v2.2.0 and older packages do not contain the fixes. See the
 [revalidation record](reviews/2026-11-10-697-698-waf-fix-revalidation.md) and
-the WAF section below. On a published package, apply the interim measures in
+the WAF section below. On v2.2.0 or an older package, apply the interim measures in
 [waf.md](waf.md#request-and-response-bodies).
 
 ## Publication and maturity boundaries
@@ -81,10 +81,10 @@ the WAF section below. On a published package, apply the interim measures in
   not promote them to GA. Bounded NGINX translation and migration E2E
   improvements shipped in v2.1.0 and remain approximated or blocking
   where the importer guide says so.
-- **Merged after `v2.2.0`, not in a published package:** the cache operations
+- **Merged after `v2.2.0`:** the cache operations
   and WAF/security-operations additions have separate Beta records in
   [feature status](status.md). Sharing intent and withdrawal are also merged
-  and unreleased; their independent maturity has not been decided. The #581
+  in this source; their independent maturity has not been decided. The #581
   standalone fixture is bounded development-source evidence, not a released
   package or a qualifying long-running GA soak.
 - **Remaining operational boundaries:** Unix-domain upstreams support named
@@ -367,7 +367,7 @@ is used. Recheck Go upgrades and remove exact stale allow-list entries; see
   defence-in-depth.
 - **No application-route OAuth2 / OIDC flows.** No opaque-token introspection, no application cookie sessions,
   no refresh tokens. JWT bearer with JWKS validation is the supported pattern.
-- **Application authorization remains upstream-owned.** Route authentication forwards validated identity/claims but does not implement arbitrary application scopes. The admin control plane separately ships opt-in local named-principal RBAC; separate [admin Console OIDC](admin-oidc.md) is an unreleased Beta addition. It does not implement application audiences. SAML/SCIM are unavailable.
+- **Application authorization remains upstream-owned.** Route authentication forwards validated identity/claims but does not implement arbitrary application scopes. The admin control plane separately ships opt-in local named-principal RBAC; separate [admin Console OIDC](admin-oidc.md) is a Beta addition. It does not implement application audiences. SAML/SCIM are unavailable.
 - **One issuer/audience per location.** Multi-issuer validation is not supported.
 - **Forward-auth is a GET probe.** It mirrors the Traefik / NGINX `auth_request`
   pattern — not a full OAuth2 exchange.
@@ -729,7 +729,7 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   waits one `timeout`, then its request fails with `503` and `Retry-After: 1`
   (#506). Live instances are limited to `max_instances × memory_limit` per
   plugin name and generation; closed instances can still have retained memory.
-  On unreleased `main`, request-side host buffers (prepared bodies, `fetch`
+  In this source, request-side host buffers (prepared bodies, `fetch`
   copies, request state, generated and replacement bodies) are charged to the
   process-wide inspection budget and refused with `503` when it is exhausted;
   response-subscription buffers are also charged (#700 I4). A finite 1 GiB
@@ -814,7 +814,7 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   attribution. Named-principal RBAC — roles, scoped revocable tokens,
   least-privilege enforcement, and per-principal audit attribution — is now
   available as an **opt-in `[admin.rbac]` layer** (HP-02 / ADR 0010); enable it
-  for multi-user workflows. [External Console OIDC](admin-oidc.md) is separately Beta/unreleased: one provider, in-memory sessions lost on restart, local-only logout and bounded role mappings. Provider account revocation does not immediately revoke Jul sessions, and already established streams are not drained. Local recovery credentials remain required. See [docs/specs/console-rbac.md](specs/console-rbac.md) and the migration
+  for multi-user workflows. [External Console OIDC](admin-oidc.md) is separately Beta: one provider, in-memory sessions lost on restart, local-only logout and bounded role mappings. Provider account revocation does not immediately revoke Jul sessions, and already established streams are not drained. Local recovery credentials remain required. See [docs/specs/console-rbac.md](specs/console-rbac.md) and the migration
   steps in [docs/console.md](console.md).
 - **Admin listener TLS has no ACME.** `[admin.tls]` (#336) terminates the
   listener with an operator-supplied certificate, with hot content rotation
@@ -913,7 +913,7 @@ dedicated policy. Application-outcome retries (#406) remain deferred/blocking.
 For #525, Part 1 cold-miss fill locking (`[cache].lock` and
 `[cache].lock_timeout`) and Part 2 disk-streamed large-object capture
 (`[cache].max_entry_size`, `JULDCH02` trailer-framed disk store) are
-implemented, opt-in and unreleased; NGINX `proxy_cache_lock`
+implemented and opt-in in this source; NGINX `proxy_cache_lock`
 and `proxy_cache_lock_timeout` translate as approximated across `http`,
 `server`, and `location` scopes only when all cache-enabled locations share
 compatible effective values (including NGINX's `off` and `5s` defaults), while

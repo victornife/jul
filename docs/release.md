@@ -95,7 +95,7 @@ artifacts produced for the tagged SHA.
 
 ## v2.2.0 preparation
 
-v2.2.0 is published and is the latest stable release. Its immutable preparation
+v2.2.0 is published. Its immutable preparation
 record remains preserved; see the
 [release preparation record](release-candidates/v2.2.0.md) for the frozen
 scope, macOS 13+/Go 1.27.2 compatibility, #569's seven exact HTTP/3 exceptions,
@@ -248,8 +248,8 @@ was separately published 2026-09-21 from post-#420
 in [#425](https://github.com/victornife/jul/issues/425). The older
 [`v1.32.1-rc.1` evidence](release-candidates/v1.32.1-rc.1.md) remains
 historical. The [roadmap checkpoint](roadmap/README.md#published-stable-checkpoint)
-and [status matrix](status.md) distinguish the stable release from later
-unreleased work on `main`. No RC was renamed or reused as a stable tag.
+and [status matrix](status.md) distinguish stable releases from later work on
+`main`. No RC was renamed or reused as a stable tag.
 
 Before creating any tag:
 
