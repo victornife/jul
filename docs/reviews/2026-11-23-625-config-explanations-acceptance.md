@@ -58,6 +58,13 @@ directive matrix, corpus, and migration E2E therefore need no updates. See
   its old lifecycle assessment; that assessment is now hidden until current.
 - Hosted CI on head `85b5635` passed Chromium (24 tests), real-server E2E
   (44 tests), and the coverage gate. These results do not validate later heads.
+- Hosted CI on head `6d9dd797` passed Chromium (24 tests), real-server E2E
+  (44 tests), and the main coverage gate, but the separate #407 Unix HTTP
+  quality gate failed: its narrower changed-statement profile covered 6/9
+  (66.67%) statements in the shared transport classifier. Follow-up
+  config-package regressions cover the classifier's known and unknown
+  transports; the same lean/importer profile scope passes locally at 9/9
+  (100%). The new head still requires hosted validation.
 - The reviewer accepted the existing Console preview and documented API/CLI
   as the appropriate ADR 0014 surfaces for this preview-only capability; no
   runtime FeatureStatus row is required.
@@ -71,8 +78,9 @@ directive matrix, corpus, and migration E2E therefore need no updates. See
   its reload root; a fresh complete fixture passed. The PR records commands.
 - Local changed Go statement coverage on head `85b5635` against `origin/main`,
   combining lean and full-tag profiles, was 279/293 (95.22%). The follow-up
-  source measured 301/315 (95.56%) with the same method. Final-head hosted
-  validation remains required and is recorded on the PR.
+  head `6d9dd797` and the config-package test follow-up each measured 301/315
+  (95.56%) with the same method. Final-head hosted validation remains required
+  and is recorded on the PR.
 - A maintainer/reader walkthrough asking what will happen for representative
   changes is still required; no independent reader trial is claimed here.
 - Command-level validation results are recorded in the PR description after
