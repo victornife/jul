@@ -21,8 +21,9 @@ in their existing owners.
 - `ConfigDiff.explanations` is an additive, deterministic, deduplicated field
   capped at 64 entries, with an explicit summary entry on truncation.
 - Typed and raw candidate previews share the same candidate diff. Console and
-  CLI consume server output; absent fields from older servers remain
-  unavailable rather than becoming an assumed empty catalog.
+  CLI consume server output and explicitly report an omitted explanations
+  field, which can mean no entries were generated or an older server lacks the
+  field; neither case establishes that the candidate has no consequences.
 - Each entry has a stable code, kind, safe scope, evidence source/state,
   message, and optional next action/documentation reference. Candidate-only
   evidence is not runtime evidence; `not_observed` is not a healthy result.

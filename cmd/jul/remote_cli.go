@@ -745,6 +745,7 @@ func renderRawSuccess(common remoteCommon, command string, r adminclient.RawResp
 func renderConfigExplanations(diff map[string]any) {
 	entries, ok := diff["explanations"].([]any)
 	if !ok {
+		fmt.Fprintln(stdout, "No consequence explanations were returned; this does not establish that the candidate has no consequences.")
 		return
 	}
 	for _, raw := range entries {

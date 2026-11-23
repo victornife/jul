@@ -557,9 +557,10 @@ previewed operations.
 The same `diff.explanations` contract is present in the server's raw plan and
 typed-patch assessment. The Console presents the highest-priority consequence
 before the grouped diff and keeps supporting entries in a keyboard-accessible
-disclosure. If an older server omits this optional field, the Console treats
-the explanations as unavailable rather than assuming the candidate has no
-consequences.
+disclosure. If the optional field is omitted, the Console reports that no
+explanations were returned; this does not establish that the candidate has no
+consequences. The field can be omitted because no entries were generated or
+because an older server does not support it.
 [`testdata/config-explanations.toml`](../testdata/config-explanations.toml) is
 a runnable candidate showing several of these settings; validate it with
 `go run -tags waf ./cmd/jul check -config testdata/config-explanations.toml`.

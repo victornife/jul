@@ -505,6 +505,27 @@ func TestRemotePostconditionCLIAndPlanSharingSummary(t *testing.T) {
 		})
 	})
 
+	t.Run("reports absent consequence explanations without treating them as empty", func(t *testing.T) {
+		withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
+			rawResp := adminclient.RawResponse{Body: []byte(`{"diff":{"summary":"1 change"}}`)}
+			if code := renderRawSuccess(remoteCommon{}, "plan", rawResp, "assessed"); code != 0 {
+				t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+			}
+			if !strings.Contains(out.String(), "No consequence explanations were returned") {
+				t.Fatalf("missing unavailable explanation notice: %s", out)
+			}
+
+			out.Reset()
+			rawResp.Body = []byte(`{"diff":{"summary":"1 change","explanations":[]}}`)
+			if code := renderRawSuccess(remoteCommon{}, "plan", rawResp, "assessed"); code != 0 {
+				t.Fatalf("code=%d out=%s err=%s", code, out, errOut)
+			}
+			if strings.Contains(out.String(), "No consequence explanations were returned") {
+				t.Fatalf("explicit empty catalog reported as absent: %s", out)
+			}
+		})
+	})
+
 	t.Run("handles sparse explanations, lifecycle states, and long affected lists", func(t *testing.T) {
 		withRemoteOutput(t, func(out, errOut *bytes.Buffer) {
 			renderConfigExplanations(map[string]any{

@@ -132,7 +132,10 @@ Human-readable `plan` and `diff --config` output includes the server's assessed
 apply mode, affected scope, and candidate explanations when supplied. With
 `--json`, the CLI preserves the server response, including the additive
 `diff.explanations` array; it does not infer missing explanations or change
-server decisions. Explanations use configuration-only evidence where marked
+server decisions. Human-readable output reports when no explanations were
+returned; omission can mean there were no entries or that an older server
+does not support the field, not that the candidate has no consequences.
+Explanations use configuration-only evidence where marked
 `candidate_only`; `not_observed` means the preview did not assess the outcome
 at runtime. Older servers may omit this field without breaking JSON or human
 output.

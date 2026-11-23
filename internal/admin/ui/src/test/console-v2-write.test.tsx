@@ -299,6 +299,15 @@ describe("DiffView", () => {
     expect(screen.getByText(/No structural changes/)).toBeInTheDocument();
   });
 
+  it("reports when consequence explanations were not returned", () => {
+    const { rerender } = render(<DiffView diff={{ summary: "1 change" }} />);
+    const message = /No consequence explanations were returned/;
+    expect(screen.getByText(message)).toBeInTheDocument();
+
+    rerender(<DiffView diff={{ summary: "1 change", explanations: [] }} />);
+    expect(screen.queryByText(message)).not.toBeInTheDocument();
+  });
+
   it("shows the leading consequence and progressively discloses supporting advice", () => {
     render(
       <DiffView

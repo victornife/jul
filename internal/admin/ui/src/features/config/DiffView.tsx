@@ -63,6 +63,12 @@ export function DiffView({ diff }: { readonly diff: ConfigDiff }) {
 
   return (
     <div className="space-y-3 rounded-md border border-jul-border bg-jul-bg p-4">
+      {diff.explanations === undefined && (
+        <p className="text-xs text-jul-muted">
+          No consequence explanations were returned; this does not establish that the candidate has
+          no consequences.
+        </p>
+      )}
       {explanations.length > 0 && (
         <section
           aria-label="Configuration consequences"
