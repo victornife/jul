@@ -581,22 +581,7 @@ func coordinatesStillPresent(l *config.LocationConfig, after []config.LocationCo
 func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, beforeConfig, afterConfig *config.Config, d *ConfigDiff) {
 	name := server + " " + key
 
-	if !reflect.DeepEqual(b.BackendTLS, a.BackendTLS) {
-		beforeTLS := effectiveLocationBackendTLS(beforeConfig, b)
-		afterTLS := effectiveLocationBackendTLS(afterConfig, a)
-		if b.BackendTLS != nil && a.BackendTLS == nil && afterTLS != nil && afterTLS.InsecureSkipVerify {
-			d.explain(candidateExplanation(
-				"tls.backend_identity_unverified",
-				"critical",
-				name,
-				"The route now inherits a backend policy that still skips certificate-chain and server-identity verification.",
-				"Restore verification or configure the intended trust roots, server_name, and peer identities.",
-				"docs/upstreams.md#backend_tls",
-			))
-		} else {
-			explainBackendTLS(name, beforeTLS, afterTLS, d)
-		}
-	}
+	explainLocationBackendTLS(name, beforeConfig, afterConfig, b, a, d)
 	if !reflect.DeepEqual(b.Resilience, a.Resilience) {
 		d.explain(candidateExplanation(
 			"resilience.location_override",
@@ -1767,6 +1752,51 @@ func effectiveLocationBackendTLS(c *config.Config, loc *config.LocationConfig) *
 	return nil
 }
 
+func explainLocationBackendTLS(scope string, beforeConfig, afterConfig *config.Config, before, after *config.LocationConfig, d *ConfigDiff) {
+	beforeUsesTLS, _ := config.LocationProxyBackendTLS(*before)
+	afterUsesTLS, afterHasBackend := config.LocationProxyBackendTLS(*after)
+	if !afterUsesTLS {
+		if beforeUsesTLS && afterHasBackend {
+			d.explain(candidateExplanation(
+				"tls.backend_transport_plaintext",
+				"critical",
+				scope,
+				"The route now connects to its backend without TLS. Traffic is not encrypted in transit, and backend TLS certificate verification does not apply.",
+				"Use TLS for the backend if confidentiality and peer authentication are required.",
+				"docs/upstreams.md#backend_tls",
+			))
+		}
+		return
+	}
+
+	afterPolicy := effectiveLocationBackendTLS(afterConfig, after)
+	var beforePolicy *config.BackendTLSConfig
+	if beforeUsesTLS {
+		beforePolicy = effectiveLocationBackendTLS(beforeConfig, before)
+	}
+	if afterPolicy != nil && afterPolicy.InsecureSkipVerify &&
+		(!beforeUsesTLS || beforePolicy == nil || !beforePolicy.InsecureSkipVerify ||
+			locationTarget(before) != locationTarget(after) ||
+			(before.BackendTLS != nil && after.BackendTLS == nil)) {
+		message := "Backend TLS is encrypted, but insecure_skip_verify disables certificate-chain and server-identity verification; encryption alone does not authenticate the backend."
+		if before.BackendTLS != nil && after.BackendTLS == nil {
+			message = "The route now inherits a backend policy that still skips certificate-chain and server-identity verification."
+		}
+		d.explain(candidateExplanation(
+			"tls.backend_identity_unverified",
+			"critical",
+			scope,
+			message,
+			"Restore verification or configure the intended trust roots, server_name, and peer identities.",
+			"docs/upstreams.md#backend_tls",
+		))
+		return
+	}
+	if beforeUsesTLS {
+		explainBackendTLS(scope, beforePolicy, afterPolicy, d)
+	}
+}
+
 func explainBackendTLS(scope string, before, after *config.BackendTLSConfig, d *ConfigDiff) {
 	if reflect.DeepEqual(before, after) {
 		return
@@ -1776,7 +1806,7 @@ func explainBackendTLS(scope string, before, after *config.BackendTLSConfig, d *
 			"tls.backend_identity_unverified",
 			"critical",
 			scope,
-			"Backend TLS remains encrypted, but insecure_skip_verify disables certificate-chain and server-identity verification; encryption alone does not authenticate the backend.",
+			"For backend TLS connections using this policy, insecure_skip_verify disables certificate-chain and server-identity verification; encryption alone does not authenticate the backend.",
 			"Restore verification or configure the intended trust roots, server_name, and peer identities.",
 			"docs/upstreams.md#backend_tls",
 		))
@@ -1787,7 +1817,7 @@ func explainBackendTLS(scope string, before, after *config.BackendTLSConfig, d *
 			"tls.backend_verification_restored",
 			"information",
 			scope,
-			"Backend TLS certificate and server-identity verification is enabled again; encryption alone was not authenticating the peer while verification was disabled.",
+			"For backend TLS connections using this policy, certificate and server-identity verification is enabled again. This policy does not enable TLS on a plaintext connection.",
 			"Confirm the configured trust roots and server name match the backend certificate.",
 			"docs/upstreams.md#backend_tls",
 		))

@@ -451,17 +451,20 @@ async function setupApiMocks(page: Page): Promise<void> {
   await page.route("/api/config/validate", (route) =>
     json(route, { ok: true, message: "Configuration is valid." }),
   );
-  await page.route("/api/config/diff", (route) =>
+  await page.route("/api/config/preview", (route) =>
     json(route, {
-      summary: "1 modification",
-      modifications: [
-        {
-          kind: "access_log",
-          name: "observability.access_log",
-          before: "enabled = true",
-          after: "enabled = false",
-        },
-      ],
+      ...PATCH_RESULT,
+      diff: {
+        summary: "1 modification",
+        modifications: [
+          {
+            kind: "access_log",
+            name: "observability.access_log",
+            before: "enabled = true",
+            after: "enabled = false",
+          },
+        ],
+      },
     }),
   );
   await page.route("/api/traffic-controls", (route) => json(route, TRAFFIC_CONTROLS));
@@ -693,16 +696,16 @@ test.describe("Console SPA smoke (UI-1)", () => {
     page,
   }) => {
     await setupApiMocks(page);
-    await page.route("/api/config/diff", (route) => json(route, PATCH_RESULT.diff));
+    await page.route("/api/config/preview", (route) => json(route, PATCH_RESULT));
     await page.goto("/config");
 
     const editor = page.locator(".cm-content");
     await expect(editor).toContainText('proxy_pass = "http://app:3000"');
     await editor.focus();
-    const diffRequest = page.waitForRequest("/api/config/diff");
+    const previewRequest = page.waitForRequest("/api/config/preview");
     await page.keyboard.press("ControlOrMeta+End");
     await page.keyboard.type(" # changed");
-    await diffRequest;
+    expect((await previewRequest).headers()["x-jul-base-version"]).toBe("v1");
 
     const consequences = page.getByRole("region", { name: "Configuration consequences" });
     await expect(

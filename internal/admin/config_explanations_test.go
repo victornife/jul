@@ -560,6 +560,151 @@ func TestRemovingBackendTLSOverrideUsesInheritedPolicy(t *testing.T) {
 	}
 }
 
+func TestBackendTLSExplanationsFollowEffectiveTransport(t *testing.T) {
+	tests := []struct {
+		name        string
+		configure   func(before, after *config.Config)
+		wantCode    string
+		wantKind    string
+		wantMessage string
+		absentCode  string
+	}{
+		{
+			name: "insecure HTTPS override removed for plaintext HTTP",
+			configure: func(before, after *config.Config) {
+				before.Servers[0].Locations[0].BackendTLS = &config.BackendTLSConfig{InsecureSkipVerify: true}
+				after.Servers[0].Locations[0].ProxyPass = "http://verified"
+			},
+			wantCode:    "tls.backend_transport_plaintext",
+			wantKind:    "critical",
+			wantMessage: "not encrypted",
+			absentCode:  "tls.backend_verification_restored",
+		},
+		{
+			name: "HTTPS replaced with plaintext FastCGI",
+			configure: func(before, after *config.Config) {
+				before.Servers[0].Locations[0].BackendTLS = &config.BackendTLSConfig{InsecureSkipVerify: true}
+				after.Servers[0].Locations[0].ProxyPass = ""
+				after.Servers[0].Locations[0].FastCGIPass = "127.0.0.1:9000"
+			},
+			wantCode:    "tls.backend_transport_plaintext",
+			wantKind:    "critical",
+			wantMessage: "not encrypted",
+			absentCode:  "tls.backend_verification_restored",
+		},
+		{
+			name: "HTTPS replaced with plaintext uWSGI",
+			configure: func(before, after *config.Config) {
+				before.Servers[0].Locations[0].BackendTLS = &config.BackendTLSConfig{InsecureSkipVerify: true}
+				after.Servers[0].Locations[0].ProxyPass = ""
+				after.Servers[0].Locations[0].UWSGIPass = "127.0.0.1:9000"
+			},
+			wantCode:    "tls.backend_transport_plaintext",
+			wantKind:    "critical",
+			wantMessage: "not encrypted",
+			absentCode:  "tls.backend_verification_restored",
+		},
+		{
+			name: "HTTPS retargeted to unverified pool",
+			configure: func(_, after *config.Config) {
+				after.Servers[0].Locations[0].ProxyPass = "https://unverified"
+			},
+			wantCode:    "tls.backend_identity_unverified",
+			wantKind:    "critical",
+			wantMessage: "verification",
+			absentCode:  "tls.backend_verification_restored",
+		},
+		{
+			name: "HTTPS retargeted to verified pool",
+			configure: func(before, _ *config.Config) {
+				before.Servers[0].Locations[0].ProxyPass = "https://unverified"
+			},
+			wantCode:    "tls.backend_verification_restored",
+			wantKind:    "information",
+			wantMessage: "verification",
+			absentCode:  "tls.backend_identity_unverified",
+		},
+		{
+			name: "route override stays authoritative after retarget",
+			configure: func(before, after *config.Config) {
+				before.Servers[0].Locations[0].BackendTLS = &config.BackendTLSConfig{}
+				after.Servers[0].Locations[0].BackendTLS = &config.BackendTLSConfig{}
+				after.Servers[0].Locations[0].ProxyPass = "https://unverified"
+			},
+			absentCode: "tls.backend_identity_unverified",
+		},
+		{
+			name: "plaintext to unverified HTTPS",
+			configure: func(before, after *config.Config) {
+				before.Servers[0].Locations[0].ProxyPass = "http://verified"
+				after.Servers[0].Locations[0].ProxyPass = "https://unverified"
+			},
+			wantCode:   "tls.backend_identity_unverified",
+			wantKind:   "critical",
+			absentCode: "tls.backend_verification_restored",
+		},
+		{
+			name: "TLS transcoder retargeted to unverified pool",
+			configure: func(before, after *config.Config) {
+				before.Servers[0].Locations[0].ProxyPass = ""
+				after.Servers[0].Locations[0].ProxyPass = ""
+				before.Servers[0].Locations[0].GRPCTranscode = &config.GRPCTranscodeConfig{Target: "verified", TLS: true}
+				after.Servers[0].Locations[0].GRPCTranscode = &config.GRPCTranscodeConfig{Target: "unverified", TLS: true}
+			},
+			wantCode: "tls.backend_identity_unverified",
+			wantKind: "critical",
+		},
+		{
+			name: "inherited pool policy changes without route edit",
+			configure: func(_, after *config.Config) {
+				after.Upstreams[0].BackendTLS = &config.BackendTLSConfig{InsecureSkipVerify: true}
+			},
+			wantCode: "tls.backend_identity_unverified",
+			wantKind: "critical",
+		},
+		{
+			name: "insecure HTTPS replaced by static route",
+			configure: func(before, after *config.Config) {
+				before.Servers[0].Locations[0].BackendTLS = &config.BackendTLSConfig{InsecureSkipVerify: true}
+				after.Servers[0].Locations[0].ProxyPass = ""
+				after.Servers[0].Locations[0].Root = "/srv/www"
+			},
+			absentCode: "tls.backend_verification_restored",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := config.ProxyTarget("127.0.0.1:9001", "127.0.0.1:8080")
+			before.Servers[0].Locations[0].ProxyPass = "https://verified"
+			before.Upstreams = []config.UpstreamConfig{
+				{Name: "verified", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9001"}}},
+				{Name: "unverified", Servers: []config.UpstreamServer{{Address: "127.0.0.1:9002"}}, BackendTLS: &config.BackendTLSConfig{InsecureSkipVerify: true}},
+			}
+			after, err := before.Clone()
+			if err != nil {
+				t.Fatal(err)
+			}
+			tt.configure(before, after)
+			var found *ConfigExplanation
+			for _, entry := range DiffConfigs(before, after).Explanations {
+				if entry.Scope != "127.0.0.1:8080 prefix /" {
+					continue
+				}
+				if tt.absentCode != "" && entry.Code == tt.absentCode {
+					t.Errorf("unexpected route explanation: %+v", entry)
+				}
+				if tt.wantCode != "" && entry.Code == tt.wantCode {
+					entry := entry
+					found = &entry
+				}
+			}
+			if tt.wantCode != "" && (found == nil || found.Kind != tt.wantKind || !strings.Contains(found.Message, tt.wantMessage)) {
+				t.Errorf("route explanation = %+v, want %s (%s) containing %q", found, tt.wantCode, tt.wantKind, tt.wantMessage)
+			}
+		})
+	}
+}
+
 func TestTypedAndRawAssessmentShareCandidateExplanations(t *testing.T) {
 	before := config.ProxyTarget("127.0.0.1:9001", "127.0.0.1:8080")
 	ops := []patchRequest{{

@@ -34,6 +34,7 @@ import {
   AppProjectionSchema,
   CertProjectionSchema,
   RawConfigSchema,
+  RawConfigPreviewSchema,
   ApplyResultSchema,
   HistoryEntrySchema,
   PluginsProjectionSchema,
@@ -45,7 +46,9 @@ import {
 test("real configuration consequence reaches the Console before apply", async ({ page, request }) => {
   const response = await request.get("/api/config");
   expect(response.ok()).toBe(true);
-  const original = RawConfigSchema.parse(await response.json()).raw ?? "";
+  const baseline = RawConfigSchema.parse(await response.json());
+  const original = baseline.raw ?? "";
+  expect(baseline.base_version).toBeTruthy();
   const candidate = original.replace(
     /proxy_pass\s*=\s*['"]http:\/\/e2e-pool['"]\s*\nproxy_connect_timeout\s*=\s*['"]0s['"]\s*\nproxy_read_timeout\s*=\s*['"]0s['"]/,
     "proxy_pass = 'http://127.0.0.1:8999'\nproxy_connect_timeout = '1s'\nproxy_read_timeout = '2s'",
@@ -56,14 +59,17 @@ test("real configuration consequence reaches the Console before apply", async ({
   const editor = page.locator(".cm-content");
   await expect(editor).toContainText("[global]");
   const previewResponse = page.waitForResponse((result) =>
-    result.url().includes("/api/config/diff") &&
+    result.url().includes("/api/config/preview") &&
     result.request().method() === "POST" &&
     result.request().postData() === candidate,
   );
   await editor.fill(candidate);
   const preview = await previewResponse;
   expect(preview.ok()).toBe(true);
-  const diff = await preview.json() as { explanations?: Array<{ code: string; message: string }> };
+  expect(preview.request().headers()["x-jul-base-version"]).toBe(baseline.base_version);
+  const assessment = RawConfigPreviewSchema.parse(await preview.json());
+  expect(assessment.base_version).toBe(baseline.base_version);
+  const diff = assessment.diff;
   const consequence = diff.explanations?.find((entry) => entry.code === "routing.target_retargeted");
   expect(consequence).toBeDefined();
   if (!consequence) throw new Error("The server did not return the retargeting consequence.");

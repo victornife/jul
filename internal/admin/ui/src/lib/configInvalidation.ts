@@ -8,6 +8,8 @@ import type { QueryClient } from "@tanstack/react-query";
 /** Targeted post-mutation query families required by the configuration contract. */
 export const configInvalidationKeys = [
   ["raw-config"],
+  ["config-diff"],
+  ["config-cutover-preview"],
   ["traffic-controls"],
   ["routes"],
   ["apps"],
