@@ -308,6 +308,28 @@ describe("DiffView", () => {
     expect(screen.queryByText(message)).not.toBeInTheDocument();
   });
 
+  it("keeps all critical and truncation notices visible", () => {
+    const entry = (code: string, kind: "critical" | "warning" | "tradeoff" | "information", message: string) => ({
+      code,
+      kind,
+      scope: "route",
+      evidence_source: "candidate_configuration",
+      evidence_state: "candidate_only",
+      message,
+    });
+    render(
+      <DiffView diff={{ summary: "changes", explanations: [
+        entry("one", "warning", "First warning"),
+        entry("two", "warning", "Second warning"),
+        entry("three", "critical", "Critical consequence"),
+        entry("catalogue.scope_summarized", "information", "Additional consequences summarized"),
+      ] }} />,
+    );
+    expect(screen.getByText("Critical consequence")).toBeVisible();
+    expect(screen.getByText("Additional consequences summarized")).toBeVisible();
+    expect(screen.getByText("More consequences (2)")).toBeInTheDocument();
+  });
+
   it("shows the leading consequence and progressively discloses supporting advice", () => {
     render(
       <DiffView

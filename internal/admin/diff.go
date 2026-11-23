@@ -447,7 +447,7 @@ func diffServers(before, after *config.Config, d *ConfigDiff) {
 		if !slices.Equal(b.Plugins, srv.Plugins) {
 			d.mod(DiffEntry{Kind: "plugin", Name: name, Detail: "Change plugin order or membership on " + name}, "server "+name+" plugin order")
 		}
-		diffLocations(name, b.Locations, srv.Locations, before.WAF, after.WAF, d)
+		diffLocations(name, b.Locations, srv.Locations, before.WAF, after.WAF, before, after, d)
 	}
 	for i, srv := range before.Servers {
 		if !matchedBefore[i] {

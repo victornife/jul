@@ -42,6 +42,22 @@ directive matrix, corpus, and migration E2E therefore need no updates. See
 
 ## Remaining acceptance evidence
 
+- The adversarial review of head `a8171797` identified inherited backend TLS
+  verification, credential-removal, combined timeout, and decision-point UX
+  gaps. The follow-up compares effective route policy, reports remaining CIDR
+  gates, preserves both timeout explanations, and surfaces critical and
+  truncation entries outside disclosure. The access-control editor can request
+  server guidance before handoff; the raw editor continues to preview while
+  editing.
+- The reviewer accepted the existing Console preview and documented API/CLI
+  as the appropriate ADR 0014 surfaces for this preview-only capability; no
+  runtime FeatureStatus row is required.
+- A real-server browser test covers the candidate response, Console display,
+  and keyboard disclosure before apply. Screen-reader and independent operator
+  walkthroughs remain unperformed.
+- Local changed Go statement coverage against `origin/main`, combining lean
+  and full-tag profiles, is 279/293 (95.22%). Final-head hosted validation is
+  recorded on the PR rather than inferred from the reviewed earlier head.
 - A maintainer/reader walkthrough asking what will happen for representative
   changes is still required; no independent reader trial is claimed here.
 - Command-level validation results are recorded in the PR description after

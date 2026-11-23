@@ -561,6 +561,10 @@ disclosure. If the optional field is omitted, the Console reports that no
 explanations were returned; this does not establish that the candidate has no
 consequences. The field can be omitted because no entries were generated or
 because an older server does not support it.
+The access-control editor can also preview server consequences for the selected
+change or removal before handing the draft to Configuration. The assessment is
+bound to its base and selection; changing the selection hides its preview.
+Critical entries and a truncation summary remain visible in the final review.
 [`testdata/config-explanations.toml`](../testdata/config-explanations.toml) is
 a runnable candidate showing several of these settings; validate it with
 `go run -tags waf ./cmd/jul check -config testdata/config-explanations.toml`.

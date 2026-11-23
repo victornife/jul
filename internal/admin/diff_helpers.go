@@ -432,7 +432,7 @@ func correlateLocations(before, after []config.LocationConfig) (afterPairs, remo
 // reporting additions, removals, and per-field modifications with operational
 // consequences (action/target, auth, cache, compression, rate limit, body
 // size, proxy timeouts).
-func diffLocations(server string, before, after []config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {
+func diffLocations(server string, before, after []config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, beforeConfig, afterConfig *config.Config, d *ConfigDiff) {
 	oldOrder, newOrder := locationOrder(before), locationOrder(after)
 	if len(oldOrder) == len(newOrder) {
 		counts := make(map[string]int, len(oldOrder))
@@ -481,7 +481,7 @@ func diffLocations(server string, before, after []config.LocationConfig, beforeG
 			d.add(DiffEntry{Kind: "location", Name: name, After: locationAction(a) + " → " + orNone(locationTarget(a)), Detail: detail}, "route "+name)
 			continue
 		}
-		diffLocationFields(server, label, p.before, a, beforeGlobWAF, afterGlobWAF, d)
+		diffLocationFields(server, label, p.before, a, beforeGlobWAF, afterGlobWAF, beforeConfig, afterConfig, d)
 	}
 	for _, p := range removedPairs {
 		b := p.before
@@ -578,10 +578,25 @@ func coordinatesStillPresent(l *config.LocationConfig, after []config.LocationCo
 	return false
 }
 
-func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, d *ConfigDiff) {
+func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeGlobWAF, afterGlobWAF config.WAFConfig, beforeConfig, afterConfig *config.Config, d *ConfigDiff) {
 	name := server + " " + key
 
-	explainBackendTLS(name, b.BackendTLS, a.BackendTLS, d)
+	if !reflect.DeepEqual(b.BackendTLS, a.BackendTLS) {
+		beforeTLS := effectiveLocationBackendTLS(beforeConfig, b)
+		afterTLS := effectiveLocationBackendTLS(afterConfig, a)
+		if b.BackendTLS != nil && a.BackendTLS == nil && afterTLS != nil && afterTLS.InsecureSkipVerify {
+			d.explain(candidateExplanation(
+				"tls.backend_identity_unverified",
+				"critical",
+				name,
+				"The route now inherits a backend policy that still skips certificate-chain and server-identity verification.",
+				"Restore verification or configure the intended trust roots, server_name, and peer identities.",
+				"docs/upstreams.md#backend_tls",
+			))
+		} else {
+			explainBackendTLS(name, beforeTLS, afterTLS, d)
+		}
+	}
 	if !reflect.DeepEqual(b.Resilience, a.Resilience) {
 		d.explain(candidateExplanation(
 			"resilience.location_override",
@@ -1184,12 +1199,14 @@ func diffProxyTimeouts(server, key string, b, a *config.LocationConfig, d *Confi
 			d.mod(DiffEntry{Kind: "timeouts", Name: name, Before: durStr(p.b), After: durStr(p.a), Detail: fmt.Sprintf("Change %s on route %s", p.label, key)}, fmt.Sprintf("route %s %s", name, p.label))
 			message := "The proxy connect timeout bounds establishing the upstream connection; it is not an end-to-end request deadline."
 			nextAction := "Use a separate overall deadline when the complete request and response need a total time bound."
+			code := "resilience.connect_timeout_semantics"
 			if p.label != "proxy connect timeout" {
 				message = "Proxy read/send timeouts are progress (inactivity) bounds, not a single end-to-end deadline; a stream with no progress can be interrupted when its timeout expires."
 				nextAction = "Check the route's streaming behavior and separate retry_deadline when setting an overall work bound."
+				code = "resilience.inactivity_timeout_semantics"
 			}
 			d.explain(candidateExplanation(
-				"resilience.timeout_semantics",
+				code,
 				"tradeoff",
 				name,
 				message,
@@ -1232,6 +1249,20 @@ func diffAuth(server, key string, b, a *config.AuthConfig, d *ConfigDiff) {
 	}
 	if a == nil {
 		return
+	}
+	if _, reason := classifyCredentialChange(b, a); reason == "all credential checks removed" {
+		message := "This removes the route's application credential checks."
+		if len(a.Allow) > 0 || len(a.Deny) > 0 {
+			message += " CIDR allow or deny rules remain as network gates, not per-application authorization."
+		}
+		d.explain(candidateExplanation(
+			"access.route_auth_removed",
+			"critical",
+			name,
+			message,
+			"Confirm who owns application authorization and whether public access is intended.",
+			"docs/auth.md",
+		))
 	}
 
 	// CIDR allow/deny lists.
@@ -1721,6 +1752,19 @@ func diffResilienceFields(name string, b, a *config.ResilienceConfig, d *ConfigD
 			d.warn("Setting circuit_half_open_probes to 0 on %s makes half-open probing unbounded; a recovering backend takes the full waiting load the instant its cooldown ends.", name)
 		}
 	}
+}
+
+func effectiveLocationBackendTLS(c *config.Config, loc *config.LocationConfig) *config.BackendTLSConfig {
+	if loc.BackendTLS != nil || c == nil {
+		return loc.BackendTLS
+	}
+	name := config.ResolveLocationUpstreamName(c, *loc)
+	for i := range c.Upstreams {
+		if c.Upstreams[i].Name == name {
+			return c.Upstreams[i].BackendTLS
+		}
+	}
+	return nil
 }
 
 func explainBackendTLS(scope string, before, after *config.BackendTLSConfig, d *ConfigDiff) {

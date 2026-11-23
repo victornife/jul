@@ -50,19 +50,20 @@ function Section({
   );
 }
 
-/** Renders a structured config diff (summary, warnings, and grouped changes). */
-export function DiffView({ diff }: { readonly diff: ConfigDiff }) {
-  const additions = diff.additions ?? [];
-  const removals = diff.removals ?? [];
-  const modifications = diff.modifications ?? [];
-  const warnings = diff.warnings ?? [];
+export function ConfigConsequences({ diff }: { readonly diff: ConfigDiff }) {
   const explanations = diff.explanations ?? [];
-  const empty = additions.length === 0 && removals.length === 0 && modifications.length === 0;
-  const primaryExplanations = explanations.slice(0, 2);
-  const supportingExplanations = explanations.slice(2);
+  const importantExplanations = explanations.filter(
+    (entry) => entry.kind === "critical" || entry.code === "catalogue.scope_summarized",
+  );
+  const otherExplanations = explanations.filter(
+    (entry) => entry.kind !== "critical" && entry.code !== "catalogue.scope_summarized",
+  );
+  const otherPrimaryCount = Math.max(0, 2 - importantExplanations.length);
+  const primaryExplanations = [...importantExplanations, ...otherExplanations.slice(0, otherPrimaryCount)];
+  const supportingExplanations = otherExplanations.slice(otherPrimaryCount);
 
   return (
-    <div className="space-y-3 rounded-md border border-jul-border bg-jul-bg p-4">
+    <>
       {diff.explanations === undefined && (
         <p className="text-xs text-jul-muted">
           No consequence explanations were returned; this does not establish that the candidate has
@@ -138,6 +139,20 @@ export function DiffView({ diff }: { readonly diff: ConfigDiff }) {
           )}
         </section>
       )}
+    </>
+  );
+}
+
+/** Renders a structured config diff (summary, warnings, and grouped changes). */
+export function DiffView({ diff }: { readonly diff: ConfigDiff }) {
+  const additions = diff.additions ?? [];
+  const removals = diff.removals ?? [];
+  const modifications = diff.modifications ?? [];
+  const warnings = diff.warnings ?? [];
+  const empty = additions.length === 0 && removals.length === 0 && modifications.length === 0;
+  return (
+    <div className="space-y-3 rounded-md border border-jul-border bg-jul-bg p-4">
+      <ConfigConsequences diff={diff} />
       <p className="text-sm text-jul-text">{diff.summary}</p>
       {diff.affected && diff.affected.length > 0 && (
         <p className="text-xs text-jul-muted">Affected: {diff.affected.join(", ")}</p>

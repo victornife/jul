@@ -437,7 +437,7 @@ func TestConfigExplanationCatalog(t *testing.T) {
 		},
 		{
 			name:  "proxy read timeout is inactivity bound",
-			code:  "resilience.timeout_semantics",
+			code:  "resilience.inactivity_timeout_semantics",
 			kind:  "tradeoff",
 			scope: "/",
 			configure: func(before, after *config.Config) {
@@ -495,18 +495,68 @@ func TestProxyTimeoutExplanationsDistinguishConnectFromInactivity(t *testing.T) 
 	}
 	before.Servers[0].Locations[0].ProxyConnectTimeout = config.Duration(time.Second)
 	after.Servers[0].Locations[0].ProxyConnectTimeout = config.Duration(2 * time.Second)
-	connect := findExplanation(t, DiffConfigs(before, after).Explanations, "resilience.timeout_semantics")
+	connect := findExplanation(t, DiffConfigs(before, after).Explanations, "resilience.connect_timeout_semantics")
 	if !strings.Contains(connect.Message, "establishing the upstream connection") || strings.Contains(connect.Message, "inactivity") {
 		t.Fatalf("connect timeout explanation incorrectly describes inactivity: %+v", connect)
 	}
 
-	before.Servers[0].Locations[0].ProxyConnectTimeout = 0
-	after.Servers[0].Locations[0].ProxyConnectTimeout = 0
 	before.Servers[0].Locations[0].ProxyReadTimeout = config.Duration(time.Second)
 	after.Servers[0].Locations[0].ProxyReadTimeout = config.Duration(2 * time.Second)
-	read := findExplanation(t, DiffConfigs(before, after).Explanations, "resilience.timeout_semantics")
+	combined := DiffConfigs(before, after).Explanations
+	findExplanation(t, combined, "resilience.connect_timeout_semantics")
+	read := findExplanation(t, combined, "resilience.inactivity_timeout_semantics")
 	if !strings.Contains(read.Message, "inactivity") || !strings.Contains(read.Message, "stream") {
 		t.Fatalf("read timeout explanation omits inactivity/streaming semantics: %+v", read)
+	}
+}
+
+func TestCredentialRemovalWithRemainingCIDRGate(t *testing.T) {
+	before := config.ProxyTarget("127.0.0.1:9001", "127.0.0.1:8080")
+	before.Servers[0].Locations[0].Auth = &config.AuthConfig{
+		Allow:       []string{"10.0.0.0/8"},
+		ForwardAuth: &config.ForwardAuthConfig{URL: "http://auth.example/check"},
+	}
+	after, err := before.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	after.Servers[0].Locations[0].Auth.ForwardAuth = nil
+	entry := findExplanation(t, DiffConfigs(before, after).Explanations, "access.route_auth_removed")
+	if entry.Kind != "critical" || !strings.Contains(entry.Message, "CIDR") {
+		t.Fatalf("credential removal explanation = %+v", entry)
+	}
+}
+
+func TestRemovingBackendTLSOverrideUsesInheritedPolicy(t *testing.T) {
+	before := config.ProxyTarget("127.0.0.1:9001", "127.0.0.1:8080")
+	before.Servers[0].Locations[0].ProxyPass = "https://api"
+	before.Servers[0].Locations[0].BackendTLS = &config.BackendTLSConfig{InsecureSkipVerify: true}
+	before.Upstreams = []config.UpstreamConfig{{Name: "api", BackendTLS: &config.BackendTLSConfig{InsecureSkipVerify: true}}}
+	after, err := before.Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	after.Servers[0].Locations[0].BackendTLS = nil
+	inherited := DiffConfigs(before, after).Explanations
+	warning := findExplanation(t, inherited, "tls.backend_identity_unverified")
+	if warning.Kind != "critical" || !strings.Contains(warning.Message, "inherits") {
+		t.Fatalf("expected inherited insecure-policy warning, got %+v", warning)
+	}
+	for _, entry := range inherited {
+		if entry.Code == "tls.backend_verification_restored" {
+			t.Fatalf("inherited insecure policy reported as verified: %+v", entry)
+		}
+	}
+	after.Upstreams[0].BackendTLS.InsecureSkipVerify = false
+	restored := findExplanation(t, DiffConfigs(before, after).Explanations, "tls.backend_verification_restored")
+	if !strings.Contains(restored.Scope, "/") {
+		t.Fatalf("expected route-scoped restoration, got %+v", restored)
+	}
+	before.Servers[0].Locations[0].BackendTLS.InsecureSkipVerify = false
+	after.Upstreams[0].BackendTLS.InsecureSkipVerify = true
+	unverified := findExplanation(t, DiffConfigs(before, after).Explanations, "tls.backend_identity_unverified")
+	if !strings.Contains(unverified.Scope, "/") {
+		t.Fatalf("expected route-scoped inherited warning, got %+v", unverified)
 	}
 }
 

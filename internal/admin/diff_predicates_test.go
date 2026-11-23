@@ -33,7 +33,7 @@ func route(methods []string, target string) config.LocationConfig {
 func diffOf(t *testing.T, before, after config.ServerConfig) *ConfigDiff {
 	t.Helper()
 	d := &ConfigDiff{}
-	diffLocations(":8080", before.Locations, after.Locations, config.WAFConfig{}, config.WAFConfig{}, d)
+	diffLocations(":8080", before.Locations, after.Locations, config.WAFConfig{}, config.WAFConfig{}, nil, nil, d)
 	return d
 }
 
