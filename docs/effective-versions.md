@@ -47,8 +47,8 @@ owner has the same authority as its implicit ability to change the DACL.
 Unsupported ACEs fail closed. Native Windows ACL, key lifecycle and
 virtual-service-account journeys passed for the reviewed #647 source, as
 recorded in [#644's closure](https://github.com/victornife/jul/issues/644).
-That evidence does not certify an as-yet-unpublished package or substitute for
-testing a later release.
+That evidence does not certify a later package or substitute for testing that
+release.
 
 ## Startup path selection
 

@@ -19,7 +19,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   Malicious glob patterns can still cause build or development processes to
   hang. A CI check rejects `picomatch` in production dependencies; remove the
   exception and check when an upstream fix is available.
-- **Unmerged inspection recovery:** Jul uses stock wazero and Coraza. Managed
+- **Inspection recovery:** Jul uses stock wazero and Coraza. Managed
   guest instances reserve logical page-rounded capacity; this is not an RSS
   bound or proof that engine references have been released. At 64 unresolved
   guest teardown tickets, new reservations are refused in all modes. Jul also
@@ -510,7 +510,7 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
   token recovery. Audit persists captured provider, principal, effective role
   and concrete permissions across JSON/CSV exports and the durable sink.
   Authentication-policy Publish invalidates prior sessions.
-  Beta/unreleased; provider evidence is explicit, Meta's current discovery is
+  Beta; provider evidence is explicit, Meta's current discovery is
   unsupported, and application sharing, SAML/SCIM and generic provider API-token
   authentication remain outside scope. NGINX migration is unaffected.
 

@@ -37,7 +37,7 @@ follows:
 - **`main`** — receives security fixes first. Development happens here.
 - **Latest stable release** — receives the supported fix through the next
   stable release, with an affected-version/advisory record where applicable.
-  v2.2.0 is the published fixed release after v2.1.0; actual packages passed
+  v2.2.0 was the published fixed release after v2.1.0; its packages passed
   verification before publication and the two #514 advisories are public.
 - **Older releases** — no committed back-ports; upgrade to the latest stable
   release. No separate emergency/backport campaign is selected for this release.
@@ -106,7 +106,7 @@ disabled by default.
   deny-by-default admin routes ([ADR 0010](docs/adr/0010-console-rbac.md),
   [docs/specs/console-rbac.md](docs/specs/console-rbac.md)). **Interactive token
   management** — minting and revoking scoped tokens from the Console/API — is the
-  remaining future milestone. [Console OIDC](docs/admin-oidc.md) is a separate unreleased Beta addition: exact issuer/subject mapping, PKCE, bounded HttpOnly sessions, origin/header CSRF protection, local logout and token recovery. Provider tokens are never Jul automation credentials.
+  remaining future milestone. [Console OIDC](docs/admin-oidc.md) is a separate Beta addition: exact issuer/subject mapping, PKCE, bounded HttpOnly sessions, origin/header CSRF protection, local logout and token recovery. Provider tokens are never Jul automation credentials.
   Edits that change admin reachability (disabling admin, moving its listen
   address, rotating its token, or disabling the web console) are held for
   explicit confirmation so a single apply cannot silently lock you out. See the
@@ -208,7 +208,7 @@ states the boundary and relationship to #644.
 
 ## Cache inspection privacy
 
-The unreleased cache inspector requires an explicit `cache:inspect` grant; built-in viewer/operator/auditor permissions are unchanged. Existing wildcard and legacy-token authority remain in effect. Every page reauthenticates and binds principal, scope and live authorization/configuration context. Safe output omits query/Vary values, bodies and credentials; malformed Vary names are filtered as unavailable metadata. Opt-in decision samples are bounded, memory-only and expiring. See [retention and threat boundaries](docs/cache.md#bounded-cache-inspection).
+The cache inspector requires an explicit `cache:inspect` grant; built-in viewer/operator/auditor permissions are unchanged. Existing wildcard and legacy-token authority remain in effect. Every page reauthenticates and binds principal, scope and live authorization/configuration context. Safe output omits query/Vary values, bodies and credentials; malformed Vary names are filtered as unavailable metadata. Opt-in decision samples are bounded, memory-only and expiring. See [retention and threat boundaries](docs/cache.md#bounded-cache-inspection).
 
 Inspection-only Console access is a limited projection: `cache:inspect` alone
 returns only an `inspection_only` view marker from the Traffic entry endpoint.

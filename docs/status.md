@@ -2,12 +2,12 @@
 
 > Version 2.24 · Updated 2026-11-09
 >
-> Stable v2.2.0 is published. The cache and security-operations additions below
-> are merged on `main`, not in that release. The separately approved #527
+> At the 2026-11-23 publication checkpoint, stable v2.2.0 was published. The
+> cache and security-operations additions below are not in that release. The separately approved #527
 > contracts remain GA/soaked after the source-bound #590 review. This post-tag
 > reconciliation does not change immutable packages or historical soak evidence.
 
-The current published source is `b12e051139f652b400cff37d9f063f5637a7d550`, with
+The v2.2.0 published source is `b12e051139f652b400cff37d9f063f5637a7d550`, with
 [exact-source package/native verification](release.md#published-v220-verification).
 The v2.1.0 source and #480 runtime review remain historical evidence.
 The four-hour measurements on `3258f1a3` and the corrected one-hour
@@ -21,6 +21,8 @@ by publication alone.
 > single editable manifest. This page is the human-readable rendering of that
 > data. When maturity or any GA criterion changes, update `feature-status.yaml`
 > first, then keep this table in sync.
+> Delivery values reflect the recorded publication checkpoint; update the
+> manifest and this page after a later stable release is actually published.
 
 The at-a-glance view of **every recorded feature**, its **maturity**, and how
 it stands against the nine-criteria GA bar ([ADR 0003](adr/0003-maturity-and-ga.md)).
@@ -62,7 +64,7 @@ not inherit an older GA row merely because it lives in the same package or guide
 ### Current product snapshot
 
 - **Published release:** stable [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)
-  is the current published release at `b12e051139f652b400cff37d9f063f5637a7d550`.
+  was the published release at the 2026-11-23 checkpoint, at `b12e051139f652b400cff37d9f063f5637a7d550`.
   [Release and native package verification](release.md#published-v220-verification)
   record its exact-source artifacts and execution limits;
   [#527](https://github.com/victornife/jul/issues/527) records the bounded GA
@@ -91,7 +93,7 @@ not inherit an older GA row merely because it lives in the same package or guide
 ### Current notices
 
 - **Offered-ALPN TCP passthrough routing (#434):** Alpha, merged via
-  [PR #635](https://github.com/victornife/jul/pull/635), unreleased. The
+  [PR #635](https://github.com/victornife/jul/pull/635). The
   [separate evidence](audit/434-alpn/README.md) records the feasibility GO,
   passing changed-code coverage and final reviewed-head CI, including the
   pinned NGINX comparison; the released L4 GA row is unchanged.
@@ -100,14 +102,14 @@ not inherit an older GA row merely because it lives in the same package or guide
   cache record retains GA. Additive post-v2.2.0 cold-miss fill locking (#525
   Part 1), disk-streamed large-object capture (#525 Part 2), Option A
   range-aware caching (#442), and cache operations #621–#624 and #666–#668
-  are merged, Beta and unreleased. Their separate rows do not inherit that
+  are merged and Beta. Their separate rows do not inherit that
   GA/soaked certification.
 - **WAF and security operations:** #630–#634 and #628 Milestone B are merged,
-  Beta and unreleased under #629. The original WAF GA/soak record does not
-  certify them; #628 Milestone A remains open. See the
+  Beta under #629. The original WAF GA/soak record does not
+  certify them; #628 Milestones A and B are delivered. See the
   [source-bound programme ledger](reviews/2026-11-02-629-waf-programme-ledger.md).
-- **Sharing foundation:** #641 intent and #642 withdrawal are merged and
-  unreleased; no independent maturity decision is recorded for them. #581
+- **Sharing foundation:** #641 intent and #642 withdrawal are merged;
+  no independent maturity decision is recorded for them. #581
   verified one development-source standalone fixture, not a released package
   or a qualifying long-running GA soak. The existing Core HTTP and Console GA
   records do not certify the additions.

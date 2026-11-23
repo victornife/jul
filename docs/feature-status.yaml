@@ -366,7 +366,7 @@ features:
     published the executable matrix, refreshed six benchmarks, added a zero-error focused correctness soak and found no unresolved
     P0/P1 cache defect. Criterion 8 is satisfied by adversarial Cache-Control parser coverage. Additive post-v2.2.0 cold-miss fill
     locking (#525 Part 1), disk-streamed large-object capture (#525 Part 2), Option A range-aware caching (#442), and cache operations
-    #621-#624 with #666-#668 are unreleased and do not inherit this GA/soaked certification. See their separate entries,
+    #621-#624 with #666-#668 do not inherit this GA/soaked certification. See their separate entries,
     docs/cache.md and the 2026-08-07
     audit record.
 
@@ -388,7 +388,7 @@ features:
     7: true
     8: true
     9: true
-  notes: 'Relationships (#512): per-status error pages (internal/handler/errorpages.go), the always-on Request ID middleware and the worker_threads process setting (GOMAXPROCS) are part of this row: they are in docs/core-http.md and docs/configuration.md and on the path of every soaked request. Deployment packaging is the separate DEPLOY-PKG row. The separately merged, unreleased #641 intent and #642 withdrawal foundation has no independent maturity decision recorded and does not inherit this GA/soaked row. #581 verifies one bounded development-source fixture, not a released package or qualifying GA soak.'
+  notes: 'Relationships (#512): per-status error pages (internal/handler/errorpages.go), the always-on Request ID middleware and the worker_threads process setting (GOMAXPROCS) are part of this row: they are in docs/core-http.md and docs/configuration.md and on the path of every soaked request. Deployment packaging is the separate DEPLOY-PKG row. The separately merged #641 intent and #642 withdrawal foundation has no independent maturity decision recorded and does not inherit this GA/soaked row. #581 verifies one bounded development-source fixture, not a released package or qualifying GA soak.'
   delivery: soaked
 - id: SEND-TIMEOUT
   name: Downstream write-inactivity timeout
@@ -987,7 +987,7 @@ features:
     7: true
     8: true
     9: true
-  notes: 'Merged #621 via PR #665 (78b458b8; ADR 0027): preview-confirmed scoped invalidation across memory and disk by exact URL, segment-bounded path prefix, bounded anchored glob, trusted origin grouping tag ([cache].tag_headers / [cache].strip_tag_headers), and hostname via /api/v1/cache/purge*, jul cache purge, and the Full Console. Separate from the historical core-cache GA/soaked record; unreleased with no qualifying long-running GA soak recorded.'
+  notes: 'Merged #621 via PR #665 (78b458b8; ADR 0027): preview-confirmed scoped invalidation across memory and disk by exact URL, segment-bounded path prefix, bounded anchored glob, trusted origin grouping tag ([cache].tag_headers / [cache].strip_tag_headers), and hostname via /api/v1/cache/purge*, jul cache purge, and the Full Console. Separate from the historical core-cache GA/soaked record; no qualifying long-running GA soak recorded.'
 
 - id: CACHE-OPS-02
   name: Bounded cache inspection and observed decisions
@@ -1107,4 +1107,4 @@ features:
     7: true
     8: true
     9: false
-  notes: 'Merged via PR #635 for completed #434 at 1b462ce46659275db38964a25436a6eac9c022cf; Alpha and unreleased. Reviewed-head CI passes, with changed Go 165/166 and frontend 27/29 statements covered, each strictly greater than 90%; whole-module/package coverage is informational under the maintainer clarification. No inherited GA/soak status. Automatic ambiguous NGINX ALPN map conversion remains blocking, with manual guidance and a passing pinned reference counterexample. See audit/434-alpn/README.md for exact source identities and evidence.'
+  notes: 'Merged via PR #635 for completed #434 at 1b462ce46659275db38964a25436a6eac9c022cf; Alpha. Reviewed-head CI passes, with changed Go 165/166 and frontend 27/29 statements covered, each strictly greater than 90%; whole-module/package coverage is informational under the maintainer clarification. No inherited GA/soak status. Automatic ambiguous NGINX ALPN map conversion remains blocking, with manual guidance and a passing pinned reference counterexample. See audit/434-alpn/README.md for exact source identities and evidence.'

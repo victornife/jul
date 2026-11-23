@@ -95,8 +95,8 @@ explains the alternatives and responsibilities that remain.
 ## Current direction
 
 **Where we are today:** Jul.IA is a complete, standalone single-node application
-and protocol gateway (latest stable release:
-[`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)). Its
+and protocol gateway. Check [GitHub Releases](https://github.com/victornife/jul/releases)
+for the latest published stable version. Its
 [core gateway foundation](docs/specs/core-gateway-completeness.md) is in place:
 HTTP/1.1–HTTP/3 serving, TLS/ACME and mTLS, trusted client and backend
 identities, routing and response policy, upstream resilience, authentication,
@@ -108,13 +108,24 @@ audience-change checks, and in-place route withdrawal with active-stream
 retirement), alongside targeted additions such as single-provider Console OIDC,
 large-object and range-aware caching, and offered-ALPN TCP passthrough routing.
 
+**Release direction:** This source is prepared for v2.3.1 after the
+published v2.2.0 baseline. Changes include archive provenance before extraction,
+private effective-version keys, Console OIDC, configuration-consequence
+explanations, operational alert recipes, and the cache, sharing and WAF
+additions described below. CRS argument-limit enforcement and response-body
+inspection behavior also change; review the [changelog](CHANGELOG.md) and
+[known limitations](docs/known-limitations.md) before upgrading. Check the
+release listing for publication status: preparation is not publication, and
+shipping these additions does not grant them GA or soak certification.
+
 Two operational programmes have since completed on `main`:
 
 - **Cache operations ([#620](https://github.com/victornife/jul/issues/620); children #621–#624)** — scoped invalidation, bounded cache inspection and decision explanations, route-scoped cache controls, and explicit cache handling during route/backend changes.
 - **WAF and security operations ([#629](https://github.com/victornife/jul/issues/629); children #630–#634)** — bounded outcome investigation, fixture-based policy verification and recovery, scoped rule exceptions, posture/isolation evidence, and security alerting delivered through [#628 Milestone B](https://github.com/victornife/jul/issues/628).
 
-These operational additions are **Beta and unreleased**; completion does not
-promote them to GA or soak-certified status. The established base WAF and
+These operational additions are **Beta**; completion or publication does not
+promote them to GA or soak-certified status. Check the release version for
+availability. The established base WAF and
 response cache retain their separate maturity entries in the
 [feature status matrix](docs/status.md).
 
@@ -137,14 +148,13 @@ sharing work and remaining operational candidates are tracked separately in
   is ready but requires an authorized disposable tailnet and intended/excluded
   clients.
 - **Cross-Console explanations ([#625](https://github.com/victornife/jul/issues/625))** —
-  A candidate, not started. Cache-specific decision and cutover explanations
-  have shipped; this issue remains for the broader shared explanation catalog.
+  The shared configuration-consequence explanation catalog is complete.
 - **HTTP download bandwidth controls ([#626](https://github.com/victornife/jul/issues/626))** —
   A separate candidate, not started; it is distinct from request-rate limiting
   and cache operations.
 - **External alert recipes ([#628](https://github.com/victornife/jul/issues/628))** —
-  Security milestone B is delivered. Operational milestone A, covering core
-  availability/certificate/backend/storage alerts, remains open.
+  Security milestone B and operational milestone A, covering core
+  availability/certificate/backend/storage alerts, are delivered.
 
 The agreed pre-release scheduling order is in the programme tracker. Scheduling
 does not start a candidate or turn that order into a technical dependency; each
@@ -184,11 +194,10 @@ human view and evidence matrix are in [`docs/status.md`](docs/status.md).
 | **Beta · released in v2.0.0** | Configuration authority/generated contracts, NGINX assessment/provenance/include traversal, diagnostics, admin TLS, external API/CLI, selected hot reload and Unix HTTP upstreams |
 | **Beta · released in v2.1.0** | gRPC Health/Check probes, resource and storage headroom, serving WAF policy visibility, Console diagnostics guidance, WASM ABI v2 response phase, consistent-hash affinity, client-certificate policy hot reload, and the post-v2.0.0 NGINX translation/E2E evidence |
 | **Beta · released in v2.2.0** | Downstream write-inactivity timeout and bounded per-route metrics/charts; publication does not complete their open GA criteria |
-| **Beta · merged, unreleased** | Cache operations and WAF/security operations; their newer contracts do not inherit the historical cache or WAF GA/soak evidence |
+| **Beta · post-v2.2.0 additions** | Cache operations and WAF/security operations; their newer contracts do not inherit the historical cache or WAF GA/soak evidence |
 
-Published stable
-[`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0)
-is the latest GitHub Release. The older
+Published stable releases are listed on [GitHub Releases](https://github.com/victornife/jul/releases).
+The older
 [`v2.0.0-rc.1` checkpoint](docs/release-candidates/v2.0.0-rc.1.md) remains a
 separate prerelease. A Beta capability does not become GA because it is
 included in a stable tag. Check the [status matrix](docs/status.md) for each
@@ -238,7 +247,7 @@ a `full` release artifact to enable all optional capabilities.
 | **Configuration lifecycle** | Transactional zero-downtime reload, strict preflight, planned-restart staging, history/rollback, and explicit `managed` versus `file_owned` authority with drift/adoption semantics. Field-level lifecycle truth is generated from the Go registry. |
 | **Observability** | Structured logging (text/JSON), pluggable access-log sinks (file/syslog with rotation), Prometheus metrics, OpenTelemetry tracing, health/readiness probes |
 | **Diagnostics** | Read-only `jul doctor` checks with deterministic human/JSON output, plus operator-triggered, bounded, secret-safe local support bundles with no automatic upload ([docs/diagnostics.md](docs/diagnostics.md)) |
-| **Admin GUI** | Loopback-bound web console with live metrics, upstream/certificate status, config history and rollback, setup and structured editors, and server-owned consequence explanations in configuration previews ([guide](docs/console.md#structured-diff)). Legacy shared-token mode remains available; opt-in local multi-principal RBAC with predefined/custom roles, scoped revocable tokens and per-principal audit attribution is shipped (`console` build tag). External Console [OIDC login](docs/admin-oidc.md) is an unreleased Beta addition, with existing RBAC, bounded sessions and local-token recovery. SAML/SCIM are not shipped. |
+| **Admin GUI** | Loopback-bound web console with live metrics, upstream/certificate status, config history and rollback, setup and structured editors, and server-owned consequence explanations in configuration previews ([guide](docs/console.md#structured-diff)). Legacy shared-token mode remains available; opt-in local multi-principal RBAC with predefined/custom roles, scoped revocable tokens and per-principal audit attribution is shipped (`console` build tag). External Console [OIDC login](docs/admin-oidc.md) is a Beta addition, with existing RBAC, bounded sessions and local-token recovery. SAML/SCIM are not shipped. |
 | **Developer experience** | Zero-config `jul run --serve`/`--proxy` (no file needed), `jul lint` best-practice checks with CI-friendly exit codes, and `jul fmt` canonical formatting |
 | **Generated contracts** | Deterministic JSON Schema, machine metadata, generated field reference and lifecycle reference derive from code-defined authorities; durable `route_id` supports stable route addressability. Released in v2.0.0 with separate Beta maturity. |
 | **Migration** | `jul import nginx` can convert supported NGINX constructs and emit deterministic human/JSON assessment with blocking/approximate findings, source provenance, guidance, and opt-in bounded root-confined include traversal — opt-in `importer` build tag. |
@@ -247,7 +256,7 @@ a `full` release artifact to enable all optional capabilities.
 | **Portability** | Single static binary, no runtime dependencies; Windows, Linux, and macOS on amd64/arm64 |
 
 The [offered-ALPN TCP routing extension](docs/stream-alpn.md) (#434) is Alpha,
-merged via [PR #635](https://github.com/victornife/jul/pull/635) and unreleased,
+merged via [PR #635](https://github.com/victornife/jul/pull/635),
 with separate [coverage and verification evidence](docs/audit/434-alpn/README.md).
 It routes client offers while backends retain TLS negotiation.
 
@@ -280,11 +289,10 @@ two **profiles**: `lean` (the default build, no optional features) and `full`
 WASM plugins, stream proxy, Consul/Kubernetes discovery, WAF). Pick `full` unless
 you specifically want the smaller lean binary.
 
-The latest published archives are **v2.2.0**. A build from current `main` can
-contain later, unreleased capabilities, including cache operations, security
-operations and sharing foundations; the v2.2.0 archives cannot acquire those
-changes from this web documentation. Check the binary version and
-[feature status](docs/status.md) as well as `jul capabilities`.
+The v2.2.0 archives do not include later cache operations, security operations
+and sharing foundations. Documentation cannot add features to an older binary;
+check the binary version, [feature status](docs/status.md), and
+`jul capabilities`.
 
 | Platform | Archive (full profile) |
 | -------- | ------- |
@@ -310,8 +318,8 @@ Not sure which architecture you need?
 ## Quick start
 
 From the verified extracted folder, create a page and serve it on loopback. The
-published v2.2.0 binary does not have or require `version-key init`. A binary
-built from current `main` requires a private key before serving: on first
+v2.2.0 binary does not have or require `version-key init`. The binary built
+from this source requires a private key before serving: on first
 installation run `./jul version-key init` (Windows: `.\jul.exe version-key init`)
 as the serving identity. Preserve the key and restore its backup if it is lost;
 do not initialize a replacement for an established installation. See
