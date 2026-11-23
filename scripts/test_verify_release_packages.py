@@ -62,6 +62,33 @@ class VerificationTests(unittest.TestCase):
         Path(str(archive) + ".sha256").write_text(digest)
         (self.root / "SHA256SUMS").write_text(f"{digest}  {archive.name}\n")
 
+    def test_windows_key_root_uses_protected_user_profile_directory(self):
+        user_profile = self.root / "UserProfile"
+        user_profile.mkdir()
+        with patch.object(verifier, "command") as provision:
+            key_root = verifier.create_windows_key_root(user_profile)
+        self.assertEqual(key_root.parent, user_profile)
+        self.assertNotEqual(key_root.parent, self.root)
+        provision.assert_called_once()
+        args = provision.call_args.args
+        self.assertEqual(args[:4], ("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive"))
+        self.assertEqual(Path(args[args.index("-File") + 1]),
+                         ROOT / "deploy/windows/new-secure-data-dir.ps1")
+        self.assertEqual(Path(args[-1]), key_root)
+
+    def test_windows_key_root_cleans_up_failed_provisioning(self):
+        user_profile = self.root / "UserProfile"
+        user_profile.mkdir()
+
+        def partial_provision(*args, **kwargs):
+            Path(args[-1]).mkdir()
+            raise RuntimeError("ACL provisioning failed")
+
+        with patch.object(verifier, "command", side_effect=partial_provision):
+            with self.assertRaisesRegex(RuntimeError, "ACL provisioning failed"):
+                verifier.create_windows_key_root(user_profile)
+        self.assertEqual(list(user_profile.iterdir()), [])
+
     def fake_command(self, *args, **kwargs):
         self.events.append(args)
         if args[0] == "gh":
