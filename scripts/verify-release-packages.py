@@ -50,8 +50,8 @@ def command(*arguments, **options):
     return result.stdout
 
 
-def create_windows_key_root(program_data):
-    root = Path(program_data) / f"jul-release-package-verification-{secrets.token_hex(16)}"
+def create_windows_key_root(system_drive_root):
+    root = Path(system_drive_root) / f"jul-release-package-verification-{secrets.token_hex(16)}"
     provisioner = Path(__file__).resolve().parent.parent / "deploy/windows/new-secure-data-dir.ps1"
     try:
         command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
@@ -300,10 +300,10 @@ def main():
     key_root = None
     try:
         if os.name == "nt":
-            program_data = os.environ.get("ProgramData")
-            if not program_data:
-                raise RuntimeError("Windows ProgramData directory is unavailable for protected key verification")
-            key_root = create_windows_key_root(program_data)
+            system_drive = os.environ.get("SystemDrive")
+            if not system_drive:
+                raise RuntimeError("Windows system drive is unavailable for protected key verification")
+            key_root = create_windows_key_root(Path(system_drive + "\\"))
         version_key_file = key_root / "private" / "version.key" if key_root else None
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

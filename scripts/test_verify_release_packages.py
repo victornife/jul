@@ -62,12 +62,12 @@ class VerificationTests(unittest.TestCase):
         Path(str(archive) + ".sha256").write_text(digest)
         (self.root / "SHA256SUMS").write_text(f"{digest}  {archive.name}\n")
 
-    def test_windows_key_root_uses_protected_programdata_directory(self):
-        program_data = self.root / "ProgramData"
-        program_data.mkdir()
+    def test_windows_key_root_uses_protected_system_drive_directory(self):
+        system_drive_root = self.root / "SystemDrive"
+        system_drive_root.mkdir()
         with patch.object(verifier, "command") as provision:
-            key_root = verifier.create_windows_key_root(program_data)
-        self.assertEqual(key_root.parent, program_data)
+            key_root = verifier.create_windows_key_root(system_drive_root)
+        self.assertEqual(key_root.parent, system_drive_root)
         self.assertNotEqual(key_root.parent, self.root)
         provision.assert_called_once()
         args = provision.call_args.args
@@ -77,8 +77,8 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(Path(args[-1]), key_root)
 
     def test_windows_key_root_cleans_up_failed_provisioning(self):
-        program_data = self.root / "ProgramData"
-        program_data.mkdir()
+        system_drive_root = self.root / "SystemDrive"
+        system_drive_root.mkdir()
 
         def partial_provision(*args, **kwargs):
             Path(args[-1]).mkdir()
@@ -86,8 +86,8 @@ class VerificationTests(unittest.TestCase):
 
         with patch.object(verifier, "command", side_effect=partial_provision):
             with self.assertRaisesRegex(RuntimeError, "ACL provisioning failed"):
-                verifier.create_windows_key_root(program_data)
-        self.assertEqual(list(program_data.iterdir()), [])
+                verifier.create_windows_key_root(system_drive_root)
+        self.assertEqual(list(system_drive_root.iterdir()), [])
 
     def fake_command(self, *args, **kwargs):
         self.events.append(args)
