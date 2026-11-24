@@ -93,9 +93,39 @@ starting point: before publication they must be reconciled with `CHANGELOG.md`,
 the current security/status/known-limitations documents, and the actual
 artifacts produced for the tagged SHA.
 
-## v2.2.0 preparation
+## Published v2.3.1 verification
 
-v2.2.0 is published. Its immutable preparation
+Stable [v2.3.1](https://github.com/victornife/jul/releases/tag/v2.3.1) was
+published **2026-11-24T00:12:45Z** from source
+`ef409c0c7ea0ebabb9b6307352db8ba13e3edf95` (annotated tag object
+`63936a1ef36cf6e0aa850931778f34837923e11c`). The exact-source main workflows
+completed successfully, and the [tag release run](https://github.com/victornife/jul/actions/runs/45293311709)
+passed all 16 jobs: preflight, full build/test, the five-minute release smoke,
+all twelve platform/profile builds and draft creation.
+
+The published release contains 25 assets: twelve lean/full archives for Linux,
+macOS and Windows on amd64/arm64, twelve checksum sidecars and `SHA256SUMS`.
+All actual downloaded asset digests matched GitHub's published digests; each
+archive's checksums and packaged README, SECURITY and effective-version guide
+matched the tagged source.
+
+The [native actual-download run](https://github.com/victornife/jul/actions/runs/45294503446)
+passed on all six platform/architecture pairs against the stable draft assets,
+for both profiles. It verified archive and binary provenance, SBOM, checksums,
+package identity, startup and upgrade/rollback. Actual-download negative checks
+also rejected a modified archive and a genuine full-profile sibling substituted
+under the lean filename; positive controls passed. These package and release
+gates do not establish the longer post-GA soak minimums or promote Beta/Alpha
+features to GA.
+
+The release changed no feature maturity. Post-tag documentation records the
+Beta and Alpha additions as released while preserving their open GA criteria
+and soak limits. This reconciliation does not modify the immutable tag or
+archives.
+
+## Historical v2.2.0 preparation
+
+v2.2.0 is a historical published release. Its immutable preparation
 record remains preserved; see the
 [release preparation record](release-candidates/v2.2.0.md) for the frozen
 scope, macOS 13+/Go 1.27.2 compatibility, #569's seven exact HTTP/3 exceptions,
@@ -500,10 +530,10 @@ post-v2.0.0 root-check change open and immediately close each configured static
 root, but cannot prove it will remain readable at startup or that the example
 backends respond.
 
-The published v2.2.0 binary does not have or require a private effective-version
-key. A binary built from current `main` requires one before serving: provision
-it once as the serving identity with `jul version-key init`, then preserve it
-across restarts and in a restricted backup. See
+The published v2.2.0 binary and older releases do not have or require a private
+effective-version key. The v2.3.1 binary and current `main` require one before
+serving: provision it once as the serving identity with `jul version-key init`,
+then preserve it across restarts and in a restricted backup. See
 [effective-version provisioning and recovery](effective-versions.md); do not
 initialize a replacement for an established lost key.
 

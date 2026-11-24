@@ -1,6 +1,6 @@
 # Jul.IA — Roadmap
 
-> Version 2.24 · Updated 2026-11-09
+> Version 2.25 · Updated 2026-11-24
 >
 > This roadmap owns the **durable portfolio sequence**. It deliberately does
 > not duplicate volatile READY/NEXT/blocked issue state. The current issue-level

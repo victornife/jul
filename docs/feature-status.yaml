@@ -21,14 +21,14 @@
 # parser" (parsing is done by the standard library or a vetted dependency);
 # any other null carries its rationale in the row's notes.
 #
-# Updated 2026-09-30 after stable v2.1.0 publication at 0951090a.
-# Shipped post-v2.0.0 rows are released; maturity and GA criteria are unchanged.
-# This post-tag manifest update does not modify the immutable release archives.
+# Updated 2026-11-24 after stable v2.3.1 publication from ef409c0c.
+# The remaining post-v2.2.0 merged rows shipped in v2.3.1; maturity and GA
+# criteria are unchanged. This post-tag update does not modify release archives.
 # Runtime and affected logging evidence retain their exact source identities;
 # docs/soak-evidence.md and #480 record the post-fix impact review and limits.
 
 version: 2
-updated: '2026-11-09'
+updated: '2026-11-24'
 features:
 - id: Y1-01
   name: TLS + automatic HTTPS (ACME)
@@ -936,7 +936,7 @@ features:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: admin-oidc.md
   criteria:
     1: true
@@ -948,14 +948,14 @@ features:
     7: true
     8: true
     9: true
-  notes: 'Unreleased #441: one provider, Code + PKCE, bounded process-local sessions and existing RBAC. Separate from Y1-07 GA, published v2.2.0 and sharing/audiences. Provider evidence is source-specific; no universal provider, upstream logout or immediate IdP revocation claim. Benchmark publication and long-running GA soak remain open.'
+  notes: 'Released Beta in v2.3.1: #441 provides one provider, Code + PKCE, bounded process-local sessions and existing RBAC. Separate from Y1-07 GA and sharing/audiences. Provider evidence is source-specific; no universal provider, upstream logout or immediate IdP revocation claim. Benchmark publication and long-running GA soak remain open.'
 
 - id: CACHE-LARGE-RANGE
   name: Large-object fill lock, disk streaming, and Option A range caching
   tags:
   - core
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: cache.md
   criteria:
     1: true
@@ -967,7 +967,7 @@ features:
     7: true
     8: true
     9: true
-  notes: 'Unreleased #525 (Part 1 cold-miss fill lock, Part 2 disk-streamed large-object capture under ADR 0023) and #442 (opt-in Option A complete-object range caching under ADR 0024). Separate from the historical core-cache GA/soaked record and published v2.2.0 packages. Complete-object storage only; no 206 fragment caching. Long-running GA soak remains open.'
+  notes: 'Released Beta in v2.3.1: #525 (Part 1 cold-miss fill lock, Part 2 disk-streamed large-object capture under ADR 0023) and #442 (opt-in Option A complete-object range caching under ADR 0024). Separate from the historical core-cache GA/soaked record. Complete-object storage only; no 206 fragment caching. Long-running GA soak remains open.'
 
 - id: CACHE-OPS-01
   name: Scoped URL, prefix, pattern, tag, and hostname cache invalidation
@@ -975,7 +975,7 @@ features:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: cache.md
   criteria:
     1: true
@@ -987,7 +987,7 @@ features:
     7: true
     8: true
     9: true
-  notes: 'Merged #621 via PR #665 (78b458b8; ADR 0027): preview-confirmed scoped invalidation across memory and disk by exact URL, segment-bounded path prefix, bounded anchored glob, trusted origin grouping tag ([cache].tag_headers / [cache].strip_tag_headers), and hostname via /api/v1/cache/purge*, jul cache purge, and the Full Console. Separate from the historical core-cache GA/soaked record; no qualifying long-running GA soak recorded.'
+  notes: 'Released Beta in v2.3.1: #621 via PR #665 (78b458b8; ADR 0027) provides preview-confirmed scoped invalidation across memory and disk by exact URL, segment-bounded path prefix, bounded anchored glob, trusted origin grouping tag ([cache].tag_headers / [cache].strip_tag_headers), and hostname via /api/v1/cache/purge*, jul cache purge, and the Full Console. Separate from the historical core-cache GA/soaked record; no qualifying long-running GA soak recorded.'
 
 - id: CACHE-OPS-02
   name: Bounded cache inspection and observed decisions
@@ -995,7 +995,7 @@ features:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: cache.md
   criteria:
     1: true
@@ -1007,7 +1007,7 @@ features:
     7: true
     8: false
     9: true
-  notes: 'Unreleased #622, merged via PR #669 (bc99eca6), with Windows timing-test follow-up #670. API, CLI and Console expose bounded metadata and opt-in, lossy observed decisions under a separate cache:inspect grant. The reviewed-head benchmark and platform limits are in reviews/2026-10-27-622-implementation.md and #622; no independent GA or qualifying soak decision is recorded.'
+  notes: 'Released Beta in v2.3.1: #622 via PR #669 (bc99eca6), with Windows timing-test follow-up #670. API, CLI and Console expose bounded metadata and opt-in, lossy observed decisions under a separate cache:inspect grant. The reviewed-head benchmark and platform limits are in reviews/2026-10-27-622-implementation.md and #622; no independent GA or qualifying soak decision is recorded.'
 
 - id: CACHE-OPS-03
   name: Route-scoped cache policy and conservative reuse guards
@@ -1015,7 +1015,7 @@ features:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: cache.md
   criteria:
     1: true
@@ -1027,7 +1027,7 @@ features:
     7: true
     8: false
     9: true
-  notes: 'Unreleased #623 and #672, merged via PR #673 (fddc3456; ADR 0029): route freshness policy, cookie bypass, route isolation and sensitive/transformed Vary guards. This is separate from the historical core-cache GA/soak; no independent GA or qualifying soak decision is recorded.'
+  notes: 'Released Beta in v2.3.1: #623 and #672 via PR #673 (fddc3456; ADR 0029) provide route freshness policy, cookie bypass, route isolation and sensitive/transformed Vary guards. This is separate from the historical core-cache GA/soak; no independent GA or qualifying soak decision is recorded.'
 
 - id: CACHE-OPS-04
   name: Cache purge recovery and route/backend cutover
@@ -1035,7 +1035,7 @@ features:
   - core
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: cache.md
   criteria:
     1: true
@@ -1047,7 +1047,7 @@ features:
     7: true
     8: false
     9: true
-  notes: 'Unreleased #666-#668 via PR #674 (abe70dfc) and #624 via PR #675 (70277d98; ADR 0030): durable incomplete-purge recovery, measured local purge bounds, truthful outcomes and explicit publication-aligned cutover. Already-admitted readers may finish; local measurements are not a production latency guarantee. No independent GA or qualifying soak decision is recorded.'
+  notes: 'Released Beta in v2.3.1: #666-#668 via PR #674 (abe70dfc) and #624 via PR #675 (70277d98; ADR 0030) provide durable incomplete-purge recovery, measured local purge bounds, truthful outcomes and explicit publication-aligned cutover. Already-admitted readers may finish; local measurements are not a production latency guarantee. No independent GA or qualifying soak decision is recorded.'
 
 - id: WAF-OPS
   name: WAF policy evaluation, tuning, and outcome investigation
@@ -1055,7 +1055,7 @@ features:
   - waf
   - console
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: waf.md
   criteria:
     1: true
@@ -1067,7 +1067,7 @@ features:
     7: true
     8: false
     9: true
-  notes: 'Unreleased #630-#632, merged through PRs #679-#683 (ADR 0031): synthetic policy fixtures, external-asset manifests, narrow exceptions, actual transaction outcomes and bounded investigation. The #629 ledger records reviewed-source and environment limits. This does not inherit Y2-06 GA/soak; a manifest verifies assets but is not their backup.'
+  notes: 'Released Beta in v2.3.1: #630-#632 through PRs #679-#683 (ADR 0031) provide synthetic policy fixtures, external-asset manifests, narrow exceptions, actual transaction outcomes and bounded investigation. The #629 ledger records reviewed-source and environment limits. This does not inherit Y2-06 GA/soak; a manifest verifies assets but is not their backup.'
 
 - id: SEC-OPS
   name: Security posture review, isolation evidence, and security alerting
@@ -1076,7 +1076,7 @@ features:
   - console
   - waf
   maturity: Beta
-  delivery: merged
+  delivery: released
   doc: security-posture.md
   criteria:
     1: true
@@ -1088,14 +1088,14 @@ features:
     7: true
     8: false
     9: true
-  notes: 'Unreleased #633 and #634 plus #628 Milestone B, merged through PRs #678 and #682-#683 under #629. Posture and the local security-alert recipe use bounded producer evidence; the isolation matrix and local notification tests do not certify every deployment or provider. General operational alert recipes remain open in #628 Milestone A. No inherited GA or qualifying soak is claimed.'
+  notes: 'Released Beta in v2.3.1: #633 and #634 plus #628 Milestone B, through PRs #678 and #682-#683 under #629. Posture and the local security-alert recipe use bounded producer evidence; the isolation matrix and local notification tests do not certify every deployment or provider. General operational alert recipes in #628 Milestone A are also delivered. No inherited GA or qualifying soak is claimed.'
 
 - id: L4-ALPN
   name: Offered-ALPN TCP passthrough routing
   tags:
   - stream
   maturity: Alpha
-  delivery: merged
+  delivery: released
   doc: stream-alpn.md
   criteria:
     1: true
@@ -1107,4 +1107,4 @@ features:
     7: true
     8: true
     9: false
-  notes: 'Merged via PR #635 for completed #434 at 1b462ce46659275db38964a25436a6eac9c022cf; Alpha. Reviewed-head CI passes, with changed Go 165/166 and frontend 27/29 statements covered, each strictly greater than 90%; whole-module/package coverage is informational under the maintainer clarification. No inherited GA/soak status. Automatic ambiguous NGINX ALPN map conversion remains blocking, with manual guidance and a passing pinned reference counterexample. See audit/434-alpn/README.md for exact source identities and evidence.'
+  notes: 'Released Alpha in v2.3.1: PR #635 for completed #434 at 1b462ce46659275db38964a25436a6eac9c022cf. Reviewed-head CI passes, with changed Go 165/166 and frontend 27/29 statements covered, each strictly greater than 90%; whole-module/package coverage is informational under the maintainer clarification. No inherited GA/soak status. Automatic ambiguous NGINX ALPN map conversion remains blocking, with manual guidance and a passing pinned reference counterexample. See audit/434-alpn/README.md for exact source identities and evidence.'

@@ -5,10 +5,11 @@ gateway written in Go, configured through TOML, and shipped as a static binary.
 
 ## Start with product truth
 
-Stable [`v2.2.0`](https://github.com/victornife/jul/releases/tag/v2.2.0) was
-published at 2026-10-11T23:49:52Z from `b12e051139f652b400cff37d9f063f5637a7d550`.
+Stable [`v2.3.1`](https://github.com/victornife/jul/releases/tag/v2.3.1) was
+published at 2026-11-24T00:12:45Z from `ef409c0c7ea0ebabb9b6307352db8ba13e3edf95`.
 The capability table distinguishes published delivery from merged, unreleased
-work; Beta capabilities stay Beta until their own GA evidence exists.
+work; Beta and Alpha capabilities stay at their recorded maturity until their
+own GA evidence exists.
 Publication does not satisfy open criteria.
 
 Source-bound runtime and downloaded-package verification are in
@@ -100,7 +101,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Rate + connection limiting | [ratelimit.md](ratelimit.md) | `GA` / `soaked` |
 | Authentication (CIDR / Basic / JWT / forward-auth) | [auth.md](auth.md) | `GA` / `soaked` |
 | Active health checks (HTTP / TCP probes) | [health.md](health.md) | `GA` / `soaked` |
-| External admin Console OIDC | [admin-oidc.md](admin-oidc.md) | `Beta` / `merged` |
+| External admin Console OIDC | [admin-oidc.md](admin-oidc.md) | `Beta` / `released` |
 | Console (operations cockpit) | [console.md](console.md) | `GA` / `soaked` |
 | Zero-config + jul lint | [zeroconf.md](zeroconf.md) | `GA` / `soaked` |
 | NGINX config importer | [nginx-importer.md](nginx-importer.md) | `GA` / `soaked` |
@@ -111,22 +112,22 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | WASM plugin response phase (jul-abi/v2) | [abi.md](abi.md) | `Beta` / `released` |
 | Deterministic consistent-hash affinity | [upstreams.md](upstreams.md#consistent-hash-affinity) | `Beta` / `released` |
 | L4 stream proxy | [stream.md](stream.md) | `GA` / `soaked` |
-| Offered-ALPN TCP passthrough routing | [stream-alpn.md](stream-alpn.md) | `Alpha` / `merged` |
+| Offered-ALPN TCP passthrough routing | [stream-alpn.md](stream-alpn.md) | `Alpha` / `released` |
 | Native gRPC passthrough + h2c | [grpc-proxy.md](grpc-proxy.md) | `GA` / `soaked` |
 | Service discovery / dynamic upstreams | [service-discovery.md](service-discovery.md) | `GA` / `soaked` |
 | Web application firewall (WAF) | [waf.md](waf.md) | `GA` / `soaked` |
-| WAF policy evaluation, tuning, and outcome investigation | [waf.md](waf.md) | `Beta` / `merged` |
-| Security posture review, isolation evidence, and security alerting | [security-posture.md](security-posture.md) | `Beta` / `merged` |
-| Optional operational notifications (Prometheus + Alertmanager) | [alerting recipe](../examples/alerting/security/README.md) | `optional` / `merged` |
+| WAF policy evaluation, tuning, and outcome investigation | [waf.md](waf.md) | `Beta` / `released` |
+| Security posture review, isolation evidence, and security alerting | [security-posture.md](security-posture.md) | `Beta` / `released` |
+| Optional operational notifications (Prometheus + Alertmanager) | [alerting recipe](../examples/alerting/security/README.md) | `optional` / `released` |
 | mTLS client auth | [mtls.md](mtls.md) | `GA` / `soaked` |
 | Client-certificate policy and CRL hot reload | [mtls.md](mtls.md) | `Beta` / `released` |
 | Secrets references + log redaction | [secrets.md](secrets.md) | `GA` / `soaked` |
 | Response cache (memory + disk) | [cache.md](cache.md) | `GA` / `soaked` |
-| Large-object fill lock, disk streaming, and Option A range caching | [cache.md](cache.md) | `Beta` / `merged` |
-| Scoped URL, prefix, pattern, tag, and hostname cache invalidation | [cache.md](cache.md#scoped-cache-invalidation-and-origin-grouping-tags) | `Beta` / `merged` |
-| Bounded cache inspection and observed decisions | [cache.md](cache.md#bounded-cache-inspection) | `Beta` / `merged` |
-| Route-scoped cache policy and conservative reuse guards | [cache.md](cache.md) | `Beta` / `merged` |
-| Cache purge recovery and route/backend cutover | [cache.md](cache.md) | `Beta` / `merged` |
+| Large-object fill lock, disk streaming, and Option A range caching | [cache.md](cache.md) | `Beta` / `released` |
+| Scoped URL, prefix, pattern, tag, and hostname cache invalidation | [cache.md](cache.md#scoped-cache-invalidation-and-origin-grouping-tags) | `Beta` / `released` |
+| Bounded cache inspection and observed decisions | [cache.md](cache.md#bounded-cache-inspection) | `Beta` / `released` |
+| Route-scoped cache policy and conservative reuse guards | [cache.md](cache.md) | `Beta` / `released` |
+| Cache purge recovery and route/backend cutover | [cache.md](cache.md) | `Beta` / `released` |
 | Core HTTP (static / proxy / FastCGI / vhosts / routing) | [core-http.md](core-http.md) | `GA` / `soaked` |
 | Downstream write-inactivity timeout | [core-http.md](core-http.md#downstream-write-inactivity) | `Beta` / `released` |
 | Per-route HTTP metrics and bounded hosts | [observability.md](observability.md#per-route-http-metrics) | `Beta` / `released` |
