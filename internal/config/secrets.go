@@ -66,6 +66,22 @@ func ResolveContext(ctx context.Context, c *Config) (*Config, redact.State, map[
 		minLen = clone.Global.RedactMinSecretLength
 	}
 
+	var dnsSecrets []*RFC2136Config
+	for i := range clone.Servers {
+		tls := clone.Servers[i].TLS
+		if tls == nil || tls.ACME == nil || tls.ACME.RFC2136 == nil {
+			continue
+		}
+		dns := tls.ACME.RFC2136
+		if dns.TSIGSecret == "" || dns.secretResolved {
+			continue
+		}
+		if !isSingleSecretRef(dns.TSIGSecret) {
+			return nil, redact.State{}, nil, fmt.Errorf("servers[%d].tls.acme.rfc2136.tsig_secret must be a single ${env:NAME} or ${file:/path} reference", i)
+		}
+		dnsSecrets = append(dnsSecrets, dns)
+	}
+
 	// Short-circuit if the config is already resolved: return the clone and an
 	// empty redaction state so the candidate does not change between phases.
 	if IsResolved(clone) {
@@ -97,6 +113,9 @@ func ResolveContext(ctx context.Context, c *Config) (*Config, redact.State, map[
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, redact.State{}, nil, err
+	}
+	for _, dns := range dnsSecrets {
+		dns.secretResolved = true
 	}
 
 	values := make([]string, 0, len(active))
@@ -201,6 +220,11 @@ func SecretRefSchemes(s string) (hasEnv, hasFile bool) {
 // from one already externalized.
 func containsSecretRef(s string) bool {
 	return secretRefRE.MatchString(s)
+}
+
+func isSingleSecretRef(s string) bool {
+	match := secretRefRE.FindStringSubmatch(s)
+	return len(match) == 3 && match[0] == s && strings.TrimSpace(match[2]) != ""
 }
 
 // resolveSecretRefs replaces every recognized secret reference in s with its

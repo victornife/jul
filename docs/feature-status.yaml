@@ -48,6 +48,24 @@ features:
     8: null
     9: true
   delivery: soaked
+- id: ACME-DNS01
+  name: ACME DNS-01 with RFC 2136
+  tags:
+  - acme
+  maturity: Beta
+  doc: tls-acme.md
+  criteria:
+    1: true
+    2: false
+    3: true
+    4: false
+    5: false
+    6: true
+    7: true
+    8: null
+    9: true
+  notes: 'Additive #433 capability; local Pebble evidence does not establish real-provider staging, release or soak, and does not inherit the existing TLS/ACME GA evidence.'
+  delivery: implemented
 - id: Y1-02
   name: Compression (gzip / Brotli / Zstd)
   tags:

@@ -435,6 +435,7 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	// Optional final-tranche ACME policy: the process-lifetime ACME manager owns
 	// a stable OCSP wrapper whose atomic policy is safe to switch at Publish.
 	p.s.updateACMEOCSPPolicy(p.Candidate.Effective.Servers)
+	p.s.stopUnusedACMEManager(p.Candidate.Effective.Servers)
 
 	// Alt-Svc max-age hot reload (#161): unlike certificate rotation, building
 	// a header value cannot fail, so this has no Prepare/Abort phase and runs

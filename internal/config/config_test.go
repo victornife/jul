@@ -539,21 +539,21 @@ func acmeBlock(listen, email, ca, challenge, cacheDir string) ServerConfig {
 	}
 }
 
-func TestValidateACMEDNS01Reserved(t *testing.T) {
+func TestValidateACMEDNS01RequiresProvider(t *testing.T) {
 	cfg := &Config{Servers: []ServerConfig{acmeBlock(":443", "a@b.com", "letsencrypt-staging", "dns-01", "./c")}}
 	err := Validate(cfg)
-	if err == nil || !strings.Contains(err.Error(), "reserved for a future release") {
-		t.Fatalf("expected dns-01 reserved error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "dns_provider") {
+		t.Fatalf("expected a missing provider error, got %v", err)
 	}
 }
 
-func TestValidateACMEDNSProviderReserved(t *testing.T) {
+func TestValidateACMEDNSProviderRequiresDNS01(t *testing.T) {
 	s := acmeBlock(":443", "a@b.com", "letsencrypt-staging", "http-01", "./c")
 	s.TLS.ACME.DNSProvider = "cloudflare"
 	cfg := &Config{Servers: []ServerConfig{s}}
 	err := Validate(cfg)
-	if err == nil || !strings.Contains(err.Error(), "dns_provider is reserved") {
-		t.Fatalf("expected dns_provider reserved error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "require challenge \"dns-01\"") {
+		t.Fatalf("expected incompatible provider error, got %v", err)
 	}
 }
 
@@ -1879,8 +1879,7 @@ func TestValidateACMERejectsStaticCert(t *testing.T) {
 }
 
 func TestValidateACMERejectsUnsupportedChallenge(t *testing.T) {
-	// dns-01 is reserved for a future release (rejected today); bogus is invalid.
-	// tls-alpn-01 is intentionally absent here — it is now a supported challenge.
+	// DNS-01 without its required provider is invalid; bogus is unsupported.
 	for _, ch := range []string{"dns-01", "bogus"} {
 		cfg := acmeServer(&ACMEConfig{Enabled: true, Email: "ops@example.com", CA: "letsencrypt", Challenge: ch, Domains: []string{"example.com"}}, "example.com")
 		if err := Validate(cfg); err == nil {

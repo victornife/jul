@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -237,6 +238,10 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		Metrics:    metrics,
 		ACMEClient: acmeClient,
 		OCSPClient: ocspClient,
+		ACMEOptions: server.ACMEOptions{
+			DNSDialContext: egressManager.DialContextWith(egress.SubsystemACME, (&net.Dialer{Timeout: 10 * time.Second}).DialContext),
+			Logger:         log,
+		},
 	}.Build()
 	if err != nil {
 		log.Error("failed to initialize server runtime", "error", err)

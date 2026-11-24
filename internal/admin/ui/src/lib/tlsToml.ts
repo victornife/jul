@@ -16,7 +16,7 @@
 
 export type TLSMode = "static" | "acme";
 export type ACMEEnvironment = "staging" | "production";
-export type ACMEChallenge = "http-01" | "tls-alpn-01";
+export type ACMEChallenge = "http-01" | "tls-alpn-01" | "dns-01";
 export type TLSMinVersion = "" | "1.2" | "1.3";
 export type TLSRouteAction = "static" | "proxy";
 // Mutual-TLS client-auth mode. "none" omits the client_auth block; "request"
@@ -39,6 +39,10 @@ export interface TLSDraft {
   acmeEnvironment: ACMEEnvironment;
   acmeChallenge: ACMEChallenge;
   acmeDomains: string; // optional; defaults to server_names
+  dnsServer: string;
+  dnsZone: string;
+  dnsTSIGKeyName: string;
+  dnsTSIGSecretRef: string;
 
   // mutual TLS (client certificates). clientAuthMode "none" disables it.
   clientAuthMode: ClientAuthMode;
@@ -69,6 +73,10 @@ export function emptyTLSDraft(): TLSDraft {
     acmeEnvironment: "staging",
     acmeChallenge: "http-01",
     acmeDomains: "",
+    dnsServer: "",
+    dnsZone: "",
+    dnsTSIGKeyName: "",
+    dnsTSIGSecretRef: "",
     clientAuthMode: "none",
     clientCAFile: "",
     clientCRLFile: "",
@@ -95,6 +103,11 @@ function splitCsv(s: string): string[] {
     .filter((x) => x.length > 0);
 }
 
+function validSecretReference(value: string): boolean {
+  const match = /^\$\{(?:env|file|secret):([^}]*)\}$/.exec(value.trim());
+  return (match?.[1] ?? "").trim().length > 0;
+}
+
 // caForEnvironment maps the staging/production toggle to the ACME directory
 // name the server understands. Staging is the default everywhere so a misconfig
 // never consumes production issuance quota.
@@ -116,6 +129,14 @@ export function tlsWarnings(d: TLSDraft): string[] {
       warn.push(
         "Production Let's Encrypt has strict rate limits. Verify issuance against staging first.",
       );
+    }
+    if (d.acmeChallenge === "dns-01") {
+      if (!d.dnsServer.trim() || !d.dnsZone.trim() || !d.dnsTSIGKeyName.trim()) {
+        warn.push("DNS-01 needs an authoritative server, zone and TSIG key name.");
+      }
+      if (!validSecretReference(d.dnsTSIGSecretRef)) {
+        warn.push("DNS-01 needs a single secret reference; never paste the TSIG secret itself.");
+      }
     }
   } else {
     if (!d.certFile.trim()) warn.push("Static TLS needs a certificate file path.");
@@ -182,6 +203,17 @@ export function generateTLSToml(d: TLSDraft): string {
     const domains = splitCsv(d.acmeDomains);
     if (domains.length > 0) {
       lines.push(`    domains = ${tomlStringArray(domains)}`);
+    }
+    if (d.acmeChallenge === "dns-01") {
+      lines.push('    dns_provider = "rfc2136"');
+      lines.push("");
+      lines.push("      [servers.tls.acme.rfc2136]");
+      lines.push(`      server = ${tomlString(d.dnsServer.trim())}`);
+      lines.push(`      zone = ${tomlString(d.dnsZone.trim())}`);
+      lines.push(`      tsig_key_name = ${tomlString(d.dnsTSIGKeyName.trim())}`);
+      lines.push(
+        `      tsig_secret = ${tomlString(validSecretReference(d.dnsTSIGSecretRef) ? d.dnsTSIGSecretRef.trim() : "")}`,
+      );
     }
   }
   lines.push("");

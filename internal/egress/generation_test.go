@@ -4,8 +4,10 @@
 package egress
 
 import (
+	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -13,6 +15,36 @@ import (
 
 	"jul/internal/config"
 )
+
+func TestDynamicDialUsesPublishedGeneration(t *testing.T) {
+	manager, err := NewManager(config.EgressConfig{Enabled: true, Allow: []string{"127.0.0.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	dial := manager.DialContextWith(SubsystemACME, func(context.Context, string, string) (net.Conn, error) {
+		calls++
+		client, peer := net.Pipe()
+		_ = peer.Close()
+		return client, nil
+	})
+	conn, err := dial(context.Background(), "tcp", "127.0.0.1:53")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	next, _, err := manager.Prepare(config.EgressConfig{Enabled: true, Allow: []string{"192.0.2.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.Publish(next)
+	if _, err := dial(context.Background(), "tcp", "127.0.0.1:53"); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("tightened policy: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("blocked dial reached base dialer; calls = %d", calls)
+	}
+}
 
 func TestManagerPrepareIsolatedUntilPublish(t *testing.T) {
 	m, err := NewManager(config.EgressConfig{Enabled: true, Allow: []string{"127.0.0.1"}})

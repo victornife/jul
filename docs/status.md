@@ -234,6 +234,7 @@ stable release. Publication does not complete the unchecked GA criteria.
 
 | Feature | ID | Tag | Delivery | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | Doc |
 | --- | --- | --- | --- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: | --- |
+| ACME DNS-01 with RFC 2136 | ACME-DNS01 | `acme` | `implemented` | ✅ | ☐ | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [tls-acme.md](tls-acme.md) |
 | Downstream write-inactivity timeout | SEND-TIMEOUT | core | `released` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [core-http.md](core-http.md) |
 | Per-route HTTP metrics and bounded hosts | ROUTE-METRICS | core | `released` | ✅ | ☐ | ☐ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [observability.md](observability.md) |
 | Configuration authority and managed drift | AUTO-AUTH | core · `console` | `released` | ✅ | n/a | ✅ | ☐ | ☐ | ✅ | ✅ | n/a | ✅ | [reload-semantics.md](reload-semantics.md) |

@@ -261,7 +261,12 @@ func digestValues(v any) any {
 // DiffAddressAware ignore addresses that were added or removed rather than
 // edited.
 func perListener(cfg *config.Config, fn func(*config.ServerConfig) any) any {
+	type dnsListenerValue struct {
+		names map[string]bool
+		value any
+	}
 	byAddr := map[string]any{}
+	dnsValues := map[string]map[string]*dnsListenerValue{}
 	for i := range cfg.Servers {
 		s := &cfg.Servers[i]
 		hosts, ok := byAddr[s.Listen].(map[string]any)
@@ -269,9 +274,95 @@ func perListener(cfg *config.Config, fn func(*config.ServerConfig) any) any {
 			hosts = map[string]any{}
 			byAddr[s.Listen] = hosts
 		}
-		hosts[sniKey(s.ServerNames)] = fn(s)
+		key := sniKey(s.ServerNames)
+		value := fn(s)
+		if isDNSACMEServer(s) {
+			values := dnsValues[s.Listen]
+			if values == nil {
+				values = map[string]*dnsListenerValue{}
+				dnsValues[s.Listen] = values
+			}
+			valueKey := digestString(fmt.Sprintf("%#v", value))
+			group := values[valueKey]
+			if group == nil {
+				group = &dnsListenerValue{names: map[string]bool{}, value: value}
+				values[valueKey] = group
+			}
+			for _, name := range strings.Split(dnsCertificateKey(s), "\x00") {
+				group.names[name] = true
+			}
+			continue
+		}
+		hosts[key] = value
+	}
+	for addr, values := range dnsValues {
+		hosts := byAddr[addr].(map[string]any)
+		for valueKey, group := range values {
+			names := make([]string, 0, len(group.names))
+			for name := range group.names {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			key := "dns:" + digestString(strings.Join(names, "\x00")) + ":" + valueKey
+			hosts[key] = group.value
+		}
 	}
 	return byAddr
+}
+
+func isDNSACMEServer(s *config.ServerConfig) bool {
+	return s.TLS != nil && s.TLS.Enabled && s.TLS.ACME != nil && s.TLS.ACME.Enabled && s.TLS.ACME.Challenge == "dns-01"
+}
+
+func dnsCertificateKey(s *config.ServerConfig) string {
+	names := s.TLS.ACME.Domains
+	if len(names) == 0 {
+		names = s.ServerNames
+	}
+	set := make(map[string]bool, len(names))
+	for _, name := range names {
+		set[strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")] = true
+	}
+	canonical := make([]string, 0, len(set))
+	for name := range set {
+		canonical = append(canonical, name)
+	}
+	sort.Strings(canonical)
+	return strings.Join(canonical, "\x00")
+}
+
+func dnsManagerValue(fn func(*config.ACMEConfig) any) func(*config.Config) any {
+	return func(cfg *config.Config) any {
+		type listenerGroup struct {
+			names map[string]bool
+			acme  *config.ACMEConfig
+		}
+		listeners := map[string]*listenerGroup{}
+		for i := range cfg.Servers {
+			s := &cfg.Servers[i]
+			if !isDNSACMEServer(s) {
+				continue
+			}
+			group := listeners[s.Listen]
+			if group == nil {
+				group = &listenerGroup{names: map[string]bool{}, acme: s.TLS.ACME}
+				listeners[s.Listen] = group
+			}
+			for _, name := range strings.Split(dnsCertificateKey(s), "\x00") {
+				group.names[name] = true
+			}
+		}
+		groups := map[string]any{}
+		for _, listener := range listeners {
+			names := make([]string, 0, len(listener.names))
+			for name := range listener.names {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			groups[digestString(strings.Join(names, "\x00"))] = fn(listener.acme)
+		}
+		return groups
+	}
 }
 
 // locationBackendTLS groups a location's backend_tls field by listen address,
@@ -342,6 +433,15 @@ func acmeValue(fn func(*config.ACMEConfig) any) func(*config.Config) any {
 			return nil
 		}
 		return fn(t.ACME)
+	})
+}
+
+func rfc2136Value(fn func(*config.RFC2136Config) any) func(*config.Config) any {
+	return dnsManagerValue(func(a *config.ACMEConfig) any {
+		if a.RFC2136 == nil {
+			return nil
+		}
+		return fn(a.RFC2136)
 	})
 }
 
@@ -429,7 +529,17 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 	case "servers.*.tls.acme.ca":
 		return acmeValue(func(a *config.ACMEConfig) any { return a.CA }), true
 	case "servers.*.tls.acme.domains":
-		return acmeValue(func(a *config.ACMEConfig) any { return sortedCopy(a.Domains) }), true
+		return func(cfg *config.Config) any {
+			return perListener(cfg, func(s *config.ServerConfig) any {
+				if isDNSACMEServer(s) {
+					return true
+				}
+				if s.TLS == nil || s.TLS.ACME == nil {
+					return nil
+				}
+				return sortedCopy(s.TLS.ACME.Domains)
+			})
+		}, true
 	case "servers.*.tls.acme.challenge":
 		return acmeValue(func(a *config.ACMEConfig) any { return a.Challenge }), true
 	case "servers.*.tls.acme.cache_dir":
@@ -437,19 +547,24 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 	case "servers.*.tls.acme.ocsp_stapling":
 		return acmeValue(func(a *config.ACMEConfig) any { return a.OCSPStaplingEnabled() }), true
 	case "servers.*.tls.acme.dns_provider":
-		// Validation rejects a non-empty value, so nothing can ever be consumed.
-		// The extractor reports only whether any block configures one, which is
-		// what preview needs to explain the rejection — and which keeps adding or
-		// removing an unrelated listener from looking like a rejected change.
-		return func(cfg *config.Config) any {
-			for i := range cfg.Servers {
-				s := &cfg.Servers[i]
-				if s.TLS != nil && s.TLS.ACME != nil && strings.TrimSpace(s.TLS.ACME.DNSProvider) != "" {
-					return true
-				}
+		return dnsManagerValue(func(a *config.ACMEConfig) any {
+			return map[string]any{
+				"provider": a.DNSProvider, "ca": a.CA, "email": a.Email,
+				"challenge": a.Challenge, "cache_dir": a.CacheDir,
 			}
-			return false
-		}, true
+		}), true
+	case "servers.*.tls.acme.rfc2136.server":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.Server }), true
+	case "servers.*.tls.acme.rfc2136.zone":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.Zone }), true
+	case "servers.*.tls.acme.rfc2136.tsig_key_name":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.TSIGKeyName }), true
+	case "servers.*.tls.acme.rfc2136.tsig_secret":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.TSIGSecret }), true
+	case "servers.*.tls.acme.rfc2136.propagation_timeout":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.PropagationTimeout }), true
+	case "servers.*.tls.acme.rfc2136.poll_interval":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.PollInterval }), true
 	case "servers.*.locations.*.rate_limit.max_conns":
 		// Validation rejects a location-scoped connection cap. Presence is the
 		// only signal preview needs, and it stays stable when locations are added.

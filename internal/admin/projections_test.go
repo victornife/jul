@@ -4,10 +4,60 @@
 package admin
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
+
+func TestProjectTLSDNSStateAndListenerScope(t *testing.T) {
+	expiry := time.Now().Add(2 * time.Hour)
+	cfg := &config.Config{Servers: []config.ServerConfig{
+		{Listen: ":443", ServerNames: []string{"example.test"}, TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{Enabled: true}}},
+		{Listen: ":8443", ServerNames: []string{"example.test"}, TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{Enabled: true}}},
+	}}
+	live := []CertStatus{
+		{Listen: ":443", ServerNames: []string{"example.test"}, State: "pending"},
+		{Listen: ":8443", ServerNames: []string{"example.test"}, State: "available", NotAfter: expiry, Error: "renewal failed",
+			Variants: []CertVariantStatus{
+				{Algorithm: "ecdsa-p256", State: "available", NotAfter: &expiry},
+				{Algorithm: "rsa-2048", State: "failed", Error: "DNS update refused"},
+			}},
+	}
+	got := projectTLS(cfg, cfg, live)
+	if len(got) != 2 || got[0].Listen != ":443" || got[0].State != "pending" || got[0].DaysLeft != nil ||
+		got[1].Listen != ":8443" || got[1].State != "available" || got[1].DaysLeft == nil || *got[1].DaysLeft != 0 {
+		t.Fatalf("listener-scoped certificate state: %+v", got)
+	}
+	data, err := json.Marshal(got[1])
+	if err != nil || !strings.Contains(string(data), `"days_left":0`) {
+		t.Fatalf("zero-day expiry omitted: %s (%v)", data, err)
+	}
+	if len(got[1].Variants) != 2 || got[1].Variants[0].NotAfter == "" ||
+		got[1].Variants[1].Algorithm != "rsa-2048" || got[1].Variants[1].State != "failed" ||
+		got[1].Variants[1].Error != "DNS update refused" {
+		t.Fatalf("certificate variant state was not projected: %+v", got[1].Variants)
+	}
+	if risk := projectCertRisk(got); risk == nil || risk.Errors != 2 || !strings.Contains(risk.Details, "errors") {
+		t.Fatalf("pending and failed renewal must be reported as risks: %+v", risk)
+	}
+}
+
+func TestProjectTLSRiskCountsRecentlyExpiredCertificates(t *testing.T) {
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":443", ServerNames: []string{"example.test"}, TLS: &config.TLSConfig{Enabled: true},
+	}}}
+	certs := projectTLS(cfg, cfg, []CertStatus{{
+		Listen: ":443", ServerNames: []string{"example.test"}, NotAfter: time.Now().Add(-time.Hour),
+	}})
+	risk := projectCertRisk(certs)
+	if len(certs) != 1 || certs[0].DaysLeft == nil || *certs[0].DaysLeft != -1 ||
+		risk == nil || risk.Expired != 1 || !strings.Contains(risk.Details, "1 expired") {
+		t.Fatalf("recently expired certificate risk: certs=%+v risk=%+v", certs, risk)
+	}
+}
 
 func TestProjectRoutesIncludesRouteIDWhenPresent(t *testing.T) {
 	id := "r-abc123"

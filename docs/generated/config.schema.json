@@ -2222,10 +2222,11 @@
                   },
                   "challenge": {
                     "default": "http-01",
-                    "description": "Challenge selects the ACME challenge type: \"http-01\" (default) or \"tls-alpn-01\"",
+                    "description": "Challenge selects \"http-01\" (default), \"tls-alpn-01\", or \"dns-01\"",
                     "enum": [
                       "http-01",
-                      "tls-alpn-01"
+                      "tls-alpn-01",
+                      "dns-01"
                     ],
                     "type": "string",
                     "x-jul-capability": [
@@ -2234,12 +2235,11 @@
                     "x-jul-constraint": "exact lowercase enum"
                   },
                   "dns_provider": {
-                    "description": "DNSProvider names the DNS-01 provider plugin (e.g. \"cloudflare\")",
+                    "description": "DNSProvider must be \"rfc2136\" for DNS-01 and empty for other challenges",
                     "type": "string",
                     "x-jul-capability": [
                       "acme"
-                    ],
-                    "x-jul-reserved": true
+                    ]
                   },
                   "domains": {
                     "description": "Domains is the allow-list of hostnames to obtain certificates for",
@@ -2272,6 +2272,59 @@
                     "x-jul-capability": [
                       "acme"
                     ]
+                  },
+                  "rfc2136": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "poll_interval": {
+                        "description": "PollInterval controls how often the authoritative server is queried",
+                        "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+                        "type": "string",
+                        "x-jul-capability": [
+                          "acme"
+                        ],
+                        "x-jul-constraint": "250ms to 30s and no greater than propagation_timeout"
+                      },
+                      "propagation_timeout": {
+                        "description": "PropagationTimeout bounds polling after the first authoritative DNS observation",
+                        "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+                        "type": "string",
+                        "x-jul-capability": [
+                          "acme"
+                        ],
+                        "x-jul-constraint": "1s to 15m"
+                      },
+                      "server": {
+                        "description": "Server is the authoritative DNS update endpoint, as host:port",
+                        "type": "string",
+                        "x-jul-capability": [
+                          "acme"
+                        ]
+                      },
+                      "tsig_key_name": {
+                        "description": "TSIGKeyName identifies the TSIG key authorized to update the zone",
+                        "type": "string",
+                        "x-jul-capability": [
+                          "acme"
+                        ]
+                      },
+                      "tsig_secret": {
+                        "description": "TSIGSecret is a single environment or file reference to the base64 TSIG key",
+                        "type": "string",
+                        "x-jul-capability": [
+                          "acme"
+                        ],
+                        "x-jul-secret": true
+                      },
+                      "zone": {
+                        "description": "Zone is the DNS zone containing the ACME challenge records",
+                        "type": "string",
+                        "x-jul-capability": [
+                          "acme"
+                        ]
+                      }
+                    },
+                    "type": "object"
                   }
                 },
                 "type": "object"

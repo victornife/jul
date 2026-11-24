@@ -17,15 +17,15 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 470 |
-| Schema leaves (configurable values) | 399 |
-| Registry entries | 399 |
-| Startup-consumed entries | 29 |
+| Schema paths (containers included) | 477 |
+| Schema leaves (configurable values) | 405 |
+| Registry entries | 405 |
+| Startup-consumed entries | 36 |
 | Class `hot_reload` | 356 |
-| Class `restart_required` | 29 |
+| Class `restart_required` | 36 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
-| Class `validation_rejected_reserved` | 3 |
+| Class `validation_rejected_reserved` | 2 |
 
 ## Classes
 
@@ -401,11 +401,17 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.tls.acme.ca` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.cache_dir` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.challenge` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
-| `servers.*.tls.acme.dns_provider` | `validation_rejected_reserved` | `acme` | reserved | DNS-01 is not implemented; Validate rejects a non-empty dns_provider, so no running process can have consumed it |
+| `servers.*.tls.acme.dns_provider` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
 | `servers.*.tls.acme.domains` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.email` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.enabled` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.ocsp_stapling` | `hot_reload` | `acme` | — | the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106) |
+| `servers.*.tls.acme.rfc2136.poll_interval` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| `servers.*.tls.acme.rfc2136.propagation_timeout` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| `servers.*.tls.acme.rfc2136.server` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| `servers.*.tls.acme.rfc2136.tsig_key_name` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| `servers.*.tls.acme.rfc2136.tsig_secret` | `restart_required` | `acme` | startup, digest | the process-owned DNS-01 manager uses the credential resolved at startup |
+| `servers.*.tls.acme.rfc2136.zone` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
 | `servers.*.tls.cert` | `hot_reload` | `tls` | digest | a candidate certificate provider is built and validated during Prepare and swapped atomically into the listener's existing dynamic provider at Publish, without rebinding (#100) |
 | `servers.*.tls.client_auth.ca_file` | `hot_reload` | `mtls` | digest | the client CA pool is loaded and validated during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486) |
 | `servers.*.tls.client_auth.crl_file` | `hot_reload` | `mtls` | digest | the revocation list is loaded and signature-checked during Prepare and swapped into the listener's client-auth holder at Publish; the fingerprint digests the file contents so an in-place rotation reloads (#486) |

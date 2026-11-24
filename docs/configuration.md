@@ -1781,16 +1781,17 @@ The full reference lives in [docs/mtls.md](mtls.md).
 ## Automatic HTTPS (ACME)
 
 Jul can obtain and renew certificates automatically from an ACME certificate
-authority (Let's Encrypt by default) using the **HTTP-01** or **TLS-ALPN-01**
-challenge. This eliminates manual certificate provisioning and renewal.
+authority (Let's Encrypt by default) using **HTTP-01**, **TLS-ALPN-01**, or
+**DNS-01** (RFC 2136 with TSIG). This eliminates manual certificate
+provisioning and renewal.
 This feature is gated behind the `acme` build tag.
 
 ```bash
 go build -tags acme -o jul ./cmd/jul
 ```
 
-Configure it under `[servers.tls.acme]` on a `:443` server block, and keep a
-plain `:80` block running so the challenge can be answered:
+Configure it under `[servers.tls.acme]` on a `:443` server block. For the
+HTTP-01 example below, keep a plain `:80` block running for the challenge:
 
 ```toml
 [[servers]]
@@ -1820,7 +1821,9 @@ redirect_https = 308
 | `email` | string | **Required.** ACME account contact address |
 | `ca` | string | `letsencrypt-staging` (default), `letsencrypt`, or a custom `https://` directory URL |
 | `domains` | []string | Certificate host names; defaults to `server_names` |
-| `challenge` | string | `http-01` (default) or `tls-alpn-01`. `dns-01` is reserved for a future release |
+| `challenge` | string | `http-01` (default), `tls-alpn-01`, or `dns-01` |
+| `dns_provider` | string | Required for DNS-01: `rfc2136`; absent for other challenges |
+| `rfc2136` | table | DNS server/zone, TSIG key name and secret reference, and bounded propagation settings; see [TLS/ACME](tls-acme.md#dns-01-with-rfc-2136-and-tsig) |
 | `cache_dir` | string | Directory where issued certificates are cached (default `./jul-data/certs`) |
 | `ocsp_stapling` | bool | Staple OCSP responses onto served certificates (default `true`) |
 
@@ -1828,12 +1831,17 @@ redirect_https = 308
   Switch to `ca = "letsencrypt"` only after staging works end to end.
 - A single listener address may not mix ACME and static `cert`/`key` server
   blocks; validation rejects that.
-- The ACME domain set is fixed at startup — enabling ACME or adding domains
-  needs a restart.
+- The ACME domain set and provider/credential selection are fixed at startup:
+  enabling ACME, adding domains or changing those settings needs a restart.
+- DNS-01 requires listener `server_names`, a scoped TSIG secret reference and
+  an authoritative server. It does not activate HTTP-01 or TLS-ALPN-01.
+  ECDSA P-256 and RSA-2048 variants are issued and renewed separately and
+  selected automatically for compatible clients.
 - Certificate expiry and renewals are exported as `jul_tls_cert_expiry_seconds`
   and `jul_acme_renewals_total`.
 
-See [examples/auto-https](../examples/auto-https) for a runnable walkthrough.
+See [examples/auto-https](../examples/auto-https) and the
+[DNS-01 + mTLS example](../testdata/acme-dns-mtls.toml).
 
 ---
 

@@ -77,16 +77,16 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 470
-  schema_leaves: 399
-  registry_entries: 399
-  startup_consumed: 29
+  schema_paths: 477
+  schema_leaves: 405
+  registry_entries: 405
+  startup_consumed: 36
   by_class:
     hot_reload: 356
-    restart_required: 29
+    restart_required: 36
     new_listener_only: 7
     ignored_deprecated: 4
-    validation_rejected_reserved: 3
+    validation_rejected_reserved: 2
 
 conditions:
   retained_listener: "at least one listen address kept across this reload changed the value it bound with, so the running listener keeps the old value until the process restarts"
@@ -1287,10 +1287,10 @@ fields:
     address_keyed: true
     conditional: true
   - path: "servers.*.tls.acme.dns_provider"
-    class: validation_rejected_reserved
+    class: restart_required
     subsystem: acme
-    reason: "DNS-01 is not implemented; Validate rejects a non-empty dns_provider, so no running process can have consumed it"
-    reserved: true
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
   - path: "servers.*.tls.acme.domains"
     class: restart_required
     subsystem: acme
@@ -1316,6 +1316,37 @@ fields:
     class: hot_reload
     subsystem: acme
     reason: "the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106)"
+  - path: "servers.*.tls.acme.rfc2136.poll_interval"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
+  - path: "servers.*.tls.acme.rfc2136.propagation_timeout"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
+  - path: "servers.*.tls.acme.rfc2136.server"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
+  - path: "servers.*.tls.acme.rfc2136.tsig_key_name"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
+  - path: "servers.*.tls.acme.rfc2136.tsig_secret"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager uses the credential resolved at startup"
+    startup_consumed: true
+    secret_digested: true
+  - path: "servers.*.tls.acme.rfc2136.zone"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
   - path: "servers.*.tls.cert"
     class: hot_reload
     subsystem: tls

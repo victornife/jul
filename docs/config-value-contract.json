@@ -23,7 +23,8 @@
       "active_when": "ACME enabled",
       "allowed": [
         "http-01",
-        "tls-alpn-01"
+        "tls-alpn-01",
+        "dns-01"
       ]
     },
     {
@@ -1074,6 +1075,22 @@
       "constraint": "at most 1 KiB, compared after percent-decoding",
       "zero_semantics": "omitted and explicitly empty are different: omitted is only legal for op = present, and an empty value matches ?x and ?x=",
       "active_when": "op is exact"
+    },
+    {
+      "go_field": "RFC2136Config.PollInterval",
+      "path": "servers[].tls.acme.rfc2136.poll_interval",
+      "kind": "duration",
+      "constraint": "250ms to 30s and no greater than propagation_timeout",
+      "zero_semantics": "omitted/zero defaults to 2s",
+      "active_when": "DNS-01 is enabled"
+    },
+    {
+      "go_field": "RFC2136Config.PropagationTimeout",
+      "path": "servers[].tls.acme.rfc2136.propagation_timeout",
+      "kind": "duration",
+      "constraint": "1s to 15m",
+      "zero_semantics": "omitted/zero defaults to 2m",
+      "active_when": "DNS-01 is enabled"
     },
     {
       "go_field": "RateLimitConfig.Burst",

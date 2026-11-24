@@ -592,7 +592,7 @@ func TestAcmeCertSummariesForAddrSkipsNonMatchingServers(t *testing.T) {
 			Enabled: true, ACME: &config.ACMEConfig{Enabled: true},
 		}},
 	}
-	got := acmeCertSummariesForAddr(servers, addr)
+	got := acmeCertSummariesForAddr(servers, addr, nil)
 	if len(got) != 1 || got[0].ServerNames[0] != "acme.example.com" {
 		t.Fatalf("summaries = %+v, want exactly the one matching ACME server on addr", got)
 	}

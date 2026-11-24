@@ -644,6 +644,113 @@ describe("TLSPanel", () => {
     render(<TLSPanel />, { wrapper: Wrapper });
     expect(await screen.findByText("acme")).toBeInTheDocument();
   });
+
+  it("shows the listener, zero-day expiry and safe renewal failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              url.includes("/mtls")
+                ? { servers: [] }
+                : [
+                    {
+                      listen: ":8443",
+                      server_names: ["example.com"],
+                      source: "acme",
+                      state: "available",
+                      days_left: 0,
+                      not_after: "2026-06-28T00:00:00Z",
+                      error: "DNS-01 renewal failed; check the DNS server",
+                      variants: [
+                        { algorithm: "ecdsa-p256", state: "available" },
+                        { algorithm: "rsa-2048", state: "failed", error: "DNS update refused" },
+                      ],
+                    },
+                  ],
+            ),
+        }),
+      ),
+    );
+    render(<TLSPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText(":8443")).toBeInTheDocument();
+    expect(screen.getByText("available")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.getByText(/DNS-01 renewal failed/)).toBeInTheDocument();
+    expect(screen.getByText(/ECDSA P-256: available/)).toBeInTheDocument();
+    expect(screen.getByText(/RSA-2048: failed/)).toHaveTextContent("DNS update refused");
+  });
+
+  it("distinguishes a pending DNS certificate from a missing expiry", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              url.includes("/mtls")
+                ? { servers: [] }
+                : [
+                    {
+                      listen: ":443",
+                      server_names: ["example.test"],
+                      source: "acme",
+                      state: "pending",
+                    },
+                  ],
+            ),
+        }),
+      ),
+    );
+    render(<TLSPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText("pending")).toBeInTheDocument();
+    expect(screen.queryByText("Days left")).not.toBeInTheDocument();
+  });
+
+  it("shows DNS issuance and renewal states in the sortable table", async () => {
+    localStorage.removeItem("jul_pref:tls_view");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((url: string) =>
+        Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              url.includes("/mtls")
+                ? { servers: [] }
+                : [
+                    { listen: ":443", server_names: ["pending.test"], source: "acme", state: "pending" },
+                    { server_names: ["failed.test"], source: "acme", state: "failed", error: "DNS update refused" },
+                    { server_names: ["valid.test"], source: "acme", state: "available", not_after: "2027-01-01", days_left: 90 },
+                    { server_names: ["expired.test"], source: "acme", state: "failed", not_after: "2026-01-01", days_left: -1 },
+                  ],
+            ),
+        }),
+      ),
+    );
+    render(<TLSPanel />, { wrapper: Wrapper });
+    expect(await screen.findByText("pending.test")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    const table = screen.getByRole("table");
+    const row = (name: string) => {
+      const result = within(table).getByText(new RegExp(name)).closest("tr");
+      if (!result) throw new Error(`Missing row for ${name}`);
+      return result;
+    };
+    expect(within(row("pending.test")).getByText("pending")).toBeInTheDocument();
+    expect(within(row("failed.test")).getByText("DNS update refused")).toBeInTheDocument();
+    expect(within(row("valid.test")).getByText("ok")).toBeInTheDocument();
+    expect(within(row("expired.test")).getByText("expired")).toBeInTheDocument();
+    expect(within(table).getAllByRole("row")[1]).toHaveTextContent("expired.test");
+    fireEvent.click(within(table).getByText(/Days left/));
+    expect(within(table).getAllByRole("row").at(-1)).toHaveTextContent("expired.test");
+    fireEvent.click(screen.getByRole("button", { name: "Cards" }));
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByText("pending")).toBeInTheDocument();
+  });
 });
 
 // ── SecurityPanel ─────────────────────────────────────────────────────────────

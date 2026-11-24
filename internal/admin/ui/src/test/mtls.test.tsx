@@ -42,7 +42,36 @@ import {
   mtlsServerSummary,
 } from "@/lib/mtls.ts";
 import { TLSPanel } from "@/features/tls/TLSPanel.tsx";
+import { TLSEditor } from "@/features/tls/TLSEditor.tsx";
 import { RouteDetail } from "@/features/routes/RouteDetail.tsx";
+
+it("guides DNS-01 creation without exporting a literal TSIG secret", () => {
+  render(<TLSEditor onClose={() => undefined} />, { wrapper: Wrapper });
+  fireEvent.change(screen.getByLabelText("Challenge"), { target: { value: "dns-01" } });
+  expect(screen.getByText(/needs an authoritative server/i)).toBeInTheDocument();
+  expect(screen.getByText(/automatically selects ECDSA P-256 or RSA-2048/i)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText(/TSIG secret reference/), {
+    target: { value: "literal-secret-must-not-be-exported" },
+  });
+  expect(screen.getByText(/single secret reference/i)).toBeInTheDocument();
+  expect(document.querySelector("pre")?.textContent).not.toContain(
+    "literal-secret-must-not-be-exported",
+  );
+  fireEvent.change(screen.getByLabelText(/TSIG secret reference/), {
+    target: { value: "${env:JUL_DNS_TSIG}" },
+  });
+  fireEvent.change(screen.getByLabelText("Client-certificate mode"), {
+    target: { value: "request" },
+  });
+  fireEvent.change(screen.getByLabelText("Minimum TLS version"), { target: { value: "1.3" } });
+  expect(document.querySelector("pre")?.textContent).toContain(
+    'tsig_secret = "${env:JUL_DNS_TSIG}"',
+  );
+  expect(
+    screen.getByText(/Draft block only: TLS floor 1.3.*HTTP\/3.*requests and verifies optional client certificates/i),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/On a shared listener the strongest TLS floor/i)).toBeInTheDocument();
+});
 
 // ── schema ────────────────────────────────────────────────────────────────────
 

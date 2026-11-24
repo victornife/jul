@@ -53,6 +53,12 @@ so client-auth mode, CA verification, SAN allow-list, CRL checks, result metrics
 and the verified peer certificate exposed to middleware are equivalent across
 HTTP/1.1, HTTP/2, and HTTP/3.
 
+The [DNS-01 + mTLS example](../testdata/acme-dns-mtls.toml) uses an ACME
+server certificate and an independent client CA. A trusted client can reach
+the protected route, a missing certificate receives 403 in `request` mode, and
+an untrusted certificate fails the handshake. DNS renewal does not rotate
+client trust; see the [TLS/mTLS matrix and verification commands](tls-acme.md#dns-01-tls-and-mtls-compatibility).
+
 ## Configuration
 
 mTLS is configured per server block, under `tls.client_auth`. The server must

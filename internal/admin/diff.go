@@ -616,6 +616,12 @@ func diffACME(name string, b, a *config.ACMEConfig, d *ConfigDiff) {
 	if !strings.EqualFold(b.Challenge, a.Challenge) {
 		d.mod(DiffEntry{Kind: "acme", Name: name, Before: orNone(b.Challenge), After: orNone(a.Challenge), Detail: "Change ACME challenge type for " + name}, "server "+name+" ACME challenge")
 	}
+	if !slices.Equal(b.Domains, a.Domains) {
+		d.mod(DiffEntry{Kind: "acme", Name: name, Detail: "Change ACME certificate names for " + name}, "server "+name+" ACME names")
+	}
+	if b.DNSProvider != a.DNSProvider || !reflect.DeepEqual(b.RFC2136, a.RFC2136) {
+		d.mod(DiffEntry{Kind: "acme", Name: name, Detail: "Change DNS-01 provider settings or credential reference for " + name}, "server "+name+" ACME DNS provider")
+	}
 }
 
 func diffMTLS(name string, b, a *config.ClientAuthConfig, d *ConfigDiff) {

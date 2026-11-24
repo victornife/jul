@@ -17,7 +17,7 @@ import (
 
 func TestNewACMEManagerNilWhenNoACME(t *testing.T) {
 	cfg := &config.Config{Servers: []config.ServerConfig{{Listen: ":80"}}}
-	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil)
+	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestNewACMEManagerNilWhenNoACME(t *testing.T) {
 }
 
 func TestNewACMEManagerBuildsManager(t *testing.T) {
-	mgr, err := NewACMEManager(acmeServerCfg().Servers, nil, nil, nil)
+	mgr, err := NewACMEManager(acmeServerCfg().Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatalf("NewACMEManager: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestNewACMEManagerBuildsManager(t *testing.T) {
 func TestNewACMEManagerDefaultsEmptyChallengeToHTTP01(t *testing.T) {
 	cfg := acmeServerCfg()
 	cfg.Servers[0].TLS.ACME.Challenge = ""
-	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil)
+	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatalf("NewACMEManager: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestNewACMEManagerDefaultsEmptyChallengeToHTTP01(t *testing.T) {
 
 func TestNewACMEManagerWiresGuardedClient(t *testing.T) {
 	guarded := &http.Client{}
-	m, err := NewACMEManager(acmeServerCfg().Servers, nil, guarded, nil)
+	m, err := NewACMEManager(acmeServerCfg().Servers, nil, guarded, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatalf("NewACMEManager: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestNewACMEManagerWiresGuardedClient(t *testing.T) {
 
 	// A nil client preserves the default (nil) acme HTTP client so an
 	// egress-disabled build is unchanged.
-	m2, err := NewACMEManager(acmeServerCfg().Servers, nil, nil, nil)
+	m2, err := NewACMEManager(acmeServerCfg().Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatalf("NewACMEManager: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestDirectoryURL(t *testing.T) {
 }
 
 func TestACMEChallengeHandlerRouting(t *testing.T) {
-	mgr, err := NewACMEManager(acmeServerCfg().Servers, nil, nil, nil)
+	mgr, err := NewACMEManager(acmeServerCfg().Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestACMEChallengeHandlerRouting(t *testing.T) {
 func TestACMETLSALPNChallengeDoesNotInstallHTTPHandler(t *testing.T) {
 	cfg := acmeServerCfg()
 	cfg.Servers[0].TLS.ACME.Challenge = "tls-alpn-01"
-	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil)
+	mgr, err := NewACMEManager(cfg.Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

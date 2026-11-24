@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,6 +203,38 @@ func TestACMERestartRequired(t *testing.T) {
 		})
 		if _, need := ACMERestartRequired(old, next); !need {
 			t.Fatal("adding an ACME listener must require a restart")
+		}
+	})
+
+	t.Run("DNS credential rotation requires restart without disclosing it", func(t *testing.T) {
+		old := acme("example.com")
+		old[0].TLS.ACME.RFC2136 = &config.RFC2136Config{TSIGSecret: "old-secret"}
+		next := acme("example.com")
+		next[0].TLS.ACME.RFC2136 = &config.RFC2136Config{TSIGSecret: "new-secret"}
+		reason, need := ACMERestartRequired(old, next)
+		if !need || strings.Contains(reason, "secret") {
+			t.Fatalf("credential rotation: need=%t reason=%q", need, reason)
+		}
+	})
+
+	t.Run("moving names between legacy listeners preserves the manager", func(t *testing.T) {
+		old := append(acme("a.example.com"), acme("b.example.com")...)
+		old[1].Listen = ":8443"
+		next := append(acme("b.example.com"), acme("a.example.com")...)
+		next[1].Listen = ":8443"
+		if reason, need := ACMERestartRequired(old, next); need {
+			t.Fatalf("the legacy address and domain unions are unchanged: %s", reason)
+		}
+	})
+
+	t.Run("moving an unchanged DNS certificate group does not restart the manager", func(t *testing.T) {
+		old := acme("*.example.com", "example.com")
+		old[0].TLS.ACME.Challenge = "dns-01"
+		next := acme("*.EXAMPLE.COM.", "Example.Com")
+		next[0].TLS.ACME.Challenge = "dns-01"
+		next[0].Listen = ":8443"
+		if reason, need := ACMERestartRequired(old, next); need {
+			t.Fatalf("moving the existing DNS certificate group requires restart: %s", reason)
 		}
 	})
 }

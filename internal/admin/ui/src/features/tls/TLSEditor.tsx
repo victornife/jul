@@ -6,8 +6,17 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Drawer } from "@/components/Drawer.tsx";
-import { captureAdminIdentity,  fetchRawConfig } from "@/api/client.ts";
-import { setPendingDraft } from "@/lib/configDraftHandoff.ts";
+import {
+  captureAdminIdentity,
+  fetchPendingRestart,
+  fetchRawConfig,
+  previewRawConfig,
+} from "@/api/client.ts";
+import {
+  recommendPatchAction,
+  setPendingDraft,
+  snapshotPendingRestart,
+} from "@/lib/configDraftHandoff.ts";
 import { appendFragment } from "@/lib/routeToml.ts";
 import {
   emptyTLSDraft,
@@ -67,6 +76,7 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
   const navigate = useNavigate();
   const [draft, setDraft] = useState<TLSDraft>(emptyTLSDraft());
   const [error, setError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
 
   const fragment = generateTLSToml(draft);
   const warnings = tlsWarnings(draft);
@@ -77,14 +87,57 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
 
   async function openInEditor(): Promise<void> {
     const assertIdentity = captureAdminIdentity();
+    const dns01 = draft.mode === "acme" && draft.acmeChallenge === "dns-01";
     setError(null);
+    setReviewing(true);
     try {
       const raw = await fetchRawConfig();
-      assertIdentity();
-      setPendingDraft({ kind: "toml", toml: appendFragment(raw.raw ?? "", fragment) });
+      const candidate = appendFragment(raw.raw ?? "", fragment);
+      if (dns01) {
+        if (raw.raw === undefined || !raw.base_version?.trim()) {
+          throw new Error(
+            "The raw configuration and its base version are required for DNS-01 review.",
+          );
+        }
+        const pending = snapshotPendingRestart(await fetchPendingRestart());
+        const preview = await previewRawConfig(candidate, raw.base_version);
+        if (preview.base_version !== raw.base_version) {
+          throw new Error("The DNS-01 preview did not match the source base version.");
+        }
+        if (!preview.valid || preview.validation_errors.length > 0) {
+          const details = preview.validation_errors
+            .map((issue) => `${issue.path ? `${issue.path}: ` : ""}${issue.summary}`)
+            .join("; ");
+          throw new Error(details || "The DNS-01 candidate is invalid.");
+        }
+        const action = recommendPatchAction(preview.lifecycle, pending);
+        if (action === "none") {
+          throw new Error(
+            "The server did not offer a safe apply action for this DNS-01 candidate.",
+          );
+        }
+        assertIdentity();
+        setPendingDraft({
+          kind: "toml",
+          toml: candidate,
+          baseVersion: raw.base_version,
+          previewDiff: preview.diff,
+          lifecycle: preview.lifecycle,
+          recommendedAction: action,
+          pendingRestart: pending,
+          candidateState: "memory_only",
+        });
+      } else {
+        assertIdentity();
+        setPendingDraft({ kind: "toml", toml: candidate });
+      }
       void navigate("/config");
-    } catch {
-      setError("Could not load the current configuration to merge this TLS server.");
+    } catch (failure) {
+      setError(dns01 && failure instanceof Error
+        ? failure.message
+        : "Could not load the current configuration to merge this TLS server.");
+    } finally {
+      setReviewing(false);
     }
   }
 
@@ -101,9 +154,10 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
             onClick={() => {
               void openInEditor();
             }}
-            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110"
+            disabled={reviewing}
+            className="ml-auto rounded-md bg-jul-accent px-4 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
           >
-            Review in editor →
+            {reviewing ? "Reviewing…" : "Review in editor →"}
           </button>
         </div>
       }
@@ -190,17 +244,65 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
               >
                 <option value="http-01">http-01 (port 80 must be reachable)</option>
                 <option value="tls-alpn-01">tls-alpn-01 (port 443 only)</option>
+                <option value="dns-01">dns-01 (RFC 2136; wildcard capable)</option>
               </select>
             </label>
             <TextField
               label="ACME domains (optional)"
-              hint="Comma-separated. Defaults to the host names above."
+              hint="Comma-separated. Defaults to host names. A wildcard covers one label, not the apex or deeper names."
               value={draft.acmeDomains}
               placeholder="example.com, www.example.com"
               onChange={(v) => {
                 set("acmeDomains", v);
               }}
             />
+            {draft.acmeChallenge === "dns-01" && (
+              <div className="space-y-3 rounded-md border border-jul-border p-3">
+                <p className="text-xs text-jul-muted">
+                  Provider: RFC 2136. Configure an authoritative DNS server to permit TSIG-signed
+                  updates and queries for the challenge zone. No inbound ACME listener is needed.
+                  ACME, provider, name and credential changes require a restart. The server must use
+                  an ACME-enabled build.
+                </p>
+                <p className="text-xs text-jul-muted">
+                  Jul automatically selects ECDSA P-256 or RSA-2048 for each client. Each variant
+                  needs its own issuance and renewal order.
+                </p>
+                <TextField
+                  label="DNS server and port"
+                  value={draft.dnsServer}
+                  placeholder="dns.example.com:53"
+                  onChange={(v) => {
+                    set("dnsServer", v);
+                  }}
+                />
+                <TextField
+                  label="DNS update zone"
+                  value={draft.dnsZone}
+                  placeholder="example.com"
+                  onChange={(v) => {
+                    set("dnsZone", v);
+                  }}
+                />
+                <TextField
+                  label="TSIG key name"
+                  value={draft.dnsTSIGKeyName}
+                  placeholder="jul.example.com"
+                  onChange={(v) => {
+                    set("dnsTSIGKeyName", v);
+                  }}
+                />
+                <TextField
+                  label="TSIG secret reference"
+                  value={draft.dnsTSIGSecretRef}
+                  placeholder="${env:JUL_DNS_TSIG}"
+                  hint="Use ${env:NAME} or ${file:/path}; do not enter the secret itself."
+                  onChange={(v) => {
+                    set("dnsTSIGSecretRef", v);
+                  }}
+                />
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-3">
@@ -341,7 +443,10 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
         </div>
 
         {warnings.length > 0 && (
-          <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2">
+          <div
+            role="status"
+            className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-2"
+          >
             {warnings.map((wn, i) => (
               <p key={`tw-${String(i)}`} className="text-xs text-jul-warning">
                 {wn}
@@ -351,6 +456,18 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
         )}
 
         <div className="space-y-1">
+          <p className="text-xs text-jul-muted">
+            Draft block only: TLS floor {draft.minVersion || "1.2 (default)"}; this block does not
+            enable HTTP/3; this block
+            {draft.clientAuthMode === "require"
+              ? " requires client certificates."
+              : draft.clientAuthMode === "request"
+                ? " requests and verifies optional client certificates."
+                : " does not request client certificates."}
+            {" "}On a shared listener the strongest TLS floor and client-auth mode apply to all
+            names, client trust is combined, and HTTP/3 may already be enabled. Review the merged
+            listener policy before applying.
+          </p>
           <span className="text-xs font-semibold uppercase tracking-wider text-jul-muted">
             Generated TOML
           </span>

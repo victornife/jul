@@ -11,6 +11,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jcchavezs/mergefs v0.1.1
 	github.com/klauspost/compress v1.20.4
+	github.com/miekg/dns v1.1.73
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/prometheus/client_golang v1.25.0
 	github.com/prometheus/client_model v0.6.3

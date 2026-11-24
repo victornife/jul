@@ -40,7 +40,8 @@ type RuntimeBuilder struct {
 	ACMEClient *http.Client
 	// OCSPClient guards the OCSP responder fetch when the egress allow-list is
 	// enabled; nil keeps the default client.
-	OCSPClient *http.Client
+	OCSPClient  *http.Client
+	ACMEOptions server.ACMEOptions
 }
 
 // Runtime holds the process-lifetime subsystems built by RuntimeBuilder. It is
@@ -141,6 +142,11 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 	// leaks no OTLP exporter goroutine (serve() previously relied on a deferred
 	// tracer.Shutdown for this).
 	fail := func(err error) (*Runtime, error) {
+		if closer, ok := rt.ACME.(interface{ Close() error }); ok {
+			if closeErr := closer.Close(); closeErr != nil && b.Logger != nil {
+				b.Logger.Warn("ACME shutdown", "error", closeErr)
+			}
+		}
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = tracer.Shutdown(shutCtx)
@@ -151,7 +157,7 @@ func (b RuntimeBuilder) Build() (*Runtime, error) {
 	// and answers HTTP-01 challenges. nil means no block enables ACME; an error
 	// means ACME is enabled but this binary lacks the "acme" build tag. Enabling
 	// ACME after startup requires a restart (the domain set is fixed here).
-	acmeMgr, err := server.NewACMEManager(cfg.Servers, b.Metrics.ObserveCertExpiry, b.ACMEClient, b.OCSPClient)
+	acmeMgr, err := server.NewACMEManager(cfg.Servers, b.Metrics.ObserveCertExpiry, b.ACMEClient, b.OCSPClient, b.ACMEOptions)
 	if err != nil {
 		return fail(fmt.Errorf("initialize ACME: %w", err))
 	}
@@ -226,6 +232,11 @@ func (r *Runtime) StreamStatus() string {
 func (r *Runtime) Close() {
 	if r.Stream != nil {
 		_ = r.Stream.Close()
+	}
+	if closer, ok := r.ACME.(interface{ Close() error }); ok {
+		if err := closer.Close(); err != nil && r.log != nil {
+			r.log.Warn("ACME shutdown", "error", err)
+		}
 	}
 	if r.Tracer != nil {
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

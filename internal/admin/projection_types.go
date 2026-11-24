@@ -310,12 +310,23 @@ type TLSProjection struct {
 
 // CertProjection is one certificate entry for the TLS panel.
 type CertProjection struct {
-	ServerNames []string `json:"server_names"`
-	Source      string   `json:"source"`
-	Issuer      string   `json:"issuer,omitempty"`
-	NotAfter    string   `json:"not_after,omitempty"`
-	DaysLeft    int      `json:"days_left,omitempty"`
-	Error       string   `json:"error,omitempty"`
+	Listen      string                  `json:"listen,omitempty"`
+	ServerNames []string                `json:"server_names"`
+	Source      string                  `json:"source"`
+	State       string                  `json:"state,omitempty"`
+	Issuer      string                  `json:"issuer,omitempty"`
+	NotAfter    string                  `json:"not_after,omitempty"`
+	DaysLeft    *int                    `json:"days_left,omitempty"`
+	Error       string                  `json:"error,omitempty"`
+	Variants    []CertVariantProjection `json:"variants,omitempty"`
+}
+
+// CertVariantProjection is one DNS-01 certificate variant's live state.
+type CertVariantProjection struct {
+	Algorithm string `json:"algorithm"`
+	State     string `json:"state"`
+	NotAfter  string `json:"not_after,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // SecurityProjection is the security posture for the Security panel.

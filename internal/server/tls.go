@@ -4,10 +4,13 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -183,17 +186,11 @@ func PreflightTLS(servers []config.ServerConfig) error {
 	return nil
 }
 
-// acmeFingerprint summarises the ACME settings that are fixed when the autocert
-// manager is built at startup: the union of listener addresses, issued domains,
-// and issuer parameters (email, CA and challenge). Two configs with equal
-// fingerprints can swap their ACME state on reload without a restart; a
-// non-empty fingerprint means the candidate relies on ACME. Addresses and
-// domains are de-duplicated and sorted so the comparison is order-insensitive.
+// acmeFingerprint compares each listener's certificate identity and the
+// process-owned manager's settings without exposing credential bytes.
 func acmeFingerprint(servers []config.ServerConfig) string {
-	var domains, addrs []string
-	seenDomain := make(map[string]bool)
-	seenAddr := make(map[string]bool)
-	var email, ca, challenge string
+	byAddr := make(map[string]map[string]bool)
+	var settings *config.ACMEConfig
 	for i := range servers {
 		srv := &servers[i]
 		if srv.TLS == nil || !srv.TLS.Enabled ||
@@ -201,32 +198,52 @@ func acmeFingerprint(servers []config.ServerConfig) string {
 			continue
 		}
 		a := srv.TLS.ACME
-		if !seenAddr[srv.Listen] {
-			seenAddr[srv.Listen] = true
-			addrs = append(addrs, srv.Listen)
+		if settings == nil {
+			settings = a
+		}
+		if byAddr[srv.Listen] == nil {
+			byAddr[srv.Listen] = make(map[string]bool)
 		}
 		for _, d := range a.Domains {
-			if !seenDomain[d] {
-				seenDomain[d] = true
-				domains = append(domains, d)
+			if a.Challenge == "dns-01" {
+				d = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(d)), ".")
 			}
-		}
-		if email == "" {
-			email = a.Email
-		}
-		if ca == "" {
-			ca = a.CA
-		}
-		if challenge == "" {
-			challenge = a.Challenge
+			byAddr[srv.Listen][d] = true
 		}
 	}
-	if len(addrs) == 0 {
+	if settings == nil {
 		return ""
 	}
-	sort.Strings(addrs)
-	sort.Strings(domains)
-	return strings.Join(addrs, ",") + "|" + strings.Join(domains, ",") + "|" + email + "|" + ca + "|" + challenge
+	h := sha256.New()
+	groups := make(map[string]bool)
+	for addr := range byAddr {
+		domains := make([]string, 0, len(byAddr[addr]))
+		for domain := range byAddr[addr] {
+			domains = append(domains, domain)
+			if settings.Challenge != "dns-01" {
+				groups["domain\x00"+domain] = true
+			}
+		}
+		sort.Strings(domains)
+		if settings.Challenge == "dns-01" {
+			groups[strings.Join(domains, "\x00")] = true
+		} else {
+			groups["address\x00"+addr] = true
+		}
+	}
+	identities := make([]string, 0, len(groups))
+	for group := range groups {
+		identities = append(identities, group)
+	}
+	sort.Strings(identities)
+	for _, identity := range identities {
+		fmt.Fprintf(h, "%q,", identity)
+	}
+	fmt.Fprintf(h, "%q|%q|%q|%q|%q", settings.Email, settings.CA, settings.Challenge, settings.CacheDir, settings.DNSProvider)
+	if d := settings.RFC2136; d != nil {
+		fmt.Fprintf(h, "|%q|%q|%q|%q|%d|%d", d.Server, d.Zone, d.TSIGKeyName, d.TSIGSecret, d.PropagationTimeout, d.PollInterval)
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ACMERestartRequired reports whether moving from old to next changes the ACME
@@ -247,7 +264,7 @@ func ACMERestartRequired(old, next []config.ServerConfig) (string, bool) {
 	if nextFP == acmeFingerprint(old) {
 		return "", false // ACME configuration unchanged
 	}
-	return "automatic HTTPS (ACME) domains or issuer changed; the issued-domain set is fixed when the server starts", true
+	return "automatic HTTPS (ACME) domains, issuer, cache, or DNS settings changed; the manager is fixed when the server starts", true
 }
 
 // MinTLSVersion maps a config string to a crypto/tls version constant,
@@ -293,6 +310,25 @@ func (d *DynamicCertProvider) GetCertificate(hello *tls.ClientHelloInfo) (*tls.C
 	return h.p.GetCertificate(hello)
 }
 
+type clientHelloValidator interface {
+	validateClientHello(*tls.ClientHelloInfo) error
+}
+
+func (d *DynamicCertProvider) configForClient(next func(*tls.ClientHelloInfo) (*tls.Config, error)) func(*tls.ClientHelloInfo) (*tls.Config, error) {
+	return func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+		h := d.current.Load()
+		if h == nil || h.p == nil {
+			return nil, fmt.Errorf("no certificate provider configured")
+		}
+		if validator, ok := h.p.(clientHelloValidator); ok {
+			if err := validator.validateClientHello(hello); err != nil {
+				return nil, err
+			}
+		}
+		return next(hello)
+	}
+}
+
 // ACMEManager is the seam between the listener wiring and an ACME certificate
 // source (autocert today, a different implementation later) that keeps ACME
 // specifics out of bind()/reload. It is satisfied by the acme build-tagged
@@ -305,6 +341,20 @@ type ACMEManager interface {
 	// behavior. In HTTP-01 mode it answers requests under
 	// /.well-known/acme-challenge/; in TLS-ALPN-01 mode it returns next unchanged.
 	ChallengeHandler(next http.Handler) http.Handler
+}
+
+// ACMEOptions supplies process-owned resources for DNS-01.
+type ACMEOptions struct {
+	DNSDialContext func(context.Context, string, string) (net.Conn, error)
+	Logger         *slog.Logger
+}
+
+type listenerScopedACMEManager interface {
+	ProviderForListener(domains, serverNames []string) CertProvider
+}
+
+type stoppableACMEManager interface {
+	Stop()
 }
 
 type acmeOCSPPolicy interface {
@@ -335,6 +385,24 @@ func (s *Server) updateACMEOCSPPolicy(servers []config.ServerConfig) {
 	}
 }
 
+func (s *Server) stopUnusedACMEManager(servers []config.ServerConfig) {
+	if acmeFingerprint(servers) == "" {
+		if manager, ok := s.ACME.(stoppableACMEManager); ok {
+			manager.Stop()
+		}
+	}
+}
+
+func acmeListenerFingerprint(servers []config.ServerConfig, addr string) string {
+	names := acmeServerNamesForAddr(servers, addr)
+	for i := range names {
+		names[i] = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(names[i]), "."))
+	}
+	sort.Strings(names)
+	sum := sha256.Sum256([]byte(strings.Join(names, "\x00")))
+	return hex.EncodeToString(sum[:])
+}
+
 // certProviderFor selects the certificate provider for a TLS listen address.
 // This is the single seam where the certificate source is chosen: ACME when a
 // server block on the address enables it, static files otherwise. New sources
@@ -342,7 +410,11 @@ func (s *Server) updateACMEOCSPPolicy(servers []config.ServerConfig) {
 // listener lifecycle.
 func (s *Server) certProviderFor(addr string, bindings []certBinding) (CertProvider, error) {
 	if s.ACME != nil && acmeEnabledForAddr(s.cfg.Servers, addr) {
-		return s.ACME.Provider(acmeDomainsForAddr(s.cfg.Servers, addr)), nil
+		domains := acmeDomainsForAddr(s.cfg.Servers, addr)
+		if scoped, ok := s.ACME.(listenerScopedACMEManager); ok {
+			return scoped.ProviderForListener(domains, acmeServerNamesForAddr(s.cfg.Servers, addr)), nil
+		}
+		return s.ACME.Provider(domains), nil
 	}
 	return newFileCertProvider(bindings)
 }
@@ -408,6 +480,24 @@ func acmeDomainsForAddr(servers []config.ServerConfig, addr string) []string {
 		}
 	}
 	return domains
+}
+
+func acmeServerNamesForAddr(servers []config.ServerConfig, addr string) []string {
+	var names []string
+	seen := make(map[string]bool)
+	for _, srv := range servers {
+		if srv.Listen != addr || srv.TLS == nil || !srv.TLS.Enabled ||
+			srv.TLS.ACME == nil || !srv.TLS.ACME.Enabled {
+			continue
+		}
+		for _, name := range srv.ServerNames {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
 
 // tlsBindingsForAddr returns the cert bindings and min TLS version for a listen
