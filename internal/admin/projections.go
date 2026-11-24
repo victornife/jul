@@ -557,7 +557,7 @@ func projectTLS(c, effective *config.Config, live []CertStatus) []CertProjection
 					cp.Variants = make([]CertVariantProjection, 0, len(l.Variants))
 					for _, variant := range l.Variants {
 						projected := CertVariantProjection{
-							Algorithm: variant.Algorithm, State: variant.State, Error: variant.Error,
+							Algorithm: variant.Algorithm, State: variant.State, Error: variant.Error, CleanupWarning: variant.CleanupWarning,
 						}
 						if variant.NotAfter != nil {
 							projected.NotAfter = variant.NotAfter.UTC().Format(time.RFC3339)

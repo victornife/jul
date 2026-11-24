@@ -17,12 +17,12 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 477 |
-| Schema leaves (configurable values) | 405 |
-| Registry entries | 405 |
-| Startup-consumed entries | 36 |
+| Schema paths (containers included) | 480 |
+| Schema leaves (configurable values) | 407 |
+| Registry entries | 407 |
+| Startup-consumed entries | 38 |
 | Class `hot_reload` | 356 |
-| Class `restart_required` | 36 |
+| Class `restart_required` | 38 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
 | Class `validation_rejected_reserved` | 2 |
@@ -406,6 +406,8 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.tls.acme.email` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.enabled` | `restart_required` | `acme` | startup, per-address, cond. | the ACME manager, its account and its certificate cache are created for the listener at bind time |
 | `servers.*.tls.acme.ocsp_stapling` | `hot_reload` | `acme` | — | the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106) |
+| `servers.*.tls.acme.rfc2136.cname_delegations.*` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| `servers.*.tls.acme.rfc2136.observers` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
 | `servers.*.tls.acme.rfc2136.poll_interval` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
 | `servers.*.tls.acme.rfc2136.propagation_timeout` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
 | `servers.*.tls.acme.rfc2136.server` | `restart_required` | `acme` | startup | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |

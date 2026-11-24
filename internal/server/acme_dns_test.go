@@ -43,7 +43,7 @@ func testDNSManager(t *testing.T, dir, ca string) *dnsACMEManager {
 	m, err := newDNSACMEManager(&config.ACMEConfig{
 		Email: "ops@example.test", CA: ca, CacheDir: dir,
 		RFC2136: &config.RFC2136Config{
-			Server: "127.0.0.1:53", Zone: "example.test",
+			Server: "127.0.0.1:53", Observers: []string{"127.0.0.1:53"}, Zone: "example.test",
 			TSIGKeyName: "jul.example.test", TSIGSecret: testTSIGSecret,
 		},
 	}, nil, nil, nil, ACMEOptions{DNSDialContext: (&net.Dialer{}).DialContext})
@@ -1286,8 +1286,8 @@ func TestDNSACMEDeferredDiscoveryReportsSafeFailure(t *testing.T) {
 type testDNSChallengeLease struct {
 	waitErr       error
 	cleanupErr    error
-	cleanupCalls  int
-	cleanupActive bool
+	cleanupCalls  atomic.Int32
+	cleanupActive atomic.Bool
 }
 
 func (l *testDNSChallengeLease) Wait(context.Context) error { return l.waitErr }
@@ -1297,9 +1297,9 @@ func (*testDNSChallengeLease) admitCleanup(ctx context.Context) (func(), error) 
 }
 
 func (l *testDNSChallengeLease) cleanupAdmitted(ctx context.Context) error {
-	l.cleanupCalls++
 	_, bounded := ctx.Deadline()
-	l.cleanupActive = bounded && ctx.Err() == nil
+	l.cleanupActive.Store(bounded && ctx.Err() == nil)
+	l.cleanupCalls.Add(1)
 	return l.cleanupErr
 }
 
@@ -1417,8 +1417,8 @@ func TestDNSACMEChallengeCleanupAfterFailure(t *testing.T) {
 				tt.waitErr != nil && !errors.Is(err, tt.waitErr) {
 				t.Fatalf("original failure was lost: %v", err)
 			}
-			if !tt.nilLease && (lease.cleanupCalls != 1 || !lease.cleanupActive) {
-				t.Fatalf("cleanup calls=%d, active bounded context=%v", lease.cleanupCalls, lease.cleanupActive)
+			if !tt.nilLease && (lease.cleanupCalls.Load() != 1 || !lease.cleanupActive.Load()) {
+				t.Fatalf("cleanup calls=%d, active bounded context=%v", lease.cleanupCalls.Load(), lease.cleanupActive.Load())
 			}
 			if tt.cleanupErr != nil {
 				var cleanupErr *dnsCleanupError
@@ -1448,8 +1448,8 @@ func TestDNSACMEProcessingChallengeRestoresAndWaitsForTXT(t *testing.T) {
 	if err := m.startDNSAuthorization(context.Background(), pending); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("processing challenge did not wait for propagation: %v", err)
 	}
-	if err := m.cleanupDNSAuthorizations([]*dnsPendingAuthorization{pending}, time.Second); err != nil || lease.cleanupCalls != 1 {
-		t.Fatalf("restored lease was not cleaned: %v, calls=%d", err, lease.cleanupCalls)
+	if err := m.cleanupDNSAuthorizations([]*dnsPendingAuthorization{pending}, time.Second); err != nil || lease.cleanupCalls.Load() != 1 {
+		t.Fatalf("restored lease was not cleaned: %v, calls=%d", err, lease.cleanupCalls.Load())
 	}
 }
 

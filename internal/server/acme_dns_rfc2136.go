@@ -8,6 +8,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -34,12 +35,15 @@ type dnsChallengeLease interface {
 
 type rfc2136Provider struct {
 	server             string
+	observers          []string
+	delegations        map[string]string
 	zone               string
 	keyName            string
 	secret             string
 	propagationTimeout time.Duration
 	pollInterval       time.Duration
 	dial               egress.DialFunc
+	now                func() time.Time
 	exchanges          chan struct{}
 	regularExchanges   chan struct{}
 	owners             *dnsOwnerLocks
@@ -98,10 +102,18 @@ func (e *dnsChallengeError) Error() string {
 		return "DNS-01 " + e.action + " refused; check the TSIG key and zone update permissions"
 	case "authentication":
 		return "DNS-01 " + e.action + " failed TSIG authentication; check the key and server"
+	case "clock":
+		return "DNS-01 " + e.action + " rejected the TSIG timestamp; synchronize the Jul and DNS server clocks"
 	case "not_authoritative":
-		return "DNS-01 propagation server is not authoritative for the challenge name"
+		return "DNS-01 DNS server is not authoritative for the challenge name; check the update zone and observers"
+	case "cname":
+		return "DNS-01 found an unconfigured CNAME or CNAME chain; configure a one-hop mapping or use direct TXT/NS delegation"
+	case "alias":
+		return "DNS-01 published CNAME is missing or does not match the configured target; check the challenge delegation"
 	case "conflict":
 		return "DNS-01 ownership marker already exists; leave it unchanged and retry"
+	case "marker_missing":
+		return "DNS-01 ownership marker is missing; inspect the challenge value before manual recovery"
 	case "timeout":
 		return "DNS-01 " + e.action + " timed out; check the DNS server and propagation"
 	case "cancelled":
@@ -120,6 +132,18 @@ func newRFC2136Provider(c *config.RFC2136Config, dial egress.DialFunc) (*rfc2136
 	if c.TSIGSecret == "" || config.ContainsSecretRef(c.TSIGSecret) {
 		return nil, errors.New("DNS-01 requires a resolved TSIG secret reference")
 	}
+	if len(c.Observers) == 0 || len(c.Observers) > config.MaxRFC2136Observers {
+		return nil, errors.New("DNS-01 requires 1 to 8 CA-facing authoritative DNS observers")
+	}
+	zone := dns.Fqdn(strings.ToLower(c.Zone))
+	delegations := make(map[string]string, len(c.CNAMEDelegations))
+	for owner, target := range c.CNAMEDelegations {
+		owner, target = dns.Fqdn(strings.ToLower(owner)), dns.Fqdn(strings.ToLower(target))
+		if owner == target || !dns.IsSubDomain(zone, target) {
+			return nil, errors.New("DNS-01 CNAME target must be distinct and inside the update zone")
+		}
+		delegations[owner] = target
+	}
 	timeout, interval := c.PropagationTimeout.Std(), c.PollInterval.Std()
 	if timeout == 0 {
 		timeout = 2 * time.Minute
@@ -128,9 +152,9 @@ func newRFC2136Provider(c *config.RFC2136Config, dial egress.DialFunc) (*rfc2136
 		interval = 2 * time.Second
 	}
 	return &rfc2136Provider{
-		server: c.Server, zone: dns.Fqdn(strings.ToLower(c.Zone)),
+		server: c.Server, observers: append([]string(nil), c.Observers...), zone: zone, delegations: delegations,
 		keyName: dns.Fqdn(strings.ToLower(c.TSIGKeyName)), secret: c.TSIGSecret,
-		propagationTimeout: timeout, pollInterval: interval, dial: dial,
+		propagationTimeout: timeout, pollInterval: interval, dial: dial, now: time.Now,
 		exchanges: make(chan struct{}, dnsAuthWorkers), regularExchanges: make(chan struct{}, dnsAuthWorkers-1),
 		owners: &dnsOwnerLocks{entries: make(map[string]*dnsOwnerLock)},
 	}, nil
@@ -139,6 +163,7 @@ func newRFC2136Provider(c *config.RFC2136Config, dial egress.DialFunc) (*rfc2136
 type rfc2136Lease struct {
 	provider *rfc2136Provider
 	owner    string
+	alias    string
 	value    string
 	marker   string
 	observed bool
@@ -146,17 +171,37 @@ type rfc2136Lease struct {
 
 func (p *rfc2136Provider) Present(ctx context.Context, owner, value string) (dnsChallengeLease, error) {
 	owner = dns.Fqdn(strings.ToLower(owner))
-	if !dns.IsSubDomain(p.zone, owner) || len(value) == 0 || len(value) > 255 {
+	target, delegated := p.delegations[owner]
+	if !delegated {
+		target = owner
+	}
+	if !dns.IsSubDomain(p.zone, target) || len(value) == 0 || len(value) > 255 {
 		return nil, &dnsChallengeError{action: "present", class: "invalid"}
 	}
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		return nil, &dnsChallengeError{action: "present", class: "transient", cause: err}
 	}
+	digest := sha256.Sum256([]byte(value))
 	lease := &rfc2136Lease{
-		provider: p, owner: owner, value: value, marker: "jul-dns01-" + hex.EncodeToString(nonce[:]),
+		provider: p, owner: target, value: value, marker: "jul-dns01-" + hex.EncodeToString(digest[:]) + "-" + hex.EncodeToString(nonce[:]),
+	}
+	if delegated {
+		lease.alias = owner
+	}
+	for _, observer := range p.observers {
+		if _, err := lease.observe(ctx, observer); err != nil {
+			return nil, &dnsChallengeError{action: "propagation", class: dnsErrorClass(err), cause: err}
+		}
 	}
 	return lease, lease.update(ctx, false)
+}
+
+func (l *rfc2136Lease) cleanupIdentity() (string, string) {
+	if l.observed {
+		return "", ""
+	}
+	return l.owner, l.marker
 }
 
 func (l *rfc2136Lease) admitCleanup(ctx context.Context) (func(), error) {
@@ -231,6 +276,9 @@ func (l *rfc2136Lease) updateLocked(ctx context.Context, remove bool) error {
 			hasMarker = hasMarker || text == l.marker
 		}
 		if remove && !hasMarker {
+			if hasValue {
+				return &dnsChallengeError{action: action, class: "marker_missing"}
+			}
 			return nil
 		}
 		if !remove {
@@ -254,6 +302,9 @@ func (l *rfc2136Lease) updateLocked(ctx context.Context, remove bool) error {
 			msg.RRsetNotUsed([]dns.RR{rr("")})
 		} else {
 			msg.Used(records)
+		}
+		if !remove {
+			msg.RRsetNotUsed([]dns.RR{&dns.CNAME{Hdr: dns.RR_Header{Name: l.owner, Rrtype: dns.TypeCNAME, Class: dns.ClassINET}}})
 		}
 		if remove {
 			toRemove := []dns.RR{rr(l.marker)}
@@ -295,19 +346,26 @@ func (l *rfc2136Lease) updateLocked(ctx context.Context, remove bool) error {
 }
 
 func (l *rfc2136Lease) probeAdmitted(ctx context.Context) (bool, error) {
-	records, err := l.provider.queryTXTAdmitted(ctx, l.owner, "propagation")
-	if err != nil {
-		if class := dnsErrorClass(err); class != "transient" {
-			return false, &dnsChallengeError{action: "propagation", class: class, cause: err}
+	for _, observer := range l.provider.observers {
+		records, err := l.observeAdmitted(ctx, observer)
+		if err != nil {
+			if class := dnsErrorClass(err); class != "transient" {
+				return false, &dnsChallengeError{action: "propagation", class: class, cause: err}
+			}
+			return false, nil
 		}
-		return false, nil
-	}
-	for _, record := range records {
-		if strings.Join(record.(*dns.TXT).Txt, "") == l.value {
-			return true, nil
+		found := false
+		for _, record := range records {
+			if strings.Join(record.(*dns.TXT).Txt, "") == l.value {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, nil
 		}
 	}
-	return false, nil
+	return true, nil
 }
 
 func (l *rfc2136Lease) Wait(ctx context.Context) error {
@@ -363,11 +421,65 @@ func (p *rfc2136Provider) queryTXT(ctx context.Context, owner, action string) ([
 }
 
 func (p *rfc2136Provider) queryTXTAdmitted(ctx context.Context, owner, action string) ([]dns.RR, error) {
+	return p.queryTXTAtAdmitted(ctx, p.server, owner, action, true)
+}
+
+func (l *rfc2136Lease) observe(ctx context.Context, observer string) ([]dns.RR, error) {
+	release, err := l.provider.acquireExchange(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return l.observeAdmitted(ctx, observer)
+}
+
+func (l *rfc2136Lease) observeAdmitted(ctx context.Context, observer string) ([]dns.RR, error) {
+	if l.alias != "" {
+		resp, err := l.provider.queryAtAdmitted(ctx, observer, l.alias, dns.TypeCNAME, "propagation", false)
+		if err != nil {
+			return nil, err
+		}
+		matches := 0
+		for _, answer := range resp.Answer {
+			if cname, ok := answer.(*dns.CNAME); ok && strings.EqualFold(cname.Hdr.Name, l.alias) {
+				if !strings.EqualFold(dns.Fqdn(cname.Target), l.owner) {
+					return nil, &dnsChallengeError{action: "propagation", class: "alias"}
+				}
+				matches++
+			}
+		}
+		if matches != 1 {
+			return nil, &dnsChallengeError{action: "propagation", class: "alias"}
+		}
+	}
+	return l.provider.queryTXTAtAdmitted(ctx, observer, l.owner, "propagation", false)
+}
+
+func (p *rfc2136Provider) queryTXTAtAdmitted(ctx context.Context, server, owner, action string, signed bool) ([]dns.RR, error) {
+	resp, err := p.queryAtAdmitted(ctx, server, owner, dns.TypeTXT, action, signed)
+	if err != nil {
+		return nil, err
+	}
+	var records []dns.RR
+	for _, answer := range resp.Answer {
+		if cname, ok := answer.(*dns.CNAME); ok && strings.EqualFold(cname.Hdr.Name, owner) {
+			return nil, &dnsChallengeError{action: action, class: "cname"}
+		}
+		if txt, ok := answer.(*dns.TXT); ok && strings.EqualFold(txt.Hdr.Name, owner) {
+			records = append(records, dns.Copy(txt))
+		}
+	}
+	return records, nil
+}
+
+func (p *rfc2136Provider) queryAtAdmitted(ctx context.Context, server, owner string, qtype uint16, action string, signed bool) (*dns.Msg, error) {
 	msg := new(dns.Msg)
-	msg.SetQuestion(owner, dns.TypeTXT)
+	msg.SetQuestion(owner, qtype)
 	msg.RecursionDesired = false
-	msg.SetTsig(p.keyName, dns.HmacSHA256, 300, time.Now().Unix())
-	resp, err := p.exchangeAdmitted(ctx, msg, true)
+	if signed {
+		msg.SetTsig(p.keyName, dns.HmacSHA256, 300, time.Now().Unix())
+	}
+	resp, err := p.exchangeAtAdmitted(ctx, server, msg, signed)
 	if err != nil {
 		return nil, err
 	}
@@ -380,13 +492,7 @@ func (p *rfc2136Provider) queryTXTAdmitted(ctx context.Context, owner, action st
 	if !resp.Authoritative {
 		return nil, &dnsChallengeError{action: action, class: "not_authoritative"}
 	}
-	var records []dns.RR
-	for _, answer := range resp.Answer {
-		if txt, ok := answer.(*dns.TXT); ok && strings.EqualFold(txt.Hdr.Name, owner) {
-			records = append(records, dns.Copy(txt))
-		}
-	}
-	return records, nil
+	return resp, nil
 }
 
 func (p *rfc2136Provider) exchange(ctx context.Context, msg *dns.Msg, signed, cleanup bool) (*dns.Msg, error) {
@@ -426,9 +532,13 @@ func (p *rfc2136Provider) acquireExchange(ctx context.Context, cleanup bool) (fu
 }
 
 func (p *rfc2136Provider) exchangeAdmitted(ctx context.Context, msg *dns.Msg, signed bool) (*dns.Msg, error) {
+	return p.exchangeAtAdmitted(ctx, p.server, msg, signed)
+}
+
+func (p *rfc2136Provider) exchangeAtAdmitted(ctx context.Context, server string, msg *dns.Msg, signed bool) (*dns.Msg, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, err := p.dial(ctx, "tcp", p.server)
+	conn, err := p.dial(ctx, "tcp", server)
 	if err != nil {
 		return nil, err
 	}
@@ -442,17 +552,33 @@ func (p *rfc2136Provider) exchangeAdmitted(ctx context.Context, msg *dns.Msg, si
 			return nil, &dnsChallengeError{action: "update", class: "authentication"}
 		}
 		// Admission or dialing can outlast the timestamp set on the message.
-		tsig.TimeSigned = uint64(time.Now().Unix())
+		tsig.TimeSigned = uint64(p.now().Unix())
 	}
 	resp, _, err := client.ExchangeWithConnContext(ctx, msg, &dns.Conn{Conn: conn})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		// The DNS library reports NOTAUTH before verifying its TSIG. Treat
+		// BADTIME as a diagnostic only; never accept the response as success.
+		if signed && errors.Is(err, dns.ErrAuth) && resp != nil {
+			if tsig := resp.IsTsig(); tsig != nil && tsig.Error == dns.RcodeBadTime {
+				return nil, &dnsChallengeError{action: "update", class: "clock", cause: err}
+			}
+		}
 		return nil, err
 	}
-	if signed && resp.IsTsig() == nil {
-		return nil, &dnsChallengeError{action: "update", class: "authentication"}
+	if signed {
+		tsig := resp.IsTsig()
+		if tsig == nil {
+			return nil, &dnsChallengeError{action: "update", class: "authentication"}
+		}
+		switch tsig.Error {
+		case dns.RcodeBadTime:
+			return nil, &dnsChallengeError{action: "update", class: "clock", cause: dns.ErrTime}
+		case dns.RcodeBadKey, dns.RcodeBadSig:
+			return nil, &dnsChallengeError{action: "update", class: "authentication"}
+		}
 	}
 	return resp, nil
 }
@@ -468,7 +594,10 @@ func dnsErrorClass(err error) string {
 		return "cancelled"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout"
-	case errors.Is(err, dns.ErrSig), errors.Is(err, dns.ErrSecret):
+	case errors.Is(err, dns.ErrTime):
+		return "clock"
+	case errors.Is(err, dns.ErrAuth), errors.Is(err, dns.ErrSig), errors.Is(err, dns.ErrSecret),
+		errors.Is(err, dns.ErrKey), errors.Is(err, dns.ErrKeyAlg):
 		return "authentication"
 	default:
 		return "transient"

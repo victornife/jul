@@ -414,7 +414,7 @@ func testIntegratedDNSManager(t *testing.T, ca *testDNSACMECA, provider *rfc2136
 	m, err := newDNSACMEManager(&config.ACMEConfig{
 		Email: "ops@example.test", CA: ca.server.URL + "/directory", CacheDir: dir,
 		RFC2136: &config.RFC2136Config{
-			Server: provider.server, Zone: "example.test", TSIGKeyName: testTSIGName, TSIGSecret: testTSIGSecret,
+			Server: provider.server, Observers: append([]string(nil), provider.observers...), Zone: "example.test", TSIGKeyName: testTSIGName, TSIGSecret: testTSIGSecret,
 			PropagationTimeout: config.Duration(time.Second), PollInterval: config.Duration(5 * time.Millisecond),
 		},
 	}, nil, ca.server.Client(), nil, ACMEOptions{DNSDialContext: (&net.Dialer{}).DialContext})
@@ -431,11 +431,177 @@ func testIntegratedDNSManager(t *testing.T, ca *testDNSACMECA, provider *rfc2136
 
 func assertIntegratedDNSClean(t *testing.T, dns *testRFC2136Server) {
 	t.Helper()
+	waitForDNSACMETest(t, "owned challenge cleanup", func() bool {
+		dns.mu.Lock()
+		defer dns.mu.Unlock()
+		return len(dns.records[testOwner]) == 1 && dns.records[testOwner]["unrelated"]
+	})
 	dns.mu.Lock()
 	defer dns.mu.Unlock()
 	records := dns.records[testOwner]
 	if len(records) != 1 || !records["unrelated"] {
 		t.Fatalf("owned challenge records were not cleaned up safely: %v", records)
+	}
+}
+
+func TestDNS01ReconcilesLateCAValidationAfterTimeout(t *testing.T) {
+	dns, provider := startRFC2136Server(t)
+	dns.mu.Lock()
+	dns.records[testOwner] = map[string]bool{"unrelated": true}
+	dns.mu.Unlock()
+	ca := startTestDNSACMECA(t, dns, "processing-validation")
+	m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+	if err := m.ensureAccountKey(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := m.issueCertificate(ctx, []string{"example.test"}, dnsECDSA)
+		result <- err
+	}()
+	var authID string
+	waitForDNSACMETest(t, "CA validation to begin", func() bool {
+		ca.mu.Lock()
+		defer ca.mu.Unlock()
+		for id, auth := range ca.auths {
+			if auth.accepted {
+				authID = id
+				return true
+			}
+		}
+		return false
+	})
+	if err := <-result; !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, errDNSUnresolvedCleanup) {
+		t.Fatalf("timeout did not retain an unresolved order: %v", err)
+	}
+	dns.mu.Lock()
+	if len(dns.records[testOwner]) != 3 || !dns.records[testOwner]["unrelated"] {
+		t.Fatalf("timeout removed an in-flight challenge: %v", dns.records[testOwner])
+	}
+	dns.mu.Unlock()
+	ca.mu.Lock()
+	ca.auths[authID].valid = true
+	ca.mu.Unlock()
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer retryCancel()
+	for {
+		_, err := m.issueCertificate(retryCtx, []string{"example.test"}, dnsECDSA)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, errDNSAuthorizationBusy) || retryCtx.Err() != nil {
+			t.Fatalf("late validation did not resume the existing order: %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	assertIntegratedDNSClean(t, dns)
+	ca.mu.Lock()
+	defer ca.mu.Unlock()
+	if len(ca.orders) != 1 {
+		t.Fatalf("reconciliation created %d orders, want 1", len(ca.orders))
+	}
+}
+
+func TestDNS01ShutdownRetainsUnresolvedCAChallenge(t *testing.T) {
+	dns, provider := startRFC2136Server(t)
+	dns.mu.Lock()
+	dns.records[testOwner] = map[string]bool{"unrelated": true}
+	dns.mu.Unlock()
+	ca := startTestDNSACMECA(t, dns, "processing-validation")
+	m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+	m.Provider([]string{"example.test"})
+	waitForDNSACMETest(t, "CA validation to begin", func() bool {
+		ca.mu.Lock()
+		defer ca.mu.Unlock()
+		return ca.validations > 0
+	})
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	dns.mu.Lock()
+	defer dns.mu.Unlock()
+	if len(dns.records[testOwner]) < 3 || !dns.records[testOwner]["unrelated"] {
+		t.Fatalf("shutdown removed an unresolved challenge: %v", dns.records[testOwner])
+	}
+}
+
+func TestDNS01CleanupFailureDoesNotBlockCertificateInstallation(t *testing.T) {
+	dns, provider := startRFC2136Server(t)
+	dns.mu.Lock()
+	dns.records[testOwner] = map[string]bool{"unrelated": true}
+	dns.refuseCleanup = true
+	dns.mu.Unlock()
+	ca := startTestDNSACMECA(t, dns, "")
+	m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+	names := []string{"example.test"}
+	serving := m.Provider(names)
+	if _, err := serving.GetCertificate(dnsTestHello("example.test")); err != nil {
+		t.Fatalf("cleanup refusal blocked certificate installation: %v", err)
+	}
+	waitForDNSACMETest(t, "refused cleanup and separate warning", func() bool {
+		dns.mu.Lock()
+		refused := dns.cleanupAttempts > 0
+		dns.mu.Unlock()
+		summary := m.certificateSummary(names, names)
+		return refused && summary.State == "available" && summary.Error == "" &&
+			len(summary.Variants) > 0 && summary.Variants[0].CleanupWarning != ""
+	})
+	dns.mu.Lock()
+	dns.refuseCleanup = false
+	dns.mu.Unlock()
+	assertIntegratedDNSClean(t, dns)
+	waitForDNSACMETest(t, "cleanup warning to clear", func() bool {
+		summary := m.certificateSummary(names, names)
+		for _, variant := range summary.Variants {
+			if variant.CleanupWarning != "" {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func TestDNS01DoesNotSubmitUntilEveryObserverSeesTXT(t *testing.T) {
+	primary, provider := startRFC2136Server(t)
+	secondary, secondaryProvider := startRFC2136Server(t)
+	provider.observers = []string{provider.server, secondaryProvider.server}
+	provider.pollInterval = 10 * time.Millisecond
+	ca := startTestDNSACMECA(t, primary, "")
+	m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.ensureAccountKey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := m.issueCertificate(ctx, []string{"example.test"}, dnsECDSA)
+		result <- err
+	}()
+	waitForDNSACMETest(t, "primary update", func() bool {
+		primary.mu.Lock()
+		defer primary.mu.Unlock()
+		return len(primary.records[testOwner]) == 2
+	})
+	time.Sleep(100 * time.Millisecond)
+	ca.mu.Lock()
+	attempts := ca.challengeAttempts
+	ca.mu.Unlock()
+	if attempts != 0 {
+		t.Fatalf("submitted challenge before secondary visibility: %d attempts", attempts)
+	}
+	primary.mu.Lock()
+	secondary.mu.Lock()
+	secondary.records[testOwner] = make(map[string]bool, len(primary.records[testOwner]))
+	for value := range primary.records[testOwner] {
+		secondary.records[testOwner][value] = true
+	}
+	secondary.mu.Unlock()
+	primary.mu.Unlock()
+	if err := <-result; err != nil {
+		t.Fatalf("issuance after replication: %v", err)
 	}
 }
 
@@ -1122,11 +1288,11 @@ func TestDNS01InProcessSiblingFailureKeepsProcessingChallenge(t *testing.T) {
 	if err := <-result; err == nil {
 		t.Fatal("order did not report its sibling's propagation failure")
 	}
-	dns.mu.Lock()
-	defer dns.mu.Unlock()
-	if dns.records["_acme-challenge.a.example.test."][value] {
-		t.Fatal("terminal authorization's owned TXT value was not cleaned")
-	}
+	waitForDNSACMETest(t, "terminal sibling challenge cleanup", func() bool {
+		dns.mu.Lock()
+		defer dns.mu.Unlock()
+		return !dns.records["_acme-challenge.a.example.test."][value]
+	})
 }
 
 func TestDNS01InProcessSiblingFailureDoesNotCancelAcceptInFlight(t *testing.T) {
@@ -1279,6 +1445,43 @@ func TestDNS01InProcessReconcilesAmbiguousAcceptance(t *testing.T) {
 				t.Fatalf("challenge records remain: %v", dns.records[testOwner])
 			}
 		})
+	}
+}
+
+func TestDNS01RejectedRetryDoesNotEraseEarlierUncertainSubmission(t *testing.T) {
+	dns, provider := startRFC2136Server(t)
+	ca := startTestDNSACMECA(t, dns, "reject-challenge")
+	m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.ensureAccountKey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ensureRegistered(ctx); err != nil {
+		t.Fatal(err)
+	}
+	order, err := m.client.AuthorizeOrder(ctx, acme.DomainIDs("example.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := m.client.GetAuthorization(ctx, order.AuthzURLs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := m.prepareDNSAuthorization(ctx, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending.url = order.AuthzURLs[0]
+	pending.submitted = true
+	if _, err := m.completeDNSAuthorization(ctx, pending.url, pending); err == nil {
+		t.Fatal("expected the CA to reject the retry")
+	}
+	if !pending.submitted {
+		t.Fatal("a rejected retry erased the earlier uncertain submission")
+	}
+	if err := cleanupTestDNSLease(ctx, pending.lease); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1644,8 +1847,11 @@ func TestDNS01InProcessValidAuthorizationReusedDuringBlockedCleanup(t *testing.T
 	}
 	select {
 	case err := <-first:
-		t.Fatalf("cleanup unexpectedly finished: %v", err)
-	default:
+		if err != nil {
+			t.Fatalf("cleanup blocked the first certificate: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("first certificate waited for cleanup")
 	}
 	ca.mu.Lock()
 	var sharedURL string
@@ -1664,9 +1870,11 @@ func TestDNS01InProcessValidAuthorizationReusedDuringBlockedCleanup(t *testing.T
 		t.Fatalf("shared authorization accepted a different identity: %v", err)
 	}
 	release()
-	if err := <-first; err != nil {
-		t.Fatalf("first order failed after cleanup: %v", err)
-	}
+	waitForDNSACMETest(t, "unblocked cleanup", func() bool {
+		dns.mu.Lock()
+		defer dns.mu.Unlock()
+		return len(dns.records[testOwner]) == 0
+	})
 }
 
 func TestDNS01InProcessExpiredOrderAuthorizationIsRediscovered(t *testing.T) {
@@ -2604,8 +2812,11 @@ func TestDNS01InProcessValidProcessingAuthorizationClearsPresentationFailure(t *
 	if err := <-result; err != nil {
 		t.Fatalf("valid authorization retained a presentation failure: %v", err)
 	}
-	if lease.cleanupCalls != 1 {
-		t.Fatalf("cleanup calls = %d, want 1", lease.cleanupCalls)
+	waitForDNSACMETest(t, "valid processing authorization cleanup", func() bool {
+		return lease.cleanupCalls.Load() == 1
+	})
+	if calls := lease.cleanupCalls.Load(); calls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1", calls)
 	}
 }
 
@@ -2656,7 +2867,7 @@ func TestDNS01InProcessLostAcceptanceResponseWaitsForProcessing(t *testing.T) {
 	}
 }
 
-func TestDNS01InProcessProcessingFailureOrCancellationCleansTXT(t *testing.T) {
+func TestDNS01InProcessTerminalStateCleansAndCancellationRetainsTXT(t *testing.T) {
 	for _, action := range []string{"invalid", "deactivated", "expired", "revoked", "cancelled"} {
 		t.Run(action, func(t *testing.T) {
 			dns, provider := startRFC2136Server(t)
@@ -2710,10 +2921,18 @@ func TestDNS01InProcessProcessingFailureOrCancellationCleansTXT(t *testing.T) {
 					t.Fatalf("invalid authorization challenge error = %T", authErr.Errors[0])
 				}
 			}
-			dns.mu.Lock()
-			defer dns.mu.Unlock()
-			if len(dns.records[testOwner]) != 0 {
-				t.Fatalf("processing %s left owned TXT: %v", action, dns.records[testOwner])
+			if action == "cancelled" {
+				dns.mu.Lock()
+				defer dns.mu.Unlock()
+				if len(dns.records[testOwner]) != 2 {
+					t.Fatalf("cancellation removed an unresolved challenge: %v", dns.records[testOwner])
+				}
+			} else {
+				waitForDNSACMETest(t, "terminal challenge cleanup", func() bool {
+					dns.mu.Lock()
+					defer dns.mu.Unlock()
+					return len(dns.records[testOwner]) == 0
+				})
 			}
 		})
 	}

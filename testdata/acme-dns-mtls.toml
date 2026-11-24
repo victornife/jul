@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: agpl
 
 # DNS-01 plus optional client certificates. Replace the example names, DNS
-# server, zone and client CA before serving; the bundled client CA is test-only.
+# update server, CA-facing observers, zone and client CA before serving; the
+# bundled client CA is test-only. See docs/tls-acme.md for propagation and
+# manual cleanup guidance.
 # Build with -tags acme, and provide JUL_DNS_TSIG via the service environment.
 
 [[servers]]
@@ -27,6 +29,7 @@ server_names = ["example.com", "*.example.com"]
 
       [servers.tls.acme.rfc2136]
       server = "dns.example.com:53"
+      observers = ["dns.example.com:53"]
       zone = "example.com"
       tsig_key_name = "jul-acme.example.com"
       tsig_secret = "${env:JUL_DNS_TSIG}"

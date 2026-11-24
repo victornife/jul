@@ -7,6 +7,7 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -31,7 +32,10 @@ const (
 type testRFC2136Server struct {
 	mu               sync.Mutex
 	records          map[string]map[string]bool
+	cnames           map[string]string
 	queries          int
+	updates          int
+	cleanupAttempts  int
 	delayQueries     int
 	transientUpdates int
 	refuseCleanup    bool
@@ -47,6 +51,7 @@ func (s *testRFC2136Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	resp.Authoritative = true
 	signed := req.IsTsig() != nil && w.TsigStatus() == nil
 	if req.Opcode == dns.OpcodeUpdate {
+		s.updates++
 		switch {
 		case !signed:
 			resp.Rcode = dns.RcodeRefused
@@ -59,7 +64,8 @@ func (s *testRFC2136Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 			for _, rr := range req.Answer {
 				prereqName = strings.ToLower(rr.Header().Name)
 				if rr.Header().Class == dns.ClassNONE {
-					if len(s.records[prereqName]) != 0 {
+					if rr.Header().Rrtype == dns.TypeTXT && len(s.records[prereqName]) != 0 ||
+						rr.Header().Rrtype == dns.TypeCNAME && s.cnames[prereqName] != "" {
 						resp.Rcode = dns.RcodeYXRrset
 					}
 				} else if txt, ok := rr.(*dns.TXT); ok {
@@ -88,6 +94,7 @@ func (s *testRFC2136Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 				}
 				name, value := strings.ToLower(txt.Hdr.Name), strings.Join(txt.Txt, "")
 				if txt.Hdr.Class == dns.ClassNONE {
+					s.cleanupAttempts++
 					if s.refuseCleanup {
 						resp.Rcode = dns.RcodeRefused
 						break
@@ -115,11 +122,17 @@ func (s *testRFC2136Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 			s.delayQueries--
 		} else {
 			name := strings.ToLower(req.Question[0].Name)
-			for value := range s.records[name] {
-				resp.Answer = append(resp.Answer, &dns.TXT{
-					Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 60},
-					Txt: []string{value},
+			if target := s.cnames[name]; target != "" {
+				resp.Answer = append(resp.Answer, &dns.CNAME{
+					Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 60}, Target: target,
 				})
+			} else if req.Question[0].Qtype == dns.TypeTXT {
+				for value := range s.records[name] {
+					resp.Answer = append(resp.Answer, &dns.TXT{
+						Hdr: dns.RR_Header{Name: name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 60},
+						Txt: []string{value},
+					})
+				}
 			}
 		}
 	}
@@ -135,7 +148,7 @@ func startRFC2136Server(t *testing.T) (*testRFC2136Server, *rfc2136Provider) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := &testRFC2136Server{records: map[string]map[string]bool{}}
+	handler := &testRFC2136Server{records: map[string]map[string]bool{}, cnames: map[string]string{}}
 	srv := &dns.Server{
 		Listener: listener, Handler: handler,
 		TsigSecret:    map[string]string{testTSIGName: testTSIGSecret},
@@ -152,7 +165,7 @@ func startRFC2136Server(t *testing.T) (*testRFC2136Server, *rfc2136Provider) {
 		}
 	})
 	provider, err := newRFC2136Provider(&config.RFC2136Config{
-		Server: listener.Addr().String(), Zone: "example.test", TSIGKeyName: testTSIGName,
+		Server: listener.Addr().String(), Observers: []string{listener.Addr().String()}, Zone: "example.test", TSIGKeyName: testTSIGName,
 		TSIGSecret: testTSIGSecret, PropagationTimeout: config.Duration(time.Second),
 		PollInterval: config.Duration(5 * time.Millisecond),
 	}, (&net.Dialer{}).DialContext)
@@ -171,6 +184,132 @@ func cleanupTestDNSLease(ctx context.Context, lease dnsChallengeLease) error {
 	return lease.cleanupAdmitted(ctx)
 }
 
+func TestRFC2136ObserversWaitForEveryAuthoritativeView(t *testing.T) {
+	primary, provider := startRFC2136Server(t)
+	secondary, secondaryProvider := startRFC2136Server(t)
+	provider.observers = []string{provider.server, secondaryProvider.server}
+	provider.pollInterval = 10 * time.Millisecond
+	lease, err := provider.Present(context.Background(), testOwner, "challenge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- lease.Wait(ctx) }()
+	select {
+	case err := <-result:
+		t.Fatalf("primary visibility alone completed propagation: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	secondary.mu.Lock()
+	secondary.records[testOwner] = map[string]bool{"challenge": true}
+	secondary.mu.Unlock()
+	if err := <-result; err != nil {
+		t.Fatalf("both observers did not complete propagation: %v", err)
+	}
+	if err := cleanupTestDNSLease(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
+	primary.mu.Lock()
+	defer primary.mu.Unlock()
+	if len(primary.records[testOwner]) != 0 {
+		t.Fatalf("cleanup left owned records: %v", primary.records[testOwner])
+	}
+}
+
+func TestRFC2136ExplicitCNAMEDelegation(t *testing.T) {
+	const target = "validation.example.test."
+	for _, scenario := range []string{"valid", "missing", "mismatch", "chain", "unconfigured"} {
+		t.Run(scenario, func(t *testing.T) {
+			server, provider := startRFC2136Server(t)
+			if scenario != "unconfigured" {
+				provider.delegations[testOwner] = target
+			}
+			server.mu.Lock()
+			server.records[target] = map[string]bool{"unrelated": true}
+			switch scenario {
+			case "valid", "chain", "unconfigured":
+				server.cnames[testOwner] = target
+			case "mismatch":
+				server.cnames[testOwner] = "other.example.test."
+			}
+			if scenario == "chain" {
+				server.cnames[target] = "next.example.test."
+			}
+			server.mu.Unlock()
+			lease, err := provider.Present(context.Background(), testOwner, "challenge")
+			if scenario != "valid" {
+				if err == nil || !strings.Contains(err.Error(), "CNAME") {
+					t.Fatalf("expected actionable CNAME failure, got %v", err)
+				}
+				server.mu.Lock()
+				defer server.mu.Unlock()
+				if server.updates != 0 || !server.records[target]["unrelated"] {
+					t.Fatalf("failed CNAME verification mutated DNS: updates=%d records=%v", server.updates, server.records[target])
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := lease.Wait(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if err := cleanupTestDNSLease(context.Background(), lease); err != nil {
+				t.Fatal(err)
+			}
+			server.mu.Lock()
+			defer server.mu.Unlock()
+			if len(server.records[target]) != 1 || !server.records[target]["unrelated"] || len(server.records[testOwner]) != 0 {
+				t.Fatalf("delegated cleanup changed unrelated records: %v", server.records)
+			}
+		})
+	}
+}
+
+func TestRFC2136CNAMEChecksEveryObserverBeforeUpdateAndSubmission(t *testing.T) {
+	const target = "validation.example.test."
+	primary, provider := startRFC2136Server(t)
+	secondary, secondaryProvider := startRFC2136Server(t)
+	provider.observers = []string{provider.server, secondaryProvider.server}
+	provider.delegations[testOwner] = target
+	primary.mu.Lock()
+	primary.cnames[testOwner] = target
+	primary.mu.Unlock()
+	secondary.mu.Lock()
+	secondary.cnames[testOwner] = "other.example.test."
+	secondary.mu.Unlock()
+	if _, err := provider.Present(context.Background(), testOwner, "challenge"); err == nil ||
+		!strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched second observer error = %v", err)
+	}
+	primary.mu.Lock()
+	updates := primary.updates
+	primary.mu.Unlock()
+	if updates != 0 {
+		t.Fatalf("mismatched second observer allowed %d updates", updates)
+	}
+
+	secondary.mu.Lock()
+	secondary.cnames[testOwner] = target
+	secondary.mu.Unlock()
+	lease, err := provider.Present(context.Background(), testOwner, "challenge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondary.mu.Lock()
+	secondary.records[target] = map[string]bool{"challenge": true}
+	secondary.cnames[testOwner] = "other.example.test."
+	secondary.mu.Unlock()
+	if err := lease.Wait(context.Background()); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("changed alias did not stop submission: %v", err)
+	}
+	if err := cleanupTestDNSLease(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRFC2136RecordOwnershipAndPropagation(t *testing.T) {
 	server, provider := startRFC2136Server(t)
 	server.mu.Lock()
@@ -184,6 +323,11 @@ func TestRFC2136RecordOwnershipAndPropagation(t *testing.T) {
 			t.Fatal(err)
 		}
 		leases = append(leases, lease)
+		owned := lease.(*rfc2136Lease)
+		digest := sha256.Sum256([]byte(value))
+		if !strings.HasPrefix(owned.marker, fmt.Sprintf("jul-dns01-%x-", digest)) {
+			t.Fatalf("marker does not identify its owned TXT value: %q", owned.marker)
+		}
 	}
 	server.mu.Lock()
 	server.delayQueries = 2
@@ -202,6 +346,27 @@ func TestRFC2136RecordOwnershipAndPropagation(t *testing.T) {
 	got := server.records[testOwner]
 	if got["challenge-one"] || !got["challenge-two"] || !got["unrelated"] {
 		t.Fatalf("record-specific cleanup did not preserve the other values: %v", got)
+	}
+}
+
+func TestRFC2136MissingOwnershipMarkerDoesNotDeleteValue(t *testing.T) {
+	server, provider := startRFC2136Server(t)
+	lease, err := provider.Present(context.Background(), testOwner, "challenge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := lease.(*rfc2136Lease).marker
+	server.mu.Lock()
+	delete(server.records[testOwner], marker)
+	server.records[testOwner]["unrelated"] = true
+	server.mu.Unlock()
+	if err := cleanupTestDNSLease(context.Background(), lease); err == nil || dnsErrorClass(err) != "marker_missing" {
+		t.Fatalf("missing ownership marker was not surfaced: %v", err)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if !server.records[testOwner]["challenge"] || !server.records[testOwner]["unrelated"] {
+		t.Fatalf("cleanup deleted unproven ownership: %v", server.records[testOwner])
 	}
 }
 

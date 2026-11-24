@@ -16,7 +16,7 @@ func dnsACMEConfig() *Config {
 	s.TLS.ACME.Domains = append([]string(nil), s.ServerNames...)
 	s.TLS.ACME.DNSProvider = "rfc2136"
 	s.TLS.ACME.RFC2136 = &RFC2136Config{
-		Server: "127.0.0.1:53", Zone: "example.com", TSIGKeyName: "jul.example.com",
+		Server: "127.0.0.1:53", Observers: []string{"127.0.0.1:53"}, Zone: "example.com", TSIGKeyName: "jul.example.com",
 		TSIGSecret: "${env:JUL_TEST_TSIG}",
 	}
 	return &Config{Servers: []ServerConfig{s}}
@@ -58,6 +58,32 @@ func TestDNS01Configuration(t *testing.T) {
 		{"literal secret", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.TSIGSecret = "literal-secret" }, "single ${env:"},
 		{"mixed secret", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.TSIGSecret = "prefix${env:JUL_TEST_TSIG}" }, "single ${env:"},
 		{"bad server", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Server = "example.com" }, "numeric port"},
+		{"missing observers", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Observers = nil }, "observers must contain"},
+		{"too many observers", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Observers = make([]string, MaxRFC2136Observers+1) }, "observers must contain"},
+		{"bad observer", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Observers = []string{"dns.example.com"} }, "each observer"},
+		{"duplicate observers", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.Observers = []string{"DNS.example.com:53", "dns.example.com:53"}
+		}, "duplicates"},
+		{"valid cname", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "validation.example.com"}
+		}, ""},
+		{"cname outside source zone", func(c *Config) {
+			dns := c.Servers[0].TLS.ACME.RFC2136
+			dns.Zone = "validation.example.net"
+			dns.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "txt.validation.example.net"}
+		}, ""},
+		{"outside cname target", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "validation.other.test"}
+		}, "CNAME target must be inside"},
+		{"self cname target", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "_acme-challenge.example.com"}
+		}, "distinct DNS target"},
+		{"duplicate cname owner", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{
+				"_acme-challenge.example.com":  "one.example.com",
+				"_ACME-CHALLENGE.example.com.": "two.example.com",
+			}
+		}, "duplicate challenge owner"},
 		{"invalid zone", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Zone = "invalid..example.com" }, "zone must be a DNS zone name"},
 		{"invalid TSIG key name", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.TSIGKeyName = "-invalid.example.com" }, "tsig_key_name must be a DNS key name"},
 		{"outside zone", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Zone = "other.example" }, "outside the configured zone"},

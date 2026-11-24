@@ -119,15 +119,16 @@ dynamic updates, external issuance and hot-reloaded static PEM may be simpler.
 Prerequisites:
 
 1. Use an authoritative server that supports TCP RFC 2136 updates, TSIG-signed
-   TXT queries, and RRset prerequisites. Configure an HMAC-SHA256 key whose
-   update permission is restricted to the required `_acme-challenge` TXT
-   owners and the configured zone. The CA must be able to resolve the public
-   delegation; Jul itself does not need a publicly reachable challenge port.
+   TXT queries, and RRset prerequisites. Restrict its HMAC-SHA256 key to TXT
+   updates at the exact challenge owners or use an NS-delegated challenge zone
+   with similarly scoped permissions. The CA must resolve the public delegation;
+   Jul does not need a publicly reachable challenge port.
 2. Provide the base64 TSIG key (at least 16 decoded bytes) through a single
    `${env:NAME}` or `${file:/path}` secret reference. Restrict its file and
    environment access. Never put the key itself in TOML or the Console.
 3. Use an `acme`-tagged build and a writable, private certificate cache.
-   Allow the CA and DNS server through [egress](egress.md) if enabled.
+   Allow the CA, update server and observers through [egress](egress.md) if
+   enabled.
 4. Configure explicit `server_names` and certificate `domains` (or omit
    `domains` to use the server names). A name is accepted only when both the
    certificate and that listener's configured SNI patterns cover it. A wildcard
@@ -139,10 +140,12 @@ Prerequisites:
 
 | `[servers.tls.acme.rfc2136]` key | Meaning |
 | --- | --- |
-| `server` | Authoritative DNS host or IP and numeric port, e.g. `dns.example.com:53`. |
-| `zone` | Authoritative update zone containing every challenge owner. |
+| `server` | Authoritative RFC 2136 update endpoint, as host or IP and numeric port. |
+| `observers` | Required list of 1–8 CA-facing authoritative DNS endpoints, each as host:port. |
+| `zone` | Explicit authoritative update zone containing every direct owner or mapped TXT target. |
 | `tsig_key_name` | TSIG key name configured on that server. |
 | `tsig_secret` | A single environment or file secret reference; its resolved value is base64 TSIG key material. |
+| `cname_delegations` | Optional map from each challenge owner to its one-hop TXT target inside `zone`. |
 | `propagation_timeout` | Polling bound after the initial DNS observation, 1s–15m; default `2m`. |
 | `poll_interval` | Poll interval, 250ms–30s and no greater than the timeout; default `2s`, with jitter. |
 
@@ -155,24 +158,46 @@ client CA, and supply the real key through the service's secret mechanism.
 Start with staging (its certificates are not publicly trusted), verify
 issuance and cleanup, then stage `ca = "letsencrypt"` and restart.
 
-For each authorization Jul adds the challenge TXT value and a random
-`jul-dns01-...` ownership marker to the same RRset. Atomic prerequisites protect
-concurrent values; bounded cleanup removes only the owned value and marker,
-including on cancellation or uncertain update responses. If cleanup fails, the
-status and log direct the operator to inspect the authoritative server. Stop
-the issuing process and reconcile only demonstrably stale values and their
-markers; do not delete the whole RRset or another issuer's active challenge.
-If the exact challenge value already exists, Jul observes it without claiming
-or deleting that value; its existing owner remains responsible for cleanup.
-If that owner removes the value before the CA finishes validation, the order
-may fail and retry. Concurrent updates by this Jul process are serialized per
-owner; external DNS writers may still cause prerequisite conflicts and retries.
+#### Delegation and propagation
 
-Propagation polling observes **only the configured authoritative server**. It
-does not prove that the CA's resolver can see the value, nor follow CNAMEs
-automatically. Use a zone containing the actual challenge owner and arrange
-public delegation/replication outside Jul. DNS or CA outages retry with bounded
-backoff; a still-valid certificate remains in service. Each configured
+The update endpoint and the observers have separate roles. Jul sends signed
+queries and RFC 2136 updates to `server`; observers receive only unsigned,
+read-only TCP DNS queries. Before challenge submission, **every** observer must
+return an authoritative response containing the exact TXT value. Each observer
+must be authoritative for the target and, when CNAME delegation is configured,
+for the challenge owner as well. Choose endpoints representing the DNS servers
+the CA can reach. For example, an NS-delegated challenge zone replicated to
+public authoritative secondaries can use those secondaries as observers. For a
+hidden primary with delayed replication, do not list only the primary: it may
+already see the value while a public secondary does not, and increasing
+`propagation_timeout` alone cannot fix that observation gap. Include the
+CA-facing secondary instead. Even all configured observers succeeding cannot
+prove that every recursive cache or every CA vantage point has converged.
+
+Direct TXT and NS-delegated owners need no CNAME mapping. To delegate an owner
+to one explicit target, use a zone containing that target, for example:
+
+```toml
+[servers.tls.acme.rfc2136]
+server = "hidden-primary.example.net:53"
+observers = ["ns1.example.net:53", "ns2.example.net:53"]
+zone = "validation.example.net"
+tsig_key_name = "jul-acme.validation.example.net"
+tsig_secret = "${env:JUL_DNS_TSIG}"
+
+[servers.tls.acme.rfc2136.cname_delegations]
+"_acme-challenge.example.com" = "txt.validation.example.net"
+```
+
+The published CNAME must match exactly on every observer before any update;
+Jul then writes only the target. Missing or unconfigured aliases, mismatches,
+and CNAME chains are rejected. Both the alias and the exact target TXT must
+remain visible to every observer before submission. Configure the CA-facing
+authorities and their replication accordingly; Jul does not discover or follow
+arbitrary CNAMEs.
+
+DNS or CA outages retry with bounded backoff; a still-valid certificate remains
+in service. Each configured
 certificate identity has independent ECDSA P-256 and RSA-2048 variants, with
 separate ACME orders and renewals; account and provider configuration are
 shared. Plan for twice the issuance and renewal activity and corresponding CA
@@ -207,14 +232,68 @@ if all are still active or awaiting a retry, additional orders report an error.
 TSIG timestamps are refreshed after admission, and a sibling failure does not
 cancel another authorization's progress.
 Each order's ACME work has a 20-minute deadline. If that deadline or shutdown
-cancels a still-processing authorization, Jul attempts cleanup rather than
-waiting indefinitely for the CA; the CA may then fail that validation.
-Cleanup admission waits up to 20 minutes for the owner lock and DNS and cleanup
-slots; each admitted operation then has 15 seconds to complete. At most four
-cleanup operations run per manager. Cleanup may outlast the order deadline or
-the 20-second shutdown wait: shutdown reports an error, and operators should
-inspect for stale values if the process exits before cleanup finishes. A
-blocked operating-system I/O call may remain until the filesystem recovers.
+cancels a submitted or uncertain challenge, Jul retains its owned TXT records
+while the CA might still validate and uses the existing order retry path for
+bounded reconciliation. A challenge known not to have been submitted can be
+cleaned immediately. When the CA reports a terminal challenge or authorization,
+cleanup runs separately from finalization: a deletion failure does not prevent
+installation of an otherwise valid certificate. Cleanup admission waits up to
+20 minutes for the owner lock and DNS and cleanup slots; each admitted operation
+then has 15 seconds to complete, with at most three attempts and four concurrent
+cleanup operations per manager. An unresolved cleanup is logged and shown
+separately from certificate state. State is in memory: shutdown or restart can
+leave records requiring manual recovery. A blocked operating-system I/O call
+may remain until the filesystem recovers.
+
+#### DNS-01 manual recovery
+
+For each authorization Jul adds the TXT value and a
+`jul-dns01-<sha256>-<nonce>` ownership marker to the same RRset. Atomic
+prerequisites protect concurrent writers; cleanup removes only that value and
+marker. If the value already exists, Jul observes it without claiming or
+deleting it. Do not remove a value still used by another issuer.
+
+If the Console shows an unresolved cleanup warning, or logs report retained
+records, first check the CA account's authorization state. **Leave the records
+in place while validation is pending or uncertain.** Once the CA confirms the
+challenge/authorization is terminal, prevent concurrent issuance for that owner
+and inspect the update server at the logged `owner` (the mapped target for
+CNAMEs). The log's `marker` identifies the owned record; its 64 hexadecimal
+characters after `jul-dns01-` are SHA-256 of the exact TXT value. For each
+candidate, compare `printf '%s' '<TXT value>' | sha256sum` with that digest.
+If the marker is absent, the value cannot be attributed safely, another issuer
+is still using it, or CA state cannot be confirmed, do not delete it.
+
+With an appropriately protected `nsupdate` key file and the exact owner, zone,
+value and marker substituted, delete **individual records**, never the RRset:
+
+```text
+nsupdate -v -k /run/secrets/jul-tsig.key
+> server dns.example.com 53
+> zone _acme-challenge.example.com
+> update delete _acme-challenge.example.com TXT "<exact-owned-value>"
+> update delete _acme-challenge.example.com TXT "<logged-marker>"
+> send
+```
+
+Re-query the authoritative update server and verify all unrelated TXT values
+remain. The key file is for the DNS utilities; do not place its contents in
+command arguments, logs or TOML. Warnings are not persisted across restart, so
+retain the relevant log and complete recovery even if the restarted Console no
+longer shows it.
+
+#### Reproducible DNS interoperability test
+
+On Linux with Docker and the pinned images available, run
+`JUL_BIND_E2E=1 go test -tags 'acme http3' ./internal/server -run '^TestDNS01Bind9Interoperability$' -count=1 -v`.
+The fixture uses BIND 9.20.11 primary and delayed secondary processes from
+`ubuntu/bind9@sha256:45d541e9688f2c9010d22a78200117b66ed2df31b78f3464876f7e6e15cfaf77`
+and the pinned Pebble image. It uses TCP RFC 2136, an explicit update zone,
+and an HMAC-SHA256 key restricted to exact TXT owners. It checks NS and one-hop
+CNAME issuance and renewal, delayed replication, alias mismatch before mutation,
+unrelated-value preservation, cleanup, wrong-key and clock-skew diagnostics,
+and denial of an out-of-scope update. It does not validate public DNS or
+Let's Encrypt staging; those require a separately authorized disposable zone.
 
 ## Behaviour matrix
 
@@ -416,8 +495,9 @@ bounded egress-denial reason as authoritative. See
 ## Limits
 
 - **One DNS-01 update mechanism.** RFC 2136 with TSIG is supported; provider
-  APIs, automatic CNAME traversal and recursive/global propagation checks are
-  not. Real-provider staging is not yet demonstrated without an authorized zone.
+  APIs, arbitrary CNAME traversal and recursive/global propagation checks are
+  not. One-hop CNAME mappings must be explicit. Public Let's Encrypt staging is
+  not yet demonstrated without an authorized zone.
 - **Static certificate rotation is hot-reloadable on a retained listener
   (#100).** A cert/key content or path change is validated during preflight and
   swapped atomically into the listener's existing dynamic certificate

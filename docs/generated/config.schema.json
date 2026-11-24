@@ -2276,6 +2276,26 @@
                   "rfc2136": {
                     "additionalProperties": false,
                     "properties": {
+                      "cname_delegations": {
+                        "additionalProperties": {
+                          "description": "CNAMEDelegations maps challenge owners to one-hop TXT targets in Zone",
+                          "type": "string",
+                          "x-jul-capability": [
+                            "acme"
+                          ]
+                        },
+                        "type": "object"
+                      },
+                      "observers": {
+                        "description": "Observers are CA-facing authoritative DNS endpoints, each as host:port",
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "x-jul-capability": [
+                          "acme"
+                        ]
+                      },
                       "poll_interval": {
                         "description": "PollInterval controls how often the authoritative server is queried",
                         "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",

@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 405 configurable leaves.
+Coverage: 407 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3891,6 +3891,32 @@ OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can v
 | Why | the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106) |
 | Requires | `acme` |
 | Default | true |
+
+## `servers.*.tls.acme.rfc2136.cname_delegations.*` {#servers-x-tls-acme-rfc2136-cname_delegations-x}
+
+CNAMEDelegations maps challenge owners to one-hop TXT targets in Zone.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+
+## `servers.*.tls.acme.rfc2136.observers` {#servers-x-tls-acme-rfc2136-observers}
+
+Observers are CA-facing authoritative DNS endpoints, each as host:port.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
 
 ## `servers.*.tls.acme.rfc2136.poll_interval` {#servers-x-tls-acme-rfc2136-poll_interval}
 

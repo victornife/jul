@@ -242,6 +242,7 @@ describe("comparison disclosure boundary in the Console", () => {
     render(<MemoryRouter><TLSEditor onClose={() => undefined} /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText("Challenge"), { target: { value: "dns-01" } });
     fireEvent.change(screen.getByLabelText("DNS server and port"), { target: { value: "dns.example.test:53" } });
+    fireEvent.change(screen.getByLabelText(/^CA-facing DNS observers/), { target: { value: "ns.example.test:53" } });
     fireEvent.change(screen.getByLabelText("DNS update zone"), { target: { value: "example.test" } });
     fireEvent.change(screen.getByLabelText("TSIG key name"), { target: { value: "jul.example.test" } });
     fireEvent.change(screen.getByLabelText(/TSIG secret reference/), { target: { value: "${env:JUL_TEST_TSIG}" } });
@@ -260,6 +261,7 @@ describe("comparison disclosure boundary in the Console", () => {
     expect(new Headers(preview?.[1]?.headers).get("X-Jul-Base-Version")).toBe("v1");
     expect(preview?.[1]?.body).toContain("${env:JUL_TEST_TSIG}");
     expect(preview?.[1]?.body).toContain('server = "dns.example.test:53"');
+    expect(preview?.[1]?.body).toContain('observers = ["ns.example.test:53"]');
     expect(preview?.[1]?.body).toContain('zone = "example.test"');
     expect(preview?.[1]?.body).toContain('tsig_key_name = "jul.example.test"');
   });

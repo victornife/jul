@@ -665,7 +665,7 @@ describe("TLSPanel", () => {
                       not_after: "2026-06-28T00:00:00Z",
                       error: "DNS-01 renewal failed; check the DNS server",
                       variants: [
-                        { algorithm: "ecdsa-p256", state: "available" },
+                        { algorithm: "ecdsa-p256", state: "available", cleanup_warning: "DNS-01 cleanup pending" },
                         { algorithm: "rsa-2048", state: "failed", error: "DNS update refused" },
                       ],
                     },
@@ -680,6 +680,7 @@ describe("TLSPanel", () => {
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.getByText(/DNS-01 renewal failed/)).toBeInTheDocument();
     expect(screen.getByText(/ECDSA P-256: available/)).toBeInTheDocument();
+    expect(screen.getByText("DNS-01 cleanup pending", { exact: false })).toBeInTheDocument();
     expect(screen.getByText(/RSA-2048: failed/)).toHaveTextContent("DNS update refused");
   });
 

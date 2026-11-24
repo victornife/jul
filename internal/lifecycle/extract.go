@@ -555,6 +555,10 @@ func specialExtractor(path string) (func(*config.Config) any, bool) {
 		}), true
 	case "servers.*.tls.acme.rfc2136.server":
 		return rfc2136Value(func(d *config.RFC2136Config) any { return d.Server }), true
+	case "servers.*.tls.acme.rfc2136.observers":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.Observers }), true
+	case "servers.*.tls.acme.rfc2136.cname_delegations.*":
+		return rfc2136Value(func(d *config.RFC2136Config) any { return d.CNAMEDelegations }), true
 	case "servers.*.tls.acme.rfc2136.zone":
 		return rfc2136Value(func(d *config.RFC2136Config) any { return d.Zone }), true
 	case "servers.*.tls.acme.rfc2136.tsig_key_name":

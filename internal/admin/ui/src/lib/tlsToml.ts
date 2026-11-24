@@ -40,6 +40,7 @@ export interface TLSDraft {
   acmeChallenge: ACMEChallenge;
   acmeDomains: string; // optional; defaults to server_names
   dnsServer: string;
+  dnsObservers: string;
   dnsZone: string;
   dnsTSIGKeyName: string;
   dnsTSIGSecretRef: string;
@@ -74,6 +75,7 @@ export function emptyTLSDraft(): TLSDraft {
     acmeChallenge: "http-01",
     acmeDomains: "",
     dnsServer: "",
+    dnsObservers: "",
     dnsZone: "",
     dnsTSIGKeyName: "",
     dnsTSIGSecretRef: "",
@@ -133,6 +135,9 @@ export function tlsWarnings(d: TLSDraft): string[] {
     if (d.acmeChallenge === "dns-01") {
       if (!d.dnsServer.trim() || !d.dnsZone.trim() || !d.dnsTSIGKeyName.trim()) {
         warn.push("DNS-01 needs an authoritative server, zone and TSIG key name.");
+      }
+      if (splitCsv(d.dnsObservers).length === 0 || splitCsv(d.dnsObservers).length > 8) {
+        warn.push("DNS-01 needs 1–8 CA-facing authoritative DNS observers.");
       }
       if (!validSecretReference(d.dnsTSIGSecretRef)) {
         warn.push("DNS-01 needs a single secret reference; never paste the TSIG secret itself.");
@@ -209,6 +214,7 @@ export function generateTLSToml(d: TLSDraft): string {
       lines.push("");
       lines.push("      [servers.tls.acme.rfc2136]");
       lines.push(`      server = ${tomlString(d.dnsServer.trim())}`);
+      lines.push(`      observers = ${tomlStringArray(splitCsv(d.dnsObservers))}`);
       lines.push(`      zone = ${tomlString(d.dnsZone.trim())}`);
       lines.push(`      tsig_key_name = ${tomlString(d.dnsTSIGKeyName.trim())}`);
       lines.push(

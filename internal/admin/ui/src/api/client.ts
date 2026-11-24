@@ -1015,6 +1015,7 @@ export const CertProjectionSchema = z.object({
         state: z.string(),
         not_after: z.string().optional(),
         error: z.string().optional(),
+        cleanup_warning: z.string().optional(),
       }),
     )
     .optional(),

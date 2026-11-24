@@ -6,7 +6,9 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,15 +28,51 @@ func validateACMEDNS(a *ACMEConfig, serverNames []string, where string) []error 
 	}
 	dnsWhere := where + ".rfc2136"
 	if !ContainsSecretRef(dns.Server) {
-		host, port, err := net.SplitHostPort(dns.Server)
-		n, portErr := strconv.Atoi(port)
-		if err != nil || host == "" || portErr != nil || n < 1 || n > 65535 ||
-			(net.ParseIP(host) == nil && !validDNSName(host, false)) {
+		if !validDNSHostPort(dns.Server) {
 			errs = append(errs, fmt.Errorf("%s: server must be a DNS host or IP with a numeric port", dnsWhere))
 		}
 	}
+	if len(dns.Observers) == 0 || len(dns.Observers) > MaxRFC2136Observers {
+		errs = append(errs, fmt.Errorf("%s: observers must contain 1 to %d CA-facing authoritative DNS endpoints", dnsWhere, MaxRFC2136Observers))
+	}
+	seenObservers := make(map[string]bool, len(dns.Observers))
+	for _, observer := range dns.Observers {
+		if ContainsSecretRef(observer) {
+			continue
+		}
+		if !validDNSHostPort(observer) {
+			errs = append(errs, fmt.Errorf("%s: each observer must be a DNS host or IP with a numeric port", dnsWhere))
+		}
+		key := strings.ToLower(observer)
+		if seenObservers[key] {
+			errs = append(errs, fmt.Errorf("%s: observers must not contain duplicates", dnsWhere))
+		}
+		seenObservers[key] = true
+	}
 	if !ContainsSecretRef(dns.Zone) && !validDNSName(dns.Zone, true) {
 		errs = append(errs, fmt.Errorf("%s: zone must be a DNS zone name", dnsWhere))
+	}
+	delegations := make(map[string]string, len(dns.CNAMEDelegations))
+	if len(dns.CNAMEDelegations) > 100 {
+		errs = append(errs, fmt.Errorf("%s: cname_delegations supports at most 100 challenge owners", dnsWhere))
+	}
+	for rawOwner, rawTarget := range dns.CNAMEDelegations {
+		owner, target := normalizeDNSName(rawOwner), normalizeDNSName(rawTarget)
+		if !strings.HasPrefix(owner, "_acme-challenge.") || !validDNSName(owner, true) ||
+			!validDNSName(target, true) || owner == target {
+			errs = append(errs, fmt.Errorf("%s: each cname_delegations entry needs a challenge owner and a distinct DNS target", dnsWhere))
+			continue
+		}
+		if _, exists := delegations[owner]; exists {
+			errs = append(errs, fmt.Errorf("%s: cname_delegations contains a duplicate challenge owner", dnsWhere))
+		}
+		delegations[owner] = target
+		if !ContainsSecretRef(dns.Zone) {
+			zone := normalizeDNSName(dns.Zone)
+			if target != zone && !strings.HasSuffix(target, "."+zone) {
+				errs = append(errs, fmt.Errorf("%s: CNAME target must be inside the configured update zone", dnsWhere))
+			}
+		}
 	}
 	if !ContainsSecretRef(dns.TSIGKeyName) && !validDNSName(dns.TSIGKeyName, true) {
 		errs = append(errs, fmt.Errorf("%s: tsig_key_name must be a DNS key name", dnsWhere))
@@ -85,7 +123,8 @@ func validateACMEDNS(a *ACMEConfig, serverNames []string, where string) []error 
 		if !ContainsSecretRef(dns.Zone) {
 			zone := normalizeDNSName(dns.Zone)
 			owner := "_acme-challenge." + base
-			if owner != zone && !strings.HasSuffix(owner, "."+zone) {
+			_, delegated := delegations[owner]
+			if !delegated && owner != zone && !strings.HasSuffix(owner, "."+zone) {
 				errs = append(errs, fmt.Errorf("%s: DNS challenge name for %q is outside the configured zone", where, domain))
 			}
 		}
@@ -109,6 +148,13 @@ func validateACMEDNS(a *ACMEConfig, serverNames []string, where string) []error 
 		}
 	}
 	return errs
+}
+
+func validDNSHostPort(endpoint string) bool {
+	host, port, err := net.SplitHostPort(endpoint)
+	n, portErr := strconv.Atoi(port)
+	return err == nil && host != "" && portErr == nil && n >= 1 && n <= 65535 &&
+		(net.ParseIP(host) != nil || validDNSName(host, false))
 }
 
 func normalizeDNSName(name string) string {
@@ -149,7 +195,8 @@ func equalRFC2136(a, b *RFC2136Config) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Server == b.Server && a.Zone == b.Zone && a.TSIGKeyName == b.TSIGKeyName &&
+	return a.Server == b.Server && slices.Equal(a.Observers, b.Observers) && maps.Equal(a.CNAMEDelegations, b.CNAMEDelegations) &&
+		a.Zone == b.Zone && a.TSIGKeyName == b.TSIGKeyName &&
 		a.TSIGSecret == b.TSIGSecret && a.PropagationTimeout == b.PropagationTimeout &&
 		a.PollInterval == b.PollInterval
 }

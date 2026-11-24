@@ -550,6 +550,8 @@ func tlsEntries() []Entry {
 	out = append(out, restartGroup(SubACME, "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
 		"servers.*.tls.acme.dns_provider",
 		"servers.*.tls.acme.rfc2136.server",
+		"servers.*.tls.acme.rfc2136.observers",
+		"servers.*.tls.acme.rfc2136.cname_delegations.*",
 		"servers.*.tls.acme.rfc2136.zone",
 		"servers.*.tls.acme.rfc2136.tsig_key_name",
 		"servers.*.tls.acme.rfc2136.propagation_timeout",

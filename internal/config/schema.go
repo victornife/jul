@@ -1349,10 +1349,17 @@ type ACMEConfig struct {
 	OCSPStapling *bool `toml:"ocsp_stapling"`
 }
 
-// RFC2136Config configures DNS-01 updates to one authoritative DNS server.
+// MaxRFC2136Observers bounds the number of CA-facing DNS propagation checks.
+const MaxRFC2136Observers = 8
+
+// RFC2136Config configures DNS-01 updates and authoritative observation.
 type RFC2136Config struct {
 	// Server is the authoritative DNS update endpoint, as host:port.
 	Server string `toml:"server"`
+	// Observers are CA-facing authoritative DNS endpoints, each as host:port.
+	Observers []string `toml:"observers"`
+	// CNAMEDelegations maps challenge owners to one-hop TXT targets in Zone.
+	CNAMEDelegations map[string]string `toml:"cname_delegations,omitempty"`
 	// Zone is the DNS zone containing the ACME challenge records.
 	Zone string `toml:"zone"`
 	// TSIGKeyName identifies the TSIG key authorized to update the zone.

@@ -77,13 +77,13 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 477
-  schema_leaves: 405
-  registry_entries: 405
-  startup_consumed: 36
+  schema_paths: 480
+  schema_leaves: 407
+  registry_entries: 407
+  startup_consumed: 38
   by_class:
     hot_reload: 356
-    restart_required: 36
+    restart_required: 38
     new_listener_only: 7
     ignored_deprecated: 4
     validation_rejected_reserved: 2
@@ -1316,6 +1316,16 @@ fields:
     class: hot_reload
     subsystem: acme
     reason: "the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106)"
+  - path: "servers.*.tls.acme.rfc2136.cname_delegations.*"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
+  - path: "servers.*.tls.acme.rfc2136.observers"
+    class: restart_required
+    subsystem: acme
+    reason: "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup"
+    startup_consumed: true
   - path: "servers.*.tls.acme.rfc2136.poll_interval"
     class: restart_required
     subsystem: acme

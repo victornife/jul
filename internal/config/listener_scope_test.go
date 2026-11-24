@@ -270,6 +270,8 @@ func TestListenerScopedLintCoversEveryServerLevelField(t *testing.T) {
 		"servers.*.tls.acme.enabled":                     "exempt: validation rejects ACME mixed with static TLS on one address",
 		"servers.*.tls.acme.ocsp_stapling":               "exempt: validateACMEConsistency already rejects divergence",
 		"servers.*.tls.acme.rfc2136.server":              "exempt: validateACMEConsistency already rejects divergence",
+		"servers.*.tls.acme.rfc2136.observers":           "exempt: validateACMEConsistency already rejects divergence",
+		"servers.*.tls.acme.rfc2136.cname_delegations.*": "exempt: validateACMEConsistency already rejects divergence",
 		"servers.*.tls.acme.rfc2136.zone":                "exempt: validateACMEConsistency already rejects divergence",
 		"servers.*.tls.acme.rfc2136.tsig_key_name":       "exempt: validateACMEConsistency already rejects divergence",
 		"servers.*.tls.acme.rfc2136.tsig_secret":         "exempt: validateACMEConsistency already rejects divergence",

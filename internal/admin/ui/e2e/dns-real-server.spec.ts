@@ -162,6 +162,7 @@ history_dir = ${JSON.stringify(resolve(dir, "history"))}
     await drawer.getByLabel("Account email").fill("ops@example.test");
     await drawer.getByLabel("Challenge").selectOption("dns-01");
     await drawer.getByLabel("DNS server and port").fill(`127.0.0.1:${dnsAddress.port}`);
+    await drawer.getByLabel("CA-facing DNS observers").fill(`127.0.0.1:${dnsAddress.port}`);
     await drawer.getByLabel("DNS update zone").fill("example.test");
     await drawer.getByLabel("TSIG key name").fill("jul.example.test");
     await drawer.getByLabel("TSIG secret reference").fill("${env:JUL_DNS_E2E_TSIG}");

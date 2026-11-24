@@ -22,7 +22,7 @@ func TestProjectTLSDNSStateAndListenerScope(t *testing.T) {
 		{Listen: ":443", ServerNames: []string{"example.test"}, State: "pending"},
 		{Listen: ":8443", ServerNames: []string{"example.test"}, State: "available", NotAfter: expiry, Error: "renewal failed",
 			Variants: []CertVariantStatus{
-				{Algorithm: "ecdsa-p256", State: "available", NotAfter: &expiry},
+				{Algorithm: "ecdsa-p256", State: "available", NotAfter: &expiry, CleanupWarning: "cleanup pending"},
 				{Algorithm: "rsa-2048", State: "failed", Error: "DNS update refused"},
 			}},
 	}
@@ -35,7 +35,7 @@ func TestProjectTLSDNSStateAndListenerScope(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), `"days_left":0`) {
 		t.Fatalf("zero-day expiry omitted: %s (%v)", data, err)
 	}
-	if len(got[1].Variants) != 2 || got[1].Variants[0].NotAfter == "" ||
+	if len(got[1].Variants) != 2 || got[1].Variants[0].NotAfter == "" || got[1].Variants[0].CleanupWarning != "cleanup pending" ||
 		got[1].Variants[1].Algorithm != "rsa-2048" || got[1].Variants[1].State != "failed" ||
 		got[1].Variants[1].Error != "DNS update refused" {
 		t.Fatalf("certificate variant state was not projected: %+v", got[1].Variants)

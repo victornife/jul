@@ -42,10 +42,11 @@ type CertSummary struct {
 
 // CertVariantSummary reports the live state of one automatically managed key type.
 type CertVariantSummary struct {
-	Algorithm string     `json:"algorithm"`
-	State     string     `json:"state"`
-	NotAfter  *time.Time `json:"not_after,omitempty"`
-	Error     string     `json:"error,omitempty"`
+	Algorithm      string     `json:"algorithm"`
+	State          string     `json:"state"`
+	NotAfter       *time.Time `json:"not_after,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	CleanupWarning string     `json:"cleanup_warning,omitempty"`
 }
 
 // InspectCerts walks the server blocks and returns a summary of each TLS

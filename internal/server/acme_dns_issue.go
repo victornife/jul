@@ -48,6 +48,7 @@ var (
 	errDNSAuthorizationBusy       = errors.New("DNS-01 authorization is already being processed")
 	errDNSAuthorizationStateLimit = errors.New("DNS-01 authorization state limit exceeded")
 	errDNSChallengeRetryDeferred  = errors.New("DNS-01 challenge retry deferred")
+	errDNSUnresolvedCleanup       = errors.New("DNS-01 validation or cleanup remains unresolved")
 )
 
 const (
@@ -67,7 +68,10 @@ func (e *dnsAuthorizationDeferredError) Unwrap() []error {
 type dnsPendingOrder struct {
 	order          *acme.Order
 	deadline       time.Time
+	reconcileUntil time.Time
 	authorizations map[string]time.Time
+	groupKey       string
+	algorithm      dnsKeyAlgorithm
 }
 
 type dnsValidAuthorization struct {
@@ -82,6 +86,10 @@ type dnsAuthorizationState struct {
 	pollFailures   int
 	acceptFailures int
 	valid          dnsValidAuthorization
+	lease          dnsChallengeLease
+	challengeURI   string
+	challengeToken string
+	submitted      bool
 }
 
 func (m *dnsACMEManager) issueCertificate(ctx context.Context, names []string, algorithm dnsKeyAlgorithm) (result *tls.Certificate, resultErr error) {
@@ -102,12 +110,30 @@ func (m *dnsACMEManager) issueCertificate(ctx context.Context, names []string, a
 		if !ok {
 			deadline = time.Now().Add(dnsIssuanceTimeout)
 		}
-		pending = &dnsPendingOrder{order: order, deadline: deadline}
+		pending = &dnsPendingOrder{order: order, deadline: deadline, groupKey: dnsNamesKey(names), algorithm: algorithm}
 		m.orderMu.Lock()
 		m.orders[orderKey] = pending
 		m.orderMu.Unlock()
 	}
 	defer func() {
+		if resultErr != nil && m.orderHasSubmittedDNSLease(pending) {
+			resultErr = errors.Join(resultErr, errDNSUnresolvedCleanup)
+			if m.ctx.Err() == nil {
+				if pending.reconcileUntil.IsZero() {
+					pending.reconcileUntil = time.Now().Add(dnsIssuanceTimeout)
+				}
+				if time.Now().Before(pending.reconcileUntil) {
+					pending.deadline = pending.reconcileUntil
+					resultErr = &dnsAuthorizationDeferredError{cause: resultErr}
+				} else {
+					m.abandonDNSOrder(pending)
+					resultErr = errors.Join(errDNSUnresolvedCleanup, context.DeadlineExceeded)
+				}
+			} else {
+				m.abandonDNSOrder(pending)
+				resultErr = errors.Join(errDNSUnresolvedCleanup, m.ctx.Err())
+			}
+		}
 		if !errors.Is(resultErr, errDNSAuthorizationBusy) {
 			m.orderMu.Lock()
 			delete(m.orders, orderKey)
@@ -167,7 +193,7 @@ func (m *dnsACMEManager) lockAuthorization(ctx context.Context, url string) (fun
 	if state == nil {
 		if len(m.authStates) >= maxDNSAuthStates {
 			for key, existing := range m.authStates {
-				if !existing.locked && !existing.nextPoll.After(now) && !existing.nextAccept.After(now) {
+				if !existing.locked && existing.lease == nil && !existing.nextPoll.After(now) && !existing.nextAccept.After(now) {
 					delete(m.authStates, key)
 				}
 			}
@@ -183,11 +209,109 @@ func (m *dnsACMEManager) lockAuthorization(ctx context.Context, url string) (fun
 		m.authMu.Lock()
 		state.locked = false
 		now := time.Now()
-		if !state.nextPoll.After(now) && !state.nextAccept.After(now) {
+		if state.lease == nil && !state.nextPoll.After(now) && !state.nextAccept.After(now) {
 			delete(m.authStates, url)
 		}
 		m.authMu.Unlock()
 	}, dnsValidAuthorization{}, nil
+}
+
+type dnsRetainedLease struct {
+	lease          dnsChallengeLease
+	challengeURI   string
+	challengeToken string
+	submitted      bool
+}
+
+func (m *dnsACMEManager) retainedDNSLease(url string) dnsRetainedLease {
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	if state := m.authStates[url]; state != nil {
+		return dnsRetainedLease{
+			lease: state.lease, challengeURI: state.challengeURI,
+			challengeToken: state.challengeToken, submitted: state.submitted,
+		}
+	}
+	return dnsRetainedLease{}
+}
+
+func (m *dnsACMEManager) rememberDNSLease(url string, pending *dnsPendingAuthorization) {
+	if pending == nil || pending.lease == nil {
+		return
+	}
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	if state := m.authStates[url]; state != nil {
+		state.lease = pending.lease
+		state.challengeURI = pending.challenge.URI
+		state.challengeToken = pending.challenge.Token
+		state.submitted = pending.submitted
+	}
+}
+
+func (m *dnsACMEManager) takeDNSLease(url string) dnsChallengeLease {
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	if state := m.authStates[url]; state != nil {
+		lease := state.lease
+		state.lease = nil
+		state.challengeURI = ""
+		state.challengeToken = ""
+		state.submitted = false
+		return lease
+	}
+	return nil
+}
+
+func (m *dnsACMEManager) orderHasSubmittedDNSLease(order *dnsPendingOrder) bool {
+	m.authMu.Lock()
+	defer m.authMu.Unlock()
+	for _, url := range order.order.AuthzURLs {
+		if state := m.authStates[url]; state != nil && state.lease != nil && state.submitted {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *dnsACMEManager) abandonDNSOrder(order *dnsPendingOrder) {
+	for _, url := range order.order.AuthzURLs {
+		if m.ctx.Err() == nil && m.otherDNSOrderUsesAuthorization(order, url) {
+			continue
+		}
+		m.authMu.Lock()
+		state := m.authStates[url]
+		var lease dnsChallengeLease
+		if state != nil && !state.locked && state.submitted {
+			lease = state.lease
+			state.lease = nil
+			state.submitted = false
+			if !state.nextPoll.After(time.Now()) && !state.nextAccept.After(time.Now()) {
+				delete(m.authStates, url)
+			}
+		}
+		m.authMu.Unlock()
+		if lease != nil {
+			m.unresolvedDNSCleanup(dnsCleanupTask{lease: lease, id: url, groupKey: order.groupKey, algorithm: order.algorithm},
+				"DNS-01 reconciliation ended before the CA reached a terminal state")
+		}
+	}
+}
+
+func (m *dnsACMEManager) otherDNSOrderUsesAuthorization(order *dnsPendingOrder, url string) bool {
+	m.orderMu.Lock()
+	defer m.orderMu.Unlock()
+	for _, other := range m.orders {
+		if other == order {
+			continue
+		}
+		for _, otherURL := range other.order.AuthzURLs {
+			if otherURL == url {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (m *dnsACMEManager) dnsChallengeRetry(url string) time.Time {
@@ -264,6 +388,7 @@ func (m *dnsACMEManager) authorizeDNSOrder(ctx context.Context, current *dnsPend
 			return nil
 		}
 		unlocks[i] = unlock
+		retained := m.retainedDNSLease(urls[i])
 		auth, nextPoll, err := m.observeDNSAuthorization(ctx, urls[i])
 		if err != nil && ctx.Err() == nil && !permanentDNSACMEError(err) {
 			deferred[i] = err
@@ -273,15 +398,31 @@ func (m *dnsACMEManager) authorizeDNSOrder(ctx context.Context, current *dnsPend
 		} else {
 			var name string
 			name, failures[i] = validateDNSAuthorization(urls[i], auth, expected)
+			identity, identityErr := validateDNSAuthorizationIdentity(auth, expected)
+			if retained.lease != nil && identityErr == nil && dnsAuthorizationTerminal(auth, retained.challengeURI) {
+				m.queueDNSCleanup(dnsCleanupTask{
+					lease: m.takeDNSLease(urls[i]), id: urls[i], groupKey: current.groupKey, algorithm: current.algorithm,
+				})
+				retained = dnsRetainedLease{}
+			}
 			if failures[i] == nil && auth.Status == acme.StatusValid {
 				valid[i] = m.rememberValidDNSAuthorization(urls[i], name, auth.Expires)
 			} else if failures[i] == nil {
-				pending[i], failures[i] = m.prepareDNSAuthorization(ctx, auth)
+				if retained.lease != nil && !dnsChallengeMatches(auth, retained.challengeURI, retained.challengeToken) {
+					failures[i] = errors.Join(errDNSUnresolvedCleanup, errors.New("ACME DNS-01 challenge changed during reconciliation"))
+					m.unresolvedDNSCleanup(dnsCleanupTask{
+						lease: retained.lease, id: urls[i], groupKey: current.groupKey, algorithm: current.algorithm,
+					}, "DNS-01 challenge changed before reconciliation finished")
+				} else {
+					pending[i], failures[i] = m.prepareDNSAuthorizationWithLease(ctx, auth, retained.lease)
+				}
 				if pending[i] != nil {
 					pending[i].url = urls[i]
-					pending[i].name = name
+					pending[i].name = identity
 					pending[i].nextPoll = nextPoll
 					pending[i].nextAccept = m.dnsChallengeRetry(urls[i])
+					pending[i].submitted = retained.submitted || pending[i].challenge.Status != acme.StatusPending
+					m.rememberDNSLease(urls[i], pending[i])
 				}
 			}
 		}
@@ -294,8 +435,6 @@ func (m *dnsACMEManager) authorizeDNSOrder(ctx context.Context, current *dnsPend
 
 	// Authorization count and the number of issuance workers bound these waiters;
 	// network requests have separate fixed limits and release permits between polls.
-	cleanups := make(chan dnsCleanupJob, len(pending))
-	cleanupWorkers := m.startDNSCleanupWorkers(cleanups, 15*time.Second)
 	var waiters sync.WaitGroup
 	for i, auth := range pending {
 		if auth == nil {
@@ -304,12 +443,16 @@ func (m *dnsACMEManager) authorizeDNSOrder(ctx context.Context, current *dnsPend
 		waiters.Add(1)
 		go func(i int, auth *dnsPendingAuthorization) {
 			defer waiters.Done()
+			var completed *acme.Authorization
 			if failures[i] == nil || auth.challenge.Status != acme.StatusPending {
-				completed, err := m.completeDNSAuthorization(ctx, urls[i], auth)
+				var err error
+				completed, err = m.completeDNSAuthorization(ctx, urls[i], auth)
 				if err == nil {
 					name, validationErr := validateDNSAuthorization(urls[i], completed, expected)
 					if validationErr != nil {
 						err = validationErr
+					} else if completed.Status != acme.StatusValid {
+						err = errors.New("ACME authorization is not valid")
 					} else if name != auth.name {
 						err = errors.New("ACME authorization changed its DNS identifier")
 					} else {
@@ -323,23 +466,41 @@ func (m *dnsACMEManager) authorizeDNSOrder(ctx context.Context, current *dnsPend
 					failures[i] = errors.Join(failures[i], err)
 				}
 			}
-			cleanups <- dnsCleanupJob{lease: auth.lease, done: func(err error) {
-				failures[i] = errors.Join(failures[i], err)
+			terminal := false
+			if completed != nil {
+				name, err := validateDNSAuthorizationIdentity(completed, expected)
+				terminal = err == nil && name == auth.name && dnsAuthorizationTerminal(completed, auth.challenge.URI)
+			}
+			if auth.lease != nil {
+				if terminal || !auth.submitted {
+					lease := m.takeDNSLease(urls[i])
+					done := unlocks[i]
+					unlocks[i] = nil
+					m.queueDNSCleanup(dnsCleanupTask{
+						lease: lease, id: urls[i], groupKey: current.groupKey, algorithm: current.algorithm, done: done,
+					})
+				} else {
+					m.rememberDNSLease(urls[i], auth)
+					failures[i] = errors.Join(failures[i], errDNSUnresolvedCleanup)
+					m.unresolvedDNSCleanup(dnsCleanupTask{
+						lease: auth.lease, id: urls[i], groupKey: current.groupKey, algorithm: current.algorithm,
+					}, "DNS-01 validation remains unresolved; owned TXT records were retained")
+				}
+			}
+			if unlocks[i] != nil {
 				unlocks[i]()
 				unlocks[i] = nil
-			}}
+			}
 		}(i, auth)
 	}
 	waiters.Wait()
-	close(cleanups)
-	cleanupWorkers.Wait()
-	if err := errors.Join(append([]error{prepareErr}, failures...)...); err != nil {
-		return nil, err
-	}
 	for i, complete := range valid {
 		if !complete.IsZero() {
 			current.authorizations[urls[i]] = complete
 		}
+	}
+	if err := errors.Join(append([]error{prepareErr}, failures...)...); err != nil {
+		return nil, err
 	}
 	if busy.Load() {
 		if err := errors.Join(deferred...); err != nil {
@@ -393,6 +554,24 @@ send:
 }
 
 func validateDNSAuthorization(url string, auth *acme.Authorization, expected map[string]bool) (string, error) {
+	name, err := validateDNSAuthorizationIdentity(auth, expected)
+	if err != nil {
+		return "", err
+	}
+	switch auth.Status {
+	case acme.StatusValid, acme.StatusPending:
+	case acme.StatusInvalid, acme.StatusDeactivated, acme.StatusExpired, acme.StatusRevoked:
+		return "", failedDNSAuthorization(url, auth)
+	default:
+		return "", errors.New("ACME authorization is not pending or valid")
+	}
+	if auth.Status == acme.StatusValid && !auth.Expires.IsZero() && !auth.Expires.After(time.Now()) {
+		return "", errors.New("ACME authorization has expired")
+	}
+	return name, nil
+}
+
+func validateDNSAuthorizationIdentity(auth *acme.Authorization, expected map[string]bool) (string, error) {
 	if auth == nil {
 		return "", errors.New("ACME authorization response is empty")
 	}
@@ -406,17 +585,32 @@ func validateDNSAuthorization(url string, auth *acme.Authorization, expected map
 	if !expected[name] {
 		return "", errors.New("ACME authorization does not match the requested identities")
 	}
-	switch auth.Status {
-	case acme.StatusValid, acme.StatusPending:
-	case acme.StatusInvalid, acme.StatusDeactivated, acme.StatusExpired, acme.StatusRevoked:
-		return "", failedDNSAuthorization(url, auth)
-	default:
-		return "", errors.New("ACME authorization is not pending or valid")
-	}
-	if auth.Status == acme.StatusValid && !auth.Expires.IsZero() && !auth.Expires.After(time.Now()) {
-		return "", errors.New("ACME authorization has expired")
-	}
 	return name, nil
+}
+
+func dnsAuthorizationTerminal(auth *acme.Authorization, challengeURI string) bool {
+	if auth == nil {
+		return false
+	}
+	switch auth.Status {
+	case acme.StatusValid, acme.StatusInvalid, acme.StatusDeactivated, acme.StatusExpired, acme.StatusRevoked:
+		return true
+	}
+	for _, challenge := range auth.Challenges {
+		if challenge.URI == challengeURI && (challenge.Status == acme.StatusValid || challenge.Status == acme.StatusInvalid) {
+			return true
+		}
+	}
+	return false
+}
+
+func dnsChallengeMatches(auth *acme.Authorization, uri, token string) bool {
+	for _, challenge := range auth.Challenges {
+		if challenge.Type == "dns-01" && challenge.URI == uri && challenge.Token == token {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *dnsACMEManager) ensureRegistered(ctx context.Context) error {
@@ -442,9 +636,15 @@ type dnsPendingAuthorization struct {
 	name       string
 	nextPoll   time.Time
 	nextAccept time.Time
+	submitted  bool
+	rejected   bool
 }
 
 func (m *dnsACMEManager) prepareDNSAuthorization(ctx context.Context, auth *acme.Authorization) (*dnsPendingAuthorization, error) {
+	return m.prepareDNSAuthorizationWithLease(ctx, auth, nil)
+}
+
+func (m *dnsACMEManager) prepareDNSAuthorizationWithLease(ctx context.Context, auth *acme.Authorization, lease dnsChallengeLease) (*dnsPendingAuthorization, error) {
 	var challenge *acme.Challenge
 	for _, candidate := range auth.Challenges {
 		if candidate.Type == "dns-01" {
@@ -461,6 +661,10 @@ func (m *dnsACMEManager) prepareDNSAuthorization(ctx context.Context, auth *acme
 	}
 	if challenge.Status != acme.StatusPending && challenge.Status != acme.StatusProcessing {
 		return nil, errors.New("ACME DNS-01 challenge is not pending")
+	}
+	if lease != nil {
+		pending.lease = lease
+		return pending, nil
 	}
 	value, err := m.client.DNS01ChallengeRecord(challenge.Token)
 	if err != nil {
@@ -493,8 +697,12 @@ func (m *dnsACMEManager) beginDNSAuthorization(ctx context.Context, pending *dns
 			return true, errDNSChallengeRetryDeferred
 		}
 		var err error
+		previouslySubmitted := pending.submitted
+		pending.submitted = true
 		pending.nextAccept, err = m.acceptDNSChallenge(ctx, pending.url, pending.challenge)
 		if err != nil {
+			var acmeErr *acme.Error
+			pending.rejected = !previouslySubmitted && errors.As(err, &acmeErr) && permanentDNSACMEError(err)
 			return true, err
 		}
 	}
@@ -507,7 +715,22 @@ func (m *dnsACMEManager) completeDNSAuthorization(ctx context.Context, url strin
 		return nil, err
 	}
 	if err != nil && pending.challenge.Status == acme.StatusPending {
-		return m.reconcileDNSAcceptance(ctx, url, pending.challenge, err, pending.nextPoll, pending.nextAccept)
+		auth, reconcileErr := m.reconcileDNSAcceptance(ctx, url, pending.challenge, err, pending.nextPoll, pending.nextAccept)
+		if pending.rejected && auth != nil && auth.Status == acme.StatusPending {
+			matches := 0
+			stillPending := false
+			for _, challenge := range auth.Challenges {
+				if challenge.URI == pending.challenge.URI {
+					matches++
+					stillPending = challenge.Type == "dns-01" && challenge.Token == pending.challenge.Token &&
+						challenge.Status == acme.StatusPending
+				}
+			}
+			if matches == 1 && stillPending {
+				pending.submitted = false
+			}
+		}
+		return auth, reconcileErr
 	}
 	return m.waitDNSAuthorization(ctx, url, err, pending.nextPoll)
 }
@@ -543,6 +766,7 @@ func (m *dnsACMEManager) acceptDNSChallenge(ctx context.Context, url string, cha
 
 func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string, challenge *acme.Challenge, lastErr error, nextPoll, nextAccept time.Time) (*acme.Authorization, error) {
 	var observationErr error
+	var lastAuth *acme.Authorization
 	retryAllowed := errors.Is(lastErr, errDNSChallengeRetryDeferred) || retryableDNSChallengeRejection(lastErr)
 	if errors.Is(lastErr, errDNSChallengeRetryDeferred) {
 		lastErr = nil
@@ -550,7 +774,7 @@ func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string,
 	for ctx.Err() == nil {
 		if retryAllowed && nextPoll.After(time.Now()) && (nextAccept.IsZero() || nextAccept.Before(nextPoll)) {
 			if err := waitDNSAuthorizationPoll(ctx, nextAccept); err != nil {
-				return nil, errors.Join(lastErr, observationErr, err)
+				return lastAuth, errors.Join(lastErr, observationErr, err)
 			}
 			nextAccept, lastErr = m.acceptDNSChallenge(ctx, url, challenge)
 			if lastErr == nil {
@@ -560,11 +784,12 @@ func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string,
 			continue
 		}
 		if err := waitDNSAuthorizationPoll(ctx, nextPoll); err != nil {
-			return nil, errors.Join(lastErr, observationErr, err)
+			return lastAuth, errors.Join(lastErr, observationErr, err)
 		}
 		auth, next, getErr := m.observeDNSAuthorization(ctx, url)
 		nextPoll = next
 		if getErr == nil {
+			lastAuth = auth
 			observationErr = nil
 			switch auth.Status {
 			case acme.StatusValid:
@@ -580,53 +805,55 @@ func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string,
 					case acme.StatusProcessing, acme.StatusValid:
 						return m.waitDNSAuthorization(ctx, url, lastErr, nextPoll)
 					case acme.StatusInvalid:
-						return nil, errors.Join(lastErr, candidate.Error)
+						return auth, errors.Join(lastErr, candidate.Error, errors.New("ACME DNS-01 challenge is invalid"))
 					case acme.StatusPending:
 						if permanentDNSACMEError(lastErr) {
-							return nil, lastErr
+							return auth, lastErr
 						}
 						retryAllowed = true
 						break challenges
 					}
 				}
 			case acme.StatusInvalid, acme.StatusDeactivated, acme.StatusExpired, acme.StatusRevoked:
-				return nil, errors.Join(lastErr, failedDNSAuthorization(url, auth))
+				return auth, errors.Join(lastErr, failedDNSAuthorization(url, auth))
 			default:
-				return nil, errors.Join(lastErr, errors.New("ACME authorization has an unsupported status"))
+				return auth, errors.Join(lastErr, errors.New("ACME authorization has an unsupported status"))
 			}
 		} else {
 			if permanentDNSACMEError(getErr) {
-				return nil, errors.Join(lastErr, getErr)
+				return lastAuth, errors.Join(lastErr, getErr)
 			}
 			observationErr = getErr
 		}
 	}
-	return nil, errors.Join(lastErr, observationErr, ctx.Err())
+	return lastAuth, errors.Join(lastErr, observationErr, ctx.Err())
 }
 
 func (m *dnsACMEManager) waitDNSAuthorization(ctx context.Context, url string, lastErr error, nextPoll time.Time) (*acme.Authorization, error) {
 	initialErr := lastErr
+	var lastAuth *acme.Authorization
 	for {
 		if err := waitDNSAuthorizationPoll(ctx, nextPoll); err != nil {
-			return nil, errors.Join(initialErr, lastErr, err)
+			return lastAuth, errors.Join(initialErr, lastErr, err)
 		}
 		auth, next, err := m.observeDNSAuthorization(ctx, url)
 		nextPoll = next
 		if err != nil {
 			if permanentDNSACMEError(err) || ctx.Err() != nil {
-				return nil, errors.Join(initialErr, lastErr, err)
+				return lastAuth, errors.Join(initialErr, lastErr, err)
 			}
 			lastErr = err
 		} else {
+			lastAuth = auth
 			lastErr = nil
 			switch auth.Status {
 			case acme.StatusValid:
 				return auth, nil
 			case acme.StatusPending:
 			case acme.StatusInvalid, acme.StatusDeactivated, acme.StatusExpired, acme.StatusRevoked:
-				return nil, errors.Join(initialErr, failedDNSAuthorization(url, auth))
+				return auth, errors.Join(initialErr, failedDNSAuthorization(url, auth))
 			default:
-				return nil, errors.Join(initialErr, errors.New("ACME authorization has an unsupported status"))
+				return auth, errors.Join(initialErr, errors.New("ACME authorization has an unsupported status"))
 			}
 		}
 	}
@@ -773,10 +1000,14 @@ func retryableDNSChallengeRejection(err error) bool {
 }
 
 func (m *dnsACMEManager) cleanupDNSLease(lease dnsChallengeLease, timeout time.Duration) error {
+	return m.cleanupDNSLeaseContext(context.Background(), lease, timeout)
+}
+
+func (m *dnsACMEManager) cleanupDNSLeaseContext(parent context.Context, lease dnsChallengeLease, timeout time.Duration) error {
 	if lease == nil {
 		return nil
 	}
-	admission, cancel := context.WithTimeout(context.Background(), dnsIssuanceTimeout)
+	admission, cancel := context.WithTimeout(parent, dnsIssuanceTimeout)
 	defer cancel()
 	release, err := lease.admitCleanup(admission)
 	if err == nil {
@@ -784,7 +1015,7 @@ func (m *dnsACMEManager) cleanupDNSLease(lease dnsChallengeLease, timeout time.D
 		select {
 		case m.cleanup <- struct{}{}:
 			defer func() { <-m.cleanup }()
-			ctx, stop := context.WithTimeout(context.Background(), timeout)
+			ctx, stop := context.WithTimeout(admission, timeout)
 			err = lease.cleanupAdmitted(ctx)
 			stop()
 		case <-admission.Done():
@@ -797,6 +1028,122 @@ func (m *dnsACMEManager) cleanupDNSLease(lease dnsChallengeLease, timeout time.D
 	cleanupErr := &dnsCleanupError{cause: err}
 	m.log.Warn("DNS-01 challenge cleanup failed", "reason", dnsACMEErrorMessage(cleanupErr))
 	return cleanupErr
+}
+
+type dnsCleanupTask struct {
+	lease     dnsChallengeLease
+	id        string
+	groupKey  string
+	algorithm dnsKeyAlgorithm
+	done      func()
+}
+
+func (job dnsCleanupTask) finish() {
+	if job.done != nil {
+		job.done()
+	}
+}
+
+func (m *dnsACMEManager) setDNSCleanupWarning(job dnsCleanupTask, warning bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	group := m.groups[job.groupKey]
+	if group == nil {
+		return
+	}
+	for i := range group.variants {
+		variant := &group.variants[i]
+		if variant.algorithm != job.algorithm {
+			continue
+		}
+		if warning {
+			if variant.cleanupWarnings == nil {
+				variant.cleanupWarnings = make(map[string]bool)
+			}
+			if len(variant.cleanupWarnings) >= 200 && !variant.cleanupWarnings[job.id] {
+				variant.cleanupWarnings["additional"] = true
+			} else {
+				variant.cleanupWarnings[job.id] = true
+			}
+		} else {
+			delete(variant.cleanupWarnings, job.id)
+		}
+		m.signalGroup(group)
+		return
+	}
+}
+
+func (m *dnsACMEManager) unresolvedDNSCleanup(job dnsCleanupTask, message string) {
+	m.setDNSCleanupWarning(job, true)
+	owner, marker := "", ""
+	if identity, ok := job.lease.(interface{ cleanupIdentity() (string, string) }); ok {
+		owner, marker = identity.cleanupIdentity()
+		if owner == "" {
+			m.setDNSCleanupWarning(job, false)
+			return
+		}
+	}
+	m.log.Warn(message, "owner", owner, "marker", marker,
+		"recovery", "retain the owned TXT until the CA is terminal; see DNS-01 manual recovery")
+}
+
+func (m *dnsACMEManager) queueDNSCleanup(job dnsCleanupTask) {
+	if job.lease == nil {
+		job.finish()
+		return
+	}
+	m.setDNSCleanupWarning(job, true)
+	m.mu.Lock()
+	queued := false
+	if !m.closed {
+		select {
+		case m.cleanupJobs <- job:
+			queued = true
+		default:
+		}
+	}
+	m.mu.Unlock()
+	if !queued {
+		m.unresolvedDNSCleanup(job, "DNS-01 cleanup could not be queued")
+		job.finish()
+	}
+}
+
+func (m *dnsACMEManager) runDNSCleanup() {
+	defer m.wg.Done()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case job := <-m.cleanupJobs:
+			if m.ctx.Err() != nil {
+				m.unresolvedDNSCleanup(job, "DNS-01 cleanup interrupted by shutdown")
+				job.finish()
+				continue
+			}
+			m.retryDNSCleanup(job)
+			job.finish()
+		}
+	}
+}
+
+func (m *dnsACMEManager) retryDNSCleanup(job dnsCleanupTask) {
+	for attempt := 0; attempt < dnsCleanupRetries; attempt++ {
+		err := m.cleanupDNSLeaseContext(m.ctx, job.lease, 15*time.Second)
+		if err == nil {
+			m.setDNSCleanupWarning(job, false)
+			break
+		}
+		if attempt+1 == dnsCleanupRetries || m.ctx.Err() != nil {
+			m.unresolvedDNSCleanup(job, "DNS-01 cleanup retry did not finish")
+			break
+		}
+		m.unresolvedDNSCleanup(job, "DNS-01 cleanup failed; retrying")
+		if err := waitDNSInterval(m.ctx, time.Second<<attempt); err != nil {
+			m.unresolvedDNSCleanup(job, "DNS-01 cleanup interrupted by shutdown")
+			break
+		}
+	}
 }
 
 type dnsCleanupJob struct {

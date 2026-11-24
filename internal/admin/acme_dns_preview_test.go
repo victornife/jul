@@ -65,13 +65,14 @@ server_names = ["example.test", "*.example.test"]
     dns_provider = "rfc2136"
       [servers.tls.acme.rfc2136]
       server = %q
+      observers = [%q]
       zone = "example.test"
       tsig_key_name = "jul.example.test"
       tsig_secret = "${env:JUL_DNS_PREVIEW_OLD}"
   [[servers.locations]]
   match = { type = "prefix", path = "/" }
   proxy_pass = "http://127.0.0.1:9000"
-`, ca.URL+"/directory", dns.Addr().String())
+`, ca.URL+"/directory", dns.Addr().String(), dns.Addr().String())
 	before, err := config.Parse([]byte(raw))
 	if err != nil {
 		t.Fatal(err)

@@ -80,6 +80,7 @@ describe("generateTLSToml ACME", () => {
       acmeEmail: "ops@example.com",
       acmeChallenge: "dns-01",
       dnsServer: "dns.example.com:53",
+      dnsObservers: "ns1.example.com:53, ns2.example.com:53",
       dnsZone: "example.com",
       dnsTSIGKeyName: "jul.example.com",
       dnsTSIGSecretRef: "${env:JUL_DNS_TSIG}",
@@ -90,6 +91,7 @@ describe("generateTLSToml ACME", () => {
     const toml = generateTLSToml(config);
     expect(toml).toContain('dns_provider = "rfc2136"');
     expect(toml).toContain("[servers.tls.acme.rfc2136]");
+    expect(toml).toContain('observers = ["ns1.example.com:53", "ns2.example.com:53"]');
     expect(toml).toContain('tsig_secret = "${env:JUL_DNS_TSIG}"');
     expect(toml).toContain('mode = "request"');
     expect(tlsWarnings(config)).toEqual([]);

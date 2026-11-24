@@ -64,13 +64,14 @@ server_names = ["example.test", "*.example.test"]
     dns_provider = "rfc2136"
       [servers.tls.acme.rfc2136]
       server = %q
+      observers = [%q]
       zone = "example.test"
       tsig_key_name = "jul.example.test"
       tsig_secret = "${env:JUL_DNS_CLI_TSIG}"
   [[servers.locations]]
   match = { type = "prefix", path = "/" }
   root = %q
-`, ca.URL+"/directory", dns.Addr().String(), dir)
+`, ca.URL+"/directory", dns.Addr().String(), dns.Addr().String(), dir)
 	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}

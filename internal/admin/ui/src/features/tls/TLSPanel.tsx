@@ -84,6 +84,9 @@ function CertCard({ cert }: { readonly cert: CertProjection }) {
                       {label}: {variant.state}
                       {variant.not_after && `; expires ${variant.not_after}`}
                       {variant.error && <span className="text-jul-danger">; {variant.error}</span>}
+                      {variant.cleanup_warning && (
+                        <span className="text-jul-warning">; {variant.cleanup_warning}</span>
+                      )}
                     </li>
                   );
                 })}

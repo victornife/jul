@@ -61,10 +61,11 @@ type CertStatus struct {
 
 // CertVariantStatus describes one automatically managed certificate key type.
 type CertVariantStatus struct {
-	Algorithm string     `json:"algorithm"`
-	State     string     `json:"state"`
-	NotAfter  *time.Time `json:"not_after,omitempty"`
-	Error     string     `json:"error,omitempty"`
+	Algorithm      string     `json:"algorithm"`
+	State          string     `json:"state"`
+	NotAfter       *time.Time `json:"not_after,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	CleanupWarning string     `json:"cleanup_warning,omitempty"`
 }
 
 // handleUpstreams, handleCerts, handleStatus, and the runtime feature-status

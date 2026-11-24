@@ -260,15 +260,15 @@
     }
   ],
   "counts": {
-    "schema_paths": 477,
-    "schema_leaves": 405,
-    "registry_entries": 405,
-    "startup_consumed": 36,
+    "schema_paths": 480,
+    "schema_leaves": 407,
+    "registry_entries": 407,
+    "startup_consumed": 38,
     "by_class": {
       "hot_reload": 356,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
-      "restart_required": 36,
+      "restart_required": 38,
       "validation_rejected_reserved": 2
     }
   },
@@ -4011,6 +4011,32 @@
       "subsystem": "acme",
       "reason": "the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106)",
       "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.tls.acme.rfc2136.cname_delegations.*",
+      "class": "restart_required",
+      "subsystem": "acme",
+      "reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "servers.*.tls.acme.rfc2136.observers",
+      "class": "restart_required",
+      "subsystem": "acme",
+      "reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
       "address_keyed": false,
       "conditional": false,
       "deprecated": false,

@@ -260,9 +260,14 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
               <div className="space-y-3 rounded-md border border-jul-border p-3">
                 <p className="text-xs text-jul-muted">
                   Provider: RFC 2136. Configure an authoritative DNS server to permit TSIG-signed
-                  updates and queries for the challenge zone. No inbound ACME listener is needed.
+                  updates and queries for the challenge zone. Every CA-facing observer must see
+                  the challenge before submission. No inbound ACME listener is needed.
                   ACME, provider, name and credential changes require a restart. The server must use
                   an ACME-enabled build.
+                </p>
+                <p className="text-xs text-jul-muted">
+                  If propagation fails, check observer reachability and replication. Cleanup warnings
+                  are separate from certificate status; retain records while the CA may validate.
                 </p>
                 <p className="text-xs text-jul-muted">
                   Jul automatically selects ECDSA P-256 or RSA-2048 for each client. Each variant
@@ -274,6 +279,15 @@ export function TLSEditor({ onClose }: TLSEditorProps) {
                   placeholder="dns.example.com:53"
                   onChange={(v) => {
                     set("dnsServer", v);
+                  }}
+                />
+                <TextField
+                  label="CA-facing DNS observers"
+                  hint="Comma-separated authoritative host:port endpoints. For CNAME delegation, configure the explicit mapping in the raw editor."
+                  value={draft.dnsObservers}
+                  placeholder="ns1.example.com:53, ns2.example.com:53"
+                  onChange={(v) => {
+                    set("dnsObservers", v);
                   }}
                 />
                 <TextField

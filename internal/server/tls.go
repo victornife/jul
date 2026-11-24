@@ -241,7 +241,7 @@ func acmeFingerprint(servers []config.ServerConfig) string {
 	}
 	fmt.Fprintf(h, "%q|%q|%q|%q|%q", settings.Email, settings.CA, settings.Challenge, settings.CacheDir, settings.DNSProvider)
 	if d := settings.RFC2136; d != nil {
-		fmt.Fprintf(h, "|%q|%q|%q|%q|%d|%d", d.Server, d.Zone, d.TSIGKeyName, d.TSIGSecret, d.PropagationTimeout, d.PollInterval)
+		fmt.Fprintf(h, "|%q|%q|%q|%q|%q|%q|%d|%d", d.Server, d.Observers, d.CNAMEDelegations, d.Zone, d.TSIGKeyName, d.TSIGSecret, d.PropagationTimeout, d.PollInterval)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

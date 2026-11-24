@@ -58,6 +58,11 @@ server certificate and an independent client CA. A trusted client can reach
 the protected route, a missing certificate receives 403 in `request` mode, and
 an untrusted certificate fails the handshake. DNS renewal does not rotate
 client trust; see the [TLS/mTLS matrix and verification commands](tls-acme.md#dns-01-tls-and-mtls-compatibility).
+If a CA-facing observer is behind, DNS-01 issuance waits and eventually reports
+a propagation error; check replication and observer configuration. A separate
+cleanup warning can remain after a certificate is installed. Follow the
+[DNS-01 manual recovery procedure](tls-acme.md#dns-01-manual-recovery) rather
+than changing the client CA or deleting an entire TXT RRset.
 
 ## Configuration
 

@@ -46,6 +46,7 @@ const (
 	dnsIssueWorkers    = 4
 	dnsAuthWorkers     = 4
 	dnsAuthRetry       = time.Second
+	dnsCleanupRetries  = 3
 	dnsACMEHTTPTimeout = 15 * time.Second
 	maxACMEResponse    = 1 << 20
 	maxCachedCertBytes = 1 << 20
@@ -60,14 +61,15 @@ const (
 )
 
 type dnsCertificateVariant struct {
-	algorithm   dnsKeyAlgorithm
-	cert        *tls.Certificate
-	loaded      bool
-	inFlight    bool
-	deferred    bool
-	nextAttempt time.Time
-	failures    int
-	lastFailure string
+	algorithm       dnsKeyAlgorithm
+	cert            *tls.Certificate
+	loaded          bool
+	inFlight        bool
+	deferred        bool
+	nextAttempt     time.Time
+	failures        int
+	lastFailure     string
+	cleanupWarnings map[string]bool
 }
 
 type dnsCertificateGroup struct {
@@ -78,34 +80,35 @@ type dnsCertificateGroup struct {
 
 // dnsACMEManager owns a bounded worker pool; handshakes never initiate orders.
 type dnsACMEManager struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	mu         sync.Mutex
-	groups     map[string]*dnsCertificateGroup
-	wake       chan struct{}
-	cacheWake  chan struct{}
-	done       chan struct{}
-	started    bool
-	closed     bool
-	cache      autocert.Cache
-	client     *acme.Client
-	accountMu  sync.Mutex
-	registerMu sync.Mutex
-	registered bool
-	authMu     sync.Mutex
-	authStates map[string]*dnsAuthorizationState
-	cleanup    chan struct{}
-	orderMu    sync.Mutex
-	orders     map[string]*dnsPendingOrder
-	email      string
-	provider   dnsChallengeProvider
-	onIssue    func(string, time.Time)
-	ocsp       atomic.Bool
-	ocspClient *http.Client
-	log        *slog.Logger
-	now        func() time.Time
-	issue      func(context.Context, []string, dnsKeyAlgorithm) (*tls.Certificate, error)
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	mu          sync.Mutex
+	groups      map[string]*dnsCertificateGroup
+	wake        chan struct{}
+	cacheWake   chan struct{}
+	done        chan struct{}
+	started     bool
+	closed      bool
+	cache       autocert.Cache
+	client      *acme.Client
+	accountMu   sync.Mutex
+	registerMu  sync.Mutex
+	registered  bool
+	authMu      sync.Mutex
+	authStates  map[string]*dnsAuthorizationState
+	cleanup     chan struct{}
+	cleanupJobs chan dnsCleanupTask
+	orderMu     sync.Mutex
+	orders      map[string]*dnsPendingOrder
+	email       string
+	provider    dnsChallengeProvider
+	onIssue     func(string, time.Time)
+	ocsp        atomic.Bool
+	ocspClient  *http.Client
+	log         *slog.Logger
+	now         func() time.Time
+	issue       func(context.Context, []string, dnsKeyAlgorithm) (*tls.Certificate, error)
 }
 
 func newDNSACMEManager(c *config.ACMEConfig, onIssue func(string, time.Time), acmeClient, ocspClient *http.Client, opts ACMEOptions) (*dnsACMEManager, error) {
@@ -121,8 +124,8 @@ func newDNSACMEManager(c *config.ACMEConfig, onIssue func(string, time.Time), ac
 	m := &dnsACMEManager{
 		ctx: ctx, cancel: cancel, groups: make(map[string]*dnsCertificateGroup),
 		authStates: make(map[string]*dnsAuthorizationState), orders: make(map[string]*dnsPendingOrder),
-		cleanup: make(chan struct{}, dnsAuthWorkers),
-		wake:    make(chan struct{}, 1), cacheWake: make(chan struct{}, 1), done: make(chan struct{}),
+		cleanup: make(chan struct{}, dnsAuthWorkers), cleanupJobs: make(chan dnsCleanupTask, maxDNSAuthStates),
+		wake: make(chan struct{}, 1), cacheWake: make(chan struct{}, 1), done: make(chan struct{}),
 		cache: dnsDirectoryCache(c.CacheDir),
 		client: &acme.Client{
 			DirectoryURL: directoryURL(c.CA), HTTPClient: limitedDNSACMEClient(acmeClient),
@@ -133,6 +136,14 @@ func newDNSACMEManager(c *config.ACMEConfig, onIssue func(string, time.Time), ac
 	}
 	m.ocsp.Store(c.OCSPStaplingEnabled())
 	m.issue = m.issueCertificate
+	m.wg.Add(dnsAuthWorkers)
+	for range dnsAuthWorkers {
+		go m.runDNSCleanup()
+	}
+	go func() {
+		m.wg.Wait()
+		close(m.done)
+	}()
 	return m, nil
 }
 
@@ -257,10 +268,6 @@ func (m *dnsACMEManager) ProviderForListener(domains, serverNames []string) Cert
 		for i := 0; i < dnsIssueWorkers; i++ {
 			go m.run(false)
 		}
-		go func() {
-			m.wg.Wait()
-			close(m.done)
-		}()
 	}
 	m.mu.Unlock()
 	m.notifyWorker(true)
@@ -292,11 +299,26 @@ func (m *dnsACMEManager) Stop() {
 	if !m.closed {
 		m.closed = true
 		m.cancel()
-		if !m.started {
-			close(m.done)
-		}
 	}
 	m.mu.Unlock()
+	m.orderMu.Lock()
+	orders := make([]*dnsPendingOrder, 0, len(m.orders))
+	for _, order := range m.orders {
+		orders = append(orders, order)
+	}
+	m.orderMu.Unlock()
+	for _, order := range orders {
+		m.abandonDNSOrder(order)
+	}
+	for {
+		select {
+		case job := <-m.cleanupJobs:
+			m.unresolvedDNSCleanup(job, "DNS-01 cleanup interrupted by shutdown")
+			job.finish()
+		default:
+			return
+		}
+	}
 }
 
 func (m *dnsACMEManager) notifyWorker(cache bool) {
@@ -859,6 +881,8 @@ func dnsACMEErrorMessage(err error) string {
 	switch {
 	case errors.As(err, &cleanupErr):
 		return "DNS-01 cleanup failed; inspect the authoritative DNS server for stale challenge records"
+	case errors.Is(err, errDNSUnresolvedCleanup):
+		return "DNS-01 validation or cleanup remains unresolved; owned TXT records were retained"
 	case errors.As(err, &challengeErr):
 		return challengeErr.Error()
 	case errors.Is(err, errCacheFailure):
@@ -895,6 +919,9 @@ func (m *dnsACMEManager) certificateSummary(names, serverNames []string) CertSum
 	for i := range group.variants {
 		variant := &group.variants[i]
 		status := CertVariantSummary{Algorithm: string(variant.algorithm), State: "pending", Error: variant.lastFailure}
+		if len(variant.cleanupWarnings) != 0 {
+			status.CleanupWarning = "DNS-01 cleanup pending or failed; check the logs and recovery guide"
+		}
 		if variant.cert != nil && variant.cert.Leaf != nil {
 			expiry := variant.cert.Leaf.NotAfter
 			status.NotAfter = &expiry

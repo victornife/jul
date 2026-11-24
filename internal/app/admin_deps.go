@@ -148,7 +148,7 @@ func AdaptCerts(in []server.CertSummary) []admin.CertStatus {
 		for _, variant := range c.Variants {
 			status.Variants = append(status.Variants, admin.CertVariantStatus{
 				Algorithm: variant.Algorithm, State: variant.State,
-				NotAfter: variant.NotAfter, Error: variant.Error,
+				NotAfter: variant.NotAfter, Error: variant.Error, CleanupWarning: variant.CleanupWarning,
 			})
 		}
 		out = append(out, status)

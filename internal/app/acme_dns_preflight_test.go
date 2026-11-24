@@ -24,7 +24,7 @@ func TestDNS01PreflightUsesServingEffectiveCredential(t *testing.T) {
 	raw.Servers[0].TLS = &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{
 		Enabled: true, Email: "ops@example.test", CA: "letsencrypt-staging",
 		Challenge: "dns-01", DNSProvider: "rfc2136", CacheDir: t.TempDir(), Domains: []string{"example.test"},
-		RFC2136: &config.RFC2136Config{Server: "127.0.0.1:53", Zone: "example.test",
+		RFC2136: &config.RFC2136Config{Server: "127.0.0.1:53", Observers: []string{"127.0.0.1:53"}, Zone: "example.test",
 			TSIGKeyName: "jul.example.test", TSIGSecret: "${env:JUL_DNS_PREFLIGHT_TSIG}"},
 	}}
 	live, err := config.NewCandidate(raw)

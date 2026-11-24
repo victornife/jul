@@ -323,10 +323,11 @@ type CertProjection struct {
 
 // CertVariantProjection is one DNS-01 certificate variant's live state.
 type CertVariantProjection struct {
-	Algorithm string `json:"algorithm"`
-	State     string `json:"state"`
-	NotAfter  string `json:"not_after,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Algorithm      string `json:"algorithm"`
+	State          string `json:"state"`
+	NotAfter       string `json:"not_after,omitempty"`
+	Error          string `json:"error,omitempty"`
+	CleanupWarning string `json:"cleanup_warning,omitempty"`
 }
 
 // SecurityProjection is the security posture for the Security panel.

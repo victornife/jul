@@ -140,6 +140,8 @@ func fullConfig() *config.Config {
 					DNSProvider: "rfc2136",
 					RFC2136: &config.RFC2136Config{
 						Server:             "ns.example.com:53",
+						Observers:          []string{"ns.example.com:53"},
+						CNAMEDelegations:   map[string]string{"_acme-challenge.example.com": "validation.example.com"},
 						Zone:               "example.com",
 						TSIGKeyName:        "jul.example.com",
 						TSIGSecret:         "fixture-secret",

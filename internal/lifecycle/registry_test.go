@@ -286,6 +286,8 @@ func TestCoarseTLSGroupsAreSplit(t *testing.T) {
 		"servers.*.tls.acme.challenge",
 		"servers.*.tls.acme.dns_provider",
 		"servers.*.tls.acme.rfc2136.server",
+		"servers.*.tls.acme.rfc2136.observers",
+		"servers.*.tls.acme.rfc2136.cname_delegations.*",
 		"servers.*.tls.acme.rfc2136.zone",
 		"servers.*.tls.acme.rfc2136.tsig_key_name",
 		"servers.*.tls.acme.rfc2136.tsig_secret",
@@ -423,6 +425,7 @@ func TestServerLevelListenerScopedPathsAreKnownToTheLinter(t *testing.T) {
 		"servers.*.tls.acme.domains":      true, "servers.*.tls.acme.email": true,
 		"servers.*.tls.acme.enabled": true, "servers.*.tls.acme.ocsp_stapling": true,
 		"servers.*.tls.acme.rfc2136.server": true, "servers.*.tls.acme.rfc2136.zone": true,
+		"servers.*.tls.acme.rfc2136.observers": true, "servers.*.tls.acme.rfc2136.cname_delegations.*": true,
 		"servers.*.tls.acme.rfc2136.tsig_key_name": true, "servers.*.tls.acme.rfc2136.tsig_secret": true,
 		"servers.*.tls.acme.rfc2136.propagation_timeout": true, "servers.*.tls.acme.rfc2136.poll_interval": true,
 	}
