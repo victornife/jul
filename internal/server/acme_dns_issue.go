@@ -34,6 +34,16 @@ type dnsCleanupError struct{ cause error }
 func (e *dnsCleanupError) Error() string { return "DNS-01 challenge cleanup failed" }
 func (e *dnsCleanupError) Unwrap() error { return e.cause }
 
+type dnsACMERetryableResponseError struct {
+	statusCode int
+	cause      error
+}
+
+func (*dnsACMERetryableResponseError) Error() string {
+	return "DNS-01 ACME retryable response could not be processed"
+}
+func (e *dnsACMERetryableResponseError) Unwrap() error { return e.cause }
+
 var (
 	errDNSAuthorizationBusy       = errors.New("DNS-01 authorization is already being processed")
 	errDNSAuthorizationStateLimit = errors.New("DNS-01 authorization state limit exceeded")
@@ -505,6 +515,10 @@ func (m *dnsACMEManager) completeDNSAuthorization(ctx context.Context, url strin
 func (m *dnsACMEManager) acceptDNSChallenge(ctx context.Context, url string, challenge *acme.Challenge) (time.Time, error) {
 	capture := &dnsACMERetryCapture{disableRetries: true}
 	_, err := m.client.Accept(context.WithValue(ctx, dnsACMERetryContextKey{}, capture), challenge)
+	if err != nil && !permanentDNSACMEError(err) &&
+		(capture.statusCode == http.StatusRequestTimeout || capture.statusCode == http.StatusTooManyRequests || capture.statusCode >= 500) {
+		err = &dnsACMERetryableResponseError{statusCode: capture.statusCode, cause: err}
+	}
 	m.authMu.Lock()
 	defer m.authMu.Unlock()
 	state := m.authStates[url]
@@ -750,8 +764,12 @@ func permanentDNSACMEError(err error) bool {
 }
 
 func retryableDNSChallengeRejection(err error) bool {
+	if permanentDNSACMEError(err) {
+		return false
+	}
 	var acmeErr *acme.Error
-	return errors.As(err, &acmeErr) && !permanentDNSACMEError(err)
+	var responseErr *dnsACMERetryableResponseError
+	return errors.As(err, &acmeErr) || errors.As(err, &responseErr)
 }
 
 func (m *dnsACMEManager) cleanupDNSLease(lease dnsChallengeLease, timeout time.Duration) error {

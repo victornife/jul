@@ -1486,6 +1486,7 @@ func TestDNSACMEFailureClassesDoNotDiscloseDetails(t *testing.T) {
 		{context.DeadlineExceeded, "issuance timed out"},
 		{context.Canceled, "issuance was cancelled"},
 		{&acme.Error{StatusCode: http.StatusTooManyRequests, Detail: secret}, "rate limit"},
+		{&dnsACMERetryableResponseError{statusCode: http.StatusTooManyRequests, cause: errors.New(secret)}, "rate limit"},
 		{errors.New(secret), "issuance failed"},
 	}
 	for _, tt := range tests {
@@ -1493,6 +1494,14 @@ func TestDNSACMEFailureClassesDoNotDiscloseDetails(t *testing.T) {
 		if !strings.Contains(got, tt.want) || strings.Contains(got, secret) {
 			t.Errorf("failure class %q leaked details or omitted its action: %q", tt.want, got)
 		}
+	}
+	cause := errors.New(secret)
+	retryable := &dnsACMERetryableResponseError{statusCode: http.StatusTooManyRequests, cause: cause}
+	if !errors.Is(retryable, cause) || !retryableDNSChallengeRejection(retryable) {
+		t.Fatal("retryable response lost its cause or retry classification")
+	}
+	if retryableDNSChallengeRejection(errors.Join(retryable, egress.ErrBlocked)) {
+		t.Fatal("egress denial was treated as retryable")
 	}
 }
 

@@ -158,6 +158,7 @@ type dnsACMERetryContextKey struct{}
 
 type dnsACMERetryCapture struct {
 	retryAt        time.Time
+	statusCode     int
 	hasRetryAfter  bool
 	disableRetries bool
 }
@@ -166,6 +167,7 @@ func (t *dnsACMELimitedTransport) RoundTrip(req *http.Request) (*http.Response, 
 	capture, _ := req.Context().Value(dnsACMERetryContextKey{}).(*dnsACMERetryCapture)
 	if capture != nil {
 		capture.retryAt = time.Time{}
+		capture.statusCode = 0
 		capture.hasRetryAfter = false
 	}
 	select {
@@ -177,6 +179,9 @@ func (t *dnsACMELimitedTransport) RoundTrip(req *http.Request) (*http.Response, 
 	ctx, cancel := context.WithTimeout(req.Context(), dnsACMEHTTPTimeout)
 	defer cancel()
 	response, err := t.next.RoundTrip(req.Clone(ctx))
+	if capture != nil && err == nil && response != nil {
+		capture.statusCode = response.StatusCode
+	}
 	if response != nil && response.Header.Get("Retry-After") != "" {
 		delay, valid := dnsAuthorizationPollDelay(response.Header.Get("Retry-After"))
 		if capture != nil && valid {
@@ -850,6 +855,7 @@ func dnsACMEErrorMessage(err error) string {
 	var challengeErr *dnsChallengeError
 	var cleanupErr *dnsCleanupError
 	var acmeErr *acme.Error
+	var responseErr *dnsACMERetryableResponseError
 	switch {
 	case errors.As(err, &cleanupErr):
 		return "DNS-01 cleanup failed; inspect the authoritative DNS server for stale challenge records"
@@ -865,7 +871,8 @@ func dnsACMEErrorMessage(err error) string {
 		return "DNS-01 issuance timed out; check ACME and DNS connectivity"
 	case errors.Is(err, context.Canceled):
 		return "DNS-01 issuance was cancelled"
-	case errors.As(err, &acmeErr) && acmeErr.StatusCode == http.StatusTooManyRequests:
+	case errors.As(err, &acmeErr) && acmeErr.StatusCode == http.StatusTooManyRequests ||
+		errors.As(err, &responseErr) && responseErr.statusCode == http.StatusTooManyRequests:
 		return "DNS-01 CA rate limit reached; wait before retrying"
 	default:
 		return "DNS-01 issuance failed; check the CA, DNS configuration and connectivity"

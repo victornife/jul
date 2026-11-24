@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"golang.org/x/crypto/acme"
@@ -73,6 +74,7 @@ type testDNSACMECA struct {
 	challengeFailures   int
 	challengeStatus     int
 	challengeAttempts   int
+	challengeTimes      []time.Time
 	challengeRetryAfter string
 	challengeGate       <-chan struct{}
 	challengeSeen       chan struct{}
@@ -254,6 +256,7 @@ func (ca *testDNSACMECA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeTestACMEJSON(w, http.StatusOK, response)
 	case strings.HasPrefix(r.URL.Path, "/challenge/"):
 		ca.challengeAttempts++
+		ca.challengeTimes = append(ca.challengeTimes, time.Now())
 		if ca.challengeRetryAfter != "" {
 			w.Header().Set("Retry-After", ca.challengeRetryAfter)
 		}
@@ -657,6 +660,11 @@ type staleRetryAfterTransport struct {
 	attempts atomic.Int32
 }
 
+type truncatedChallengeTransport struct {
+	next     http.RoundTripper
+	attempts atomic.Int32
+}
+
 type blockedAuthorizationTransport struct{ next http.RoundTripper }
 
 func (t *blockedAuthorizationTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -680,6 +688,18 @@ func (t *staleRetryAfterTransport) RoundTrip(req *http.Request) (*http.Response,
 		response.Header.Set("Retry-After", "2")
 	}
 	return response, err
+}
+
+func (t *truncatedChallengeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.next.RoundTrip(req)
+	if err != nil || !strings.HasPrefix(req.URL.Path, "/challenge/") || t.attempts.Add(1) != 1 {
+		return response, err
+	}
+	if err := response.Body.Close(); err != nil {
+		return nil, err
+	}
+	response.Body = io.NopCloser(io.MultiReader(strings.NewReader("{"), iotest.ErrReader(io.ErrUnexpectedEOF)))
+	return response, nil
 }
 
 func (t *droppedAcceptanceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -2098,9 +2118,64 @@ func TestDNS01InProcessPollsWhileChallengeRetryIsDeferred(t *testing.T) {
 }
 
 func TestDNS01InProcessChallengeRejectionRetriesBeforeAuthorizationPoll(t *testing.T) {
+	for _, truncated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("truncated=%t", truncated), func(t *testing.T) {
+			dns, provider := startRFC2136Server(t)
+			ca := startTestDNSACMECA(t, dns, "")
+			m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+			if truncated {
+				limited := m.client.HTTPClient.Transport.(*dnsACMELimitedTransport)
+				limited.next = &truncatedChallengeTransport{next: limited.next}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			if err := m.ensureAccountKey(ctx); err != nil {
+				t.Fatal(err)
+			}
+			ca.mu.Lock()
+			ca.authRetryAfter = "4"
+			ca.challengeFailures = 1
+			ca.challengeStatus = http.StatusTooManyRequests
+			ca.challengeRetryAfter = "1"
+			ca.mu.Unlock()
+			result := make(chan error, 1)
+			go func() {
+				_, err := m.issueCertificate(ctx, []string{"example.test"}, dnsECDSA)
+				result <- err
+			}()
+			waitForDNSACMETest(t, "a challenge retry before the authorization poll", func() bool {
+				ca.mu.Lock()
+				defer ca.mu.Unlock()
+				return ca.validations == 1
+			})
+			ca.mu.Lock()
+			attempts, reads := ca.challengeAttempts, ca.authReads
+			var retryDelay time.Duration
+			if len(ca.challengeTimes) >= 2 {
+				retryDelay = ca.challengeTimes[1].Sub(ca.challengeTimes[0])
+			}
+			ca.mu.Unlock()
+			if attempts != 2 || reads != 1 || retryDelay < time.Second {
+				t.Fatalf("challenge retry violated independent deadlines: attempts=%d auth reads=%d delay=%v", attempts, reads, retryDelay)
+			}
+			select {
+			case err := <-result:
+				if err != nil {
+					t.Fatalf("order did not finish after the independent retry: %v", err)
+				}
+			case <-ctx.Done():
+				t.Fatal("order did not finish after the independent retry")
+			}
+		})
+	}
+}
+
+func TestDNS01InProcessTruncatedSuccessfulAcceptanceIsReconciled(t *testing.T) {
 	dns, provider := startRFC2136Server(t)
 	ca := startTestDNSACMECA(t, dns, "")
 	m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+	limited := m.client.HTTPClient.Transport.(*dnsACMELimitedTransport)
+	limited.next = &truncatedChallengeTransport{next: limited.next}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	if err := m.ensureAccountKey(ctx); err != nil {
@@ -2108,8 +2183,6 @@ func TestDNS01InProcessChallengeRejectionRetriesBeforeAuthorizationPoll(t *testi
 	}
 	ca.mu.Lock()
 	ca.authRetryAfter = "4"
-	ca.challengeFailures = 1
-	ca.challengeStatus = http.StatusTooManyRequests
 	ca.challengeRetryAfter = "1"
 	ca.mu.Unlock()
 	result := make(chan error, 1)
@@ -2117,24 +2190,29 @@ func TestDNS01InProcessChallengeRejectionRetriesBeforeAuthorizationPoll(t *testi
 		_, err := m.issueCertificate(ctx, []string{"example.test"}, dnsECDSA)
 		result <- err
 	}()
-	waitForDNSACMETest(t, "a challenge retry before the authorization poll", func() bool {
+	waitForDNSACMETest(t, "the accepted challenge with a truncated response", func() bool {
 		ca.mu.Lock()
 		defer ca.mu.Unlock()
 		return ca.validations == 1
 	})
+	select {
+	case err := <-result:
+		t.Fatalf("order completed before authorization reconciliation: %v", err)
+	case <-time.After(1500 * time.Millisecond):
+	}
 	ca.mu.Lock()
-	attempts, reads := ca.challengeAttempts, ca.authReads
+	attempts := ca.challengeAttempts
 	ca.mu.Unlock()
-	if attempts != 2 || reads != 1 {
-		t.Fatalf("challenge retry was delayed by authorization polling: attempts=%d auth reads=%d", attempts, reads)
+	if attempts != 1 {
+		t.Fatalf("retried an uncertain successful acceptance: %d attempts", attempts)
 	}
 	select {
 	case err := <-result:
 		if err != nil {
-			t.Fatalf("order did not finish after the independent retry: %v", err)
+			t.Fatalf("order did not reconcile the successful acceptance: %v", err)
 		}
 	case <-ctx.Done():
-		t.Fatal("order did not finish after the independent retry")
+		t.Fatal("order did not reconcile the successful acceptance")
 	}
 }
 
