@@ -9,6 +9,8 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-11-24
+
 ### Security
 
 - Future release archives are attested as finished files, enabling keyless
