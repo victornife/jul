@@ -83,6 +83,13 @@ string-valued CNAME mappings must be migrated to the documented table form.
   replacement for the complete hosted PR coverage and Codecov checks.
 - `make generated-check`, `make format-check` and `python3 scripts/docs-check.py`:
   passed.
+- Gitleaks 8.30.1 was run against the committed tree at
+  `2d3925bff2de775c5539d5ee93b00e4d2c7f280b` and its PR commit range. The
+  distribution archive passed its SHA-256 check and the executable matched the
+  archive. The tree scan reported 35 findings, the same count as the previous
+  tree scan; the range scan reported the same seven previously reviewed
+  synthetic test-key or variable-assignment matches. Both scans therefore
+  returned the scanner's findings exit code, not a clean result.
 
 The follow-up remains local while the PR head is held. Hosted checks, Codecov
 and an independent PKI review on its eventual published head remain necessary.
