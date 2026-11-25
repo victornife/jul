@@ -251,14 +251,34 @@ func TestTransportGateRefusalCarriesNoConfigurationValue(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.routes().ServeHTTP(rr, withLocalAddr(httptest.NewRequest(http.MethodGet, "/api/status", nil), "203.0.113.7:9090"))
 
-	body := rr.Body.String()
+	env := decodeEnvelope(t, rr)
+	body := transportRefusalWithoutRequestID(t, rr)
 	for _, leak := range []string{"203.0.113.7", "9090", "secret-token"} {
 		if strings.Contains(body, leak) {
 			t.Fatalf("the pre-authentication refusal disclosed %q: %s", leak, body)
 		}
 	}
-	env := decodeEnvelope(t, rr)
 	if env.Error.Details.Field != "" || env.Error.Details.Kind != "" || env.Error.Details.ID != "" {
 		t.Fatalf("insecure_transport details carry more than `required`: %+v", env.Error.Details)
+	}
+}
+
+func transportRefusalWithoutRequestID(t *testing.T, rr *httptest.ResponseRecorder) string {
+	t.Helper()
+	body, err := json.Marshal(disclosureResponse(t, rr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+func TestTransportRefusalDisclosureIgnoresOnlyRequestID(t *testing.T) {
+	rr := httptest.NewRecorder()
+	rr.Header().Set("X-Request-ID", "random9090id")
+	rr.Body.WriteString(`{"error":{"message":"listen port 9090","request_id":"random9090id"}}`)
+
+	body := transportRefusalWithoutRequestID(t, rr)
+	if strings.Contains(body, "random9090id") || !strings.Contains(body, "listen port 9090") {
+		t.Fatalf("normalized refusal = %s", body)
 	}
 }

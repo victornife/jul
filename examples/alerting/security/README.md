@@ -8,6 +8,12 @@ notifications without keeping the Console open. Users with an existing
 Prometheus/Alertmanager can reuse the two rule files and adapt the one expected
 target selector; do not install a second monitoring stack.
 
+An optional outside-in application probe uses Blackbox Exporter `v0.27.0`
+and its own Prometheus process/profile. It checks one operator-configured HTTPS
+application URL through DNS, verified TLS, the Jul route, and the upstream.
+Normal monitoring remains usable without the profile; the probe does not query
+Jul's admin or metrics endpoints.
+
 ## Rule-to-signal matrix
 
 PromQL metric names, types and labels are governed by
@@ -23,6 +29,9 @@ a disappeared target, or missing producer data can also clear a symptom.
 | --- | --- | --- | --- |
 | `JulTargetUnavailable` | Prometheus `up` for each declared `jul-admin-metrics` target. | Critical; scrape stays failed for 1m; resolves after successful scrapes. | Check Jul process, `/metrics`, token and loopback/TLS. Distinct from target disappearing from discovery. Dependent operational/security rules ignore a target while its scrape is failing, so stale symptoms do not fan out; other targets remain independent. |
 | `JulExpectedTargetMissing` | `absent(up{job="jul-admin-metrics",instance="127.0.0.1:9090"})`, the recipe's one expected target. | Critical; absent for 5m; resolves when its series returns. | Check expected-target config and discovery. Add an equivalent exact-instance rule for each target managed in an existing stack. |
+| `JulApplicationProbeFailed` | Optional Blackbox result for the explicitly configured `jul-app` HTTPS URL; requires exporter scrape `up=1`. | Critical; status/body/TLS probe fails for 1m; clears only after a new successful probe. | Check DNS, verified TLS, Jul route and upstream. It is one synthetic URL, not general application correctness. |
+| `JulApplicationProbeExporterUnavailable` / `JulApplicationProbeMissing` | `up` for `jul-application-probe`; scrape failure differs from no expected target series. | Critical; `up=0` for 1m or expected `up` absent for 5m. | Check exporter process/listener/scrape and expected target config. Neither means the application recovered. |
+| `JulApplicationProbeCertificateExpiring` / `JulApplicationProbeCertificateExpiryCritical` | Blackbox Exporter's `probe_ssl_earliest_cert_expiry`, only while that same target probe succeeds. | Warning below 30d; critical below 7d for 10m. | Earliest observed chain `NotAfter` may be an intermediate; missing data is unknown. Confirm the served chain and renewal path. |
 | `JulCertificateExpiryWarning` / `JulCertificateExpiryCritical` | `jul_tls_cert_expiry_seconds{domain}` from the actual observed leaf certificate; only where Jul publishes that signal. | Warning below 30d for 10m; critical below 7d (including expired) for 10m. Warning excludes the critical band. Renewed expiry resolves the relevant alert. | Inspect served leaf and renewal. Static/unsupported certificates and a missing series are unknown, not healthy; a synthetic gauge only tests the rule and delivery path. |
 | `JulPoolNoEligibleBackend` | `jul_upstream_backends_eligible{pool}`; applies to emitted serving pools. | Critical at exactly 0 for 1m; resolves above 0. | Inspect backend health, circuit state, capacity and discovery. An absent/retired pool or missing metric does not mean zero. |
 | `JulStorageLow` / `JulStorageCritical` | Positive `jul_storage_bytes{category,kind="available|total"}` for configured Jul-owned paths. | Warning at 5–10% for 10m; critical below 5% for 5m. Exclusive bands avoid duplicate warning/critical notices. | Free/expand the category's filesystem. Missing values or nonpositive total are unknown; this is Jul-owned path capacity, not host-wide disk monitoring. |
@@ -52,6 +61,124 @@ fires:
    (e.g. `ARGS:profile_bio`) on legitimate traffic.
 3. If legitimate traffic is affected, create a narrow `#631` exception, verify
    it with `jul waf evaluate` (`#630`), and promote it through preview/diff/apply.
+
+## Optional outside-in application probe
+
+The probe's stable target identity is `jul-app`; it is not the URL. Edit the
+single `targets` entry in
+[`application-probe-prometheus.yml`](./application-probe-prometheus.yml) to the
+exact HTTPS route that should be exercised. Configure that public application
+route to return HTTP `200` and a small deterministic body containing
+`JUL_OPS_PROBE_OK` (for example a tiny readiness resource served by the
+application). Do not use a redirect, login page, authenticated URL, query
+credential, or a target whose response body contains secrets. The exporter
+rejects redirects, every status other than `200`, and responses without the
+marker. TLS chain and hostname verification are explicitly enabled.
+
+For a disposable local proxy exercise, run
+[`probe-fixture.py`](./probe-fixture.py), which binds only to loopback and
+returns the marker at `/ops-probe`, then route a Jul HTTPS listener's exact
+`/ops-probe` location to `http://127.0.0.1:18080`. Use an operator-trusted test
+CA for that listener and explicitly mount that CA into the temporary
+Blackbox Exporter configuration. The fixture proves only HTTP routing and
+marker matching; use a real publicly trusted certificate to validate the
+production trust path.
+
+Minimal Jul listener configuration for the fixture:
+
+```toml
+[[servers]]
+listen = "127.0.0.1:18443"
+server_names = ["localhost"]
+  [servers.tls]
+  cert = "/tmp/jul-app-probe/server.crt"
+  key = "/tmp/jul-app-probe/server.key"
+  [[servers.locations]]
+  match = { type = "exact", path = "/ops-probe" }
+  proxy_pass = "http://127.0.0.1:18080"
+```
+
+Use a test certificate with `DNS:localhost` in its SAN, configure the local
+Blackbox module's `tls_config.ca_file` to the issuing test CA, and keep
+`insecure_skip_verify = false`. Initialize a temporary effective-version key
+with `jul version-key init --file /tmp/jul-app-probe/effective-version.key`,
+then start Jul with the top-level `-config` and
+`-effective-version-key-file` flags before `serve`. Run Jul, the fixture, and
+the exporter in separate terminals. Query the loopback exporter with:
+
+```bash
+curl -fsS --get \
+  --data-urlencode 'module=https_application' \
+  --data-urlencode 'target=https://localhost:18443/ops-probe' \
+  http://127.0.0.1:9115/probe
+```
+
+Require `probe_success 1` and `probe_http_status_code 200`. Stop only the
+fixture with Ctrl-C and repeat the request; it must report `probe_success 0`.
+Restart the fixture and repeat until the result returns to `probe_success 1`.
+This verifies the actual Jul TLS listener, exact route, upstream, hostname
+verification, and body marker. It does not exercise Prometheus alert timing or
+Alertmanager delivery; the checked-in `promtool test rules` fixtures cover the
+alert state transitions separately.
+
+The exporter binds to `127.0.0.1:9115`; the optional probe Prometheus UI binds
+to `127.0.0.1:9092`. Both use host networking, consistent with the existing
+loopback-only monitoring listeners. The default stack and its Prometheus at
+`127.0.0.1:9091` are unchanged when `application-probe` is not enabled.
+Alertmanager remains the existing private local receiver at `127.0.0.1:9093`.
+No probe credentials or target URL are emitted as alert labels.
+
+For a probe from a **separate host**, run the exporter and its probe Prometheus
+together on that probe host (or on one private monitoring network). Use the
+application's real DNS name and URL there: this observes that host's resolver,
+egress/firewall path, trust store, SNI/hostname, Jul listener, route, and
+upstream reachability. It does not prove reachability from every client network
+or verify a browser's authentication path. Keep the exporter listener on
+loopback/private monitoring interfaces; do not publish its unauthenticated
+`/probe` endpoint to the public internet. If the receiver is elsewhere, use a
+private, authenticated/TLS Alertmanager path. The default same-host recipe
+shares Jul's host, power, and network failure domain; it cannot report a total
+host outage.
+
+Start the full optional recipe with:
+
+```bash
+docker compose -f examples/alerting/security/docker-compose.yml \
+  --profile application-probe up -d
+docker compose -f examples/alerting/security/docker-compose.yml \
+  --profile application-probe ps
+curl -fsS 'http://127.0.0.1:9092/api/v1/targets'
+curl -fsS 'http://127.0.0.1:9115/probe?module=https_application&target=https%3A%2F%2Fapp.example.test%2Fops-probe'
+```
+
+Replace the example URL in both the scrape config and the manual curl with the
+same real operator-owned URL. In the probe output, require `probe_success 1`
+and inspect `probe_http_status_code 200`; the Prometheus series use only
+`instance="jul-app"` and do not expose the configured URL. The target DNS
+lookup and TLS handshake happen in the Blackbox Exporter process, not in Jul or
+Prometheus.
+
+The rules distinguish an application response failure (`probe_success == 0`
+while exporter scrape `up == 1`), an exporter/scrape failure (`up == 0`), a
+missing expected target (no `up` series), and a scrape that lacks its expected
+probe result. Only a **new successful probe** clears the application-failure
+condition; exporter loss or missing data is not interpreted as application
+recovery. A missing `probe_ssl_earliest_cert_expiry` series is unknown, not
+healthy, and does not alert as a healthy certificate.
+
+Blackbox Exporter's `probe_ssl_earliest_cert_expiry` is the earliest `NotAfter`
+observed across certificates in the TLS connection, which can be an
+intermediate rather than only Jul's leaf. Its alert is evaluated only while a
+probe succeeds; it complements rather than replaces Jul's
+`jul_tls_cert_expiry_seconds` signal. The actual probe performs verified TLS;
+rule fixtures alone do not validate certificate parsing or trust.
+
+The outside-in probe confirms one synthetic response path, not application
+correctness, data freshness, every route, user authorization, or all upstream
+dependencies. A fixture endpoint must be deterministic and side-effect-free.
+Use a distinct `probe_target` and target URL for each independently operated
+application, and add matching exact-instance expected-target rules; do not
+replace the stable target identity with a hostname or arbitrary request label.
 
 ## Transport & Token Setup (Loopback-or-TLS Gate)
 
@@ -110,7 +237,13 @@ deliberately enables the external receiver.
     --entrypoint promtool prom/prometheus:v3.11.2 test rules security-alerts.test.yml
   docker run --rm -v "$PWD/examples/alerting/security:/etc/alertmanager:ro" \
     --entrypoint amtool prom/alertmanager:v0.32.0 check-config /etc/alertmanager/alertmanager.yml
+  promtool check rules examples/alerting/security/application-probe.rules.yml
+  promtool test rules examples/alerting/security/application-probe.test.yml
+  docker run --rm -v "$PWD/examples/alerting/security/blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro" \
+    prom/blackbox-exporter:v0.27.0 --config.file=/etc/blackbox_exporter/blackbox.yml --config.check
   docker compose -f examples/alerting/security/docker-compose.yml config --quiet
+  docker compose -f examples/alerting/security/docker-compose.yml \
+    --profile application-probe config --quiet
   ```
 - **Exercise real Jul → Prometheus → Alertmanager → local receiver:**
   ```bash
@@ -127,6 +260,8 @@ deliberately enables the external receiver.
   ```bash
   docker compose -f examples/alerting/security/docker-compose.yml down
   ```
+  If only the optional probe is being stopped while the default stack remains up,
+  use `docker compose -f examples/alerting/security/docker-compose.yml --profile application-probe stop application-probe-prometheus blackbox-exporter`.
   Remove only the local scrape credential when it is no longer needed:
   `rm -- examples/alerting/security/secrets/metrics-bearer-token.local`.
 

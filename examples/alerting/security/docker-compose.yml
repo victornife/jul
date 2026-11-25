@@ -20,6 +20,34 @@ services:
       - ./secrets:/etc/prometheus/secrets:ro
     restart: unless-stopped
 
+  application-probe-prometheus:
+    image: prom/prometheus:v3.11.2
+    network_mode: host
+    profiles: ["application-probe"]
+    command:
+      - "--config.file=/etc/prometheus/application-probe-prometheus.yml"
+      - "--storage.tsdb.retention.time=24h"
+      - "--web.external-url=http://127.0.0.1:9092"
+      - "--web.listen-address=127.0.0.1:9092"
+    volumes:
+      - ./application-probe-prometheus.yml:/etc/prometheus/application-probe-prometheus.yml:ro
+      - ./application-probe.rules.yml:/etc/prometheus/application-probe.rules.yml:ro
+    depends_on:
+      - blackbox-exporter
+      - alertmanager
+    restart: unless-stopped
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.27.0
+    network_mode: host
+    profiles: ["application-probe"]
+    command:
+      - "--config.file=/etc/blackbox_exporter/blackbox.yml"
+      - "--web.listen-address=127.0.0.1:9115"
+    volumes:
+      - ./blackbox.yml:/etc/blackbox_exporter/blackbox.yml:ro
+    restart: unless-stopped
+
   alertmanager:
     image: prom/alertmanager:v0.32.0
     network_mode: host
