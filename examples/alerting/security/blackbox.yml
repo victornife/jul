@@ -1,0 +1,18 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Optional outside-in application probe. Keep the module bounded and verify
+# the public certificate chain and hostname.
+
+modules:
+  jul_https_application:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      follow_redirects: false
+      fail_if_body_not_matches_regexp:
+        - "JUL_OPS_PROBE_OK"
+      tls_config:
+        insecure_skip_verify: false

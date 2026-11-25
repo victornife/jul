@@ -1,0 +1,86 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Native promtool tests for outside-in application probe alert distinctions.
+
+rule_files:
+  - application-probe.rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-application-probe",instance="jul-app"}'
+        values: "1 1 1 1 0 0 0"
+      - series: 'probe_success{job="jul-application-probe",instance="jul-app"}'
+        values: "1 0 0 1 _ _ _"
+      - series: 'up{job="jul-application-probe",instance="jul-other"}'
+        values: "1+0x6"
+      - series: 'probe_success{job="jul-application-probe",instance="jul-other"}'
+        values: "1+0x6"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: JulApplicationProbeFailed
+        exp_alerts:
+          - exp_labels:
+              job: jul-application-probe
+              instance: jul-app
+              severity: critical
+              category: application_probe
+            exp_annotations:
+              summary: "Jul application probe jul-app failed."
+              description: "The exporter is scrapeable, but the configured HTTPS request did not satisfy status 200 and the JUL_OPS_PROBE_OK body marker. Check DNS, TLS, the Jul route and the upstream. Recovery requires a new successful probe."
+      - eval_time: 3m
+        alertname: JulApplicationProbeFailed
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: JulApplicationProbeExporterUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: jul-application-probe
+              instance: jul-app
+              severity: critical
+              category: availability
+            exp_annotations:
+              summary: "Jul application probe exporter is unavailable for jul-app."
+              description: "Prometheus knows the expected target, but the exporter scrape failed. This does not establish an application failure; check the exporter process, private listener and scrape path."
+      - eval_time: 6m
+        alertname: JulApplicationProbeFailed
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-application-probe",instance="jul-other"}'
+        values: "1+0x8"
+      - series: 'probe_success{job="jul-application-probe",instance="jul-other"}'
+        values: "1+0x8"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: JulApplicationProbeMissing
+        exp_alerts:
+          - exp_labels:
+              job: jul-application-probe
+              instance: jul-app
+              severity: critical
+              category: availability
+            exp_annotations:
+              summary: "Expected Jul application probe jul-app is missing."
+              description: "The expected probe target has no up series. Check the probe Prometheus target configuration and relabeling; missing data is not healthy."
+
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-application-probe",instance="jul-app"}'
+        values: "1+0x8"
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: JulApplicationProbeDataMissing
+        exp_alerts:
+          - exp_labels:
+              job: jul-application-probe
+              instance: jul-app
+              severity: warning
+              category: availability
+            exp_annotations:
+              summary: "Jul application probe data is missing for jul-app."
+              description: "The exporter scrape is healthy but no probe_success sample is present. Treat the application state as unknown and inspect the exporter response and Prometheus scrape."

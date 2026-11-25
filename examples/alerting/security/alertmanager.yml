@@ -32,6 +32,12 @@ inhibit_rules:
       - alertname = "JulSecurityPostureWarningSustained"
       - area = "waf"
     equal: ["job", "instance"]
+  - source_matchers:
+      - alertname =~ "JulApplicationProbeExporterUnavailable|JulApplicationProbeMissing|JulApplicationProbeDataMissing"
+      - category = "availability"
+    target_matchers:
+      - alertname =~ "JulApplicationProbeCertificateExpiring|JulApplicationProbeCertificateExpiryCritical"
+    equal: ["job", "instance"]
 
 receivers:
   - name: "local-disposable-receiver"

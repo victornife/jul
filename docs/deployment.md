@@ -519,8 +519,11 @@ readinessProbe:
 The optional [Prometheus and Alertmanager recipe](../examples/alerting/security/README.md)
 can notify an operator about Jul target availability, leaf-certificate expiry,
 active pools without eligible backends, Jul-owned storage headroom/write
-failures, and the existing security rules. It does not change Jul's deployment
-shape or create a Jul-side daemon. Keep `/metrics` on loopback or verified TLS,
+failures, and the existing security rules. An optional Blackbox Exporter profile
+can also probe one configured public HTTPS application route from the monitoring
+host's network/DNS path; see the recipe for its separate-host placement and
+limitations. It does not change Jul's deployment shape or create a Jul-side
+daemon. Keep `/metrics` on loopback or verified TLS,
 use a dedicated `metrics:read` token, and keep Prometheus, Alertmanager and the
 default local receiver bound to loopback. A same-host monitor cannot report
 power or host loss; use independent monitoring for that failure domain.
