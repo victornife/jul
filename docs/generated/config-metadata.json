@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 470,
-    "schema_leaves": 399,
+    "schema_paths": 481,
+    "schema_leaves": 408,
     "resources": 9
   },
   "capability_build_tags": {
@@ -4457,10 +4457,11 @@
       "active_when": "ACME enabled",
       "allowed": [
         "http-01",
-        "tls-alpn-01"
+        "tls-alpn-01",
+        "dns-01"
       ],
       "default": "http-01",
-      "description": "Challenge selects the ACME challenge type: \"http-01\" (default) or \"tls-alpn-01\"",
+      "description": "Challenge selects \"http-01\" (default), \"tls-alpn-01\", or \"dns-01\"",
       "anchor": "servers-x-tls-acme-challenge"
     },
     "servers.*.tls.acme.dns_provider": {
@@ -4470,13 +4471,13 @@
       "optional": false,
       "dynamic": true,
       "subsystem": "acme",
-      "lifecycle_class": "validation_rejected_reserved",
-      "lifecycle_reason": "DNS-01 is not implemented; Validate rejects a non-empty dns_provider, so no running process can have consumed it",
-      "reserved": true,
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
       "capabilities": [
         "acme"
       ],
-      "description": "DNSProvider names the DNS-01 provider plugin (e.g. \"cloudflare\")",
+      "description": "DNSProvider must be \"rfc2136\" for DNS-01 and empty for other challenges",
       "anchor": "servers-x-tls-acme-dns_provider"
     },
     "servers.*.tls.acme.domains": {
@@ -4548,6 +4549,159 @@
       "default": true,
       "description": "OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can verify revocation without a separate round-trip",
       "anchor": "servers-x-tls-acme-ocsp_stapling"
+    },
+    "servers.*.tls.acme.rfc2136.cname_delegations.*.observers": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "Observers are authoritative DNS endpoints for this challenge alias",
+      "anchor": "servers-x-tls-acme-rfc2136-cname_delegations-x-observers"
+    },
+    "servers.*.tls.acme.rfc2136.cname_delegations.*.target": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "Target is the exact one-hop TXT owner inside the update zone",
+      "anchor": "servers-x-tls-acme-rfc2136-cname_delegations-x-target"
+    },
+    "servers.*.tls.acme.rfc2136.observers": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "Observers are CA-facing authoritative DNS endpoints, each as host:port",
+      "anchor": "servers-x-tls-acme-rfc2136-observers"
+    },
+    "servers.*.tls.acme.rfc2136.poll_interval": {
+      "kind": "scalar",
+      "scalar": "duration",
+      "go_type": "Duration",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "value_kind": "duration",
+      "constraint": "250ms to 30s and no greater than propagation_timeout",
+      "zero_semantics": "omitted/zero defaults to 2s",
+      "active_when": "DNS-01 is enabled",
+      "description": "PollInterval controls how often the authoritative server is queried",
+      "anchor": "servers-x-tls-acme-rfc2136-poll_interval"
+    },
+    "servers.*.tls.acme.rfc2136.propagation_timeout": {
+      "kind": "scalar",
+      "scalar": "duration",
+      "go_type": "Duration",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "value_kind": "duration",
+      "constraint": "1s to 15m",
+      "zero_semantics": "omitted/zero defaults to 2m",
+      "active_when": "DNS-01 is enabled",
+      "description": "PropagationTimeout bounds polling after the first authoritative DNS observation",
+      "anchor": "servers-x-tls-acme-rfc2136-propagation_timeout"
+    },
+    "servers.*.tls.acme.rfc2136.server": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "Server is the authoritative DNS update endpoint, as host:port",
+      "anchor": "servers-x-tls-acme-rfc2136-server"
+    },
+    "servers.*.tls.acme.rfc2136.tsig_key_name": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "TSIGKeyName identifies the TSIG key authorized to update the zone",
+      "anchor": "servers-x-tls-acme-rfc2136-tsig_key_name"
+    },
+    "servers.*.tls.acme.rfc2136.tsig_secret": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager uses the credential resolved at startup",
+      "startup_consumed": true,
+      "secret": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "TSIGSecret is a single environment or file reference to the base64 TSIG key",
+      "anchor": "servers-x-tls-acme-rfc2136-tsig_secret"
+    },
+    "servers.*.tls.acme.rfc2136.zone": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "Zone is the DNS zone containing the ACME challenge records",
+      "anchor": "servers-x-tls-acme-rfc2136-zone"
     },
     "servers.*.tls.cert": {
       "kind": "scalar",

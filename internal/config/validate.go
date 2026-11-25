@@ -789,13 +789,13 @@ func validateACME(a *ACMEConfig, serverNames []string, where string) []error {
 	}
 	switch a.Challenge {
 	case "http-01", "tls-alpn-01":
+		if strings.TrimSpace(a.DNSProvider) != "" || a.RFC2136 != nil {
+			errs = append(errs, fmt.Errorf("%s: DNS provider settings require challenge \"dns-01\"", where))
+		}
 	case "dns-01":
-		errs = append(errs, fmt.Errorf("%s: challenge \"dns-01\" is reserved for a future release and not implemented; use http-01 or tls-alpn-01", where))
+		errs = append(errs, validateACMEDNS(a, serverNames, where)...)
 	default:
-		errs = append(errs, fmt.Errorf("%s: invalid challenge %q (want http-01 | tls-alpn-01)", where, a.Challenge))
-	}
-	if strings.TrimSpace(a.DNSProvider) != "" {
-		errs = append(errs, fmt.Errorf("%s: dns_provider is reserved for a future DNS-01 release and not implemented; remove it", where))
+		errs = append(errs, fmt.Errorf("%s: invalid challenge %q (want http-01 | tls-alpn-01 | dns-01)", where, a.Challenge))
 	}
 	if len(a.Domains) == 0 && len(serverNames) == 0 {
 		errs = append(errs, fmt.Errorf("%s: no domains to certify (set tls.acme.domains or the server's server_names)", where))
@@ -813,6 +813,8 @@ func validateACMEConsistency(servers []ServerConfig) []error {
 	var errs []error
 	var ref *ACMEConfig
 	var refWhere string
+	dnsNamesByListener := make(map[string]map[string]bool)
+	overLimit := make(map[string]bool)
 	for i := range servers {
 		srv := &servers[i]
 		if srv.TLS == nil || !srv.TLS.Enabled || srv.TLS.ACME == nil || !srv.TLS.ACME.Enabled {
@@ -820,6 +822,26 @@ func validateACMEConsistency(servers []ServerConfig) []error {
 		}
 		a := srv.TLS.ACME
 		where := fmt.Sprintf("servers[%d].tls.acme", i)
+		if a.Challenge == "dns-01" {
+			names := dnsNamesByListener[srv.Listen]
+			if names == nil {
+				names = make(map[string]bool)
+				dnsNamesByListener[srv.Listen] = names
+			}
+			domains := a.Domains
+			if len(domains) == 0 {
+				domains = srv.ServerNames
+			}
+			for _, name := range domains {
+				if !ContainsSecretRef(name) {
+					names[normalizeDNSName(name)] = true
+				}
+			}
+			if len(names) > 100 && !overLimit[srv.Listen] {
+				overLimit[srv.Listen] = true
+				errs = append(errs, fmt.Errorf("%s: dns-01 supports at most 100 certificate names per listener", where))
+			}
+		}
 		if ref == nil {
 			ref, refWhere = a, where
 			continue
@@ -832,6 +854,9 @@ func validateACMEConsistency(servers []ServerConfig) []error {
 		}
 		if a.Challenge != ref.Challenge {
 			errs = append(errs, fmt.Errorf("%s: challenge %q differs from %s challenge %q; all ACME server blocks share one challenge type and must agree", where, a.Challenge, refWhere, ref.Challenge))
+		}
+		if a.DNSProvider != ref.DNSProvider || !equalRFC2136(a.RFC2136, ref.RFC2136) {
+			errs = append(errs, fmt.Errorf("%s: DNS provider settings differ from %s; all ACME server blocks must agree", where, refWhere))
 		}
 		if a.CacheDir != ref.CacheDir {
 			errs = append(errs, fmt.Errorf("%s: cache_dir %q differs from %s cache_dir %q; all ACME server blocks share one certificate cache and must agree", where, a.CacheDir, refWhere, ref.CacheDir))

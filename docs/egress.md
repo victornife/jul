@@ -51,6 +51,7 @@ destination is refused **at connect time**, before any bytes are sent.
 | Consul discovery (`[…discovery.consul] address`) | ✅ | Subsystem `discovery`; `-tags consul` |
 | Kubernetes discovery (`[…discovery.kubernetes] api_server`) | ✅ | Subsystem `discovery`; `-tags kubernetes`; TLS preserved |
 | ACME directory/order/challenge (`[…tls.acme]`) | ✅ | Subsystem `acme`; `-tags acme`; guarded only when `[egress]` is enabled — see [ACME & OCSP prerequisites](#acme--ocsp-prerequisites) |
+| DNS-01 RFC 2136 updates and authoritative TXT queries | ✅ | Subsystem `acme`; TCP dial of the configured DNS server uses the current egress generation |
 | OCSP responder fetch (stapling) | ✅ | Subsystem `ocsp`; `-tags acme`; guarded only when `[egress]` is enabled |
 | WASM plugin `fetch` (`[[plugins]] allowed_hosts`) | ✅ | Subsystem `plugin`; `-tags wasmplugins`; **intersection** of the plugin's `allowed_hosts` + SSRF guard **and** the global allow-list — see [Plugin fetch](#plugin-fetch) |
 | DNS / DNS-SRV discovery | — | Uses the system resolver, not an HTTP client |
@@ -141,6 +142,9 @@ The generation boundary is deliberately stronger than a pointer-only policy swap
   distinct transport pool, so a post-Publish operation cannot reuse a keep-alive
   or HTTP/2 connection created under the previous policy. Redirect hops re-read
   the current generation and may therefore become stricter after Publish.
+- **DNS-01 RFC 2136** selects the current generation for each TCP DNS connection;
+  already admitted exchanges may finish. Its DNS wire connections are direct,
+  not HTTP proxy requests, even when egress is disabled.
 
 Work already admitted under the previous generation may finish under the resources
 it captured. Retiring a generation closes idle transports/workers exactly once;
@@ -190,6 +194,7 @@ When `[egress]` is enabled, the ACME client (directory, order, and challenge
 calls) and the OCSP responder client are guarded like every other auxiliary
 fetch. Certificate issuance requires its CA endpoints in `allow`; OCSP
 stapling separately requires the responder host when stapling is enabled.
+For DNS-01, also allow the configured authoritative DNS server host or IP.
 Blocking OCSP prevents a fresh staple but does not itself block issuance or
 the TLS handshake. Public ACME CAs front
 their endpoints with CDNs whose IPs rotate, so prefer **name** entries (or a

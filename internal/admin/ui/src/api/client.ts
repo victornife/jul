@@ -1000,12 +1000,25 @@ export const AppProjectionSchema = z.object({
 export type AppProjection = z.infer<typeof AppProjectionSchema>;
 
 export const CertProjectionSchema = z.object({
+  listen: z.string().optional(),
   server_names: z.array(z.string()),
   source: z.string(),
+  state: z.string().optional(),
   issuer: z.string().optional(),
   not_after: z.string().optional(),
   days_left: z.number().optional(),
   error: z.string().optional(),
+  variants: z
+    .array(
+      z.object({
+        algorithm: z.string(),
+        state: z.string(),
+        not_after: z.string().optional(),
+        error: z.string().optional(),
+        cleanup_warning: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 export type CertProjection = z.infer<typeof CertProjectionSchema>;
 

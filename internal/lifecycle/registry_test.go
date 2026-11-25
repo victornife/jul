@@ -285,6 +285,15 @@ func TestCoarseTLSGroupsAreSplit(t *testing.T) {
 		"servers.*.tls.acme.domains",
 		"servers.*.tls.acme.challenge",
 		"servers.*.tls.acme.dns_provider",
+		"servers.*.tls.acme.rfc2136.server",
+		"servers.*.tls.acme.rfc2136.observers",
+		"servers.*.tls.acme.rfc2136.cname_delegations.*.target",
+		"servers.*.tls.acme.rfc2136.cname_delegations.*.observers",
+		"servers.*.tls.acme.rfc2136.zone",
+		"servers.*.tls.acme.rfc2136.tsig_key_name",
+		"servers.*.tls.acme.rfc2136.tsig_secret",
+		"servers.*.tls.acme.rfc2136.propagation_timeout",
+		"servers.*.tls.acme.rfc2136.poll_interval",
 		"servers.*.tls.acme.cache_dir",
 		"servers.*.tls.acme.ocsp_stapling",
 		"servers.*.http3.enabled",
@@ -297,12 +306,10 @@ func TestCoarseTLSGroupsAreSplit(t *testing.T) {
 }
 
 // TestReservedFieldsStayValidationRejected pins the truthful contract for the
-// reserved ACME DNS-01 seam and the location-scoped connection cap: validation
-// rejects both, so neither may be presented as a hot or restart-required
-// setting.
+// location-scoped connection cap: validation rejects it rather than presenting
+// it as a hot or restart-required setting.
 func TestReservedFieldsStayValidationRejected(t *testing.T) {
 	for _, path := range []string{
-		"servers.*.tls.acme.dns_provider",
 		"servers.*.locations.*.rate_limit.max_conns",
 	} {
 		e, ok := Lookup(path)
@@ -415,8 +422,13 @@ func TestServerLevelListenerScopedPathsAreKnownToTheLinter(t *testing.T) {
 		"servers.*.tls.client_auth.ca_file": true, "servers.*.tls.client_auth.crl_file": true,
 		"servers.*.tls.client_auth.verify_san": true, "servers.*.tls.acme.ca": true,
 		"servers.*.tls.acme.cache_dir": true, "servers.*.tls.acme.challenge": true,
-		"servers.*.tls.acme.domains": true, "servers.*.tls.acme.email": true,
+		"servers.*.tls.acme.dns_provider": true,
+		"servers.*.tls.acme.domains":      true, "servers.*.tls.acme.email": true,
 		"servers.*.tls.acme.enabled": true, "servers.*.tls.acme.ocsp_stapling": true,
+		"servers.*.tls.acme.rfc2136.server": true, "servers.*.tls.acme.rfc2136.zone": true,
+		"servers.*.tls.acme.rfc2136.observers": true, "servers.*.tls.acme.rfc2136.cname_delegations.*.target": true, "servers.*.tls.acme.rfc2136.cname_delegations.*.observers": true,
+		"servers.*.tls.acme.rfc2136.tsig_key_name": true, "servers.*.tls.acme.rfc2136.tsig_secret": true,
+		"servers.*.tls.acme.rfc2136.propagation_timeout": true, "servers.*.tls.acme.rfc2136.poll_interval": true,
 	}
 	for _, e := range Registry {
 		if !strings.HasPrefix(e.Path, "servers.*.") {

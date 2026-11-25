@@ -96,9 +96,10 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.deps.LoadConfig != nil && s.deps.Certs != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
-			certs := projectTLS(cfg, s.deps.Certs())
+			cfg, effective := s.servingStatusConfigs(cfg)
+			certs := projectTLS(cfg, effective, s.deps.Certs())
 			for _, c := range certs {
-				if c.DaysLeft < 0 {
+				if c.DaysLeft != nil && *c.DaysLeft < 0 {
 					writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 						"status": "not ready",
 						"reason": "certificate_expired",

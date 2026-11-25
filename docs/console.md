@@ -430,7 +430,12 @@ out-of-band file rewrite can never appear live (#100):
 - **File certificates** are parsed for subject, issuer, SANs, and an expiry
   countdown (red within 14 days, amber within 30).
 - **ACME-managed** certificates are marked as auto-renewing; their live expiry
-  is exported through the `jul_tls_cert_expiry_seconds` metric.
+  is exported through the `jul_tls_cert_expiry_seconds` metric. DNS-01 also
+  shows listener-scoped pending, available or failed state and safe renewal
+  guidance; a valid certificate can remain available while renewal reports an
+  error. A per-variant cleanup warning is separate from issuance state: follow
+  the [DNS-01 manual recovery procedure](tls-acme.md#dns-01-manual-recovery)
+  and do not remove a record while the CA may still be validating.
 
 No private-key material is ever returned. Backed by `GET /api/certs`.
 
@@ -909,6 +914,24 @@ The TLS panel provides **guided creation** of a new TLS-enabled server via
 or production, with optional mutual TLS — generated as a `[[servers]]` block and
 routed through the same Validate → Diff → Apply pipeline. Route creation
 includes guided **auth** (CIDR allow/deny, HTTP Basic, JWT, or forward-auth).
+DNS-01 creation selects RFC 2136, requires the update server/zone, CA-facing
+authoritative observers, TSIG key name and a secret **reference**, and explains
+wildcard scope and staging. All observers must see the exact TXT before
+submission. A propagation error calls for checking their replication and egress;
+increasing the timeout does not make an unobserved public secondary visible.
+Explicit one-hop CNAME mappings are configured in raw TOML, with separate
+per-owner alias observers and target observers; both are checked before every
+submission or retry. See
+[delegation and propagation](tls-acme.md#delegation-and-propagation).
+The Console explains automatic ECDSA/RSA selection and separate certificate
+orders. The preview describes only the generated block and warns that a shared
+listener can have stronger TLS/client-auth policy or HTTP/3 enabled. The
+certificate status shows each variant's availability and renewal errors.
+Provider, certificate-name and account changes are restart-bound: stage them
+and restart rather than expecting partial hot publication. File-owned
+configuration remains preview-only; writes require the usual permissions.
+An ACME-disabled build rejects the candidate during validation. Existing
+advanced ACME settings remain editable in raw TOML.
 
 Beyond creation, several settings are edited **in place** through structured
 patch operations that are previewed as a diff before they apply: a route's proxy

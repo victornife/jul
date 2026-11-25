@@ -248,7 +248,7 @@ func TestProviderOCSPWrapping(t *testing.T) {
 
 	cfg := acmeServerCfg()
 	cfg.Servers[0].TLS.ACME.OCSPStapling = &on
-	manager, err := NewACMEManager(cfg.Servers, nil, nil, nil)
+	manager, err := NewACMEManager(cfg.Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatalf("NewACMEManager: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestProviderOCSPWrapping(t *testing.T) {
 
 	cfgOff := acmeServerCfg()
 	cfgOff.Servers[0].TLS.ACME.OCSPStapling = &off
-	managerOff, err := NewACMEManager(cfgOff.Servers, nil, nil, nil)
+	managerOff, err := NewACMEManager(cfgOff.Servers, nil, nil, nil, ACMEOptions{})
 	if err != nil {
 		t.Fatalf("NewACMEManager (off): %v", err)
 	}

@@ -18,22 +18,35 @@ import (
 // material. A non-empty Error means the configured certificate could not be
 // read or parsed.
 type CertSummary struct {
+	Listen string `json:"listen,omitempty"`
 	// ServerNames are the virtual-host names this certificate serves.
 	ServerNames []string `json:"server_names"`
 	// Source is "file" for a static cert/key pair or "acme" for an
 	// automatically managed certificate.
 	Source string `json:"source"`
-	// Subject is the leaf certificate subject common name (file source only).
+	// State is the live ACME management state when the provider exposes it.
+	State string `json:"state,omitempty"`
+	// Subject is the leaf certificate subject common name when available.
 	Subject string `json:"subject,omitempty"`
-	// Issuer is the leaf certificate issuer common name (file source only).
+	// Issuer is the leaf certificate issuer common name when available.
 	Issuer string `json:"issuer,omitempty"`
-	// DNSNames are the subject alternative names on the leaf (file source only).
+	// DNSNames are the subject alternative names on the leaf when available.
 	DNSNames []string `json:"dns_names,omitempty"`
-	// NotBefore and NotAfter bound the validity window (file source only).
+	// NotBefore and NotAfter bound the validity window when available.
 	NotBefore time.Time `json:"not_before,omitempty"`
 	NotAfter  time.Time `json:"not_after,omitempty"`
 	// Error, when set, explains why the configured certificate is unusable.
-	Error string `json:"error,omitempty"`
+	Error    string               `json:"error,omitempty"`
+	Variants []CertVariantSummary `json:"variants,omitempty"`
+}
+
+// CertVariantSummary reports the live state of one automatically managed key type.
+type CertVariantSummary struct {
+	Algorithm      string     `json:"algorithm"`
+	State          string     `json:"state"`
+	NotAfter       *time.Time `json:"not_after,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	CleanupWarning string     `json:"cleanup_warning,omitempty"`
 }
 
 // InspectCerts walks the server blocks and returns a summary of each TLS
@@ -58,12 +71,15 @@ func InspectCerts(servers []config.ServerConfig) []CertSummary {
 		}
 		if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
 			out = append(out, CertSummary{
+				Listen:      srv.Listen,
 				ServerNames: append([]string(nil), srv.ServerNames...),
 				Source:      "acme",
 			})
 			continue
 		}
-		out = append(out, inspectFileCert(srv))
+		summary := inspectFileCert(srv)
+		summary.Listen = srv.Listen
+		out = append(out, summary)
 	}
 	return out
 }
@@ -128,7 +144,7 @@ func (s *Server) LiveCertSummaries() []CertSummary {
 			continue
 		}
 		if acmeEnabledForAddr(cfg.Servers, addr) {
-			out = append(out, acmeCertSummariesForAddr(cfg.Servers, addr)...)
+			out = append(out, acmeCertSummariesForAddr(cfg.Servers, addr, s.ACME)...)
 			continue
 		}
 		s.mu.Lock()
@@ -142,23 +158,34 @@ func (s *Server) LiveCertSummaries() []CertSummary {
 			continue
 		}
 		if summarized, ok := holder.p.(interface{ Summaries() []CertSummary }); ok {
-			out = append(out, summarized.Summaries()...)
+			summaries := summarized.Summaries()
+			for i := range summaries {
+				summaries[i].Listen = addr
+			}
+			out = append(out, summaries...)
 		}
 	}
 	return out
 }
 
-// acmeCertSummariesForAddr reports one ACME marker per ACME-enabled server
-// block on addr, matching InspectCerts' ACME branch. No file or cache read is
-// needed: ACME's live expiry is exported through the TLS metrics gauge.
-func acmeCertSummariesForAddr(servers []config.ServerConfig, addr string) []CertSummary {
+// acmeCertSummariesForAddr reports one entry per ACME-enabled server block.
+// Providers that expose live state add metadata without accessing the cache.
+func acmeCertSummariesForAddr(servers []config.ServerConfig, addr string, manager ACMEManager) []CertSummary {
 	var out []CertSummary
+	domains := acmeDomainsForAddr(servers, addr)
 	for _, srv := range servers {
 		if srv.Listen != addr || srv.TLS == nil || !srv.TLS.Enabled ||
 			srv.TLS.ACME == nil || !srv.TLS.ACME.Enabled {
 			continue
 		}
-		out = append(out, CertSummary{ServerNames: append([]string(nil), srv.ServerNames...), Source: "acme"})
+		summary := CertSummary{ServerNames: append([]string(nil), srv.ServerNames...), Source: "acme"}
+		if live, ok := manager.(interface {
+			certificateSummary([]string, []string) CertSummary
+		}); ok {
+			summary = live.certificateSummary(domains, srv.ServerNames)
+		}
+		summary.Listen = addr
+		out = append(out, summary)
 	}
 	return out
 }

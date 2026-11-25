@@ -73,6 +73,35 @@ describe("generateTLSToml ACME", () => {
     );
     expect(toml).toContain('domains = ["a.example.com", "b.example.com"]');
   });
+
+  it("generates DNS-01 with a secret reference and client authentication", () => {
+    const config = draft({
+      serverNames: "example.com, *.example.com",
+      acmeEmail: "ops@example.com",
+      acmeChallenge: "dns-01",
+      dnsServer: "dns.example.com:53",
+      dnsObservers: "ns1.example.com:53, ns2.example.com:53",
+      dnsZone: "example.com",
+      dnsTSIGKeyName: "jul.example.com",
+      dnsTSIGSecretRef: "${env:JUL_DNS_TSIG}",
+      clientAuthMode: "request",
+      clientCAFile: "/etc/jul/clients.pem",
+      target: "http://app",
+    });
+    const toml = generateTLSToml(config);
+    expect(toml).toContain('dns_provider = "rfc2136"');
+    expect(toml).toContain("[servers.tls.acme.rfc2136]");
+    expect(toml).toContain('observers = ["ns1.example.com:53", "ns2.example.com:53"]');
+    expect(toml).toContain('tsig_secret = "${env:JUL_DNS_TSIG}"');
+    expect(toml).toContain('mode = "request"');
+    expect(tlsWarnings(config)).toEqual([]);
+
+    const literal = { ...config, dnsTSIGSecretRef: "do-not-export-this-secret" };
+    expect(generateTLSToml(literal)).not.toContain("do-not-export-this-secret");
+    expect(tlsWarnings(literal)).toContain(
+      "DNS-01 needs a single secret reference; never paste the TSIG secret itself.",
+    );
+  });
 });
 
 describe("generateTLSToml static", () => {

@@ -25,6 +25,7 @@ const selectedProjects = process.argv
   .filter((arg) => arg.startsWith("--project="))
   .map((arg) => arg.slice("--project=".length));
 const runRealServer = selectedProjects.length === 0 || selectedProjects.includes("real-server");
+const runMocked = selectedProjects.length === 0 || selectedProjects.includes("chromium");
 
 export default defineConfig({
   testDir: "./e2e",
@@ -78,22 +79,30 @@ export default defineConfig({
       testMatch: ["e2e/inspection-real-server.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "dns-real-server",
+      testMatch: ["e2e/dns-real-server.spec.ts"],
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   // webServer entries: the mocked-API smoke test uses vite preview; the
   // real-server project rebuilds jul at launch so the binary embeds the SPA that
   // the job just produced, rather than an older committed dist snapshot.
   webServer: [
-    {
-      command: `node node_modules/vite/bin/vite.js preview --port ${String(PREVIEW_PORT)}`,
-      url: baseURL,
-      reuseExistingServer: !process.env.CI,
-      timeout: 30_000,
-    },
+    ...(runMocked
+      ? [
+          {
+            command: `node node_modules/vite/bin/vite.js preview --port ${String(PREVIEW_PORT)}`,
+            url: baseURL,
+            reuseExistingServer: !process.env.CI,
+            timeout: 30_000,
+          },
+        ]
+      : []),
     ...(runRealServer
       ? [
           {
-            command:
-              'cd ../../../ && bash scripts/console-e2e-server.sh',
+            command: "cd ../../../ && bash scripts/console-e2e-server.sh",
             url: `${realServerURL}/healthz`,
             reuseExistingServer: !process.env.CI,
             timeout: 60_000,

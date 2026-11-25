@@ -227,6 +227,105 @@ describe("comparison disclosure boundary in the Console", () => {
     },
   );
 
+  it("pins and stages a DNS-01 handoff without storing the raw candidate", async () => {
+    const fetch = vi.fn((url: string, _init?: RequestInit) => {
+      if (url === "/api/config") return Promise.resolve(json({ raw: "# baseline", base_version: "v1" }));
+      if (url === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+      if (url === "/api/config/preview") return Promise.resolve(json({
+        ok: true, base_version: "v1", valid: true, validation_errors: [],
+        diff: { summary: "DNS-01 requires restart" },
+        lifecycle: { can_apply_hot: false, can_stage_restart: true },
+      }));
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<MemoryRouter><TLSEditor onClose={() => undefined} /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("Challenge"), { target: { value: "dns-01" } });
+    fireEvent.change(screen.getByLabelText("DNS server and port"), { target: { value: "dns.example.test:53" } });
+    fireEvent.change(screen.getByLabelText(/^CA-facing DNS observers/), { target: { value: "ns.example.test:53" } });
+    fireEvent.change(screen.getByLabelText("DNS update zone"), { target: { value: "example.test" } });
+    fireEvent.change(screen.getByLabelText("TSIG key name"), { target: { value: "jul.example.test" } });
+    fireEvent.change(screen.getByLabelText(/TSIG secret reference/), { target: { value: "${env:JUL_TEST_TSIG}" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review in editor →" }));
+    let handoff: ReturnType<typeof takePendingDraft> = null;
+    await waitFor(() => {
+      handoff = takePendingDraft();
+      expect(handoff).toMatchObject({
+        kind: "toml", baseVersion: "v1", recommendedAction: "stage_restart", candidateState: "memory_only",
+      });
+    });
+    expect(JSON.stringify(handoff)).toContain("${env:JUL_TEST_TSIG}");
+    expect(JSON.stringify(Object.values(sessionStorage))).not.toContain("JUL_TEST_TSIG");
+    const preview = fetch.mock.calls.find(([url]) => url === "/api/config/preview");
+    expect(preview?.[1]?.method).toBe("POST");
+    expect(new Headers(preview?.[1]?.headers).get("X-Jul-Base-Version")).toBe("v1");
+    expect(preview?.[1]?.body).toContain("${env:JUL_TEST_TSIG}");
+    expect(preview?.[1]?.body).toContain('server = "dns.example.test:53"');
+    expect(preview?.[1]?.body).toContain('observers = ["ns.example.test:53"]');
+    expect(preview?.[1]?.body).toContain('zone = "example.test"');
+    expect(preview?.[1]?.body).toContain('tsig_key_name = "jul.example.test"');
+  });
+
+  it("refuses a DNS-01 handoff when the preview belongs to a different base", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url === "/api/config") return Promise.resolve(json({ raw: "# baseline", base_version: "v1" }));
+      if (url === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+      if (url === "/api/config/preview") return Promise.resolve(json({
+        ok: true, base_version: "v2", valid: true, validation_errors: [],
+        diff: { summary: "stale" }, lifecycle: { can_apply_hot: false, can_stage_restart: true },
+      }));
+      throw new Error(`unexpected request ${url}`);
+    }));
+    render(<MemoryRouter><TLSEditor onClose={() => undefined} /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("Challenge"), { target: { value: "dns-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review in editor →" }));
+    expect(await screen.findByText(/did not match the source base version/)).toBeInTheDocument();
+    expect(takePendingDraft()).toBeNull();
+  });
+
+  it.each([
+    {
+      name: "missing raw base version",
+      raw: { raw: "# baseline" },
+      preview: null,
+      message: "The raw configuration and its base version are required for DNS-01 review.",
+    },
+    {
+      name: "server validation failure",
+      raw: { raw: "# baseline", base_version: "v1" },
+      preview: {
+        ok: true, base_version: "v1", valid: false,
+        validation_errors: [{ code: "invalid", path: "servers.tls.acme", severity: "error", summary: "DNS provider is required" }],
+        diff: { summary: "invalid" }, lifecycle: { can_apply_hot: false, can_stage_restart: true },
+      },
+      message: "servers.tls.acme: DNS provider is required",
+    },
+    {
+      name: "no safe server-provided apply action",
+      raw: { raw: "# baseline", base_version: "v1" },
+      preview: {
+        ok: true, base_version: "v1", valid: true, validation_errors: [],
+        diff: { summary: "blocked" }, lifecycle: { can_apply_hot: false, can_stage_restart: false },
+      },
+      message: "The server did not offer a safe apply action for this DNS-01 candidate.",
+    },
+  ])("rejects DNS-01 handoff on $name", async ({ raw, preview, message }) => {
+    const fetch = vi.fn((url: string) => {
+      if (url === "/api/config") return Promise.resolve(json(raw));
+      if (url === "/api/config/pending-restart") return Promise.resolve(json({ pending: false }));
+      if (url === "/api/config/preview" && preview) return Promise.resolve(json(preview));
+      throw new Error(`unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetch);
+    render(<MemoryRouter><TLSEditor onClose={() => undefined} /></MemoryRouter>);
+    fireEvent.change(screen.getByLabelText("Challenge"), { target: { value: "dns-01" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review in editor →" }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(takePendingDraft()).toBeNull();
+    expect(fetch.mock.calls.some(([url]) => url === "/api/config/apply")).toBe(false);
+    if (!preview) expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps a handoff in memory when session storage rejects cleanup", () => {
     vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
       throw new Error("storage unavailable");

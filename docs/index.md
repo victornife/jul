@@ -97,6 +97,7 @@ inside the immutable release archives. They do not close the partial-audit ledge
 | Capability | Canonical guide | Status |
 | --- | --- | --- |
 | TLS + automatic HTTPS (ACME) | [tls-acme.md](tls-acme.md) | `GA` / `soaked` |
+| ACME DNS-01 with RFC 2136 | [tls-acme.md](tls-acme.md#dns-01-with-rfc-2136-and-tsig) | `Beta` / `implemented` |
 | Compression (gzip / Brotli / Zstd) | [compression.md](compression.md) | `GA` / `soaked` |
 | Rate + connection limiting | [ratelimit.md](ratelimit.md) | `GA` / `soaked` |
 | Authentication (CIDR / Basic / JWT / forward-auth) | [auth.md](auth.md) | `GA` / `soaked` |

@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 399 configurable leaves.
+Coverage: 408 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3810,7 +3810,7 @@ CacheDir is where issued certificates and account keys are stored.
 
 ## `servers.*.tls.acme.challenge` {#servers-x-tls-acme-challenge}
 
-Challenge selects the ACME challenge type: "http-01" (default) or "tls-alpn-01".
+Challenge selects "http-01" (default), "tls-alpn-01", or "dns-01".
 
 | | |
 | --- | --- |
@@ -3821,23 +3821,23 @@ Challenge selects the ACME challenge type: "http-01" (default) or "tls-alpn-01".
 | Requires | `acme` |
 | Default | http-01 |
 | Flags | startup-consumed, per-address, conditional |
-| Allowed values | `http-01`, `tls-alpn-01` |
+| Allowed values | `http-01`, `tls-alpn-01`, `dns-01` |
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
 | Active when | ACME enabled |
 
 ## `servers.*.tls.acme.dns_provider` {#servers-x-tls-acme-dns_provider}
 
-DNSProvider names the DNS-01 provider plugin (e.g. "cloudflare").
+DNSProvider must be "rfc2136" for DNS-01 and empty for other challenges.
 
 | | |
 | --- | --- |
 | Type | `string` |
-| Lifecycle | `validation_rejected_reserved` |
+| Lifecycle | `restart_required` |
 | Subsystem | `acme` |
-| Why | DNS-01 is not implemented; Validate rejects a non-empty dns_provider, so no running process can have consumed it |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
 | Requires | `acme` |
-| Flags | reserved |
+| Flags | startup-consumed |
 
 ## `servers.*.tls.acme.domains` {#servers-x-tls-acme-domains}
 
@@ -3891,6 +3891,129 @@ OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can v
 | Why | the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106) |
 | Requires | `acme` |
 | Default | true |
+
+## `servers.*.tls.acme.rfc2136.cname_delegations.*.observers` {#servers-x-tls-acme-rfc2136-cname_delegations-x-observers}
+
+Observers are authoritative DNS endpoints for this challenge alias.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+
+## `servers.*.tls.acme.rfc2136.cname_delegations.*.target` {#servers-x-tls-acme-rfc2136-cname_delegations-x-target}
+
+Target is the exact one-hop TXT owner inside the update zone.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+
+## `servers.*.tls.acme.rfc2136.observers` {#servers-x-tls-acme-rfc2136-observers}
+
+Observers are CA-facing authoritative DNS endpoints, each as host:port.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+
+## `servers.*.tls.acme.rfc2136.poll_interval` {#servers-x-tls-acme-rfc2136-poll_interval}
+
+PollInterval controls how often the authoritative server is queried.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+| Constraint | 250ms to 30s and no greater than propagation_timeout |
+| Zero/empty semantics | omitted/zero defaults to 2s |
+| Active when | DNS-01 is enabled |
+
+## `servers.*.tls.acme.rfc2136.propagation_timeout` {#servers-x-tls-acme-rfc2136-propagation_timeout}
+
+PropagationTimeout bounds polling after the first authoritative DNS observation.
+
+| | |
+| --- | --- |
+| Type | `duration` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+| Constraint | 1s to 15m |
+| Zero/empty semantics | omitted/zero defaults to 2m |
+| Active when | DNS-01 is enabled |
+
+## `servers.*.tls.acme.rfc2136.server` {#servers-x-tls-acme-rfc2136-server}
+
+Server is the authoritative DNS update endpoint, as host:port.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+
+## `servers.*.tls.acme.rfc2136.tsig_key_name` {#servers-x-tls-acme-rfc2136-tsig_key_name}
+
+TSIGKeyName identifies the TSIG key authorized to update the zone.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+
+## `servers.*.tls.acme.rfc2136.tsig_secret` {#servers-x-tls-acme-rfc2136-tsig_secret}
+
+TSIGSecret is a single environment or file reference to the base64 TSIG key.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager uses the credential resolved at startup |
+| Requires | `acme` |
+| Flags | startup-consumed, secret |
+
+## `servers.*.tls.acme.rfc2136.zone` {#servers-x-tls-acme-rfc2136-zone}
+
+Zone is the DNS zone containing the ACME challenge records.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
 
 ## `servers.*.tls.cert` {#servers-x-tls-cert}
 

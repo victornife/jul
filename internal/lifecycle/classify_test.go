@@ -112,6 +112,171 @@ func TestClassifyNewListenerAdoptsBindTimeValues(t *testing.T) {
 	}
 }
 
+func TestDNS01ManagerLifecycleAcrossListenerChanges(t *testing.T) {
+	dns := config.ServerConfig{
+		Listen: ":443", ServerNames: []string{"first.example.test"},
+		TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{
+			Enabled: true, Challenge: "dns-01", DNSProvider: "rfc2136",
+			Email: "ops@example.test", CA: "letsencrypt-staging", CacheDir: "/cache",
+			Domains: []string{"*.example.test", "example.test"},
+			RFC2136: &config.RFC2136Config{Server: "dns.example.test:53", Zone: "example.test",
+				TSIGKeyName: "jul.example.test", TSIGSecret: "fixture-secret"},
+		}},
+	}
+	plain, err := (&config.Config{Servers: []config.ServerConfig{{Listen: ":8080"}}}).Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	withDNS, err := (&config.Config{Servers: []config.ServerConfig{plain.Servers[0], dns}}).Clone()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRestart := func(t *testing.T, before, after *config.Config, want bool) {
+		t.Helper()
+		result, err := Classify(before, after, Live{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := !result.CanApplyHot; got != want {
+			t.Fatalf("preview restart=%v, want %v: %+v", got, want, result)
+		}
+		if _, got := RestartRequired(ComputeFingerprint(before), ComputeFingerprint(after)); got != want {
+			t.Fatalf("reload restart=%v, want %v", got, want)
+		}
+	}
+	t.Run("adding first DNS manager", func(t *testing.T) { assertRestart(t, plain, withDNS, true) })
+	t.Run("removing DNS manager", func(t *testing.T) { assertRestart(t, withDNS, plain, true) })
+	t.Run("unrelated listener", func(t *testing.T) {
+		next, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers = append(next.Servers, config.ServerConfig{Listen: ":9090"})
+		assertRestart(t, withDNS, next, false)
+	})
+	t.Run("SNI scope only", func(t *testing.T) {
+		next, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].ServerNames = []string{"second.example.test"}
+		assertRestart(t, withDNS, next, false)
+	})
+	t.Run("CNAME alias observer changes require restart", func(t *testing.T) {
+		before, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		before.Servers[1].TLS.ACME.RFC2136.CNAMEDelegations = map[string]config.RFC2136CNAMEDelegation{
+			"_acme-challenge.example.test": {Target: "txt.example.test", Observers: []string{"first.test:53"}},
+		}
+		next, err := before.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].TLS.ACME.RFC2136.CNAMEDelegations["_acme-challenge.example.test"] =
+			config.RFC2136CNAMEDelegation{Target: "txt.example.test", Observers: []string{"second.test:53"}}
+		assertRestart(t, before, next, true)
+	})
+	t.Run("moving the same certificate group to a new listener", func(t *testing.T) {
+		next, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].Listen = ":9443"
+		assertRestart(t, withDNS, next, false)
+	})
+	t.Run("adding a vhost with the same listener policy and certificate", func(t *testing.T) {
+		next, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		duplicate, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		duplicate.Servers[1].ServerNames = []string{"second.example.test"}
+		next.Servers = append(next.Servers, duplicate.Servers[1])
+		assertRestart(t, withDNS, next, false)
+		next.Servers[2].TLS.MinVersion = "1.3"
+		assertRestart(t, withDNS, next, true)
+	})
+	t.Run("splitting a certificate group across equivalent vhosts", func(t *testing.T) {
+		before, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		before.Servers[1].ServerNames = []string{"example.test", "*.example.test"}
+		next, err := before.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		split, err := before.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].ServerNames = []string{"example.test"}
+		next.Servers[1].TLS.ACME.Domains = []string{"example.test"}
+		split.Servers[1].ServerNames = []string{"*.example.test"}
+		split.Servers[1].TLS.ACME.Domains = []string{"*.example.test"}
+		next.Servers = append(next.Servers, split.Servers[1])
+		assertRestart(t, before, next, false)
+		next.Servers[2].TLS.MinVersion = "1.3"
+		assertRestart(t, before, next, true)
+	})
+	t.Run("certificate identities", func(t *testing.T) {
+		next, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].TLS.ACME.Domains = []string{"other.example.test"}
+		assertRestart(t, withDNS, next, true)
+	})
+	t.Run("provider change on replacement listener", func(t *testing.T) {
+		next, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].Listen = ":9443"
+		next.Servers[1].TLS.ACME.RFC2136.TSIGSecret = "new-fixture-secret"
+		assertRestart(t, withDNS, next, true)
+	})
+	t.Run("disabled TLS does not consume DNS provider settings", func(t *testing.T) {
+		before, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		before.Servers[1].TLS.Enabled = false
+		next.Servers[1].TLS.Enabled = false
+		next.Servers[1].TLS.ACME.RFC2136.TSIGSecret = "new-fixture-secret"
+		assertRestart(t, before, next, false)
+	})
+	t.Run("certificate groups change when listeners are merged", func(t *testing.T) {
+		before, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		second.Servers[1].Listen = ":9443"
+		second.Servers[1].ServerNames = []string{"other.example.test"}
+		second.Servers[1].TLS.ACME.Domains = []string{"other.example.test"}
+		before.Servers = append(before.Servers, second.Servers[1])
+		next, err := before.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].Listen, next.Servers[2].Listen = ":10443", ":10443"
+		assertRestart(t, before, next, true)
+	})
+}
+
 // TestClassifyRemovedListenerDoesNotStrand proves removing an address is not
 // reported as restart-required.
 func TestClassifyRemovedListenerDoesNotStrand(t *testing.T) {
@@ -275,13 +440,13 @@ func TestClassifyIgnoredOnlyCandidateAppliesHot(t *testing.T) {
 func TestClassifyReservedFieldBlocksApply(t *testing.T) {
 	before := fullConfig()
 	after := fullConfig()
-	after.Servers[0].TLS.ACME.DNSProvider = "cloudflare"
+	after.Servers[0].Locations[0].RateLimit.MaxConns = 17
 
 	res, err := Classify(before, after, Live{BoundHTTPAddrs: []string{":8443"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(res.ValidationRejected, "servers.*.tls.acme.dns_provider") {
+	if !contains(res.ValidationRejected, "servers.*.locations.*.rate_limit.max_conns") {
 		t.Fatalf("validation-rejected = %v", res.ValidationRejected)
 	}
 	if res.CanApplyHot || res.CanStageRestart {

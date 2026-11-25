@@ -53,6 +53,47 @@ function CertCard({ cert }: { readonly cert: CertProjection }) {
 
       {/* metadata */}
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
+        {cert.listen && (
+          <>
+            <dt className="text-jul-muted">Listener</dt>
+            <dd className="col-span-1 sm:col-span-2 font-mono text-jul-text">{cert.listen}</dd>
+          </>
+        )}
+        {cert.source === "acme" && (
+          <>
+            <dt className="text-jul-muted">Status</dt>
+            <dd className="col-span-1 sm:col-span-2 text-jul-text">
+              {cert.state ?? (cert.not_after ? "available" : "unknown")}
+            </dd>
+          </>
+        )}
+        {cert.variants && cert.variants.length > 0 && (
+          <>
+            <dt className="text-jul-muted">Certificate variants</dt>
+            <dd className="col-span-1 sm:col-span-2 text-jul-text">
+              <ul className="space-y-1">
+                {cert.variants.map((variant) => {
+                  const label =
+                    variant.algorithm === "ecdsa-p256"
+                      ? "ECDSA P-256"
+                      : variant.algorithm === "rsa-2048"
+                        ? "RSA-2048"
+                        : variant.algorithm;
+                  return (
+                    <li key={variant.algorithm}>
+                      {label}: {variant.state}
+                      {variant.not_after && `; expires ${variant.not_after}`}
+                      {variant.error && <span className="text-jul-danger">; {variant.error}</span>}
+                      {variant.cleanup_warning && (
+                        <span className="text-jul-warning">; {variant.cleanup_warning}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </dd>
+          </>
+        )}
         {cert.issuer && (
           <>
             <dt className="text-jul-muted">Issuer</dt>
@@ -259,7 +300,12 @@ function CertTable({ certs }: { readonly certs: CertProjection[] }) {
             <th className="px-4 py-2 text-left font-semibold">Source</th>
             <th className="px-4 py-2 text-left font-semibold">Issuer</th>
             <th className="px-4 py-2 text-left font-semibold">Expires</th>
-            <th className="px-4 py-2 text-left font-semibold cursor-pointer select-none" onClick={() => { toggle("days_left"); }}>
+            <th
+              className="px-4 py-2 text-left font-semibold cursor-pointer select-none"
+              onClick={() => {
+                toggle("days_left");
+              }}
+            >
               Days left {sortBy === "days_left" ? (sortDir === "asc" ? "↑" : "↓") : ""}
             </th>
             <th className="px-4 py-2 text-left font-semibold">Status</th>
@@ -271,19 +317,41 @@ function CertTable({ certs }: { readonly certs: CertProjection[] }) {
             const expired = dl !== undefined && dl < 0;
             const warn = dl !== undefined && dl <= 7;
             const hasError = cert.error && cert.error.length > 0;
-            const statusClass = expired || hasError
-              ? "text-jul-danger"
-              : warn
-                ? "text-jul-warning"
-                : "text-jul-success";
-            const statusText = hasError ? "error" : expired ? "expired" : warn ? "renew soon" : "ok";
+            const unknown = !cert.not_after && !hasError;
+            const statusClass =
+              expired || hasError
+                ? "text-jul-danger"
+                : warn
+                  ? "text-jul-warning"
+                  : unknown
+                    ? "text-jul-muted"
+                    : "text-jul-success";
+            const statusText = hasError
+              ? cert.error
+              : expired
+                ? "expired"
+                : unknown
+                  ? (cert.state ?? "unknown")
+                  : warn
+                    ? "renew soon"
+                    : "ok";
             return (
-              <tr key={cert.server_names.join(",")} className="border-t border-jul-border hover:bg-jul-surface/50">
-                <td className="px-4 py-2 font-mono text-jul-text">{cert.server_names.join(", ")}</td>
+              <tr
+                key={`${cert.listen ?? ""}-${cert.server_names.join(",")}`}
+                className="border-t border-jul-border hover:bg-jul-surface/50"
+              >
+                <td className="px-4 py-2 font-mono text-jul-text">
+                  {cert.server_names.join(", ")}
+                  {cert.listen ? ` (${cert.listen})` : ""}
+                </td>
                 <td className="px-4 py-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                    cert.source === "acme" ? "bg-jul-accent/15 text-jul-accent" : "bg-jul-border text-jul-muted"
-                  }`}>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      cert.source === "acme"
+                        ? "bg-jul-accent/15 text-jul-accent"
+                        : "bg-jul-border text-jul-muted"
+                    }`}
+                  >
                     {cert.source}
                   </span>
                 </td>
@@ -323,14 +391,18 @@ export function TLSPanel() {
             <div className="flex rounded-md border border-jul-border overflow-hidden">
               <button
                 type="button"
-                onClick={() => { setViewMode("cards"); }}
+                onClick={() => {
+                  setViewMode("cards");
+                }}
                 className={`px-3 py-1 text-xs ${viewMode === "cards" ? "bg-jul-accent text-white" : "bg-jul-surface text-jul-text hover:bg-jul-border"}`}
               >
                 Cards
               </button>
               <button
                 type="button"
-                onClick={() => { setViewMode("table"); }}
+                onClick={() => {
+                  setViewMode("table");
+                }}
                 className={`px-3 py-1 text-xs ${viewMode === "table" ? "bg-jul-accent text-white" : "bg-jul-surface text-jul-text hover:bg-jul-border"}`}
               >
                 Table

@@ -7,6 +7,7 @@ package server
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -53,9 +54,10 @@ type acmeManager struct {
 // unchanged. The first block's email, CA, challenge, cache directory, and
 // OCSP-stapling setting configure the shared manager (validation requires every
 // enabled block to agree on those values).
-func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, notAfter time.Time), acmeClient, ocspClient *http.Client) (ACMEManager, error) {
+func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, notAfter time.Time), acmeClient, ocspClient *http.Client, opts ACMEOptions) (ACMEManager, error) {
 	var domains []string
 	var email, ca, challenge, cacheDir string
+	var settings *config.ACMEConfig
 	ocsp, ocspSet := true, false
 	seen := make(map[string]bool)
 	for _, srv := range servers {
@@ -63,6 +65,9 @@ func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, n
 			continue
 		}
 		a := srv.TLS.ACME
+		if settings == nil {
+			settings = a
+		}
 		for _, d := range a.Domains {
 			if !seen[d] {
 				seen[d] = true
@@ -94,6 +99,12 @@ func NewACMEManager(servers []config.ServerConfig, onIssue func(domain string, n
 		// Keep the manager defensive for direct programmatic Config values used
 		// by tests and embedders so the documented default remains consistent.
 		challenge = "http-01"
+	}
+	if challenge == "dns-01" {
+		if settings.DNSProvider != "rfc2136" {
+			return nil, fmt.Errorf("DNS-01 requires the rfc2136 provider")
+		}
+		return newDNSACMEManager(settings, onIssue, acmeClient, ocspClient, opts)
 	}
 	client := &acme.Client{DirectoryURL: directoryURL(ca)}
 	if acmeClient != nil {
@@ -165,6 +176,13 @@ func (p *dynamicOCSPProvider) GetCertificate(hello *tls.ClientHelloInfo) (*tls.C
 		return p.base.GetCertificate(hello)
 	}
 	return p.stapler.GetCertificate(hello)
+}
+
+func (p *dynamicOCSPProvider) validateClientHello(hello *tls.ClientHelloInfo) error {
+	if validator, ok := p.base.(clientHelloValidator); ok {
+		return validator.validateClientHello(hello)
+	}
+	return nil
 }
 
 // ChallengeHandler installs autocert's HTTP-01 handler only when HTTP-01 is the

@@ -9,6 +9,14 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+
+- Add Beta ACME DNS-01 issuance and renewal using RFC 2136/TSIG, including
+  wildcard plus apex certificates, automatic ECDSA/RSA selection, guarded DNS
+  egress, listener-scoped SNI, Full Console creation/status and an mTLS example
+  (#433). A real-provider staging run and independent release/soak evidence
+  remain outstanding.
+
 ## [2.3.1] - 2026-11-24
 
 ### Security

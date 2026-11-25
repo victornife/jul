@@ -16,6 +16,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/observability"
+	"jul/internal/server"
 )
 
 // validTOML returns a marshaled, validate-passing starter config for tests.
@@ -130,8 +131,12 @@ func TestWizardGeneratesValidConfig(t *testing.T) {
 func TestStatusAPI(t *testing.T) {
 	cfg := &config.Config{
 		Servers: []config.ServerConfig{{
-			Listen:        ":8443",
-			TLS:           &config.TLSConfig{Enabled: true, ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: "ca.pem"}},
+			Listen: ":8443",
+			TLS: &config.TLSConfig{
+				Enabled:    true,
+				ClientAuth: &config.ClientAuthConfig{Mode: "require", CAFile: "ca.pem"},
+				ACME:       &config.ACMEConfig{Enabled: true, Challenge: "dns-01", DNSProvider: "rfc2136"},
+			},
 			HTTP3:         &config.HTTP3Config{Enabled: true},
 			ClientAddress: &config.ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}},
 			SendTimeout:   config.Duration(time.Minute),
@@ -177,7 +182,7 @@ func TestStatusAPI(t *testing.T) {
 	wantActive := []string{
 		"Virtual hosts", "Static file serving", "Reverse proxy", "Response cache",
 		"Downstream send timeout",
-		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)",
+		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)", "ACME DNS-01 (RFC 2136)",
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
 		"Consistent-hash affinity",
@@ -196,6 +201,167 @@ func TestStatusAPI(t *testing.T) {
 	for _, name := range wantInactive {
 		if active[name] {
 			t.Errorf("capability %q = active, want inactive", name)
+		}
+	}
+}
+
+func TestStatusAPIDNS01Capability(t *testing.T) {
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":443", TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{
+			Enabled: true, Challenge: "dns-01", DNSProvider: "rfc2136",
+		}},
+	}}}
+	s := newTestServer(t, config.AdminConfig{}, Deps{LoadConfig: func() (*config.Config, error) { return cfg, nil }})
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	var status []FeatureStatus
+	if err := json.Unmarshal(rr.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range status {
+		if row.Name == "ACME DNS-01 (RFC 2136)" {
+			if !row.Active || row.Detail != "1 server block" {
+				t.Fatalf("DNS-01 feature status: %+v", row)
+			}
+			return
+		}
+	}
+	t.Fatal("DNS-01 feature status missing")
+}
+
+func TestDNS01StagedConfigurationDoesNotAppearLive(t *testing.T) {
+	staged := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":443", ServerNames: []string{"example.test"},
+		TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{
+			Enabled: true, Challenge: "dns-01", DNSProvider: "rfc2136",
+		}},
+	}}}
+	live := &config.Config{Servers: []config.ServerConfig{{Listen: ":8080"}}}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig:   func() (*config.Config, error) { return staged, nil },
+		LiveSnapshot: func() server.LiveSnapshot { return server.LiveSnapshot{RawConfig: live} },
+		Certs:        func() []CertStatus { return nil },
+	})
+	for _, path := range []string{"/api/status", "/api/runtime/overview"} {
+		rr := httptest.NewRecorder()
+		s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", path, rr.Code, rr.Body.String())
+		}
+		var rows []FeatureStatus
+		if path == "/api/status" {
+			if err := json.Unmarshal(rr.Body.Bytes(), &rows); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			var overview RuntimeOverview
+			if err := json.Unmarshal(rr.Body.Bytes(), &overview); err != nil {
+				t.Fatal(err)
+			}
+			rows = overview.Status
+			if overview.CertRisk != nil {
+				t.Fatalf("staged certificate appeared in live risk: %+v", overview.CertRisk)
+			}
+		}
+		found := false
+		for _, row := range rows {
+			if row.Name == "ACME DNS-01 (RFC 2136)" {
+				found = true
+				if row.Active {
+					t.Fatal("staged DNS-01 reported active before restart")
+				}
+			}
+		}
+		if !found {
+			t.Fatal("DNS-01 feature status missing")
+		}
+	}
+	rr := httptest.NewRecorder()
+	s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/tls", nil))
+	if rr.Code != http.StatusOK || strings.TrimSpace(rr.Body.String()) != "[]" {
+		t.Fatalf("staged certificate appeared in live TLS inventory: %d %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestReadyzUsesServingCertificateRatherThanStagedConfig(t *testing.T) {
+	tlsConfig := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":443", ServerNames: []string{"example.test"},
+		TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{Enabled: true}},
+	}}}
+	plainConfig := &config.Config{Servers: []config.ServerConfig{{Listen: ":8080"}}}
+	tests := []struct {
+		name        string
+		live        *config.Config
+		staged      *config.Config
+		expiresIn   time.Duration
+		wantStatus  int
+		wantExpired bool
+	}{
+		{"expired live certificate", tlsConfig, plainConfig, -time.Hour, http.StatusServiceUnavailable, true},
+		{"valid live certificate", tlsConfig, plainConfig, time.Hour, http.StatusOK, false},
+		{"staged certificate is not live", plainConfig, tlsConfig, -time.Hour, http.StatusOK, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestServer(t, config.AdminConfig{}, Deps{
+				LoadConfig:   func() (*config.Config, error) { return tt.staged, nil },
+				LiveSnapshot: func() server.LiveSnapshot { return server.LiveSnapshot{RawConfig: tt.live} },
+				Certs: func() []CertStatus {
+					return []CertStatus{{Listen: ":443", ServerNames: []string{"example.test"}, NotAfter: time.Now().Add(tt.expiresIn)}}
+				},
+			})
+			rr := httptest.NewRecorder()
+			s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+			if rr.Code != tt.wantStatus || strings.Contains(rr.Body.String(), "certificate_expired") != tt.wantExpired {
+				t.Fatalf("readiness for serving certificate: %d %s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+}
+
+func TestTLSStatusMatchesResolvedServingIdentityWithoutDisclosingIt(t *testing.T) {
+	raw := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "${env:JUL_LISTEN}", ServerNames: []string{"${env:JUL_NAME}"},
+		TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{Enabled: true}},
+	}}}
+	effective := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "127.0.0.1:9443", ServerNames: []string{"private.example.test"},
+		TLS: &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{Enabled: true}},
+	}}}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig: func() (*config.Config, error) { return &config.Config{}, nil },
+		LiveSnapshot: func() server.LiveSnapshot {
+			return server.LiveSnapshot{RawConfig: raw, EffectiveConfig: effective}
+		},
+		Certs: func() []CertStatus {
+			return []CertStatus{{Listen: "127.0.0.1:9443", ServerNames: []string{"private.example.test"},
+				State: "failed", NotAfter: time.Now().Add(-time.Hour), Error: "renewal failed"}}
+		},
+	})
+	for _, path := range []string{"/api/tls", "/api/runtime/overview", "/readyz"} {
+		rr := httptest.NewRecorder()
+		s.routes().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		want := http.StatusOK
+		if path == "/readyz" {
+			want = http.StatusServiceUnavailable
+		}
+		if rr.Code != want || strings.Contains(rr.Body.String(), "private.example.test") ||
+			strings.Contains(rr.Body.String(), "127.0.0.1:9443") {
+			t.Fatalf("%s: unsafe or incorrect response %d %s", path, rr.Code, rr.Body.String())
+		}
+		switch path {
+		case "/api/tls":
+			if !strings.Contains(rr.Body.String(), `"state":"failed"`) || !strings.Contains(rr.Body.String(), `"days_left":-1`) {
+				t.Fatalf("resolved certificate state missing: %s", rr.Body.String())
+			}
+		case "/api/runtime/overview":
+			if !strings.Contains(rr.Body.String(), `"expired":1`) {
+				t.Fatalf("resolved certificate risk missing: %s", rr.Body.String())
+			}
+		case "/readyz":
+			if !strings.Contains(rr.Body.String(), "certificate_expired") {
+				t.Fatalf("expired serving certificate did not affect readiness: %s", rr.Body.String())
+			}
 		}
 	}
 }

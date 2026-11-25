@@ -4,7 +4,9 @@
 package egress
 
 import (
+	"context"
 	"errors"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -93,6 +95,21 @@ func (m *Manager) Client(subsystem string, timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout:   timeout,
 		Transport: &dynamicRoundTripper{manager: m, subsystem: subsystem},
+	}
+}
+
+// DialContextWith selects the current generation for each non-HTTP connection.
+// It is intended for process-lifetime owners such as the DNS-01 update client.
+func (m *Manager) DialContextWith(subsystem string, base DialFunc) DialFunc {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		generation := m.Current()
+		if generation == nil {
+			return nil, errors.New("egress: no published generation")
+		}
+		if base == nil {
+			return nil, errors.New("egress: no base dialer")
+		}
+		return generation.For(subsystem).DialContextWith(base)(ctx, network, addr)
 	}
 }
 

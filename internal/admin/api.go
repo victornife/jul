@@ -46,14 +46,26 @@ type BackendStatus struct {
 // CertStatus is the console view of one configured certificate. It never
 // carries private-key material.
 type CertStatus struct {
-	ServerNames []string  `json:"server_names"`
-	Source      string    `json:"source"`
-	Subject     string    `json:"subject,omitempty"`
-	Issuer      string    `json:"issuer,omitempty"`
-	DNSNames    []string  `json:"dns_names,omitempty"`
-	NotBefore   time.Time `json:"not_before,omitempty"`
-	NotAfter    time.Time `json:"not_after,omitempty"`
-	Error       string    `json:"error,omitempty"`
+	Listen      string              `json:"listen,omitempty"`
+	ServerNames []string            `json:"server_names"`
+	Source      string              `json:"source"`
+	State       string              `json:"state,omitempty"`
+	Subject     string              `json:"subject,omitempty"`
+	Issuer      string              `json:"issuer,omitempty"`
+	DNSNames    []string            `json:"dns_names,omitempty"`
+	NotBefore   time.Time           `json:"not_before,omitempty"`
+	NotAfter    time.Time           `json:"not_after,omitempty"`
+	Error       string              `json:"error,omitempty"`
+	Variants    []CertVariantStatus `json:"variants,omitempty"`
+}
+
+// CertVariantStatus describes one automatically managed certificate key type.
+type CertVariantStatus struct {
+	Algorithm      string     `json:"algorithm"`
+	State          string     `json:"state"`
+	NotAfter       *time.Time `json:"not_after,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	CleanupWarning string     `json:"cleanup_warning,omitempty"`
 }
 
 // handleUpstreams, handleCerts, handleStatus, and the runtime feature-status
@@ -100,12 +112,13 @@ func (s *Server) handleRuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	var certRisk *CertRiskProjection
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
+			cfg, effective := s.servingStatusConfigs(cfg)
 			status = s.runtimeStatus(cfg)
 			var certs []CertStatus
 			if s.deps.Certs != nil {
 				certs = s.deps.Certs()
 			}
-			certRisk = projectCertRisk(projectTLS(cfg, certs))
+			certRisk = projectCertRisk(projectTLS(cfg, effective, certs))
 		}
 	}
 	out := RuntimeOverview{
@@ -234,11 +247,12 @@ func (s *Server) handleTLS(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	cfg, effective := s.servingStatusConfigs(cfg)
 	var certs []CertStatus
 	if s.deps.Certs != nil {
 		certs = s.deps.Certs()
 	}
-	writeJSON(w, http.StatusOK, projectTLS(cfg, certs))
+	writeJSON(w, http.StatusOK, projectTLS(cfg, effective, certs))
 }
 
 func (s *Server) handleSecurity(w http.ResponseWriter, r *http.Request) {

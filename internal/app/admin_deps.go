@@ -133,16 +133,25 @@ func AdaptUpstreams(in []upstream.PoolStatus) []admin.UpstreamStatus {
 func AdaptCerts(in []server.CertSummary) []admin.CertStatus {
 	out := make([]admin.CertStatus, 0, len(in))
 	for _, c := range in {
-		out = append(out, admin.CertStatus{
+		status := admin.CertStatus{
+			Listen:      c.Listen,
 			ServerNames: c.ServerNames,
 			Source:      c.Source,
+			State:       c.State,
 			Subject:     c.Subject,
 			Issuer:      c.Issuer,
 			DNSNames:    c.DNSNames,
 			NotBefore:   c.NotBefore,
 			NotAfter:    c.NotAfter,
 			Error:       c.Error,
-		})
+		}
+		for _, variant := range c.Variants {
+			status.Variants = append(status.Variants, admin.CertVariantStatus{
+				Algorithm: variant.Algorithm, State: variant.State,
+				NotAfter: variant.NotAfter, Error: variant.Error, CleanupWarning: variant.CleanupWarning,
+			})
+		}
+		out = append(out, status)
 	}
 	return out
 }

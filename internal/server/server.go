@@ -874,7 +874,11 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		dyn := &DynamicCertProvider{}
 		dyn.Set(provider)
 		entry.provider = dyn
-		if !acmeEnabledForAddr(cfg.Servers, addr) {
+		if acmeEnabledForAddr(cfg.Servers, addr) {
+			if _, scoped := s.ACME.(listenerScopedACMEManager); scoped {
+				entry.certFingerprint = acmeListenerFingerprint(cfg.Servers, addr)
+			}
+		} else {
 			if fp, ok := provider.(*fileCertProvider); ok && fp.fp != "" {
 				entry.certFingerprint = fp.fp
 			} else {
@@ -901,7 +905,7 @@ func (s *Server) buildListenerEntry(addr string, cfg *config.Config) (*listenerE
 		} else {
 			entry.clientAuthFP = "off"
 		}
-		tlsConf.GetConfigForClient = entry.clientAuth.configForClient(tlsConf)
+		tlsConf.GetConfigForClient = dyn.configForClient(entry.clientAuth.configForClient(tlsConf))
 		ln = tls.NewListener(ln, tlsConf)
 
 		// Stage the parallel HTTP/3 (QUIC) listener on the same UDP address when

@@ -59,10 +59,27 @@ type FeatureStatus struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// handleStatus serves a grouped overview of which shipped capabilities are
-// active in the running configuration, for the console Status panel. It derives
-// everything from the parsed config via the LoadConfig hook; when that hook is
-// unwired it returns an empty list so the console renders a clean empty state.
+// servingStatusConfig prefers the published, unresolved configuration so staged
+// restart changes do not appear active or disclose resolved secret values.
+func (s *Server) servingStatusConfig(fallback *config.Config) *config.Config {
+	raw, _ := s.servingStatusConfigs(fallback)
+	return raw
+}
+
+func (s *Server) servingStatusConfigs(fallback *config.Config) (*config.Config, *config.Config) {
+	if s.deps.LiveSnapshot != nil {
+		if live := s.deps.LiveSnapshot(); live.RawConfig != nil {
+			effective := live.EffectiveConfig
+			if effective == nil || len(effective.Servers) != len(live.RawConfig.Servers) {
+				effective = live.RawConfig
+			}
+			return live.RawConfig, effective
+		}
+	}
+	return fallback, fallback
+}
+
+// handleStatus serves a grouped overview of shipped capabilities.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w, http.MethodGet)
@@ -71,7 +88,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	out := []FeatureStatus{}
 	if s.deps.LoadConfig != nil {
 		if cfg, err := s.deps.LoadConfig(); err == nil && cfg != nil {
-			out = s.runtimeStatus(cfg)
+			out = s.runtimeStatus(s.servingStatusConfig(cfg))
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -101,6 +118,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		tlsServers           int
 		mtlsServers          int
 		acmeServers          int
+		dnsACMEServers       int
 		http3Servers         int
 		h2cServers           int
 		trustedListeners     int
@@ -139,6 +157,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 			}
 			if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
 				acmeServers++
+				if srv.TLS.ACME.Challenge == "dns-01" && srv.TLS.ACME.DNSProvider == "rfc2136" {
+					dnsACMEServers++
+				}
 			}
 		}
 		if srv.HTTP3 != nil && srv.HTTP3.Enabled {
@@ -414,6 +435,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Security", Name: "TLS", Active: tlsServers > 0, Detail: countDetailIf(tlsServers, "server block")},
 		{Group: "Security", Name: "Mutual TLS (client certs)", Active: mtlsServers > 0, Detail: mtlsDetail},
 		{Group: "Security", Name: "Automatic HTTPS (ACME)", Active: acmeServers > 0, Detail: countDetailIf(acmeServers, "server block")},
+		{Group: "Security", Name: "ACME DNS-01 (RFC 2136)", Active: dnsACMEServers > 0, Detail: countDetailIf(dnsACMEServers, "server block")},
 		{Group: "Security", Name: "Access control (auth)", Active: authLocs > 0, Detail: countDetailIf(authLocs, "location")},
 		{Group: "Security", Name: "Web application firewall (WAF)", Active: wafLocs > 0, Detail: wafDetail},
 		{Group: "Security", Name: "Trusted client address", Active: trustedListeners > 0, Detail: clientAddrDetail},

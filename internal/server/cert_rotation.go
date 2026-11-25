@@ -27,7 +27,7 @@ type certProviderSwap struct {
 	newFP    string
 }
 
-// certRotationComponent is the preparedComponent for static certificate
+// certRotationComponent is the preparedComponent for certificate-provider
 // rotation. A single instance carries every retained address that needs a
 // swap this reload, so the whole candidate set commits or aborts together
 // (the "multi-address candidate is prepared completely before any provider
@@ -63,16 +63,14 @@ func (c *certRotationComponent) abort() {}
 // or any live mutation, matching the other Prepare-phase failures ReloadPlan
 // already aborts on.
 //
-// A newly added address is out of scope here: buildListenerEntry binds it
-// fresh from the candidate config, picking up its certificate identity
-// without any swap. An ACME-served address is also out of scope: its
-// provider obtains and renews certificates at handshake time and is not
-// rebuilt on a config-only reload.
+// A newly added address is built by buildListenerEntry. DNS-01 providers are
+// also replaced when the live listener-name scope changes, without replacing
+// the shared manager or its certificate identity.
 func (s *Server) prepareCertRotation(next *config.Config) (*certRotationComponent, error) {
 	var comp certRotationComponent
 	for _, addr := range uniqueListenAddrs(next.Servers) {
 		bindings, _, tlsOK := tlsBindingsForAddr(next.Servers, addr)
-		if !tlsOK || acmeEnabledForAddr(next.Servers, addr) {
+		if !tlsOK {
 			continue
 		}
 		s.mu.Lock()
@@ -80,6 +78,18 @@ func (s *Server) prepareCertRotation(next *config.Config) (*certRotationComponen
 		s.mu.Unlock()
 		if entry == nil || entry.provider == nil {
 			continue // newly added or non-TLS address: bind() builds its provider fresh.
+		}
+		if acmeEnabledForAddr(next.Servers, addr) {
+			scoped, ok := s.ACME.(listenerScopedACMEManager)
+			if !ok {
+				continue
+			}
+			newFP := acmeListenerFingerprint(next.Servers, addr)
+			if newFP != entry.certFingerprint {
+				provider := scoped.ProviderForListener(acmeDomainsForAddr(next.Servers, addr), acmeServerNamesForAddr(next.Servers, addr))
+				comp.swaps = append(comp.swaps, certProviderSwap{entry: entry, provider: provider, newFP: newFP})
+			}
+			continue
 		}
 		newFP := tlsIdentityFingerprint(bindings)
 		if newFP == entry.certFingerprint {

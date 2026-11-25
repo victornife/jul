@@ -1321,10 +1321,7 @@ func (c *ClientAuthConfig) Active() bool {
 }
 
 // ACMEConfig configures automatic certificate management via the ACME protocol.
-// Only the "http-01" and "tls-alpn-01" challenges are supported; "dns-01" is
-// reserved for a future release and is rejected by validation today. The feature
-// itself is compiled only into builds with the "acme" build tag; other builds
-// reject an enabled block with a clear "not compiled in this build" error.
+// The feature is compiled only into builds with the "acme" build tag.
 type ACMEConfig struct {
 	Enabled bool `toml:"enabled"`
 	// Email is the ACME account contact address (required when enabled).
@@ -1336,13 +1333,12 @@ type ACMEConfig struct {
 	// Domains is the allow-list of hostnames to obtain certificates for.
 	// Defaults to the server block's server_names.
 	Domains []string `toml:"domains"`
-	// Challenge selects the ACME challenge type: "http-01" (default) or
-	// "tls-alpn-01". "dns-01" is reserved for a future release.
+	// Challenge selects "http-01" (default), "tls-alpn-01", or "dns-01".
 	Challenge string `toml:"challenge"`
-	// DNSProvider names the DNS-01 provider plugin (e.g. "cloudflare"). It is a
-	// reserved seam for a future DNS-01 release and is not implemented; setting it
-	// is rejected by validation.
+	// DNSProvider must be "rfc2136" for DNS-01 and empty for other challenges.
 	DNSProvider string `toml:"dns_provider"`
+	// RFC2136 configures the authenticated dynamic DNS update endpoint.
+	RFC2136 *RFC2136Config `toml:"rfc2136,omitempty"`
 	// CacheDir is where issued certificates and account keys are stored.
 	// Defaults to "./jul-data/certs".
 	CacheDir string `toml:"cache_dir"`
@@ -1351,6 +1347,41 @@ type ACMEConfig struct {
 	// set it to false to disable. Stapling degrades gracefully — a failed OCSP
 	// fetch serves the certificate unstapled rather than breaking the handshake.
 	OCSPStapling *bool `toml:"ocsp_stapling"`
+}
+
+// MaxRFC2136Observers bounds the number of CA-facing DNS propagation checks.
+const MaxRFC2136Observers = 8
+
+// RFC2136Config configures DNS-01 updates and authoritative observation.
+type RFC2136Config struct {
+	// Server is the authoritative DNS update endpoint, as host:port.
+	Server string `toml:"server"`
+	// Observers are CA-facing authoritative DNS endpoints, each as host:port.
+	Observers []string `toml:"observers"`
+	// CNAMEDelegations maps challenge owners to one-hop targets and their authoritative observers.
+	CNAMEDelegations map[string]RFC2136CNAMEDelegation `toml:"cname_delegations,omitempty"`
+	// Zone is the DNS zone containing the ACME challenge records.
+	Zone string `toml:"zone"`
+	// TSIGKeyName identifies the TSIG key authorized to update the zone.
+	TSIGKeyName string `toml:"tsig_key_name"`
+	// TSIGSecret is a single environment or file reference to the base64 TSIG key.
+	TSIGSecret string `toml:"tsig_secret"`
+	// PropagationTimeout bounds polling after the first authoritative DNS observation.
+	PropagationTimeout Duration `toml:"propagation_timeout"`
+	// PollInterval controls how often the authoritative server is queried.
+	PollInterval Duration `toml:"poll_interval"`
+
+	// secretResolved records that TSIGSecret came from a validated reference,
+	// not from a literal in the operator's configuration.
+	secretResolved bool
+}
+
+// RFC2136CNAMEDelegation describes one explicit challenge alias.
+type RFC2136CNAMEDelegation struct {
+	// Target is the exact one-hop TXT owner inside the update zone.
+	Target string `toml:"target"`
+	// Observers are authoritative DNS endpoints for this challenge alias.
+	Observers []string `toml:"observers"`
 }
 
 // OCSPStaplingEnabled reports whether OCSP stapling should be active. It is on

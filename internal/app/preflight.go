@@ -210,6 +210,14 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 		// rebind gate below still compares prev/next configuration directly.
 		httpBound, http3Bound = configuredBoundAddrs(prev)
 	}
+	beforeEffective := live.EffectiveConfig
+	if beforeEffective == nil && prev != nil {
+		prevCandidate, err := config.NewCandidateContext(ctx, prev)
+		if err != nil {
+			return nil, err
+		}
+		beforeEffective = prevCandidate.Effective
+	}
 	streamBound := streamBoundKeys(p.Stream)
 
 	// Probe only addresses NOT currently bound (new listeners). Occupied
@@ -228,8 +236,8 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 
 	if mode == PreflightStageRestart {
 		// Classify lifecycle changes; do not reject them.
-		if prev != nil {
-			result.Lifecycle = lifecycle.DiffConfig(prev, candidate.Effective)
+		if beforeEffective != nil {
+			result.Lifecycle = lifecycle.DiffConfig(beforeEffective, candidate.Effective)
 		}
 		// Validate that startup-consumed resources can be applied at the next
 		// restart. These checks are side-effect-minimized: they create and
@@ -262,21 +270,16 @@ func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candid
 		if reason, need := server.PreflightRebindRequired(live, candidate.Effective); need {
 			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
-	} else if prev != nil {
-		prevCandidate, err := config.NewCandidate(prev)
-		if err != nil {
-			return nil, err
-		}
-		if reason, need := server.ListenerRebindRequired(prevCandidate.Effective, candidate.Effective); need {
+	} else if beforeEffective != nil {
+		if reason, need := server.ListenerRebindRequired(beforeEffective, candidate.Effective); need {
 			return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)
 		}
 	}
 
-	// ACME restart-required uses prev's server list only for the comparison.
-	// When prev is unavailable, compare against an empty server list.
+	// Compare resolved values on both sides; a raw reference is not the live key.
 	var prevServers []config.ServerConfig
-	if prev != nil {
-		prevServers = prev.Servers
+	if beforeEffective != nil {
+		prevServers = beforeEffective.Servers
 	}
 	if reason, need := server.ACMERestartRequired(prevServers, candidate.Effective.Servers); need {
 		return nil, fmt.Errorf("%w: %s", admin.ErrRestartRequired, reason)

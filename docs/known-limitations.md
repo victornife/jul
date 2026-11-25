@@ -99,6 +99,16 @@ the WAF section below. On v2.2.0 or an older package, apply the interim measures
 
 ## Deliberate product boundaries
 
+- **DNS-01 supports RFC 2136/TSIG only.** Propagation is checked at the
+  configured authoritative server, not from the CA's resolver; CNAME traversal
+  and provider APIs are not automatic. Real-provider staging requires an
+  authorized disposable zone and has not yet been demonstrated. DNS-01 manages
+  ECDSA P-256 and RSA-2048 variants separately, doubling certificate orders and
+  renewals for each identity. A deadline or shutdown can clean a TXT value
+  while the CA is still processing it; an observed existing value remains under
+  its external owner's control. See
+  [TLS/ACME](tls-acme.md#dns-01-with-rfc-2136-and-tsig).
+
 - **Per-route HTTP metrics are opt-in and Beta.** Enabling
   `observability.metrics.route_label` requires restart because collector
   dimensions are process-owned. Only durable route IDs are shown as individual

@@ -547,10 +547,20 @@ func tlsEntries() []Entry {
 		"servers.*.tls.acme.domains",
 		"servers.*.tls.acme.email",
 		"servers.*.tls.acme.enabled")...)
+	out = append(out, restartGroup(SubACME, "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+		"servers.*.tls.acme.dns_provider",
+		"servers.*.tls.acme.rfc2136.server",
+		"servers.*.tls.acme.rfc2136.observers",
+		"servers.*.tls.acme.rfc2136.cname_delegations.*.target",
+		"servers.*.tls.acme.rfc2136.cname_delegations.*.observers",
+		"servers.*.tls.acme.rfc2136.zone",
+		"servers.*.tls.acme.rfc2136.tsig_key_name",
+		"servers.*.tls.acme.rfc2136.propagation_timeout",
+		"servers.*.tls.acme.rfc2136.poll_interval")...)
+	out = append(out, secretDigest(restart("servers.*.tls.acme.rfc2136.tsig_secret", SubACME,
+		"the process-owned DNS-01 manager uses the credential resolved at startup")))
 	out = append(out, hot("servers.*.tls.acme.ocsp_stapling", SubACME,
 		"the process-lifetime ACME manager keeps a stable stapling wrapper whose atomic policy changes at Publish; no manager, account, cache, HostPolicy or listener is replaced (#106)"))
-	out = append(out, reserved("servers.*.tls.acme.dns_provider", SubACME,
-		"DNS-01 is not implemented; Validate rejects a non-empty dns_provider, so no running process can have consumed it"))
 	return out
 }
 

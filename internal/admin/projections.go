@@ -501,13 +501,14 @@ func appWarnings(up *config.UpstreamConfig) []string {
 	return w
 }
 
-func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
+func projectTLS(c, effective *config.Config, live []CertStatus) []CertProjection {
 	now := time.Now().UTC()
 	liveMap := make(map[string]CertStatus, len(live))
 	for _, cs := range live {
 		for _, sn := range cs.ServerNames {
-			if existing, ok := liveMap[sn]; !ok || existing.NotAfter.IsZero() {
-				liveMap[sn] = cs
+			key := cs.Listen + "\x00" + sn
+			if existing, ok := liveMap[key]; !ok || existing.NotAfter.IsZero() {
+				liveMap[key] = cs
 			}
 		}
 	}
@@ -519,6 +520,7 @@ func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
 			continue
 		}
 		cp := CertProjection{
+			Listen:      srv.Listen,
 			ServerNames: srv.ServerNames,
 		}
 		if srv.TLS.ACME != nil && srv.TLS.ACME.Enabled {
@@ -527,17 +529,41 @@ func projectTLS(c *config.Config, live []CertStatus) []CertProjection {
 			cp.Source = "file"
 		}
 		// Merge live metadata when available.
-		for _, sn := range srv.ServerNames {
-			if l, ok := liveMap[sn]; ok {
+		lookup := &effective.Servers[i]
+		for _, sn := range lookup.ServerNames {
+			l, ok := liveMap[lookup.Listen+"\x00"+sn]
+			if !ok {
+				l, ok = liveMap["\x00"+sn]
+			}
+			if ok {
+				if l.State != "" {
+					cp.State = l.State
+				}
 				if cp.Issuer == "" {
 					cp.Issuer = l.Issuer
 				}
 				if !l.NotAfter.IsZero() {
 					cp.NotAfter = l.NotAfter.UTC().Format(time.RFC3339)
-					cp.DaysLeft = int(math.Round(l.NotAfter.Sub(now).Hours() / 24))
+					days := int(math.Round(l.NotAfter.Sub(now).Hours() / 24))
+					if l.NotAfter.Before(now) && days == 0 {
+						days = -1
+					}
+					cp.DaysLeft = &days
 				}
 				if l.Error != "" {
 					cp.Error = l.Error
+				}
+				if len(l.Variants) != 0 {
+					cp.Variants = make([]CertVariantProjection, 0, len(l.Variants))
+					for _, variant := range l.Variants {
+						projected := CertVariantProjection{
+							Algorithm: variant.Algorithm, State: variant.State, Error: variant.Error, CleanupWarning: variant.CleanupWarning,
+						}
+						if variant.NotAfter != nil {
+							projected.NotAfter = variant.NotAfter.UTC().Format(time.RFC3339)
+						}
+						cp.Variants = append(cp.Variants, projected)
+					}
 				}
 			}
 		}
@@ -552,26 +578,33 @@ func projectCertRisk(certs []CertProjection) *CertRiskProjection {
 	}
 	cr := CertRiskProjection{Count: len(certs)}
 	for _, cp := range certs {
-		if cp.NotAfter != "" {
+		if cp.NotAfter != "" && cp.DaysLeft != nil {
 			// Live metadata available — days_left is authoritative.
-			if cp.DaysLeft < 0 {
+			if *cp.DaysLeft < 0 {
 				cr.Expired++
-			} else if cp.DaysLeft <= 7 {
+			} else if *cp.DaysLeft <= 7 {
 				cr.ExpiringSoon++
 			}
-		} else {
-			// No live metadata for this cert.
+		}
+		if cp.Error != "" || cp.NotAfter == "" {
+			// Missing live metadata and renewal failures are both operator risks.
 			cr.Errors++
 		}
 	}
+	var details []string
 	if cr.Expired > 0 {
-		cr.Details = fmt.Sprintf("%d expired, %d expiring ≤ 7d", cr.Expired, cr.ExpiringSoon)
-	} else if cr.ExpiringSoon > 0 {
-		cr.Details = fmt.Sprintf("%d expiring ≤ 7d", cr.ExpiringSoon)
-	} else if cr.Errors > 0 {
-		cr.Details = fmt.Sprintf("%d with no live expiry data", cr.Errors)
-	} else {
+		details = append(details, fmt.Sprintf("%d expired", cr.Expired))
+	}
+	if cr.ExpiringSoon > 0 {
+		details = append(details, fmt.Sprintf("%d expiring ≤ 7d", cr.ExpiringSoon))
+	}
+	if cr.Errors > 0 {
+		details = append(details, fmt.Sprintf("%d with errors or missing expiry data", cr.Errors))
+	}
+	if len(details) == 0 {
 		cr.Details = "all certs valid"
+	} else {
+		cr.Details = strings.Join(details, ", ")
 	}
 	return &cr
 }

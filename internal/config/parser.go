@@ -648,6 +648,14 @@ func applyACMEDefaults(srv *ServerConfig) {
 		on := true
 		a.OCSPStapling = &on
 	}
+	if a.RFC2136 != nil && a.Challenge == "dns-01" {
+		if a.RFC2136.PropagationTimeout == 0 {
+			a.RFC2136.PropagationTimeout = Duration(2 * time.Minute)
+		}
+		if a.RFC2136.PollInterval == 0 {
+			a.RFC2136.PollInterval = Duration(2 * time.Second)
+		}
+	}
 }
 
 // defaultAltSvcMaxAge is the Alt-Svc max-age applied to an enabled HTTP/3 block
@@ -695,7 +703,18 @@ func (c *Config) Clone() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("clone config: %w", err)
 	}
-	return Parse(data)
+	clone, err := Parse(data)
+	if err != nil {
+		return nil, err
+	}
+	for i := range c.Servers {
+		src, dst := c.Servers[i].TLS, clone.Servers[i].TLS
+		if src != nil && dst != nil && src.ACME != nil && dst.ACME != nil &&
+			src.ACME.RFC2136 != nil && dst.ACME.RFC2136 != nil {
+			dst.ACME.RFC2136.secretResolved = src.ACME.RFC2136.secretResolved
+		}
+	}
+	return clone, nil
 }
 
 // PreflightClone clones the config, resolves secret references on the clone if
