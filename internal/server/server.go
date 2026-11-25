@@ -1419,6 +1419,9 @@ func (s *Server) doReload(req ReloadRequest) {
 	// The abort defer is registered second so it runs first (LIFO), ensuring
 	// callers observe the abort callback before the result is delivered.
 	defer func() {
+		if req.Candidate != nil && config.CountSecretRefs(req.Candidate.Raw) > 0 {
+			sanitizeManagedReloadErrors(&result)
+		}
 		s.sendReloadResult(req.Result, &result)
 		if req.Finalized != nil {
 			<-req.Finalized
@@ -1805,6 +1808,28 @@ func (s *Server) doReload(req ReloadRequest) {
 			result.Error = "degraded: reload timed out after Publish; activation/post-commit side effects may be incomplete"
 		} else if result.Error != "" {
 			result.Error += "; reload timed out after Publish"
+		}
+	}
+}
+
+func sanitizeManagedReloadErrors(result *ReloadResult) {
+	if result.Error != "" {
+		if result.FailedPhase != "" {
+			result.Error = "reload failed during " + result.FailedPhase
+		} else {
+			result.Error = "reload completed with errors; inspect server logs"
+		}
+	}
+	for _, subsystem := range []struct {
+		name   string
+		result *ReloadSubsystemResult
+	}{
+		{"HTTP", &result.HTTP},
+		{"stream", &result.Stream},
+		{"admin", &result.Admin},
+	} {
+		if subsystem.result.Error != "" {
+			subsystem.result.Error = subsystem.name + " reload failed; inspect server logs"
 		}
 	}
 }

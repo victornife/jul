@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,8 +19,10 @@ import (
 
 	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/lifecycle"
 	"jul/internal/rbac"
 	"jul/internal/server"
+	"jul/internal/upstream"
 )
 
 // TestManagedApplyLifecycle_202PendingThen200Terminal is the WS01 vertical
@@ -194,6 +198,122 @@ func TestManagedApplyLifecycle_202PendingThen200Terminal(t *testing.T) {
 		if _, present := termBody[forbidden]; present {
 			t.Errorf("terminal response leaked %q", forbidden)
 		}
+	}
+}
+
+func TestManagedApplyLateReloadFailureDoesNotDiscloseSecret(t *testing.T) {
+	const secret = "http://late-reload-secret.example.test:9000"
+	t.Setenv("JUL_LATE_RELOAD_SECRET", secret)
+	path := filepath.Join(t.TempDir(), "server.toml")
+	addr := freePort(t)
+	cfg := config.ProxyTarget("http://127.0.0.1:9000", addr)
+	raw, err := config.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := config.NewCandidate(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, cleanup := minimalFactory(t)
+	defer cleanup()
+	srv := server.New(candidate.Effective, candidate.Raw, lifecycle.ComputeFingerprint(candidate.Effective), f.Log,
+		func(ctx context.Context, c *config.Config) (map[string]http.Handler, uint64, func() (upstream.SnapshotMap, func()), func(), error) {
+			if c.Servers[0].Locations[0].ProxyPass == secret {
+				return nil, 0, nil, nil, fmt.Errorf("late preparation failed for %s", c.Servers[0].Locations[0].ProxyPass)
+			}
+			return f.Prepare(ctx, c)
+		}, config.NewTOMLSource(path), func(context.Context, *config.Config) error { return nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	reload := make(chan server.ReloadRequest)
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, reload, candidate.Redaction) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("server did not start: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	coordinator := &ConfigApplyCoordinator{
+		BaseCtx: ctx, Path: path, Preflight: testPreflight(), LiveSnapshot: srv.LiveSnapshot,
+		PlannedRestart: &PlannedRestartStore{},
+		SubmitReload: func(req server.ReloadRequest) error {
+			reload <- req
+			return nil
+		},
+	}
+	registry, _, completed := wireProductionLedger(coordinator)
+	adminSrv := admin.New(config.AdminConfig{Enabled: true, Listen: "127.0.0.1:0"}, nil, admin.Deps{
+		ManagedApplies: registry,
+		ReadConfigRaw:  func() ([]byte, error) { return os.ReadFile(path) },
+		LoadConfig:     func() (*config.Config, error) { return config.NewTOMLSource(path).Load() },
+		LiveSnapshot:   srv.LiveSnapshot,
+		ApplyConfigRaw: func(ctx admin.ApplyRequestContext, data []byte, mode string) (admin.ConfigApplyResult, error) {
+			result, err := coordinator.ApplyRaw(ctx, data, ApplyMode(mode))
+			return toAdminConfigApplyResult(result), err
+		},
+	})
+	cfg.Servers[0].Locations[0].ProxyPass = "${env:JUL_LATE_RELOAD_SECRET}"
+	raw, err = config.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/config/apply", bytes.NewReader(raw))
+	req.RemoteAddr = "127.0.0.1:1234"
+	response := httptest.NewRecorder()
+	adminSrv.Handler().ServeHTTP(response, req)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("apply status = %d: %s", response.Code, response.Body.String())
+	}
+	var result admin.ConfigApplyResult
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Reload == nil || result.Reload.Outcome != server.ReloadNotApplied || result.Reload.FailedPhase != "prepare" || !result.Restored {
+		t.Fatalf("late failure classification lost: %+v", result)
+	}
+	if strings.Contains(response.Body.String(), secret) {
+		t.Fatal("immediate response disclosed the resolved secret")
+	}
+	select {
+	case <-completed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal record was not completed")
+	}
+	code, record := getApply(t, adminSrv.Handler(), result.ApplyID)
+	recordJSON, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != http.StatusOK || strings.Contains(string(recordJSON), secret) {
+		t.Fatalf("terminal record status %d or disclosed secret", code)
+	}
+	var terminal struct {
+		State  admin.ManagedApplyState `json:"state"`
+		Result admin.ConfigApplyResult `json:"result"`
+	}
+	if err := json.Unmarshal(recordJSON, &terminal); err != nil {
+		t.Fatal(err)
+	}
+	if terminal.State != admin.ManagedApplyTerminal || terminal.Result.Reload == nil ||
+		terminal.Result.Reload.Outcome != server.ReloadNotApplied ||
+		terminal.Result.Reload.FailedPhase != "prepare" || !terminal.Result.Restored {
+		t.Fatalf("terminal failure classification lost: %+v", terminal)
 	}
 }
 

@@ -28,6 +28,12 @@ check raw apply, staged apply, TLS preflight failures, and multiline secrets.
 The targeted tests and affected Go package suites pass locally; this follow-up
 is not part of merge `08f5d1c`.
 
+A further review identified that errors after preflight could disclose resolved
+values through managed reload results. Managed candidates containing secret
+references now return fixed phase and subsystem error messages before the
+result is stored or returned. A regression checks both the immediate apply
+response and terminal record while preserving the failed phase and restoration.
+
 The review found no blocker in the other three requested areas: owned records
 for submitted or uncertain challenges are retained while CA validation may
 still be active and reconciled; TSIG owner restrictions are enforced by DNS
