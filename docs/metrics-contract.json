@@ -206,6 +206,15 @@
       "state": "released_v1.32.0"
     },
     {
+      "name": "jul_discovery_last_success_timestamp_seconds",
+      "type": "gauge",
+      "help": "Unix timestamp of the last non-empty result accepted by the current discovery worker; zero means unknown or never refreshed.",
+      "labels": [
+        "pool"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_egress_decisions_total",
       "type": "counter",
       "help": "Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow).",

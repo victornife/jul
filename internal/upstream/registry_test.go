@@ -67,6 +67,86 @@ func TestRegistryReusesUnchangedPool(t *testing.T) {
 	}
 }
 
+func TestRegistryNoopReloadRetainsDiscoveryFreshness(t *testing.T) {
+	discovery := discoveryCfg("dns", "svc.local:80")
+	discovery.Discovery.Refresh = config.Duration(time.Hour)
+	r := NewRegistry(RegistryOptions{
+		NewDiscoverer: func(config.DiscoveryConfig, DialFunc) (Discoverer, error) {
+			return immediateDiscoverer{targets: []Target{{Address: "10.0.0.1:80"}}}, nil
+		},
+	})
+	defer r.CloseAll()
+
+	r.Begin()
+	p1, err := r.For(context.Background(), discovery, "http")
+	if err != nil {
+		t.Fatalf("initial For: %v", err)
+	}
+	r.Commit()
+	r.Activate()
+	eventually(t, func() bool { return !p1.DiscoveryLastSuccess().IsZero() })
+	firstSuccess := p1.DiscoveryLastSuccess()
+
+	r.Begin()
+	p2, err := r.For(context.Background(), discovery, "http")
+	if err != nil {
+		t.Fatalf("no-op For: %v", err)
+	}
+	r.Commit()
+	r.Activate()
+
+	if p1 != p2 {
+		t.Fatal("no-op reload replaced the discovery pool")
+	}
+	if got := p2.DiscoveryLastSuccess(); !got.Equal(firstSuccess) {
+		t.Fatalf("no-op reload freshness = %v, want retained %v", got, firstSuccess)
+	}
+	freshness := r.DiscoveryFreshness()
+	if len(freshness) != 1 || freshness[0].Name != "disco" || !freshness[0].LastSuccess.Equal(firstSuccess) {
+		t.Fatalf("registry freshness = %+v, want one current dynamic pool at %v", freshness, firstSuccess)
+	}
+}
+
+func TestRegistryDiscoveryFreshnessOmitsStaticAndReplacedPools(t *testing.T) {
+	discovery := discoveryCfg("dns", "svc.local:80")
+	r := NewRegistry(RegistryOptions{
+		NewDiscoverer: func(config.DiscoveryConfig, DialFunc) (Discoverer, error) {
+			return immediateDiscoverer{targets: []Target{{Address: "10.0.0.1:80"}}}, nil
+		},
+	})
+	defer r.CloseAll()
+
+	r.Begin()
+	dynamic, err := r.For(context.Background(), discovery, "http")
+	if err != nil {
+		t.Fatalf("dynamic For: %v", err)
+	}
+	if _, err := r.For(context.Background(), upstreamCfg("static-api", "round_robin", "10.0.0.2:80"), "http"); err != nil {
+		t.Fatalf("static For: %v", err)
+	}
+	r.Commit()
+	r.Activate()
+	eventually(t, func() bool { return !dynamic.DiscoveryLastSuccess().IsZero() })
+	if got := r.DiscoveryFreshness(); len(got) != 1 || got[0].Name != "disco" {
+		t.Fatalf("freshness with static and dynamic pools = %+v, want only dynamic pool", got)
+	}
+
+	r.Begin()
+	replacement, err := r.For(context.Background(), upstreamCfg("disco", "round_robin", "10.0.0.1:80"), "http")
+	if err != nil {
+		t.Fatalf("static replacement For: %v", err)
+	}
+	r.Commit()
+	r.Activate()
+
+	if replacement == dynamic || !closed(dynamic.Done()) {
+		t.Fatal("changing dynamic discovery to static should retire the old pool")
+	}
+	if got := r.DiscoveryFreshness(); len(got) != 0 {
+		t.Fatalf("freshness after dynamic pool replacement = %+v, want no series", got)
+	}
+}
+
 func TestRegistryReplacesPoolOnStrategyChange(t *testing.T) {
 	r := NewRegistry(RegistryOptions{})
 

@@ -164,6 +164,36 @@ describe("AppDetail one-operation handoff", () => {
     expect(screen.queryByText("Add backend (one operation)")).toBeNull();
   });
 
+  it("shows discovery freshness and distinguishes a pool that has never refreshed", () => {
+    render(
+      <AppDetail
+        app={app({ discovery: "dns", discovery_refresh_state: "never_refreshed" })}
+        onClose={() => undefined}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    expect(screen.getByText("Last accepted discovery refresh")).toBeInTheDocument();
+    expect(screen.getByText("Never refreshed")).toBeInTheDocument();
+  });
+
+  it("shows the most recently accepted discovery timestamp", () => {
+    const lastSuccess = "2026-11-25T12:00:00.000Z";
+    render(
+      <AppDetail
+        app={app({
+          discovery: "dns",
+          discovery_refresh_state: "fresh",
+          discovery_last_success: lastSuccess,
+        })}
+        onClose={() => undefined}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    expect(screen.getByText(new Date(lastSuccess).toLocaleString())).toBeInTheDocument();
+  });
+
   it("keeps the last static backend removal disabled", () => {
     render(
       <AppDetail

@@ -57,7 +57,13 @@ func TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration(
 	// cancelled/fenced, then B is installed. The A provider deliberately ignores
 	// cancellation and returns later; its result must be dropped.
 	p.StopDiscovery()
-	p.StartDiscovery(immediateDiscoverer{targets: []Target{{Address: "127.0.0.1:8002", Weight: 1}}}, time.Hour, DiscoveryHooks{}, nil)
+	if got := p.DiscoveryLastSuccess(); !got.IsZero() {
+		t.Fatalf("stopped generation retained freshness at %v", got)
+	}
+	newSuccessAt := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	p.StartDiscovery(immediateDiscoverer{targets: []Target{{Address: "127.0.0.1:8002", Weight: 1}}}, time.Hour, DiscoveryHooks{
+		Now: func() time.Time { return newSuccessAt },
+	}, nil)
 
 	deadline := time.Now().Add(time.Second)
 	for {
@@ -70,11 +76,17 @@ func TestDiscoveryResultFromRetiredEgressGenerationCannotOverwriteNewGeneration(
 		}
 		time.Sleep(time.Millisecond)
 	}
+	if got := p.DiscoveryLastSuccess(); !got.Equal(newSuccessAt) {
+		t.Fatalf("new worker freshness = %v, want %v", got, newSuccessAt)
+	}
 
 	close(old.release)
 	time.Sleep(20 * time.Millisecond)
 	backends := p.Backends()
 	if len(backends) != 1 || backends[0].Address != "127.0.0.1:8002" {
 		t.Fatalf("late generation-A result overwrote B: %+v", backends)
+	}
+	if got := p.DiscoveryLastSuccess(); !got.Equal(newSuccessAt) {
+		t.Fatalf("late generation-A result changed freshness to %v, want %v", got, newSuccessAt)
 	}
 }

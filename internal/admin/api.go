@@ -25,9 +25,11 @@ import (
 // adapts its internal pool snapshot into this shape so the admin package stays
 // decoupled from the upstream package.
 type UpstreamStatus struct {
-	Name     string          `json:"name"`
-	Strategy string          `json:"strategy"`
-	Backends []BackendStatus `json:"backends"`
+	Name                  string          `json:"name"`
+	Strategy              string          `json:"strategy"`
+	Backends              []BackendStatus `json:"backends"`
+	DiscoveryRefreshState string          `json:"discovery_refresh_state,omitempty"`
+	DiscoveryLastSuccess  *time.Time      `json:"discovery_last_success,omitempty"`
 }
 
 // BackendStatus is the console view of one backend within a pool.

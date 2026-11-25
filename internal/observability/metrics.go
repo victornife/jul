@@ -90,16 +90,17 @@ type Metrics struct {
 	storage               *storageCollector
 	// upstreamCapacity is #431's separate, un-scraped capacity source; see
 	// SetUpstreamCapacitySource.
-	upstreamCapacity atomic.Pointer[UpstreamStatsSource]
-	discoveryErrors  *prometheus.CounterVec
-	probes           *prometheus.CounterVec
-	probeDuration    *prometheus.HistogramVec
-	grpcTranscode    *prometheus.CounterVec
-	grpcStreamMsgs   *prometheus.CounterVec
-	grpcProxyCalls   prometheus.Counter
-	pluginInvokes    *prometheus.CounterVec
-	pluginDuration   *prometheus.HistogramVec
-	pluginPanics     *prometheus.CounterVec
+	upstreamCapacity   atomic.Pointer[UpstreamStatsSource]
+	discoveryErrors    *prometheus.CounterVec
+	discoveryFreshness *discoveryFreshnessCollector
+	probes             *prometheus.CounterVec
+	probeDuration      *prometheus.HistogramVec
+	grpcTranscode      *prometheus.CounterVec
+	grpcStreamMsgs     *prometheus.CounterVec
+	grpcProxyCalls     prometheus.Counter
+	pluginInvokes      *prometheus.CounterVec
+	pluginDuration     *prometheus.HistogramVec
+	pluginPanics       *prometheus.CounterVec
 	// pluginRespInvokes/pluginRespDuration/pluginRespNoBody are the jul-abi/v2
 	// response phase (ADR 0020 §9): new families, so the released plugin
 	// families keep counting handle_request only.
@@ -450,6 +451,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_discovery_errors_total",
 			Help: "Failed or empty service-discovery resolves, labeled by pool (last-good backends are kept).",
 		}, []string{"pool"}),
+		discoveryFreshness: newDiscoveryFreshnessCollector(),
 		probes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_upstream_probes_total",
 			Help: "Active health-check probes, labeled by pool, result (success/failure) and the proxy surface that owns the checker (http/stream).",
@@ -671,6 +673,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.upstreamUp,
 		m.upstreamBackends,
 		m.discoveryErrors,
+		m.discoveryFreshness,
 		m.probes,
 		m.probeDuration,
 		m.grpcTranscode,

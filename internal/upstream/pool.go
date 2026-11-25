@@ -101,9 +101,10 @@ type Pool struct {
 	// Keep its cancellation/fencing separate from Close: a policy Publish must
 	// stop generation A from starting another refresh immediately, without
 	// retiring the pool admission/circuit state still referenced by old handlers.
-	discoveryMu     sync.Mutex
-	discoveryEpoch  atomic.Uint64
-	discoveryCancel context.CancelFunc
+	discoveryMu          sync.Mutex
+	discoveryEpoch       atomic.Uint64
+	discoveryCancel      context.CancelFunc
+	discoveryLastSuccess atomic.Int64
 
 	// admission bounds the pool's in-flight logical work and owns the resolved
 	// resilience policy. It is created with the pool and never replaced, which is
@@ -458,6 +459,7 @@ func (p *Pool) StopDiscovery() {
 		p.discoveryCancel()
 		p.discoveryCancel = nil
 	}
+	p.discoveryLastSuccess.Store(0)
 	p.discoveryMu.Unlock()
 }
 
@@ -470,6 +472,7 @@ func (p *Pool) beginDiscoveryGeneration() (context.Context, uint64) {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.discoveryCancel = cancel
 	epoch := p.discoveryEpoch.Add(1)
+	p.discoveryLastSuccess.Store(0)
 	return ctx, epoch
 }
 
@@ -483,7 +486,7 @@ func (p *Pool) discoveryGenerationCurrent(epoch uint64) bool {
 // before StopDiscovery acquires the lock, or StopDiscovery advances the epoch
 // first and A is discarded. It can never pass the check under A and write after
 // B has fenced the worker.
-func (p *Pool) applyDiscoveryTargets(epoch uint64, targets []Target) bool {
+func (p *Pool) applyDiscoveryTargets(epoch uint64, targets []Target, acceptedAt time.Time) bool {
 	if p == nil {
 		return false
 	}
@@ -493,7 +496,21 @@ func (p *Pool) applyDiscoveryTargets(epoch uint64, targets []Target) bool {
 		return false
 	}
 	p.UpdateTargets(targets)
+	p.discoveryLastSuccess.Store(acceptedAt.UnixNano())
 	return true
+}
+
+// DiscoveryLastSuccess returns the current discovery worker's last accepted
+// non-empty result. The zero time means that worker has not accepted one.
+func (p *Pool) DiscoveryLastSuccess() time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	n := p.discoveryLastSuccess.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
 }
 
 // Done returns a channel closed when the pool is closed. Pool-owned goroutines

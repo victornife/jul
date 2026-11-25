@@ -962,6 +962,8 @@ export const AppProjectionSchema = z.object({
   health_check_path: z.string().optional(),
   health_check_interval: z.string().optional(),
   discovery_target: z.string().optional(),
+  discovery_refresh_state: z.enum(["never_refreshed", "fresh"]).optional(),
+  discovery_last_success: z.string().optional(),
   routes_using: z.array(z.string()).optional(),
   warnings: z.array(z.string()).optional(),
   // Guided App-editor seed fields. Non-secret health-check and discovery

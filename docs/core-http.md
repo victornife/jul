@@ -508,6 +508,7 @@ Labels fall into three classes by what bounds them:
 | `jul_transport_retired_total` | `mode` | `graceful`/`forced` |
 | `jul_upstream_backends` | `pool` | configured pools |
 | `jul_discovery_errors_total` | `pool` | configured pools |
+| `jul_discovery_last_success_timestamp_seconds` | `pool` | current dynamic pools |
 | `jul_upstream_probes_total` | `pool`, `result` | pools × `success`/`failure` |
 | `jul_upstream_probe_duration_seconds` | `pool` | configured pools |
 | `jul_grpc_transcode_requests_total` | `method`, `code` | proto methods × status |

@@ -109,6 +109,19 @@ func AdaptUpstreams(in []upstream.PoolStatus) []admin.UpstreamStatus {
 		if !ok {
 			ps = admin.UpstreamStatus{Name: p.Name, Strategy: p.Strategy}
 		}
+		if p.DiscoveryEnabled {
+			switch {
+			case p.DiscoveryLastSuccess.IsZero():
+				ps.DiscoveryRefreshState = "never_refreshed"
+				ps.DiscoveryLastSuccess = nil
+			case ps.DiscoveryRefreshState != "never_refreshed":
+				if ps.DiscoveryLastSuccess == nil || p.DiscoveryLastSuccess.Before(*ps.DiscoveryLastSuccess) {
+					lastSuccess := p.DiscoveryLastSuccess
+					ps.DiscoveryLastSuccess = &lastSuccess
+				}
+				ps.DiscoveryRefreshState = "fresh"
+			}
+		}
 		for _, b := range p.Backends {
 			ps.Backends = append(ps.Backends, admin.BackendStatus{
 				Address:  b.Address,

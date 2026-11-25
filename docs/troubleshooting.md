@@ -248,10 +248,14 @@ they update on the next successful poll.
 
 - `jul_upstream_backends{pool}` — current backend count discovery sees.
 - `jul_discovery_errors_total{pool}` — failed/empty resolves (last-good kept).
+- `jul_discovery_last_success_timestamp_seconds{pool}` — timestamp of the last non-empty result accepted by the current worker; zero means no accepted result yet.
 - `jul_upstream_backends_healthy{pool}` — of those, how many pass active health checks.
 
 A rising `jul_discovery_errors_total` with a flat `jul_upstream_backends` is the
-signature of a provider outage masked by keep-last-good.
+signature of a provider outage masked by keep-last-good. Alert on a zero
+freshness value after expected startup convergence, or on a timestamp older than
+the configured `refresh` plus the 5-second lookup timeout, one scrape interval,
+and scheduling slack. Static and removed pools do not emit a freshness series.
 
 ### Validating discovery end-to-end
 

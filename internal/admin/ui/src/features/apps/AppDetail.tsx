@@ -533,6 +533,16 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
                 : "static"
             }
           />
+          {app.discovery_refresh_state && (
+            <Row
+              label="Last accepted discovery refresh"
+              value={
+                app.discovery_last_success
+                  ? new Date(app.discovery_last_success).toLocaleString()
+                  : "Never refreshed"
+              }
+            />
+          )}
         </div>
 
         <div className="space-y-3 rounded-md border border-jul-border bg-jul-surface p-4">

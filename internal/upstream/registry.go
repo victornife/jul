@@ -729,9 +729,11 @@ func (r *Registry) CloseAll() {
 // PoolStatus is a point-in-time view of one live pool for operational
 // inspection (the admin console upstream panel).
 type PoolStatus struct {
-	Name     string
-	Scheme   string
-	Strategy string
+	Name                 string
+	Scheme               string
+	Strategy             string
+	DiscoveryEnabled     bool
+	DiscoveryLastSuccess time.Time
 	// Hash is the effective consistent_hash configuration, nil for any other
 	// strategy.
 	Hash     *HashStatus
@@ -759,7 +761,14 @@ func (r *Registry) Snapshot() []PoolStatus {
 	defer r.mu.Unlock()
 	out := make([]PoolStatus, 0, len(r.live))
 	for key, e := range r.live {
-		ps := PoolStatus{Name: key.name, Scheme: key.scheme, Strategy: e.meta.strategy, Hash: e.pool.HashStatus()}
+		ps := PoolStatus{
+			Name:                 key.name,
+			Scheme:               key.scheme,
+			Strategy:             e.meta.strategy,
+			Hash:                 e.pool.HashStatus(),
+			DiscoveryEnabled:     e.discovery,
+			DiscoveryLastSuccess: e.pool.DiscoveryLastSuccess(),
+		}
 		perBackend := e.pool.Policy().MaxActivePerBackend()
 		for _, b := range e.pool.Backends() {
 			ps.Backends = append(ps.Backends, BackendStatus{
@@ -771,6 +780,43 @@ func (r *Registry) Snapshot() []PoolStatus {
 			})
 		}
 		out = append(out, ps)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// PoolDiscoveryFreshness is the bounded freshness view for one configured
+// dynamic pool name. A zero LastSuccess means no current worker has accepted a
+// non-empty result yet.
+type PoolDiscoveryFreshness struct {
+	Name        string
+	LastSuccess time.Time
+}
+
+// DiscoveryFreshness returns one freshness value per configured dynamic pool.
+// When one pool name has multiple serving schemes, the oldest accepted refresh
+// is reported, and any worker without an accepted result makes the pool unknown.
+func (r *Registry) DiscoveryFreshness() []PoolDiscoveryFreshness {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	byName := make(map[string]time.Time)
+	for key, e := range r.live {
+		if !e.discovery {
+			continue
+		}
+		at := e.pool.DiscoveryLastSuccess()
+		current, ok := byName[key.name]
+		if !ok {
+			byName[key.name] = at
+			continue
+		}
+		if at.IsZero() || (!current.IsZero() && at.Before(current)) {
+			byName[key.name] = at
+		}
+	}
+	out := make([]PoolDiscoveryFreshness, 0, len(byName))
+	for name, at := range byName {
+		out = append(out, PoolDiscoveryFreshness{Name: name, LastSuccess: at})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

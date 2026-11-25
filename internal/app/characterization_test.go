@@ -72,6 +72,29 @@ func TestAdaptUpstreamsMapsCorrectly(t *testing.T) {
 	}
 }
 
+func TestAdaptUpstreamsRequiresFreshnessForEveryDynamicScheme(t *testing.T) {
+	first := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	out := AdaptUpstreams([]upstream.PoolStatus{
+		{Name: "api", DiscoveryEnabled: true, DiscoveryLastSuccess: second},
+		{Name: "api", DiscoveryEnabled: true, DiscoveryLastSuccess: first},
+	})
+	if len(out) != 1 || out[0].DiscoveryRefreshState != "fresh" || out[0].DiscoveryLastSuccess == nil {
+		t.Fatalf("fresh scheme aggregation = %+v", out)
+	}
+	if !out[0].DiscoveryLastSuccess.Equal(first) {
+		t.Fatalf("last success = %v, want oldest current scheme timestamp %v", out[0].DiscoveryLastSuccess, first)
+	}
+
+	out = AdaptUpstreams([]upstream.PoolStatus{
+		{Name: "api", DiscoveryEnabled: true, DiscoveryLastSuccess: first},
+		{Name: "api", DiscoveryEnabled: true},
+	})
+	if len(out) != 1 || out[0].DiscoveryRefreshState != "never_refreshed" || out[0].DiscoveryLastSuccess != nil {
+		t.Fatalf("unknown scheme aggregation = %+v, want never_refreshed with no timestamp", out)
+	}
+}
+
 func TestAdaptCertsMapsCorrectly(t *testing.T) {
 	in := []server.CertSummary{
 		{
