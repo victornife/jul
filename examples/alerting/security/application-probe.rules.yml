@@ -1,0 +1,80 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+#
+# Outside-in application probe alerts. The operator-owned instance label is a
+# stable name, not the target URL or request data.
+
+groups:
+  - name: application_probe
+    interval: 15s
+    rules:
+      - alert: JulApplicationProbeFailed
+        expr: |
+          (probe_success{job="jul-application-probe",instance="jul-app"} == 0)
+          and on (job, instance) (up{job="jul-application-probe"} == 1)
+        for: 1m
+        labels:
+          severity: critical
+          category: application_probe
+        annotations:
+          summary: "Jul application probe jul-app failed."
+          description: "The exporter is scrapeable, but the configured HTTPS request did not satisfy status 200 and the JUL_OPS_PROBE_OK body marker. Check DNS, TLS, the Jul route and the upstream. Recovery requires a new successful probe."
+
+      - alert: JulApplicationProbeExporterUnavailable
+        expr: up{job="jul-application-probe",instance="jul-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Jul application probe exporter is unavailable for jul-app."
+          description: "Prometheus knows the expected target, but the exporter scrape failed. This does not establish an application failure; check the exporter process, private listener and scrape path."
+
+      - alert: JulApplicationProbeMissing
+        expr: absent(up{job="jul-application-probe",instance="jul-app"})
+        for: 5m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Expected Jul application probe jul-app is missing."
+          description: "The expected probe target has no up series. Check the probe Prometheus target configuration and relabeling; missing data is not healthy."
+
+      - alert: JulApplicationProbeDataMissing
+        expr: |
+          (up{job="jul-application-probe",instance="jul-app"} == 1)
+          unless on (job, instance)
+          probe_success{job="jul-application-probe",instance="jul-app"}
+        for: 5m
+        labels:
+          severity: warning
+          category: availability
+        annotations:
+          summary: "Jul application probe data is missing for jul-app."
+          description: "The exporter scrape is healthy but no probe_success sample is present. Treat the application state as unknown and inspect the exporter response and Prometheus scrape."
+
+      - alert: JulApplicationProbeCertificateExpiring
+        expr: |
+          (probe_ssl_earliest_cert_expiry{job="jul-application-probe",instance="jul-app"} - time() < 30 * 24 * 3600)
+          and on (job, instance)
+          (probe_success{job="jul-application-probe",instance="jul-app"} == 1)
+        for: 10m
+        labels:
+          severity: warning
+          category: certificate
+        annotations:
+          summary: "The HTTPS certificate chain observed by jul-app has an earliest expiry within 30 days."
+          description: "The Blackbox Exporter signal is the earliest NotAfter across certificates observed for this TLS connection, not necessarily only Jul's leaf. Confirm the served chain and renewal path. Missing certificate data is unknown, not healthy."
+
+      - alert: JulApplicationProbeCertificateExpiryCritical
+        expr: |
+          (probe_ssl_earliest_cert_expiry{job="jul-application-probe",instance="jul-app"} - time() < 7 * 24 * 3600)
+          and on (job, instance)
+          (probe_success{job="jul-application-probe",instance="jul-app"} == 1)
+        for: 10m
+        labels:
+          severity: critical
+          category: certificate
+        annotations:
+          summary: "The HTTPS certificate chain observed by jul-app has an earliest expiry within 7 days or has expired."
+          description: "The Blackbox Exporter signal is the earliest NotAfter across certificates observed for this TLS connection, not necessarily only Jul's leaf. Confirm the served chain and renew it. Missing certificate data is unknown, not healthy."

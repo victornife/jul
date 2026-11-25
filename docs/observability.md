@@ -706,7 +706,8 @@ to disable a specific limit.
 - [ ] Use `/readyz` for orchestrator readiness probes.
 - [ ] For an optional local notification journey, start and validate the
       [operational alerting recipe](../examples/alerting/security/README.md);
-      reuse existing monitoring where available.
+      reuse existing monitoring where available. Its optional Blackbox Exporter
+      profile checks one explicitly configured HTTPS application URL outside-in.
 
 ## Benchmarks & tuning
 
