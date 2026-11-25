@@ -23,6 +23,9 @@ Linux/arm64 results, not public-CA certification.
 - Hosted semantic-noop and Windows Full jobs on follow-up head
   `03f2f2cbae0d424a297ad7b2defcd7d6f3e573b9` found that a multi-owner test
   waited for only one owner's cleanup. Its assertion now waits for all owners.
+- Hosted generation-security on `6fd84762731290109ee880bfebe5af36894b0035`
+  exposed the same immediate-cleanup assumption in another test. Related
+  issuance tests now wait for all asynchronous cleanup before asserting.
 
 These are implementation follow-ups, **not an independent PKI review**. The
 earlier independent review attempt ended with a tool-safety error and did not
@@ -63,10 +66,14 @@ resolver caches or CA network vantage points. See
 - `go test -race -p 2 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/server -run '^TestDNS01InProcess(AuthorizationsPropagateConcurrently|ConcurrentAuthorizationFailureCleansAllLeases)$' -count=5 -timeout=90s`:
   passed. A prior 30-repeat run hit its overall 180-second timeout without an
   individual test failure.
+- `go test -race -p 2 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/server -run '^TestDNS01InProcess(ReconcilesAmbiguousAcceptance|LostAcceptanceResponseWaitsForProcessing|ACMEConcurrentCertificateGroups|AuthorizationsPropagateConcurrently|ConcurrentAuthorizationFailureCleansAllLeases)$' -count=3 -timeout=180s`:
+  passed after correcting the remaining assertions.
 - `go test -tags 'acme http3 console' ./internal/config ./internal/lifecycle ./internal/admin ./internal/app ./cmd/jul -count=1 -timeout=180s`:
   passed.
 - `go test -p 2 -count=1 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/server ./internal/app ./internal/admin ./internal/adminapi ./internal/adminclient ./internal/apicontract ./internal/config ./internal/lifecycle ./internal/observability ./internal/redact ./cmd/jul`:
   passed after the multi-owner assertion fix.
+- `go test -p 2 -count=2 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/egress ./internal/auth ./internal/upstream ./internal/plugins ./internal/server ./internal/app`:
+  passed after correcting the remaining assertions.
 - `go test -race -p 2 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./...`:
   passed after the fixture fix; unaffected packages reused Go's test cache.
 - `make console-check`: passed, 1,112 tests and 83.55% statements.

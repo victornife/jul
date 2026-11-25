@@ -429,21 +429,26 @@ func testIntegratedDNSManager(t *testing.T, ca *testDNSACMECA, provider *rfc2136
 	return m
 }
 
-func assertIntegratedDNSClean(t *testing.T, dns *testRFC2136Server) {
+func waitForIntegratedDNSClean(t *testing.T, dns *testRFC2136Server, preserveUnrelated bool) {
 	t.Helper()
 	waitForDNSACMETest(t, "owned challenge cleanup", func() bool {
 		dns.mu.Lock()
 		defer dns.mu.Unlock()
-		if len(dns.records[testOwner]) != 1 || !dns.records[testOwner]["unrelated"] {
+		if preserveUnrelated && (len(dns.records[testOwner]) != 1 || !dns.records[testOwner]["unrelated"]) {
 			return false
 		}
 		for owner, values := range dns.records {
-			if owner != testOwner && len(values) != 0 {
+			if (!preserveUnrelated || owner != testOwner) && len(values) != 0 {
 				return false
 			}
 		}
 		return true
 	})
+}
+
+func assertIntegratedDNSClean(t *testing.T, dns *testRFC2136Server) {
+	t.Helper()
+	waitForIntegratedDNSClean(t, dns, true)
 	dns.mu.Lock()
 	defer dns.mu.Unlock()
 	records := dns.records[testOwner]
@@ -1440,11 +1445,7 @@ func TestDNS01InProcessReconcilesAmbiguousAcceptance(t *testing.T) {
 			if flaky.attempts.Load() != tt.attempts || validations != 1 {
 				t.Fatalf("attempts=%d validations=%d, want %d and 1", flaky.attempts.Load(), validations, tt.attempts)
 			}
-			dns.mu.Lock()
-			defer dns.mu.Unlock()
-			if len(dns.records[testOwner]) != 0 {
-				t.Fatalf("challenge records remain: %v", dns.records[testOwner])
-			}
+			waitForIntegratedDNSClean(t, dns, false)
 		})
 	}
 }
@@ -2861,11 +2862,7 @@ func TestDNS01InProcessLostAcceptanceResponseWaitsForProcessing(t *testing.T) {
 	if err := <-result; err != nil {
 		t.Fatalf("valid authorization did not recover from the lost response: %v", err)
 	}
-	dns.mu.Lock()
-	defer dns.mu.Unlock()
-	if len(dns.records[testOwner]) != 0 {
-		t.Fatalf("validated challenge was not cleaned: %v", dns.records[testOwner])
-	}
+	waitForIntegratedDNSClean(t, dns, false)
 }
 
 func TestDNS01InProcessTerminalStateCleansAndCancellationRetainsTXT(t *testing.T) {
@@ -3159,11 +3156,5 @@ func TestDNS01InProcessACMEConcurrentCertificateGroups(t *testing.T) {
 		t.Errorf("registrations=%d orders=%d validations=%d", ca.registrations, len(ca.orders), ca.validations)
 	}
 	ca.mu.Unlock()
-	dns.mu.Lock()
-	defer dns.mu.Unlock()
-	for owner, records := range dns.records {
-		if len(records) != 0 {
-			t.Errorf("concurrent challenge owner %s was not cleaned: %v", owner, records)
-		}
-	}
+	waitForIntegratedDNSClean(t, dns, false)
 }
