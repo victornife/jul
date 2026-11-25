@@ -164,34 +164,38 @@ describe("AppDetail one-operation handoff", () => {
     expect(screen.queryByText("Add backend (one operation)")).toBeNull();
   });
 
-  it("shows discovery freshness and distinguishes a pool that has never refreshed", () => {
+  it("shows a serving discovery pool waiting for an accepted refresh", () => {
     render(
       <AppDetail
-        app={app({ discovery: "dns", discovery_refresh_state: "never_refreshed" })}
+        app={app({ discovery: "dns", serving_discovery: {} })}
         onClose={() => undefined}
       />,
       { wrapper: Wrapper },
     );
 
-    expect(screen.getByText("Last accepted discovery refresh")).toBeInTheDocument();
-    expect(screen.getByText("Never refreshed")).toBeInTheDocument();
+    const serving = within(screen.getByRole("region", { name: "Serving discovery" }));
+    expect(serving.getByText("Waiting for a successful refresh")).toBeInTheDocument();
   });
 
-  it("shows the most recently accepted discovery timestamp", () => {
-    const lastSuccess = "2026-11-25T12:00:00.000Z";
+  it("shows the serving pool's older refresh separately from a staged target", () => {
+    const lastSuccess = "2026-11-24T12:00:00.000Z";
     render(
       <AppDetail
         app={app({
           discovery: "dns",
-          discovery_refresh_state: "fresh",
-          discovery_last_success: lastSuccess,
+          discovery_target: "staged.example.test:8080",
+          serving_discovery: { last_success: lastSuccess },
         })}
         onClose={() => undefined}
       />,
       { wrapper: Wrapper },
     );
 
-    expect(screen.getByText(new Date(lastSuccess).toLocaleString())).toBeInTheDocument();
+    const serving = within(screen.getByRole("region", { name: "Serving discovery" }));
+    expect(serving.getByText(new Date(lastSuccess).toLocaleString())).toBeInTheDocument();
+    expect(serving.queryByText(/staged.example.test/)).toBeNull();
+    expect(screen.getByText("Configured discovery")).toBeInTheDocument();
+    expect(screen.getByText("dns · staged.example.test:8080")).toBeInTheDocument();
   });
 
   it("keeps the last static backend removal disabled", () => {

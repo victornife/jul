@@ -110,16 +110,11 @@ func AdaptUpstreams(in []upstream.PoolStatus) []admin.UpstreamStatus {
 			ps = admin.UpstreamStatus{Name: p.Name, Strategy: p.Strategy}
 		}
 		if p.DiscoveryEnabled {
-			switch {
-			case p.DiscoveryLastSuccess.IsZero():
-				ps.DiscoveryRefreshState = "never_refreshed"
-				ps.DiscoveryLastSuccess = nil
-			case ps.DiscoveryRefreshState != "never_refreshed":
-				if ps.DiscoveryLastSuccess == nil || p.DiscoveryLastSuccess.Before(*ps.DiscoveryLastSuccess) {
-					lastSuccess := p.DiscoveryLastSuccess
-					ps.DiscoveryLastSuccess = &lastSuccess
-				}
-				ps.DiscoveryRefreshState = "fresh"
+			at := p.DiscoveryLastSuccess
+			if ps.ServingDiscovery == nil {
+				ps.ServingDiscovery = &admin.DiscoveryObservation{LastSuccess: at}
+			} else if previous := ps.ServingDiscovery.LastSuccess; at.IsZero() || (!previous.IsZero() && at.Before(previous)) {
+				ps.ServingDiscovery.LastSuccess = at
 			}
 		}
 		for _, b := range p.Backends {

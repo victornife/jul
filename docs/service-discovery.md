@@ -319,6 +319,13 @@ interval, and small scheduling slack. For example, with `refresh = "30s"` and a
 avoids paging during one in-flight lookup while still surfacing a persistently
 stale pool.
 
+Apps → App Detail shows the serving pool's last accepted refresh separately
+from its configured discovery target. During a staged change, the configured
+target can differ from the target currently serving. The timestamp records an
+observation. Compare its age with the serving pool's refresh interval to
+decide whether discovery is stale. If any current worker has yet to succeed,
+App Detail shows that it is waiting for a successful refresh.
+
 ## Local live integration runbook (issue #24)
 
 Use this runbook to validate service discovery against live providers on a
