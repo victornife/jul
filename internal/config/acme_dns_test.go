@@ -4,6 +4,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -153,6 +154,30 @@ func TestDNS01Configuration(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "literal-secret") {
 				t.Fatal("validation exposed a credential")
+			}
+		})
+	}
+}
+
+func TestDNS01FallbackNameErrorsUseServerNamePathsWithoutValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"private-invalid!", "invalid DNS-01 certificate name"},
+		{"private-value.outside.test", "DNS challenge name is outside the configured zone"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			cfg := dnsACMEConfig()
+			srv := &cfg.Servers[0]
+			srv.TLS.ACME.Domains = nil
+			srv.ServerNames = []string{"example.com", tc.name}
+			err := errors.Join(validateACMEDNS(srv.TLS.ACME, srv.ServerNames, "servers[0].tls.acme")...)
+			if err == nil || !strings.Contains(err.Error(), "servers[0].server_names[1]: "+tc.want) {
+				t.Fatalf("fallback name error = %v", err)
+			}
+			if strings.Contains(err.Error(), tc.name) {
+				t.Fatal("fallback name error disclosed a configured value")
 			}
 		})
 	}

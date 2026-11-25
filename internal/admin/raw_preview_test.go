@@ -142,6 +142,31 @@ func TestSafeValidationDoesNotTreatSecretAsPath(t *testing.T) {
 	}
 }
 
+func TestSecretSafeValidationError(t *testing.T) {
+	if err := SecretSafeValidationError(nil); err != nil {
+		t.Fatalf("nil error became %v", err)
+	}
+
+	err := errors.Join(
+		errors.New("servers[0].tls.acme.domains[0]: invalid DNS-01 certificate name private-value"),
+		errors.New("invalid value\nx[1]: another-private-value"),
+	)
+	safe := SecretSafeValidationError(err)
+	if safe == nil {
+		t.Fatal("invalid candidate lost its error")
+	}
+	for _, secret := range []string{"private-value", "x[1]"} {
+		if strings.Contains(safe.Error(), secret) {
+			t.Fatal("safe error disclosed a resolved value")
+		}
+	}
+	for _, guidance := range []string{"A DNS-01 certificate name is invalid.", "The candidate value is invalid."} {
+		if !strings.Contains(safe.Error(), guidance) {
+			t.Fatalf("safe error omitted guidance %q", guidance)
+		}
+	}
+}
+
 func TestSafeValidationPreservesFixedClassification(t *testing.T) {
 	const marker = "CONFIGURED_VALUE_MUST_NOT_ESCAPE"
 	for _, test := range []struct {
