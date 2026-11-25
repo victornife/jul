@@ -427,6 +427,7 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 			}
 		}
 		livePool := live[up.Name]
+		ap.ServingDiscovery = livePool.ServingDiscovery
 		liveMap := make(map[string]BackendStatus, len(livePool.Backends))
 		for _, b := range livePool.Backends {
 			liveMap[backendProjectionKey(b.Network, b.Address)] = b

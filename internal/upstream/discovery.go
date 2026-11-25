@@ -59,6 +59,8 @@ type DiscoveryHooks struct {
 	OnBackends func(pool string, n int)
 	// OnError is called after a failed or empty resolve.
 	OnError func(pool string)
+	// Now overrides the accepted-result timestamp in deterministic tests.
+	Now func() time.Time
 }
 
 // loggingDiscoverer lets a Discoverer accept a logger for detailed diagnostics.
@@ -197,7 +199,11 @@ func (p *Pool) refreshOnce(workerCtx context.Context, epoch uint64, d Discoverer
 		return
 	}
 
-	if !p.applyDiscoveryTargets(epoch, targets) {
+	acceptedAt := time.Now()
+	if hooks.Now != nil {
+		acceptedAt = hooks.Now()
+	}
+	if !p.applyDiscoveryTargets(epoch, targets, acceptedAt) {
 		return
 	}
 	if hooks.OnBackends != nil {

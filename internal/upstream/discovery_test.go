@@ -142,6 +142,84 @@ func TestStartDiscoveryKeepsLastGoodOnError(t *testing.T) {
 	}
 }
 
+func TestDiscoveryFreshnessTracksAcceptedCurrentWorkerResults(t *testing.T) {
+	cfg := discoveryCfg("dns", "svc.local:80")
+	cfg.Servers = []config.UpstreamServer{{Address: "10.0.0.1:80"}}
+	p, err := NewPool(cfg, "http")
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer p.Close()
+
+	if got := p.DiscoveryLastSuccess(); !got.IsZero() {
+		t.Fatalf("seed marked fresh at %v", got)
+	}
+
+	f := &fakeDiscoverer{}
+	f.set(nil, errors.New("provider down"))
+	var nowMu sync.Mutex
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	hooks := DiscoveryHooks{
+		Now: func() time.Time {
+			nowMu.Lock()
+			defer nowMu.Unlock()
+			return now
+		},
+	}
+	p.StartDiscovery(f, time.Hour, hooks, nil)
+	eventually(t, func() bool { return f.calls.Load() > 0 })
+	epoch := p.discoveryEpoch.Load()
+	if got := p.DiscoveryLastSuccess(); !got.IsZero() {
+		t.Fatalf("failed initial refresh marked fresh at %v", got)
+	}
+
+	f.set(nil, nil)
+	p.refreshOnce(context.Background(), epoch, f, hooks, nil)
+	if got := p.DiscoveryLastSuccess(); !got.IsZero() {
+		t.Fatalf("empty result marked fresh at %v", got)
+	}
+
+	targets := []Target{{Address: "10.0.0.1:80"}}
+	f.set(targets, nil)
+	p.refreshOnce(context.Background(), epoch, f, hooks, nil)
+	if got := p.DiscoveryLastSuccess(); !got.Equal(now) {
+		t.Fatalf("first accepted result timestamp = %v, want %v", got, now)
+	}
+
+	nowMu.Lock()
+	now = now.Add(time.Minute)
+	secondSuccess := now
+	nowMu.Unlock()
+	p.refreshOnce(context.Background(), epoch, f, hooks, nil)
+	if got := p.DiscoveryLastSuccess(); !got.Equal(secondSuccess) {
+		t.Fatalf("unchanged membership timestamp = %v, want %v", got, secondSuccess)
+	}
+
+	f.set(nil, errors.New("provider still down"))
+	p.refreshOnce(context.Background(), epoch, f, hooks, nil)
+	if got := p.DiscoveryLastSuccess(); !got.Equal(secondSuccess) {
+		t.Fatalf("failed refresh changed last success to %v, want %v", got, secondSuccess)
+	}
+	f.set(nil, nil)
+	p.refreshOnce(context.Background(), epoch, f, hooks, nil)
+	if got := p.DiscoveryLastSuccess(); !got.Equal(secondSuccess) {
+		t.Fatalf("empty refresh changed last success to %v, want %v", got, secondSuccess)
+	}
+
+	nowMu.Lock()
+	now = now.Add(time.Minute)
+	recoveredAt := now
+	nowMu.Unlock()
+	f.set(targets, nil)
+	p.refreshOnce(context.Background(), epoch, f, hooks, nil)
+	if got := p.DiscoveryLastSuccess(); !got.Equal(recoveredAt) {
+		t.Fatalf("recovery timestamp = %v, want %v", got, recoveredAt)
+	}
+	if got := len(p.Backends()); got != 1 {
+		t.Fatalf("last-good backend count = %d, want 1", got)
+	}
+}
+
 func TestStartDiscoveryStopsOnClose(t *testing.T) {
 	p, err := NewPool(discoveryCfg("dns", "svc.local:80"), "http")
 	if err != nil {

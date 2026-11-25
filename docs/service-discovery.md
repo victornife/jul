@@ -300,11 +300,31 @@ changed mid-request. Two keys, two questions.
 | --- | --- | --- | --- |
 | `jul_upstream_backends` | gauge | `pool` | Current backend count (tracks discovery) |
 | `jul_discovery_errors_total` | counter | `pool` | Failed/empty resolves (last-good kept) |
+| `jul_discovery_last_success_timestamp_seconds` | gauge | `pool` | Unix timestamp of the last non-empty result accepted by the current discovery worker; zero means unknown/never refreshed |
 
 These complement the existing `jul_upstream_backends_healthy` gauge and
 `jul_upstream_probes_total` counter from active health checking, so a dashboard
 can show both how many backends discovery currently sees and how many of them are
 passing their probes.
+
+The freshness gauge includes only current dynamic pools; static and removed
+pools have no series. A new worker starts at zero, and only an accepted,
+non-empty result (including one that leaves membership unchanged) advances the
+timestamp. Failed or empty refreshes preserve the last accepted time. Alert when
+the value is zero for a pool that must have completed initial discovery, or when
+`time() - jul_discovery_last_success_timestamp_seconds` exceeds that pool's
+configured `refresh` plus the 5-second resolve timeout, one Prometheus scrape
+interval, and small scheduling slack. For example, with `refresh = "30s"` and a
+15-second scrape interval, use a threshold slightly above 50 seconds. This
+avoids paging during one in-flight lookup while still surfacing a persistently
+stale pool.
+
+Apps → App Detail shows the serving pool's last accepted refresh separately
+from its configured discovery target. During a staged change, the configured
+target can differ from the target currently serving. The timestamp records an
+observation. Compare its age with the serving pool's refresh interval to
+decide whether discovery is stale. If any current worker has yet to succeed,
+App Detail shows that it is waiting for a successful refresh.
 
 ## Local live integration runbook (issue #24)
 
@@ -487,6 +507,7 @@ provider so operators can choose the right source for their deployment.
 | Active health checks on backends | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | Prometheus `jul_upstream_backends` | ☐ | ✅ | ✅ | ✅ | ✅ | — |
 | Prometheus `jul_discovery_errors_total` | ☐ | ✅ | ✅ | ✅ | ✅ | — |
+| Prometheus `jul_discovery_last_success_timestamp_seconds` | ☐ | ✅ | ✅ | ✅ | ✅ | — |
 | Console Status panel | ☐ | ✅ | ✅ | ✅ | ✅ | — |
 | Atomic reload (unchanged pool kept) | ✅ | ✅ | ✅ | ✅ | ✅ | — |
 | **Security / access** | | | | | | |

@@ -4,10 +4,53 @@
 package admin
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
+
+func TestAppsProjectionSeparatesServingDiscoveryFromStagedTarget(t *testing.T) {
+	lastSuccess := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{Upstreams: []config.UpstreamConfig{
+		{Name: "api", Discovery: &config.DiscoveryConfig{Type: "dns", Target: "staged.example.test:8080"}},
+		{Name: "pending"},
+		{Name: "static"},
+	}}
+	live := map[string]UpstreamStatus{
+		"api":     {ServingDiscovery: &DiscoveryObservation{LastSuccess: lastSuccess}},
+		"pending": {ServingDiscovery: &DiscoveryObservation{}},
+	}
+
+	apps := projectApps(cfg, live)
+	if len(apps) != 3 {
+		t.Fatalf("apps = %+v", apps)
+	}
+	if apps[0].DiscoveryTarget != "staged.example.test:8080" ||
+		apps[0].ServingDiscovery == nil || !apps[0].ServingDiscovery.LastSuccess.Equal(lastSuccess) {
+		t.Errorf("staged target and serving discovery projection = %+v", apps[0])
+	}
+	if apps[1].ServingDiscovery == nil || !apps[1].ServingDiscovery.LastSuccess.IsZero() {
+		t.Errorf("pending discovery projection = %+v", apps[1])
+	}
+	if apps[2].ServingDiscovery != nil {
+		t.Errorf("static discovery projection = %+v", apps[2])
+	}
+	for i, want := range []string{`{"last_success":"2026-11-24T12:00:00Z"}`, `{}`, ""} {
+		data, err := json.Marshal(apps[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(data, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(fields["serving_discovery"]); got != want {
+			t.Errorf("app %d serving discovery JSON = %q, want %q", i, got, want)
+		}
+	}
+}
 
 func TestAppsProjectionJoinsUnixBackendByNetworkAndNormalizedAddress(t *testing.T) {
 	cfg := &config.Config{Upstreams: []config.UpstreamConfig{{

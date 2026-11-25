@@ -57,9 +57,9 @@ credential to protect, and liveness checking keeps working unchanged.
 The compatibility baseline was reconstructed from tag `v1.32.0` at commit
 `6bb76a08846150663d7eeb9661edb718ef357a7c`. Its released families are
 frozen except for the explicitly recorded retirements and amendments in
-[compatibility.md](compatibility.md). Of the current 70 contract families, 25
+[compatibility.md](compatibility.md). Of the current 71 contract families, 25
 are retained from v1.32.0, 38 additional families are present in published
-`v2.0.0`, and seven were added after that tag and are in the proposed v2.1.0
+`v2.0.0`, and eight were added after that tag and are in the proposed v2.1.0
 tree. The table below marks the published and post-v2.0.0 groups separately.
 New families are additive MINOR metrics, not renames.
 
@@ -189,6 +189,7 @@ or actual-memory measurement. See the
 | `jul_config_pending_restart` | Gauge | — | Released `v2.0.0` | 1 when a managed staged-restart candidate is pending (waiting for process restart); 0 otherwise. |
 | `jul_config_stage_restart_total` | Counter | `result` | Released `v2.0.0` | Staged-restart apply operations, labeled by result (created/updated/discarded/failed). |
 | `jul_discovery_errors_total` | Counter | `pool` | Released `v1.32.0` | Failed or empty service-discovery resolves, labeled by pool (last-good backends are kept). |
+| `jul_discovery_last_success_timestamp_seconds` | Gauge | `pool` | Merged / release pending | Unix timestamp of the last non-empty result accepted by the current discovery worker; zero means unknown or never refreshed. Only current dynamic pools are emitted. |
 | `jul_egress_decisions_total` | Counter | `reason`, `result`, `subsystem` | Released `v2.0.0` | Outbound egress allow-list decisions, labeled by subsystem, result (allow/block), and reason (empty on allow). |
 | `jul_egress_dns_answers_total` | Counter | `result`, `subsystem` | Released `v2.0.0` | Egress CIDR-only hostname resolutions evaluated, labeled by subsystem and result (allow/block). |
 | `jul_grpc_proxy_streams_total` | Counter | — | Released `v1.32.0` | Native gRPC calls forwarded by the HTTP/2 passthrough proxy (one per call, including each streaming call). |

@@ -489,6 +489,22 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
 
         <AppResilience name={app.name} />
 
+        {app.serving_discovery && (
+          <section
+            aria-label="Serving discovery"
+            className="rounded-md border border-jul-border bg-jul-surface px-4 py-2"
+          >
+            <Row
+              label="Serving pool · last accepted discovery refresh"
+              value={
+                app.serving_discovery.last_success
+                  ? new Date(app.serving_discovery.last_success).toLocaleString()
+                  : "Waiting for a successful refresh"
+              }
+            />
+          </section>
+        )}
+
         <div className="rounded-md border border-jul-border bg-jul-surface px-4 py-2">
           <Row label="Strategy" value={app.strategy} />
           {hashDescription !== null && app.hash !== undefined && (
@@ -526,7 +542,7 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
           {app.max_fails ? <Row label="Max fails" value={String(app.max_fails)} /> : null}
           {app.fail_timeout && <Row label="Fail timeout" value={app.fail_timeout} />}
           <Row
-            label="Discovery"
+            label="Configured discovery"
             value={
               app.discovery
                 ? `${app.discovery}${app.discovery_target ? " · " + app.discovery_target : ""}`

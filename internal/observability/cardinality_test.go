@@ -164,6 +164,12 @@ func labelPolicy(t *testing.T, m *Metrics) map[string][]string {
 // exerciseAllMetrics touches every metric hook once so that each collector
 // exports at least one series for the label-policy audit.
 func exerciseAllMetrics(m *Metrics) {
+	m.SetDiscoveryFreshnessSource(func() []DiscoveryFreshness {
+		return []DiscoveryFreshness{{
+			Pool:        "api",
+			LastSuccess: time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC),
+		}}
+	})
 	m.SetInspectionSource(func() InspectionMetricsSnapshot {
 		return InspectionMetricsSnapshot{MaxBytes: 256 << 20, EvaluationLimit: 2}
 	})

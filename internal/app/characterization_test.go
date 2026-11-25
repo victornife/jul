@@ -72,6 +72,30 @@ func TestAdaptUpstreamsMapsCorrectly(t *testing.T) {
 	}
 }
 
+func TestAdaptUpstreamsReportsOldestAcceptedRefreshForServingSchemes(t *testing.T) {
+	first := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	second := first.Add(time.Minute)
+	out := AdaptUpstreams([]upstream.PoolStatus{
+		{Name: "api", DiscoveryEnabled: true, DiscoveryLastSuccess: second},
+		{Name: "api", DiscoveryEnabled: true, DiscoveryLastSuccess: first},
+	})
+	if len(out) != 1 || out[0].ServingDiscovery == nil {
+		t.Fatalf("serving discovery aggregation = %+v", out)
+	}
+	if got := out[0].ServingDiscovery.LastSuccess; !got.Equal(first) {
+		t.Fatalf("last success = %v, want oldest current scheme timestamp %v", got, first)
+	}
+
+	observed := upstream.PoolStatus{Name: "api", DiscoveryEnabled: true, DiscoveryLastSuccess: first}
+	waiting := upstream.PoolStatus{Name: "api", DiscoveryEnabled: true}
+	for _, input := range [][]upstream.PoolStatus{{observed, waiting}, {waiting, observed}} {
+		out = AdaptUpstreams(input)
+		if len(out) != 1 || out[0].ServingDiscovery == nil || !out[0].ServingDiscovery.LastSuccess.IsZero() {
+			t.Fatalf("serving discovery aggregation = %+v, want no timestamp until every worker succeeds", out)
+		}
+	}
+}
+
 func TestAdaptCertsMapsCorrectly(t *testing.T) {
 	in := []server.CertSummary{
 		{

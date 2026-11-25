@@ -280,6 +280,17 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	metrics.SetUpstreamStatsSource(func() []observability.UpstreamPoolStats {
 		return upstreamStats(poolReg)
 	})
+	metrics.SetDiscoveryFreshnessSource(func() []observability.DiscoveryFreshness {
+		freshness := poolReg.DiscoveryFreshness()
+		out := make([]observability.DiscoveryFreshness, 0, len(freshness))
+		for _, pool := range freshness {
+			out = append(out, observability.DiscoveryFreshness{
+				Pool:        pool.Name,
+				LastSuccess: pool.LastSuccess,
+			})
+		}
+		return out
+	})
 	// Separate, deliberately un-scraped source for #431's Overview capacity
 	// summary (see upstreamCapacityStats for why it is not folded into the
 	// Prometheus-facing source above).

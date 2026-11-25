@@ -18,7 +18,7 @@ groups:
           category: application_probe
         annotations:
           summary: "Jul application probe jul-app failed."
-          description: "The exporter is scrapeable, but the configured HTTPS request did not satisfy status 200 and the JUL_OPS_PROBE_OK body marker. Check DNS, TLS, the Jul route and the upstream. Recovery requires a new successful probe."
+          description: "The exporter is scrapeable, but the configured HTTPS request did not satisfy status 200 and the JUL_OPS_PROBE_OK body marker. Check DNS, TLS, the Jul route and the upstream. Exporter or data loss can clear this alert. Confirm recovery with a new successful probe."
 
       - alert: JulApplicationProbeExporterUnavailable
         expr: up{job="jul-application-probe",instance="jul-app"} == 0

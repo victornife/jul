@@ -25,9 +25,16 @@ import (
 // adapts its internal pool snapshot into this shape so the admin package stays
 // decoupled from the upstream package.
 type UpstreamStatus struct {
-	Name     string          `json:"name"`
-	Strategy string          `json:"strategy"`
-	Backends []BackendStatus `json:"backends"`
+	Name             string                `json:"name"`
+	Strategy         string                `json:"strategy"`
+	Backends         []BackendStatus       `json:"backends"`
+	ServingDiscovery *DiscoveryObservation `json:"serving_discovery,omitempty"`
+}
+
+// DiscoveryObservation reports the last accepted result for a serving dynamic
+// pool. A zero timestamp means at least one current worker has yet to succeed.
+type DiscoveryObservation struct {
+	LastSuccess time.Time `json:"last_success,omitzero"`
 }
 
 // BackendStatus is the console view of one backend within a pool.
