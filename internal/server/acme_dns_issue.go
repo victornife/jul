@@ -773,6 +773,13 @@ func (m *dnsACMEManager) acceptDNSChallenge(ctx context.Context, url string, cha
 	return next, err
 }
 
+func waitDNSPropagation(ctx context.Context, lease dnsChallengeLease) (<-chan error, context.CancelFunc) {
+	waitCtx, cancel := context.WithCancel(ctx)
+	result := make(chan error, 1)
+	go func() { result <- lease.Wait(waitCtx) }()
+	return result, cancel
+}
+
 func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string, challenge *acme.Challenge, lease dnsChallengeLease, lastErr error, nextPoll, nextAccept time.Time, onSubmit func()) (*acme.Authorization, error) {
 	var observationErr error
 	var lastAuth *acme.Authorization
@@ -796,11 +803,7 @@ func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string,
 				if lease == nil {
 					return lastAuth, errors.Join(lastErr, errors.New("DNS-01 retry requires a challenge lease"))
 				}
-				result := make(chan error, 1)
-				propagation = result
-				var waitCtx context.Context
-				waitCtx, cancelWait = context.WithCancel(ctx)
-				go func() { result <- lease.Wait(waitCtx) }()
+				propagation, cancelWait = waitDNSPropagation(ctx, lease)
 			}
 			timer := time.NewTimer(max(0, time.Until(nextPoll)))
 			select {
