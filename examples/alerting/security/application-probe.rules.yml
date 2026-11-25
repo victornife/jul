@@ -5,7 +5,7 @@
 # stable name, not the target URL or request data.
 
 groups:
-  - name: jul_application_probe
+  - name: application_probe
     interval: 15s
     rules:
       - alert: JulApplicationProbeFailed

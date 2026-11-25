@@ -5,7 +5,7 @@
 # the public certificate chain and hostname.
 
 modules:
-  jul_https_application:
+  https_application:
     prober: http
     timeout: 5s
     http:

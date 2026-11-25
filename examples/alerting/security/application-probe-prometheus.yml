@@ -22,7 +22,7 @@ scrape_configs:
   - job_name: "jul-application-probe"
     metrics_path: /probe
     params:
-      module: [jul_https_application]
+      module: [https_application]
     static_configs:
       - targets:
           # Replace with the exact HTTPS URL of the application route to test.

@@ -108,7 +108,7 @@ the exporter in separate terminals. Query the loopback exporter with:
 
 ```bash
 curl -fsS --get \
-  --data-urlencode 'module=jul_https_application' \
+  --data-urlencode 'module=https_application' \
   --data-urlencode 'target=https://localhost:18443/ops-probe' \
   http://127.0.0.1:9115/probe
 ```
@@ -148,7 +148,7 @@ docker compose -f examples/alerting/security/docker-compose.yml \
 docker compose -f examples/alerting/security/docker-compose.yml \
   --profile application-probe ps
 curl -fsS 'http://127.0.0.1:9092/api/v1/targets'
-curl -fsS 'http://127.0.0.1:9115/probe?module=jul_https_application&target=https%3A%2F%2Fapp.example.test%2Fops-probe'
+curl -fsS 'http://127.0.0.1:9115/probe?module=https_application&target=https%3A%2F%2Fapp.example.test%2Fops-probe'
 ```
 
 Replace the example URL in both the scrape config and the manual curl with the
