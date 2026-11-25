@@ -5,6 +5,42 @@ This records the follow-up to the review of #737 at
 results are identified in the PR verification comment. Results below are local
 Linux/arm64 results, not public-CA certification.
 
+## Final bounded review of merge `08f5d1c`
+
+An AI-assisted, read-only security review checked the merged diff and existing
+verification record for TXT ownership and cleanup after ambiguous CA responses,
+TSIG scope and secret handling, managed egress, and serving-certificate
+preservation after failed renewal. No independent human PKI review was
+available; DNS-01 remains Beta.
+
+The review found one high-confidence blocker: managed preflight validation
+could return a DNS-01 field value after resolving a secret reference. A
+`config:apply` caller able to submit a candidate could place such a reference
+in a DNS name or another validated field and receive the expanded value in the
+apply response. The finding is at the reviewed merge's
+`internal/config/validate_acme_dns.go:132`; the same diagnostic pattern existed
+for DNS-zone and server-name checks. The current focused follow-up removes
+values from those diagnostics and sanitizes failed managed preflight results
+whenever the candidate contains secret references, including downstream
+preflight failures. Secret-safe validation also omits parsed field paths because
+an error can contain a resolved value that looks like a path. Regression tests
+check raw apply, staged apply, TLS preflight failures, and multiline secrets.
+The targeted tests and affected Go package suites pass locally; this follow-up
+is not part of merge `08f5d1c`.
+
+The review found no blocker in the other three requested areas: owned records
+for submitted or uncertain challenges are retained while CA validation may
+still be active and reconciled; TSIG owner restrictions are enforced by DNS
+server policy; managed egress is used; and failed renewal does not replace a
+still-valid serving certificate. The credential-disclosure finding above was
+the secret-handling blocker. The review reused the BIND9, Pebble, race, and
+Gitleaks evidence recorded below. Gitleaks results remain findings-bearing:
+the tree scan reported 35 matches and the commit-range scan reported seven
+previously reviewed synthetic-key/assignment matches, not a clean scan.
+
+Public Let's Encrypt staging issuance and renewal on an authorized disposable
+zone remain unverified. DNS-01 remains Beta and is not production-qualified.
+
 ## Findings and disposition
 
 - Local timeout or shutdown could remove TXT data while the CA was still
@@ -27,14 +63,11 @@ Linux/arm64 results, not public-CA certification.
   exposed the same immediate-cleanup assumption in another test. Related
   issuance tests now wait for all asynchronous cleanup before asserting.
 
-These are implementation follow-ups, **not an independent PKI review**. The
-earlier independent review attempt ended with a tool-safety error and did not
-produce a verdict. A maintainer-assigned independent reviewer must still review
-the final diff for CA state and ownership, TSIG and secret handling, managed
-egress, and certificate renewal. Public Let's Encrypt staging on an authorized
-disposable zone also remains unverified; the maintainer must decide whether that
-is a release prerequisite. Qlty previously reported one blocking issue despite
-a successful GitHub status; its details were inaccessible without sign-in.
+These implementation follow-ups preceded the bounded AI-assisted review
+summarized above. The review does not constitute an independent human PKI
+review. Public Let's Encrypt staging on an authorized disposable zone remains
+unverified. Qlty previously reported one blocking issue despite a successful
+GitHub status; its details were inaccessible without sign-in.
 
 ## Real DNS and TLS
 
@@ -91,9 +124,9 @@ string-valued CNAME mappings must be migrated to the documented table form.
   synthetic test-key or variable-assignment matches. Both scans therefore
   returned the scanner's findings exit code, not a clean result.
 
-The follow-up remains local while the PR head is held. Hosted checks, Codecov
-and an independent PKI review on its eventual published head remain necessary.
-Public Let's Encrypt staging and the Qlty detail remain open as described above.
+These results were collected before the merge and do not establish hosted
+checks or Codecov results for the current follow-up. Public Let's Encrypt
+staging and the Qlty detail remain open as described above.
 
 ## Local gates
 

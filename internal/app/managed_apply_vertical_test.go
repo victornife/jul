@@ -4,17 +4,20 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"jul/internal/admin"
 	"jul/internal/config"
+	"jul/internal/rbac"
 	"jul/internal/server"
 )
 
@@ -222,4 +225,163 @@ func mustParse(t *testing.T, raw []byte) *config.Config {
 		t.Fatalf("parse config: %v", err)
 	}
 	return cfg
+}
+
+func TestManagedApplyDNSValidationDoesNotDiscloseResolvedSecrets(t *testing.T) {
+	const adminSecret = "dns01-admin-credential-canary-123"
+	const operatorToken = "dns01-config-apply-token-fixture"
+	t.Setenv("JUL_DNS_REVIEW_ADMIN_SECRET", adminSecret)
+	t.Setenv("JUL_DNS_REVIEW_TSIG", "MDEyMzQ1Njc4OWFiY2RlZg==")
+	t.Setenv("JUL_DNS_REVIEW_MULTILINE_SECRET", "private-value\ncredentialCanary[123]:suffix")
+
+	path := filepath.Join(t.TempDir(), "server.toml")
+	seed := config.ProxyTarget("127.0.0.1:9000", ":8080")
+	seed.Admin = config.AdminConfig{
+		Enabled: true,
+		Listen:  "127.0.0.1:9090",
+		RBAC: config.AdminRBACConfig{
+			Enabled:     true,
+			DefaultRole: "admin",
+			Roles:       []config.AdminRole{{Name: "writer", Permissions: []string{"config:apply"}}},
+			Principals: []config.AdminPrincipal{
+				{Name: "writer", Role: "writer", Token: operatorToken},
+				{Name: "admin", Role: "admin", Token: "${env:JUL_DNS_REVIEW_ADMIN_SECRET}"},
+			},
+		},
+	}
+	raw, err := config.Marshal(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	baseline := mustParse(t, raw)
+	resolved, err := config.NewCandidate(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveSnapshot := func() server.LiveSnapshot {
+		return server.LiveSnapshot{EffectiveConfig: resolved.Effective}
+	}
+	coordinator := &ConfigApplyCoordinator{
+		BaseCtx:        context.Background(),
+		Path:           path,
+		Preflight:      testPreflight(),
+		LiveSnapshot:   liveSnapshot,
+		PlannedRestart: &PlannedRestartStore{},
+	}
+	entered := false
+	adminServer := admin.New(resolved.Effective.Admin, nil, admin.Deps{
+		ReadConfigRaw: func() ([]byte, error) { return os.ReadFile(path) },
+		LoadConfig:    func() (*config.Config, error) { return config.Parse(raw) },
+		LiveSnapshot:  liveSnapshot,
+		ApplyConfigRaw: func(ctx admin.ApplyRequestContext, data []byte, mode string) (admin.ConfigApplyResult, error) {
+			entered = true
+			result, err := coordinator.ApplyRaw(ctx, data, ApplyMode(mode))
+			return toAdminConfigApplyResult(result), err
+		},
+	})
+	if adminServer == nil {
+		t.Fatal("admin server is disabled")
+	}
+	policy, err := rbac.Build(true, "admin", map[string][]string{"writer": {"config:apply"}}, []rbac.PrincipalDef{
+		{Name: "writer", Role: "writer", Token: operatorToken},
+		{Name: "admin", Role: "admin", Token: adminSecret},
+	}, "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminServer.UpdatePolicy(policy)
+
+	for _, tc := range []struct {
+		name string
+		edit func(*config.Config)
+	}{
+		{"invalid domain", func(c *config.Config) {
+			c.Servers[0].TLS.ACME.Domains = []string{"${env:JUL_DNS_REVIEW_ADMIN_SECRET}!"}
+		}},
+		{"domain outside zone", func(c *config.Config) {
+			c.Servers[0].TLS.ACME.Domains = []string{"${env:JUL_DNS_REVIEW_ADMIN_SECRET}.outside.test"}
+		}},
+		{"uncovered server name", func(c *config.Config) {
+			c.Servers[0].ServerNames = []string{"${env:JUL_DNS_REVIEW_ADMIN_SECRET}.example.test"}
+			c.Servers[0].TLS.ACME.Domains = []string{"other.example.test"}
+		}},
+		{"invalid CA", func(c *config.Config) {
+			c.Servers[0].TLS.ACME.CA = "${env:JUL_DNS_REVIEW_ADMIN_SECRET}!"
+		}},
+		{"missing TLS certificate", func(c *config.Config) {
+			c.Servers[0].TLS = &config.TLSConfig{
+				Enabled: true,
+				Cert:    "/missing/${env:JUL_DNS_REVIEW_ADMIN_SECRET}.pem",
+				Key:     "/missing/key.pem",
+			}
+		}},
+		{"multiline TLS certificate", func(c *config.Config) {
+			c.Servers[0].TLS = &config.TLSConfig{
+				Enabled: true,
+				Cert:    "/missing/${env:JUL_DNS_REVIEW_MULTILINE_SECRET}.pem",
+				Key:     "/missing/key.pem",
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate, err := baseline.Clone()
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate.Servers[0].ServerNames = []string{"example.test"}
+			candidate.Servers[0].TLS = &config.TLSConfig{Enabled: true, ACME: &config.ACMEConfig{
+				Enabled: true, Email: "ops@example.test", CA: "letsencrypt-staging",
+				Challenge: "dns-01", DNSProvider: "rfc2136", Domains: []string{"example.test"},
+				RFC2136: &config.RFC2136Config{
+					Server: "127.0.0.1:53", Observers: []string{"127.0.0.1:53"},
+					Zone: "example.test", TSIGKeyName: "jul.example.test",
+					TSIGSecret: "${env:JUL_DNS_REVIEW_TSIG}",
+				},
+			}}
+			tc.edit(candidate)
+			candidateRaw, err := config.Marshal(candidate)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, endpoint := range []struct {
+				path         string
+				wantStatus   int
+				managedApply bool
+			}{
+				{path: "/api/config/apply", wantStatus: http.StatusBadRequest, managedApply: true},
+				{path: "/api/config/apply?mode=stage_restart", wantStatus: http.StatusBadRequest, managedApply: true},
+				{path: "/api/config/raw", wantStatus: http.StatusBadRequest, managedApply: true},
+			} {
+				t.Run(endpoint.path, func(t *testing.T) {
+					entered = false
+					request := httptest.NewRequest(http.MethodPost, endpoint.path, bytes.NewReader(candidateRaw))
+					request.RemoteAddr = "127.0.0.1:1234"
+					request.Header.Set("Authorization", "Bearer "+operatorToken)
+					response := httptest.NewRecorder()
+					adminServer.Handler().ServeHTTP(response, request)
+					if endpoint.managedApply && !entered {
+						t.Fatalf("request did not reach managed apply: status=%d", response.Code)
+					}
+					if response.Code != endpoint.wantStatus {
+						t.Fatalf("status = %d, want %d", response.Code, endpoint.wantStatus)
+					}
+					for _, secret := range []string{adminSecret, "private-value", "credentialCanary[123]"} {
+						if strings.Contains(response.Body.String(), secret) {
+							t.Fatal("managed apply response disclosed a resolved credential")
+						}
+					}
+				})
+			}
+		})
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(onDisk, raw) {
+		t.Fatal("invalid candidate changed the persisted configuration")
+	}
 }

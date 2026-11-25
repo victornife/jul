@@ -61,6 +61,33 @@ func humanizeErr(raw string) []validationError {
 			},
 		},
 		{
+			token: "client_address.trusted_proxies",
+			err: validationError{
+				Code:     "bad_trusted_proxies",
+				Summary:  "The client_address.trusted_proxies setting is invalid.",
+				Detail:   "Use valid proxy IP addresses or canonical CIDR prefixes.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "client_address.forwarded_headers",
+			err: validationError{
+				Code:     "bad_forwarded_headers",
+				Summary:  "The client_address.forwarded_headers setting is invalid.",
+				Detail:   "Choose supported forwarded headers or use an empty list.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "client_address.max_hops",
+			err: validationError{
+				Code:     "bad_max_hops",
+				Summary:  "The client_address.max_hops setting is invalid.",
+				Detail:   "Use a value within the supported range.",
+				Severity: "error",
+			},
+		},
+		{
 			token: "no upstream named",
 			err: validationError{
 				Code:     "unknown_upstream",
@@ -120,6 +147,42 @@ func humanizeErr(raw string) []validationError {
 				Code:     "acme_misconfig",
 				Summary:  "ACME settings are incomplete or invalid.",
 				Detail:   "Check the email, provider URL, and accepted terms.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "unknown role",
+			err: validationError{
+				Code:     "unknown_rbac_role",
+				Summary:  "An RBAC principal references an unknown role.",
+				Detail:   "Assign the principal to a configured role.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "invalid DNS-01 certificate name",
+			err: validationError{
+				Code:     "invalid_dns01_name",
+				Summary:  "A DNS-01 certificate name is invalid.",
+				Detail:   "Use a valid DNS name or a single-label wildcard.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "DNS challenge name is outside the configured zone",
+			err: validationError{
+				Code:     "dns01_name_outside_zone",
+				Summary:  "A DNS-01 challenge name is outside the update zone.",
+				Detail:   "Configure the appropriate zone or an explicit CNAME delegation.",
+				Severity: "error",
+			},
+		},
+		{
+			token: "server name is not covered by its configured ACME domains",
+			err: validationError{
+				Code:     "dns01_name_not_covered",
+				Summary:  "A server name is not covered by the ACME domains.",
+				Detail:   "Include the server name in the configured certificate domains.",
 				Severity: "error",
 			},
 		},

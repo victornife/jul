@@ -65,9 +65,10 @@ the catalog fail a source-level check. See the
 for evidence and the remaining #514 line-level review boundary.
 
 Shared admin JSON responses use `Cache-Control: no-store`, including internal
-Console responses and error projections. Configuration validation findings
-retain structural field locations and content-free guidance; they are not a
-raw configuration readback. The
+Console responses and error projections. Secret-safe configuration validation
+findings use the generic `config` path and content-free guidance rather than
+returning parsed field locations that could contain resolved values. They are
+not a raw configuration readback. The
 [2026-10-08 continuation](audit/2026-10-08-admin-security-continuation.md)
 records the new regression evidence and remaining review work.
 

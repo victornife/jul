@@ -597,9 +597,8 @@ carrying:
 
 - a **code** that themes the message (e.g. `unknown_upstream`, `tls_misconfig`,
   or `unknown` for an unmapped message);
-- a **path** locating the offending block (e.g. `servers[0].locations[1]`) so an
-  error stays findable in a large config. Bare subsystem prefixes such as `waf:`
-  or `auth:` are surfaced as a code, not a path;
+- a **path**, which is `config` for secret-safe validation findings rather than
+  an inferred field location that could contain a resolved value;
 - a human **summary** (and optional **detail**) with actionable guidance.
 
 The Configuration panel shows the path as a chip in front of each message. The

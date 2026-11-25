@@ -3,6 +3,9 @@
 > **Maturity:** The existing TLS and HTTP-01/TLS-ALPN-01 capability is GA (see
 > [ADR 0003](adr/0003-maturity-and-ga.md)). The new RFC 2136 DNS-01 path is
 > Beta, implemented in this source but not independently released or soaked.
+> Public Let's Encrypt staging issuance and renewal remain unverified. Both
+> must be exercised on an authorized disposable zone before DNS-01 is called
+> production-qualified.
 > Mutual TLS is documented separately in [mtls.md](mtls.md).
 
 Jul.IA terminates TLS for HTTP/1.1, HTTP/2, and (with the `http3` tag) HTTP/3 on
@@ -500,8 +503,8 @@ bounded egress-denial reason as authoritative. See
 
 - **One DNS-01 update mechanism.** RFC 2136 with TSIG is supported; provider
   APIs, arbitrary CNAME traversal and recursive/global propagation checks are
-  not. One-hop CNAME mappings must be explicit. Public Let's Encrypt staging is
-  not yet demonstrated without an authorized zone.
+  not. One-hop CNAME mappings must be explicit. Public Let's Encrypt staging
+  issuance and renewal remain unverified pending an authorized disposable zone.
 - **Static certificate rotation is hot-reloadable on a retained listener
   (#100).** A cert/key content or path change is validated during preflight and
   swapped atomically into the listener's existing dynamic certificate
