@@ -22,6 +22,26 @@ func dnsACMEConfig() *Config {
 	return &Config{Servers: []ServerConfig{s}}
 }
 
+func TestRFC2136DelegationEquality(t *testing.T) {
+	first := &RFC2136Config{CNAMEDelegations: map[string]RFC2136CNAMEDelegation{
+		"_acme-challenge.example.com": {Target: "txt.example.com", Observers: []string{"ns.example.com:53"}},
+	}}
+	second := &RFC2136Config{CNAMEDelegations: map[string]RFC2136CNAMEDelegation{
+		"_acme-challenge.example.com": {Target: "txt.example.com", Observers: []string{"ns.example.com:53"}},
+	}}
+	if !equalRFC2136(first, second) {
+		t.Fatal("equal delegations should share a manager")
+	}
+	second.CNAMEDelegations["_acme-challenge.example.com"] = RFC2136CNAMEDelegation{Target: "txt.example.com", Observers: []string{"other.example.com:53"}}
+	if equalRFC2136(first, second) {
+		t.Fatal("different alias observers must not share a manager")
+	}
+	delete(second.CNAMEDelegations, "_acme-challenge.example.com")
+	if equalRFC2136(first, second) {
+		t.Fatal("missing delegation must not share a manager")
+	}
+}
+
 func TestDNS01ListenerNameLimitAcrossBlocks(t *testing.T) {
 	cfg := dnsACMEConfig()
 	first := &cfg.Servers[0]
@@ -65,25 +85,34 @@ func TestDNS01Configuration(t *testing.T) {
 			c.Servers[0].TLS.ACME.RFC2136.Observers = []string{"DNS.example.com:53", "dns.example.com:53"}
 		}, "duplicates"},
 		{"valid cname", func(c *Config) {
-			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "validation.example.com"}
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "validation.example.com", Observers: []string{"127.0.0.1:53"}}}
 		}, ""},
 		{"cname outside source zone", func(c *Config) {
 			dns := c.Servers[0].TLS.ACME.RFC2136
 			dns.Zone = "validation.example.net"
-			dns.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "txt.validation.example.net"}
+			dns.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "txt.validation.example.net", Observers: []string{"127.0.0.1:53"}}}
 		}, ""},
 		{"outside cname target", func(c *Config) {
-			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "validation.other.test"}
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "validation.other.test", Observers: []string{"127.0.0.1:53"}}}
 		}, "CNAME target must be inside"},
 		{"self cname target", func(c *Config) {
-			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{"_acme-challenge.example.com": "_acme-challenge.example.com"}
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "_acme-challenge.example.com", Observers: []string{"127.0.0.1:53"}}}
 		}, "distinct DNS target"},
 		{"duplicate cname owner", func(c *Config) {
-			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]string{
-				"_acme-challenge.example.com":  "one.example.com",
-				"_ACME-CHALLENGE.example.com.": "two.example.com",
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{
+				"_acme-challenge.example.com":  {Target: "one.example.com", Observers: []string{"127.0.0.1:53"}},
+				"_ACME-CHALLENGE.example.com.": {Target: "two.example.com", Observers: []string{"127.0.0.1:53"}},
 			}
 		}, "duplicate challenge owner"},
+		{"missing alias observers", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "validation.example.com"}}
+		}, "CNAME observers must contain"},
+		{"invalid alias observer", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "validation.example.com", Observers: []string{"bad"}}}
+		}, "each CNAME observer"},
+		{"duplicate alias observers", func(c *Config) {
+			c.Servers[0].TLS.ACME.RFC2136.CNAMEDelegations = map[string]RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "validation.example.com", Observers: []string{"DNS.example.com:53", "dns.example.com:53"}}}
+		}, "CNAME observers must not contain duplicates"},
 		{"invalid zone", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Zone = "invalid..example.com" }, "zone must be a DNS zone name"},
 		{"invalid TSIG key name", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.TSIGKeyName = "-invalid.example.com" }, "tsig_key_name must be a DNS key name"},
 		{"outside zone", func(c *Config) { c.Servers[0].TLS.ACME.RFC2136.Zone = "other.example" }, "outside the configured zone"},

@@ -2278,11 +2278,27 @@
                     "properties": {
                       "cname_delegations": {
                         "additionalProperties": {
-                          "description": "CNAMEDelegations maps challenge owners to one-hop TXT targets in Zone",
-                          "type": "string",
-                          "x-jul-capability": [
-                            "acme"
-                          ]
+                          "additionalProperties": false,
+                          "properties": {
+                            "observers": {
+                              "description": "Observers are authoritative DNS endpoints for this challenge alias",
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array",
+                              "x-jul-capability": [
+                                "acme"
+                              ]
+                            },
+                            "target": {
+                              "description": "Target is the exact one-hop TXT owner inside the update zone",
+                              "type": "string",
+                              "x-jul-capability": [
+                                "acme"
+                              ]
+                            }
+                          },
+                          "type": "object"
                         },
                         "type": "object"
                       },

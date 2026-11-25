@@ -815,16 +815,6 @@ type hookedAuthorizationLease struct {
 	wait  func(context.Context, string, dnsChallengeLease) error
 }
 
-type signallingAuthorizationLease struct {
-	dnsChallengeLease
-	waiting chan struct{}
-}
-
-func (l *signallingAuthorizationLease) Wait(ctx context.Context) error {
-	close(l.waiting)
-	return l.dnsChallengeLease.Wait(ctx)
-}
-
 type droppedAcceptanceTransport struct {
 	next        http.RoundTripper
 	afterSend   bool
@@ -1507,7 +1497,7 @@ func TestDNS01InProcessPermanentAuthorizationErrorsFailPromptly(t *testing.T) {
 			if mode == "wait" {
 				_, err = m.waitDNSAuthorization(ctx, url, initial, time.Time{})
 			} else {
-				_, err = m.reconcileDNSAcceptance(ctx, url, &acme.Challenge{}, initial, time.Time{}, time.Time{})
+				_, err = m.reconcileDNSAcceptance(ctx, url, &acme.Challenge{}, nil, initial, time.Time{}, time.Time{}, nil)
 			}
 			var acmeErr *acme.Error
 			if !errors.As(err, &acmeErr) || acmeErr.StatusCode != http.StatusNotFound ||
@@ -1545,7 +1535,7 @@ func TestDNS01InProcessTransientAuthorizationHTTPErrorRecovers(t *testing.T) {
 			if mode == "wait" {
 				_, err = m.waitDNSAuthorization(ctx, order.AuthzURLs[0], nil, time.Time{})
 			} else {
-				_, err = m.reconcileDNSAcceptance(ctx, order.AuthzURLs[0], &acme.Challenge{}, errors.New("acceptance response lost"), time.Time{}, time.Time{})
+				_, err = m.reconcileDNSAcceptance(ctx, order.AuthzURLs[0], &acme.Challenge{}, nil, errors.New("acceptance response lost"), time.Time{}, time.Time{}, nil)
 			}
 			if err != nil {
 				t.Fatalf("transient authorization HTTP error did not recover: %v", err)
@@ -1744,12 +1734,13 @@ func TestDNS01InProcessReconciliationCarriesRetryAfter(t *testing.T) {
 			url := order.AuthzURLs[0]
 			id := strings.TrimPrefix(url, ca.server.URL+"/authz/")
 			challenge := &acme.Challenge{Type: "dns-01", URI: ca.server.URL + "/challenge/" + id, Token: "token-" + id}
+			var lease dnsChallengeLease
 			if mode == "failed acceptance retry" {
 				value, err := m.client.DNS01ChallengeRecord(challenge.Token)
 				if err != nil {
 					t.Fatal(err)
 				}
-				lease, err := m.provider.Present(ctx, "_acme-challenge.example.test", value)
+				lease, err = m.provider.Present(ctx, "_acme-challenge.example.test", value)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1769,7 +1760,7 @@ func TestDNS01InProcessReconciliationCarriesRetryAfter(t *testing.T) {
 			ca.mu.Unlock()
 			result := make(chan error, 1)
 			go func() {
-				_, err := m.reconcileDNSAcceptance(ctx, url, challenge, errors.New("acceptance response lost"), time.Time{}, time.Time{})
+				_, err := m.reconcileDNSAcceptance(ctx, url, challenge, lease, errors.New("acceptance response lost"), time.Time{}, time.Time{}, nil)
 				result <- err
 			}()
 			waitForDNSACMETest(t, "reconciliation observation", func() bool {
@@ -2045,7 +2036,7 @@ func TestDNS01InProcessChallengeRetryAfterIsSeparateFromPolling(t *testing.T) {
 	}
 	result := make(chan error, 1)
 	go func() {
-		_, reconcileErr := m.reconcileDNSAcceptance(ctx, url, challenge, err, time.Time{}, nextAccept)
+		_, reconcileErr := m.reconcileDNSAcceptance(ctx, url, challenge, lease, err, time.Time{}, nextAccept, nil)
 		result <- reconcileErr
 	}()
 	waitForDNSACMETest(t, "the reconciliation authorization observation", func() bool {
@@ -2076,6 +2067,133 @@ func TestDNS01InProcessChallengeRetryAfterIsSeparateFromPolling(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("authorization did not finish after its polling hint")
+	}
+}
+
+func TestDNS01RetryRechecksPropagationWhilePollingCA(t *testing.T) {
+	for _, missing := range []string{"txt", "cname"} {
+		t.Run(missing, func(t *testing.T) {
+			dns, provider := startRFC2136Server(t)
+			aliasDNS, aliasProvider := startRFC2136Server(t)
+			const alias = "_acme-challenge.alias.test."
+			provider.delegations[alias] = config.RFC2136CNAMEDelegation{Target: testOwner, Observers: []string{aliasProvider.server}}
+			aliasDNS.mu.Lock()
+			aliasDNS.cnames[alias] = testOwner
+			aliasDNS.mu.Unlock()
+			ca := startTestDNSACMECA(t, dns, "")
+			m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			if err := m.ensureAccountKey(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := m.ensureRegistered(ctx); err != nil {
+				t.Fatal(err)
+			}
+			order, err := m.client.AuthorizeOrder(ctx, acme.DomainIDs("example.test"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			url := order.AuthzURLs[0]
+			id := strings.TrimPrefix(url, ca.server.URL+"/authz/")
+			challenge := &acme.Challenge{Type: "dns-01", URI: ca.server.URL + "/challenge/" + id, Token: "token-" + id}
+			value, err := m.client.DNS01ChallengeRecord(challenge.Token)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lease, err := provider.Present(ctx, alias, value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := m.cleanupDNSLease(lease, 5*time.Second); err != nil {
+					t.Errorf("cleanup: %v", err)
+				}
+			}()
+			if missing == "txt" {
+				dns.mu.Lock()
+				delete(dns.records[testOwner], value)
+				dns.mu.Unlock()
+			} else {
+				aliasDNS.mu.Lock()
+				aliasDNS.cnames[alias] = "wrong.example.test."
+				aliasDNS.mu.Unlock()
+			}
+			result := make(chan error, 1)
+			go func() {
+				_, err := m.reconcileDNSAcceptance(ctx, url, challenge, lease, errDNSChallengeRetryDeferred, time.Time{}, time.Time{}, nil)
+				result <- err
+			}()
+			waitForDNSACMETest(t, "independent CA polling during missing DNS", func() bool {
+				ca.mu.Lock()
+				defer ca.mu.Unlock()
+				return ca.authReads >= 2
+			})
+			ca.mu.Lock()
+			attempts := ca.challengeAttempts
+			ca.mu.Unlock()
+			if attempts != 0 {
+				t.Fatalf("submitted %d times while %s was missing", attempts, missing)
+			}
+			if missing == "txt" {
+				dns.mu.Lock()
+				dns.records[testOwner][value] = true
+				dns.mu.Unlock()
+			} else {
+				aliasDNS.mu.Lock()
+				aliasDNS.cnames[alias] = testOwner
+				aliasDNS.mu.Unlock()
+			}
+			if err := <-result; err != nil {
+				t.Fatalf("retry after DNS recovery: %v", err)
+			}
+			ca.mu.Lock()
+			attempts = ca.challengeAttempts
+			ca.mu.Unlock()
+			if attempts != 1 {
+				t.Fatalf("got %d retry submissions, want one", attempts)
+			}
+		})
+	}
+}
+
+func TestDNS01DeferredSubmissionRecordsUncertainOwnership(t *testing.T) {
+	dns, provider := startRFC2136Server(t)
+	ca := startTestDNSACMECA(t, dns, "processing-validation")
+	m := testIntegratedDNSManager(t, ca, provider, t.TempDir())
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	if err := m.ensureAccountKey(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ensureRegistered(ctx); err != nil {
+		t.Fatal(err)
+	}
+	order, err := m.client.AuthorizeOrder(ctx, acme.DomainIDs("example.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth, err := m.client.GetAuthorization(ctx, order.AuthzURLs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := m.prepareDNSAuthorization(ctx, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending.url = order.AuthzURLs[0]
+	pending.nextAccept = time.Now().Add(100 * time.Millisecond)
+	short, stop := context.WithTimeout(ctx, 2*time.Second)
+	defer stop()
+	_, _ = m.completeDNSAuthorization(short, pending.url, pending)
+	ca.mu.Lock()
+	attempts := ca.challengeAttempts
+	ca.mu.Unlock()
+	if attempts == 0 || !pending.submitted {
+		t.Fatalf("deferred submission not tracked: attempts=%d submitted=%v", attempts, pending.submitted)
+	}
+	if err := cleanupTestDNSLease(ctx, pending.lease); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -2483,7 +2601,7 @@ func TestDNS01InProcessDoesNotRetryDisappearedChallenge(t *testing.T) {
 	retryAt := time.Now().Add(3 * time.Second)
 	result := make(chan error, 1)
 	go func() {
-		_, err := m.reconcileDNSAcceptance(ctx, url, challenge, errDNSChallengeRetryDeferred, time.Time{}, retryAt)
+		_, err := m.reconcileDNSAcceptance(ctx, url, challenge, nil, errDNSChallengeRetryDeferred, time.Time{}, retryAt, nil)
 		result <- err
 	}()
 	waitForDNSACMETest(t, "the initial challenge observation", func() bool {
@@ -2745,20 +2863,17 @@ func TestDNS01InProcessFailedPreparationReleasesItsAuthorizationLock(t *testing.
 	id := strings.TrimPrefix(order.AuthzURLs[1], ca.server.URL+"/authz/")
 	ca.auths[id].accepted = true
 	ca.mu.Unlock()
-	waiting := make(chan struct{})
-	m.provider = testDNSChallengeProvider{lease: &signallingAuthorizationLease{
-		dnsChallengeLease: &testDNSChallengeLease{}, waiting: waiting,
-	}}
+	m.provider = testDNSChallengeProvider{lease: &testDNSChallengeLease{}}
 	result := make(chan error, 1)
 	go func() {
 		_, err := m.authorizeDNSOrder(ctx, &dnsPendingOrder{order: order}, names)
 		result <- err
 	}()
-	select {
-	case <-waiting:
-	case <-ctx.Done():
-		t.Fatal("sibling authorization did not reach its waiter")
-	}
+	waitForDNSACMETest(t, "sibling authorization polling", func() bool {
+		ca.mu.Lock()
+		defer ca.mu.Unlock()
+		return ca.auths[id].reads >= 2
+	})
 	m.authMu.Lock()
 	failed, processing := m.authStates[order.AuthzURLs[0]], m.authStates[order.AuthzURLs[1]]
 	failedHeld, processingHeld := failed != nil && failed.locked, processing != nil && processing.locked
@@ -2793,9 +2908,8 @@ func TestDNS01InProcessValidProcessingAuthorizationClearsPresentationFailure(t *
 	ca.auths[id].accepted = true
 	ca.mu.Unlock()
 	lease := &testDNSChallengeLease{}
-	waiting := make(chan struct{})
 	m.provider = testDNSChallengeProvider{
-		lease: &signallingAuthorizationLease{dnsChallengeLease: lease, waiting: waiting},
+		lease: lease,
 		err:   errors.New("injected presentation failure"),
 	}
 	result := make(chan error, 1)
@@ -2803,11 +2917,11 @@ func TestDNS01InProcessValidProcessingAuthorizationClearsPresentationFailure(t *
 		_, err := m.authorizeDNSOrder(ctx, &dnsPendingOrder{order: order}, []string{"example.test"})
 		result <- err
 	}()
-	select {
-	case <-waiting:
-	case <-ctx.Done():
-		t.Fatal("processing authorization did not reach its waiter")
-	}
+	waitForDNSACMETest(t, "processing authorization polling", func() bool {
+		ca.mu.Lock()
+		defer ca.mu.Unlock()
+		return ca.auths[id].reads >= 2
+	})
 	ca.mu.Lock()
 	ca.auths[id].valid = true
 	ca.mu.Unlock()

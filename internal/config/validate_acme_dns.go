@@ -6,7 +6,6 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
-	"maps"
 	"net"
 	"slices"
 	"strconv"
@@ -56,8 +55,22 @@ func validateACMEDNS(a *ACMEConfig, serverNames []string, where string) []error 
 	if len(dns.CNAMEDelegations) > 100 {
 		errs = append(errs, fmt.Errorf("%s: cname_delegations supports at most 100 challenge owners", dnsWhere))
 	}
-	for rawOwner, rawTarget := range dns.CNAMEDelegations {
-		owner, target := normalizeDNSName(rawOwner), normalizeDNSName(rawTarget)
+	for rawOwner, delegation := range dns.CNAMEDelegations {
+		owner, target := normalizeDNSName(rawOwner), normalizeDNSName(delegation.Target)
+		if len(delegation.Observers) == 0 || len(delegation.Observers) > MaxRFC2136Observers {
+			errs = append(errs, fmt.Errorf("%s: CNAME observers must contain 1 to %d authoritative endpoints", dnsWhere, MaxRFC2136Observers))
+		}
+		seen := make(map[string]bool, len(delegation.Observers))
+		for _, observer := range delegation.Observers {
+			if !ContainsSecretRef(observer) && !validDNSHostPort(observer) {
+				errs = append(errs, fmt.Errorf("%s: each CNAME observer must be a DNS host or IP with a numeric port", dnsWhere))
+			}
+			key := strings.ToLower(observer)
+			if seen[key] {
+				errs = append(errs, fmt.Errorf("%s: CNAME observers must not contain duplicates", dnsWhere))
+			}
+			seen[key] = true
+		}
 		if !strings.HasPrefix(owner, "_acme-challenge.") || !validDNSName(owner, true) ||
 			!validDNSName(target, true) || owner == target {
 			errs = append(errs, fmt.Errorf("%s: each cname_delegations entry needs a challenge owner and a distinct DNS target", dnsWhere))
@@ -195,7 +208,16 @@ func equalRFC2136(a, b *RFC2136Config) bool {
 	if a == nil || b == nil {
 		return a == b
 	}
-	return a.Server == b.Server && slices.Equal(a.Observers, b.Observers) && maps.Equal(a.CNAMEDelegations, b.CNAMEDelegations) &&
+	if len(a.CNAMEDelegations) != len(b.CNAMEDelegations) {
+		return false
+	}
+	for owner, delegation := range a.CNAMEDelegations {
+		other, ok := b.CNAMEDelegations[owner]
+		if !ok || delegation.Target != other.Target || !slices.Equal(delegation.Observers, other.Observers) {
+			return false
+		}
+	}
+	return a.Server == b.Server && slices.Equal(a.Observers, b.Observers) &&
 		a.Zone == b.Zone && a.TSIGKeyName == b.TSIGKeyName &&
 		a.TSIGSecret == b.TSIGSecret && a.PropagationTimeout == b.PropagationTimeout &&
 		a.PollInterval == b.PollInterval

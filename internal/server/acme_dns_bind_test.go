@@ -29,9 +29,10 @@ import (
 const bind9Image = "ubuntu/bind9@sha256:45d541e9688f2c9010d22a78200117b66ed2df31b78f3464876f7e6e15cfaf77"
 
 type bind9Fixture struct {
-	primary, secondary string
-	primaryID          string
-	secondaryID        string
+	primary, secondary                 string
+	aliasOne, aliasTwo, targetObserver string
+	primaryID                          string
+	secondaryID                        string
 }
 
 type bindChallengeTransport struct {
@@ -56,7 +57,7 @@ func TestDNS01Bind9Interoperability(t *testing.T) {
 	tracker := &bindChallengeTransport{next: pebble.client.Transport}
 	pebble.client.Transport = tracker
 
-	newManager := func(zone string, delegations map[string]string) *dnsACMEManager {
+	newManager := func(zone string, delegations map[string]config.RFC2136CNAMEDelegation) *dnsACMEManager {
 		t.Helper()
 		cfg := &config.ACMEConfig{
 			Email: "ops@example.test", CA: pebble.directory, CacheDir: filepath.Join(t.TempDir(), "cache"),
@@ -92,7 +93,7 @@ func TestDNS01Bind9Interoperability(t *testing.T) {
 	})
 
 	t.Run("one-hop CNAME issuance and renewal", func(t *testing.T) {
-		delegations := map[string]string{"_acme-challenge.alias.test": "txt.validation.test"}
+		delegations := map[string]config.RFC2136CNAMEDelegation{"_acme-challenge.alias.test": {Target: "txt.validation.test", Observers: []string{bind.secondary}}}
 		manager := newManager("validation.test", delegations)
 		names := []string{"*.alias.test", "alias.test"}
 		first := issueBindCertificate(t, bind, pebble, tracker, manager, names,
@@ -104,8 +105,82 @@ func TestDNS01Bind9Interoperability(t *testing.T) {
 		}
 	})
 
+	t.Run("two CNAME aliases with separate authorities", func(t *testing.T) {
+		delegations := map[string]config.RFC2136CNAMEDelegation{
+			"_acme-challenge.alias.test":  {Target: "txt.validation.test", Observers: []string{bind.aliasOne}},
+			"_acme-challenge.second.test": {Target: "txt.validation.test", Observers: []string{bind.aliasTwo}},
+		}
+		manager := newManager("validation.test", delegations)
+		manager.provider.(*rfc2136Provider).observers = []string{bind.targetObserver}
+		if _, err := queryBindTXT(bind.targetObserver, "_acme-challenge.alias.test."); err == nil {
+			t.Fatal("target observer must not be authoritative for alias.test")
+		}
+		if _, err := queryBindTXT(bind.aliasOne, "txt.validation.test."); err == nil {
+			t.Fatal("alias observer must not be authoritative for validation.test")
+		}
+		first := issueBindCertificate(t, bind, pebble, tracker, manager, []string{"alias.test", "second.test"},
+			"validation.test.", "txt.validation.test.", "unrelated-cname")
+		renewed := issueBindCertificate(t, bind, pebble, tracker, manager, []string{"alias.test", "second.test"},
+			"validation.test.", "txt.validation.test.", "unrelated-cname")
+		if first.Leaf.SerialNumber.Cmp(renewed.Leaf.SerialNumber) == 0 {
+			t.Fatal("split-authority renewal returned the original certificate")
+		}
+		provider := manager.provider.(*rfc2136Provider)
+		for _, owner := range []string{"_acme-challenge.alias.test.", "_acme-challenge.second.test."} {
+			lease, err := provider.Present(context.Background(), owner, "retry-probe")
+			if err != nil {
+				t.Fatal(err)
+			}
+			bindNotify(t, bind.targetObserver, "validation.test.")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := lease.Wait(ctx); err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			cancel()
+			update := func(remove bool) {
+				t.Helper()
+				msg := new(dns.Msg)
+				msg.SetUpdate("validation.test.")
+				record := &dns.TXT{Hdr: dns.RR_Header{Name: "txt.validation.test.", Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 60}, Txt: []string{"retry-probe"}}
+				if remove {
+					msg.Remove([]dns.RR{record})
+				} else {
+					msg.Insert([]dns.RR{record})
+				}
+				msg.SetTsig(testTSIGName, dns.HmacSHA256, 300, time.Now().Unix())
+				reply, _, err := (&dns.Client{Net: "tcp", TsigSecret: map[string]string{testTSIGName: testTSIGSecret}, Timeout: 3 * time.Second}).Exchange(msg, bind.primary)
+				if err != nil || reply.Rcode != dns.RcodeSuccess {
+					t.Fatalf("update retry probe: %v, %v", reply, err)
+				}
+				bindNotify(t, bind.targetObserver, "validation.test.")
+				waitBind(t, bind, "retry probe replication", func() bool {
+					values, err := queryBindTXT(bind.targetObserver, "txt.validation.test.")
+					return err == nil && values["retry-probe"] != remove
+				})
+			}
+			update(true)
+			ctx, cancel = context.WithTimeout(context.Background(), 300*time.Millisecond)
+			err = lease.Wait(ctx)
+			cancel()
+			if err == nil {
+				t.Fatal("missing TXT passed the retry propagation check")
+			}
+			update(false)
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			if err := lease.Wait(ctx); err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			cancel()
+			if err := cleanupTestDNSLease(context.Background(), lease); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+
 	t.Run("mismatched and unconfigured aliases fail before update", func(t *testing.T) {
-		manager := newManager("validation.test", map[string]string{"_acme-challenge.alias.test": "wrong.validation.test"})
+		manager := newManager("validation.test", map[string]config.RFC2136CNAMEDelegation{"_acme-challenge.alias.test": {Target: "wrong.validation.test", Observers: []string{bind.secondary}}})
 		before := bindSOASerial(t, bind.primary, "validation.test.")
 		_, err := manager.provider.Present(context.Background(), "_acme-challenge.alias.test.", "must-not-be-written")
 		if err == nil || !strings.Contains(err.Error(), "does not match") {
@@ -218,6 +293,9 @@ func issueBindCertificate(t *testing.T, bind *bind9Fixture, pebble *testDNSPebbl
 		t.Fatalf("submitted %d challenge(s) before the CA-facing secondary caught up", got-before)
 	}
 	bindNotify(t, bind.secondary, zone)
+	if zone == "validation.test." {
+		bindNotify(t, bind.targetObserver, zone)
+	}
 	var issued result
 	select {
 	case issued = <-done:
@@ -239,8 +317,12 @@ func issueBindCertificate(t *testing.T, bind *bind9Fixture, pebble *testDNSPebbl
 		}
 		intermediates.AddCert(cert)
 	}
+	verifyName := names[0]
+	if strings.HasPrefix(verifyName, "*.") {
+		verifyName = "www." + strings.TrimPrefix(verifyName, "*.")
+	}
 	if _, err := issued.cert.Leaf.Verify(x509.VerifyOptions{
-		Roots: pebble.roots, Intermediates: intermediates, DNSName: "www." + strings.TrimPrefix(names[0], "*."),
+		Roots: pebble.roots, Intermediates: intermediates, DNSName: verifyName,
 	}); err != nil {
 		t.Fatalf("issued certificate did not verify: %v", err)
 	}
@@ -249,6 +331,13 @@ func issueBindCertificate(t *testing.T, bind *bind9Fixture, pebble *testDNSPebbl
 		return err == nil && len(values) == 1 && values[unrelated]
 	})
 	bindNotify(t, bind.secondary, zone)
+	if zone == "validation.test." {
+		bindNotify(t, bind.targetObserver, zone)
+		waitBind(t, bind, "target observer cleanup replication", func() bool {
+			values, err := queryBindTXT(bind.targetObserver, owner)
+			return err == nil && len(values) == 1 && values[unrelated]
+		})
+	}
 	waitBind(t, bind, "cleanup replication to the secondary", func() bool {
 		values, err := queryBindTXT(bind.secondary, owner)
 		return err == nil && len(values) == 1 && values[unrelated]
@@ -259,22 +348,31 @@ func issueBindCertificate(t *testing.T, bind *bind9Fixture, pebble *testDNSPebbl
 func startBind9Fixture(t *testing.T) *bind9Fixture {
 	t.Helper()
 	dir := t.TempDir()
-	for _, subdir := range []string{"primary", "secondary"} {
+	for _, subdir := range []string{"primary", "secondary", "alias-one", "alias-two", "target"} {
 		if err := os.Mkdir(filepath.Join(dir, subdir), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	primaryPort, secondaryPort := freeTCPPort(t), freeTCPPort(t)
-	for primaryPort == secondaryPort {
-		secondaryPort = freeTCPPort(t)
+	ports := make(map[int]bool)
+	newPort := func() int {
+		for {
+			port := freeTCPPort(t)
+			if !ports[port] {
+				ports[port] = true
+				return port
+			}
+		}
 	}
+	primaryPort, secondaryPort, aliasOnePort, aliasTwoPort, targetPort := newPort(), newPort(), newPort(), newPort(), newPort()
 	zones := map[string]string{
 		"example.test":                 "_acme-challenge IN NS ns.example.test.\nns IN A 127.0.0.1\n",
 		"_acme-challenge.example.test": "@ IN TXT \"unrelated\"\n",
 		"alias.test":                   "_acme-challenge IN CNAME txt.validation.test.\nns IN A 127.0.0.1\n",
+		"second.test":                  "_acme-challenge IN CNAME txt.validation.test.\nns IN A 127.0.0.1\n",
 		"validation.test":              "txt IN TXT \"unrelated-cname\"\nns IN A 127.0.0.1\n",
 	}
 	primaryZones, secondaryZones := "", ""
+	observerZones := map[string]string{}
 	for zone, records := range zones {
 		filename := strings.ReplaceAll(zone, ".", "-") + ".db"
 		server := "ns." + zone + "."
@@ -295,6 +393,12 @@ func startBind9Fixture(t *testing.T) *bind9Fixture {
 		primaryZones += fmt.Sprintf("zone %q { type primary; file %q; %s };\n", zone, "/work/primary/"+filename, policy)
 		secondaryZones += fmt.Sprintf("zone %q { type secondary; primaries { 127.0.0.1 port %d; }; file %q; };\n",
 			zone, primaryPort, "/work/secondary/"+filename)
+		for name, observedZone := range map[string]string{"alias-one": "alias.test", "alias-two": "second.test", "target": "validation.test"} {
+			if zone == observedZone {
+				observerZones[name] = fmt.Sprintf("zone %q { type secondary; primaries { 127.0.0.1 port %d; }; file %q; };\n",
+					zone, primaryPort, "/work/"+name+"/"+filename)
+			}
+		}
 	}
 	options := func(port int, directory string, recursive bool) string {
 		recursion := "recursion no;"
@@ -313,7 +417,11 @@ controls { };
 	primaryConfig := options(primaryPort, "/work/primary", false) +
 		fmt.Sprintf("key %q { algorithm hmac-sha256; secret %q; };\n", testTSIGName, testTSIGSecret) + primaryZones
 	secondaryConfig := options(secondaryPort, "/work/secondary", true) + secondaryZones
-	for name, contents := range map[string]string{"primary": primaryConfig, "secondary": secondaryConfig} {
+	configs := map[string]string{"primary": primaryConfig, "secondary": secondaryConfig}
+	for name, port := range map[string]int{"alias-one": aliasOnePort, "alias-two": aliasTwoPort, "target": targetPort} {
+		configs[name] = options(port, "/work/"+name, false) + observerZones[name]
+	}
+	for name, contents := range configs {
 		if err := os.WriteFile(filepath.Join(dir, name, "named.conf"), []byte(contents), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -339,14 +447,25 @@ controls { };
 	}
 	fixture := &bind9Fixture{
 		primary: fmt.Sprintf("127.0.0.1:%d", primaryPort), secondary: fmt.Sprintf("127.0.0.1:%d", secondaryPort),
+		aliasOne: fmt.Sprintf("127.0.0.1:%d", aliasOnePort), aliasTwo: fmt.Sprintf("127.0.0.1:%d", aliasTwoPort),
+		targetObserver: fmt.Sprintf("127.0.0.1:%d", targetPort),
 	}
 	fixture.primaryID = start("primary")
 	fixture.secondaryID = start("secondary")
+	start("alias-one")
+	start("alias-two")
+	start("target")
 	for _, endpoint := range []string{fixture.primary, fixture.secondary} {
 		waitBind(t, fixture, "authoritative zones to load", func() bool {
 			direct, err := queryBindTXT(endpoint, testOwner)
 			if err != nil || !direct["unrelated"] {
 				return false
+			}
+			for endpoint, owner := range map[string]string{fixture.aliasOne: "_acme-challenge.alias.test.", fixture.aliasTwo: "_acme-challenge.second.test.", fixture.targetObserver: "txt.validation.test."} {
+				waitBind(t, fixture, "split authoritative zone to load", func() bool {
+					_, err := queryBindTXT(endpoint, owner)
+					return err == nil
+				})
 			}
 			target, err := queryBindTXT(endpoint, "txt.validation.test.")
 			return err == nil && target["unrelated-cname"]

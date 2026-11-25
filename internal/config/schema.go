@@ -1358,8 +1358,8 @@ type RFC2136Config struct {
 	Server string `toml:"server"`
 	// Observers are CA-facing authoritative DNS endpoints, each as host:port.
 	Observers []string `toml:"observers"`
-	// CNAMEDelegations maps challenge owners to one-hop TXT targets in Zone.
-	CNAMEDelegations map[string]string `toml:"cname_delegations,omitempty"`
+	// CNAMEDelegations maps challenge owners to one-hop targets and their authoritative observers.
+	CNAMEDelegations map[string]RFC2136CNAMEDelegation `toml:"cname_delegations,omitempty"`
 	// Zone is the DNS zone containing the ACME challenge records.
 	Zone string `toml:"zone"`
 	// TSIGKeyName identifies the TSIG key authorized to update the zone.
@@ -1374,6 +1374,14 @@ type RFC2136Config struct {
 	// secretResolved records that TSIGSecret came from a validated reference,
 	// not from a literal in the operator's configuration.
 	secretResolved bool
+}
+
+// RFC2136CNAMEDelegation describes one explicit challenge alias.
+type RFC2136CNAMEDelegation struct {
+	// Target is the exact one-hop TXT owner inside the update zone.
+	Target string `toml:"target"`
+	// Observers are authoritative DNS endpoints for this challenge alias.
+	Observers []string `toml:"observers"`
 }
 
 // OCSPStaplingEnabled reports whether OCSP stapling should be active. It is on

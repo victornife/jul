@@ -162,6 +162,22 @@ func TestDNS01ManagerLifecycleAcrossListenerChanges(t *testing.T) {
 		next.Servers[1].ServerNames = []string{"second.example.test"}
 		assertRestart(t, withDNS, next, false)
 	})
+	t.Run("CNAME alias observer changes require restart", func(t *testing.T) {
+		before, err := withDNS.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		before.Servers[1].TLS.ACME.RFC2136.CNAMEDelegations = map[string]config.RFC2136CNAMEDelegation{
+			"_acme-challenge.example.test": {Target: "txt.example.test", Observers: []string{"first.test:53"}},
+		}
+		next, err := before.Clone()
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Servers[1].TLS.ACME.RFC2136.CNAMEDelegations["_acme-challenge.example.test"] =
+			config.RFC2136CNAMEDelegation{Target: "txt.example.test", Observers: []string{"second.test:53"}}
+		assertRestart(t, before, next, true)
+	})
 	t.Run("moving the same certificate group to a new listener", func(t *testing.T) {
 		next, err := withDNS.Clone()
 		if err != nil {

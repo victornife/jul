@@ -919,7 +919,9 @@ authoritative observers, TSIG key name and a secret **reference**, and explains
 wildcard scope and staging. All observers must see the exact TXT before
 submission. A propagation error calls for checking their replication and egress;
 increasing the timeout does not make an unobserved public secondary visible.
-Explicit one-hop CNAME mappings are configured in raw TOML; see
+Explicit one-hop CNAME mappings are configured in raw TOML, with separate
+per-owner alias observers and target observers; both are checked before every
+submission or retry. See
 [delegation and propagation](tls-acme.md#delegation-and-propagation).
 The Console explains automatic ECDSA/RSA selection and separate certificate
 orders. The preview describes only the generated block and warns that a shared

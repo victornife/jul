@@ -224,7 +224,7 @@ func TestRFC2136ExplicitCNAMEDelegation(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			server, provider := startRFC2136Server(t)
 			if scenario != "unconfigured" {
-				provider.delegations[testOwner] = target
+				provider.delegations[testOwner] = config.RFC2136CNAMEDelegation{Target: target, Observers: []string{provider.server}}
 			}
 			server.mu.Lock()
 			server.records[target] = map[string]bool{"unrelated": true}
@@ -273,7 +273,7 @@ func TestRFC2136CNAMEChecksEveryObserverBeforeUpdateAndSubmission(t *testing.T) 
 	primary, provider := startRFC2136Server(t)
 	secondary, secondaryProvider := startRFC2136Server(t)
 	provider.observers = []string{provider.server, secondaryProvider.server}
-	provider.delegations[testOwner] = target
+	provider.delegations[testOwner] = config.RFC2136CNAMEDelegation{Target: target, Observers: []string{provider.server, secondaryProvider.server}}
 	primary.mu.Lock()
 	primary.cnames[testOwner] = target
 	primary.mu.Unlock()
@@ -307,6 +307,79 @@ func TestRFC2136CNAMEChecksEveryObserverBeforeUpdateAndSubmission(t *testing.T) 
 	}
 	if err := cleanupTestDNSLease(context.Background(), lease); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRFC2136CNAMESeparateAuthorities(t *testing.T) {
+	targetDNS, provider := startRFC2136Server(t)
+	first, firstProvider := startRFC2136Server(t)
+	second, secondProvider := startRFC2136Server(t)
+	const target = "validation.example.test."
+	owners := []string{"_acme-challenge.first.test.", "_acme-challenge.second.test."}
+	first.mu.Lock()
+	first.cnames[owners[0]] = target
+	first.mu.Unlock()
+	second.mu.Lock()
+	second.cnames[owners[1]] = target
+	second.mu.Unlock()
+	var err error
+	provider, err = newRFC2136Provider(&config.RFC2136Config{
+		Server: provider.server, Observers: []string{provider.server}, Zone: "example.test",
+		TSIGKeyName: testTSIGName, TSIGSecret: testTSIGSecret,
+		CNAMEDelegations: map[string]config.RFC2136CNAMEDelegation{
+			owners[0]: {Target: target, Observers: []string{firstProvider.server}},
+			owners[1]: {Target: target, Observers: []string{secondProvider.server}},
+		},
+	}, (&net.Dialer{}).DialContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range owners {
+		lease, err := provider.Present(context.Background(), owner, "value-"+owner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := lease.Wait(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if err := cleanupTestDNSLease(context.Background(), lease); err != nil {
+			t.Fatal(err)
+		}
+	}
+	targetDNS.mu.Lock()
+	defer targetDNS.mu.Unlock()
+	if len(targetDNS.records[target]) != 0 {
+		t.Fatalf("owned records remain: %v", targetDNS.records[target])
+	}
+}
+
+func TestRFC2136CNAMERequiresAliasObservers(t *testing.T) {
+	_, err := newRFC2136Provider(&config.RFC2136Config{
+		Server: "127.0.0.1:53", Observers: []string{"127.0.0.1:53"}, Zone: "example.test",
+		TSIGKeyName: testTSIGName, TSIGSecret: testTSIGSecret,
+		CNAMEDelegations: map[string]config.RFC2136CNAMEDelegation{
+			"_acme-challenge.alias.test": {Target: "txt.example.test"},
+		},
+	}, (&net.Dialer{}).DialContext)
+	if err == nil || !strings.Contains(err.Error(), "authoritative observers") {
+		t.Fatalf("missing alias observers: %v", err)
+	}
+}
+
+func TestRFC2136CancelledPresentationDoesNotUpdate(t *testing.T) {
+	server, provider := startRFC2136Server(t)
+	if _, err := provider.queryTXT(context.Background(), testOwner, "present"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := provider.Present(ctx, testOwner, "value"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled presentation: %v", err)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if server.updates != 0 {
+		t.Fatalf("cancelled presentation issued %d updates", server.updates)
 	}
 }
 

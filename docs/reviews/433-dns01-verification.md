@@ -57,6 +57,37 @@ The BIND fixture represents a configured CA-facing secondary, not all public
 resolver caches or CA network vantage points. See
 [TLS/ACME setup and recovery](../tls-acme.md#dns-01-with-rfc-2136-and-tsig).
 
+## Split-authority and retry follow-up
+
+The follow-up to `cd3ef15bb1872885d07c695d54e37008ed48ae3c` requires a
+per-owner alias observer list and checks both alias and target before each
+challenge retry, while CA polling continues independently. Existing
+string-valued CNAME mappings must be migrated to the documented table form.
+
+- `JUL_BIND_E2E=1 go test -tags 'acme http3' ./internal/server -run '^TestDNS01Bind9Interoperability$' -count=1 -v -timeout=90s`:
+  passed with two alias-only BIND authorities and a separate target-only
+  authority. Issuance, renewal, exact cleanup and missing/restored TXT retry
+  probes were exercised.
+- The same BIND command with `go test -race` passed when run independently.
+  An earlier concurrent run with another Pebble test timed out during renewal.
+- `JUL_PEBBLE_E2E=1 JUL_PEBBLE_AUTHZREUSE=0 go test -tags 'acme http3' ./internal/server -run '^TestDNS01PebbleEndToEnd$' -count=1 -v -timeout=180s`:
+  passed the real TLS/mTLS matrix; a separate run with reuse set to `100` passed.
+- `go test -tags 'acme http3' ./internal/server -run 'Test(DNS01|RFC2136|.*ACME.*|.*TLS.*|.*MTLS.*)' -count=1`:
+  passed. Focused retry, cancellation, ownership and split-observer tests also
+  passed under `-race`.
+- `go test -tags 'acme http3 console' ./internal/config ./internal/lifecycle ./internal/admin ./internal/app ./cmd/jul -count=1 -timeout=180s`:
+  passed. The focused Console TLS, mTLS and editor tests passed (38 tests).
+- The added Go statement coverage for this follow-up relative to `cd3ef15`,
+  using the three local affected-package profiles and
+  `scripts/check-added-go-coverage.py`, was 90/99 (90.91%). This is not a
+  replacement for the complete hosted PR coverage and Codecov checks.
+- `make generated-check`, `make format-check` and `python3 scripts/docs-check.py`:
+  passed.
+
+The follow-up remains local while the PR head is held. Hosted checks, Codecov
+and an independent PKI review on its eventual published head remain necessary.
+Public Let's Encrypt staging and the Qlty detail remain open as described above.
+
 ## Local gates
 
 - `go test -tags 'acme http3' ./internal/server -run 'Test(DNS01|RFC2136|DNSACME)' -count=1 -timeout=180s`:

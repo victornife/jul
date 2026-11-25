@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 480,
-    "schema_leaves": 407,
+    "schema_paths": 481,
+    "schema_leaves": 408,
     "resources": 9
   },
   "capability_build_tags": {
@@ -4550,7 +4550,23 @@
       "description": "OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can verify revocation without a separate round-trip",
       "anchor": "servers-x-tls-acme-ocsp_stapling"
     },
-    "servers.*.tls.acme.rfc2136.cname_delegations.*": {
+    "servers.*.tls.acme.rfc2136.cname_delegations.*.observers": {
+      "kind": "list",
+      "scalar": "string",
+      "go_type": "[]string",
+      "optional": false,
+      "dynamic": true,
+      "subsystem": "acme",
+      "lifecycle_class": "restart_required",
+      "lifecycle_reason": "the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup",
+      "startup_consumed": true,
+      "capabilities": [
+        "acme"
+      ],
+      "description": "Observers are authoritative DNS endpoints for this challenge alias",
+      "anchor": "servers-x-tls-acme-rfc2136-cname_delegations-x-observers"
+    },
+    "servers.*.tls.acme.rfc2136.cname_delegations.*.target": {
       "kind": "scalar",
       "scalar": "string",
       "go_type": "string",
@@ -4563,8 +4579,8 @@
       "capabilities": [
         "acme"
       ],
-      "description": "CNAMEDelegations maps challenge owners to one-hop TXT targets in Zone",
-      "anchor": "servers-x-tls-acme-rfc2136-cname_delegations-x"
+      "description": "Target is the exact one-hop TXT owner inside the update zone",
+      "anchor": "servers-x-tls-acme-rfc2136-cname_delegations-x-target"
     },
     "servers.*.tls.acme.rfc2136.observers": {
       "kind": "list",

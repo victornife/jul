@@ -141,7 +141,7 @@ func fullConfig() *config.Config {
 					RFC2136: &config.RFC2136Config{
 						Server:             "ns.example.com:53",
 						Observers:          []string{"ns.example.com:53"},
-						CNAMEDelegations:   map[string]string{"_acme-challenge.example.com": "validation.example.com"},
+						CNAMEDelegations:   map[string]config.RFC2136CNAMEDelegation{"_acme-challenge.example.com": {Target: "validation.example.com", Observers: []string{"127.0.0.1:53"}}},
 						Zone:               "example.com",
 						TSIGKeyName:        "jul.example.com",
 						TSIGSecret:         "fixture-secret",

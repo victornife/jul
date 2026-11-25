@@ -145,7 +145,7 @@ Prerequisites:
 | `zone` | Explicit authoritative update zone containing every direct owner or mapped TXT target. |
 | `tsig_key_name` | TSIG key name configured on that server. |
 | `tsig_secret` | A single environment or file secret reference; its resolved value is base64 TSIG key material. |
-| `cname_delegations` | Optional map from each challenge owner to its one-hop TXT target inside `zone`. |
+| `cname_delegations` | Optional map from each challenge owner to its one-hop `target` inside `zone` and its own `observers` list. |
 | `propagation_timeout` | Polling bound after the initial DNS observation, 1s–15m; default `2m`. |
 | `poll_interval` | Poll interval, 250ms–30s and no greater than the timeout; default `2s`, with jitter. |
 
@@ -164,8 +164,8 @@ The update endpoint and the observers have separate roles. Jul sends signed
 queries and RFC 2136 updates to `server`; observers receive only unsigned,
 read-only TCP DNS queries. Before challenge submission, **every** observer must
 return an authoritative response containing the exact TXT value. Each observer
-must be authoritative for the target and, when CNAME delegation is configured,
-for the challenge owner as well. Choose endpoints representing the DNS servers
+must be authoritative for the target. For a CNAME, its separate per-owner
+observers must be authoritative for the alias. Choose endpoints representing the DNS servers
 the CA can reach. For example, an NS-delegated challenge zone replicated to
 public authoritative secondaries can use those secondaries as observers. For a
 hidden primary with delayed replication, do not list only the primary: it may
@@ -185,16 +185,20 @@ zone = "validation.example.net"
 tsig_key_name = "jul-acme.validation.example.net"
 tsig_secret = "${env:JUL_DNS_TSIG}"
 
-[servers.tls.acme.rfc2136.cname_delegations]
-"_acme-challenge.example.com" = "txt.validation.example.net"
+[servers.tls.acme.rfc2136.cname_delegations."_acme-challenge.example.com"]
+target = "txt.validation.example.net"
+observers = ["ns1.example.com:53", "ns2.example.com:53"]
 ```
 
-The published CNAME must match exactly on every observer before any update;
+The published CNAME must match exactly on every alias observer before any update;
 Jul then writes only the target. Missing or unconfigured aliases, mismatches,
 and CNAME chains are rejected. Both the alias and the exact target TXT must
-remain visible to every observer before submission. Configure the CA-facing
+remain visible to their respective observers before every submission or retry. Configure the CA-facing
 authorities and their replication accordingly; Jul does not discover or follow
 arbitrary CNAMEs.
+
+Existing string-valued CNAME mappings must be migrated to the table form above,
+including an explicit alias observer list.
 
 DNS or CA outages retry with bounded backoff; a still-valid certificate remains
 in service. Each configured

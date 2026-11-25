@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 407 configurable leaves.
+Coverage: 408 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3892,9 +3892,22 @@ OCSPStapling enables OCSP stapling for ACME-issued certificates so clients can v
 | Requires | `acme` |
 | Default | true |
 
-## `servers.*.tls.acme.rfc2136.cname_delegations.*` {#servers-x-tls-acme-rfc2136-cname_delegations-x}
+## `servers.*.tls.acme.rfc2136.cname_delegations.*.observers` {#servers-x-tls-acme-rfc2136-cname_delegations-x-observers}
 
-CNAMEDelegations maps challenge owners to one-hop TXT targets in Zone.
+Observers are authoritative DNS endpoints for this challenge alias.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `restart_required` |
+| Subsystem | `acme` |
+| Why | the process-owned DNS-01 manager, certificate identities and provider settings are fixed at startup |
+| Requires | `acme` |
+| Flags | startup-consumed |
+
+## `servers.*.tls.acme.rfc2136.cname_delegations.*.target` {#servers-x-tls-acme-rfc2136-cname_delegations-x-target}
+
+Target is the exact one-hop TXT owner inside the update zone.
 
 | | |
 | --- | --- |

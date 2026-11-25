@@ -36,7 +36,7 @@ type dnsChallengeLease interface {
 type rfc2136Provider struct {
 	server             string
 	observers          []string
-	delegations        map[string]string
+	delegations        map[string]config.RFC2136CNAMEDelegation
 	zone               string
 	keyName            string
 	secret             string
@@ -136,13 +136,16 @@ func newRFC2136Provider(c *config.RFC2136Config, dial egress.DialFunc) (*rfc2136
 		return nil, errors.New("DNS-01 requires 1 to 8 CA-facing authoritative DNS observers")
 	}
 	zone := dns.Fqdn(strings.ToLower(c.Zone))
-	delegations := make(map[string]string, len(c.CNAMEDelegations))
-	for owner, target := range c.CNAMEDelegations {
-		owner, target = dns.Fqdn(strings.ToLower(owner)), dns.Fqdn(strings.ToLower(target))
+	delegations := make(map[string]config.RFC2136CNAMEDelegation, len(c.CNAMEDelegations))
+	for owner, delegation := range c.CNAMEDelegations {
+		owner, target := dns.Fqdn(strings.ToLower(owner)), dns.Fqdn(strings.ToLower(delegation.Target))
 		if owner == target || !dns.IsSubDomain(zone, target) {
 			return nil, errors.New("DNS-01 CNAME target must be distinct and inside the update zone")
 		}
-		delegations[owner] = target
+		if len(delegation.Observers) == 0 || len(delegation.Observers) > config.MaxRFC2136Observers {
+			return nil, errors.New("DNS-01 CNAME requires 1 to 8 authoritative observers")
+		}
+		delegations[owner] = config.RFC2136CNAMEDelegation{Target: target, Observers: append([]string(nil), delegation.Observers...)}
 	}
 	timeout, interval := c.PropagationTimeout.Std(), c.PollInterval.Std()
 	if timeout == 0 {
@@ -161,17 +164,19 @@ func newRFC2136Provider(c *config.RFC2136Config, dial egress.DialFunc) (*rfc2136
 }
 
 type rfc2136Lease struct {
-	provider *rfc2136Provider
-	owner    string
-	alias    string
-	value    string
-	marker   string
-	observed bool
+	provider       *rfc2136Provider
+	owner          string
+	alias          string
+	aliasObservers []string
+	value          string
+	marker         string
+	observed       bool
 }
 
 func (p *rfc2136Provider) Present(ctx context.Context, owner, value string) (dnsChallengeLease, error) {
 	owner = dns.Fqdn(strings.ToLower(owner))
-	target, delegated := p.delegations[owner]
+	delegation, delegated := p.delegations[owner]
+	target := delegation.Target
 	if !delegated {
 		target = owner
 	}
@@ -188,6 +193,16 @@ func (p *rfc2136Provider) Present(ctx context.Context, owner, value string) (dns
 	}
 	if delegated {
 		lease.alias = owner
+		lease.aliasObservers = delegation.Observers
+	}
+	release, err := p.acquireExchange(ctx, false)
+	if err != nil {
+		return nil, &dnsChallengeError{action: "propagation", class: dnsErrorClass(err), cause: err}
+	}
+	err = lease.observeAliasesAdmitted(ctx)
+	release()
+	if err != nil {
+		return nil, &dnsChallengeError{action: "propagation", class: dnsErrorClass(err), cause: err}
 	}
 	for _, observer := range p.observers {
 		if _, err := lease.observe(ctx, observer); err != nil {
@@ -346,6 +361,12 @@ func (l *rfc2136Lease) updateLocked(ctx context.Context, remove bool) error {
 }
 
 func (l *rfc2136Lease) probeAdmitted(ctx context.Context) (bool, error) {
+	if err := l.observeAliasesAdmitted(ctx); err != nil {
+		if dnsErrorClass(err) == "transient" {
+			return false, nil
+		}
+		return false, &dnsChallengeError{action: "propagation", class: dnsErrorClass(err), cause: err}
+	}
 	for _, observer := range l.provider.observers {
 		records, err := l.observeAdmitted(ctx, observer)
 		if err != nil {
@@ -434,25 +455,29 @@ func (l *rfc2136Lease) observe(ctx context.Context, observer string) ([]dns.RR, 
 }
 
 func (l *rfc2136Lease) observeAdmitted(ctx context.Context, observer string) ([]dns.RR, error) {
-	if l.alias != "" {
+	return l.provider.queryTXTAtAdmitted(ctx, observer, l.owner, "propagation", false)
+}
+
+func (l *rfc2136Lease) observeAliasesAdmitted(ctx context.Context) error {
+	for _, observer := range l.aliasObservers {
 		resp, err := l.provider.queryAtAdmitted(ctx, observer, l.alias, dns.TypeCNAME, "propagation", false)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		matches := 0
 		for _, answer := range resp.Answer {
 			if cname, ok := answer.(*dns.CNAME); ok && strings.EqualFold(cname.Hdr.Name, l.alias) {
 				if !strings.EqualFold(dns.Fqdn(cname.Target), l.owner) {
-					return nil, &dnsChallengeError{action: "propagation", class: "alias"}
+					return &dnsChallengeError{action: "propagation", class: "alias"}
 				}
 				matches++
 			}
 		}
 		if matches != 1 {
-			return nil, &dnsChallengeError{action: "propagation", class: "alias"}
+			return &dnsChallengeError{action: "propagation", class: "alias"}
 		}
 	}
-	return l.provider.queryTXTAtAdmitted(ctx, observer, l.owner, "propagation", false)
+	return nil
 }
 
 func (p *rfc2136Provider) queryTXTAtAdmitted(ctx context.Context, server, owner, action string, signed bool) ([]dns.RR, error) {

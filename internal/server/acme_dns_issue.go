@@ -687,6 +687,12 @@ func (m *dnsACMEManager) startDNSAuthorization(ctx context.Context, pending *dns
 }
 
 func (m *dnsACMEManager) beginDNSAuthorization(ctx context.Context, pending *dnsPendingAuthorization) (bool, error) {
+	if pending.submitted {
+		if pending.challenge.Status == acme.StatusPending {
+			return true, errDNSChallengeRetryDeferred
+		}
+		return true, nil
+	}
 	if pending.lease != nil {
 		if err := pending.lease.Wait(ctx); err != nil {
 			return pending.challenge.Status != acme.StatusPending, err
@@ -715,7 +721,10 @@ func (m *dnsACMEManager) completeDNSAuthorization(ctx context.Context, url strin
 		return nil, err
 	}
 	if err != nil && pending.challenge.Status == acme.StatusPending {
-		auth, reconcileErr := m.reconcileDNSAcceptance(ctx, url, pending.challenge, err, pending.nextPoll, pending.nextAccept)
+		auth, reconcileErr := m.reconcileDNSAcceptance(ctx, url, pending.challenge, pending.lease, err, pending.nextPoll, pending.nextAccept, func() {
+			pending.submitted = true
+			pending.rejected = false
+		})
 		if pending.rejected && auth != nil && auth.Status == acme.StatusPending {
 			matches := 0
 			stillPending := false
@@ -764,9 +773,16 @@ func (m *dnsACMEManager) acceptDNSChallenge(ctx context.Context, url string, cha
 	return next, err
 }
 
-func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string, challenge *acme.Challenge, lastErr error, nextPoll, nextAccept time.Time) (*acme.Authorization, error) {
+func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string, challenge *acme.Challenge, lease dnsChallengeLease, lastErr error, nextPoll, nextAccept time.Time, onSubmit func()) (*acme.Authorization, error) {
 	var observationErr error
 	var lastAuth *acme.Authorization
+	var propagation <-chan error
+	var cancelWait context.CancelFunc
+	defer func() {
+		if cancelWait != nil {
+			cancelWait()
+		}
+	}()
 	retryAllowed := errors.Is(lastErr, errDNSChallengeRetryDeferred) || retryableDNSChallengeRejection(lastErr)
 	if errors.Is(lastErr, errDNSChallengeRetryDeferred) {
 		lastErr = nil
@@ -776,12 +792,42 @@ func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string,
 			if err := waitDNSAuthorizationPoll(ctx, nextAccept); err != nil {
 				return lastAuth, errors.Join(lastErr, observationErr, err)
 			}
-			nextAccept, lastErr = m.acceptDNSChallenge(ctx, url, challenge)
-			if lastErr == nil {
-				return m.waitDNSAuthorization(ctx, url, nil, nextPoll)
+			if propagation == nil {
+				if lease == nil {
+					return lastAuth, errors.Join(lastErr, errors.New("DNS-01 retry requires a challenge lease"))
+				}
+				result := make(chan error, 1)
+				propagation = result
+				var waitCtx context.Context
+				waitCtx, cancelWait = context.WithCancel(ctx)
+				go func() { result <- lease.Wait(waitCtx) }()
 			}
-			retryAllowed = retryableDNSChallengeRejection(lastErr)
-			continue
+			timer := time.NewTimer(max(0, time.Until(nextPoll)))
+			select {
+			case err := <-propagation:
+				timer.Stop()
+				cancelWait()
+				cancelWait = nil
+				propagation = nil
+				if err != nil {
+					lastErr = errors.Join(lastErr, err)
+					retryAllowed = false
+					continue
+				}
+				if onSubmit != nil {
+					onSubmit()
+				}
+				nextAccept, lastErr = m.acceptDNSChallenge(ctx, url, challenge)
+				if lastErr == nil {
+					return m.waitDNSAuthorization(ctx, url, nil, nextPoll)
+				}
+				retryAllowed = retryableDNSChallengeRejection(lastErr)
+				continue
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return lastAuth, errors.Join(lastErr, observationErr, ctx.Err())
+			}
 		}
 		if err := waitDNSAuthorizationPoll(ctx, nextPoll); err != nil {
 			return lastAuth, errors.Join(lastErr, observationErr, err)
@@ -813,6 +859,11 @@ func (m *dnsACMEManager) reconcileDNSAcceptance(ctx context.Context, url string,
 						retryAllowed = true
 						break challenges
 					}
+				}
+				if !retryAllowed && cancelWait != nil {
+					cancelWait()
+					cancelWait = nil
+					propagation = nil
 				}
 			case acme.StatusInvalid, acme.StatusDeactivated, acme.StatusExpired, acme.StatusRevoked:
 				return auth, errors.Join(lastErr, failedDNSAuthorization(url, auth))
