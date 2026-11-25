@@ -20,6 +20,9 @@ Linux/arm64 results, not public-CA certification.
   clock diagnostic, never as an authenticated success.
 - The full race gate exposed an asynchronous cleanup race in a test fixture;
   its counters are synchronized and the assertion waits for cleanup.
+- Hosted semantic-noop and Windows Full jobs on follow-up head
+  `03f2f2cbae0d424a297ad7b2defcd7d6f3e573b9` found that a multi-owner test
+  waited for only one owner's cleanup. Its assertion now waits for all owners.
 
 These are implementation follow-ups, **not an independent PKI review**. The
 earlier independent review attempt ended with a tool-safety error and did not
@@ -57,8 +60,13 @@ resolver caches or CA network vantage points. See
   passed.
 - `go test -race -tags 'acme http3' ./internal/server -run '^Test(DNS01ReconcilesLateCAValidationAfterTimeout|DNS01ShutdownRetainsUnresolvedCAChallenge|DNS01CleanupFailureDoesNotBlockCertificateInstallation|DNS01DoesNotSubmitUntilEveryObserverSeesTXT|RFC2136CNAMEChecksEveryObserverBeforeUpdateAndSubmission|RFC2136ExplicitCNAMEDelegation)$' -count=1 -timeout=90s`:
   passed.
+- `go test -race -p 2 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/server -run '^TestDNS01InProcess(AuthorizationsPropagateConcurrently|ConcurrentAuthorizationFailureCleansAllLeases)$' -count=5 -timeout=90s`:
+  passed. A prior 30-repeat run hit its overall 180-second timeout without an
+  individual test failure.
 - `go test -tags 'acme http3 console' ./internal/config ./internal/lifecycle ./internal/admin ./internal/app ./cmd/jul -count=1 -timeout=180s`:
   passed.
+- `go test -p 2 -count=1 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./internal/server ./internal/app ./internal/admin ./internal/adminapi ./internal/adminclient ./internal/apicontract ./internal/config ./internal/lifecycle ./internal/observability ./internal/redact ./cmd/jul`:
+  passed after the multi-owner assertion fix.
 - `go test -race -p 2 -tags 'brotli zstd acme console otel grpc http3 importer wasmplugins stream consul kubernetes waf' ./...`:
   passed after the fixture fix; unaffected packages reused Go's test cache.
 - `make console-check`: passed, 1,112 tests and 83.55% statements.

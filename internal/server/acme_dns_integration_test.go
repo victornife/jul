@@ -434,7 +434,15 @@ func assertIntegratedDNSClean(t *testing.T, dns *testRFC2136Server) {
 	waitForDNSACMETest(t, "owned challenge cleanup", func() bool {
 		dns.mu.Lock()
 		defer dns.mu.Unlock()
-		return len(dns.records[testOwner]) == 1 && dns.records[testOwner]["unrelated"]
+		if len(dns.records[testOwner]) != 1 || !dns.records[testOwner]["unrelated"] {
+			return false
+		}
+		for owner, values := range dns.records {
+			if owner != testOwner && len(values) != 0 {
+				return false
+			}
+		}
+		return true
 	})
 	dns.mu.Lock()
 	defer dns.mu.Unlock()
@@ -958,13 +966,6 @@ func TestDNS01InProcessAuthorizationsPropagateConcurrently(t *testing.T) {
 		t.Fatalf("presented %d authorizations, want %d", barrier.presented.Load(), len(names))
 	}
 	assertIntegratedDNSClean(t, dns)
-	dns.mu.Lock()
-	defer dns.mu.Unlock()
-	for owner, values := range dns.records {
-		if owner != testOwner && len(values) != 0 {
-			t.Fatalf("challenge values remain at %s: %v", owner, values)
-		}
-	}
 }
 
 func TestDNS01InProcessSlowPropagationDoesNotStarveReadyChallenge(t *testing.T) {
@@ -3015,13 +3016,6 @@ func TestDNS01InProcessConcurrentAuthorizationFailureCleansAllLeases(t *testing.
 		t.Fatal("injected propagation failure was accepted")
 	}
 	assertIntegratedDNSClean(t, dns)
-	dns.mu.Lock()
-	defer dns.mu.Unlock()
-	for owner, values := range dns.records {
-		if owner != testOwner && len(values) != 0 {
-			t.Fatalf("challenge values remain at %s: %v", owner, values)
-		}
-	}
 }
 
 func TestDNS01InProcessAuthorizationCardinality(t *testing.T) {
