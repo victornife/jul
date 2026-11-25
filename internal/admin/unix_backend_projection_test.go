@@ -5,9 +5,37 @@ package admin
 
 import (
 	"testing"
+	"time"
 
 	"jul/internal/config"
 )
+
+func TestAppsProjectionDiscoveryFreshness(t *testing.T) {
+	lastSuccess := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{Upstreams: []config.UpstreamConfig{
+		{Name: "fresh"},
+		{Name: "pending"},
+		{Name: "static"},
+	}}
+	live := map[string]UpstreamStatus{
+		"fresh":   {DiscoveryRefreshState: "fresh", DiscoveryLastSuccess: &lastSuccess},
+		"pending": {DiscoveryRefreshState: "never_refreshed"},
+	}
+
+	apps := projectApps(cfg, live)
+	if len(apps) != 3 {
+		t.Fatalf("apps = %+v", apps)
+	}
+	if apps[0].DiscoveryRefreshState != "fresh" || apps[0].DiscoveryLastSuccess == nil || !apps[0].DiscoveryLastSuccess.Equal(lastSuccess) {
+		t.Errorf("fresh discovery projection = %+v", apps[0])
+	}
+	if apps[1].DiscoveryRefreshState != "never_refreshed" || apps[1].DiscoveryLastSuccess != nil {
+		t.Errorf("pending discovery projection = %+v", apps[1])
+	}
+	if apps[2].DiscoveryRefreshState != "" || apps[2].DiscoveryLastSuccess != nil {
+		t.Errorf("static discovery projection = %+v", apps[2])
+	}
+}
 
 func TestAppsProjectionJoinsUnixBackendByNetworkAndNormalizedAddress(t *testing.T) {
 	cfg := &config.Config{Upstreams: []config.UpstreamConfig{{
