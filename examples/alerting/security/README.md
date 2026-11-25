@@ -91,6 +91,7 @@ Minimal Jul listener configuration for the fixture:
 listen = "127.0.0.1:18443"
 server_names = ["localhost"]
   [servers.tls]
+  enabled = true
   cert = "/tmp/jul-app-probe/server.crt"
   key = "/tmp/jul-app-probe/server.key"
   [[servers.locations]]
@@ -100,7 +101,10 @@ server_names = ["localhost"]
 
 Use a test certificate with `DNS:localhost` in its SAN, configure the local
 Blackbox module's `tls_config.ca_file` to the issuing test CA, and keep
-`insecure_skip_verify = false`. Initialize a temporary effective-version key
+`insecure_skip_verify = false`. For this IPv4-only fixture, set
+`preferred_ip_protocol: ip4` under the local module's `http` section so the
+exporter connects to the fixture even when `localhost` also resolves to `::1`.
+Initialize a temporary effective-version key
 with `jul version-key init --file /tmp/jul-app-probe/effective-version.key`,
 then start Jul with the top-level `-config` and
 `-effective-version-key-file` flags before `serve`. Run Jul, the fixture, and
@@ -161,10 +165,11 @@ Prometheus.
 The rules distinguish an application response failure (`probe_success == 0`
 while exporter scrape `up == 1`), an exporter/scrape failure (`up == 0`), a
 missing expected target (no `up` series), and a scrape that lacks its expected
-probe result. Only a **new successful probe** clears the application-failure
-condition; exporter loss or missing data is not interpreted as application
-recovery. A missing `probe_ssl_earliest_cert_expiry` series is unknown, not
-healthy, and does not alert as a healthy certificate.
+probe result. A resolved application alert means its rule condition cleared.
+Exporter loss or missing data can also clear that condition and leaves the
+application state unknown. Confirm recovery with a **new `probe_success = 1`
+sample** for the same target on a successful scrape (`up = 1`). A missing
+`probe_ssl_earliest_cert_expiry` series leaves the certificate state unknown.
 
 Blackbox Exporter's `probe_ssl_earliest_cert_expiry` is the earliest `NotAfter`
 observed across certificates in the TLS connection, which can be an

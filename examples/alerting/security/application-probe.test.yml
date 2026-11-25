@@ -30,7 +30,7 @@ tests:
               category: application_probe
             exp_annotations:
               summary: "Jul application probe jul-app failed."
-              description: "The exporter is scrapeable, but the configured HTTPS request did not satisfy status 200 and the JUL_OPS_PROBE_OK body marker. Check DNS, TLS, the Jul route and the upstream. Recovery requires a new successful probe."
+              description: "The exporter is scrapeable, but the configured HTTPS request did not satisfy status 200 and the JUL_OPS_PROBE_OK body marker. Check DNS, TLS, the Jul route and the upstream. Exporter or data loss can clear this alert. Confirm recovery with a new successful probe."
       - eval_time: 3m
         alertname: JulApplicationProbeFailed
         exp_alerts: []
@@ -48,6 +48,38 @@ tests:
       - eval_time: 6m
         alertname: JulApplicationProbeFailed
         exp_alerts: []
+
+  # An exporter outage can clear a firing application alert before recovery.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="jul-application-probe",instance="jul-app"}'
+        values: "1 1 1 0 0"
+      - series: 'probe_success{job="jul-application-probe",instance="jul-app"}'
+        values: "1 0 0 stale _"
+    promql_expr_test:
+      - expr: 'ALERTS{alertname="JulApplicationProbeFailed",alertstate="firing",instance="jul-app"}'
+        eval_time: 2m
+        exp_samples:
+          - labels: 'ALERTS{alertname="JulApplicationProbeFailed",alertstate="firing",category="application_probe",instance="jul-app",job="jul-application-probe",severity="critical"}'
+            value: 1
+      - expr: 'probe_success{job="jul-application-probe",instance="jul-app"} == 1'
+        eval_time: 4m
+        exp_samples: []
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: JulApplicationProbeFailed
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: JulApplicationProbeExporterUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: jul-application-probe
+              instance: jul-app
+              severity: critical
+              category: availability
+            exp_annotations:
+              summary: "Jul application probe exporter is unavailable for jul-app."
+              description: "Prometheus knows the expected target, but the exporter scrape failed. This does not establish an application failure; check the exporter process, private listener and scrape path."
 
   - interval: 1m
     input_series:
