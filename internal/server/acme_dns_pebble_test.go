@@ -39,16 +39,7 @@ func TestDNS01PebbleEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	udp := &dns.Server{PacketConn: packet, Handler: dnsServer, MsgAcceptFunc: func(dns.Header) dns.MsgAcceptAction { return dns.MsgAccept }}
-	udpDone := make(chan error, 1)
-	go func() { udpDone <- udp.ActivateAndServe() }()
-	t.Cleanup(func() {
-		if err := udp.Shutdown(); err != nil {
-			t.Errorf("shutdown DNS UDP server: %v", err)
-		}
-		if err := <-udpDone; err != nil {
-			t.Errorf("DNS UDP server: %v", err)
-		}
-	})
+	startDNSTestServer(t, udp)
 	dnsServer.mu.Lock()
 	dnsServer.records[testOwner] = map[string]bool{"unrelated": true}
 	dnsServer.mu.Unlock()

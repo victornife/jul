@@ -43,6 +43,31 @@ func TestPreflightApplyValidConfigOK(t *testing.T) {
 	}
 }
 
+func TestPreflightSecretErrorsPreserveClassification(t *testing.T) {
+	const secret = "preflight-secret-canary"
+	t.Setenv("JUL_PREFLIGHT_TEST_SECRET", secret)
+	cfg := config.ProxyTarget(":9000", ":0")
+	cfg.Global.AccessLog = "${env:JUL_PREFLIGHT_TEST_SECRET}"
+
+	for _, sentinel := range []error{context.Canceled, context.DeadlineExceeded, admin.ErrRestartRequired} {
+		t.Run(sentinel.Error(), func(t *testing.T) {
+			p := Preflight{
+				BuildHandlers: func(context.Context, *config.Config, bool) (map[string]http.Handler, func(), error) {
+					return nil, nil, errors.Join(sentinel, errors.New(secret))
+				},
+				Stream: &mockStreamPreflighter{},
+			}
+			_, err := p.Apply(context.Background(), cfg, nil, PreflightHot)
+			if !errors.Is(err, sentinel) {
+				t.Fatalf("error %v lost classification %v", err, sentinel)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatal("preflight error disclosed a resolved credential")
+			}
+		})
+	}
+}
+
 func TestPreflightApplyInvalidConfigFailsFast(t *testing.T) {
 	bad := &config.Config{
 		Servers: []config.ServerConfig{{

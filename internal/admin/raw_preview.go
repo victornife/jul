@@ -52,24 +52,42 @@ func secretSafeRawValidationErrors(err error) []validationError {
 	}
 	out := make([]validationError, 0, len(humanized))
 	for _, issue := range humanized {
-		path := issue.Path
-		if path == "" {
-			path = "config"
-		}
 		if issue.Code != "unknown" {
-			issue.Path = path
+			// Parsed paths can themselves be part of a resolved secret.
+			issue.Path = "config"
 			out = append(out, issue)
 			continue
 		}
 		out = append(out, validationError{
 			Code:     "candidate_validation",
-			Path:     path,
+			Path:     "config",
 			Summary:  "The candidate value is invalid.",
 			Detail:   "Review this field and generate a fresh preview.",
 			Severity: "error",
 		})
 	}
 	return out
+}
+
+// SecretSafeValidationError returns fixed guidance without exposing values
+// from a resolved candidate.
+func SecretSafeValidationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	issues := secretSafeRawValidationErrors(err)
+	safe := make([]error, 0, len(issues))
+	for _, issue := range issues {
+		message := issue.Summary
+		if issue.Detail != "" {
+			message += " " + issue.Detail
+		}
+		if issue.Path != "" {
+			message = issue.Path + ": " + message
+		}
+		safe = append(safe, errors.New(message))
+	}
+	return errors.Join(safe...)
 }
 
 func previewRawCandidate(

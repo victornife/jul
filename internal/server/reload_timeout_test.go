@@ -297,6 +297,31 @@ func TestReloadDeadlineBoundsCancellation(t *testing.T) {
 	<-done
 }
 
+func TestSanitizeManagedReloadErrors(t *testing.T) {
+	const secret = "secret-canary"
+	for _, phase := range []string{"prepare", ""} {
+		t.Run(phase, func(t *testing.T) {
+			result := ReloadResult{
+				Outcome: ReloadAppliedDegraded, FailedPhase: phase, TimedOut: true,
+				TimedOutPhase: "post_commit", Published: true, Error: secret,
+				HTTP:   ReloadSubsystemResult{Status: ReloadSubsystemFailed, Error: secret},
+				Stream: ReloadSubsystemResult{Status: ReloadSubsystemFailed, Error: secret},
+				Admin:  ReloadSubsystemResult{Status: ReloadSubsystemFailed, Error: secret},
+			}
+			sanitizeManagedReloadErrors(&result)
+			if result.Outcome != ReloadAppliedDegraded || result.FailedPhase != phase ||
+				!result.TimedOut || result.TimedOutPhase != "post_commit" || !result.Published {
+				t.Fatalf("reload classification changed: %+v", result)
+			}
+			for _, message := range []string{result.Error, result.HTTP.Error, result.Stream.Error, result.Admin.Error} {
+				if message == "" || strings.Contains(message, secret) {
+					t.Fatal("sanitized error was empty or disclosed a secret")
+				}
+			}
+		})
+	}
+}
+
 // TestReloadPhaseTimingRecordsDurations verifies that phase durations are
 // recorded and exposed in the reload result.
 func TestReloadResultIncludesAdminSubsystem(t *testing.T) {

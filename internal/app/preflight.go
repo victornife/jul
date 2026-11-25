@@ -5,6 +5,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -165,6 +166,21 @@ func (p *Preflight) ApplyCandidate(ctx context.Context, candidate *config.Candid
 }
 
 func (p *Preflight) applyCandidate(ctx context.Context, candidate *config.Candidate, prev *config.Config, mode PreflightMode) (_ *PreflightResult, retErr error) {
+	defer func() {
+		if retErr == nil || config.CountSecretRefs(candidate.Raw) == 0 {
+			return
+		}
+		switch {
+		case errors.Is(retErr, context.Canceled):
+			retErr = context.Canceled
+		case errors.Is(retErr, context.DeadlineExceeded):
+			retErr = context.DeadlineExceeded
+		case errors.Is(retErr, admin.ErrRestartRequired):
+			retErr = fmt.Errorf("%w: review startup settings and stage a restart", admin.ErrRestartRequired)
+		default:
+			retErr = admin.SecretSafeValidationError(retErr)
+		}
+	}()
 	reportPhase(ctx, PreflightPhaseValidate)
 	if err := ValidateRuntimeConfig(ctx, candidate.Effective); err != nil {
 		return nil, err

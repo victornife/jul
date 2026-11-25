@@ -154,16 +154,7 @@ func startRFC2136Server(t *testing.T) (*testRFC2136Server, *rfc2136Provider) {
 		TsigSecret:    map[string]string{testTSIGName: testTSIGSecret},
 		MsgAcceptFunc: func(dns.Header) dns.MsgAcceptAction { return dns.MsgAccept },
 	}
-	done := make(chan error, 1)
-	go func() { done <- srv.ActivateAndServe() }()
-	t.Cleanup(func() {
-		if err := srv.Shutdown(); err != nil {
-			t.Errorf("shutdown DNS test server: %v", err)
-		}
-		if err := <-done; err != nil {
-			t.Errorf("DNS test server: %v", err)
-		}
-	})
+	startDNSTestServer(t, srv)
 	provider, err := newRFC2136Provider(&config.RFC2136Config{
 		Server: listener.Addr().String(), Observers: []string{listener.Addr().String()}, Zone: "example.test", TSIGKeyName: testTSIGName,
 		TSIGSecret: testTSIGSecret, PropagationTimeout: config.Duration(time.Second),
@@ -175,6 +166,44 @@ func startRFC2136Server(t *testing.T) (*testRFC2136Server, *rfc2136Provider) {
 	return handler, provider
 }
 
+func startDNSTestServer(t *testing.T, srv *dns.Server) {
+	t.Helper()
+	started := make(chan struct{})
+	srv.NotifyStartedFunc = func() { close(started) }
+	done := make(chan error, 1)
+	go func() { done <- srv.ActivateAndServe() }()
+	select {
+	case <-started:
+	case err := <-done:
+		if srv.Listener != nil {
+			if closeErr := srv.Listener.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+				t.Errorf("close DNS test listener: %v", closeErr)
+			}
+		}
+		if srv.PacketConn != nil {
+			if closeErr := srv.PacketConn.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+				t.Errorf("close DNS test packet connection: %v", closeErr)
+			}
+		}
+		t.Fatalf("DNS test server exited before startup: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := srv.ShutdownContext(ctx); err != nil {
+			t.Errorf("shutdown DNS test server: %v", err)
+		}
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("DNS test server: %v", err)
+			}
+		case <-ctx.Done():
+			t.Errorf("DNS test server did not stop: %v", ctx.Err())
+		}
+	})
+}
+
 func cleanupTestDNSLease(ctx context.Context, lease dnsChallengeLease) error {
 	release, err := lease.admitCleanup(ctx)
 	if err != nil {
@@ -182,6 +211,19 @@ func cleanupTestDNSLease(ctx context.Context, lease dnsChallengeLease) error {
 	}
 	defer release()
 	return lease.cleanupAdmitted(ctx)
+}
+
+func TestRFC2136ServerImmediateShutdown(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
+			handler, _ := startRFC2136Server(t)
+			packet, err := net.ListenPacket("udp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			startDNSTestServer(t, &dns.Server{PacketConn: packet, Handler: handler})
+		})
+	}
 }
 
 func TestRFC2136ObserversWaitForEveryAuthoritativeView(t *testing.T) {

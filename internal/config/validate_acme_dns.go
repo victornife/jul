@@ -115,21 +115,24 @@ func validateACMEDNS(a *ACMEConfig, serverNames []string, where string) []error 
 		errs = append(errs, fmt.Errorf("%s: poll_interval must be between 250ms and 30s and not exceed propagation_timeout", dnsWhere))
 	}
 	domains := a.Domains
+	serverNamesWhere := strings.TrimSuffix(where, ".tls.acme") + ".server_names"
+	domainsWhere := where + ".domains"
 	if len(domains) == 0 {
 		domains = serverNames
+		domainsWhere = serverNamesWhere
 	}
 	if len(serverNames) == 0 {
 		errs = append(errs, fmt.Errorf("%s: dns-01 requires server_names to scope SNI on the listener", where))
 	}
 	seen := make(map[string]bool)
-	for _, domain := range domains {
+	for i, domain := range domains {
 		if ContainsSecretRef(domain) {
 			continue
 		}
 		name := normalizeDNSName(domain)
 		base := strings.TrimPrefix(name, "*.")
 		if !validDNSName(base, false) || strings.Contains(base, "*") {
-			errs = append(errs, fmt.Errorf("%s: invalid DNS-01 certificate name %q", where, domain))
+			errs = append(errs, fmt.Errorf("%s[%d]: invalid DNS-01 certificate name", domainsWhere, i))
 			continue
 		}
 		seen[name] = true
@@ -138,14 +141,14 @@ func validateACMEDNS(a *ACMEConfig, serverNames []string, where string) []error 
 			owner := "_acme-challenge." + base
 			_, delegated := delegations[owner]
 			if !delegated && owner != zone && !strings.HasSuffix(owner, "."+zone) {
-				errs = append(errs, fmt.Errorf("%s: DNS challenge name for %q is outside the configured zone", where, domain))
+				errs = append(errs, fmt.Errorf("%s[%d]: DNS challenge name is outside the configured zone", domainsWhere, i))
 			}
 		}
 	}
 	if len(seen) > 100 {
 		errs = append(errs, fmt.Errorf("%s: dns-01 supports at most 100 certificate names per listener", where))
 	}
-	for _, name := range serverNames {
+	for i, name := range serverNames {
 		if ContainsSecretRef(name) {
 			continue
 		}
@@ -157,7 +160,7 @@ func validateACMEDNS(a *ACMEConfig, serverNames []string, where string) []error 
 			}
 		}
 		if !covered {
-			errs = append(errs, fmt.Errorf("%s: server name %q is not covered by its configured ACME domains", where, name))
+			errs = append(errs, fmt.Errorf("%s[%d]: server name is not covered by its configured ACME domains", serverNamesWhere, i))
 		}
 	}
 	return errs

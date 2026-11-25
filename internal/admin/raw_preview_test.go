@@ -127,6 +127,46 @@ func TestIssue81RawValidationErrorsDoNotEchoCandidateValues(t *testing.T) {
 	}
 }
 
+func TestSafeValidationDoesNotTreatSecretAsPath(t *testing.T) {
+	for _, secret := range []string{"credentialCanary[123]", "x[1]"} {
+		t.Run(secret, func(t *testing.T) {
+			issues := secretSafeRawValidationErrors(errors.New("invalid value\n" + secret + ": invalid"))
+			encoded, err := json.Marshal(issues)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), secret) {
+				t.Fatal("validation response disclosed a secret as a path")
+			}
+		})
+	}
+}
+
+func TestSecretSafeValidationError(t *testing.T) {
+	if err := SecretSafeValidationError(nil); err != nil {
+		t.Fatalf("nil error became %v", err)
+	}
+
+	err := errors.Join(
+		errors.New("servers[0].tls.acme.domains[0]: invalid DNS-01 certificate name private-value"),
+		errors.New("invalid value\nx[1]: another-private-value"),
+	)
+	safe := SecretSafeValidationError(err)
+	if safe == nil {
+		t.Fatal("invalid candidate lost its error")
+	}
+	for _, secret := range []string{"private-value", "x[1]"} {
+		if strings.Contains(safe.Error(), secret) {
+			t.Fatal("safe error disclosed a resolved value")
+		}
+	}
+	for _, guidance := range []string{"A DNS-01 certificate name is invalid.", "The candidate value is invalid."} {
+		if !strings.Contains(safe.Error(), guidance) {
+			t.Fatalf("safe error omitted guidance %q", guidance)
+		}
+	}
+}
+
 func TestSafeValidationPreservesFixedClassification(t *testing.T) {
 	const marker = "CONFIGURED_VALUE_MUST_NOT_ESCAPE"
 	for _, test := range []struct {
@@ -134,10 +174,10 @@ func TestSafeValidationPreservesFixedClassification(t *testing.T) {
 		code    string
 		path    string
 	}{
-		{"servers[0].client_address.trusted_proxies[0]: host bits in " + marker, "noncanonical_cidr", "servers[0].client_address.trusted_proxies[0]"},
+		{"servers[0].client_address.trusted_proxies[0]: host bits in " + marker, "noncanonical_cidr", "config"},
 		{"invalid proxy_pass " + marker, "bad_proxy_pass", "config"},
 		{"requested encoder " + marker + " is not compiled in this build", "unsupported_build_capability", "config"},
-		{"servers[0].locations[0]: invalid value " + marker, "candidate_validation", "servers[0].locations[0]"},
+		{"servers[0].locations[0]: invalid value " + marker, "candidate_validation", "config"},
 	} {
 		t.Run(test.code, func(t *testing.T) {
 			issues := secretSafeRawValidationErrors(errors.New(test.message))
