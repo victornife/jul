@@ -273,13 +273,14 @@ func serveWebSocketEcho(w http.ResponseWriter, r *http.Request, onClose ...func(
 			return
 		}
 		length := int(header[1] & 0x7f)
-		if length == 126 {
+		switch length {
+		case 126:
 			var extendedLength [2]byte
 			if _, err := io.ReadFull(rw, extendedLength[:]); err != nil {
 				return
 			}
 			length = int(binary.BigEndian.Uint16(extendedLength[:]))
-		} else if length == 127 {
+		case 127:
 			return
 		}
 		payload := make([]byte, length)
