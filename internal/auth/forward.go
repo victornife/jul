@@ -145,7 +145,7 @@ func (f *forwardAuth) decide(ctx context.Context, r *http.Request) (forwardResul
 func copyForwardHeaders(dst, src http.Header) {
 	hop := connectionScopedHeaders(src)
 	for name, vals := range src {
-		if hop[http.CanonicalHeaderKey(name)] {
+		if strings.HasPrefix(name, ":") || hop[http.CanonicalHeaderKey(name)] {
 			continue
 		}
 		for _, v := range vals {

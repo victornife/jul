@@ -374,6 +374,10 @@ type Deps struct {
 	// PluginModules returns the content identity of each serving plugin's
 	// compiled module, keyed by plugin name (#429). Nil omits digests.
 	PluginModules func() map[string]PluginModule
+	// HTTP2ExtendedConnectEnabled reflects the process-startup GODEBUG switch.
+	HTTP2ExtendedConnectEnabled bool
+	// HTTP3Compiled reports whether this binary includes the HTTP/3 server.
+	HTTP3Compiled bool
 	// Cache, when non-nil, backs the versioned cache invalidation endpoints.
 	Cache Purger
 	// Reload triggers a configuration reload. It returns an error if the

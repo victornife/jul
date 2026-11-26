@@ -74,6 +74,11 @@ func CheckHTTP3(servers []config.ServerConfig) error {
 	return nil
 }
 
+// HTTP3Compiled reports whether this build includes the HTTP/3 server.
+func HTTP3Compiled() bool {
+	return http3Compiled
+}
+
 // http3EnabledForAddr reports whether any server block on addr enables HTTP/3.
 // Validation guarantees such a block also has TLS, and HTTP/3 only starts inside
 // the TLS branch of bind, so this drives whether a QUIC listener is opened.

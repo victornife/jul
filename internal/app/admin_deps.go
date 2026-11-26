@@ -64,6 +64,8 @@ func BuildAdminDeps(productName, version string, src config.Source, subsystems S
 	deps.PluginEngine = subsystems.PluginEngine
 	deps.StreamCompiled = subsystems.StreamCompiled
 	deps.WAFCompiled = subsystems.WAFCompiled
+	deps.HTTP2ExtendedConnectEnabled = server.HTTP2ExtendedConnectEnabled()
+	deps.HTTP3Compiled = server.HTTP3Compiled()
 
 	deps.Upstreams = func() []admin.UpstreamStatus {
 		return AdaptUpstreams(subsystems.PoolReg.Snapshot())

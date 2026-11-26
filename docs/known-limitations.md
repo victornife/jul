@@ -589,14 +589,17 @@ bound. L4 sessions have their separate shutdown owner and timeout policy.
   A dependency/tool change or a recovered case forces exception review;
   passing the allow-listed lane is not full RFC conformance. See
   [conformance evidence](security-testing.md#protocol-conformance-lane).
-- **No WebSocket over HTTP/3 — or over HTTP/2.** Jul.IA implements the HTTP/1.1 `Upgrade` mechanism
-  only. WebSocket over HTTP/2 and HTTP/3 uses extended `CONNECT` (RFC 8441 / RFC 9220), which Jul.IA
-  does not implement. Go's bundled HTTP/2 server keeps extended `CONNECT` behind
-  `GODEBUG=http2xconnect=1` for a reason that applies directly here: advertising it makes browsers
-  *stop* sending HTTP/1.1 `Upgrade` and start sending extended `CONNECT`, which then fails against a
-  server whose WebSocket path does not implement it. A WebSocket upgrade over HTTP/3 will be
-  rejected. Browsers fall back to an HTTP/1.1 connection for the WebSocket, so nothing is
-  unreachable.
+- **Native HTTP/2 and HTTP/3 WebSocket upstreams are not supported yet.** HTTP/2
+  and HTTP/3 clients can use Extended CONNECT through Jul to an HTTP/1.1
+  WebSocket backend. Go's HTTP/2 Extended CONNECT advertisement is off by
+  default; set `GODEBUG=http2xconnect=1` before startup to enable it. The
+  process-wide switch affects data and admin HTTP/2 listeners and requires a
+  restart to change. The Status → Protocols panel reports the active state and
+  prerequisite. HTTP/3 advertisement is independent and requires an
+  `-tags http3` build. Native HTTP/2 and HTTP/3 backend support is tracked in
+  [#741](https://github.com/victornife/jul/issues/741) and
+  [#742](https://github.com/victornife/jul/issues/742). Client fallback to
+  HTTP/1.1 is not guaranteed.
 - **HTTP/3 enablement requires a restart.** The QUIC listener is built at bind
   time, so `servers.*.http3.enabled` remains restart-bound. The Alt-Svc
   advertisement max-age is hot-reloadable and does not rebind the listener.

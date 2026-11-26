@@ -3,7 +3,11 @@
 
 package middleware
 
-import "net/http"
+import (
+	"net/http"
+
+	"jul/internal/websocketx"
+)
 
 // BodyLimit returns middleware that caps the request body at maxBytes. A
 // request that declares a Content-Length over the limit is rejected up front
@@ -17,6 +21,10 @@ func BodyLimit(maxBytes int64) Middleware {
 			return next
 		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if websocketx.IsExtendedRequest(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			// A known Content-Length over the limit can be refused immediately,
 			// before reading (and, for a proxy, before dialing the upstream). An
 			// unknown length (-1, e.g. chunked) is handled by MaxBytesReader.

@@ -17,6 +17,7 @@ import (
 
 	"jul/internal/inspection"
 	"jul/internal/reqdeadline"
+	"jul/internal/websocketx"
 )
 
 // errPluginClosed fails a request that reaches a plugin whose generation has
@@ -144,7 +145,7 @@ func nextBodyCap(c, want, ceiling int) int {
 // lease, which keeps the prepared body charged until the lease closes.
 func (p *plugin) prepareRequestBody(w http.ResponseWriter, inv *invocation) ([]byte, error) {
 	r := inv.r
-	if r.Body == nil || r.Body == http.NoBody {
+	if websocketx.IsExtendedRequest(r) || r.Body == nil || r.Body == http.NoBody {
 		return nil, nil
 	}
 	if pb, ok := r.Body.(*preparedBody); ok && pb.unread() {

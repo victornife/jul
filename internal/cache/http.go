@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+
+	"jul/internal/websocketx"
 )
 
 // Reasons a response was streamed without being captured for storage, reported
@@ -420,6 +422,9 @@ func isEventStream(h http.Header) bool {
 // Both halves are required: an Upgrade header is only meaningful when the same
 // hop also lists "upgrade" in Connection.
 func isUpgradeRequest(r *http.Request) bool {
+	if websocketx.IsExtendedRequest(r) {
+		return true
+	}
 	upgrade := false
 	for _, v := range r.Header.Values("Upgrade") {
 		if strings.TrimSpace(v) != "" {

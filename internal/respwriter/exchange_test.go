@@ -648,6 +648,7 @@ func TestUpgradedSessionPreReadMidFrameAndSlowPeerFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Hijack: %v", err)
 	}
+
 	// Attach backend AFTER Hijack to exercise the post-hijack attachBackend branch.
 	backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, http.Header{"Upgrade": []string{"websocket"}})
 

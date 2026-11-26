@@ -48,6 +48,45 @@ func StartLoopV2() []byte {
 	)
 }
 
+// BodyReaderV2 reads the request body, continuing only if it is empty when
+// stopStatus is zero, or stopping with stopStatus otherwise.
+func BodyReaderV2(stopStatus uint32) []byte {
+	types := vec(
+		[]byte{0x60, 2, 0x7f, 0x7f, 1, 0x7f},
+		[]byte{0x60, 1, 0x7f, 0},
+		[]byte{0x60, 0, 0},
+		[]byte{0x60, 0, 1, 0x7f},
+	)
+	imports := vec(
+		cat(name("jul-abi/v2"), name("read_request_body"), []byte{0, 0}),
+		cat(name("jul-abi/v2"), name("set_response_status"), []byte{0, 1}),
+	)
+	instrs := []byte{0x41, 0, 0x41, 32, 0x10, 0}
+	if stopStatus == 0 {
+		instrs = append(instrs, 0x45)
+	} else {
+		status := uleb(stopStatus)
+		if status[len(status)-1]&0x40 != 0 {
+			status[len(status)-1] |= 0x80
+			status = append(status, 0)
+		}
+		instrs = cat(instrs, []byte{0x1a, 0x41}, status, []byte{0x10, 1, 0x41, 0})
+	}
+	return cat(
+		[]byte{0x00, 'a', 's', 'm', 0x01, 0x00, 0x00, 0x00},
+		section(1, types),
+		section(2, imports),
+		section(3, vec([]byte{2}, []byte{3})),
+		section(5, vec([]byte{0, 1})),
+		section(7, vec(
+			cat(name("jul-abi/v2"), []byte{0, 2}),
+			cat(name("handle_request"), []byte{0, 3}),
+			cat(name("memory"), []byte{2, 0}),
+		)),
+		section(10, vec(body(0x0b), body(append(instrs, 0x0b)...))),
+	)
+}
+
 func uleb(v uint32) []byte {
 	var out []byte
 	for {

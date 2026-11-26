@@ -142,16 +142,31 @@ staging. The admin listener's client-auth policy still requires a restart.
 
 ## Known limitations
 
-1. **No WebSocket upgrade over HTTP/3 — and none over HTTP/2 either.** Jul supports
-   the HTTP/1.1 `Upgrade` mechanism only. WebSocket over HTTP/2 and HTTP/3 uses
-   extended `CONNECT` ([RFC 8441][rfc8441] / RFC 9220), which Jul does not implement.
-   Go's bundled HTTP/2 server keeps extended `CONNECT` behind `GODEBUG=http2xconnect=1`
-   for a reason that applies directly here: advertising it makes browsers *stop*
-   sending HTTP/1.1 `Upgrade` and start sending extended `CONNECT`, which then fails
-   against a server whose WebSocket path does not implement it. A client that connects
-   over HTTP/3 and requests a WebSocket upgrade will receive a `400 Bad Request` or the
-   upgrade will fail. Browsers fall back to an HTTP/1.1 connection for the WebSocket,
-   so nothing is unreachable.
+1. **Native HTTP/2 and HTTP/3 WebSocket upstreams are not yet supported.**
+   HTTP/2 and HTTP/3 clients can use WebSocket Extended CONNECT
+   ([RFC 8441][rfc8441] / RFC 9220) through Jul to an HTTP/1.1 WebSocket
+   backend. Jul confirms the backend's `101 Switching Protocols` handshake
+   and prepares the frontend stream before returning the Extended CONNECT
+   success response. HTTP/3 uses its normal duplex request/response streams,
+   preserving handshake middleware rather than taking over the raw QUIC stream.
+   Native HTTP/2
+   upstream support is tracked by [#741](https://github.com/victornife/jul/issues/741);
+   native HTTP/3 upstream support is tracked by
+   [#742](https://github.com/victornife/jul/issues/742).
+
+   Go disables HTTP/2 Extended CONNECT advertisement by default. To enable it,
+   set `GODEBUG=http2xconnect=1` before starting Jul; this process-wide switch
+   affects HTTP/2 TLS and h2c data listeners. The admin listener uses HTTP/1.1
+   and is not an Extended CONNECT endpoint. Changing the switch requires a
+   restart. The Status → Protocols panel reports the switch and
+   the restart prerequisite. HTTP/3 Extended CONNECT advertisement is
+   independent of that switch and requires an `-tags http3` build with an
+   HTTP/3 listener configured. Jul does not guarantee that clients will fall
+   back to HTTP/1.1 when Extended CONNECT is unavailable.
+
+   The pinned Go runtime enables the switch if the startup `GODEBUG` string
+   contains `http2xconnect=1`, even when a later duplicate says
+   `http2xconnect=0`. Avoid duplicate settings.
 
 [rfc8441]: https://www.rfc-editor.org/rfc/rfc8441.html
 

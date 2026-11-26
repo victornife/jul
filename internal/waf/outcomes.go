@@ -27,6 +27,7 @@ import (
 	"jul/internal/inspection"
 	"jul/internal/middleware"
 	"jul/internal/reqdeadline"
+	"jul/internal/websocketx"
 )
 
 type detectionOnlyInterrupter interface {
@@ -499,7 +500,7 @@ func (f *Firewall) serveHTTP(w http.ResponseWriter, r *http.Request, next http.H
 	phase2 := false
 	// A phase-1 ctl:ruleEngine=Off makes Coraza ignore body writes, so the
 	// body is forwarded untouched, as ReadRequestBodyFrom did.
-	if tx.IsRequestBodyAccessible() && !tx.IsRuleEngineOff() && r.Body != nil && r.Body != http.NoBody {
+	if !websocketx.IsExtendedRequest(r) && tx.IsRequestBodyAccessible() && !tx.IsRuleEngineOff() && r.Body != nil && r.Body != http.NoBody {
 		origBody := r.Body
 		res, ran := f.readRequestBody(w, r, tx, a)
 		phase2 = ran
@@ -716,7 +717,10 @@ type wafWrappedResponseWriter interface {
 	http.ResponseWriter
 	io.ReaderFrom
 	http.Flusher
+	FlushError() error
+	EnableFullDuplex() error
 	SetReadDeadline(time.Time) error
+	SetWriteDeadline(time.Time) error
 }
 
 var _ wafWrappedResponseWriter = (*wafResponseInterceptor)(nil)
@@ -854,7 +858,8 @@ func (i *wafResponseInterceptor) WriteHeader(statusCode int) {
 	if statusCode == http.StatusSwitchingProtocols {
 		i.flushWriteHeader()
 	}
-	if !i.tx.IsResponseBodyAccessible() || !i.tx.IsResponseBodyProcessable() {
+	if (websocketx.IsExtendedRequest(i.req) && statusCode == http.StatusOK) ||
+		!i.tx.IsResponseBodyAccessible() || !i.tx.IsResponseBodyProcessable() {
 		i.allowFlushing = true
 	}
 }
@@ -1051,29 +1056,42 @@ func (i *wafResponseInterceptor) SupportsReadDeadline() bool {
 	return reqdeadline.WriterSupports(i.w)
 }
 
+func (i *wafResponseInterceptor) EnableFullDuplex() error {
+	return http.NewResponseController(i.w).EnableFullDuplex()
+}
+
+func (i *wafResponseInterceptor) SetWriteDeadline(t time.Time) error {
+	return http.NewResponseController(i.w).SetWriteDeadline(t)
+}
+
 func (i *wafResponseInterceptor) Flush() {
+	_ = i.FlushError()
+}
+
+func (i *wafResponseInterceptor) FlushError() error {
 	if i.isHijacked {
-		return
+		return nil
 	}
 	if i.committed {
-		if fl, ok := i.w.(http.Flusher); ok {
-			fl.Flush()
-		}
-		return
+		return http.NewResponseController(i.w).Flush()
 	}
-	if i.responseFailed {
-		return
+	if i.responseFailed || i.responseInterrupted {
+		return io.ErrClosedPipe
 	}
 	if !i.wroteHeader {
 		i.WriteHeader(http.StatusOK)
 	}
+	if i.responseFailed || i.responseInterrupted {
+		return io.ErrClosedPipe
+	}
 	if i.allowFlushing {
 		i.flushWriteHeader()
-		if fl, ok := i.w.(http.Flusher); ok {
-			fl.Flush()
+		if err := http.NewResponseController(i.w).Flush(); err != nil {
+			return err
 		}
 		i.commitAfterInspection()
 	}
+	return nil
 }
 
 func (i *wafResponseInterceptor) finishResponse() error {

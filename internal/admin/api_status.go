@@ -121,6 +121,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		dnsACMEServers       int
 		http3Servers         int
 		h2cServers           int
+		h2Servers            int
 		trustedListeners     int
 		trustedRanges        int
 		sendTimeoutServers   int
@@ -152,6 +153,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 		if srv.TLS != nil && srv.TLS.Enabled {
 			tlsServers++
+			h2Servers++
 			if srv.TLS.ClientAuth.Active() {
 				mtlsServers++
 			}
@@ -167,6 +169,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 		if srv.H2C {
 			h2cServers++
+			if srv.TLS == nil || !srv.TLS.Enabled {
+				h2Servers++
+			}
 		}
 		if srv.ClientAddress != nil && len(srv.ClientAddress.TrustedProxies) > 0 {
 			// Counted per listen address, not per block: the policy is
@@ -445,6 +450,8 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 
 		{Group: "Protocols", Name: "HTTP/3 (QUIC)", Active: http3Servers > 0, Detail: countDetailIf(http3Servers, "server block")},
 		{Group: "Protocols", Name: "Cleartext HTTP/2 (h2c)", Active: h2cServers > 0, Detail: countDetailIf(h2cServers, "server block")},
+		{Group: "Protocols", Name: "WebSocket Extended CONNECT (HTTP/2)", Active: s.deps.HTTP2ExtendedConnectEnabled && h2Servers > 0, Detail: websocketH2Detail(s.deps.HTTP2ExtendedConnectEnabled, h2Servers)},
+		{Group: "Protocols", Name: "WebSocket Extended CONNECT (HTTP/3)", Active: s.deps.HTTP3Compiled && http3Servers > 0, Detail: websocketH3Detail(s.deps.HTTP3Compiled, http3Servers)},
 		{Group: "Protocols", Name: "gRPC transcoding", Active: grpcTranscode > 0, Detail: countDetailIf(grpcTranscode, "location")},
 		{Group: "Protocols", Name: "gRPC passthrough", Active: grpcProxy > 0, Detail: countDetailIf(grpcProxy, "location")},
 		{Group: "Protocols", Name: "L4 stream proxy", Active: len(c.Streams) > 0, Detail: countDetailIf(len(c.Streams), "listener")},
@@ -472,6 +479,26 @@ func countDetailIf(n int, unit string) string {
 		return ""
 	}
 	return countUnit(n, unit)
+}
+
+func websocketH2Detail(enabled bool, listeners int) string {
+	if !enabled {
+		return "inactive; set GODEBUG=http2xconnect=1 before startup and restart; data listeners only"
+	}
+	if listeners == 0 {
+		return "startup switch enabled; no HTTP/2-capable data listener is configured"
+	}
+	return countUnit(listeners, "HTTP/2 data listener") + "; process-wide startup switch; restart required to change"
+}
+
+func websocketH3Detail(compiled bool, listeners int) string {
+	if !compiled {
+		return "unavailable in this build; build with -tags http3"
+	}
+	if listeners == 0 {
+		return "available in this build; no HTTP/3 listener is configured"
+	}
+	return countUnit(listeners, "HTTP/3 listener") + "; Extended CONNECT is advertised by the HTTP/3 server"
 }
 
 // metricsDetail describes the Prometheus surface when it is wired.

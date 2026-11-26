@@ -9,11 +9,13 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"jul/internal/config"
 	"jul/internal/middleware"
 	"jul/internal/respwriter"
+	"jul/internal/websocketx"
 )
 
 // Builder constructs the http.Handler for a location's action. The router seeds
@@ -233,6 +235,16 @@ func buildServerRoute(serverIndex int, srv config.ServerConfig, reg map[string]B
 		if err != nil {
 			return nil, err
 		}
+		if action != ActionProxy {
+			next := h
+			h = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if websocketx.IsExtendedRequest(r) {
+					http.Error(w, "WebSocket Extended CONNECT requires a proxy route", http.StatusNotImplemented)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		}
 
 		// Per-location body limit (location override wins over server default).
 		limit := bodyLimit
@@ -323,6 +335,22 @@ func compileRewrites(rules []config.RewriteConfig) ([]compiledRewrite, error) {
 func (r *Router) For(addr string) http.Handler {
 	ar := r.byAddr[addr]
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == http.MethodConnect {
+			protocol, extended := websocketx.ExtendedProtocol(req)
+			if !extended {
+				http.Error(w, "CONNECT is not supported", http.StatusBadRequest)
+				return
+			}
+			if !strings.EqualFold(protocol, "websocket") {
+				http.Error(w, "extended CONNECT protocol is not supported", http.StatusNotImplemented)
+				return
+			}
+			if !websocketx.ValidExtendedRequest(req) {
+				http.Error(w, "invalid WebSocket Extended CONNECT handshake", http.StatusBadRequest)
+				return
+			}
+			req = websocketx.AsApplicationRequest(req)
+		}
 		if ar == nil {
 			http.NotFound(w, req)
 			return
