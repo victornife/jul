@@ -8,15 +8,11 @@ import (
 	"strings"
 )
 
-// HTTP2ExtendedConnectEnabled reports the process-startup GODEBUG setting that
-// controls whether Go advertises HTTP/2 Extended CONNECT.
+// Go's HTTP/2 server tests the raw startup GODEBUG string for this substring.
+var http2ExtendedConnectEnabled = strings.Contains(os.Getenv("GODEBUG"), "http2xconnect=1")
+
+// HTTP2ExtendedConnectEnabled reports the startup setting used by Go when it
+// decides whether to advertise HTTP/2 Extended CONNECT.
 func HTTP2ExtendedConnectEnabled() bool {
-	enabled := false
-	for _, setting := range strings.Split(os.Getenv("GODEBUG"), ",") {
-		key, value, ok := strings.Cut(strings.TrimSpace(setting), "=")
-		if ok && key == "http2xconnect" {
-			enabled = value == "1"
-		}
-	}
-	return enabled
+	return http2ExtendedConnectEnabled
 }

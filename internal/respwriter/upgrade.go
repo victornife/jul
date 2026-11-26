@@ -833,6 +833,14 @@ func (b *upgradedBackConn) Write(p []byte) (int, error) {
 	}
 	if b.isWebSocket {
 		b.c2sTracker.expectMasked = true
+		if b.closeSent.Load() {
+			// Observe the client's reply without forwarding after our Close.
+			b.c2sTracker.feed(p)
+			if b.c2sTracker.sawCloseFrame {
+				b.peerClose.Store(true)
+			}
+			return len(p), nil
+		}
 		if b.closePending && !b.c2sTracker.atFrameBoundary() {
 			n := b.c2sTracker.bytesToNextBoundary(p)
 			if n == 0 {
@@ -869,20 +877,31 @@ func (b *upgradedBackConn) Write(p []byte) (int, error) {
 				// Some tunnel streams block even on a zero-length write.
 				return n, nil
 			}
-			rest, restErr := b.ReadWriteCloser.Write(p[n:])
-			if rest > 0 {
-				previousClose = b.c2sTracker.sawCloseFrame
-				b.c2sTracker.feed(p[n : n+rest])
-				if !previousClose && b.c2sTracker.sawCloseFrame {
+			if !b.closeSent.Load() {
+				written, err := b.ReadWriteCloser.Write(p[n:])
+				if written > 0 {
+					b.c2sTracker.feed(p[n : n+written])
+				}
+				if b.c2sTracker.sawCloseFrame {
 					b.peerClose.Store(true)
 				}
+				return n + written, err
 			}
-			return n + rest, restErr
+			b.c2sTracker.feed(p[n:])
+			if b.c2sTracker.sawCloseFrame {
+				b.peerClose.Store(true)
+			}
+			return len(p), nil
 		}
 		if b.closePending && b.c2sTracker.atFrameBoundary() {
 			if err := b.writeMaskedCloseLocked(); err != nil {
 				return 0, err
 			}
+			b.c2sTracker.feed(p)
+			if b.c2sTracker.sawCloseFrame {
+				b.peerClose.Store(true)
+			}
+			return len(p), nil
 		}
 		previousClose := b.c2sTracker.sawCloseFrame
 		written, err := b.ReadWriteCloser.Write(p)

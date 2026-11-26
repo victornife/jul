@@ -52,7 +52,13 @@ func (t *extendedTunnel) writeFront(p []byte) (int, error) {
 	t.retireMu.Lock()
 	closing := t.closing
 	t.retireMu.Unlock()
-	if closing && !t.frontCloseSent {
+	if t.frontCloseSent {
+		// Keep parsing the backend's reply without forwarding after our Close.
+		t.frontFrames.feed(p)
+		t.notify()
+		return len(p), nil
+	}
+	if closing {
 		if !t.frontFrames.atFrameBoundary() {
 			n := t.frontFrames.bytesToNextBoundary(p)
 			if n == 0 {
@@ -82,16 +88,24 @@ func (t *extendedTunnel) writeFront(p []byte) (int, error) {
 				t.notify()
 				return n, nil
 			}
-			rest, restErr := t.front.Write(p[n:])
-			if rest > 0 {
-				t.frontFrames.feed(p[n : n+rest])
+			if !t.frontCloseSent {
+				written, err := t.front.Write(p[n:])
+				if written > 0 {
+					t.frontFrames.feed(p[n : n+written])
+				}
+				t.notify()
+				return n + written, err
 			}
+			t.frontFrames.feed(p[n:])
 			t.notify()
-			return n + rest, restErr
+			return len(p), nil
 		}
 		if err := t.sendFrontCloseLocked(); err != nil {
 			return 0, err
 		}
+		t.frontFrames.feed(p)
+		t.notify()
+		return len(p), nil
 	}
 	n, err := t.front.Write(p)
 	if n > 0 {

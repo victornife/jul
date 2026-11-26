@@ -777,8 +777,11 @@ entry narrowing/withdrawal, `1001` on listener removal/shutdown) within the
 peer-initiated Close handshakes are forwarded transparently in both directions.
 HTTP/2 and HTTP/3 Extended CONNECT tunnels use the same bounded retirement
 policy: the cutoff is armed independently of blocked tunnel writes, Close
-frames are attempted independently on both hops, and forced retirement ends
-only the affected frontend stream, not healthy siblings on its connection.
+frames are attempted independently on both hops after the current frame
+finishes, and no further frames are forwarded on a leg after Jul sends its
+Close. Peer Close frames are still observed during the graceful window.
+Forced retirement ends only the affected frontend stream, not healthy siblings
+on its connection.
 On established TLS connections (HTTP/1.1, HTTP/2, HTTP/3), every new request
 re-evaluates `r.TLS` against the listener's current `client_auth` policy
 (`mode`, CA pool, CRLs, `verify_san`) and the location's `require_client_cert`

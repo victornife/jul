@@ -586,9 +586,9 @@ async function setupApiMocks(page: Page): Promise<void> {
 
 test.describe("WebSocket Extended CONNECT status", () => {
   const scenarios = [
-    { protocol: 2, active: false, detail: "inactive; set GODEBUG=http2xconnect=1 before startup and restart (process-wide, including the admin HTTP/2 listener)" },
+    { protocol: 2, active: false, detail: "inactive; set GODEBUG=http2xconnect=1 before startup and restart; data listeners only" },
     { protocol: 2, active: false, detail: "startup switch enabled; no HTTP/2-capable data listener is configured" },
-    { protocol: 2, active: true, detail: "1 HTTP/2 data listener; process-wide startup switch, including the admin listener; restart required to change" },
+    { protocol: 2, active: true, detail: "1 HTTP/2 data listener; process-wide startup switch; restart required to change" },
     { protocol: 3, active: false, detail: "unavailable in this build; build with -tags http3" },
     { protocol: 3, active: false, detail: "available in this build; no HTTP/3 listener is configured" },
     { protocol: 3, active: true, detail: "1 HTTP/3 listener; Extended CONNECT is advertised by the HTTP/3 server" },

@@ -483,12 +483,12 @@ func countDetailIf(n int, unit string) string {
 
 func websocketH2Detail(enabled bool, listeners int) string {
 	if !enabled {
-		return "inactive; set GODEBUG=http2xconnect=1 before startup and restart (process-wide, including the admin HTTP/2 listener)"
+		return "inactive; set GODEBUG=http2xconnect=1 before startup and restart; data listeners only"
 	}
 	if listeners == 0 {
 		return "startup switch enabled; no HTTP/2-capable data listener is configured"
 	}
-	return countUnit(listeners, "HTTP/2 data listener") + "; process-wide startup switch, including the admin listener; restart required to change"
+	return countUnit(listeners, "HTTP/2 data listener") + "; process-wide startup switch; restart required to change"
 }
 
 func websocketH3Detail(compiled bool, listeners int) string {

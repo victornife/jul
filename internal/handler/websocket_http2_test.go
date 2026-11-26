@@ -33,15 +33,19 @@ import (
 )
 
 func TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
-	testHTTP2ExtendedConnect(t, false, false)
+	testHTTP2ExtendedConnect(t, false, false, false)
 }
 
 func TestHTTP2ExtendedConnectWithdrawalKeepsSibling(t *testing.T) {
-	testHTTP2ExtendedConnect(t, true, false)
+	testHTTP2ExtendedConnect(t, true, false, false)
 }
 
 func TestHTTP2ExtendedConnectBlockedWithdrawalKeepsSibling(t *testing.T) {
-	testHTTP2ExtendedConnect(t, true, true)
+	testHTTP2ExtendedConnect(t, true, true, false)
+}
+
+func TestHTTP2ExtendedConnectWithdrawalStopsDataAfterClose(t *testing.T) {
+	testHTTP2ExtendedConnect(t, true, false, true)
 }
 
 type websocketBlockedWriter struct {
@@ -66,7 +70,7 @@ func (w *websocketBlockedWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
+func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked, afterClose bool) {
 	t.Helper()
 	if !runtimeHTTP2ExtendedConnectEnabled() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -84,8 +88,17 @@ func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
 		return
 	}
 	backendClosed := make(chan struct{})
+	var retirement *websocketRetirementBackend
+	if afterClose {
+		retirement = newWebsocketRetirementBackend()
+	}
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveWebSocketEcho(w, r, func() { close(backendClosed) })
+		if retirement != nil {
+			retirement.serve(w, r)
+			close(backendClosed)
+		} else {
+			serveWebSocketEcho(w, r, func() { close(backendClosed) })
+		}
 	}))
 	defer backend.Close()
 
@@ -243,7 +256,13 @@ func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
 
 	mask := [4]byte{1, 2, 3, 4}
 	payload := bytes.Repeat([]byte("j"), 32<<10)
+	if afterClose {
+		payload = []byte("j")
+	}
 	clientFrame := []byte{0x82, 0xFE, byte(len(payload) >> 8), byte(len(payload)), mask[0], mask[1], mask[2], mask[3]}
+	if afterClose {
+		clientFrame = []byte{0x82, 0x81, mask[0], mask[1], mask[2], mask[3]}
+	}
 	for i, value := range payload {
 		clientFrame = append(clientFrame, value^mask[i&3])
 	}
@@ -259,6 +278,9 @@ func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
 	}
 	echo := make([]byte, 0, len(payload)+4)
 	wantEcho := len(payload) + 4
+	if afterClose {
+		wantEcho = len(payload) + 2
+	}
 	if blocked {
 		wantEcho = 65535 // Exhaust this stream's initial HTTP/2 flow-control window.
 	}
@@ -273,10 +295,13 @@ func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
 		}
 		echo = append(echo, data.Data()...)
 	}
-	if len(echo) != wantEcho || echo[0] != 0x82 || echo[1] != 126 ||
+	if !afterClose && (len(echo) != wantEcho || echo[0] != 0x82 || echo[1] != 126 ||
 		binary.BigEndian.Uint16(echo[2:4]) != uint16(len(payload)) ||
-		!bytes.Equal(echo[4:len(payload)+4], payload) {
+		!bytes.Equal(echo[4:len(payload)+4], payload)) {
 		t.Fatalf("backend echo frame header=%x payload length=%d", echo[:min(len(echo), 4)], len(echo)-4)
+	}
+	if afterClose && !bytes.Equal(echo, []byte{0x82, 1, 'j'}) {
+		t.Fatalf("unexpected pre-retirement echo: %x", echo)
 	}
 	if withdraw {
 		if blocked {
@@ -332,8 +357,14 @@ func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
 				t.Fatal("H2 retirement reset the stream before sending Close")
 			}
 		}
-		if !blocked && (closeFrame[0] != 0x88 || closeFrame[1] != 2 || binary.BigEndian.Uint16(closeFrame[2:4]) != 1008) {
+		if !blocked && (len(closeFrame) != 4 || closeFrame[0] != 0x88 || closeFrame[1] != 2 || binary.BigEndian.Uint16(closeFrame[2:4]) != 1008) {
 			t.Fatalf("retirement Close=%x, want code 1008", closeFrame)
+		}
+		if afterClose {
+			retirement.afterClose(t)
+			if err := framer.WriteData(1, false, maskedRetirementTestFrames()); err != nil {
+				t.Fatal(err)
+			}
 		}
 		results := wait()
 		if elapsed := time.Since(start); elapsed > registry.Bound+200*time.Millisecond {
@@ -342,7 +373,11 @@ func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
 		var retired bool
 		for _, result := range results {
 			if result.RouteID == "extended-ws" {
-				retired = result.ForcedCount == 1 && result.CompletedWithinBound && result.CollateralCount == 0
+				wantForced := 1
+				if afterClose {
+					wantForced = 0
+				}
+				retired = result.ForcedCount == wantForced && result.CompletedWithinBound && result.CollateralCount == 0
 			}
 		}
 		if !retired {
@@ -361,6 +396,12 @@ func testHTTP2ExtendedConnect(t *testing.T, withdraw, blocked bool) {
 			if data, ok := frame.(*http2.DataFrame); ok && data.StreamID == 3 {
 				body = append(body, data.Data()...)
 			}
+			if data, ok := frame.(*http2.DataFrame); afterClose && ok && data.StreamID == 1 && len(data.Data()) > 0 {
+				t.Fatalf("H2 forwarded data after Close: %x", data.Data())
+			}
+		}
+		if afterClose {
+			retirement.verify(t)
 		}
 	} else if err := framer.WriteRSTStream(1, http2.ErrCodeCancel); err != nil {
 		t.Fatalf("cancel Extended CONNECT stream: %v", err)

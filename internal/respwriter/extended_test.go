@@ -183,9 +183,15 @@ func TestExtendedTunnelRetirementWaitsForFrontendFrameBoundary(t *testing.T) {
 	}
 	writeAndReadTunnel(t, front, client, []byte{'b'}, []byte{'b'})
 	remainder := []byte{'c', 'd', 0x81, 1, 'z'}
+	remainder = append(remainder, buildUnmaskedCloseFrame(WSCloseGoingAway)...)
 	want := append([]byte{'c', 'd'}, buildUnmaskedCloseFrame(WSClosePolicyViolation)...)
-	want = append(want, 0x81, 1, 'z')
 	writeAndReadTunnel(t, front, client, remainder, want)
+	if _, err := front.Write([]byte{0x82, 1, 'x'}); err != nil {
+		t.Fatal(err)
+	}
+	if !front.(*extendedTunnelFrontend).tunnel.frontCloseSeen.Load() {
+		t.Fatal("backend's discarded Close was not recorded")
+	}
 }
 
 func TestUpgradedBackendRetirementWaitsForClientFrameBoundary(t *testing.T) {
@@ -211,11 +217,11 @@ func TestUpgradedBackendRetirementWaitsForClientFrameBoundary(t *testing.T) {
 		}
 		done <- err
 	}()
-	got := make([]byte, len(remaining)+8)
+	got := make([]byte, 10)
 	if _, err := io.ReadFull(upstream, got); err != nil {
 		t.Fatalf("read backend frame and Close: %v", err)
 	}
-	if !bytes.Equal(got[:2], frame[8:]) || !bytes.Equal(got[10:], clientClose) {
+	if !bytes.Equal(got[:2], frame[8:]) {
 		t.Fatalf("backend frame ordering = %x", got)
 	}
 	if code := readMaskedCloseCode(t, got[2:10]); code != WSClosePolicyViolation {
@@ -230,7 +236,10 @@ func TestUpgradedBackendRetirementWaitsForClientFrameBoundary(t *testing.T) {
 		t.Fatal("backend write did not finish")
 	}
 	if !back.peerCloseSeen() {
-		t.Fatal("client's relayed Close frame was not recorded")
+		t.Fatal("client's discarded Close frame was not recorded")
+	}
+	if _, err := back.Write(frame); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -426,19 +435,8 @@ func TestExtendedTunnelRetirementCompletesWebSocketCloseHandshake(t *testing.T) 
 	if _, err := clientPeer.Write(buildMaskedCloseFrame(WSCloseGoingAway)); err != nil {
 		t.Fatalf("send client Close frame: %v", err)
 	}
-	clientReplyAtBackend := make([]byte, 8)
-	if _, err := io.ReadFull(upstreamPeer, clientReplyAtBackend); err != nil {
-		t.Fatalf("read relayed client Close frame: %v", err)
-	}
 	if _, err := upstreamPeer.Write(buildUnmaskedCloseFrame(WSCloseGoingAway)); err != nil {
 		t.Fatalf("send backend Close frame: %v", err)
-	}
-	backendReplyAtClient := make([]byte, 4)
-	if _, err := io.ReadFull(clientPeer, backendReplyAtClient); err != nil {
-		t.Fatalf("read relayed backend Close frame: %v", err)
-	}
-	if backendReplyAtClient[0] != 0x88 || backendReplyAtClient[1] != 2 {
-		t.Fatalf("client received invalid backend Close frame: %x", backendReplyAtClient)
 	}
 
 	for range 2 {

@@ -156,12 +156,17 @@ staging. The admin listener's client-auth policy still requires a restart.
 
    Go disables HTTP/2 Extended CONNECT advertisement by default. To enable it,
    set `GODEBUG=http2xconnect=1` before starting Jul; this process-wide switch
-   affects TLS and h2c data listeners and the admin HTTP/2 listener. Changing
-   it requires a restart. The Status → Protocols panel reports the switch and
+   affects HTTP/2 TLS and h2c data listeners. The admin listener uses HTTP/1.1
+   and is not an Extended CONNECT endpoint. Changing the switch requires a
+   restart. The Status → Protocols panel reports the switch and
    the restart prerequisite. HTTP/3 Extended CONNECT advertisement is
    independent of that switch and requires an `-tags http3` build with an
    HTTP/3 listener configured. Jul does not guarantee that clients will fall
    back to HTTP/1.1 when Extended CONNECT is unavailable.
+
+   The pinned Go runtime enables the switch if the startup `GODEBUG` string
+   contains `http2xconnect=1`, even when a later duplicate says
+   `http2xconnect=0`. Avoid duplicate settings.
 
 [rfc8441]: https://www.rfc-editor.org/rfc/rfc8441.html
 
