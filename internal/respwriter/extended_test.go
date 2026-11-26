@@ -73,6 +73,82 @@ func readMaskedCloseCode(t *testing.T, frame []byte) uint16 {
 	return binary.BigEndian.Uint16([]byte{frame[6] ^ frame[2], frame[7] ^ frame[3]})
 }
 
+func TestExtendedTunnelBlockedWriteDoesNotBlockWithdrawal(t *testing.T) {
+	reg := NewExchangeRegistry()
+	reg.Grace = 80 * time.Millisecond
+	reg.Bound = 180 * time.Millisecond
+	reg.SetInitialGeneration(1)
+	client, proxyFront := net.Pipe()
+	defer client.Close()
+	defer proxyFront.Close()
+	upstream, proxyBack := net.Pipe()
+	defer upstream.Close()
+	defer proxyBack.Close()
+	req := httptest.NewRequest(http.MethodConnect, "http://example.test/ws", nil)
+	req.ProtoMajor = 2
+	_, admitted, _, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1, RouteID: "blocked"})
+	defer release()
+	back := AttachUpgradedBackend(admitted.Context(), proxyBack, http.Header{"Upgrade": {"websocket"}})
+	// Hide deadlines so only the independently armed cutoff can unblock Write.
+	front := AttachExtendedStream(admitted.Context(), struct{ io.ReadWriteCloser }{proxyFront}, back)
+	defer front.Close()
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := front.Write([]byte{0x82, 1, 'x'})
+		release()
+		writeDone <- err
+	}()
+	// The pipe read accepts only the header, leaving the payload write blocked.
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(client, header); err != nil {
+		t.Fatal(err)
+	}
+	siblingRecorder := httptest.NewRecorder()
+	siblingReq := httptest.NewRequest(http.MethodGet, "http://example.test/healthy", nil)
+	siblingReq.ProtoMajor = 2
+	siblingWriter, sibling, siblingEx, siblingRelease := reg.Admit(siblingRecorder, siblingReq, EntryCoord{GenID: 1, RouteID: "healthy", LocationIndex: 1})
+	defer siblingRelease()
+
+	start := time.Now()
+	published := make(chan func() []EntryRetirementResult, 1)
+	go func() {
+		published <- reg.PublishGeneration(1, 2, []EntryTransition{
+			{FromRouteID: "blocked", ToRouteID: "blocked", Retire: true, Mandatory: true},
+			{FromRouteID: "healthy", FromLocationIndex: 1, ToRouteID: "healthy", ToLocationIndex: 1, KeepOpen: true},
+		})
+	}()
+	var wait func() []EntryRetirementResult
+	select {
+	case wait = <-published:
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("withdrawal waited for the blocked tunnel write")
+	}
+	finished := make(chan []EntryRetirementResult, 1)
+	go func() { finished <- wait() }()
+	select {
+	case <-finished:
+	case <-time.After(reg.Bound + 200*time.Millisecond):
+		t.Fatal("blocked tunnel exceeded the withdrawal bound")
+	}
+	if elapsed := time.Since(start); elapsed > reg.Bound+200*time.Millisecond {
+		t.Fatalf("withdrawal elapsed=%s, bound=%s", elapsed, reg.Bound)
+	}
+	select {
+	case err := <-writeDone:
+		if err == nil {
+			t.Fatal("blocked write unexpectedly succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("forced cutoff did not unblock the writer")
+	}
+	if sibling.Context().Err() != nil || siblingEx.ShouldAbortStream() {
+		t.Fatal("withdrawing the blocked tunnel aborted its healthy sibling")
+	}
+	if _, err := siblingWriter.Write([]byte("healthy")); err != nil || siblingRecorder.Body.String() != "healthy" {
+		t.Fatalf("healthy sibling write failed: %v", err)
+	}
+}
+
 func TestExtendedTunnelRetirementWaitsForFrontendFrameBoundary(t *testing.T) {
 	reg := NewExchangeRegistry()
 	reg.SetInitialGeneration(1)

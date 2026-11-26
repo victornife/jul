@@ -146,7 +146,10 @@ staging. The admin listener's client-auth policy still requires a restart.
    HTTP/2 and HTTP/3 clients can use WebSocket Extended CONNECT
    ([RFC 8441][rfc8441] / RFC 9220) through Jul to an HTTP/1.1 WebSocket
    backend. Jul confirms the backend's `101 Switching Protocols` handshake
-   before returning the Extended CONNECT success response. Native HTTP/2
+   and prepares the frontend stream before returning the Extended CONNECT
+   success response. HTTP/3 uses its normal duplex request/response streams,
+   preserving handshake middleware rather than taking over the raw QUIC stream.
+   Native HTTP/2
    upstream support is tracked by [#741](https://github.com/victornife/jul/issues/741);
    native HTTP/3 upstream support is tracked by
    [#742](https://github.com/victornife/jul/issues/742).

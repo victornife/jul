@@ -898,6 +898,9 @@ func (b *upgradedBackConn) Write(p []byte) (int, error) {
 }
 
 func (b *upgradedBackConn) sendMaskedClose(code uint16, grace time.Time) {
+	if c, ok := b.ReadWriteCloser.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = c.SetWriteDeadline(grace)
+	}
 	b.writeMu.Lock()
 	defer b.writeMu.Unlock()
 	if !b.isWebSocket || b.closeSent.Load() {
@@ -905,9 +908,6 @@ func (b *upgradedBackConn) sendMaskedClose(code uint16, grace time.Time) {
 	}
 	b.closeCode = code
 	b.closePending = true
-	if c, ok := b.ReadWriteCloser.(interface{ SetWriteDeadline(time.Time) error }); ok {
-		_ = c.SetWriteDeadline(grace)
-	}
 	if b.c2sTracker.atFrameBoundary() {
 		_ = b.writeMaskedCloseLocked()
 	}

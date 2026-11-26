@@ -113,17 +113,18 @@ func TestCompressBypassesExtendedWebSocketFrames(t *testing.T) {
 	wire.Header[":protocol"] = []string{"websocket"}
 	wire.Header.Set("Sec-WebSocket-Version", "13")
 	wire.Header.Set("Accept-Encoding", "gzip")
-	req := websocketx.AsApplicationRequest(wire)
 	frame := []byte{0x81, 0x03, 'j', 'u', 'l'}
-	recorder := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(frame)
-	}, req)
-	if !bytes.Equal(recorder.Body.Bytes(), frame) {
-		t.Fatalf("frame bytes changed: got %x want %x", recorder.Body.Bytes(), frame)
-	}
-	if recorder.Header().Get("Content-Encoding") != "" || recorder.Header().Get("Content-Type") != "" {
-		t.Fatalf("compression headers were added to tunnel: %v", recorder.Header())
+	for _, req := range []*http.Request{wire, websocketx.AsApplicationRequest(wire)} {
+		recorder := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(frame)
+		}, req)
+		if !bytes.Equal(recorder.Body.Bytes(), frame) {
+			t.Fatalf("frame bytes changed: got %x want %x", recorder.Body.Bytes(), frame)
+		}
+		if recorder.Header().Get("Content-Encoding") != "" || recorder.Header().Get("Content-Type") != "" {
+			t.Fatalf("compression headers were added to tunnel: %v", recorder.Header())
+		}
 	}
 }
 

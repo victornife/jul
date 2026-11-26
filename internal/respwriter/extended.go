@@ -6,6 +6,7 @@ package respwriter
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,7 +16,9 @@ type extendedTunnel struct {
 	back  io.ReadWriteCloser
 
 	mu             sync.Mutex
+	retireMu       sync.Mutex
 	frontFrames    wsFrameTracker
+	frontCloseSeen atomic.Bool
 	closing        bool
 	frontCloseSent bool
 	closeCode      uint16
@@ -42,8 +45,14 @@ func (w *extendedTunnelFrontend) Close() error {
 
 func (t *extendedTunnel) writeFront(p []byte) (int, error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.closing && !t.frontCloseSent {
+	defer func() {
+		t.frontCloseSeen.Store(t.frontFrames.sawCloseFrame)
+		t.mu.Unlock()
+	}()
+	t.retireMu.Lock()
+	closing := t.closing
+	t.retireMu.Unlock()
+	if closing && !t.frontCloseSent {
 		if !t.frontFrames.atFrameBoundary() {
 			n := t.frontFrames.bytesToNextBoundary(p)
 			if n == 0 {
@@ -96,7 +105,10 @@ func (t *extendedTunnel) sendFrontCloseLocked() error {
 	if t.frontCloseSent || !t.frontFrames.atFrameBoundary() {
 		return nil
 	}
-	frame := buildUnmaskedCloseFrame(t.closeCode)
+	t.retireMu.Lock()
+	code := t.closeCode
+	t.retireMu.Unlock()
+	frame := buildUnmaskedCloseFrame(code)
 	n, err := t.front.Write(frame)
 	if err == nil && n == len(frame) {
 		t.frontCloseSent = true
@@ -110,7 +122,7 @@ func (t *extendedTunnel) sendFrontCloseLocked() error {
 }
 
 func (t *extendedTunnel) initiateClose(grace, _ time.Time, code uint16) {
-	t.mu.Lock()
+	t.retireMu.Lock()
 	start := !t.closing
 	if start {
 		t.closing = true
@@ -118,17 +130,21 @@ func (t *extendedTunnel) initiateClose(grace, _ time.Time, code uint16) {
 		if t.closeCode == 0 {
 			t.closeCode = WSClosePolicyViolation
 		}
-		if setter, ok := t.front.(interface{ SetWriteDeadline(time.Time) error }); ok {
-			_ = setter.SetWriteDeadline(grace)
-		}
 	}
 	closeCode := t.closeCode
-	t.mu.Unlock()
+	t.retireMu.Unlock()
+	// Deadlines must not wait for a write holding the frame-tracking mutex.
+	if setter, ok := t.front.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = setter.SetWriteDeadline(grace)
+	}
 	if start {
 		go func() {
 			t.mu.Lock()
 			_ = t.sendFrontCloseLocked()
 			t.mu.Unlock()
+			t.notify()
+		}()
+		go func() {
 			if back, ok := t.back.(*upgradedBackConn); ok {
 				back.sendMaskedClose(closeCode, grace)
 			} else if t.back != nil {
@@ -182,11 +198,8 @@ func (t *extendedTunnel) drain(ex *ActiveExchange, grace, bound time.Time) {
 }
 
 func (t *extendedTunnel) cleanCloseReceived() bool {
-	t.mu.Lock()
-	frontClosed := t.frontFrames.sawCloseFrame
-	t.mu.Unlock()
 	back, ok := t.back.(*upgradedBackConn)
-	return frontClosed && ok && back.peerCloseSeen()
+	return t.frontCloseSeen.Load() && ok && back.peerCloseSeen()
 }
 
 func (t *extendedTunnel) notify() {

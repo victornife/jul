@@ -775,6 +775,10 @@ WebSocket upgrades initiate a bounded RFC 6455 Close handshake (`1008` on
 entry narrowing/withdrawal, `1001` on listener removal/shutdown) within the
 `1s` graceful window and force-close both legs by `2s` (#562, #642);
 peer-initiated Close handshakes are forwarded transparently in both directions.
+HTTP/2 and HTTP/3 Extended CONNECT tunnels use the same bounded retirement
+policy: the cutoff is armed independently of blocked tunnel writes, Close
+frames are attempted independently on both hops, and forced retirement ends
+only the affected frontend stream, not healthy siblings on its connection.
 On established TLS connections (HTTP/1.1, HTTP/2, HTTP/3), every new request
 re-evaluates `r.TLS` against the listener's current `client_auth` policy
 (`mode`, CA pool, CRLs, `verify_san`) and the location's `require_client_cert`

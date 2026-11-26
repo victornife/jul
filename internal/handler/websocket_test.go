@@ -169,7 +169,7 @@ func TestExtendedWebSocketFrontendSetupFailuresCloseBackend(t *testing.T) {
 	}{
 		{name: "duplex unavailable", protoMajor: 2, duplexErr: failure, wantStatus: http.StatusInternalServerError},
 		{name: "response flush fails", protoMajor: 2, flushErr: failure, wantStatus: http.StatusOK, wantLog: "response flush failed"},
-		{name: "HTTP/3 stream unavailable", protoMajor: 3, wantStatus: http.StatusOK, wantLog: "stream setup failed"},
+		{name: "HTTP/3 stream unavailable", protoMajor: 3, wantStatus: http.StatusBadGateway, wantLog: "stream setup failed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			backend := &websocketTestBackend{}
@@ -189,6 +189,7 @@ func TestExtendedWebSocketFrontendSetupFailuresCloseBackend(t *testing.T) {
 			request.ProtoMajor = tt.protoMajor
 			if tt.protoMajor == 3 {
 				request.Proto = "websocket"
+				request.Body = nil
 			}
 			writer := &websocketControlWriter{
 				ResponseRecorder: httptest.NewRecorder(), duplexErr: tt.duplexErr, flushErr: tt.flushErr,
@@ -259,6 +260,12 @@ func TestExtendedWebSocketFrontendWriteAndCloseErrors(t *testing.T) {
 	}
 	if closeCalls != 1 || w.readDeadline.IsZero() || w.writeDeadline.IsZero() {
 		t.Errorf("close calls=%d, read deadline=%v, write deadline=%v", closeCalls, w.readDeadline, w.writeDeadline)
+	}
+	if _, err := front.Write([]byte("late Close")); !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("post-close write error=%v, want closed pipe", err)
+	}
+	if err := front.SetWriteDeadline(deadline); !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("post-close deadline error=%v, want closed pipe", err)
 	}
 	writer := &websocketDeadlineWriter{}
 	front = &extendedWebSocketFrontend{writer: writer}

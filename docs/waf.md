@@ -307,6 +307,12 @@ over static directives, not per-transaction `ctl:ruleEngine` actions.
 
 ## Request and response bodies
 
+- **WebSocket Extended CONNECT** authorizes the HTTP/2 or HTTP/3 handshake
+  without reading its live request stream. Request phases still run, with an
+  empty representation body, and response-header policy can deny the handshake.
+  Once the successful handshake is authorized, WebSocket frames bypass HTTP
+  body inspection and buffering, even with request/response body access enabled.
+  Ordinary rejected HTTP responses retain their normal inspection behavior.
 - **Request bodies** are read and inspected up to `request_body_limit` (128 KiB
   by default) before the action. In block mode with the default Reject action,
   a body **reaching or exceeding** the threshold is **rejected with `413`**.

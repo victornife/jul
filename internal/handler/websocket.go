@@ -104,19 +104,20 @@ func (h *proxyHandler) serveExtendedWebSocket(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
+	front, err := extendedFrontendStream(w, r, controller)
+	if err != nil {
+		_ = backend.Close()
+		http.Error(w, "WebSocket frontend stream is unavailable", http.StatusBadGateway)
+		if h.logger != nil {
+			h.logger.Error("proxy WebSocket stream setup failed", "path", r.URL.Path, "error", err)
+		}
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	if err := controller.Flush(); err != nil {
 		_ = backend.Close()
 		if h.logger != nil {
 			h.logger.Error("proxy WebSocket response flush failed", "path", r.URL.Path, "error", err)
-		}
-		return
-	}
-	front, err := extendedFrontendStream(w, r, controller)
-	if err != nil {
-		_ = backend.Close()
-		if h.logger != nil {
-			h.logger.Error("proxy WebSocket stream setup failed", "path", r.URL.Path, "error", err)
 		}
 		return
 	}
@@ -289,6 +290,8 @@ type extendedWebSocketFrontend struct {
 	controller *http.ResponseController
 	closeFn    func() error
 	writeMu    sync.Mutex
+	deadlineMu sync.Mutex
+	closed     bool
 	closeOnce  sync.Once
 	closeErr   error
 }
@@ -300,6 +303,9 @@ func (s *extendedWebSocketFrontend) Read(p []byte) (int, error) {
 func (s *extendedWebSocketFrontend) Write(p []byte) (int, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+	if s.closed {
+		return 0, io.ErrClosedPipe
+	}
 	n, err := s.writer.Write(p)
 	if err == nil && n != len(p) {
 		err = io.ErrShortWrite
@@ -315,17 +321,29 @@ func (s *extendedWebSocketFrontend) Write(p []byte) (int, error) {
 
 func (s *extendedWebSocketFrontend) Close() error {
 	s.closeOnce.Do(func() {
+		s.deadlineMu.Lock()
+		defer s.deadlineMu.Unlock()
 		now := time.Now()
 		_ = s.controller.SetReadDeadline(now)
 		_ = s.controller.SetWriteDeadline(now)
 		if s.closeFn != nil {
 			s.closeErr = s.closeFn()
 		}
+		// Unblock I/O first, then prevent queued retirement writes from using
+		// the HTTP response writer after the handler has returned.
+		s.writeMu.Lock()
+		s.closed = true
+		s.writeMu.Unlock()
 	})
 	return s.closeErr
 }
 
 func (s *extendedWebSocketFrontend) SetWriteDeadline(deadline time.Time) error {
+	s.deadlineMu.Lock()
+	defer s.deadlineMu.Unlock()
+	if s.closed {
+		return io.ErrClosedPipe
+	}
 	if s.controller != nil {
 		return s.controller.SetWriteDeadline(deadline)
 	}

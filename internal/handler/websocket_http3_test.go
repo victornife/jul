@@ -11,12 +11,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
-	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,15 +27,6 @@ import (
 	"jul/internal/websocketx"
 )
 
-type websocketHTTP3ErrorWriter struct {
-	*httptest.ResponseRecorder
-	err error
-}
-
-func (w *websocketHTTP3ErrorWriter) HTTPStream() (*http3.Stream, error) {
-	return nil, w.err
-}
-
 type websocketUnwrapWriter struct {
 	http.ResponseWriter
 }
@@ -45,15 +36,24 @@ func (w websocketUnwrapWriter) Unwrap() http.ResponseWriter { return w.ResponseW
 func TestHTTP3ExtendedFrontendStreamReportsSetupErrors(t *testing.T) {
 	request := httptest.NewRequest(http.MethodConnect, "https://example.test/ws", nil)
 	request.Proto, request.ProtoMajor = "websocket", 3
-	failure := errors.New("HTTP/3 stream unavailable")
-	streamWriter := &websocketHTTP3ErrorWriter{ResponseRecorder: httptest.NewRecorder(), err: failure}
-	wrapped := websocketUnwrapWriter{ResponseWriter: streamWriter}
-	if stream, err := extendedFrontendStream(wrapped, request, http.NewResponseController(wrapped)); stream != nil || !errors.Is(err, failure) {
-		t.Fatalf("wrapped stream=%v error=%v, want %v", stream, err, failure)
-	}
-	missing := websocketUnwrapWriter{ResponseWriter: httptest.NewRecorder()}
-	if stream, err := extendedFrontendStream(missing, request, http.NewResponseController(missing)); stream != nil || err == nil {
+	request.Body = nil
+	writer := &websocketControlWriter{ResponseRecorder: httptest.NewRecorder()}
+	wrapped := websocketUnwrapWriter{ResponseWriter: writer}
+	if stream, err := extendedFrontendStream(wrapped, request, http.NewResponseController(wrapped)); stream != nil || err == nil {
 		t.Fatalf("missing stream=%v error=%v", stream, err)
+	}
+	request.Body = io.NopCloser(strings.NewReader("frame"))
+	stream, err := extendedFrontendStream(wrapped, request, http.NewResponseController(wrapped))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	data := make([]byte, 5)
+	if _, err := io.ReadFull(stream, data); err != nil || string(data) != "frame" {
+		t.Fatalf("stream read=%q error=%v", data, err)
+	}
+	if _, err := stream.Write(data); err != nil || writer.Body.String() != "frame" || writer.flushes != 1 {
+		t.Fatalf("wrapped stream write=%q flushes=%d error=%v", writer.Body.String(), writer.flushes, err)
 	}
 }
 

@@ -958,8 +958,8 @@ func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, imm
 		return
 	}
 	if extended != nil {
-		extended.initiateClose(effGrace, effBound, effCode)
 		go extended.drain(ex, effGrace, effBound)
+		extended.initiateClose(effGrace, effBound, effCode)
 		return
 	}
 	if !hijacked {
@@ -1079,7 +1079,7 @@ func (w *exchangeResponseWriter) WriteHeader(code int) {
 
 func (w *exchangeResponseWriter) Write(p []byte) (int, error) {
 	ex := w.ex
-	if ex.IsRetired() {
+	if w.abortWrite() {
 		ex.abortStream.Store(true)
 		return 0, io.ErrClosedPipe
 	}
@@ -1093,13 +1093,22 @@ func (w *exchangeResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (w *exchangeResponseWriter) Flush() {
-	if w.ex.IsRetired() {
+	if w.abortWrite() {
 		w.ex.abortStream.Store(true)
 		return
 	}
+
 	if fl, ok := w.ResponseWriter.(http.Flusher); ok {
 		fl.Flush()
 	}
+}
+
+func (w *exchangeResponseWriter) abortWrite() bool {
+	ex := w.ex
+	ex.mu.Lock()
+	defer ex.mu.Unlock()
+	// An accepted Extended CONNECT remains writable for its Close handshake.
+	return ex.abortNow && (ex.extendedTunnel == nil || ex.abortStream.Load() || ex.closed.Load())
 }
 
 func (w *exchangeResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
@@ -1188,8 +1197,8 @@ func AttachExtendedStream(ctx context.Context, front, back io.ReadWriteCloser) i
 	retiring, grace, bound, code := ex.retiring, ex.graceDeadline, ex.boundDeadline, ex.closeCode
 	ex.mu.Unlock()
 	if retiring {
-		tunnel.initiateClose(grace, bound, code)
 		go tunnel.drain(ex, grace, bound)
+		tunnel.initiateClose(grace, bound, code)
 	}
 	return wrapped
 }

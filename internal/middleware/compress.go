@@ -140,7 +140,7 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if websocketx.IsExtendedRequest(r) {
+			if websocketx.IsExtendedRequest(r) || websocketx.ValidExtendedRequest(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
