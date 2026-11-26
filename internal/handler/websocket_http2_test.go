@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,7 +35,12 @@ func TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	if !runtimeHTTP2ExtendedConnectEnabled() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket$")
+		args := []string{"-test.run=^TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket$"}
+		// The child must write its counters where go test collects the parent's profile.
+		if coverDir := flag.Lookup("test.gocoverdir"); coverDir != nil && coverDir.Value.String() != "" {
+			args = append(args, "-test.gocoverdir="+coverDir.Value.String())
+		}
+		cmd := exec.CommandContext(ctx, os.Args[0], args...)
 		cmd.Env = withHTTP2ExtendedConnectEnabled(os.Environ())
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("H2 Extended CONNECT subprocess failed: %v\n%s", err, output)

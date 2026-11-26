@@ -61,6 +61,13 @@ func TestExtendedConnectRejectsNonWebSocketAndMalformedHandshakes(t *testing.T) 
 		{"plain connect", func(r *http.Request) { r.Header.Del(":protocol") }},
 		{"unsupported protocol", func(r *http.Request) { r.Header.Set(":protocol", "webtransport") }},
 		{"whitespace in protocol", func(r *http.Request) { r.Header.Set(":protocol", " websocket ") }},
+		{"duplicate protocol", func(r *http.Request) { r.Header.Add(":protocol", "websocket") }},
+		{"not CONNECT", func(r *http.Request) { r.Method = http.MethodGet }},
+		{"HTTP/1 request", func(r *http.Request) { r.ProtoMajor = 1 }},
+		{"ordinary HTTP/3 CONNECT", func(r *http.Request) { r.Proto, r.ProtoMajor = "HTTP/3.0", 3 }},
+		{"missing URL", func(r *http.Request) { r.URL = nil }},
+		{"missing path", func(r *http.Request) { r.URL.Path = "" }},
+		{"missing authority", func(r *http.Request) { r.Host = "" }},
 		{"missing version", func(r *http.Request) { r.Header.Del("Sec-WebSocket-Version") }},
 		{"duplicate version", func(r *http.Request) { r.Header.Add("Sec-WebSocket-Version", "13") }},
 		{"h1 connection header", func(r *http.Request) { r.Header.Set("Connection", "Upgrade") }},
@@ -73,5 +80,8 @@ func TestExtendedConnectRejectsNonWebSocketAndMalformedHandshakes(t *testing.T) 
 				t.Fatal("invalid Extended CONNECT was accepted")
 			}
 		})
+	}
+	if ValidExtendedRequest(nil) || IsExtendedRequest(nil) {
+		t.Fatal("nil request was classified as WebSocket Extended CONNECT")
 	}
 }

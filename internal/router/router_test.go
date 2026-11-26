@@ -762,3 +762,51 @@ func TestWebSocketExtendedConnectUsesGETRouteAndRejectsOtherConnects(t *testing.
 		})
 	}
 }
+
+func TestWebSocketExtendedConnectCannotReachNonProxyRoute(t *testing.T) {
+	calls := 0
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "127.0.0.1:80",
+		Locations: []config.LocationConfig{{
+			Match: config.MatchConfig{Type: "prefix", Path: "/"},
+			Root:  "/static",
+		}},
+	}}}
+	builder := func(config.ServerConfig, config.LocationConfig) (http.Handler, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			calls++
+			w.WriteHeader(http.StatusNoContent)
+		}), nil
+	}
+	router, err := New(cfg, map[string]Builder{ActionStatic: builder}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name       string
+		proto      string
+		protoMajor int
+	}{
+		{name: "HTTP/2", proto: "HTTP/2.0", protoMajor: 2},
+		{name: "HTTP/3", proto: "websocket", protoMajor: 3},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodConnect, "https://app.example/ws", nil)
+			request.Proto, request.ProtoMajor = tt.proto, tt.protoMajor
+			if tt.protoMajor == 2 {
+				request.Header.Set(":protocol", "websocket")
+			}
+			request.Header.Set("Sec-WebSocket-Version", "13")
+			recorder := httptest.NewRecorder()
+			router.For("127.0.0.1:80").ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusNotImplemented || calls != 0 {
+				t.Fatalf("status=%d non-proxy handler calls=%d", recorder.Code, calls)
+			}
+		})
+	}
+	recorder := httptest.NewRecorder()
+	router.For("127.0.0.1:80").ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "https://app.example/ws", nil))
+	if recorder.Code != http.StatusNoContent || calls != 1 {
+		t.Fatalf("ordinary GET status=%d non-proxy handler calls=%d", recorder.Code, calls)
+	}
+}

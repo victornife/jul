@@ -68,6 +68,11 @@ func (t *extendedTunnel) writeFront(p []byte) (int, error) {
 					return n, err
 				}
 			}
+			if n == len(p) {
+				// Some tunnel streams block even on a zero-length write.
+				t.notify()
+				return n, nil
+			}
 			rest, restErr := t.front.Write(p[n:])
 			if rest > 0 {
 				t.frontFrames.feed(p[n : n+rest])

@@ -865,6 +865,10 @@ func (b *upgradedBackConn) Write(p []byte) (int, error) {
 					return n, err
 				}
 			}
+			if n == len(p) {
+				// Some tunnel streams block even on a zero-length write.
+				return n, nil
+			}
 			rest, restErr := b.ReadWriteCloser.Write(p[n:])
 			if rest > 0 {
 				previousClose = b.c2sTracker.sawCloseFrame

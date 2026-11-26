@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -25,6 +26,36 @@ import (
 	"jul/internal/respwriter"
 	"jul/internal/websocketx"
 )
+
+type websocketHTTP3ErrorWriter struct {
+	*httptest.ResponseRecorder
+	err error
+}
+
+func (w *websocketHTTP3ErrorWriter) HTTPStream() (*http3.Stream, error) {
+	return nil, w.err
+}
+
+type websocketUnwrapWriter struct {
+	http.ResponseWriter
+}
+
+func (w websocketUnwrapWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func TestHTTP3ExtendedFrontendStreamReportsSetupErrors(t *testing.T) {
+	request := httptest.NewRequest(http.MethodConnect, "https://example.test/ws", nil)
+	request.Proto, request.ProtoMajor = "websocket", 3
+	failure := errors.New("HTTP/3 stream unavailable")
+	streamWriter := &websocketHTTP3ErrorWriter{ResponseRecorder: httptest.NewRecorder(), err: failure}
+	wrapped := websocketUnwrapWriter{ResponseWriter: streamWriter}
+	if stream, err := extendedFrontendStream(wrapped, request, http.NewResponseController(wrapped)); stream != nil || !errors.Is(err, failure) {
+		t.Fatalf("wrapped stream=%v error=%v, want %v", stream, err, failure)
+	}
+	missing := websocketUnwrapWriter{ResponseWriter: httptest.NewRecorder()}
+	if stream, err := extendedFrontendStream(missing, request, http.NewResponseController(missing)); stream != nil || err == nil {
+		t.Fatalf("missing stream=%v error=%v", stream, err)
+	}
+}
 
 func TestHTTP3ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	backendClosed := make(chan struct{})

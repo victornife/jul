@@ -4,9 +4,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
 	"encoding/base64"
+	"errors"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +27,248 @@ type websocketRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f websocketRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
+}
+
+type websocketTestBackend struct {
+	closed bool
+}
+
+func (*websocketTestBackend) Read([]byte) (int, error)    { return 0, io.EOF }
+func (*websocketTestBackend) Write(p []byte) (int, error) { return len(p), nil }
+func (b *websocketTestBackend) Close() error {
+	b.closed = true
+	return nil
+}
+
+func extendedWebSocketTestRequest() *http.Request {
+	r := httptest.NewRequest(http.MethodConnect, "https://example.test/ws", nil)
+	r.Proto, r.ProtoMajor = "HTTP/2.0", 2
+	r.Header[":protocol"] = []string{"websocket"}
+	r.Header.Set("Sec-WebSocket-Version", "13")
+	r.Header.Set("Sec-WebSocket-Protocol", "chat")
+	r.Header.Set("Sec-WebSocket-Extensions", "permessage-deflate")
+	return websocketx.AsApplicationRequest(r)
+}
+
+func websocketTestResponse(r *http.Request, body io.ReadCloser) *http.Response {
+	sum := sha1.Sum([]byte(r.Header.Get("Sec-WebSocket-Key") + websocketGUID))
+	header := make(http.Header)
+	header.Set("Connection", "Upgrade")
+	header.Set("Upgrade", "websocket")
+	header.Set("Sec-WebSocket-Accept", base64.StdEncoding.EncodeToString(sum[:]))
+	return &http.Response{StatusCode: http.StatusSwitchingProtocols, Header: header, Body: body}
+}
+
+func TestExtendedWebSocketRejectsHandshakeFailures(t *testing.T) {
+	upstreamErr := errors.New("backend unavailable")
+	for _, tt := range []struct {
+		name           string
+		invalidRequest bool
+		missingRewrite bool
+		transportErr   error
+		response       func(*http.Response)
+		readOnlyBody   bool
+		customHandler  bool
+		wantStatus     int
+		wantMessage    string
+		wantClosed     bool
+		wantHandler    bool
+	}{
+		{name: "invalid request", invalidRequest: true, wantStatus: http.StatusBadRequest, wantMessage: "invalid WebSocket"},
+		{name: "missing rewrite", missingRewrite: true, wantStatus: http.StatusBadGateway, wantMessage: "route is unavailable"},
+		{name: "transport error", transportErr: upstreamErr, wantStatus: http.StatusBadGateway, wantMessage: "handshake failed"},
+		{name: "transport error uses handler", transportErr: upstreamErr, customHandler: true, wantStatus: http.StatusBadGateway, wantMessage: "custom upstream error", wantHandler: true},
+		{name: "canceled transport", transportErr: context.Canceled, customHandler: true, wantStatus: http.StatusOK},
+		{name: "backend refusal", response: func(r *http.Response) { r.StatusCode = http.StatusForbidden }, wantStatus: http.StatusBadGateway, wantMessage: "did not accept", wantClosed: true},
+		{name: "unoffered protocol", response: func(r *http.Response) { r.Header.Set("Sec-WebSocket-Protocol", "admin") }, wantStatus: http.StatusBadGateway, wantMessage: "unoffered WebSocket subprotocol", wantClosed: true},
+		{name: "unoffered extension", response: func(r *http.Response) { r.Header.Set("Sec-WebSocket-Extensions", "other") }, wantStatus: http.StatusBadGateway, wantMessage: "unoffered WebSocket extension", wantClosed: true},
+		{name: "read-only backend", readOnlyBody: true, wantStatus: http.StatusBadGateway, wantMessage: "stream is unavailable", wantClosed: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := &websocketTestBackend{}
+			called := false
+			h := &proxyHandler{ReverseProxy: &httputil.ReverseProxy{
+				Rewrite: func(pr *httputil.ProxyRequest) {
+					pr.SetURL(&url.URL{Scheme: "http", Host: "backend"})
+				},
+				Transport: websocketRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if tt.transportErr != nil {
+						return nil, tt.transportErr
+					}
+					var body io.ReadCloser = backend
+					if tt.readOnlyBody {
+						body = struct{ io.ReadCloser }{backend}
+					}
+					response := websocketTestResponse(r, body)
+					if tt.response != nil {
+						tt.response(response)
+					}
+					return response, nil
+				}),
+			}}
+			if tt.missingRewrite {
+				h.Rewrite = nil
+			}
+			if tt.customHandler {
+				h.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
+					called = true
+					http.Error(w, "custom upstream error", http.StatusBadGateway)
+				}
+			}
+			request := extendedWebSocketTestRequest()
+			if tt.invalidRequest {
+				request = httptest.NewRequest(http.MethodGet, "https://example.test/ws", nil)
+			}
+			recorder := httptest.NewRecorder()
+			h.serveExtendedWebSocket(recorder, request)
+			if recorder.Code != tt.wantStatus || !strings.Contains(recorder.Body.String(), tt.wantMessage) {
+				t.Errorf("response status=%d body=%q, want %d containing %q", recorder.Code, recorder.Body.String(), tt.wantStatus, tt.wantMessage)
+			}
+			if tt.transportErr == context.Canceled && recorder.Body.Len() != 0 {
+				t.Errorf("canceled request wrote a response: %q", recorder.Body.String())
+			}
+			if backend.closed != tt.wantClosed || called != tt.wantHandler {
+				t.Errorf("backend closed=%t, error handler called=%t; want %t, %t", backend.closed, called, tt.wantClosed, tt.wantHandler)
+			}
+		})
+	}
+}
+
+type websocketControlWriter struct {
+	*httptest.ResponseRecorder
+	duplexErr     error
+	flushErr      error
+	flushes       int
+	readDeadline  time.Time
+	writeDeadline time.Time
+}
+
+func (w *websocketControlWriter) EnableFullDuplex() error { return w.duplexErr }
+func (w *websocketControlWriter) FlushError() error {
+	w.flushes++
+	return w.flushErr
+}
+func (w *websocketControlWriter) SetReadDeadline(deadline time.Time) error {
+	w.readDeadline = deadline
+	return nil
+}
+func (w *websocketControlWriter) SetWriteDeadline(deadline time.Time) error {
+	w.writeDeadline = deadline
+	return nil
+}
+
+func TestExtendedWebSocketFrontendSetupFailuresCloseBackend(t *testing.T) {
+	failure := errors.New("response writer failure")
+	for _, tt := range []struct {
+		name       string
+		protoMajor int
+		duplexErr  error
+		flushErr   error
+		wantStatus int
+		wantLog    string
+	}{
+		{name: "duplex unavailable", protoMajor: 2, duplexErr: failure, wantStatus: http.StatusInternalServerError},
+		{name: "response flush fails", protoMajor: 2, flushErr: failure, wantStatus: http.StatusOK, wantLog: "response flush failed"},
+		{name: "HTTP/3 stream unavailable", protoMajor: 3, wantStatus: http.StatusOK, wantLog: "stream setup failed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := &websocketTestBackend{}
+			var logs bytes.Buffer
+			h := &proxyHandler{
+				ReverseProxy: &httputil.ReverseProxy{
+					Rewrite: func(pr *httputil.ProxyRequest) {
+						pr.SetURL(&url.URL{Scheme: "http", Host: "backend"})
+					},
+					Transport: websocketRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+						return websocketTestResponse(r, backend), nil
+					}),
+				},
+				logger: slog.New(slog.NewTextHandler(&logs, nil)),
+			}
+			request := extendedWebSocketTestRequest()
+			request.ProtoMajor = tt.protoMajor
+			if tt.protoMajor == 3 {
+				request.Proto = "websocket"
+			}
+			writer := &websocketControlWriter{
+				ResponseRecorder: httptest.NewRecorder(), duplexErr: tt.duplexErr, flushErr: tt.flushErr,
+			}
+			h.serveExtendedWebSocket(writer, request)
+			if writer.Code != tt.wantStatus || !backend.closed {
+				t.Errorf("status=%d backend closed=%t, want %d and closed", writer.Code, backend.closed, tt.wantStatus)
+			}
+			if tt.wantLog != "" && !strings.Contains(logs.String(), tt.wantLog) {
+				t.Errorf("log=%q, want %q", logs.String(), tt.wantLog)
+			}
+		})
+	}
+}
+
+type websocketWriterFunc func([]byte) (int, error)
+
+func (f websocketWriterFunc) Write(p []byte) (int, error) { return f(p) }
+
+type websocketDeadlineWriter struct {
+	deadline time.Time
+}
+
+func (*websocketDeadlineWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (w *websocketDeadlineWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func TestExtendedWebSocketFrontendWriteAndCloseErrors(t *testing.T) {
+	failure := errors.New("write or flush failed")
+	for _, tt := range []struct {
+		name        string
+		write       websocketWriterFunc
+		flushErr    error
+		wantErr     error
+		wantFlushes int
+	}{
+		{name: "short write", write: func(p []byte) (int, error) { return len(p) - 1, nil }, wantErr: io.ErrShortWrite},
+		{name: "write error", write: func([]byte) (int, error) { return 0, failure }, wantErr: failure},
+		{name: "flush error", write: func(p []byte) (int, error) { return len(p), nil }, flushErr: failure, wantErr: failure, wantFlushes: 1},
+		{name: "success flushes", write: func(p []byte) (int, error) { return len(p), nil }, wantFlushes: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := &websocketControlWriter{ResponseRecorder: httptest.NewRecorder(), flushErr: tt.flushErr}
+			front := &extendedWebSocketFrontend{writer: tt.write, controller: http.NewResponseController(w)}
+			_, err := front.Write([]byte("frame"))
+			if !errors.Is(err, tt.wantErr) || w.flushes != tt.wantFlushes {
+				t.Errorf("write error=%v flushes=%d, want %v and %d", err, w.flushes, tt.wantErr, tt.wantFlushes)
+			}
+		})
+	}
+
+	w := &websocketControlWriter{ResponseRecorder: httptest.NewRecorder()}
+	closeCalls := 0
+	front := &extendedWebSocketFrontend{
+		controller: http.NewResponseController(w),
+		closeFn:    func() error { closeCalls++; return failure },
+	}
+	deadline := time.Now().Add(time.Second)
+	if err := front.SetWriteDeadline(deadline); err != nil || !w.writeDeadline.Equal(deadline) {
+		t.Fatalf("controller deadline=%v, error=%v", w.writeDeadline, err)
+	}
+	for range 2 {
+		if err := front.Close(); !errors.Is(err, failure) {
+			t.Errorf("close error=%v, want %v", err, failure)
+		}
+	}
+	if closeCalls != 1 || w.readDeadline.IsZero() || w.writeDeadline.IsZero() {
+		t.Errorf("close calls=%d, read deadline=%v, write deadline=%v", closeCalls, w.readDeadline, w.writeDeadline)
+	}
+	writer := &websocketDeadlineWriter{}
+	front = &extendedWebSocketFrontend{writer: writer}
+	if err := front.SetWriteDeadline(deadline); err != nil || !writer.deadline.Equal(deadline) {
+		t.Errorf("writer deadline=%v, error=%v", writer.deadline, err)
+	}
+	front.writer = io.Discard
+	if err := front.SetWriteDeadline(deadline); !errors.Is(err, http.ErrNotSupported) {
+		t.Errorf("unsupported deadline error=%v", err)
+	}
 }
 
 func TestExtendedWebSocketUpstreamHandshakeIsH1AndRejectsBadAccept(t *testing.T) {
@@ -157,6 +403,89 @@ func TestWebSocketNegotiationCannotAddUnrequestedProtocolOrExtension(t *testing.
 	selected.Set("Sec-WebSocket-Extensions", `permessage-deflate; note="unterminated`)
 	if validSelectedExtensions(request, selected) {
 		t.Fatal("malformed selected extension must be rejected")
+	}
+}
+
+func TestWebSocketNegotiationRejectsMalformedSelections(t *testing.T) {
+	request := make(http.Header)
+	request.Set("Sec-WebSocket-Protocol", "chat, superchat")
+	for _, selected := range [][]string{{""}, {"chat, superchat"}, {"chat", "superchat"}} {
+		response := make(http.Header)
+		response["Sec-Websocket-Protocol"] = selected
+		if validSelectedSubprotocol(request, response) {
+			t.Errorf("accepted malformed selected protocols %q", selected)
+		}
+	}
+	for _, tt := range []struct {
+		offered  string
+		selected string
+		want     bool
+	}{
+		{`permessage-deflate; note="unterminated`, "permessage-deflate", false},
+		{`permessage-deflate; note="x\",y", x-custom`, "x-custom", true},
+		{"permessage-deflate,, x-custom", "permessage-deflate", false},
+		{"permessage-deflate", "bad@extension", false},
+		{"permessage-deflate", "", false},
+	} {
+		t.Run(tt.offered+"/"+tt.selected, func(t *testing.T) {
+			req, res := make(http.Header), make(http.Header)
+			req.Set("Sec-WebSocket-Extensions", tt.offered)
+			res.Set("Sec-WebSocket-Extensions", tt.selected)
+			if got := validSelectedExtensions(req, res); got != tt.want {
+				t.Errorf("valid extensions = %t, want %t", got, tt.want)
+			}
+		})
+	}
+	if validBackendWebSocketResponse(nil, "key") {
+		t.Fatal("nil backend response was accepted")
+	}
+}
+
+func TestCopyWebSocketResponseHeadersRemovesHandshakeAndHopHeaders(t *testing.T) {
+	source := make(http.Header)
+	source.Set("Connection", "Upgrade, X-Remove")
+	source.Set("Upgrade", "websocket")
+	source.Set("X-Remove", "hop-by-hop")
+	source.Set("Sec-WebSocket-Accept", "backend-only")
+	source.Set("Sec-WebSocket-Key", "backend-only")
+	source.Set("Content-Length", "7")
+	source[":protocol"] = []string{"websocket"}
+	source.Add("X-Allowed", "one")
+	source.Add("X-Allowed", "two")
+	destination := make(http.Header)
+	copyWebSocketResponseHeaders(destination, source)
+	if got := destination.Values("X-Allowed"); len(got) != 2 || got[0] != "one" || got[1] != "two" {
+		t.Fatalf("end-to-end headers = %v", destination)
+	}
+	for _, name := range []string{"Connection", "Upgrade", "X-Remove", "Sec-WebSocket-Accept", "Sec-WebSocket-Key", "Content-Length", ":protocol"} {
+		if len(destination.Values(name)) != 0 || len(destination[name]) != 0 {
+			t.Errorf("forwarded forbidden header %q: %v", name, destination)
+		}
+	}
+}
+
+func TestExtendedFrontendStreamRejectsUnsupportedProtocol(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	writer := httptest.NewRecorder()
+	if stream, err := extendedFrontendStream(writer, request, http.NewResponseController(writer)); err == nil || stream != nil {
+		t.Fatalf("unsupported protocol stream=%v error=%v", stream, err)
+	}
+}
+
+type websocketErrorBackend struct {
+	err error
+}
+
+func (b *websocketErrorBackend) Read([]byte) (int, error)  { return 0, b.err }
+func (*websocketErrorBackend) Write(p []byte) (int, error) { return len(p), nil }
+func (*websocketErrorBackend) Close() error                { return nil }
+
+func TestRelayExtendedWebSocketReportsUnexpectedBackendErrors(t *testing.T) {
+	client, front := net.Pipe()
+	defer client.Close()
+	failure := errors.New("backend read failed")
+	if err := relayExtendedWebSocket(front, &websocketErrorBackend{err: failure}); !errors.Is(err, failure) {
+		t.Fatalf("relay error=%v, want %v", err, failure)
 	}
 }
 
