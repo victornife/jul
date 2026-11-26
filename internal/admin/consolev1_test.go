@@ -215,6 +215,7 @@ func TestStatusAPIWebSocketCapabilityPrerequisites(t *testing.T) {
 	}}}
 	for _, tt := range []struct {
 		name        string
+		cfg         *config.Config
 		h2Enabled   bool
 		h3Compiled  bool
 		h2Active    bool
@@ -235,10 +236,33 @@ func TestStatusAPIWebSocketCapabilityPrerequisites(t *testing.T) {
 			name: "HTTP/3 build tag missing", h2Enabled: true, h2Active: true,
 			h2DetailHas: "restart required", h3DetailHas: "-tags http3",
 		},
+		{
+			name: "startup switch enabled without HTTP/2 or HTTP/3 listeners",
+			cfg: &config.Config{Servers: []config.ServerConfig{{
+				Listen: ":8080",
+			}}},
+			h2Enabled: true, h3Compiled: true,
+			h2DetailHas: "no HTTP/2-capable data listener is configured",
+			h3DetailHas: "no HTTP/3 listener is configured",
+		},
+		{
+			name: "cleartext HTTP/2 listeners",
+			cfg: &config.Config{Servers: []config.ServerConfig{
+				{Listen: ":8080", H2C: true},
+				{Listen: ":8081", H2C: true, TLS: &config.TLSConfig{Enabled: false}},
+			}},
+			h2Enabled: true, h3Compiled: true, h2Active: true,
+			h2DetailHas: "2 HTTP/2 data listeners",
+			h3DetailHas: "no HTTP/3 listener is configured",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			testCfg := cfg
+			if tt.cfg != nil {
+				testCfg = tt.cfg
+			}
 			s := newTestServer(t, config.AdminConfig{}, Deps{
-				LoadConfig:                  func() (*config.Config, error) { return cfg, nil },
+				LoadConfig:                  func() (*config.Config, error) { return testCfg, nil },
 				HTTP2ExtendedConnectEnabled: tt.h2Enabled,
 				HTTP3Compiled:               tt.h3Compiled,
 			})
