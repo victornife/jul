@@ -287,6 +287,14 @@ Rules worth knowing before you start (all detailed in [abi.md](abi.md)):
   headers-only subscription (or no plugin) on media locations.
 - `sdk.Reject` discards the response (status set with `SetStatus` if 4xx/5xx,
   else `502`); a trap or timeout discards it with `500`.
+- For HTTP/2 and HTTP/3 WebSocket Extended CONNECT, plugins see the HTTP
+  handshake, never tunnel frames. Request-body readers receive an empty body.
+  A response-body subscription runs before handshake commitment with
+  `UPGRADED` body state and no buffering; header changes and denials still
+  apply. A request hook stopping with non-final `1xx` or `2xx` (including
+  implicit `200`), or a response hook changing a status to a different `2xx`,
+  fails with `500`:
+  only the proxy can establish a successful tunnel.
 
 Runnable examples: [`v2-status-header`](../examples/plugins/v2-status-header)
 (headers only) and [`v2-redact`](../examples/plugins/v2-redact) (bounded body

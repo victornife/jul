@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -37,10 +38,28 @@ import (
 )
 
 func TestWebSocketProductionPolicyHandshake(t *testing.T) {
+	testWebSocketProductionPolicyHandshake(t, nil, []webSocketPolicyCase{
+		{probe: "clean", status: http.StatusOK, backend: true},
+		{probe: "attack", status: http.StatusForbidden},
+		{probe: "response-deny", status: http.StatusForbidden, backend: true},
+		{probe: "clean", status: http.StatusOK, backend: true},
+	})
+}
+
+type webSocketPolicyCase struct {
+	probe           string
+	status          int
+	backend         bool
+	headers         http.Header
+	responseHeaders http.Header
+}
+
+func testWebSocketProductionPolicyHandshake(t *testing.T, configure func(*config.Config), cases []webSocketPolicyCase) {
+	t.Helper()
 	if !strings.Contains(os.Getenv("GODEBUG"), "http2xconnect=1") {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
-		args := []string{"-test.run=^TestWebSocketProductionPolicyHandshake$"}
+		args := []string{"-test.run=^" + regexp.QuoteMeta(t.Name()) + "$"}
 		if dir := flag.Lookup("test.gocoverdir"); dir != nil && dir.Value.String() != "" {
 			args = append(args, "-test.gocoverdir="+dir.Value.String())
 		}
@@ -80,6 +99,10 @@ func TestWebSocketProductionPolicyHandshake(t *testing.T) {
 						(mtls && len(r.TLS.VerifiedChains) == 0) {
 						t.Error("backend did not receive a verified H1 WebSocket handshake")
 						http.Error(w, "invalid handshake", http.StatusBadRequest)
+						return
+					}
+					if r.URL.Query().Get("probe") == "backend-deny" {
+						http.Error(w, "backend handshake denied", http.StatusServiceUnavailable)
 						return
 					}
 					conn, brw, err := w.(http.Hijacker).Hijack()
@@ -135,6 +158,9 @@ SecResponseBodyMimeType text/plain
 SecRule ARGS:probe "@streq attack" "id:43501,phase:2,deny,status:403"
 SecRule RESPONSE_HEADERS:X-Policy "@streq deny" "id:43502,phase:3,deny,status:403"
 SecRule RESPONSE_BODY "@contains ok" "id:43503,phase:4,deny,status:403"`,
+				}
+				if configure != nil {
+					configure(cfg)
 				}
 				factory, cleanup := minimalFactory(t)
 				defer cleanup()
@@ -195,12 +221,16 @@ SecRule RESPONSE_BODY "@contains ok" "id:43503,phase:4,deny,status:403"`,
 				}
 				tr, closeTransport := newTransport(tlsClient)
 				defer closeTransport()
-				for _, probe := range []string{"clean", "attack", "response-deny", "clean"} {
+				for _, tc := range cases {
+					probe := tc.probe
 					ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 					pr, pw := io.Pipe()
 					req, _ := http.NewRequestWithContext(ctx, http.MethodConnect, endpoint+"/?probe="+probe, pr)
 					req.ContentLength = -1
 					req.Header.Set("Sec-WebSocket-Version", "13")
+					for name, values := range tc.headers {
+						req.Header[name] = append([]string(nil), values...)
+					}
 					if proto == 2 {
 						req.Header.Set(":protocol", "websocket")
 					} else {
@@ -216,17 +246,23 @@ SecRule RESPONSE_BODY "@contains ok" "id:43503,phase:4,deny,status:403"`,
 						_ = pw.Close()
 						t.Fatalf("handshake before client frames, probe=%s: %v", probe, err)
 					}
-					want := http.StatusOK
-					if probe != "clean" {
-						want = http.StatusForbidden
-					}
+					want := tc.status
 					if resp.StatusCode != want || resp.ProtoMajor != proto {
 						t.Errorf("probe=%s response=%d HTTP/%d, want %d HTTP/%d", probe, resp.StatusCode, resp.ProtoMajor, want, proto)
 					}
-					if probe == "attack" && hits.Load() != before {
-						t.Error("phase-2 denial reached the backend")
+					wantHits := before
+					if tc.backend {
+						wantHits++
 					}
-					if probe == "clean" && resp.StatusCode == http.StatusOK {
+					if hits.Load() != wantHits {
+						t.Errorf("probe=%s backend hits=%d, want %d", probe, hits.Load(), wantHits)
+					}
+					for name, values := range tc.responseHeaders {
+						if got := resp.Header.Get(name); got != values[0] {
+							t.Errorf("probe=%s response header %s=%q, want %q", probe, name, got, values[0])
+						}
+					}
+					if want == http.StatusOK && resp.StatusCode == http.StatusOK {
 						_, err = pw.Write([]byte{0x82, 0x82, 1, 2, 3, 4, 'o' ^ 1, 'k' ^ 2})
 						if err != nil {
 							t.Error(err)
@@ -268,7 +304,11 @@ SecRule RESPONSE_BODY "@contains ok" "id:43503,phase:4,deny,status:403"`,
 							if len(certs) != 0 {
 								t.Error("TLS accepted a presented, untrusted client certificate")
 							}
-							if resp.StatusCode != http.StatusForbidden {
+							want := http.StatusForbidden
+							if tc := cases[0]; tc.probe == "clean" && !tc.backend {
+								want = tc.status
+							}
+							if resp.StatusCode != want {
 								t.Errorf("unverified client admitted: %d", resp.StatusCode)
 							}
 						} else if len(certs) == 0 {

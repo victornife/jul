@@ -24,11 +24,18 @@ import (
 	"jul/internal/config"
 	"jul/internal/inspection"
 	"jul/internal/respwriter"
+	"jul/internal/websocketx"
 )
 
 type sendTimeoutCapture struct {
 	*httptest.ResponseRecorder
 	deadlines []time.Time
+	flushErr  error
+}
+
+func (writer *sendTimeoutCapture) FlushError() error {
+	writer.Flush()
+	return writer.flushErr
 }
 
 func (writer *sendTimeoutCapture) SetWriteDeadline(deadline time.Time) error {
@@ -37,18 +44,20 @@ func (writer *sendTimeoutCapture) SetWriteDeadline(deadline time.Time) error {
 }
 
 func TestSendTimeoutThroughPluginResponseLayer(t *testing.T) {
-	under := &sendTimeoutCapture{ResponseRecorder: httptest.NewRecorder()}
-	parent := respwriter.WithSendTimeout(under, time.Second, time.Time{})
-	layer := &responseLayer{parent: parent, state: layerPassthrough}
-	writer := respwriter.Wrap(layer, parent)
-	if _, err := io.WriteString(writer, "plugin response"); err != nil {
-		t.Fatal(err)
-	}
-	if err := http.NewResponseController(writer).Flush(); err != nil {
-		t.Fatal(err)
-	}
-	if len(under.deadlines) != 4 || !under.Flushed || !under.deadlines[3].IsZero() {
-		t.Fatalf("plugin writer lost deadline delegation: deadlines=%v flushed=%v", under.deadlines, under.Flushed)
+	for _, flushErr := range []error{nil, io.ErrUnexpectedEOF} {
+		under := &sendTimeoutCapture{ResponseRecorder: httptest.NewRecorder(), flushErr: flushErr}
+		parent := respwriter.WithSendTimeout(under, time.Second, time.Time{})
+		layer := &responseLayer{parent: parent, state: layerPassthrough}
+		writer := respwriter.Wrap(layer, parent)
+		if _, err := io.WriteString(writer, "plugin response"); err != nil {
+			t.Fatal(err)
+		}
+		if err := http.NewResponseController(writer).Flush(); err != flushErr {
+			t.Fatalf("flush error=%v, want %v", err, flushErr)
+		}
+		if len(under.deadlines) != 4 || !under.Flushed || !under.deadlines[3].IsZero() {
+			t.Fatalf("plugin writer lost deadline delegation: deadlines=%v flushed=%v", under.deadlines, under.Flushed)
+		}
 	}
 }
 
@@ -182,6 +191,54 @@ func TestResponsePhaseEchoMetadata(t *testing.T) {
 	}
 	if hooks.count(hooks.results, "continue") != 1 || hooks.count(hooks.noBody, "none") != 0 {
 		t.Fatalf("hooks = %+v %+v", hooks.results, hooks.noBody)
+	}
+}
+
+func TestExtendedHandshakeResponsePhase(t *testing.T) {
+	for _, tc := range []struct {
+		name, op, to   string
+		origin, status int
+		body           bool
+	}{
+		{"body", "echo", "", 200, 200, true},
+		{"denial", "reject", "403", 200, 403, true},
+		{"alternate-success", "set-status", "201", 200, 500, true},
+		{"false-success", "set-status", "200", 502, 500, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := singleV2(t, withOp(tc.op))
+			r := websocketx.AsApplicationRequest(req(http.MethodConnect, "/ws",
+				"X-Status-To", tc.to, "Range", "bytes=0-1", "Accept-Encoding", "gzip"))
+			if tc.body {
+				r.Header.Set("X-Mode", "body")
+			}
+			frames := "\x82\x02ok"
+			action := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Range") != "bytes=0-1" || r.Header.Get("Accept-Encoding") != "gzip" {
+					t.Error("response subscription stripped handshake headers")
+				}
+				w.WriteHeader(tc.origin)
+				err := http.NewResponseController(w).Flush()
+				if (err != nil) != (tc.status != http.StatusOK) {
+					t.Errorf("handshake flush error=%v, final status=%d", err, tc.status)
+				}
+				if err == nil {
+					_, _ = io.WriteString(w, frames)
+				}
+			})
+			rec := serve(chainFor(s, action, "p"), r)
+			if rec.Code != tc.status {
+				t.Fatalf("status=%d, want %d", rec.Code, tc.status)
+			}
+			if tc.status == http.StatusOK {
+				if !rec.Flushed || rec.Body.String() != frames || rec.Header().Get("X-Body-State") != "7" ||
+					rec.Header().Get("X-Body-RC") != "-4" {
+					t.Fatalf("handshake buffered or exposed frames: flushed=%t body=%q headers=%v", rec.Flushed, rec.Body.String(), rec.Header())
+				}
+			} else if strings.Contains(rec.Body.String(), frames) {
+				t.Fatal("denied handshake relayed tunnel frames")
+			}
+		})
 	}
 }
 

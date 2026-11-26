@@ -17,6 +17,7 @@ import (
 
 	"jul/internal/egress"
 	"jul/internal/inspection"
+	"jul/internal/websocketx"
 )
 
 // maxRequestBodyBuffer caps how much of a request body the host buffers so a
@@ -128,6 +129,12 @@ func (inv *invocation) flush() {
 	if status < 100 || status > 599 {
 		inv.log.Warn("plugin: invalid response status replaced with 500", "status", status)
 		status = http.StatusInternalServerError
+	}
+	if websocketx.IsExtendedRequest(inv.r) && status < 300 {
+		undoPluginHeaders(inv.w, inv.r, inv)
+		inv.log.Warn("plugin: Extended CONNECT success requires an established proxy tunnel")
+		http.Error(inv.w, "plugin error", http.StatusInternalServerError)
+		return
 	}
 	inv.w.WriteHeader(status)
 	if len(inv.respBody) > 0 {

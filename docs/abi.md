@@ -193,6 +193,17 @@ toward the serving instance's `max_invocations`.
 - after a protocol switch (`101`/hijack): after the handler returns,
   **read-only** — every mutation returns `COMMITTED` and only deliver is valid.
 
+HTTP/2 and HTTP/3 WebSocket Extended CONNECT is handshake-only in both ABIs:
+`read_request_body` returns an empty body without reading or replacing the
+tunnel stream. In v2, the proxy's `200` runs response hooks **before**
+commitment, with `UPGRADED` for body subscriptions (`NOT_REQUESTED` for
+headers-only subscriptions). Frames are never buffered or exposed to guests.
+Headers and non-success status changes remain available, and Reject prevents
+relay. Request-phase Stop with non-final `1xx` or any `2xx` (including the
+default `200`) and response-phase changes to a different `2xx` fail closed with
+`500`, logged as plugin errors; successful tunnel establishment belongs to the
+proxy.
+
 ## Body availability
 
 `resp_body_state()` returns one value from a closed enum:
@@ -206,7 +217,7 @@ toward the serving instance's `max_invocations`.
 | 4 | `STREAMING` | `text/event-stream`, `application/grpc*`, `multipart/x-mixed-replace`, `X-Accel-Buffering: no`, or a declared `Trailer` |
 | 5 | `ENCODED` | The action returned a non-identity `Content-Encoding` |
 | 6 | `PARTIAL` | The action returned `206` |
-| 7 | `UPGRADED` | Protocol switch; the response is already committed (read-only) |
+| 7 | `UPGRADED` | Protocol switch; read-only after `101`/hijack, but before commitment for an Extended CONNECT handshake |
 
 A guest must treat any value it does not know as "not available".
 

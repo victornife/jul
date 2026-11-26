@@ -28,6 +28,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/reqdeadline"
+	"jul/internal/websocketx"
 )
 
 // bodyGuestMode selects what a hand-assembled body guest's handle_request does.
@@ -116,6 +117,42 @@ func bodyGuestConfig(abi string, mode bodyGuestMode, opts ...func(*config.Plugin
 		},
 	}, opts...)
 	return pcfg("", all...)
+}
+
+func TestExtendedHandshakeRequestBody(t *testing.T) {
+	for _, abi := range []string{ABIJulV1, ABIJulV2} {
+		for _, tc := range []struct {
+			name   string
+			mode   bodyGuestMode
+			status int
+			next   bool
+		}{
+			{"continue", guestReadContinue, http.StatusOK, true},
+			{"implicit-success", guestEcho, http.StatusInternalServerError, false},
+			{"deny", guestReject, http.StatusForbidden, false},
+		} {
+			t.Run(abi+"/"+tc.name, func(t *testing.T) {
+				m, _ := bodyManager(t)
+				s := buildSet(t, m, map[string]config.PluginConfig{"g": bodyGuestConfig(abi, tc.mode)})
+				body := &countingBody{r: strings.NewReader("unconsumed tunnel frames")}
+				r := websocketx.AsApplicationRequest(httptest.NewRequest(http.MethodConnect, "https://h/ws", body))
+				r.ContentLength = -1
+				var next bool
+				h := s.Middleware("g")(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					next = true
+					w.WriteHeader(http.StatusOK)
+				}))
+				rec := serve(h, r)
+				if rec.Code != tc.status || next != tc.next {
+					t.Fatalf("status=%d next=%t, want %d/%t", rec.Code, next, tc.status, tc.next)
+				}
+				if r.Body != body || r.ContentLength != -1 || body.n.Load() != 0 || body.closed.Load() != 0 {
+					t.Fatalf("plugin touched tunnel body: body=%T length=%d read=%d closed=%d",
+						r.Body, r.ContentLength, body.n.Load(), body.closed.Load())
+				}
+			})
+		}
+	}
 }
 
 func randomBody(t *testing.T, n int) []byte {

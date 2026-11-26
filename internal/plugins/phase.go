@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"io"
 	"mime"
 	"net"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 
 	"jul/internal/inspection"
 	"jul/internal/respwriter"
+	"jul/internal/websocketx"
 )
 
 // This file implements the jul-abi/v2 response phase (ADR 0020 §3–§8): the
@@ -78,7 +80,7 @@ func responsePoint(next http.Handler) http.Handler {
 		defer cancel()
 		inner := r.WithContext(ctx)
 		for _, s := range c.subs {
-			if s.mode == responseModeBody {
+			if s.mode == responseModeBody && !websocketx.IsExtendedRequest(r) {
 				inner.Header = r.Header.Clone()
 				for _, h := range identityRequestHeaders {
 					inner.Header.Del(h)
@@ -179,6 +181,9 @@ func (l *responseLayer) WriteHeader(code int) {
 		return
 	}
 	state := classifyResponse(l.sub.mode, l.req.Method, code, l.Header(), l.sub.p.maxRespBody)
+	if websocketx.IsExtendedRequest(l.req) && code == http.StatusOK && l.sub.mode == responseModeBody {
+		state = bodyUpgraded
+	}
 	if state == bodyAvailable {
 		l.state = layerBuffering
 		if n, err := strconv.Atoi(l.Header().Get("Content-Length")); err == nil && n > 0 {
@@ -194,6 +199,7 @@ func (l *responseLayer) WriteHeader(code int) {
 	}
 	if view, ok := l.decide(state, nil); ok {
 		l.parent.WriteHeader(view.status)
+		l.status = view.status
 		l.state = layerPassthrough
 	}
 }
@@ -232,15 +238,20 @@ func (l *responseLayer) Write(p []byte) (int, error) {
 // flush while buffering is absorbed: the body is bounded by max_response_body
 // and the reverse proxy flushes every response of unknown length.
 func (l *responseLayer) Flush() {
+	_ = l.FlushError()
+}
+
+func (l *responseLayer) FlushError() error {
 	if l.state == layerPending {
 		l.WriteHeader(http.StatusOK)
 	}
+	if websocketx.IsExtendedRequest(l.req) && (l.state == layerDiscard || l.status < 200 || l.status >= 300) {
+		return io.ErrClosedPipe
+	}
 	if l.state != layerPassthrough {
-		return
+		return nil
 	}
-	if f, ok := l.parent.(http.Flusher); ok {
-		f.Flush()
-	}
+	return http.NewResponseController(l.parent).Flush()
 }
 
 // Hijack is exposed only when the parent is a Hijacker. Once the connection
@@ -328,6 +339,9 @@ func (l *responseLayer) decideWithReason(state uint32, body []byte, reason strin
 		if view.statusSet && view.status >= 400 && view.status <= 599 {
 			l.final = view.status
 		}
+	case websocketx.IsExtendedRequest(l.req) && view.status >= 200 && view.status < 300 && view.status != l.status:
+		l.sub.p.log.Warn("plugin: response hook cannot change Extended CONNECT success status", "plugin", l.sub.p.name)
+		l.final, l.failed = http.StatusInternalServerError, true
 	default:
 		return view, true
 	}
