@@ -247,6 +247,11 @@ SecRule RESPONSE_BODY "@contains ok" "id:43503,phase:4,deny,status:403"`,
 					for _, certs := range [][]tls.Certificate{nil, {wrongCert}} {
 						badTLS := tlsClient.Clone()
 						badTLS.Certificates = certs
+						if len(certs) != 0 {
+							badTLS.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+								return &certs[0], nil
+							}
+						}
 						badTransport, closeBad := newTransport(badTLS)
 						ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 						req, _ := http.NewRequestWithContext(ctx, http.MethodConnect, endpoint+"/", nil)
@@ -260,6 +265,9 @@ SecRule RESPONSE_BODY "@contains ok" "id:43503,phase:4,deny,status:403"`,
 						resp, err := badTransport.RoundTrip(req)
 						if err == nil {
 							_ = resp.Body.Close()
+							if len(certs) != 0 {
+								t.Error("TLS accepted a presented, untrusted client certificate")
+							}
 							if resp.StatusCode != http.StatusForbidden {
 								t.Errorf("unverified client admitted: %d", resp.StatusCode)
 							}
