@@ -26,6 +26,7 @@ import (
 	"golang.org/x/net/http2/hpack"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 	"jul/internal/websocketx"
 )
 
@@ -54,12 +55,18 @@ func TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = proxy.(*proxyHandler).Close() })
+	registry := respwriter.NewExchangeRegistry()
+	registry.SetInitialGeneration(1)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !websocketx.ValidExtendedRequest(r) {
 			http.Error(w, "invalid Extended CONNECT", http.StatusBadRequest)
 			return
 		}
-		proxy.ServeHTTP(w, websocketx.AsApplicationRequest(r))
+		writer, request, _, release := registry.Admit(w, websocketx.AsApplicationRequest(r), respwriter.EntryCoord{
+			GenID: 1, ListenAddr: "test", RouteID: "extended-ws",
+		})
+		defer release()
+		proxy.ServeHTTP(writer, request)
 	})
 	server := httptest.NewUnstartedServer(handler)
 	server.EnableHTTP2 = true
@@ -169,6 +176,7 @@ func TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	if status != "200" {
 		t.Fatalf("Extended CONNECT status=%s headers=%v, want 200", status, responseHeaders)
 	}
+	waitForExtendedExchangeCount(t, registry, 1)
 
 	mask := [4]byte{1, 2, 3, 4}
 	payload := bytes.Repeat([]byte("j"), 32<<10)
@@ -207,6 +215,18 @@ func TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	case <-backendClosed:
 	case <-time.After(3 * time.Second):
 		t.Fatal("canceled H2 stream did not close the backend WebSocket")
+	}
+	waitForExtendedExchangeCount(t, registry, 0)
+}
+
+func waitForExtendedExchangeCount(t *testing.T, registry *respwriter.ExchangeRegistry, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for registry.ActiveCount() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("active exchange count=%d, want %d", registry.ActiveCount(), want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

@@ -33,6 +33,9 @@ func TestExtendedTunnelRetirementCompletesWebSocketCloseHandshake(t *testing.T) 
 		GenID: 1, ListenAddr: "127.0.0.1:8080", RouteID: "extended-ws",
 	})
 	back := AttachUpgradedBackend(admitted.Context(), proxyBackSide, http.Header{"Upgrade": {"websocket"}})
+	if again := AttachUpgradedBackend(admitted.Context(), back, http.Header{"Upgrade": {"websocket"}}); again != back {
+		t.Fatal("attaching an already-owned backend changed its wrapper")
+	}
 	front := AttachExtendedStream(admitted.Context(), proxyClientSide, back)
 	copyDone := make(chan struct{}, 2)
 	go func() {

@@ -1141,6 +1141,9 @@ func AttachUpgradedBackend(ctx context.Context, back io.ReadWriteCloser, resHead
 	if ex == nil {
 		return back
 	}
+	if attached, ok := back.(*upgradedBackConn); ok && attached.ex == ex {
+		return back
+	}
 	isWS := strings.EqualFold(strings.TrimSpace(resHeader.Get("Upgrade")), "websocket")
 	wb := &upgradedBackConn{
 		ReadWriteCloser: back,

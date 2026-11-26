@@ -22,6 +22,7 @@ import (
 	"github.com/quic-go/quic-go/http3"
 
 	"jul/internal/config"
+	"jul/internal/respwriter"
 	"jul/internal/websocketx"
 )
 
@@ -38,12 +39,18 @@ func TestHTTP3ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = proxy.(*proxyHandler).Close() })
+	registry := respwriter.NewExchangeRegistry()
+	registry.SetInitialGeneration(1)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !websocketx.ValidExtendedRequest(r) {
 			http.Error(w, "invalid Extended CONNECT", http.StatusBadRequest)
 			return
 		}
-		proxy.ServeHTTP(w, websocketx.AsApplicationRequest(r))
+		writer, request, _, release := registry.Admit(w, websocketx.AsApplicationRequest(r), respwriter.EntryCoord{
+			GenID: 1, ListenAddr: "test", RouteID: "extended-ws",
+		})
+		defer release()
+		proxy.ServeHTTP(writer, request)
 	})
 
 	certServer := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
@@ -123,6 +130,7 @@ func TestHTTP3ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	if response.StatusCode != http.StatusOK || response.ProtoMajor != 3 {
 		t.Fatalf("response status/protocol=%d/%s, want 200/HTTP3", response.StatusCode, response.Proto)
 	}
+	waitForExtendedExchangeCount(t, registry, 1)
 
 	mask := [4]byte{1, 2, 3, 4}
 	payload := bytes.Repeat([]byte("j"), 32<<10)
@@ -153,4 +161,5 @@ func TestHTTP3ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("canceled H3 stream did not close the backend WebSocket")
 	}
+	waitForExtendedExchangeCount(t, registry, 0)
 }

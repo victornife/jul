@@ -94,6 +94,7 @@ func (h *proxyHandler) serveExtendedWebSocket(w http.ResponseWriter, r *http.Req
 		http.Error(w, "upstream WebSocket stream is unavailable", http.StatusBadGateway)
 		return
 	}
+	backend = respwriter.AttachUpgradedBackend(r.Context(), backend, response.Header)
 	copyWebSocketResponseHeaders(w.Header(), response.Header.Clone())
 	controller := http.NewResponseController(w)
 	if r.ProtoMajor == 2 {
