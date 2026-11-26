@@ -7,12 +7,14 @@ import (
 	"context"
 	"encoding/base64"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"jul/internal/websocketx"
 )
@@ -129,6 +131,7 @@ func TestWebSocketNegotiationCannotAddUnrequestedProtocolOrExtension(t *testing.
 	if !validSelectedSubprotocol(request, selected) {
 		t.Fatal("offered subprotocol should be accepted")
 	}
+
 	selected.Set("Sec-WebSocket-Protocol", "admin")
 	if validSelectedSubprotocol(request, selected) {
 		t.Fatal("unoffered subprotocol must be rejected")
@@ -154,5 +157,32 @@ func TestWebSocketNegotiationCannotAddUnrequestedProtocolOrExtension(t *testing.
 	selected.Set("Sec-WebSocket-Extensions", `permessage-deflate; note="unterminated`)
 	if validSelectedExtensions(request, selected) {
 		t.Fatal("malformed selected extension must be rejected")
+	}
+}
+
+func TestRelayExtendedWebSocketStopsWhenBackendCloses(t *testing.T) {
+	client, front := net.Pipe()
+	defer client.Close()
+	backendPeer, backend := net.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- relayExtendedWebSocket(front, backend) }()
+
+	if err := backendPeer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	var one [1]byte
+	if _, err := client.Read(one[:]); err == nil {
+		t.Fatal("frontend remained open after the backend closed")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("relay after backend close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("relay did not stop after the backend closed")
 	}
 }

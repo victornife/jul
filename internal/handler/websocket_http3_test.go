@@ -6,9 +6,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/binary"
 	"io"
 	"net"
 	"net/http"
@@ -24,8 +26,9 @@ import (
 )
 
 func TestHTTP3ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
+	backendClosed := make(chan struct{})
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveWebSocketEcho(w, r)
+		serveWebSocketEcho(w, r, func() { close(backendClosed) })
 	}))
 	defer backend.Close()
 
@@ -122,19 +125,32 @@ func TestHTTP3ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	}
 
 	mask := [4]byte{1, 2, 3, 4}
-	payload := []byte("hi")
-	frame := []byte{0x82, 0x80 | byte(len(payload)), mask[0], mask[1], mask[2], mask[3]}
+	payload := bytes.Repeat([]byte("j"), 32<<10)
+	frame := []byte{0x82, 0xFE, byte(len(payload) >> 8), byte(len(payload)), mask[0], mask[1], mask[2], mask[3]}
 	for i, value := range payload {
 		frame = append(frame, value^mask[i&3])
 	}
-	if _, err := pipeWriter.Write(frame); err != nil {
-		t.Fatalf("write client WebSocket frame: %v", err)
+	for len(frame) > 0 {
+		n := min(len(frame), 1024)
+		if _, err := pipeWriter.Write(frame[:n]); err != nil {
+			t.Fatalf("write client WebSocket frame: %v", err)
+		}
+		frame = frame[n:]
+		time.Sleep(time.Millisecond)
 	}
-	echo := make([]byte, 4)
+	echo := make([]byte, len(payload)+4)
 	if _, err := io.ReadFull(response.Body, echo); err != nil {
 		t.Fatalf("read backend echo: %v", err)
 	}
-	if echo[0] != 0x82 || echo[1] != byte(len(payload)) || string(echo[2:]) != string(payload) {
-		t.Fatalf("backend echo frame=%x", echo)
+	if echo[0] != 0x82 || echo[1] != 126 ||
+		binary.BigEndian.Uint16(echo[2:4]) != uint16(len(payload)) ||
+		!bytes.Equal(echo[4:], payload) {
+		t.Fatalf("backend echo frame header=%x payload length=%d", echo[:4], len(echo)-4)
+	}
+	cancel()
+	select {
+	case <-backendClosed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("canceled H3 stream did not close the backend WebSocket")
 	}
 }

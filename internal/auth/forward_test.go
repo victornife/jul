@@ -156,6 +156,35 @@ func TestForwardAuthUsesGETForValidatedWebSocketExtendedConnect(t *testing.T) {
 	}
 }
 
+func TestForwardAuthDenialStopsValidatedWebSocketBeforeBackend(t *testing.T) {
+	var gotMethod string
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Header.Get("X-Forwarded-Method")
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer authServer.Close()
+
+	request := httptest.NewRequest(http.MethodConnect, "https://app.example/ws", nil)
+	request.Proto, request.ProtoMajor = "HTTP/2.0", 2
+	request.Header[":protocol"] = []string{"websocket"}
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	if !websocketx.ValidExtendedRequest(request) {
+		t.Fatal("test request is not a valid WebSocket Extended CONNECT")
+	}
+
+	backendCalled := false
+	authenticator := &Authenticator{forward: newForwardAuth(authServer.URL, nil, authServer.Client(), nil)}
+	handler := authenticator.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		backendCalled = true
+	}))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, websocketx.AsApplicationRequest(request))
+	if recorder.Code != http.StatusUnauthorized || gotMethod != http.MethodGet || backendCalled {
+		t.Fatalf("status=%d X-Forwarded-Method=%q backendCalled=%t, want 401/GET/not called",
+			recorder.Code, gotMethod, backendCalled)
+	}
+}
+
 func TestForwardAuthBodyReadError(t *testing.T) {
 	fa := newForwardAuth("http://auth.example", nil, &http.Client{
 		Transport: roundTripperFn(func(req *http.Request) (*http.Response, error) {

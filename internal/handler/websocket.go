@@ -353,7 +353,8 @@ func relayExtendedWebSocket(front, backend io.ReadWriteCloser) error {
 	select {
 	case second := <-done:
 		for _, err := range []error{first.err, second.err} {
-			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
+			if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrClosedPipe) &&
+				!errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 				return err
 			}
 		}

@@ -9,6 +9,7 @@ import (
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
@@ -39,8 +40,9 @@ func TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 		}
 		return
 	}
+	backendClosed := make(chan struct{})
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveWebSocketEcho(w, r)
+		serveWebSocketEcho(w, r, func() { close(backendClosed) })
 	}))
 	defer backend.Close()
 
@@ -169,31 +171,42 @@ func TestHTTP2ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
 	}
 
 	mask := [4]byte{1, 2, 3, 4}
-	payload := []byte("hi")
-	clientFrame := []byte{0x82, 0x80 | byte(len(payload)), mask[0], mask[1], mask[2], mask[3]}
+	payload := bytes.Repeat([]byte("j"), 32<<10)
+	clientFrame := []byte{0x82, 0xFE, byte(len(payload) >> 8), byte(len(payload)), mask[0], mask[1], mask[2], mask[3]}
 	for i, value := range payload {
 		clientFrame = append(clientFrame, value^mask[i&3])
 	}
-	if err := framer.WriteData(1, false, clientFrame); err != nil {
-		t.Fatalf("write client WebSocket frame: %v", err)
+	for len(clientFrame) > 0 {
+		n := min(len(clientFrame), 16<<10)
+		if err := framer.WriteData(1, false, clientFrame[:n]); err != nil {
+			t.Fatalf("write client WebSocket frame: %v", err)
+		}
+		clientFrame = clientFrame[n:]
 	}
-	for {
+	echo := make([]byte, 0, len(payload)+4)
+	for len(echo) < len(payload)+4 {
 		frame, err := framer.ReadFrame()
 		if err != nil {
 			t.Fatalf("read backend echo: %v; proxy logs: %s", err, proxyLogs.String())
 		}
 		data, ok := frame.(*http2.DataFrame)
-		if ok && data.StreamID == 1 {
-		}
 		if !ok || data.StreamID != 1 || len(data.Data()) == 0 {
 			continue
 		}
-		echo := data.Data()
-		if len(echo) != 4 || echo[0] != 0x82 || echo[1] != byte(len(payload)) ||
-			string(echo[2:]) != string(payload) {
-			t.Fatalf("backend echo frame=%x", echo)
-		}
-		break
+		echo = append(echo, data.Data()...)
+	}
+	if len(echo) != len(payload)+4 || echo[0] != 0x82 || echo[1] != 126 ||
+		binary.BigEndian.Uint16(echo[2:4]) != uint16(len(payload)) ||
+		!bytes.Equal(echo[4:], payload) {
+		t.Fatalf("backend echo frame header=%x payload length=%d", echo[:min(len(echo), 4)], len(echo)-4)
+	}
+	if err := framer.WriteRSTStream(1, http2.ErrCodeCancel); err != nil {
+		t.Fatalf("cancel Extended CONNECT stream: %v", err)
+	}
+	select {
+	case <-backendClosed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("canceled H2 stream did not close the backend WebSocket")
 	}
 }
 
@@ -228,7 +241,7 @@ func runtimeHTTP2ExtendedConnectEnabled() bool {
 	return false
 }
 
-func serveWebSocketEcho(w http.ResponseWriter, r *http.Request) {
+func serveWebSocketEcho(w http.ResponseWriter, r *http.Request, onClose ...func()) {
 	if r.Method != http.MethodGet ||
 		!strings.EqualFold(r.Header.Get("Upgrade"), "websocket") ||
 		!strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade") {
@@ -244,7 +257,12 @@ func serveWebSocketEcho(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "hijacking unavailable", http.StatusInternalServerError)
 		return
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+		if len(onClose) > 0 {
+			onClose[0]()
+		}
+	}()
 	_, _ = fmt.Fprintf(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: %s\r\n\r\n", accept)
 	if err := rw.Flush(); err != nil {
 		return
@@ -255,7 +273,13 @@ func serveWebSocketEcho(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		length := int(header[1] & 0x7f)
-		if length == 126 || length == 127 {
+		if length == 126 {
+			var extendedLength [2]byte
+			if _, err := io.ReadFull(rw, extendedLength[:]); err != nil {
+				return
+			}
+			length = int(binary.BigEndian.Uint16(extendedLength[:]))
+		} else if length == 127 {
 			return
 		}
 		payload := make([]byte, length)
@@ -273,7 +297,11 @@ func serveWebSocketEcho(w http.ResponseWriter, r *http.Request) {
 		} else if _, err := io.ReadFull(rw, payload); err != nil {
 			return
 		}
-		if _, err := rw.Write([]byte{header[0], byte(len(payload))}); err != nil {
+		if length >= 126 {
+			if _, err := rw.Write([]byte{header[0], 126, byte(length >> 8), byte(length)}); err != nil {
+				return
+			}
+		} else if _, err := rw.Write([]byte{header[0], byte(len(payload))}); err != nil {
 			return
 		}
 		if _, err := rw.Write(payload); err != nil {
