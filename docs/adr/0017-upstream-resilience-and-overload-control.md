@@ -538,7 +538,9 @@ so admission, per-backend filtering, retry, the breaker and the reason taxonomy 
 Inbound QUIC connections are counted by the listener's `onConn` hook and are a listener concern.
 `h3Conn.Close(ctx)` performs GOAWAY and drain bounded by `shutdown_timeout`, so a long-lived HTTP/3
 stream holds its admission slot and its `handlerGen` reference exactly as an HTTP/2 stream does.
-WebSocket over HTTP/3 is not applicable: HTTP/3 uses extended CONNECT, which Jul does not implement.
+Client-side WebSocket over HTTP/3 uses RFC 9220 Extended CONNECT and is supported through the
+HTTP/1.1 backend adapter tracked by #435. This does not add a native HTTP/3 backend transport;
+upstream HTTP/3 WebSocket support remains tracked separately by #742.
 
 **FastCGI and uWSGI become full pool members.** They are currently the least protected path in the data
 plane: `gofast.NewClientPool(factory, 0, 30s)` retains no clients and uWSGI dials per request, so

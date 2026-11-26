@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"jul/internal/clientaddr"
+	"jul/internal/websocketx"
 )
 
 func TestForwardAuthDecide(t *testing.T) {
@@ -37,6 +38,7 @@ func TestForwardAuthDecide(t *testing.T) {
 			w.Header().Set("X-Auth-Role", "admin")
 			w.WriteHeader(http.StatusOK)
 		}
+
 	}))
 	defer auth.Close()
 
@@ -124,6 +126,35 @@ func (e *errReadCloser) Close() error             { return nil }
 type roundTripperFn func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFn) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestForwardAuthUsesGETForValidatedWebSocketExtendedConnect(t *testing.T) {
+	var gotMethod string
+	var gotProtocolHeader bool
+	authServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Header.Get("X-Forwarded-Method")
+		gotProtocolHeader = len(r.Header[":protocol"]) > 0
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authServer.Close()
+
+	request := httptest.NewRequest(http.MethodConnect, "https://app.example/ws", nil)
+	request.Proto, request.ProtoMajor = "HTTP/2.0", 2
+	request.Header[":protocol"] = []string{"websocket"}
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	if !websocketx.ValidExtendedRequest(request) {
+		t.Fatal("test request is not a valid WebSocket Extended CONNECT")
+	}
+	request = websocketx.AsApplicationRequest(request)
+	fa := newForwardAuth(authServer.URL, nil, authServer.Client(), nil)
+	result, err := fa.decide(request.Context(), request)
+	if err != nil {
+		t.Fatalf("decide: %v", err)
+	}
+	if !result.ok || gotMethod != http.MethodGet || gotProtocolHeader {
+		t.Fatalf("auth result=%+v X-Forwarded-Method=%q :protocol forwarded=%t, want allowed GET without pseudo-headers",
+			result, gotMethod, gotProtocolHeader)
+	}
+}
 
 func TestForwardAuthBodyReadError(t *testing.T) {
 	fa := newForwardAuth("http://auth.example", nil, &http.Client{

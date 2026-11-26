@@ -1,0 +1,21 @@
+[global]
+log_level = "info"
+
+# HTTP/2 Extended CONNECT is advertised only when Jul starts with
+# GODEBUG=http2xconnect=1. The setting is process-wide and restart-bound.
+[[servers]]
+listen = "127.0.0.1:8443"
+server_names = ["localhost"]
+
+  [servers.tls]
+  enabled = true
+  cert = "testdata/tls/localhost.crt"
+  key = "testdata/tls/localhost.key"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/ws/" }
+  proxy_pass = "http://websocket_backend"
+
+[[upstreams]]
+name = "websocket_backend"
+servers = ["127.0.0.1:9000"]

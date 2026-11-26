@@ -162,8 +162,10 @@ func TestStatusAPI(t *testing.T) {
 		Admin:         config.AdminConfig{Enabled: true, Listen: "127.0.0.1:9090"},
 	}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
-		Metrics:    http.NewServeMux(),
-		LoadConfig: func() (*config.Config, error) { return cfg, nil },
+		Metrics:                     http.NewServeMux(),
+		LoadConfig:                  func() (*config.Config, error) { return cfg, nil },
+		HTTP2ExtendedConnectEnabled: true,
+		HTTP3Compiled:               true,
 	})
 
 	rr := httptest.NewRecorder()
@@ -184,6 +186,7 @@ func TestStatusAPI(t *testing.T) {
 		"Downstream send timeout",
 		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)", "ACME DNS-01 (RFC 2136)",
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
+		"WebSocket Extended CONNECT (HTTP/2)", "WebSocket Extended CONNECT (HTTP/3)",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
 		"Consistent-hash affinity",
 		"Prometheus metrics", "Access log", "Backend dial-failure accounting",
@@ -202,6 +205,62 @@ func TestStatusAPI(t *testing.T) {
 		if active[name] {
 			t.Errorf("capability %q = active, want inactive", name)
 		}
+	}
+}
+
+func TestStatusAPIWebSocketCapabilityPrerequisites(t *testing.T) {
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: ":8443", TLS: &config.TLSConfig{Enabled: true},
+		HTTP3: &config.HTTP3Config{Enabled: true},
+	}}}
+	for _, tt := range []struct {
+		name        string
+		h2Enabled   bool
+		h3Compiled  bool
+		h2Active    bool
+		h3Active    bool
+		h2DetailHas string
+		h3DetailHas string
+	}{
+		{
+			name: "startup switch disabled", h2DetailHas: "GODEBUG=http2xconnect=1",
+			h3Compiled: true, h3Active: true, h3DetailHas: "HTTP/3 listener",
+		},
+		{
+			name: "both available", h2Enabled: true, h3Compiled: true,
+			h2Active: true, h3Active: true, h2DetailHas: "restart required",
+			h3DetailHas: "advertised",
+		},
+		{
+			name: "HTTP/3 build tag missing", h2Enabled: true, h2Active: true,
+			h2DetailHas: "restart required", h3DetailHas: "-tags http3",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestServer(t, config.AdminConfig{}, Deps{
+				LoadConfig:                  func() (*config.Config, error) { return cfg, nil },
+				HTTP2ExtendedConnectEnabled: tt.h2Enabled,
+				HTTP3Compiled:               tt.h3Compiled,
+			})
+			recorder := httptest.NewRecorder()
+			s.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+			var rows []FeatureStatus
+			if err := json.Unmarshal(recorder.Body.Bytes(), &rows); err != nil {
+				t.Fatal(err)
+			}
+			got := make(map[string]FeatureStatus, len(rows))
+			for _, row := range rows {
+				got[row.Name] = row
+			}
+			h2 := got["WebSocket Extended CONNECT (HTTP/2)"]
+			h3 := got["WebSocket Extended CONNECT (HTTP/3)"]
+			if h2.Active != tt.h2Active || !strings.Contains(h2.Detail, tt.h2DetailHas) {
+				t.Errorf("HTTP/2 status=%+v", h2)
+			}
+			if h3.Active != tt.h3Active || !strings.Contains(h3.Detail, tt.h3DetailHas) {
+				t.Errorf("HTTP/3 status=%+v", h3)
+			}
+		})
 	}
 }
 

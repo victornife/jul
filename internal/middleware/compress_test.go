@@ -11,8 +11,11 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"jul/internal/websocketx"
 )
 
 func gzipMiddleware(t *testing.T, opts CompressionOptions) Middleware {
@@ -65,6 +68,7 @@ func TestCompressNegotiation(t *testing.T) {
 		{"no header", "", ""},
 		{"with params", "gzip;q=0.5, deflate;q=1.0", "gzip"},
 	}
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -93,6 +97,33 @@ func TestCompressNegotiation(t *testing.T) {
 				t.Fatalf("passthrough body mismatch")
 			}
 		})
+	}
+}
+
+func TestCompressBypassesExtendedWebSocketFrames(t *testing.T) {
+	mw := gzipMiddleware(t, CompressionOptions{MinSize: 1})
+	wire := &http.Request{
+		Method:     http.MethodConnect,
+		Proto:      "HTTP/2.0",
+		ProtoMajor: 2,
+		Header:     make(http.Header),
+		URL:        &url.URL{Path: "/ws"},
+		Host:       "example.test",
+	}
+	wire.Header[":protocol"] = []string{"websocket"}
+	wire.Header.Set("Sec-WebSocket-Version", "13")
+	wire.Header.Set("Accept-Encoding", "gzip")
+	req := websocketx.AsApplicationRequest(wire)
+	frame := []byte{0x81, 0x03, 'j', 'u', 'l'}
+	recorder := serveCompress(mw, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(frame)
+	}, req)
+	if !bytes.Equal(recorder.Body.Bytes(), frame) {
+		t.Fatalf("frame bytes changed: got %x want %x", recorder.Body.Bytes(), frame)
+	}
+	if recorder.Header().Get("Content-Encoding") != "" || recorder.Header().Get("Content-Type") != "" {
+		t.Fatalf("compression headers were added to tunnel: %v", recorder.Header())
 	}
 }
 

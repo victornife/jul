@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"jul/internal/respwriter"
+	"jul/internal/websocketx"
 )
 
 // CompressionOptions configures the Compression middleware. It is populated
@@ -139,6 +140,10 @@ func NewCompression(opts CompressionOptions) (Middleware, error) {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if websocketx.IsExtendedRequest(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			ep := c.negotiate(r)
 			if ep == nil {
 				// Client accepts none of our codings: never compress, but the

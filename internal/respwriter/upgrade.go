@@ -796,17 +796,19 @@ func (c *upgradedClientConn) Close() error {
 
 type upgradedBackConn struct {
 	io.ReadWriteCloser
-	ex          *ActiveExchange
-	isWebSocket bool
-
-	writeMu    sync.Mutex
-	c2sTracker wsFrameTracker
-	closing    atomic.Bool
-	closeSent  atomic.Bool
-	holdCh     chan struct{}
-	holdOnce   sync.Once
-	closedOnce sync.Once
-	closeErr   error
+	ex           *ActiveExchange
+	isWebSocket  bool
+	writeMu      sync.Mutex
+	c2sTracker   wsFrameTracker
+	closeCode    uint16
+	closePending bool
+	closing      atomic.Bool
+	closeSent    atomic.Bool
+	peerClose    atomic.Bool
+	holdCh       chan struct{}
+	holdOnce     sync.Once
+	closedOnce   sync.Once
+	closeErr     error
 }
 
 func (b *upgradedBackConn) Read(p []byte) (int, error) {
@@ -824,7 +826,6 @@ func (b *upgradedBackConn) Read(p []byte) (int, error) {
 func (b *upgradedBackConn) Write(p []byte) (int, error) {
 	b.writeMu.Lock()
 	defer b.writeMu.Unlock()
-
 	if b.closing.Load() {
 		// Discard post-retirement client-to-backend writes while allowing the
 		// client Read loop to continue reading the client's reciprocal Close frame.
@@ -832,9 +833,101 @@ func (b *upgradedBackConn) Write(p []byte) (int, error) {
 	}
 	if b.isWebSocket {
 		b.c2sTracker.expectMasked = true
-		b.c2sTracker.feed(p)
+		if b.closePending && !b.c2sTracker.atFrameBoundary() {
+			n := b.c2sTracker.bytesToNextBoundary(p)
+			if n == 0 {
+				previousClose := b.c2sTracker.sawCloseFrame
+				written, err := b.ReadWriteCloser.Write(p)
+				if written > 0 {
+					b.c2sTracker.feed(p[:written])
+				}
+				if !previousClose && b.c2sTracker.sawCloseFrame {
+					b.peerClose.Store(true)
+				}
+				return written, err
+			}
+			written, err := b.ReadWriteCloser.Write(p[:n])
+			previousClose := b.c2sTracker.sawCloseFrame
+			if written > 0 {
+				b.c2sTracker.feed(p[:written])
+			}
+			if !previousClose && b.c2sTracker.sawCloseFrame {
+				b.peerClose.Store(true)
+			}
+			if err != nil || written != n {
+				if err == nil {
+					err = io.ErrShortWrite
+				}
+				return written, err
+			}
+			if b.c2sTracker.atFrameBoundary() {
+				if err = b.writeMaskedCloseLocked(); err != nil {
+					return n, err
+				}
+			}
+			rest, restErr := b.ReadWriteCloser.Write(p[n:])
+			if rest > 0 {
+				previousClose = b.c2sTracker.sawCloseFrame
+				b.c2sTracker.feed(p[n : n+rest])
+				if !previousClose && b.c2sTracker.sawCloseFrame {
+					b.peerClose.Store(true)
+				}
+			}
+			return n + rest, restErr
+		}
+		if b.closePending && b.c2sTracker.atFrameBoundary() {
+			if err := b.writeMaskedCloseLocked(); err != nil {
+				return 0, err
+			}
+		}
+		previousClose := b.c2sTracker.sawCloseFrame
+		written, err := b.ReadWriteCloser.Write(p)
+		if written > 0 {
+			b.c2sTracker.feed(p[:written])
+		}
+		if !previousClose && b.c2sTracker.sawCloseFrame {
+			b.peerClose.Store(true)
+		}
+		return written, err
 	}
 	return b.ReadWriteCloser.Write(p)
+}
+
+func (b *upgradedBackConn) sendMaskedClose(code uint16, grace time.Time) {
+	b.writeMu.Lock()
+	defer b.writeMu.Unlock()
+	if !b.isWebSocket || b.closeSent.Load() {
+		return
+	}
+	b.closeCode = code
+	b.closePending = true
+	if c, ok := b.ReadWriteCloser.(interface{ SetWriteDeadline(time.Time) error }); ok {
+		_ = c.SetWriteDeadline(grace)
+	}
+	if b.c2sTracker.atFrameBoundary() {
+		_ = b.writeMaskedCloseLocked()
+	}
+}
+
+func (b *upgradedBackConn) writeMaskedCloseLocked() error {
+	if b.closeSent.Load() {
+		return nil
+	}
+	frame := buildMaskedCloseFrame(b.closeCode)
+	n, err := b.ReadWriteCloser.Write(frame)
+	if err == nil && n == len(frame) {
+		b.closeSent.Store(true)
+		b.closePending = false
+		return nil
+	}
+	if err == nil {
+		err = io.ErrShortWrite
+	}
+	return err
+}
+
+func (b *upgradedBackConn) peerCloseSeen() bool {
+	return b.peerClose.Load()
 }
 
 func (b *upgradedBackConn) sendMaskedCloseAndClose(code uint16, grace time.Time) {

@@ -1381,6 +1381,16 @@ answer is not "it is hard". It is feasible and it is currently not worth its cos
 > compression, `Recorder` and `respwriter` upgrade/hijack assumptions are re-derived *before* any
 > implementation, not after.
 
+### Addendum — WebSocket Extended CONNECT
+
+The preceding exclusion and re-entry trigger are superseded for client-side WebSocket Extended
+CONNECT by #435. Jul now routes validated HTTP/2 and HTTP/3 WebSocket requests with GET semantics,
+adapts them to an HTTP/1.1 backend Upgrade, and establishes the client-side success response only
+after the backend accepts the handshake. HTTP/2 capability advertisement remains an explicit,
+process-wide startup opt-in; HTTP/3 advertisement remains controlled by the compiled listener.
+Native HTTP/2 and HTTP/3 WebSocket upstream transports are still excluded here and tracked
+separately by #741 and #742.
+
 ### 18. Importer
 
 `internal/migrate/nginx` gains truthful classification, not translation ambition.

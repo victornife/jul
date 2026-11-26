@@ -1882,8 +1882,12 @@ Notes:
 - **Open the UDP port.** HTTP/3 listens on UDP at the same port as TCP.
 - **Shared certificates, including renewals.** Static-cert reload or ACME
   renewal applies to HTTP/3 automatically.
-- **WebSocket is not supported over HTTP/3.** Clients transparently fall back
-  to HTTP/2.
+- **WebSocket over HTTP/2 or HTTP/3 requires an HTTP/1.1 WebSocket backend.**
+  Jul supports Extended CONNECT from HTTP/2 and HTTP/3 clients to HTTP/1.1
+  backends; native HTTP/2 and HTTP/3 upstreams are not yet supported. HTTP/2
+  advertisement requires `GODEBUG=http2xconnect=1` before startup; HTTP/3
+  advertisement requires an `-tags http3` build and an enabled HTTP/3 listener.
+  See [HTTP/3 limitations](http3.md#known-limitations).
 - Settings are fixed at startup; changing them needs a restart.
 
 ---

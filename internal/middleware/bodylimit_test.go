@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"jul/internal/websocketx"
 )
 
 // TestBodyLimitRejectsByContentLength verifies that a request declaring a
@@ -28,6 +30,7 @@ func TestBodyLimitRejectsByContentLength(t *testing.T) {
 	if rec.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", rec.Code)
 	}
+
 	if reached {
 		t.Error("handler ran despite an oversized Content-Length")
 	}
@@ -69,5 +72,29 @@ func TestBodyLimitUnknownLengthStreamsToLimit(t *testing.T) {
 
 	if readErr == nil {
 		t.Error("expected a read error from MaxBytesReader on an oversized stream")
+	}
+
+}
+
+func TestBodyLimitDoesNotCapOpaqueWebSocketFrames(t *testing.T) {
+	called := false
+	h := BodyLimit(4)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		if r.Body == nil {
+			t.Fatal("WebSocket stream body was removed")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	r := httptest.NewRequest(http.MethodConnect, "https://example.test/ws", strings.NewReader("frames"))
+	r.Proto, r.ProtoMajor = "HTTP/2.0", 2
+	r.Header.Set(":protocol", "websocket")
+	r.Header.Set("Sec-WebSocket-Version", "13")
+	if !websocketx.ValidExtendedRequest(r) {
+		t.Fatal("test request is not a valid Extended CONNECT")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, websocketx.AsApplicationRequest(r))
+	if !called || rec.Code != http.StatusNoContent {
+		t.Fatalf("handler called=%t status=%d", called, rec.Code)
 	}
 }

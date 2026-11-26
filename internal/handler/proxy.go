@@ -28,6 +28,7 @@ import (
 	"jul/internal/respwriter"
 	"jul/internal/tracing"
 	"jul/internal/upstream"
+	"jul/internal/websocketx"
 )
 
 // NewProxy builds a reverse-proxy handler for a location. The target is a pool
@@ -141,6 +142,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 		transport:    transport,
 		admission:    pool.Admission(),
 		retire:       make(chan struct{}),
+		logger:       log,
 	}, nil
 }
 
@@ -165,6 +167,7 @@ type proxyHandler struct {
 	// belong to whichever generation parked them.
 	retire     chan struct{}
 	retireOnce sync.Once
+	logger     *slog.Logger
 }
 
 // ServeHTTP admits the request before any upstream work happens, then delegates
@@ -195,6 +198,10 @@ func (h *proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w, r, _, releaseEx = reg.Admit(w, r, respwriter.EntryCoord{GenID: genID})
 			defer releaseEx()
 		}
+	}
+	if websocketx.IsExtendedRequest(r) {
+		h.serveExtendedWebSocket(w, r)
+		return
 	}
 	h.ReverseProxy.ServeHTTP(w, r)
 }

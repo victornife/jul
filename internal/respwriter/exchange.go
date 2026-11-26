@@ -824,16 +824,17 @@ type ActiveExchange struct {
 	rawH1Conn  net.Conn
 	controller *http.ResponseController
 
-	mu            sync.Mutex
-	retiring      bool
-	abortNow      bool
-	graceDeadline time.Time
-	boundDeadline time.Time
-	closeCode     uint16
-	wroteHeader   bool
-	statusCode    int
-	hijacked      bool
-	upgraded      *upgradedSession
+	mu             sync.Mutex
+	retiring       bool
+	abortNow       bool
+	graceDeadline  time.Time
+	boundDeadline  time.Time
+	closeCode      uint16
+	wroteHeader    bool
+	statusCode     int
+	hijacked       bool
+	upgraded       *upgradedSession
+	extendedTunnel *extendedTunnel
 	// upgradedHandshake is the upgraded session's clean-handshake flag.
 	upgradedHandshake atomic.Pointer[atomic.Bool]
 	upgradedBack      *upgradedBackConn
@@ -854,7 +855,7 @@ func (ex *ActiveExchange) isUpgraded() bool {
 	}
 	ex.mu.Lock()
 	defer ex.mu.Unlock()
-	return ex.hijacked || ex.upgraded != nil || ex.reqUpgrade != ""
+	return ex.hijacked || ex.upgraded != nil || ex.extendedTunnel != nil || ex.reqUpgrade != ""
 }
 
 func (ex *ActiveExchange) hasWrittenHeader() bool {
@@ -942,6 +943,7 @@ func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, imm
 	effBound := ex.boundDeadline
 	effCode := ex.closeCode
 	up := ex.upgraded
+	extended := ex.extendedTunnel
 	hijacked := ex.hijacked
 	for _, b := range batches {
 		if b != nil {
@@ -953,6 +955,11 @@ func (ex *ActiveExchange) armRetirement(grace, bound time.Time, code uint16, imm
 
 	if up != nil {
 		up.initiateClose(effGrace, effBound, effCode)
+		return
+	}
+	if extended != nil {
+		extended.initiateClose(effGrace, effBound, effCode)
+		go extended.drain(ex, effGrace, effBound)
 		return
 	}
 	if !hijacked {
@@ -1000,7 +1007,7 @@ func (ex *ActiveExchange) markClosed() {
 		ex.mu.Lock()
 		cancel := ex.cancel
 		ex.cancel, ex.rawH1Conn, ex.controller = nil, nil, nil
-		ex.upgraded, ex.upgradedBack = nil, nil
+		ex.upgraded, ex.upgradedBack, ex.extendedTunnel = nil, nil, nil
 		ex.mu.Unlock()
 		cancel()
 		ex.reg.mu.Lock()
@@ -1152,4 +1159,34 @@ func AttachUpgradedBackend(ctx context.Context, back io.ReadWriteCloser, resHead
 	}
 	ex.mu.Unlock()
 	return wb
+}
+
+// AttachExtendedStream registers the HTTP/2 or HTTP/3 WebSocket stream with
+// the exchange lifecycle and wraps its frontend writer for frame-safe drains.
+func AttachExtendedStream(ctx context.Context, front, back io.ReadWriteCloser) io.ReadWriteCloser {
+	ex := ActiveExchangeFrom(ctx)
+	if ex == nil {
+		return front
+	}
+	tunnel := &extendedTunnel{
+		ex: ex, front: front, back: back,
+		done: make(chan struct{}), changed: make(chan struct{}, 1),
+	}
+	tunnel.frontFrames.expectMasked = false
+	wrapped := &extendedTunnelFrontend{tunnel: tunnel}
+	ex.mu.Lock()
+	if ex.closed.Load() {
+		ex.mu.Unlock()
+		return front
+	}
+	ex.extendedTunnel = tunnel
+	handshake := &atomic.Bool{}
+	ex.upgradedHandshake.Store(handshake)
+	retiring, grace, bound, code := ex.retiring, ex.graceDeadline, ex.boundDeadline, ex.closeCode
+	ex.mu.Unlock()
+	if retiring {
+		tunnel.initiateClose(grace, bound, code)
+		go tunnel.drain(ex, grace, bound)
+	}
+	return wrapped
 }

@@ -309,11 +309,17 @@ special configuration:
 Both are pinned by passthrough conformance tests
 (`TestProxyWebSocketPassthrough` drives a real WebSocket echo with text and
 binary frames; `TestProxyServerSentEventsStreaming` proves events are streamed,
-not buffered). WebSocket upgrades use the **HTTP/1.1 `Upgrade` mechanism only**:
-WebSocket over HTTP/2 and HTTP/3 uses extended `CONNECT` (RFC 8441 / RFC 9220),
-which Jul.IA does not implement. Browsers transparently open an HTTP/1.1
-connection for the WebSocket, so nothing is unreachable — see
-[HTTP/3 (QUIC)](../docs/configuration.md#http3-quic).
+not buffered). WebSocket upgrades use HTTP/1.1 `Upgrade` on HTTP/1.1 frontends
+and RFC 8441/RFC 9220 Extended CONNECT on HTTP/2 and HTTP/3 frontends. For
+Extended CONNECT, Jul routes and authorizes the validated WebSocket request
+with GET semantics while retaining CONNECT on the wire, and reports success
+only after an HTTP/1.1 backend accepts the WebSocket handshake. Native HTTP/2
+and HTTP/3 upstreams are not yet supported. HTTP/2 advertisement is disabled
+unless `GODEBUG=http2xconnect=1` is set before startup; the setting is
+process-wide and requires a restart to change. See
+[HTTP/3 (QUIC)](http3.md#known-limitations). The
+[runnable configuration](../testdata/websocket-extended-connect.toml) shows a
+TLS frontend and an HTTP/1.1 WebSocket backend route.
 
 Both also work with `cache = true` on the same location. An upgrade request
 bypasses the cache before lookup and reaches the handler with the untouched

@@ -1035,8 +1035,9 @@ implements `Hijack` and returns an error still makes `w.(http.Hijacker)` succeed
 and handlers branch on the assertion rather than the error. On **HTTP/2 and
 HTTP/3 there is no connection to hijack**, and the writer correctly reports that
 by not implementing `http.Hijacker` at all; `http.NewResponseController(w).Hijack()`
-returns `http.ErrNotSupported`. WebSocket over HTTP/2 (RFC 8441 extended
-`CONNECT`) is not supported by the reverse proxy and is unrelated to caching.
+returns `http.ErrNotSupported`. Valid WebSocket Extended CONNECT requests use a
+full-duplex stream adapter instead of hijacking; the cache bypasses them before
+lookup or storage.
 
 The same guarantee holds through the whole middleware chain — metrics, access
 log, tracing and compression all use the same wrapper — so composition does not

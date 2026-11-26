@@ -11,6 +11,10 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Add WebSocket Extended CONNECT over HTTP/2 and HTTP/3 frontends, adapting to
+  HTTP/1.1 WebSocket backends. HTTP/2 advertisement remains a process-wide
+  startup opt-in; native HTTP/2 and HTTP/3 upstream transports remain separate
+  follow-up work (#435, #741, #742).
 - Add Beta ACME DNS-01 issuance and renewal using RFC 2136/TSIG, including
   wildcard plus apex certificates, automatic ECDSA/RSA selection, guarded DNS
   egress, listener-scoped SNI, Full Console creation/status and an mTLS example

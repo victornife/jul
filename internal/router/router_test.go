@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -685,5 +686,79 @@ func TestActionFallbackWhenUnregistered(t *testing.T) {
 	// Unregistered static action falls back to 501.
 	if rec := do(t, r, "127.0.0.1:80", "h", "/page"); rec.Code != http.StatusNotImplemented {
 		t.Fatalf("unregistered action status = %d, want 501", rec.Code)
+	}
+}
+
+func TestWebSocketExtendedConnectUsesGETRouteAndRejectsOtherConnects(t *testing.T) {
+	calls := 0
+	cfg := &config.Config{Servers: []config.ServerConfig{{
+		Listen: "127.0.0.1:80",
+		Locations: []config.LocationConfig{
+			{Match: config.MatchConfig{Type: "prefix", Path: "/ws", Methods: []string{"CONNECT"}}, ProxyPass: "http://backend"},
+			{Match: config.MatchConfig{Type: "prefix", Path: "/ws", Methods: []string{"GET"}}, ProxyPass: "http://backend"},
+		},
+	}}}
+	proxy := func(_ config.ServerConfig, loc config.LocationConfig) (http.Handler, error) {
+		method := loc.Match.Methods[0]
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.Header().Set("X-Route-Method", method)
+			w.Header().Set("X-Handler-Method", r.Method)
+			w.WriteHeader(http.StatusNoContent)
+		}), nil
+	}
+	r, err := New(cfg, map[string]Builder{ActionProxy: proxy}, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &http.Request{
+		Method: http.MethodConnect, URL: &url.URL{Path: "/ws"}, Host: "app.example",
+		Header: make(http.Header), Proto: "HTTP/2.0", ProtoMajor: 2,
+	}
+	request.Header.Set(":protocol", "websocket")
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	rec := httptest.NewRecorder()
+	r.For("127.0.0.1:80").ServeHTTP(rec, request)
+	if rec.Code != http.StatusNoContent || rec.Header().Get("X-Route-Method") != http.MethodGet || rec.Header().Get("X-Handler-Method") != http.MethodGet {
+		t.Fatalf("Extended CONNECT selected route=%q handler method=%q status=%d", rec.Header().Get("X-Route-Method"), rec.Header().Get("X-Handler-Method"), rec.Code)
+	}
+	if request.Method != http.MethodConnect {
+		t.Fatalf("wire request method mutated to %q", request.Method)
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls = %d, want 1", calls)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		protocol   string
+		version    string
+		wantStatus int
+	}{
+		{"plain CONNECT", "", "13", http.StatusBadRequest},
+		{"unsupported extended protocol", "webtransport", "13", http.StatusNotImplemented},
+		{"malformed WebSocket handshake", "websocket", "", http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bad := &http.Request{
+				Method: http.MethodConnect, URL: &url.URL{Path: "/ws"}, Host: "app.example",
+				Header: make(http.Header), Proto: "HTTP/2.0", ProtoMajor: 2,
+			}
+			if tc.protocol != "" {
+				bad.Header.Set(":protocol", tc.protocol)
+			}
+			if tc.version != "" {
+				bad.Header.Set("Sec-WebSocket-Version", tc.version)
+			}
+			before := calls
+			rec := httptest.NewRecorder()
+			r.For("127.0.0.1:80").ServeHTTP(rec, bad)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.wantStatus)
+			}
+			if calls != before {
+				t.Fatal("invalid CONNECT reached an application route")
+			}
+		})
 	}
 }

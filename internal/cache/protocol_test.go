@@ -16,6 +16,7 @@ import (
 
 	"jul/internal/config"
 	"jul/internal/respwriter"
+	"jul/internal/websocketx"
 )
 
 type sendTimeoutCapture struct {
@@ -179,6 +180,19 @@ func TestUpgradeDetectionRequiresBothHeaders(t *testing.T) {
 				t.Fatalf("isUpgradeRequest = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExtendedWebSocketConnectBypassesCacheWithoutHopHeaders(t *testing.T) {
+	r := httptest.NewRequest(http.MethodConnect, "https://example.test/ws", nil)
+	r.Proto, r.ProtoMajor = "HTTP/2.0", 2
+	r.Header.Set(":protocol", "websocket")
+	r.Header.Set("Sec-WebSocket-Version", "13")
+	if !websocketx.ValidExtendedRequest(r) {
+		t.Fatal("test request is not a valid Extended CONNECT")
+	}
+	if !isUpgradeRequest(websocketx.AsApplicationRequest(r)) {
+		t.Fatal("Extended CONNECT was not classified as an upgrade for cache bypass")
 	}
 }
 
