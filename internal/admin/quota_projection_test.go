@@ -29,6 +29,9 @@ func TestQuotaProjectionShowsEffectiveBindingsWithoutPrincipalValues(t *testing.
 						PerCaller: config.QuotaLimitConfig{Rate: 10, Burst: 12},
 					},
 				},
+				Pools: map[string]config.QuotaPoolConfig{
+					"office": {Class: "public", CIDRs: []string{"192.0.2.0/24"}},
+				},
 				Operations: map[string]config.QuotaOperationConfig{
 					"export": {
 						Shared:    config.QuotaLimitConfig{Rate: 5, Burst: 8},
@@ -60,6 +63,10 @@ func TestQuotaProjectionShowsEffectiveBindingsWithoutPrincipalValues(t *testing.
 	}
 	if len(policies[0].Operations) != 1 || policies[0].Operations[0].Name != "export" {
 		t.Fatalf("operation projection = %+v", policies[0].Operations)
+	}
+	if len(policies[0].Pools) != 1 || policies[0].Pools[0].Name != "office" ||
+		policies[0].Pools[0].CIDRs[0] != "192.0.2.0/24" {
+		t.Fatalf("pool projection = %+v", policies[0].Pools)
 	}
 
 	encoded, err := json.Marshal(projectIssue81TrafficControls(cfg))
