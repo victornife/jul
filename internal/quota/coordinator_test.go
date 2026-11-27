@@ -4,6 +4,7 @@
 package quota
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 	"sync"
@@ -158,6 +159,28 @@ func TestSubnanosecondRefillDoesNotExceedBurst(t *testing.T) {
 	}
 }
 
+func TestFractionalRefillRetry(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := Policy{
+		Application: Limit{Rate: 3, Burst: 1},
+		Classes: map[string]Class{
+			"public": {Shared: Limit{Rate: 3, Burst: 1}, PerCaller: Limit{Rate: 3, Burst: 1}},
+		},
+	}
+	c := testCoordinator(t, policy, 1, &now)
+	if !admit(t, c, "public", "alice").Allowed {
+		t.Fatal("first request denied")
+	}
+	now = now.Add(333_333_333 * time.Nanosecond)
+	if got := admit(t, c, "public", "alice"); got.Allowed || got.RetryAfter != time.Nanosecond {
+		t.Fatalf("fractional refill decision = %+v", got)
+	}
+	now = now.Add(time.Nanosecond)
+	if got := admit(t, c, "public", "alice"); !got.Allowed {
+		t.Fatalf("request denied after retry interval: %+v", got)
+	}
+}
+
 func TestCallerCapacityPreservesActiveBuckets(t *testing.T) {
 	now := time.Unix(100, 0)
 	c := testCoordinator(t, testPolicy(), 1, &now)
@@ -206,6 +229,37 @@ func TestCallerCapacityFindsRefilledEntryBeyondOldest(t *testing.T) {
 	}
 	if got := admit(t, c, "public", "alice"); got.Allowed || got.Reason != ReasonCaller {
 		t.Fatalf("partially refilled oldest caller was reset: %+v", got)
+	}
+}
+
+func TestSharedDenialPreservesEvictionCandidate(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := Policy{
+		Application: Limit{Rate: 1, Burst: 1},
+		Classes: map[string]Class{
+			"public": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 2, Burst: 1}},
+		},
+	}
+	c := testCoordinator(t, policy, 1, &now)
+	if !admit(t, c, "public", "alice").Allowed {
+		t.Fatal("initial request denied")
+	}
+	now = now.Add(500 * time.Millisecond)
+	if got := admit(t, c, "public", "bob"); got.Allowed || got.Reason != ReasonApplication {
+		t.Fatalf("expected shared-budget denial: %+v", got)
+	}
+	if len(c.classes["public"].callers) != 1 || c.classes["public"].order.Len() != 1 {
+		t.Fatal("shared-budget denial changed the caller store")
+	}
+	if c.classes["public"].callers[sha256.Sum256([]byte("alice"))] == nil {
+		t.Fatal("shared-budget denial removed the eviction candidate")
+	}
+	if got := admit(t, c, "public", "carol"); got.Allowed || got.Reason != ReasonApplication {
+		t.Fatalf("refilled candidate lost after denied admission: %+v", got)
+	}
+	now = now.Add(500 * time.Millisecond)
+	if got := admit(t, c, "public", "bob"); !got.Allowed {
+		t.Fatalf("refilled candidate was not available for later admission: %+v", got)
 	}
 }
 
