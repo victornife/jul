@@ -394,6 +394,224 @@ func TestWebSocketHTTP3CloseCancelsPendingDial(t *testing.T) {
 	}
 }
 
+func TestWebSocketHTTP3PendingDialWaiters(t *testing.T) {
+	dialCtx, cancelDial := context.WithCancel(context.Background())
+	connection := &websocketHTTP3Connection{
+		address:    "backend",
+		ready:      make(chan struct{}),
+		dialCancel: cancelDial,
+	}
+	transport := &websocketHTTP3Transport{
+		connections: map[string]*websocketHTTP3Connection{"backend": connection},
+	}
+	defer transport.Close()
+
+	waitCtx, cancelWait := context.WithCancelCause(context.Background())
+	waitErr := errors.New("waiting request canceled")
+	cancelWait(waitErr)
+	if _, err := transport.connection(waitCtx, "backend"); !errors.Is(err, waitErr) {
+		t.Fatalf("waiting request error = %v, want %v", err, waitErr)
+	}
+	if dialCtx.Err() != nil {
+		t.Fatal("canceling a waiter canceled the shared dial")
+	}
+
+	dialErr := errors.New("backend setup failed")
+	connection.err = dialErr
+	close(connection.ready)
+	if _, err := transport.connection(context.Background(), "backend"); !errors.Is(err, dialErr) {
+		t.Fatalf("shared dial error = %v, want %v", err, dialErr)
+	}
+}
+
+func TestWebSocketHTTP3UpstreamStreamLimitCancellation(t *testing.T) {
+	transport, address := newHTTP3UpstreamTestTransport(t, 1, http.HandlerFunc(echoHTTP3WebSocket))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	response, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("healthy sibling status = %d, want 200", response.StatusCode)
+	}
+
+	waitCtx, cancelWait := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancelWait()
+	_, err = transport.RoundTrip(http3WebSocketRequest(waitCtx, address, "/ws"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("blocked stream error = %v, want deadline exceeded", err)
+	}
+	transport.mu.Lock()
+	connection := transport.connections[address]
+	active := 0
+	if connection != nil {
+		active = connection.active
+	}
+	transport.mu.Unlock()
+	if connection == nil || active != 1 {
+		t.Fatalf("active streams after canceled open = %d, want the healthy sibling only", active)
+	}
+	stream, ok := response.Body.(io.ReadWriteCloser)
+	if !ok {
+		t.Fatal("WebSocket response is not duplex")
+	}
+	echoWebSocketBytes(t, stream, stream)
+}
+
+func TestWebSocketHTTP3FailedHandshakesPreserveSibling(t *testing.T) {
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	defer close(release)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/blocked" {
+			close(blocked)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+			}
+			return
+		}
+		echoHTTP3WebSocket(w, r)
+	})
+	transport, address := newHTTP3UpstreamTestTransport(t, 0, handler)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	response, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("healthy sibling status = %d, want 200", response.StatusCode)
+	}
+
+	invalid := http3WebSocketRequest(ctx, address, "/ws")
+	invalid.Header.Set("X-Invalid", "bad\x00value")
+	if _, err := transport.RoundTrip(invalid); err == nil || !strings.Contains(err.Error(), "invalid HTTP header") {
+		t.Fatalf("invalid-header handshake error = %v", err)
+	}
+
+	transport.readTimeout = 2 * time.Second
+	result := make(chan error, 1)
+	go func() {
+		_, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/blocked"))
+		result <- err
+	}()
+	select {
+	case <-blocked:
+	case err := <-result:
+		t.Fatalf("handshake finished before reaching the backend: %v", err)
+	case <-ctx.Done():
+		t.Fatal("backend never received the blocked handshake")
+	}
+	select {
+	case err := <-result:
+		var timeout net.Error
+		if !errors.As(err, &timeout) || !timeout.Timeout() {
+			t.Fatalf("blocked handshake error = %v, want a read timeout", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("blocked handshake did not time out")
+	}
+
+	transport.mu.Lock()
+	connection := transport.connections[address]
+	active := 0
+	if connection != nil {
+		active = connection.active
+	}
+	transport.mu.Unlock()
+	if connection == nil || active != 1 {
+		t.Fatalf("active streams after failed handshakes = %d, want the healthy sibling only", active)
+	}
+	stream, ok := response.Body.(io.ReadWriteCloser)
+	if !ok {
+		t.Fatal("WebSocket response is not duplex")
+	}
+	echoWebSocketBytes(t, stream, stream)
+}
+
+func TestWebSocketHTTP3IdleConnectionLifecycle(t *testing.T) {
+	for _, retire := range []bool{false, true} {
+		name := "eviction permits reconnect"
+		if retire {
+			name = "retirement closes idle connection"
+		}
+		t.Run(name, func(t *testing.T) {
+			transport, address := newHTTP3UpstreamTestTransport(t, 0, http.HandlerFunc(echoHTTP3WebSocket))
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			response, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK {
+				response.Body.Close()
+				t.Fatalf("initial WebSocket status = %d, want 200", response.StatusCode)
+			}
+			if err := response.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
+			transport.mu.Lock()
+			connection := transport.connections[address]
+			var active int
+			var timer *time.Timer
+			if connection != nil {
+				active = connection.active
+				timer = connection.idleTimer
+			}
+			if !retire && timer != nil {
+				timer.Stop()
+			}
+			transport.mu.Unlock()
+			if connection == nil || active != 0 || timer == nil {
+				t.Fatalf("released connection has active=%d idle timer=%v", active, timer)
+			}
+
+			if retire {
+				if err := transport.Close(); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				transport.closeIdle(connection)
+			}
+			select {
+			case <-connection.conn.Context().Done():
+			case <-ctx.Done():
+				t.Fatal("idle QUIC connection was not closed")
+			}
+			response, err = transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws"))
+			if retire {
+				if err == nil {
+					response.Body.Close()
+					t.Fatal("retired transport accepted a new stream")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("reconnect after idle eviction: %v", err)
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				t.Fatalf("replacement WebSocket status = %d, want 200", response.StatusCode)
+			}
+			transport.mu.Lock()
+			replacement := transport.connections[address]
+			transport.mu.Unlock()
+			if replacement == nil || replacement == connection {
+				t.Fatal("idle eviction did not establish a replacement connection")
+			}
+			stream, ok := response.Body.(io.ReadWriteCloser)
+			if !ok {
+				t.Fatal("replacement WebSocket response is not duplex")
+			}
+			echoWebSocketBytes(t, stream, stream)
+		})
+	}
+}
+
 func TestWebSocketHTTP3UpstreamBoundsBlockedUDP(t *testing.T) {
 	packetConn, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
@@ -488,6 +706,63 @@ func TestWebSocketHTTP3UpstreamRejectsUntrustedBackend(t *testing.T) {
 	if recorder.Code == http.StatusSwitchingProtocols || recorder.Code == http.StatusOK {
 		t.Fatalf("untrusted backend returned success status %d", recorder.Code)
 	}
+}
+
+func newHTTP3UpstreamTestTransport(t *testing.T, maxStreams int64, handler http.Handler) (*websocketHTTP3Transport, string) {
+	t.Helper()
+	pki := newBackendPKI(t)
+	cert := pki.issue(t, "inventory", []string{"inventory.internal"}, nil)
+	roots := x509.NewCertPool()
+	roots.AddCert(pki.cert)
+	packetConn, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http3.Server{
+		TLSConfig:  http3.ConfigureTLSConfig(&tls.Config{Certificates: []tls.Certificate{cert}}),
+		QUICConfig: &quic.Config{MaxIncomingStreams: maxStreams},
+		Handler:    handler,
+	}
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(packetConn) }()
+	transport := &websocketHTTP3Transport{
+		connections:    make(map[string]*websocketHTTP3Connection),
+		tlsConfig:      &tls.Config{RootCAs: roots, ServerName: "inventory.internal", NextProtos: []string{http3.NextProtoH3}},
+		connectTimeout: 5 * time.Second,
+	}
+	t.Cleanup(func() {
+		if err := transport.Close(); err != nil {
+			t.Errorf("close HTTP/3 transport: %v", err)
+		}
+		if err := server.Close(); err != nil {
+			t.Errorf("close HTTP/3 backend: %v", err)
+		}
+		_ = packetConn.Close()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("HTTP/3 backend did not stop")
+		}
+	})
+	return transport, packetConn.LocalAddr().String()
+}
+
+func http3WebSocketRequest(ctx context.Context, address, path string) *http.Request {
+	request := (&http.Request{
+		Method: http.MethodConnect,
+		Proto:  "websocket",
+		URL:    &url.URL{Scheme: "https", Host: address, Path: path},
+		Host:   address,
+		Header: make(http.Header),
+	}).WithContext(ctx)
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	return request
+}
+
+func echoHTTP3WebSocket(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.(http.Flusher).Flush()
+	_, _ = io.Copy(w, r.Body)
 }
 
 func newWebSocketHTTP3Upstream(t *testing.T) (http.Handler, *backendPKI, chan string, func()) {

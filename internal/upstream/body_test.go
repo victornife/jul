@@ -236,6 +236,8 @@ func TestDoReleasesSuccessfulNonRetainedAttempt(t *testing.T) {
 func TestOwedBodyLength(t *testing.T) {
 	get := &http.Request{Method: http.MethodGet}
 	head := &http.Request{Method: http.MethodHead}
+	websocket := &http.Request{Method: http.MethodConnect, Proto: "websocket"}
+	connect := &http.Request{Method: http.MethodConnect, Proto: "HTTP/2.0"}
 	for _, tc := range []struct {
 		name string
 		resp *http.Response
@@ -248,6 +250,10 @@ func TestOwedBodyLength(t *testing.T) {
 		{"204", &http.Response{Request: get, StatusCode: 204, ContentLength: 5}, -1},
 		{"304", &http.Response{Request: get, StatusCode: 304, ContentLength: 21}, -1},
 		{"101", &http.Response{Request: get, StatusCode: 101, ContentLength: 0}, -1},
+		{"accepted WebSocket", &http.Response{Request: websocket, StatusCode: 200, ContentLength: 0}, -1},
+		{"accepted WebSocket 299", &http.Response{Request: websocket, StatusCode: 299, ContentLength: 21}, -1},
+		{"rejected WebSocket", &http.Response{Request: websocket, StatusCode: 403, ContentLength: 21}, 21},
+		{"ordinary CONNECT", &http.Response{Request: connect, StatusCode: 200, ContentLength: 21}, 21},
 		{"no request", &http.Response{StatusCode: 200, ContentLength: 7}, 7},
 	} {
 		if got := OwedBodyLength(tc.resp); got != tc.want {

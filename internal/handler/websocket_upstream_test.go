@@ -11,6 +11,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"jul/internal/config"
+	"jul/internal/upstream"
 )
 
 type selectorTestRoundTripper struct {
@@ -91,13 +94,15 @@ func TestWebSocketUpstreamSelectorAdaptsHTTP1Handshake(t *testing.T) {
 
 func TestWebSocketUpstreamSelectorRejectsInvalidH3Handshake(t *testing.T) {
 	tests := []struct {
-		name       string
-		key        string
-		protocol   string
-		duplexBody bool
+		name         string
+		key          string
+		protocol     string
+		duplicateKey bool
+		duplexBody   bool
 	}{
 		{name: "unoffered protocol", key: "dGhlIHNhbXBsZSBub25jZQ==", protocol: "other", duplexBody: true},
 		{name: "invalid key", key: "bad", duplexBody: true},
+		{name: "duplicate key", key: "dGhlIHNhbXBsZSBub25jZQ==", duplicateKey: true, duplexBody: true},
 		{name: "non-duplex response", key: "dGhlIHNhbXBsZSBub25jZQ=="},
 	}
 	for _, tt := range tests {
@@ -124,6 +129,9 @@ func TestWebSocketUpstreamSelectorRejectsInvalidH3Handshake(t *testing.T) {
 			request.Header.Set("Connection", "Upgrade")
 			request.Header.Set("Upgrade", "websocket")
 			request.Header.Set("Sec-WebSocket-Key", tt.key)
+			if tt.duplicateKey {
+				request.Header.Add("Sec-WebSocket-Key", tt.key)
+			}
 			request.Header.Set("Sec-WebSocket-Protocol", "chat")
 
 			if _, err := selector.RoundTrip(request); err == nil {
@@ -165,5 +173,49 @@ func TestWebSocketUpstreamSelectorPropagatesTransportError(t *testing.T) {
 	_, err := selector.RoundTrip(request)
 	if !errors.Is(err, want) {
 		t.Fatalf("RoundTrip error = %v, want %v", err, want)
+	}
+}
+
+func TestWebSocketUpstreamUnsupportedConnectIsHealthNeutral(t *testing.T) {
+	pool, err := upstream.NewPool(config.UpstreamConfig{
+		Name:     "backend",
+		Strategy: "round_robin",
+		Servers: []config.UpstreamServer{
+			{Address: "127.0.0.1:1", Weight: 1},
+			{Address: "127.0.0.1:2", Weight: 1},
+		},
+		MaxFails: 1,
+	}, "https")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	attempts, dialFailures := 0, 0
+	transport := &balancingTransport{
+		pool: pool,
+		base: websocketRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			attempts++
+			return nil, errExtendedConnectUnsupported
+		}),
+		tlsBackend:    true,
+		retryOverride: upstream.RetryOverride{Attempts: 3},
+		dialFailure:   func(string) { dialFailures++ },
+	}
+	request := httptest.NewRequest(http.MethodGet, "https://frontend.internal/ws", nil)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	_, err = transport.RoundTrip(request)
+	if !errors.Is(err, errExtendedConnectUnsupported) {
+		t.Fatalf("RoundTrip error = %v, want Extended CONNECT refusal", err)
+	}
+	if attempts != 1 || dialFailures != 0 {
+		t.Fatalf("attempts=%d dial failures=%d, want one attempt and no dial failure", attempts, dialFailures)
+	}
+	for _, backend := range pool.Backends() {
+		if !backend.Available() || backend.FailCount() != 0 || backend.Inflight() != 0 {
+			t.Fatalf("backend state after refusal: available=%t failures=%d inflight=%d",
+				backend.Available(), backend.FailCount(), backend.Inflight())
+		}
 	}
 }

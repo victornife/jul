@@ -28,6 +28,10 @@ func TestValidateWebSocketUpstreamProtocol(t *testing.T) {
 			want: "http3 requires an https:// proxy_pass",
 		},
 		{
+			name: "HTTP3 accepts HTTPS",
+			loc:  LocationConfig{ProxyPass: "https://inventory", WebSocketUpstreamProtocol: "http3"},
+		},
+		{
 			name: "HTTP3 requires a proxy route",
 			loc:  LocationConfig{WebSocketUpstreamProtocol: "http3"},
 			want: "applies only to HTTP proxy routes",
