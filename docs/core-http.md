@@ -488,6 +488,7 @@ Labels fall into three classes by what bounds them:
 | `jul_storage_write_health` | `sink`, `state` | fixed (`cache`/`access_log`/`audit_log`) × fixed (`unknown`/`ok`/`failing`) |
 | `jul_http_response_compressed_total` | `encoding` | fixed content codings |
 | `jul_http_ratelimited_total` | `key` | fixed (`ip`/`header`/`jwt`) |
+| `jul_quota_decisions_total` | `mode`, `reason` | fixed (`enforce`/`observe`/`unknown`) × fixed quota denial reasons |
 | `jul_http_backend_dial_failures_total` | `reason` | fixed (`timeout`/`refused`/`no_backend`/`other`) |
 | `jul_client_addr_derivations_total` | `source`, `result` | fixed (3 × 4 enums, never an address) |
 | `jul_auth_decisions_total` | `method`, `result` | fixed gate × `allow`/`deny` |

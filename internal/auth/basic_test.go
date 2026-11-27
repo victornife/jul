@@ -59,7 +59,7 @@ func TestBasicAuthCheck(t *testing.T) {
 			if tt.setCreds {
 				r.SetBasicAuth(tt.user, tt.pass)
 			}
-			if got := b.check(r); got != tt.want {
+			if _, got := b.check(r); got != tt.want {
 				t.Errorf("check() = %v, want %v", got, tt.want)
 			}
 		})
@@ -75,7 +75,7 @@ func TestBasicAuthRejectsDuplicateAuthorization(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.SetBasicAuth("alice", "s3cret")
 	r.Header.Add("Authorization", "Basic other")
-	if b.check(r) {
+	if _, ok := b.check(r); ok {
 		t.Fatal("ambiguous Basic credentials accepted")
 	}
 }

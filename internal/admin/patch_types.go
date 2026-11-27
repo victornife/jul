@@ -67,13 +67,16 @@ type patchRequest struct {
 	WebSocketUpstreamProtocol *string `json:"websocket_upstream_protocol,omitempty"`
 
 	// Operation payloads (only the field relevant to Op is read).
-	Target    string          `json:"target,omitempty"`     // route_set_target: new proxy_pass
-	Enabled   *bool           `json:"enabled,omitempty"`    // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c / location_toggle_require_client_cert
-	Withdrawn *bool           `json:"withdrawn,omitempty"`  // location_set_withdrawn: stage-0 withdrawal gate
-	RateLimit *rateLimitPatch `json:"rate_limit,omitempty"` // route_set_rate_limit
-	Address   string          `json:"address,omitempty"`    // upstream_add_backend / upstream_remove_backend
-	Weight    int             `json:"weight,omitempty"`     // upstream_add_backend (defaults to 1)
-	Strategy  string          `json:"strategy,omitempty"`   // upstream_set_strategy
+	Target          string            `json:"target,omitempty"`            // route_set_target: new proxy_pass
+	Enabled         *bool             `json:"enabled,omitempty"`           // route_toggle_cache / route_toggle_rate_limit / server_toggle_http3 / server_toggle_h2c / location_toggle_require_client_cert
+	Withdrawn       *bool             `json:"withdrawn,omitempty"`         // location_set_withdrawn: stage-0 withdrawal gate
+	RateLimit       *rateLimitPatch   `json:"rate_limit,omitempty"`        // route_set_rate_limit
+	QuotaPolicyName string            `json:"quota_policy_name,omitempty"` // quota_policy_remove
+	QuotaPolicy     *quotaPolicyPatch `json:"quota_policy,omitempty"`      // quota_policy_set
+	RouteQuota      *routeQuotaPatch  `json:"route_quota,omitempty"`       // route_set_quota_policy
+	Address         string            `json:"address,omitempty"`           // upstream_add_backend / upstream_remove_backend
+	Weight          int               `json:"weight,omitempty"`            // upstream_add_backend (defaults to 1)
+	Strategy        string            `json:"strategy,omitempty"`          // upstream_set_strategy
 	// Hash is the [upstreams.hash] block for upstream_set_strategy and
 	// upstream_add with strategy consistent_hash. It is required by that
 	// strategy and rejected with any other.
@@ -408,6 +411,45 @@ type rateLimitPatch struct {
 	Rate     *int    `json:"rate,omitempty"`
 	Burst    *int    `json:"burst,omitempty"`
 	MaxConns *int    `json:"max_conns,omitempty"`
+}
+
+type quotaPolicyPatch struct {
+	Name             string                         `json:"name"`
+	Mode             *string                        `json:"mode,omitempty"`
+	Rate             *int                           `json:"rate,omitempty"`
+	Burst            *int                           `json:"burst,omitempty"`
+	MaxCallers       *int                           `json:"max_callers,omitempty"`
+	Classes          map[string]quotaClassPatch     `json:"classes,omitempty"`
+	RemoveClasses    []string                       `json:"remove_classes,omitempty"`
+	Pools            map[string]quotaPoolPatch      `json:"pools,omitempty"`
+	RemovePools      []string                       `json:"remove_pools,omitempty"`
+	Operations       map[string]quotaOperationPatch `json:"operations,omitempty"`
+	RemoveOperations []string                       `json:"remove_operations,omitempty"`
+}
+
+type quotaClassPatch struct {
+	Shared    *quotaLimitPatch `json:"shared,omitempty"`
+	PerCaller *quotaLimitPatch `json:"per_caller,omitempty"`
+}
+
+type quotaLimitPatch struct {
+	Rate  *int `json:"rate,omitempty"`
+	Burst *int `json:"burst,omitempty"`
+}
+
+type quotaPoolPatch struct {
+	Class *string   `json:"class,omitempty"`
+	CIDRs *[]string `json:"cidrs,omitempty"`
+}
+
+type quotaOperationPatch struct {
+	Shared    *quotaLimitPatch `json:"shared,omitempty"`
+	PerCaller *quotaLimitPatch `json:"per_caller,omitempty"`
+}
+
+type routeQuotaPatch struct {
+	Policy    string `json:"policy"`
+	Operation string `json:"operation,omitempty"`
 }
 
 // locationAuth carries the per-location access-control fields the guided auth

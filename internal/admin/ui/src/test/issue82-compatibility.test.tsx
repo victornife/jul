@@ -41,6 +41,7 @@ describe("issue #82 optional traffic-control projections", () => {
       "Global settings",
       "Compression",
       "Rate limiting",
+      "Application quotas",
       "Cache",
       "Limits & Timeouts",
       "Access Logging",
@@ -50,12 +51,12 @@ describe("issue #82 optional traffic-control projections", () => {
     }
 
     const edits = await screen.findAllByRole("button", { name: "Edit" });
-    expect(edits).toHaveLength(7);
+    expect(edits).toHaveLength(8);
     for (const edit of edits) {
       expect(edit).toBeDisabled();
       expect(edit).toHaveAttribute("aria-describedby");
     }
-    expect(screen.getAllByText(/Unavailable on this server/)).toHaveLength(7);
+    expect(screen.getAllByText(/Unavailable on this server/)).toHaveLength(8);
     expect(screen.queryByText(/^enabled$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^disabled$/i)).not.toBeInTheDocument();
   });

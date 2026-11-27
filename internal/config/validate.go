@@ -35,6 +35,7 @@ func Validate(c *Config) error {
 
 	errs = append(errs, validateGlobalValues(c.Global)...)
 	errs = append(errs, validateMIME(c.MIME, "config")...)
+	errs = append(errs, validateQuotaPolicies(c)...)
 
 	errs = append(errs, validateEgress(c.Egress)...)
 
@@ -687,6 +688,7 @@ func ValidRateKey(k string) bool {
 // applied (Basic realm, JWT algorithms). where labels the error source.
 func validateAuth(a *AuthConfig, where string) []error {
 	var errs []error
+	errs = append(errs, validateAuthQuotaPrincipal(a, where)...)
 	for _, cidr := range a.Allow {
 		if _, err := netip.ParsePrefix(cidr); err != nil {
 			errs = append(errs, fmt.Errorf("%s: invalid allow CIDR %q: %v", where, cidr, err))

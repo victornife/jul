@@ -204,6 +204,33 @@ func TestObserveRateLimited(t *testing.T) {
 	m.ObserveRateLimited("ip")
 }
 
+func TestObserveQuotaDecisionBoundsLabels(t *testing.T) {
+	m := NewMetrics()
+	m.ObserveQuotaDecision("enforce", "application")
+	m.ObserveQuotaDecision("untrusted", "caller-provided-value")
+	families, err := m.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, family := range families {
+		if family.GetName() != "jul_quota_decisions_total" {
+			continue
+		}
+		if got := len(family.GetMetric()); got != 2 {
+			t.Fatalf("quota metric series = %d, want 2", got)
+		}
+		for _, metric := range family.GetMetric() {
+			for _, label := range metric.GetLabel() {
+				if label.GetValue() == "caller-provided-value" || label.GetValue() == "untrusted" {
+					t.Fatalf("unbounded quota label emitted: %s=%q", label.GetName(), label.GetValue())
+				}
+			}
+		}
+		return
+	}
+	t.Fatal("quota decision metric was not registered")
+}
+
 func TestObserveAuthDecision(t *testing.T) {
 	m := NewMetrics()
 	m.ObserveAuthDecision("basic", "allow")

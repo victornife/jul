@@ -77,6 +77,18 @@ func TestSnapshotGenerationRetirements(t *testing.T) {
 	}
 }
 
+func TestSnapshotIncludesQuotaDecisionSource(t *testing.T) {
+	metrics := NewMetrics()
+	metrics.SetQuotaDecisionSource(func() map[string]map[string]float64 {
+		return map[string]map[string]float64{
+			"public-api": {"enforce:application": 3},
+		}
+	})
+	if got := metrics.Snapshot().QuotaDecisions["public-api"]["enforce:application"]; got != 3 {
+		t.Fatalf("quota decision snapshot = %v, want 3", got)
+	}
+}
+
 // drive sends one request through the metrics middleware with the given status
 // and optional X-Cache state, sleeping briefly so an observable latency is
 // recorded (Windows' coarse clock makes a no-op handler record a zero sample).

@@ -42,6 +42,9 @@ type Options struct {
 	// nil keeps the bare client, which is exactly the previous behaviour.
 	ForwardPool *upstream.Pool
 	JWKSPool    *upstream.Pool
+	// Principal enables publication of a verified principal for quota
+	// classification. It does not authorize any traffic class.
+	Principal *PrincipalOptions
 }
 
 // Authenticator enforces a location's access-control policy: a CIDR allow/deny
@@ -56,6 +59,7 @@ type Authenticator struct {
 
 	logger     *slog.Logger
 	onDecision func(method, result string)
+	principal  *PrincipalOptions
 
 	// ownedClient is non-nil only for the default JWT/forward-auth client this
 	// Authenticator created. It is generation-owned and its idle H1/H2 pools are
@@ -72,10 +76,17 @@ func New(ctx context.Context, cfg config.AuthConfig, opts Options) (*Authenticat
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := validatePrincipalOptions(cfg, opts.Principal); err != nil {
+		return nil, err
+	}
 	a := &Authenticator{
 		cidr:       newCIDRGate(cfg.Allow, cfg.Deny),
 		logger:     opts.Logger,
 		onDecision: opts.OnDecision,
+	}
+	if opts.Principal != nil {
+		p := *opts.Principal
+		a.principal = &p
 	}
 	switch {
 	case cfg.Basic != nil:
@@ -130,6 +141,9 @@ func (a *Authenticator) BasicFileBytes() []byte {
 // forward-auth response headers merged into the request headers.
 func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := PrincipalFromContext(r.Context()); ok {
+			r = r.WithContext(context.WithValue(r.Context(), principalKey{}, Principal{}))
+		}
 		if !a.cidr.empty() && !cidrAllows(a.cidr, r) {
 			a.decide("cidr", "deny")
 			http.Error(w, "403 Forbidden", http.StatusForbidden)
@@ -138,12 +152,14 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 
 		switch {
 		case a.basic != nil:
-			if !a.basic.check(r) {
+			account, ok := a.basic.check(r)
+			if !ok {
 				a.decide("basic", "deny")
 				a.basic.challenge(w)
 				return
 			}
 			a.decide("basic", "allow")
+			r = a.withPrincipal(r, "basic", "", account)
 
 		case a.jwt != nil:
 			claims, err := a.jwt.validate(r)
@@ -156,6 +172,8 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 			}
 			a.decide("jwt", "allow")
 			r = r.WithContext(middleware.WithClaims(r.Context(), claims))
+			subject, _ := claims["sub"].(string)
+			r = a.withPrincipal(r, "jwt", a.jwt.issuer, subject)
 
 		case a.forward != nil:
 			res, err := a.forward.decide(r.Context(), r)
@@ -171,6 +189,12 @@ func (a *Authenticator) Wrap(next http.Handler) http.Handler {
 				return
 			}
 			a.decide("forward", "allow")
+			if a.principal != nil {
+				values := res.header.Values(a.principal.ForwardResponseHeader)
+				if len(values) == 1 && !connectionScopedHeaders(res.header)[http.CanonicalHeaderKey(a.principal.ForwardResponseHeader)] {
+					r = a.withPrincipal(r, "forward", "", values[0])
+				}
+			}
 			// Strip any client-supplied copies of the auth headers first, then
 			// apply the values the auth service vouched for, so a client cannot
 			// spoof an identity header the service did not return.

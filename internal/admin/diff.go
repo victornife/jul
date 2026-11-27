@@ -201,6 +201,7 @@ func diffConfigs(before, after *config.Config, cutoverModes ...string) ConfigDif
 	diffGlobalCache(before, after, &d)
 	diffGlobalCompression(before, after, &d)
 	diffGlobalRateLimit(before, after, &d)
+	diffQuotaPolicies(before, after, &d)
 	diffGlobalWAF(before, after, &d)
 	diffGlobalTracing(before, after, &d)
 	diffGlobalPlugins(before, after, &d)

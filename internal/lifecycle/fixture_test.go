@@ -240,7 +240,9 @@ func fullConfig() *config.Config {
 				ClientMaxBodySize: config.Size(2048),
 				RequireClientCert: true,
 
-				RateLimit: &config.RateLimitConfig{Enabled: true, Rate: 10, Burst: 20, Key: "ip"},
+				RateLimit:      &config.RateLimitConfig{Enabled: true, Rate: 10, Burst: 20, Key: "ip"},
+				QuotaPolicy:    "api",
+				QuotaOperation: "export",
 				Auth: &config.AuthConfig{
 					Allow: []string{"10.0.0.0/8"},
 					Deny:  []string{"10.0.0.1/32"},
@@ -254,6 +256,10 @@ func fullConfig() *config.Config {
 					ForwardAuth: &config.ForwardAuthConfig{
 						URL:                 "http://authz.internal/allow",
 						AuthResponseHeaders: []string{"X-User"},
+					},
+					QuotaPrincipal: &config.AuthQuotaPrincipalConfig{
+						Domain:         "staff",
+						ResponseHeader: "X-Quota-User",
 					},
 				},
 				WAF: &config.WAFConfig{
@@ -427,6 +433,36 @@ func fullConfig() *config.Config {
 			Burst:    200,
 			Key:      "ip",
 			MaxConns: 1000,
+		},
+		QuotaPolicies: map[string]config.QuotaPolicyConfig{
+			"api": {
+				Mode:       "enforce",
+				Rate:       100,
+				Burst:      200,
+				MaxCallers: 4096,
+				Classes: map[string]config.QuotaClassConfig{
+					"public": {
+						Shared:    config.QuotaLimitConfig{Rate: 60, Burst: 100},
+						PerCaller: config.QuotaLimitConfig{Rate: 10, Burst: 20},
+					},
+					"staff": {
+						Shared:    config.QuotaLimitConfig{Rate: 40, Burst: 100},
+						PerCaller: config.QuotaLimitConfig{Rate: 20, Burst: 40},
+						Principals: []config.QuotaPrincipalMatch{{
+							Method: "jwt", Domain: "staff", Issuer: "https://idp.example", Subject: "operator",
+						}},
+					},
+				},
+				Pools: map[string]config.QuotaPoolConfig{
+					"internal": {Class: "staff", CIDRs: []string{"10.0.0.0/8"}},
+				},
+				Operations: map[string]config.QuotaOperationConfig{
+					"export": {
+						Shared:    config.QuotaLimitConfig{Rate: 5, Burst: 10},
+						PerCaller: config.QuotaLimitConfig{Rate: 2, Burst: 4},
+					},
+				},
+			},
 		},
 		Observability: config.ObservabilityConfig{
 			Tracing: config.TracingConfig{

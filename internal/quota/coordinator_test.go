@@ -94,6 +94,33 @@ func TestDeniedCallerDoesNotSpendSharedBudgets(t *testing.T) {
 	}
 }
 
+func TestOperationDenialDoesNotSpendOtherBudgets(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := Policy{
+		Application: Limit{Rate: 10, Burst: 10},
+		Classes: map[string]Class{
+			"public":  {Shared: Limit{Rate: 5, Burst: 5}, PerCaller: Limit{Rate: 5, Burst: 5}},
+			"trusted": {Shared: Limit{Rate: 5, Burst: 5}, PerCaller: Limit{Rate: 5, Burst: 5}},
+		},
+		Operations: map[string]Operation{
+			"export": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}},
+		},
+	}
+	c := testCoordinator(t, policy, 10, &now)
+	if got, err := c.AdmitOperation("public", "export", "alice"); err != nil || !got.Allowed {
+		t.Fatalf("first operation admission = %+v, %v", got, err)
+	}
+	if got, err := c.AdmitOperation("trusted", "export", "bob"); err != nil || got.Allowed || got.Reason != ReasonOperation {
+		t.Fatalf("shared operation ceiling = %+v, %v", got, err)
+	}
+	if got := admit(t, c, "trusted", "bob"); !got.Allowed {
+		t.Fatalf("operation denial spent application/class/caller budgets: %+v", got)
+	}
+	if got, err := c.AdmitOperation("trusted", "unknown", "carol"); err == nil || got.Allowed {
+		t.Fatalf("unknown operation did not fail explicitly: %+v, %v", got, err)
+	}
+}
+
 func TestRefillAndRetry(t *testing.T) {
 	now := time.Unix(100, 0)
 	c := testCoordinator(t, testPolicy(), 10, &now)
@@ -230,6 +257,49 @@ func TestCallerCapacityFindsRefilledEntryBeyondOldest(t *testing.T) {
 	}
 	if got := admit(t, c, "public", "alice"); got.Allowed || got.Reason != ReasonCaller {
 		t.Fatalf("partially refilled oldest caller was reset: %+v", got)
+	}
+}
+
+func TestCallerCapacityDecreaseReclaimsEnoughRefilledEntries(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := testPolicy()
+	policy.Operations = map[string]Operation{
+		"export": {
+			Shared:    Limit{Rate: 10, Burst: 10},
+			PerCaller: Limit{Rate: 1, Burst: 1},
+		},
+	}
+	c := testCoordinator(t, policy, 4, &now)
+	for _, caller := range []string{"alice", "bob", "carol", "david"} {
+		if got, err := c.AdmitOperation("public", "export", caller); err != nil || !got.Allowed {
+			t.Fatalf("initial admission for %s = %+v, %v", caller, got, err)
+		}
+	}
+	if _, err := c.Reconfigure(policy, 2, false); err != nil {
+		t.Fatalf("lower caller cap: %v", err)
+	}
+	if got, err := c.AdmitOperation("public", "export", "erin"); err != nil ||
+		got.Allowed || got.Reason != ReasonCallerCapacity {
+		t.Fatalf("over-cap store admitted a caller without safe candidates: %+v, %v", got, err)
+	}
+	if len(c.classes["public"].callers) != 4 || len(c.operations["export"].callers) != 4 {
+		t.Fatal("denied admission changed over-cap caller stores")
+	}
+
+	now = now.Add(time.Second)
+	if got, err := c.AdmitOperation("public", "export", "erin"); err != nil || !got.Allowed {
+		t.Fatalf("admission after buckets refilled = %+v, %v", got, err)
+	}
+	if len(c.classes["public"].callers) != 2 || len(c.operations["export"].callers) != 2 {
+		t.Fatalf("caller stores after downsize admission = class:%d operation:%d, want 2 each",
+			len(c.classes["public"].callers), len(c.operations["export"].callers))
+	}
+	if got, err := c.AdmitOperation("public", "export", "frank"); err != nil || !got.Allowed {
+		t.Fatalf("admission at downsized capacity = %+v, %v", got, err)
+	}
+	if len(c.classes["public"].callers) != 2 || len(c.operations["export"].callers) != 2 {
+		t.Fatalf("caller stores grew beyond downsized cap: class:%d operation:%d",
+			len(c.classes["public"].callers), len(c.operations["export"].callers))
 	}
 }
 

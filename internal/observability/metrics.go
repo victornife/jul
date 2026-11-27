@@ -75,6 +75,8 @@ type Metrics struct {
 	cacheTagIngestSkipped *prometheus.CounterVec
 	compressed            *prometheus.CounterVec
 	ratelimited           *prometheus.CounterVec
+	quotaDecisions        *prometheus.CounterVec
+	quotaDecisionSource   atomic.Pointer[QuotaDecisionSource]
 	clientAddrDerived     *prometheus.CounterVec
 	authDecisions         *prometheus.CounterVec
 	upstreamUp            *prometheus.GaugeVec
@@ -242,6 +244,23 @@ type Metrics struct {
 	preGather atomic.Value
 }
 
+// QuotaDecisionSource returns bounded denial counts keyed by configured policy
+// name and "mode:reason". The application supplies this process-owned view for
+// the admin stats API; Prometheus uses only the fixed-cardinality aggregate.
+type QuotaDecisionSource func() map[string]map[string]float64
+
+// SetQuotaDecisionSource wires the process-owned per-policy denial projection.
+func (m *Metrics) SetQuotaDecisionSource(source QuotaDecisionSource) {
+	if m == nil {
+		return
+	}
+	if source == nil {
+		m.quotaDecisionSource.Store(nil)
+		return
+	}
+	m.quotaDecisionSource.Store(&source)
+}
+
 // MetricsOption customises a Metrics at construction time.
 type MetricsOption func(*Metrics)
 
@@ -368,6 +387,10 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 			Name: "jul_http_ratelimited_total",
 			Help: "Requests rejected by rate limiting, labeled by key kind (ip/header/jwt).",
 		}, []string{"key"}),
+		quotaDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "jul_quota_decisions_total",
+			Help: "Application quota denials, labeled by mode (enforce/observe) and bounded reason.",
+		}, []string{"mode", "reason"}),
 		clientAddrDerived: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_client_addr_derivations_total",
 			Help: "Canonical client-address derivations, labeled by source (peer/forwarded/xff) and result (accepted/untrusted_peer/malformed/too_many_hops).",
@@ -668,6 +691,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		m.cacheTagIngestSkipped,
 		m.compressed,
 		m.ratelimited,
+		m.quotaDecisions,
 		m.clientAddrDerived,
 		m.authDecisions,
 		m.upstreamUp,
@@ -997,6 +1021,21 @@ func (m *Metrics) ObserveCacheTagIngestSkipped(reason string) {
 // onLimited hook (the middleware package cannot import observability directly).
 func (m *Metrics) ObserveRateLimited(kind string) {
 	m.ratelimited.WithLabelValues(kind).Inc()
+}
+
+// ObserveQuotaDecision records a denied application quota admission. Labels are
+// bounded enums; policy names, callers, and request data are never retained.
+func (m *Metrics) ObserveQuotaDecision(mode, reason string) {
+	if mode != "enforce" && mode != "observe" {
+		mode = "unknown"
+	}
+	switch reason {
+	case "application", "class", "caller", "caller_capacity",
+		"operation", "operation_caller", "stale_authorization":
+	default:
+		reason = "unknown"
+	}
+	m.quotaDecisions.WithLabelValues(mode, reason).Inc()
 }
 
 // ObserveClientAddrDerivation records how one request's canonical client address

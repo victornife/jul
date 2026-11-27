@@ -94,6 +94,7 @@ type Generation struct {
 	// each Basic-authenticated location (srvIdx, locIdx) in this generation (#642, #563).
 	basicByLoc         map[[2]int][]byte
 	cacheRoutePolicies []cache.RouteCacheConfig
+	quotaCandidate     *quotaCandidate
 	publishedGenID     atomic.Uint64
 }
 
@@ -149,6 +150,9 @@ func (g *Generation) Commit() func() {
 		return func() {}
 	}
 	g.parent.pools.Commit()
+	if g.quotaCandidate != nil {
+		g.quotaCandidate.Commit()
+	}
 	prev := g.parent.live
 	g.parent.live = g.staged
 	g.committed = true
@@ -171,6 +175,9 @@ func (g *Generation) Abort() {
 		return
 	}
 	g.aborted = true
+	if g.quotaCandidate != nil {
+		g.quotaCandidate.Abort()
+	}
 	g.parent.pools.Abort()
 	for _, c := range g.staged {
 		_ = c.Close()

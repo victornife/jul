@@ -344,6 +344,8 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 	// The factory holds the process-lifetime dependencies and rebuilds the
 	// per-listen-address handler tree on every reload that reaches Prepare. See
 	// factory.go.
+	quotaStore := newQuotaRuntime()
+	metrics.SetQuotaDecisionSource(quotaStore.decisionSnapshot)
 	f := &HandlerFactory{
 		Log:           log,
 		Metrics:       metrics,
@@ -357,6 +359,7 @@ func Serve(baseCtx context.Context, sigReload <-chan struct{}, src config.Source
 		RT:            rt,
 		Inspection:    rt.Inspection,
 		Versions:      options.versions,
+		QuotaRuntime:  quotaStore,
 	}
 
 	// factory adapts HandlerFactory.Prepare to the server reload hook: the

@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 409 configurable leaves.
+Coverage: 431 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -1763,6 +1763,246 @@ Type is "middleware" (wraps a handler, may pass through) or "handler" (a termina
 | Zero/empty semantics | omitted selects the documented default where supported |
 | Active when | plugin configured |
 
+## `quota_policies.*.burst` {#quota_policies-x-burst}
+
+Burst is the aggregate token capacity across attached routes.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | quota policy is configured |
+
+## `quota_policies.*.classes.*.per_caller.burst` {#quota_policies-x-classes-x-per_caller-burst}
+
+Burst is the maximum accumulated request-token count.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.classes.*.per_caller.rate` {#quota_policies-x-classes-x-per_caller-rate}
+
+Rate is the sustained number of requests allowed per second.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests per second |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.classes.*.principals.*.domain` {#quota_policies-x-classes-x-principals-x-domain}
+
+Domain scopes a principal authority independently of its display realm.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+
+## `quota_policies.*.classes.*.principals.*.issuer` {#quota_policies-x-classes-x-principals-x-issuer}
+
+Issuer distinguishes JWT subjects from different trusted issuers.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+
+## `quota_policies.*.classes.*.principals.*.method` {#quota_policies-x-classes-x-principals-x-method}
+
+Method is "basic", "jwt", or "forward".
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Allowed values | `basic`, `forward`, `jwt` |
+| Constraint | exact lowercase authentication method |
+| Zero/empty semantics | required; there is no default |
+| Active when | a class principal mapping is configured |
+
+## `quota_policies.*.classes.*.principals.*.subject` {#quota_policies-x-classes-x-principals-x-subject}
+
+Subject is the exact verified account or service identifier.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+
+## `quota_policies.*.classes.*.shared.burst` {#quota_policies-x-classes-x-shared-burst}
+
+Burst is the maximum accumulated request-token count.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.classes.*.shared.rate` {#quota_policies-x-classes-x-shared-rate}
+
+Rate is the sustained number of requests allowed per second.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests per second |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.max_callers` {#quota_policies-x-max_callers}
+
+MaxCallers bounds each per-class and per-operation caller store.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..4096 callers per class and operation; combined enforcement and observation caller stores are capped at 32768 entries per policy |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | quota policy is configured |
+
+## `quota_policies.*.mode` {#quota_policies-x-mode}
+
+Mode is "enforce" (reject over-budget requests) or "observe" (measure counterfactual denials while allowing requests).
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Allowed values | `enforce`, `observe` |
+| Constraint | exact lowercase enforce or observe |
+| Zero/empty semantics | required; there is no default |
+| Active when | quota policy is configured |
+
+## `quota_policies.*.operations.*.per_caller.burst` {#quota_policies-x-operations-x-per_caller-burst}
+
+Burst is the maximum accumulated request-token count.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.operations.*.per_caller.rate` {#quota_policies-x-operations-x-per_caller-rate}
+
+Rate is the sustained number of requests allowed per second.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests per second |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.operations.*.shared.burst` {#quota_policies-x-operations-x-shared-burst}
+
+Burst is the maximum accumulated request-token count.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.operations.*.shared.rate` {#quota_policies-x-operations-x-shared-rate}
+
+Rate is the sustained number of requests allowed per second.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests per second |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | a quota class or operation is configured |
+
+## `quota_policies.*.pools.*.cidrs` {#quota_policies-x-pools-x-cidrs}
+
+CIDRs are canonical IPv4 or IPv6 prefixes; longest prefix wins.
+
+| | |
+| --- | --- |
+| Type | list of `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+
+## `quota_policies.*.pools.*.class` {#quota_policies-x-pools-x-class}
+
+Class is the non-public class assigned to matching addresses.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+
+## `quota_policies.*.rate` {#quota_policies-x-rate}
+
+Rate is the aggregate sustained request rate across attached routes.
+
+| | |
+| --- | --- |
+| Type | `integer` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| Constraint | 1..1000000000 requests per second |
+| Zero/empty semantics | required; zero is invalid |
+| Active when | quota policy is configured |
+
 ## `rate_limit.burst` {#rate_limit-burst}
 
 Burst is the maximum momentary burst above Rate.
@@ -2143,6 +2383,29 @@ Timeout bounds one JWKS fetch.
 | Constraint | 0s to 60s |
 | Zero/empty semantics | omitted/zero means 10s |
 | Active when | jwt configured |
+
+## `servers.*.locations.*.auth.quota_principal.domain` {#servers-x-locations-x-auth-quota_principal-domain}
+
+Domain identifies the independently configured authentication authority.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Lifecycle | `hot_reload` |
+| Subsystem | `auth` |
+| Why | auth modifiers are rebuilt around each location action on every successful reload |
+
+## `servers.*.locations.*.auth.quota_principal.response_header` {#servers-x-locations-x-auth-quota_principal-response_header}
+
+ResponseHeader selects the identity field in an allowed forward-auth response; it is ignored for Basic and JWT.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `auth` |
+| Why | auth modifiers are rebuilt around each location action on every successful reload |
 
 ## `servers.*.locations.*.backend_tls.ca_file` {#servers-x-locations-x-backend_tls-ca_file}
 
@@ -2941,6 +3204,30 @@ ProxySendTimeout bounds writing the request to the backend for this location.
 | Constraint | non-negative |
 | Zero/empty semantics | zero uses the runtime/default transport behavior |
 | Active when | always |
+
+## `servers.*.locations.*.quota_operation` {#servers-x-locations-x-quota_operation}
+
+QuotaOperation adds the named operation's shared and per-caller ceilings.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+
+## `servers.*.locations.*.quota_policy` {#servers-x-locations-x-quota_policy}
+
+QuotaPolicy opts this location into a process-local named application quota policy.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `quota` |
+| Why | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
 
 ## `servers.*.locations.*.rate_limit.burst` {#servers-x-locations-x-rate_limit-burst}
 

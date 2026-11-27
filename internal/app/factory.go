@@ -68,6 +68,7 @@ type HandlerFactory struct {
 	Inspection       *inspection.Governor    // process-owned; shared by the plugin and WAF request paths
 	Versions         *versionid.Context      // private effective-version context (#649)
 	WAFInvestigation *waf.InvestigationStore // bounded WAF transaction investigation buffer (#632)
+	QuotaRuntime     *quotaRuntime           // process-owned admission state for named application quotas
 
 	mu sync.Mutex // serialises every build (startup, reload, preflight)
 
@@ -715,12 +716,20 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			if err != nil {
 				return nil, fmt.Errorf("servers[%d].locations[%d]: jwt.jwks_url: %w", i, j, err)
 			}
+			var principal *auth.PrincipalOptions
+			if loc.Auth.QuotaPrincipal != nil {
+				principal = &auth.PrincipalOptions{
+					Domain:                loc.Auth.QuotaPrincipal.Domain,
+					ForwardResponseHeader: loc.Auth.QuotaPrincipal.ResponseHeader,
+				}
+			}
 			a, err := newAuthenticator(ctx, *loc.Auth, auth.Options{
 				Logger:      f.Log,
 				OnDecision:  f.Metrics.ObserveAuthDecision,
 				DialContext: authDial,
 				ForwardPool: forwardPool,
 				JWKSPool:    jwksPool,
+				Principal:   principal,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("servers[%d].locations[%d]: %w", i, j, err)
@@ -743,6 +752,11 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		}
 		return nil
 	}
+	quotaCandidate, err := f.QuotaRuntime.prepare(c, gen)
+	if err != nil {
+		return nil, err
+	}
+	gen.quotaCandidate = quotaCandidate
 
 	// Firewalls are built once per reload. The effective policy for a location
 	// is its own [waf] override when set, otherwise the global [waf] policy;
@@ -893,6 +907,17 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 	locModifier := func(i, j int, srv config.ServerConfig, loc config.LocationConfig) middleware.Middleware {
 		au := locAuth(i, j, loc)
 		rl := locRateLimit(srv, loc)
+		var qb *quotaBinding
+		if quotaCandidate != nil {
+			qb = quotaCandidate.Binding(loc.QuotaPolicy)
+		}
+		var observeQuota func(string, string, string)
+		if f.Metrics != nil {
+			observeQuota = func(_ string, mode, reason string) {
+				f.Metrics.ObserveQuotaDecision(mode, reason)
+			}
+		}
+		qm := quotaMiddleware(qb, loc.QuotaOperation, f.Log, observeQuota)
 		wf := locWAF(i, j)
 		// The CORS preflight terminator (ADR 0018 §10) needs no config surface
 		// of its own: an enabled cors policy is what turns it on, and it reuses
@@ -900,7 +925,8 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		// nil when the location has no CORS policy, so it costs a location
 		// without one nothing.
 		cors := middleware.CompileCORS(loc.CORS)
-		pf := middleware.Preflight(cors, locPreflightRateLimit(srv, loc), wf)
+		pf := middleware.Preflight(cors, locPreflightRateLimit(srv, loc), wf,
+			quotaMiddleware(qb, "", f.Log, observeQuota))
 		// Client-certificate handling applies when any server block on the
 		// listener enables TLS or the location requires a client certificate.
 		// It re-evaluates r.TLS against the listener's current client_auth
@@ -933,7 +959,7 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		// and the cache, so every served response (hit or miss) is presented and
 		// the cache stores the origin representation.
 		respPoint := pluginSet.ResponsePoint(append(append([]string(nil), srv.Plugins...), loc.Plugins...)...)
-		if au == nil && rl == nil && cc == nil && wf == nil && pf == nil && len(pluginMW) == 0 {
+		if au == nil && rl == nil && qm == nil && cc == nil && wf == nil && pf == nil && len(pluginMW) == 0 {
 			return nil
 		}
 		return func(next http.Handler) http.Handler {
@@ -948,6 +974,9 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 			// rules inspect the response body uncompressed.
 			if wf != nil {
 				h = wf(h)
+			}
+			if qm != nil {
+				h = qm(h)
 			}
 			if rl != nil {
 				h = rl(h)

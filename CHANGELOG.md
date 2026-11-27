@@ -11,6 +11,12 @@ Dates are in ISO 8601 format (`YYYY-MM-DD`).
 
 ### Added
 
+- Add opt-in process-local application quotas with fixed traffic-class
+  allocations, verified-principal and attributed-CIDR classification, route
+  operations, observe/enforce modes, reload-safe accounting, typed Console
+  editing and a provider-free example (#745 candidate). Production serving,
+  protocol and mixed-workload qualification remain pending; this is not a GA
+  claim.
 - Add WebSocket Extended CONNECT over HTTP/2 and HTTP/3 frontends, adapting to
   HTTP/1.1 WebSocket backends. HTTP/2 advertisement remains a process-wide
   startup opt-in; native HTTP/2 and HTTP/3 upstream transports remain separate

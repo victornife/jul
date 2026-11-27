@@ -22,15 +22,18 @@ import (
 // Config is the root configuration document.
 type Config struct {
 	// MIME is the optional static-file MIME policy inherited by servers and locations.
-	MIME          *MIMEConfig         `toml:"mime,omitempty"`
-	Global        GlobalConfig        `toml:"global"`
-	Servers       []ServerConfig      `toml:"servers"`
-	Upstreams     []UpstreamConfig    `toml:"upstreams,omitempty"`
-	Cache         CacheConfig         `toml:"cache"`
-	Admin         AdminConfig         `toml:"admin"`
-	Compression   CompressionConfig   `toml:"compression"`
-	RateLimit     RateLimitConfig     `toml:"rate_limit"`
-	Observability ObservabilityConfig `toml:"observability"`
+	MIME        *MIMEConfig       `toml:"mime,omitempty"`
+	Global      GlobalConfig      `toml:"global"`
+	Servers     []ServerConfig    `toml:"servers"`
+	Upstreams   []UpstreamConfig  `toml:"upstreams,omitempty"`
+	Cache       CacheConfig       `toml:"cache"`
+	Admin       AdminConfig       `toml:"admin"`
+	Compression CompressionConfig `toml:"compression"`
+	RateLimit   RateLimitConfig   `toml:"rate_limit"`
+	// QuotaPolicies declares named process-local request budgets. Routes opt in
+	// explicitly; omission leaves the existing rate-limit behavior unchanged.
+	QuotaPolicies map[string]QuotaPolicyConfig `toml:"quota_policies,omitempty"`
+	Observability ObservabilityConfig          `toml:"observability"`
 
 	// Egress is the optional outbound-destination allow-list ([egress]). When
 	// enabled it constrains the server's config-driven auxiliary fetches (JWKS,
@@ -707,6 +710,12 @@ type LocationConfig struct {
 	// location (rate/burst/key). MaxConns is ignored here, since connection
 	// caps are listener-global. A nil pointer inherits the global policy.
 	RateLimit *RateLimitConfig `toml:"rate_limit"`
+
+	// QuotaPolicy opts this location into a process-local named application
+	// quota policy. Omission preserves legacy behavior.
+	QuotaPolicy string `toml:"quota_policy,omitempty"`
+	// QuotaOperation adds the named operation's shared and per-caller ceilings.
+	QuotaOperation string `toml:"quota_operation,omitempty"`
 
 	// Auth, when set, applies per-location access control (CIDR allow/deny,
 	// HTTP Basic, JWT, forward-auth) as a modifier composed around the
@@ -1527,6 +1536,84 @@ type RateLimitConfig struct {
 	MaxConns int `toml:"max_conns"`
 }
 
+// QuotaPolicyConfig defines one fixed process-local request budget. Class
+// shared allocations reserve capacity from the application ceiling. Operation
+// limits are additional ceilings and do not reserve extra capacity.
+type QuotaPolicyConfig struct {
+	// Mode is "enforce" (reject over-budget requests) or "observe" (measure
+	// counterfactual denials while allowing requests).
+	Mode string `toml:"mode"`
+	// Rate is the aggregate sustained request rate across attached routes.
+	Rate int `toml:"rate"`
+	// Burst is the aggregate token capacity across attached routes.
+	Burst int `toml:"burst"`
+	// MaxCallers bounds each per-class and per-operation caller store. Depleted
+	// state for removed scopes is retained until every bucket refills; the
+	// process rejects a candidate update rather than exceeding its bounded
+	// state registry.
+	MaxCallers int `toml:"max_callers"`
+	// Classes reserves the application ceiling among fixed traffic classes.
+	Classes map[string]QuotaClassConfig `toml:"classes"`
+	// Pools maps attributed canonical client-address prefixes to non-public,
+	// non-identity-reserved classes.
+	Pools map[string]QuotaPoolConfig `toml:"pools,omitempty"`
+	// Operations adds named shared and per-caller ceilings to attached routes.
+	Operations map[string]QuotaOperationConfig `toml:"operations,omitempty"`
+}
+
+// QuotaClassConfig defines one named traffic class. The public class is the
+// fallback and cannot be selected by an identity or CIDR mapping. A class with
+// principal mappings is identity-reserved and cannot be selected by CIDR.
+type QuotaClassConfig struct {
+	// Shared is the class-wide sustained rate and burst allocation.
+	Shared QuotaLimitConfig `toml:"shared"`
+	// PerCaller is the sustained rate and burst for one authenticated principal
+	// or canonical client address in this class.
+	PerCaller QuotaLimitConfig `toml:"per_caller"`
+	// Principals maps exact verified identities to this class.
+	Principals []QuotaPrincipalMatch `toml:"principals,omitempty"`
+}
+
+// QuotaLimitConfig is a sustained request rate and burst.
+type QuotaLimitConfig struct {
+	// Rate is the sustained number of requests allowed per second.
+	Rate int `toml:"rate"`
+	// Burst is the maximum accumulated request-token count.
+	Burst int `toml:"burst"`
+}
+
+// QuotaPoolConfig maps attributed canonical client addresses in CIDRs to a
+// non-public class without principal mappings. Among overlapping pools, the
+// longest prefix wins.
+type QuotaPoolConfig struct {
+	// Class is the non-public class assigned to matching addresses.
+	Class string `toml:"class"`
+	// CIDRs are canonical IPv4 or IPv6 prefixes; longest prefix wins.
+	CIDRs []string `toml:"cidrs"`
+}
+
+// QuotaPrincipalMatch authorizes one exact, independently verified principal
+// for a class. JWT matches require both issuer and subject.
+type QuotaPrincipalMatch struct {
+	// Method is "basic", "jwt", or "forward".
+	Method string `toml:"method"`
+	// Domain scopes a principal authority independently of its display realm.
+	Domain string `toml:"domain"`
+	// Issuer distinguishes JWT subjects from different trusted issuers.
+	Issuer string `toml:"issuer,omitempty"`
+	// Subject is the exact verified account or service identifier.
+	Subject string `toml:"subject"`
+}
+
+// QuotaOperationConfig adds a shared and per-caller ceiling for a named
+// operation. It is charged atomically with the enclosing policy and class.
+type QuotaOperationConfig struct {
+	// Shared is the operation-wide sustained rate and burst.
+	Shared QuotaLimitConfig `toml:"shared"`
+	// PerCaller is the operation's additional per-caller ceiling.
+	PerCaller QuotaLimitConfig `toml:"per_caller"`
+}
+
 // AuthConfig configures per-location access control. The configured methods are
 // applied in a fixed order: CIDR allow/deny first (a network-level gate), then
 // exactly one credential method (Basic, JWT, or forward-auth) if set. Auth is a
@@ -1545,6 +1632,20 @@ type AuthConfig struct {
 	JWT *JWTAuthConfig `toml:"jwt"`
 	// ForwardAuth delegates the decision to an external HTTP endpoint.
 	ForwardAuth *ForwardAuthConfig `toml:"forward_auth"`
+	// QuotaPrincipal opts a verified credential method into publishing a
+	// bounded principal for explicit quota authorization. It grants no class.
+	QuotaPrincipal *AuthQuotaPrincipalConfig `toml:"quota_principal,omitempty"`
+}
+
+// AuthQuotaPrincipalConfig binds an authenticated method to an explicit
+// authority domain. Forward-auth identity is read only from ResponseHeader on
+// the successful auth-service response.
+type AuthQuotaPrincipalConfig struct {
+	// Domain identifies the independently configured authentication authority.
+	Domain string `toml:"domain"`
+	// ResponseHeader selects the identity field in an allowed forward-auth
+	// response; it is ignored for Basic and JWT.
+	ResponseHeader string `toml:"response_header,omitempty"`
 }
 
 // BasicAuthConfig configures HTTP Basic authentication. Passwords are checked

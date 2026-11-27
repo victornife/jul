@@ -9312,6 +9312,146 @@
                   },
                   "additionalProperties": false
                 },
+                "quota_policy": {
+                  "type": "object",
+                  "properties": {
+                    "burst": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "classes": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "per_caller": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "shared": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "max_callers": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "mode": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "operations": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "per_caller": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "shared": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "pools": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "cidrs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "class": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "rate": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "remove_classes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "remove_operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "remove_pools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "quota_policy_name": {
+                  "type": "string"
+                },
                 "rate_limit": {
                   "type": "object",
                   "properties": {
@@ -9413,6 +9553,21 @@
                 },
                 "route_id": {
                   "type": "string"
+                },
+                "route_quota": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "type": "string"
+                    },
+                    "policy": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "policy"
+                  ],
+                  "additionalProperties": false
                 },
                 "route_selector": {
                   "type": "object",

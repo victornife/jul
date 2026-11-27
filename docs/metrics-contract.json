@@ -620,6 +620,16 @@
       "state": "merged_release_pending"
     },
     {
+      "name": "jul_quota_decisions_total",
+      "type": "counter",
+      "help": "Application quota denials, labeled by mode (enforce/observe) and bounded reason.",
+      "labels": [
+        "mode",
+        "reason"
+      ],
+      "state": "merged_release_pending"
+    },
+    {
       "name": "jul_reload_duration_seconds",
       "type": "histogram",
       "help": "Configuration reload latency in seconds, labeled by source and outcome.",

@@ -85,24 +85,26 @@ func isBcryptHash(h string) bool {
 	return strings.HasPrefix(h, "$2a$") || strings.HasPrefix(h, "$2b$") || strings.HasPrefix(h, "$2y$")
 }
 
-// check validates the request's Basic credentials. It returns true when the
-// username exists and the password matches the stored bcrypt hash.
-func (b *basicAuth) check(r *http.Request) bool {
+// check returns the account name only after the credentials are verified.
+func (b *basicAuth) check(r *http.Request) (string, bool) {
 	if len(r.Header.Values("Authorization")) != 1 {
-		return false
+		return "", false
 	}
 	user, pass, ok := r.BasicAuth()
 	if !ok {
-		return false
+		return "", false
 	}
 	hash, known := b.users[user]
 	if !known {
 		// Run a bcrypt comparison against a fixed dummy hash so the response
 		// time does not reveal whether the username exists.
 		_ = bcrypt.CompareHashAndPassword([]byte(dummyBcryptHash), []byte(pass))
-		return false
+		return "", false
 	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass)) == nil
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(pass)) != nil {
+		return "", false
+	}
+	return user, true
 }
 
 // dummyBcryptHash is a valid bcrypt hash (of a random password) used to keep the

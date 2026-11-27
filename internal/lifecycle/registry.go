@@ -57,6 +57,7 @@ const (
 	SubProxyPass       Subsystem = "proxy_pass"
 	SubProxyRetries    Subsystem = "proxy_retries"
 	SubProxyTimeouts   Subsystem = "proxy_timeouts"
+	SubQuota           Subsystem = "quota"
 	SubRateLimit       Subsystem = "rate_limit"
 	SubRBAC            Subsystem = "rbac"
 	SubRedact          Subsystem = "redact"
@@ -120,6 +121,7 @@ var subsystemDescriptions = map[Subsystem]string{
 	SubProxyPass:       "The reverse-proxy target of a location.",
 	SubProxyRetries:    "Retry budget for idempotent proxied requests.",
 	SubProxyTimeouts:   "Per-location proxy dial and I/O timeouts.",
+	SubQuota:           "Process-local application request budgets, class allocation, and caller accounting.",
 	SubRateLimit:       "Request rate limiting and the per-listener connection cap.",
 	SubRBAC:            "Admin role-based access control policy.",
 	SubRedact:          "Secret redaction applied to logs.",
@@ -161,6 +163,7 @@ const (
 	reasonUpstreamStaged        = "the upstream registry stages and swaps pools on each successful reload"
 	reasonWAFRebuild            = "the WAF policy is rebuilt on each successful reload"
 	reasonRateLimitPolicy       = "the rate-limiter store accepts a new policy on each successful reload"
+	reasonQuotaPolicy           = "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
 	reasonStreamRoute           = "the stream listener swaps its route pointer atomically on each successful reload"
 	reasonRBACSwap              = "the admin RBAC policy is rebuilt and atomically swapped after each successful reload"
 	reasonAdminStartup          = "the admin listener and its resources are created once at startup"
@@ -194,6 +197,7 @@ var Registry = assemble(
 	globalEntries(),
 	observabilityEntries(),
 	pluginEntries(),
+	quotaEntries(),
 	rateLimitEntries(),
 	serverEntries(),
 	tlsEntries(),
@@ -202,6 +206,29 @@ var Registry = assemble(
 	upstreamEntries(),
 	wafEntries(),
 )
+
+func quotaEntries() []Entry {
+	return hotGroup(SubQuota, reasonQuotaPolicy,
+		"quota_policies.*.burst",
+		"quota_policies.*.classes.*.per_caller.burst",
+		"quota_policies.*.classes.*.per_caller.rate",
+		"quota_policies.*.classes.*.principals.*.domain",
+		"quota_policies.*.classes.*.principals.*.issuer",
+		"quota_policies.*.classes.*.principals.*.method",
+		"quota_policies.*.classes.*.principals.*.subject",
+		"quota_policies.*.classes.*.shared.burst",
+		"quota_policies.*.classes.*.shared.rate",
+		"quota_policies.*.max_callers",
+		"quota_policies.*.mode",
+		"quota_policies.*.operations.*.per_caller.burst",
+		"quota_policies.*.operations.*.per_caller.rate",
+		"quota_policies.*.operations.*.shared.burst",
+		"quota_policies.*.operations.*.shared.rate",
+		"quota_policies.*.pools.*.cidrs",
+		"quota_policies.*.pools.*.class",
+		"quota_policies.*.rate",
+	)
+}
 
 // assemble flattens the per-subsystem groups and sorts them by path. Sorting at
 // construction keeps Registry order independent of the grouping above, so the
@@ -604,6 +631,8 @@ func locationEntries() []Entry {
 		loc+"auth.jwt.issuer",
 		loc+"auth.jwt.jwks_url",
 		loc+"auth.jwt.timeout",
+		loc+"auth.quota_principal.domain",
+		loc+"auth.quota_principal.response_header",
 	)...)
 	out = append(out, hotGroup(SubGRPCTranscode, reasonHandlerRebuild,
 		loc+"grpc_transcode.descriptor_set",
@@ -665,6 +694,10 @@ func locationEntries() []Entry {
 		loc+"rate_limit.enabled",
 		loc+"rate_limit.key",
 		loc+"rate_limit.rate",
+	)...)
+	out = append(out, hotGroup(SubQuota, reasonQuotaPolicy,
+		loc+"quota_operation",
+		loc+"quota_policy",
 	)...)
 	out = append(out, reserved(loc+"rate_limit.max_conns", SubRateLimit,
 		"connection caps are listener-global; Validate rejects max_conns on a location override, so no running process can have consumed it"))

@@ -794,6 +794,29 @@ func diffLocationFields(server, key string, b, a *config.LocationConfig, beforeG
 	// Per-route rate-limit override.
 	diffRateLimit(server, key, b.RateLimit, a.RateLimit, d)
 
+	if b.QuotaPolicy != a.QuotaPolicy || b.QuotaOperation != a.QuotaOperation {
+		beforeQuota := "none"
+		if b.QuotaPolicy != "" {
+			beforeQuota = b.QuotaPolicy
+			if b.QuotaOperation != "" {
+				beforeQuota += " / " + b.QuotaOperation
+			}
+		}
+		afterQuota := "none"
+		if a.QuotaPolicy != "" {
+			afterQuota = a.QuotaPolicy
+			if a.QuotaOperation != "" {
+				afterQuota += " / " + a.QuotaOperation
+			}
+		}
+		d.mod(DiffEntry{
+			Kind: "quota", Name: name, Before: beforeQuota, After: afterQuota,
+			Detail: "Change application quota attachment on route " + key,
+		}, "route "+name+" application quota")
+	}
+	d.cover("servers.*.locations.*.quota_policy")
+	d.cover("servers.*.locations.*.quota_operation")
+
 	// mTLS require-client-cert toggle.
 	if b.RequireClientCert != a.RequireClientCert {
 		action := "Require"

@@ -39,7 +39,7 @@ func grantOriginFrom(ctx context.Context) (string, bool) {
 // gets no guard, which is consistent with an ordinary request to the same
 // route. Authentication is never run here — it is the only layer an approved
 // preflight skips, because Fetch sends preflights without credentials.
-func Preflight(cors *CORSPolicy, rateLimit, waf Middleware) Middleware {
+func Preflight(cors *CORSPolicy, rateLimit, waf Middleware, quotaGuard ...Middleware) Middleware {
 	if cors == nil {
 		return nil
 	}
@@ -52,6 +52,11 @@ func Preflight(cors *CORSPolicy, rateLimit, waf Middleware) Middleware {
 		guarded := http.Handler(emit)
 		if waf != nil {
 			guarded = waf(guarded)
+		}
+		for i := len(quotaGuard) - 1; i >= 0; i-- {
+			if quotaGuard[i] != nil {
+				guarded = quotaGuard[i](guarded)
+			}
 		}
 		if rateLimit != nil {
 			guarded = rateLimit(guarded)
