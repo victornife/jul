@@ -57,6 +57,7 @@ const (
 )
 
 type classState struct {
+	mu        sync.Mutex
 	shared    *rate.Limiter
 	perCaller Limit
 	callers   map[[sha256.Size]byte]*callerState
@@ -147,30 +148,37 @@ func (c *Coordinator) Admit(class, caller string) (Decision, error) {
 	}
 	key := sha256.Sum256([]byte(caller))
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	state, ok := c.classes[class]
 	if !ok {
 		return Decision{}, fmt.Errorf("unknown quota class %q", class)
 	}
-	now := c.now()
+	// Always acquire the class lock before the application lock.
+	state.mu.Lock()
+	defer state.mu.Unlock()
+
 	entry := state.callers[key]
 	var evict *callerState
+	var scanTime time.Time
 	if entry == nil {
 		if len(state.callers) >= c.maxCallers {
-			for element := state.order.Front(); element != nil; element = element.Next() {
-				candidate := element.Value.(*callerState)
-				if candidate.limiter.TokensAt(now) >= float64(candidate.limiter.Burst()) {
-					evict = candidate
-					break
-				}
-			}
+			scanTime = c.now()
+			evict = state.refilledCaller(scanTime)
 			if evict == nil {
 				return Decision{Reason: ReasonCallerCapacity}, nil
 			}
 		}
 		entry = &callerState{key: key, limiter: newLimiter(state.perCaller)}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	// A backwards clock can make the candidate only partially refilled.
+	if evict != nil && now.Before(scanTime) {
+		evict = state.refilledCaller(now)
+		if evict == nil {
+			return Decision{Reason: ReasonCallerCapacity}, nil
+		}
 	}
 
 	limiters := [...]struct {
@@ -197,8 +205,7 @@ func (c *Coordinator) Admit(class, caller string) (Decision, error) {
 	if decision.Reason != "" {
 		return decision, nil
 	}
-	// The private limiters cannot change between the checks and these charges:
-	// every access is serialized by c.mu and uses the same timestamp.
+	// Class state and the application budget remain locked through all charges.
 	for _, limit := range limiters {
 		limit.limiter.AllowN(now, 1)
 	}
@@ -213,4 +220,14 @@ func (c *Coordinator) Admit(class, caller string) (Decision, error) {
 		state.order.MoveToBack(entry.element)
 	}
 	return Decision{Allowed: true}, nil
+}
+
+func (s *classState) refilledCaller(now time.Time) *callerState {
+	for element := s.order.Front(); element != nil; element = element.Next() {
+		candidate := element.Value.(*callerState)
+		if candidate.limiter.TokensAt(now) >= float64(candidate.limiter.Burst()) {
+			return candidate
+		}
+	}
+	return nil
 }
