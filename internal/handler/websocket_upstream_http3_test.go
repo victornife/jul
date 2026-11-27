@@ -884,7 +884,7 @@ func testWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T, limit in
 				if got.response != nil {
 					_ = got.response.Body.Close()
 				}
-				if got.err == nil || !strings.Contains(got.err.Error(), "closed") {
+				if !errors.Is(got.err, errWebSocketH3StreamUnavailable) {
 					t.Fatalf("retired transport waiter error: %v", got.err)
 				}
 			case <-ctx.Done():

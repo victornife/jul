@@ -152,7 +152,7 @@ func (t *websocketHTTP3Transport) acquire(ctx context.Context, address string) (
 		t.mu.Lock()
 		if t.closed {
 			t.mu.Unlock()
-			return nil, nil, errors.New("HTTP/3 WebSocket upstream is closed")
+			return nil, nil, fmt.Errorf("%w: transport is closed", errWebSocketH3StreamUnavailable)
 		}
 		if t.connections[address] != connection || connection.conn.Context().Err() != nil {
 			t.mu.Unlock()
@@ -177,7 +177,7 @@ func (t *websocketHTTP3Transport) connection(ctx context.Context, address string
 		t.mu.Lock()
 		if t.closed {
 			t.mu.Unlock()
-			return nil, errors.New("HTTP/3 WebSocket upstream is closed")
+			return nil, fmt.Errorf("%w: transport is closed", errWebSocketH3StreamUnavailable)
 		}
 		if connection := t.connections[address]; connection != nil {
 			ready := connection.ready
