@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 408 configurable leaves.
+Coverage: 409 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -5223,6 +5223,22 @@ Strategy is one of "round_robin", "weighted_round_robin", "least_conn", "consist
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
 | Active when | upstream configured |
+
+## `upstreams.*.websocket_upstream_protocol` {#upstreams-x-websocket_upstream_protocol}
+
+WebSocketUpstreamProtocol selects this pool's WebSocket handshake only.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `proxy_pass` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Allowed values | ``, `http1`, `http3` |
+| Constraint | trimmed lowercase enum; http3 requires HTTPS HTTP proxy consumers and UDP backends |
+| Zero/empty semantics | omitted/empty or http1 retains HTTP/1.1 WebSocket Upgrade; ordinary HTTP is unchanged |
+| Active when | WebSocket handshake to this named pool; http3 requires the http3 build tag |
 
 ## `waf.block_status` {#waf-block_status}
 

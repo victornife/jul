@@ -62,6 +62,9 @@ type patchRequest struct {
 
 	// Upstream target (upstream_* ops).
 	Upstream string `json:"upstream,omitempty"`
+	// WebSocketUpstreamProtocol is pool-scoped; nil preserves the default on
+	// upstream_add, while upstream_set_websocket_protocol requires a value.
+	WebSocketUpstreamProtocol *string `json:"websocket_upstream_protocol,omitempty"`
 
 	// Operation payloads (only the field relevant to Op is read).
 	Target    string          `json:"target,omitempty"`     // route_set_target: new proxy_pass
@@ -353,9 +356,9 @@ type locationMatch struct {
 // richer actions (transcode, FastCGI/uWSGI, handler plugin) stay raw and the
 // editor leaves them read-only.
 type locationActionPayload struct {
-	Kind   string `json:"kind"`             // proxy | grpc | static | redirect | return | deny
-	Target string `json:"target,omitempty"` // proxy_pass / gRPC backend / root / redirect URL
-	Status int    `json:"status,omitempty"` // return status, or optional redirect code
+	Kind   string `json:"kind"` // proxy | grpc | static | redirect | return | deny
+	Target string `json:"target,omitempty"`
+	Status int    `json:"status,omitempty"`
 }
 
 // transcodePatch carries the grpc_transcode fields the two-tier editor mutates

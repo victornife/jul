@@ -3136,6 +3136,19 @@
             ],
             "type": "string",
             "x-jul-constraint": "exact lowercase enum"
+          },
+          "websocket_upstream_protocol": {
+            "description": "WebSocketUpstreamProtocol selects this pool's WebSocket handshake only",
+            "enum": [
+              "",
+              "http1",
+              "http3"
+            ],
+            "type": "string",
+            "x-jul-constraint": "trimmed lowercase enum; http3 requires HTTPS HTTP proxy consumers and UDP backends",
+            "x-jul-value-capability": {
+              "http3": "http3"
+            }
           }
         },
         "required": [

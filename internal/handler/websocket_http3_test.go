@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,33 +59,68 @@ func TestHTTP3ExtendedFrontendStreamReportsSetupErrors(t *testing.T) {
 }
 
 func TestHTTP3ExtendedConnectProxiesToHTTP1WebSocket(t *testing.T) {
-	testHTTP3ExtendedConnect(t, false)
+	testHTTP3ExtendedConnect(t, false, false)
 }
 
 func TestHTTP3ExtendedConnectWithdrawalStopsDataAfterClose(t *testing.T) {
-	testHTTP3ExtendedConnect(t, true)
+	testHTTP3ExtendedConnect(t, true, false)
 }
 
-func testHTTP3ExtendedConnect(t *testing.T, withdraw bool) {
+func TestHTTP3UpstreamWithdrawalStopsDataAfterClose(t *testing.T) {
+	testHTTP3ExtendedConnect(t, true, true)
+}
+
+type websocketFlushingWriter struct{ http.ResponseWriter }
+
+func (w websocketFlushingWriter) Write(data []byte) (int, error) {
+	n, err := w.ResponseWriter.Write(data)
+	if err == nil {
+		err = http.NewResponseController(w.ResponseWriter).Flush()
+	}
+	return n, err
+}
+
+func testHTTP3ExtendedConnect(t *testing.T, withdraw, nativeBackend bool) {
 	backendClosed := make(chan struct{})
+	afterCloseDone := make(chan struct{})
+	finishAfterClose := sync.OnceFunc(func() { close(afterCloseDone) })
 	var retirement *websocketRetirementBackend
 	if withdraw {
 		retirement = newWebsocketRetirementBackend()
 	}
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if retirement != nil {
-			retirement.serve(w, r)
+	var proxy http.Handler
+	var backendRemote chan string
+	if nativeBackend {
+		var closeBackend func()
+		proxy, _, backendRemote, closeBackend = newWebSocketHTTP3Upstream(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/ws" {
+				echoHTTP3WebSocket(w, r)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_ = http.NewResponseController(w).Flush()
+			retirement.serveFrames(r.Body, websocketFlushingWriter{w})
+			<-afterCloseDone
 			close(backendClosed)
-		} else {
-			serveWebSocketEcho(w, r, func() { close(backendClosed) })
+		}))
+		defer closeBackend()
+		defer finishAfterClose()
+	} else {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if retirement != nil {
+				retirement.serve(w, r)
+				close(backendClosed)
+			} else {
+				serveWebSocketEcho(w, r, func() { close(backendClosed) })
+			}
+		}))
+		defer backend.Close()
+		var err error
+		proxy, err = NewProxy(context.Background(), config.ServerConfig{},
+			config.LocationConfig{ProxyPass: backend.URL}, nil, nil, nil, nil)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}))
-	defer backend.Close()
-
-	proxy, err := NewProxy(context.Background(), config.ServerConfig{},
-		config.LocationConfig{ProxyPass: backend.URL}, nil, nil, nil, nil)
-	if err != nil {
-		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = proxy.(*proxyHandler).Close() })
 	registry := respwriter.NewExchangeRegistry()
@@ -167,6 +203,9 @@ func testHTTP3ExtendedConnect(t *testing.T, withdraw bool) {
 	}
 	request.Proto = "websocket"
 	request.Header.Set("Sec-WebSocket-Version", "13")
+	if nativeBackend {
+		request.Header.Set("Sec-WebSocket-Protocol", "chat")
+	}
 	pipeReader, pipeWriter := io.Pipe()
 	request.Body = pipeReader
 	request.ContentLength = -1
@@ -234,6 +273,25 @@ func testHTTP3ExtendedConnect(t *testing.T, withdraw bool) {
 		if !bytes.Equal(echo, []byte{0x82, 1, 'j'}) {
 			t.Fatalf("unexpected pre-retirement echo: %x", echo)
 		}
+		var backendSibling io.ReadWriteCloser
+		if nativeBackend {
+			proxy := proxy.(*proxyHandler)
+			transport := proxy.websocket.(*websocketHTTP3Transport)
+			backendRequest := http3WebSocketRequest(ctx, transport.pool.Backends()[0].URL.Host, "/sibling")
+			backendRequest.Header.Set("Sec-WebSocket-Protocol", "chat")
+			sibling, err := transport.RoundTrip(backendRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer sibling.Body.Close()
+			if sibling.StatusCode != http.StatusOK {
+				t.Fatalf("backend sibling status=%d", sibling.StatusCode)
+			}
+			backendSibling = sibling.Body.(io.ReadWriteCloser)
+			if first, second := <-backendRemote, <-backendRemote; first != second {
+				t.Fatalf("backend sibling opened another QUIC connection: %q != %q", first, second)
+			}
+		}
 		siblingRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.Scheme+"://"+requestURL.Host+"/healthy", nil)
 		if err != nil {
 			t.Fatal(err)
@@ -258,7 +316,10 @@ func testHTTP3ExtendedConnect(t *testing.T, withdraw bool) {
 		if !bytes.Equal(closeFrame, []byte{0x88, 2, 0x03, 0xf0}) {
 			t.Fatalf("H3 retirement Close=%x", closeFrame)
 		}
-		retirement.afterClose(t)
+		func() {
+			defer finishAfterClose()
+			retirement.afterClose(t)
+		}()
 		if _, err := pipeWriter.Write(maskedRetirementTestFrames()); err != nil {
 			t.Fatalf("send client post-Close frames: %v", err)
 		}
@@ -277,6 +338,9 @@ func testHTTP3ExtendedConnect(t *testing.T, withdraw bool) {
 			t.Fatalf("H3 forwarded data after Close: %x", extra)
 		}
 		retirement.verify(t)
+		if backendSibling != nil {
+			echoWebSocketBytes(t, backendSibling, backendSibling)
+		}
 		close(resumeSibling)
 		body, err := io.ReadAll(sibling.Body)
 		if err != nil || string(body) != "healthy" {

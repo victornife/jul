@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 481 |
-| Schema leaves (configurable values) | 408 |
-| Registry entries | 408 |
+| Schema paths (containers included) | 482 |
+| Schema leaves (configurable values) | 409 |
+| Registry entries | 409 |
 | Startup-consumed entries | 39 |
-| Class `hot_reload` | 356 |
+| Class `hot_reload` | 357 |
 | Class `restart_required` | 39 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -505,6 +505,7 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.servers.*.address` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.servers.*.weight` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.strategy` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.websocket_upstream_protocol` | `hot_reload` | `proxy_pass` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `waf.block_status` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `waf.blocking_paranoia` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `waf.crs_enabled` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |

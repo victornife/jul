@@ -127,6 +127,7 @@ type ValueCapability struct {
 // capability requirements. Every entry's Path must resolve against
 // config.SchemaLeaves() (tested), and Capability must be a real Capability.
 var ValueCapabilityRegistry = []ValueCapability{
+	{"upstreams.*.websocket_upstream_protocol", "http3", CapHTTP3},
 	{"compression.encoders", "br", CapBrotli},
 	{"compression.encoders", "zstd", CapZstd},
 }

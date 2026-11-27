@@ -613,6 +613,27 @@ test.describe("WebSocket Extended CONNECT status", () => {
       await expect(page.getByRole("alert").filter({ hasText: /error/i })).toHaveCount(0);
     });
   }
+
+  test("HTTP/3 WebSocket upstream status is separate from the frontend listener", async ({
+    page,
+  }) => {
+    await setupApiMocks(page);
+    const name = "WebSocket upstream HTTP/3";
+    const detail = "1 HTTP/3 WebSocket upstream pool; backend hop only; outbound UDP required";
+    await page.route("/api/runtime/overview", (route) =>
+      json(route, {
+        ...OVERVIEW,
+        status: [{ group: "Upstreams", name, active: true, detail }],
+      }),
+    );
+    await page.goto("/");
+    await page.getByText("Show capabilities and configuration").focus();
+    await page.keyboard.press("Enter");
+    const row = page.getByRole("listitem").filter({ has: page.getByText(name, { exact: true }) });
+    await expect(row).toBeVisible();
+    await expect(row.getByText("active", { exact: true })).toBeVisible();
+    await expect(row.locator("[title]").filter({ hasText: detail })).toHaveAttribute("title", detail);
+  });
 });
 
 // ── Test ──────────────────────────────────────────────────────────────────────

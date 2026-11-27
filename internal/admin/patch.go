@@ -307,6 +307,25 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		up.Servers = append(up.Servers[:idx], up.Servers[idx+1:]...)
 		return fmt.Sprintf("upstream %s removed backend %s", req.Upstream, addr), nil
 
+	case "upstream_set_websocket_protocol":
+		up, err := findUpstream(c, req.Upstream)
+		if err != nil {
+			return "", err
+		}
+		if req.WebSocketUpstreamProtocol == nil {
+			return "", fmt.Errorf("upstream_set_websocket_protocol: websocket_upstream_protocol is required")
+		}
+		protocol, err := patchWebSocketProtocol(req.WebSocketUpstreamProtocol)
+		if err != nil {
+			return "", err
+		}
+		up.WebSocketUpstreamProtocol = protocol
+		display := protocol
+		if display == "" {
+			display = "http1 (default)"
+		}
+		return fmt.Sprintf("upstream %s WebSocket protocol set to %s", req.Upstream, display), nil
+
 	case "upstream_set_strategy":
 		up, err := findUpstream(c, req.Upstream)
 		if err != nil {
@@ -738,11 +757,16 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 		if err != nil {
 			return "", err
 		}
+		protocol, err := patchWebSocketProtocol(req.WebSocketUpstreamProtocol)
+		if err != nil {
+			return "", err
+		}
 		c.Upstreams = append(c.Upstreams, config.UpstreamConfig{
-			Name:     name,
-			Strategy: strat,
-			Hash:     hash,
-			Servers:  []config.UpstreamServer{{Address: addr, Weight: weight}},
+			Name:                      name,
+			Strategy:                  strat,
+			Hash:                      hash,
+			Servers:                   []config.UpstreamServer{{Address: addr, Weight: weight}},
+			WebSocketUpstreamProtocol: protocol,
 		})
 		return fmt.Sprintf("upstream %s added with backend %s (weight %d)", name, addr, weight), nil
 

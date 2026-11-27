@@ -77,6 +77,16 @@ func TestProjectRoutesIncludesRouteIDWhenPresent(t *testing.T) {
 	}
 }
 
+func TestProjectAppsIncludesWebSocketUpstreamProtocol(t *testing.T) {
+	c := &config.Config{Upstreams: []config.UpstreamConfig{{
+		Name: "inventory", WebSocketUpstreamProtocol: " http3 ",
+	}}}
+	got := projectApps(c, nil)[0].WebSocketUpstreamProtocol
+	if got != "http3" {
+		t.Fatalf("WebSocketUpstreamProtocol = %q, want http3", got)
+	}
+}
+
 func TestFirstNonEmpty(t *testing.T) {
 	if got := firstNonEmpty("a", "b"); got != "a" {
 		t.Errorf("firstNonEmpty(a,b) = %q", got)

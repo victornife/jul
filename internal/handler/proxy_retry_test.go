@@ -4,6 +4,8 @@
 package handler
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +16,64 @@ import (
 	"jul/internal/config"
 	"jul/internal/upstream"
 )
+
+func TestWebSocketHTTP1HandshakeFailover(t *testing.T) {
+	var failedAttempts atomic.Int64
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		failedAttempts.Add(1)
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveWebSocketEcho(w, r)
+	}))
+	defer second.Close()
+	h := newProxy(t, config.LocationConfig{ProxyPass: "http://pool"}, map[string]config.UpstreamConfig{
+		"pool": {
+			Name: "pool", Strategy: "round_robin",
+			Servers: []config.UpstreamServer{
+				{Address: strings.TrimPrefix(first.URL, "http://"), Weight: 1},
+				{Address: strings.TrimPrefix(second.URL, "http://"), Weight: 1},
+			},
+		},
+	})
+	front := httptest.NewServer(h)
+	defer front.Close()
+	req, err := http.NewRequest(http.MethodGet, front.URL+"/ws", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header = http.Header{
+		"Connection": {"Upgrade"}, "Upgrade": {"websocket"},
+		"Sec-WebSocket-Version": {"13"}, "Sec-WebSocket-Key": {"dGhlIHNhbXBsZSBub25jZQ=="},
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	response, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusSwitchingProtocols || failedAttempts.Load() != 1 {
+		t.Fatalf("status=%d failed attempts=%d, want 101 after one failed handshake", response.StatusCode, failedAttempts.Load())
+	}
+	stream, ok := response.Body.(io.ReadWriteCloser)
+	if !ok {
+		t.Fatal("upgraded response is not duplex")
+	}
+	if _, err := stream.Write([]byte{0x82, 0x81, 1, 2, 3, 4, 'j' ^ 1}); err != nil {
+		t.Fatal(err)
+	}
+	echo := make([]byte, 3)
+	if _, err := io.ReadFull(stream, echo); err != nil || string(echo) != "\x82\x01j" {
+		t.Fatalf("failover tunnel echo=%x err=%v", echo, err)
+	}
+}
 
 // TestNoRetryAfterResponseStarted is the regression that matters most in this
 // slice, because violating it is not a performance bug but a correctness one:

@@ -440,6 +440,9 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
   const [newAddr, setNewAddr] = useState("");
   const [newWeight, setNewWeight] = useState(1);
   const [strategy, setStrategy] = useState(app.strategy || "round_robin");
+  const [websocketProtocol, setWebsocketProtocol] = useState(
+    app.websocket_upstream_protocol === "http3" ? "http3" : "http1",
+  );
   const [hash, setHash] = useState<AppHashDraft>(hashDraftFromProjection(app));
   const [editing, setEditing] = useState<null | "health" | "discovery">(null);
   const isStatic = !app.discovery || app.discovery === "static";
@@ -461,6 +464,10 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
     setHash(hashDraftFromProjection(app));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reseed only when the upstream's own policy changes
   }, [app.name, app.strategy, app.hash?.key, app.hash?.name, app.hash?.fallback]);
+
+  useEffect(() => {
+    setWebsocketProtocol(app.websocket_upstream_protocol === "http3" ? "http3" : "http1");
+  }, [app.name, app.websocket_upstream_protocol]);
 
   return (
     <Drawer
@@ -507,6 +514,14 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
 
         <div className="rounded-md border border-jul-border bg-jul-surface px-4 py-2">
           <Row label="Strategy" value={app.strategy} />
+          <Row
+            label="WebSocket upstream protocol"
+            value={
+              app.websocket_upstream_protocol === "http3"
+                ? "HTTP/3 Extended CONNECT"
+                : "HTTP/1.1 (default)"
+            }
+          />
           {hashDescription !== null && app.hash !== undefined && (
             <>
               <Row label="Affinity key" value={hashDescription} />
@@ -601,6 +616,46 @@ export function AppDetail({ app, onClose }: AppDetailProps) {
               {issue}
             </p>
           ))}
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex-1 space-y-1">
+              <span className="text-xs text-jul-muted">WebSocket upstream protocol</span>
+              <select
+                value={websocketProtocol}
+                disabled={!canWrite || patch.busy}
+                onChange={(event) => {
+                  setWebsocketProtocol(event.target.value === "http3" ? "http3" : "http1");
+                }}
+                className="w-full rounded-md border border-jul-border bg-jul-bg px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent disabled:opacity-50"
+              >
+                <option value="http1">Default (HTTP/1.1)</option>
+                <option value="http3">HTTP/3 Extended CONNECT</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={
+                !canWrite ||
+                patch.busy ||
+                websocketProtocol ===
+                  (app.websocket_upstream_protocol === "http3" ? "http3" : "http1")
+              }
+              onClick={() => {
+                patch.run({
+                  op: "upstream_set_websocket_protocol",
+                  upstream: app.name,
+                  websocket_upstream_protocol: websocketProtocol === "http3" ? "http3" : "http1",
+                });
+              }}
+              className="rounded-md bg-jul-accent px-3 py-1.5 text-sm font-medium text-jul-bg hover:brightness-110 disabled:opacity-40"
+            >
+              Review WebSocket protocol →
+            </button>
+          </div>
+          <p className="text-xs text-jul-muted">
+            Pool-wide WebSocket handshakes only; ordinary HTTP and gRPC are unchanged. HTTP/3
+            requires HTTPS proxy routes, backend TLS trust and outbound UDP. Invalid consumers are
+            rejected during preview; existing tunnels retain their generation.
+          </p>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

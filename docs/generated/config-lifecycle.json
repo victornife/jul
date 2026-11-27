@@ -260,12 +260,12 @@
     }
   ],
   "counts": {
-    "schema_paths": 481,
-    "schema_leaves": 408,
-    "registry_entries": 408,
+    "schema_paths": 482,
+    "schema_leaves": 409,
+    "registry_entries": 409,
     "startup_consumed": 39,
     "by_class": {
-      "hot_reload": 356,
+      "hot_reload": 357,
       "ignored_deprecated": 4,
       "new_listener_only": 7,
       "restart_required": 39,
@@ -5297,6 +5297,19 @@
       "class": "hot_reload",
       "subsystem": "upstream",
       "reason": "the upstream registry stages and swaps pools on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.websocket_upstream_protocol",
+      "class": "hot_reload",
+      "subsystem": "proxy_pass",
+      "reason": "the handler tree is rebuilt from the effective config on each successful reload",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

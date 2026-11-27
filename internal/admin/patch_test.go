@@ -863,6 +863,38 @@ func TestApplyPatchLocationSetAction(t *testing.T) {
 	}
 }
 
+func TestApplyPatchUpstreamSetWebSocketProtocol(t *testing.T) {
+	c := patchTestConfig()
+	for _, protocol := range []string{"http3", "http1", ""} {
+		if _, err := applyPatch(c, patchRequest{
+			Op: "upstream_set_websocket_protocol", Upstream: "pool",
+			WebSocketUpstreamProtocol: &protocol,
+		}); err != nil {
+			t.Fatalf("set %q: %v", protocol, err)
+		}
+		if got := c.Upstreams[0].WebSocketUpstreamProtocol; got != protocol {
+			t.Fatalf("protocol=%q, want %q", got, protocol)
+		}
+	}
+	invalid := "h3"
+	for _, request := range []patchRequest{
+		{Op: "upstream_set_websocket_protocol", Upstream: "pool"},
+		{Op: "upstream_set_websocket_protocol", Upstream: "missing", WebSocketUpstreamProtocol: &invalid},
+		{Op: "upstream_set_websocket_protocol", Upstream: "pool", WebSocketUpstreamProtocol: &invalid},
+		{Op: "upstream_add", Upstream: "new", Address: "127.0.0.1:443", WebSocketUpstreamProtocol: &invalid},
+	} {
+		if _, err := applyPatch(c, request); err == nil {
+			t.Errorf("invalid WebSocket protocol request succeeded: %+v", request)
+		}
+	}
+	protocol := "http3"
+	if _, err := applyPatch(c, patchRequest{
+		Op: "upstream_add", Upstream: "new", Address: "127.0.0.1:443", WebSocketUpstreamProtocol: &protocol,
+	}); err != nil || c.Upstreams[len(c.Upstreams)-1].WebSocketUpstreamProtocol != protocol {
+		t.Fatalf("create HTTP/3 upstream: %v", err)
+	}
+}
+
 // TestApplyPatchRouteRename proves a server block's host names can be renamed in
 // place, that an exact-target match is required, and that an unchanged or
 // colliding rename is rejected.

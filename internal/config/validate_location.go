@@ -89,6 +89,7 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 	if loc.GRPC && loc.ProxyPass == "" {
 		errs = append(errs, fmt.Errorf("%s: grpc = true requires proxy_pass (the gRPC backend)", where))
 	}
+
 	if loc.GRPCTranscode != nil {
 		errs = append(errs, validateGRPCTranscode(loc.GRPCTranscode, where+".grpc_transcode", upstreamNames)...)
 	}

@@ -38,9 +38,15 @@ function json(body: unknown, status = 200): Response {
 }
 
 function Wrapper({ children }: { readonly children: ReactNode }) {
-  const client = new QueryClient({defaultOptions: {queries: {retry: false, staleTime: Infinity}}});
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
   client.setQueryData(["upstream-resilience", "api"], []);
-  return <QueryClientProvider client={client}><MemoryRouter initialEntries={["/apps"]}>{children}</MemoryRouter></QueryClientProvider>;
+  return (
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/apps"]}>{children}</MemoryRouter>
+    </QueryClientProvider>
+  );
 }
 
 beforeEach(() => {
@@ -210,6 +216,26 @@ describe("AppDetail one-operation handoff", () => {
     expect(screen.getByRole("button", { name: "Remove →" })).toBeDisabled();
     expect(screen.getByTitle("Cannot remove the last backend")).toBeInTheDocument();
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("AppDetail WebSocket protocol", () => {
+  it("previews the pool selector without modifying a route action", async () => {
+    render(<AppDetail app={app()} onClose={() => undefined} />, { wrapper: Wrapper });
+    const selector = screen.getByRole("combobox", { name: "WebSocket upstream protocol" });
+    expect(selector).toHaveValue("http1");
+    fireEvent.change(selector, { target: { value: "http3" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Review WebSocket protocol/ }));
+    await waitFor(() => {
+      expect(requests[0]).toEqual([
+        {
+          op: "upstream_set_websocket_protocol",
+          upstream: "api",
+          websocket_upstream_protocol: "http3",
+        },
+      ]);
+    });
+    expect(takePendingDraft()).toMatchObject({ kind: "patch", ops: requests[0] });
   });
 });
 

@@ -94,6 +94,33 @@ func TestStatusReportsAdminTransportPosture(t *testing.T) {
 	}
 }
 
+func TestStatusReportsWebSocketHTTP3Upstream(t *testing.T) {
+	cfg := &config.Config{Upstreams: []config.UpstreamConfig{{
+		Name: "inventory", WebSocketUpstreamProtocol: "http3",
+	}}}
+	s := newTestServer(t, config.AdminConfig{}, Deps{
+		LoadConfig:    func() (*config.Config, error) { return cfg, nil },
+		HTTP3Compiled: true,
+	})
+	recorder := httptest.NewRecorder()
+	s.routes().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/status", nil))
+	var rows []FeatureStatus
+	if err := json.Unmarshal(recorder.Body.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Name != "WebSocket upstream HTTP/3" {
+			continue
+		}
+		if !row.Active || !strings.Contains(row.Detail, "1 HTTP/3 WebSocket upstream pool") ||
+			!strings.Contains(row.Detail, "outbound UDP required") {
+			t.Fatalf("WebSocket upstream status = %+v", row)
+		}
+		return
+	}
+	t.Fatal("the Status overview has no HTTP/3 WebSocket upstream row")
+}
+
 // TestStatusReportsExternalAPISurface gives "is this endpoint stable?" an
 // answer an operator can reach from the Console rather than only from the
 // generated document.

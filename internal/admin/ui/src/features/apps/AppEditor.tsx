@@ -575,6 +575,7 @@ export function AppEditor({
   const [newListen, setNewListen] = useState(":8080");
   const [newServerNames, setNewServerNames] = useState("");
   const [protocol, setProtocol] = useState<AppProtocol>(preset.protocol);
+  const [websocketUpstreamProtocol, setWebsocketUpstreamProtocol] = useState<"" | "http3">("");
   const [matchType, setMatchType] = useState<AppRouteMatchType>("prefix");
   const [path, setPath] = useState("/");
   const [localError, setLocalError] = useState<AppPatchValidationError | null>(null);
@@ -644,6 +645,7 @@ export function AppEditor({
       const ops = buildAppCreationBatch(
         {
           name,
+          ...(websocketUpstreamProtocol === "http3" ? { websocketUpstreamProtocol } : {}),
           strategy,
           hash,
           backends,
@@ -746,6 +748,25 @@ export function AppEditor({
           </select>
         </label>
         {strategy === "consistent_hash" && <HashSettingsFields value={hash} onChange={setHash} />}
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium text-jul-text">WebSocket upstream protocol</span>
+          <select
+            value={websocketUpstreamProtocol}
+            onChange={(event) => {
+              setWebsocketUpstreamProtocol(event.target.value === "http3" ? "http3" : "");
+            }}
+            className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+          >
+            <option value="">Default (HTTP/1.1)</option>
+            <option value="http3">HTTP/3 Extended CONNECT</option>
+          </select>
+          <span className="text-xs text-jul-muted">
+            Applies to this pool's WebSocket handshakes only, not ordinary HTTP or gRPC. HTTP/3
+            requires outbound UDP and HTTPS proxy routes. A new HTTP mount uses HTTPS with system
+            backend trust; configure private CA or mTLS trust in raw configuration.
+          </span>
+        </label>
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">

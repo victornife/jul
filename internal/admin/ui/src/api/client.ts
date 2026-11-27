@@ -938,6 +938,7 @@ export type BackendProjection = z.infer<typeof BackendProjectionSchema>;
 
 export const AppProjectionSchema = z.object({
   name: z.string(),
+  websocket_upstream_protocol: z.enum(["http1", "http3"]).optional(),
   strategy: z.string(),
   // consistent_hash key policy; configuration only, never a key value.
   hash: z
@@ -2676,6 +2677,11 @@ export type ConfigPatch =
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
   | { op: "upstream_set_strategy"; upstream: string; strategy: string; hash?: HashPatch }
+  | {
+      op: "upstream_set_websocket_protocol";
+      upstream: string;
+      websocket_upstream_protocol: "http1" | "http3";
+    }
   | { op: "upstream_set_health_check"; upstream: string; health_check: HealthCheckPatch }
   | { op: "upstream_set_discovery"; upstream: string; discovery: DiscoveryPatch }
   | { op: "server_add"; listen: string; server_names?: string[] }
@@ -2711,6 +2717,7 @@ export type ConfigPatch =
     }
   | {
       op: "upstream_add";
+      websocket_upstream_protocol?: "http1" | "http3";
       upstream: string;
       address: string;
       weight?: number;

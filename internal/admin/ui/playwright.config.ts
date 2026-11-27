@@ -84,6 +84,11 @@ export default defineConfig({
       testMatch: ["e2e/dns-real-server.spec.ts"],
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "websocket-real-server",
+      testMatch: ["e2e/websocket-real-server.spec.ts"],
+      use: { ...devices["Desktop Chrome"] },
+    },
   ],
   // webServer entries: the mocked-API smoke test uses vite preview; the
   // real-server project rebuilds jul at launch so the binary embeds the SPA that
