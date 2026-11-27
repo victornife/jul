@@ -81,6 +81,43 @@ afterEach(() => {
 });
 
 describe("AppEditor ordered structured handoff", () => {
+  it("mounts an HTTP/3 WebSocket route with HTTPS and the explicit selector", async () => {
+    render(
+      <AppEditor
+        initial={{
+          name: "api",
+          backends: [{ address: "api.internal:443", weight: 1 }],
+        }}
+        onClose={() => undefined}
+      />,
+      { wrapper: Wrapper },
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "New exact server" }));
+    fireEvent.change(screen.getByRole("combobox", { name: /^WebSocket upstream protocol/ }), {
+      target: { value: "http3" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Listener" }), {
+      target: { value: ":9443" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Review batch in editor →" }));
+
+    await waitFor(() => {
+      expect(requestBody?.ops.at(-1)).toMatchObject({
+        op: "location_add",
+        listen: ":9443",
+        action: {
+          kind: "proxy",
+          target: "https://api",
+        },
+      });
+      expect(requestBody?.ops[0]).toMatchObject({
+        op: "upstream_add",
+        websocket_upstream_protocol: "http3",
+      });
+    });
+  });
+
   it("hands off the exact upstream/health/discovery/existing-server batch", async () => {
     const onReview = vi.fn();
     render(

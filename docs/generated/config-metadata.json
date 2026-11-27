@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 481,
-    "schema_leaves": 408,
+    "schema_paths": 482,
+    "schema_leaves": 409,
     "resources": 9
   },
   "capability_build_tags": {
@@ -6162,6 +6162,30 @@
       "default": "round_robin",
       "description": "Strategy is one of \"round_robin\", \"weighted_round_robin\", \"least_conn\", \"consistent_hash\"",
       "anchor": "upstreams-x-strategy"
+    },
+    "upstreams.*.websocket_upstream_protocol": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "proxy_pass",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "value_capabilities": {
+        "http3": "http3"
+      },
+      "value_kind": "enum",
+      "constraint": "trimmed lowercase enum; http3 requires HTTPS HTTP proxy consumers and UDP backends",
+      "zero_semantics": "omitted/empty or http1 retains HTTP/1.1 WebSocket Upgrade; ordinary HTTP is unchanged",
+      "active_when": "WebSocket handshake to this named pool; http3 requires the http3 build tag",
+      "allowed": [
+        "",
+        "http1",
+        "http3"
+      ],
+      "description": "WebSocketUpstreamProtocol selects this pool's WebSocket handshake only",
+      "anchor": "upstreams-x-websocket_upstream_protocol"
     },
     "waf.block_status": {
       "kind": "scalar",

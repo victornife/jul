@@ -1141,11 +1141,9 @@ func (w *exchangeResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return up.clientConn(), up.clientReadWriter(), nil
 }
 
-// AttachUpgradedBackend associates the upstream 101 ReadWriteCloser with the
-// current request's ActiveExchange so narrowing retirement and shutdown can
-// send a masked WebSocket Close frame (when WebSocket) and close the upstream
-// leg deterministically (#562).
-func AttachUpgradedBackend(ctx context.Context, back io.ReadWriteCloser, resHeader http.Header) io.ReadWriteCloser {
+// AttachUpgradedBackend associates a validated tunnel with the current exchange.
+// The caller supplies its type because Extended CONNECT has no Upgrade header.
+func AttachUpgradedBackend(ctx context.Context, back io.ReadWriteCloser, isWebSocket bool) io.ReadWriteCloser {
 	ex := ActiveExchangeFrom(ctx)
 	if ex == nil {
 		return back
@@ -1153,11 +1151,10 @@ func AttachUpgradedBackend(ctx context.Context, back io.ReadWriteCloser, resHead
 	if attached, ok := back.(*upgradedBackConn); ok && attached.ex == ex {
 		return back
 	}
-	isWS := strings.EqualFold(strings.TrimSpace(resHeader.Get("Upgrade")), "websocket")
 	wb := &upgradedBackConn{
 		ReadWriteCloser: back,
 		ex:              ex,
-		isWebSocket:     isWS,
+		isWebSocket:     isWebSocket,
 		holdCh:          make(chan struct{}),
 	}
 	ex.mu.Lock()
@@ -1167,7 +1164,7 @@ func AttachUpgradedBackend(ctx context.Context, back io.ReadWriteCloser, resHead
 	}
 	ex.upgradedBack = wb
 	if ex.upgraded != nil {
-		ex.upgraded.attachBackend(wb, isWS)
+		ex.upgraded.attachBackend(wb, isWebSocket)
 	}
 	ex.mu.Unlock()
 	return wb

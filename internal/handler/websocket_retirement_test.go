@@ -9,21 +9,20 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"testing"
 	"time"
 )
 
 type websocketRetirementBackend struct {
-	conn   chan net.Conn
+	conn   chan io.Writer
 	closed chan []byte
 	after  chan []byte
 }
 
 func newWebsocketRetirementBackend() *websocketRetirementBackend {
 	return &websocketRetirementBackend{
-		conn: make(chan net.Conn, 1), closed: make(chan []byte, 1), after: make(chan []byte, 1),
+		conn: make(chan io.Writer, 1), closed: make(chan []byte, 1), after: make(chan []byte, 1),
 	}
 }
 
@@ -41,27 +40,27 @@ func (b *websocketRetirementBackend) serve(w http.ResponseWriter, r *http.Reques
 		b.closed <- nil
 		return
 	}
-	b.conn <- conn
+	b.serveFrames(rw, conn)
+}
+
+func (b *websocketRetirementBackend) serveFrames(reader io.Reader, writer io.Writer) {
+	b.conn <- writer
 	initial := make([]byte, 7)
-	if _, err := io.ReadFull(rw, initial); err != nil {
+	if _, err := io.ReadFull(reader, initial); err != nil {
 		b.closed <- nil
 		return
 	}
-	if _, err := rw.Write([]byte{0x82, 1, initial[6] ^ initial[2]}); err != nil {
-		b.closed <- nil
-		return
-	}
-	if err := rw.Flush(); err != nil {
+	if _, err := writer.Write([]byte{0x82, 1, initial[6] ^ initial[2]}); err != nil {
 		b.closed <- nil
 		return
 	}
 	closeFrame := make([]byte, 8)
-	if _, err := io.ReadFull(rw, closeFrame); err != nil {
+	if _, err := io.ReadFull(reader, closeFrame); err != nil {
 		b.closed <- nil
 		return
 	}
 	b.closed <- closeFrame
-	data, _ := io.ReadAll(rw)
+	data, _ := io.ReadAll(reader)
 	b.after <- data
 }
 

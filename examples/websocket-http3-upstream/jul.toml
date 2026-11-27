@@ -1,0 +1,17 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
+[[upstreams]]
+name = "inventory"
+servers = ["inventory.internal:443"]
+websocket_upstream_protocol = "http3"
+
+  [upstreams.backend_tls]
+  server_name = "inventory.internal"
+
+[[servers]]
+listen = ":8080"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/ws" }
+  proxy_pass = "https://inventory"

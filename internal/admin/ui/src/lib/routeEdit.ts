@@ -89,7 +89,11 @@ export function seedAction(loc: LocationProjection): ActionDraft {
       `The ${loc.action} action is not supported by the generic route action editor; use its protocol-specific workflow or raw configuration.`,
     );
   }
-  return { kind: loc.action, target: loc.target ?? "", status: "" };
+  return {
+    kind: loc.action,
+    target: loc.target ?? "",
+    status: "",
+  };
 }
 
 export function actionChanged(d: ActionDraft, loc: LocationProjection): boolean {
@@ -144,7 +148,10 @@ export function actionWarnings(d: ActionDraft): string[] {
 export function actionToPatch(d: ActionDraft): LocationActionPatch {
   switch (d.kind) {
     case "proxy":
-      return { kind: "proxy", target: d.target.trim() };
+      return {
+        kind: "proxy",
+        target: d.target.trim(),
+      };
     case "static":
       return { kind: "static", target: d.target.trim() };
     case "redirect": {

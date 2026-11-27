@@ -107,12 +107,20 @@ describe("routeEdit — action", () => {
     expect(actionWarnings({ kind: "proxy", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "static", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "redirect", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "200" })).toHaveLength(
-      1,
-    );
-    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "301" })).toHaveLength(
-      0,
-    );
+    expect(
+      actionWarnings({
+        kind: "redirect",
+        target: "https://x",
+        status: "200",
+      }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({
+        kind: "redirect",
+        target: "https://x",
+        status: "301",
+      }),
+    ).toHaveLength(0);
     expect(actionWarnings({ kind: "return", target: "", status: "" })).toHaveLength(1);
     expect(actionWarnings({ kind: "return", target: "", status: "700" })).toHaveLength(1);
     expect(actionWarnings({ kind: "return", target: "", status: "404" })).toHaveLength(0);
@@ -120,16 +128,34 @@ describe("routeEdit — action", () => {
   });
 
   it("builds the right patch payload per kind", () => {
-    expect(actionToPatch({ kind: "proxy", target: " http://a ", status: "" })).toEqual({
+    expect(
+      actionToPatch({
+        kind: "proxy",
+        target: " http://a ",
+        status: "",
+      }),
+    ).toEqual({
       kind: "proxy",
       target: "http://a",
     });
-    expect(actionToPatch({ kind: "redirect", target: "https://x", status: "301" })).toEqual({
+    expect(
+      actionToPatch({
+        kind: "redirect",
+        target: "https://x",
+        status: "301",
+      }),
+    ).toEqual({
       kind: "redirect",
       target: "https://x",
       status: 301,
     });
-    expect(actionToPatch({ kind: "redirect", target: "https://x", status: "" })).toEqual({
+    expect(
+      actionToPatch({
+        kind: "redirect",
+        target: "https://x",
+        status: "",
+      }),
+    ).toEqual({
       kind: "redirect",
       target: "https://x",
     });
@@ -141,7 +167,11 @@ describe("routeEdit — action", () => {
   });
 
   it("does not carry a status when the draft enables it but leaves it non-integer", () => {
-    const d: ActionDraft = { kind: "redirect", target: "https://x", status: "abc" };
+    const d: ActionDraft = {
+      kind: "redirect",
+      target: "https://x",
+      status: "abc",
+    };
     expect(actionToPatch(d)).toEqual({ kind: "redirect", target: "https://x" });
   });
 });

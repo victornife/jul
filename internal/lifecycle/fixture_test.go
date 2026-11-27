@@ -315,8 +315,9 @@ func fullConfig() *config.Config {
 			}},
 		}},
 		Upstreams: []config.UpstreamConfig{{
-			Name:     "app",
-			Strategy: "consistent_hash",
+			WebSocketUpstreamProtocol: "http3",
+			Name:                      "app",
+			Strategy:                  "consistent_hash",
 			Hash: &config.HashConfig{
 				Key:       "header",
 				Name:      "X-Tenant",

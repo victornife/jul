@@ -65,6 +65,7 @@ export interface AppDiscoveryDraft {
 
 export interface AppCreateDraft {
   readonly name: string;
+  readonly websocketUpstreamProtocol?: "http3";
   readonly strategy: AppStrategy;
   /** Required when strategy is consistent_hash; ignored otherwise. */
   readonly hash?: AppHashDraft | undefined;
@@ -125,7 +126,9 @@ function locationOperation(
   protocol: AppProtocol,
   matchType: AppRouteMatchType,
   path: string,
+  https: boolean,
 ): ConfigPatch {
+  const target = `${protocol === "http" && https ? "https" : "http"}://${name}`;
   return {
     op: "location_add",
     listen: server.listen,
@@ -133,8 +136,11 @@ function locationOperation(
     match_set: { type: matchType, path },
     action:
       protocol === "grpc"
-        ? { kind: "grpc_proxy", target: `http://${name}` }
-        : { kind: "proxy", target: `http://${name}` },
+        ? { kind: "grpc_proxy", target }
+        : {
+            kind: "proxy",
+            target,
+          },
   };
 }
 
@@ -176,6 +182,7 @@ function appendMount(
   name: string,
   mount: AppMountDraft,
   routes: readonly RouteProjection[],
+  https: boolean,
 ): void {
   if (mount.mode === "none") return;
   const server = normalizedServer(mount.server);
@@ -198,7 +205,7 @@ function appendMount(
         `Native gRPC requires HTTP/2. The selected plaintext server ${formatServerIdentity(server)} does not already have h2c enabled; this workflow will not change an existing listener or its sibling virtual hosts.`,
       ]);
     }
-    ops.push(locationOperation(name, server, mount.protocol, mount.matchType, path));
+    ops.push(locationOperation(name, server, mount.protocol, mount.matchType, path, https));
     return;
   }
 
@@ -225,7 +232,7 @@ function appendMount(
     // mutation cannot alter a pre-existing sibling virtual host.
     ops.push({ op: "server_toggle_h2c", listen: server.listen, enabled: true });
   }
-  ops.push(locationOperation(name, server, mount.protocol, mount.matchType, path));
+  ops.push(locationOperation(name, server, mount.protocol, mount.matchType, path, https));
 }
 
 /**
@@ -281,6 +288,9 @@ export function buildAppCreationBatch(
       address: first.address,
       weight: first.weight,
       strategy: draft.strategy,
+      ...(draft.websocketUpstreamProtocol === "http3"
+        ? { websocket_upstream_protocol: "http3" as const }
+        : {}),
       ...(hash === undefined ? {} : { hash }),
     },
   ];
@@ -294,7 +304,13 @@ export function buildAppCreationBatch(
   }
   appendHealthCheck(ops, name, draft.healthCheck);
   appendDiscovery(ops, name, draft.discovery);
-  appendMount(ops, name, draft.mount, inventory.routes);
+  appendMount(
+    ops,
+    name,
+    draft.mount,
+    inventory.routes,
+    draft.websocketUpstreamProtocol === "http3",
+  );
   return ops;
 }
 

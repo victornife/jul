@@ -364,12 +364,13 @@ func projectApps(c *config.Config, live map[string]UpstreamStatus) []AppProjecti
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
 		ap := AppProjection{
-			Name:        up.Name,
-			Strategy:    up.Strategy,
-			Hash:        upstreamHashView(up),
-			Backends:    make([]BackendProjection, 0, len(up.Servers)),
-			MaxFails:    up.CircuitMaxFails(),
-			RoutesUsing: routesByUpstream[up.Name],
+			WebSocketUpstreamProtocol: strings.TrimSpace(up.WebSocketUpstreamProtocol),
+			Name:                      up.Name,
+			Strategy:                  up.Strategy,
+			Hash:                      upstreamHashView(up),
+			Backends:                  make([]BackendProjection, 0, len(up.Servers)),
+			MaxFails:                  up.CircuitMaxFails(),
+			RoutesUsing:               routesByUpstream[up.Name],
 		}
 		if d := up.CircuitFailTimeout(); d > 0 {
 			ap.FailTimeout = d.String()

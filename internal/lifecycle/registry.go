@@ -752,6 +752,7 @@ func upstreamEntries() []Entry {
 		"upstreams.*.servers.*.weight",
 		"upstreams.*.strategy",
 	)
+	out = append(out, hot("upstreams.*.websocket_upstream_protocol", SubProxyPass, reasonHandlerRebuild))
 	// The hash block is part of the pool's construction-time shape, like
 	// strategy: a changed key, fallback or algorithm rebuilds the pool on the
 	// next successful reload, and keys are re-placed from that moment.

@@ -214,8 +214,9 @@ type LocationCORSState struct {
 
 // AppProjection is a structured upstream/app for the Console v2 Apps panel.
 type AppProjection struct {
-	Name     string `json:"name"`
-	Strategy string `json:"strategy"`
+	WebSocketUpstreamProtocol string `json:"websocket_upstream_protocol,omitempty"`
+	Name                      string `json:"name"`
+	Strategy                  string `json:"strategy"`
 	// Hash is the consistent_hash key policy, so the Console can state the key
 	// source, where it applies and what happens without a key.
 	Hash        *adminapi.UpstreamHash `json:"hash,omitempty"`

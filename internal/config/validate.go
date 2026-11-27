@@ -65,6 +65,7 @@ func Validate(c *Config) error {
 			}
 		}
 		errs = append(errs, validateUpstreamValues(up, where)...)
+		errs = append(errs, validateWebSocketUpstreamProtocol(up, where)...)
 		errs = append(errs, validateBackendTLS(up.BackendTLS, where+".backend_tls")...)
 		errs = append(errs, validateResilience(up.Resilience, where+".resilience", c.Global.ShutdownTimeout.Std())...)
 		errs = append(errs, validateCircuitThresholds(up, where)...)
@@ -72,6 +73,8 @@ func Validate(c *Config) error {
 		errs = append(errs, validateUnixBackends(up, where)...)
 		errs = append(errs, validateDiscovery(up.Discovery, where+".discovery")...)
 	}
+
+	errs = append(errs, validateWebSocketUpstreamConsumers(c)...)
 
 	// Detect listen addresses used by both a TLS and a non-TLS server block,
 	// which cannot share one listener. Separately track ACME vs static TLS per

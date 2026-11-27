@@ -88,7 +88,7 @@ func TestExtendedTunnelBlockedWriteDoesNotBlockWithdrawal(t *testing.T) {
 	req.ProtoMajor = 2
 	_, admitted, _, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1, RouteID: "blocked"})
 	defer release()
-	back := AttachUpgradedBackend(admitted.Context(), proxyBack, http.Header{"Upgrade": {"websocket"}})
+	back := AttachUpgradedBackend(admitted.Context(), proxyBack, true)
 	// Hide deadlines so only the independently armed cutoff can unblock Write.
 	front := AttachExtendedStream(admitted.Context(), struct{ io.ReadWriteCloser }{proxyFront}, back)
 	defer front.Close()
@@ -165,7 +165,7 @@ func TestExtendedTunnelRetirementWaitsForFrontendFrameBoundary(t *testing.T) {
 	req.ProtoMajor = 2
 	_, admitted, ex, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1})
 	defer release()
-	back := AttachUpgradedBackend(admitted.Context(), proxyBack, http.Header{"Upgrade": {"websocket"}})
+	back := AttachUpgradedBackend(admitted.Context(), proxyBack, true)
 	front := AttachExtendedStream(admitted.Context(), proxyFront, back)
 	defer front.Close()
 	if !ex.isUpgraded() {
@@ -259,7 +259,7 @@ func TestExtendedTunnelForcesUnresponsivePeerAfterLateAttachment(t *testing.T) {
 	req.ProtoMajor = 2
 	_, admitted, ex, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{GenID: 1})
 	defer release()
-	back := AttachUpgradedBackend(admitted.Context(), proxyBack, http.Header{"Upgrade": {"websocket"}})
+	back := AttachUpgradedBackend(admitted.Context(), proxyBack, true)
 	grace := time.Now().Add(300 * time.Millisecond)
 	ex.armRetirement(grace, grace.Add(time.Second), 0, false)
 	front := AttachExtendedStream(admitted.Context(), proxyFront, back)
@@ -395,8 +395,8 @@ func TestExtendedTunnelRetirementCompletesWebSocketCloseHandshake(t *testing.T) 
 	_, admitted, ex, release := reg.Admit(httptest.NewRecorder(), req, EntryCoord{
 		GenID: 1, ListenAddr: "127.0.0.1:8080", RouteID: "extended-ws",
 	})
-	back := AttachUpgradedBackend(admitted.Context(), proxyBackSide, http.Header{"Upgrade": {"websocket"}})
-	if again := AttachUpgradedBackend(admitted.Context(), back, http.Header{"Upgrade": {"websocket"}}); again != back {
+	back := AttachUpgradedBackend(admitted.Context(), proxyBackSide, true)
+	if again := AttachUpgradedBackend(admitted.Context(), back, true); again != back {
 		t.Fatal("attaching an already-owned backend changed its wrapper")
 	}
 	front := AttachExtendedStream(admitted.Context(), proxyClientSide, back)

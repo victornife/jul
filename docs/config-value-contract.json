@@ -1506,6 +1506,15 @@
       ]
     },
     {
+      "go_field": "UpstreamConfig.WebSocketUpstreamProtocol",
+      "path": "upstreams[].websocket_upstream_protocol",
+      "kind": "enum",
+      "constraint": "trimmed lowercase enum; http3 requires HTTPS HTTP proxy consumers and UDP backends",
+      "zero_semantics": "omitted/empty or http1 retains HTTP/1.1 WebSocket Upgrade; ordinary HTTP is unchanged",
+      "active_when": "WebSocket handshake to this named pool; http3 requires the http3 build tag",
+      "allowed": ["", "http1", "http3"]
+    },
+    {
       "go_field": "UpstreamServer.Weight",
       "path": "upstreams[].servers[].weight",
       "kind": "integer",

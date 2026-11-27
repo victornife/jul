@@ -267,8 +267,7 @@ func TestUpgradedSessionWebSocketHandshakeVsEOFAndOpaqueFallback(t *testing.T) {
 			LocationIndex: 0,
 			RouteID:       "ws-route",
 		})
-		resHdr := http.Header{"Upgrade": []string{"websocket"}}
-		backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, resHdr)
+		backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, true)
 
 		conn, brw, err := http.NewResponseController(w).Hijack()
 		if err != nil {
@@ -384,7 +383,7 @@ func TestUpgradedSessionWebSocketHandshakeVsEOFAndOpaqueFallback(t *testing.T) {
 		req.Header.Set("Upgrade", "websocket")
 		rec := newHijackableRecorder(proxyClientSide)
 		w, reqAdmitted, _, release := reg.Admit(rec, req, EntryCoord{GenID: 1, ListenAddr: "127.0.0.1:8080", RouteID: "ws-eof"})
-		backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, http.Header{"Upgrade": []string{"websocket"}})
+		backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, true)
 		conn, brw, _ := http.NewResponseController(w).Hijack()
 
 		go func() {
@@ -434,7 +433,7 @@ func TestUpgradedSessionWebSocketHandshakeVsEOFAndOpaqueFallback(t *testing.T) {
 		req.Header.Set("Upgrade", "custom-proto/1.0")
 		rec := newHijackableRecorder(proxyClientSide)
 		w, reqAdmitted, _, release := reg.Admit(rec, req, EntryCoord{GenID: 1, ListenAddr: "127.0.0.1:8080", RouteID: "opaque"})
-		backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, http.Header{"Upgrade": []string{"custom-proto/1.0"}})
+		backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, false)
 		conn, brw, _ := http.NewResponseController(w).Hijack()
 
 		go func() {
@@ -650,7 +649,7 @@ func TestUpgradedSessionPreReadMidFrameAndSlowPeerFallback(t *testing.T) {
 	}
 
 	// Attach backend AFTER Hijack to exercise the post-hijack attachBackend branch.
-	backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, http.Header{"Upgrade": []string{"websocket"}})
+	backWrapped := AttachUpgradedBackend(reqAdmitted.Context(), proxyBackSide, true)
 
 	// Drain clientPeer in background.
 	go func() {
@@ -968,7 +967,7 @@ func TestFifth653InvalidCloseRepliesMustNotCountAsGraceful(t *testing.T) {
 				ListenAddr: "127.0.0.1:8080",
 				RouteID:    "ws",
 			})
-			rawBack := AttachUpgradedBackend(reqAdmitted.Context(), bProxy, http.Header{"Upgrade": []string{"websocket"}})
+			rawBack := AttachUpgradedBackend(reqAdmitted.Context(), bProxy, true)
 			hj, ok := w.(http.Hijacker)
 			if !ok {
 				t.Fatal("missing hijacker")
@@ -1063,7 +1062,7 @@ func TestSixth653ShutdownShortensExistingRetirementDeadline(t *testing.T) {
 			ListenAddr: "127.0.0.1:8080",
 			RouteID:    "ws",
 		})
-		rawBack := AttachUpgradedBackend(reqAdmitted.Context(), bProxy, http.Header{"Upgrade": []string{"websocket"}})
+		rawBack := AttachUpgradedBackend(reqAdmitted.Context(), bProxy, true)
 		hj := w.(http.Hijacker)
 		clientConn, _, err := hj.Hijack()
 		if err != nil {
@@ -1336,7 +1335,7 @@ func TestRetiredUpgradedExchangeHistoryDropsBackend(t *testing.T) {
 		req.Header.Set("Connection", "Upgrade")
 		req.Header.Set("Upgrade", "raw")
 		w, admitted, _, release := reg.Admit(newHijackableRecorder(proxyClientSide), req, EntryCoord{GenID: 1, ListenAddr: "127.0.0.1:8080", RouteID: "raw"})
-		AttachUpgradedBackend(admitted.Context(), &ctxBackend{ReadWriteCloser: proxyBackSide, ctx: admitted.Context()}, http.Header{"Upgrade": []string{"raw"}})
+		AttachUpgradedBackend(admitted.Context(), &ctxBackend{ReadWriteCloser: proxyBackSide, ctx: admitted.Context()}, false)
 		conn, brw, err := http.NewResponseController(w).Hijack()
 		if err != nil {
 			t.Fatalf("Hijack: %v", err)

@@ -822,6 +822,10 @@ type RewriteConfig struct {
 // UpstreamConfig is a named pool of backend servers.
 type UpstreamConfig struct {
 	Name string `toml:"name"`
+	// WebSocketUpstreamProtocol selects this pool's WebSocket handshake only.
+	// Empty or "http1" keeps HTTP/1.1; "http3" requires HTTPS proxy consumers
+	// and the http3 build tag. Ordinary HTTP keeps its existing transport.
+	WebSocketUpstreamProtocol string `toml:"websocket_upstream_protocol,omitempty"`
 	// Strategy is one of "round_robin", "weighted_round_robin", "least_conn",
 	// "consistent_hash".
 	Strategy string           `toml:"strategy"`

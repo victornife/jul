@@ -556,6 +556,19 @@ func locationMatchTaken(c *config.Config, listen string, serverNames []string, m
 	return false
 }
 
+func patchWebSocketProtocol(value *string) (string, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return "", nil
+	}
+	protocol := strings.TrimSpace(*value)
+	switch protocol {
+	case "http1", "http3":
+		return protocol, nil
+	default:
+		return "", fmt.Errorf("websocket_upstream_protocol must be %q or %q", "http1", "http3")
+	}
+}
+
 // setLocationAction replaces a location's action wholesale: it clears every
 // action discriminator (and the action-specific helper fields) so no
 // conflicting leftover remains, then sets the chosen one. It covers the

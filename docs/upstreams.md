@@ -26,6 +26,90 @@ match      = { type = "prefix", path = "/inventory/" }
 proxy_pass = "https://inventory"
 ```
 
+### WebSocket upstream protocol
+
+WebSocket routes use HTTP/1.1 Upgrade to the backend by default. To use
+HTTP/3 Extended CONNECT for WebSocket handshakes, build Jul with the `http3`
+tag and set `websocket_upstream_protocol = "http3"` on the named upstream pool:
+
+```toml
+[[upstreams]]
+name = "inventory"
+servers = ["inventory.internal:443"]
+websocket_upstream_protocol = "http3"
+
+[[servers.locations]]
+match = { type = "prefix", path = "/ws" }
+proxy_pass = "https://inventory"
+```
+
+A complete runnable configuration is in
+[`examples/websocket-http3-upstream/jul.toml`](../examples/websocket-http3-upstream/jul.toml).
+
+Every HTTP proxy route referencing that pool must use an `https://` `proxy_pass`;
+plaintext consumers are rejected before publication. Define a named pool to opt
+in; concrete URL targets retain the HTTP/1.1 WebSocket default. The setting changes only the
+WebSocket handshake and duplex tunnel; ordinary HTTP requests on the same
+route continue using the normal proxy transport. If omitted (or set to
+`"http1"`), WebSocket upstreams retain the HTTP/1.1 Upgrade default. Backend
+certificate verification and optional client certificates use the same
+`backend_tls` policy described below. An HTTP/3 capability or TLS failure is
+reported as an upstream error; Jul does not silently fall back or replay the
+handshake over HTTP/1.1.
+Native HTTP/3 WebSocket handshakes are not retried on another backend either;
+the default HTTP/1.1 path retains its existing failover policy.
+
+This setting enables HTTP/3 only on the backend hop. It does not enable the
+front-end HTTP/3 listener, which remains a separate per-server setting in
+[http3.md](http3.md). Outbound QUIC requires UDP connectivity from Jul to the
+backend. The backend must negotiate HTTP/3 and advertise its WebSocket
+Extended CONNECT setting; otherwise the handshake fails without falling back
+to HTTP/1.1. Jul uses TLS 1.3 and the configured backend trust policy, including
+private CA roots and client certificates. The backend stream is never opened
+using QUIC 0-RTT.
+
+The HTTP/3 transport reuses a backend QUIC connection for concurrent WebSocket
+streams. Cancellation closes only its request stream; route retirement stops
+new work while existing sibling streams drain. Idle connections and handshake
+setup are bounded. A binary built without the `http3` tag rejects this setting
+at startup.
+A backend GOAWAY removes its connection from new admission without interrupting
+existing tunnels. A refused handshake is not replayed; a subsequent new handshake
+can establish a replacement connection.
+The transport honors the effective `max_connections_per_backend` bound, including
+dials in progress and draining connections until they close. At the bound, a new
+handshake waits for capacity or request cancellation; transport retirement wakes
+waiters without interrupting existing tunnels. A positive route override wins
+over the pool setting, and zero at route scope inherits the pool's value.
+The Console Status overview reports whether the transport is compiled and how
+many configured upstream pools select it. The Console Apps creation editor and
+App Detail expose the pool-wide selector through preview and live apply; route
+actions do not own it. The change is hot-reloadable and rollback restores the
+previous protocol for new handshakes; existing tunnels retain their generation.
+
+#### WebSocket protocol coverage
+
+The backend choice applies only to WebSocket handshakes; ordinary HTTP requests
+continue using the standard upstream transport. Current coverage is:
+
+| Frontend | HTTP/1.1 backend (default) | HTTP/3 backend (`http3`) | HTTP/2 backend |
+| --- | --- | --- | --- |
+| HTTP/1.1 | Supported | Supported | Tracked by [#741](https://github.com/victornife/jul/issues/741) |
+| HTTP/2 | Supported | Supported | Tracked by [#741](https://github.com/victornife/jul/issues/741) |
+| HTTP/3 | Supported | Supported | Tracked by [#741](https://github.com/victornife/jul/issues/741) |
+
+HTTP/2 Extended CONNECT on the frontend still requires the startup
+`GODEBUG=http2xconnect=1` setting. The table describes backend protocol support,
+not whether a client has negotiated Extended CONNECT on its frontend hop.
+
+No comparative HTTP/1.1, HTTP/2 and HTTP/3 upstream throughput figures are
+published yet: the native HTTP/2 upstream needed for a three-protocol
+comparison is tracked separately in #741. Avoid treating the existing inbound
+HTTP/3 benchmark as a backend-hop measurement; it uses a different transport
+path. Record measurements on the target deployment after #741 provides a
+comparable backend, and report the Go version, build tags, RTT, payload size,
+concurrency and full command with the results.
+
 ## Contents
 
 - [Pool basics](#pool-basics)
