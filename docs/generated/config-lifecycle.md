@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 481 |
-| Schema leaves (configurable values) | 408 |
-| Registry entries | 408 |
+| Schema paths (containers included) | 482 |
+| Schema leaves (configurable values) | 409 |
+| Registry entries | 409 |
 | Startup-consumed entries | 39 |
-| Class `hot_reload` | 356 |
+| Class `hot_reload` | 357 |
 | Class `restart_required` | 39 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -386,6 +386,7 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.waf.paranoia` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `servers.*.locations.*.waf.request_body_limit` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `servers.*.locations.*.waf.response_body_check` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
+| `servers.*.locations.*.websocket_upstream_protocol` | `hot_reload` | `proxy_pass` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.withdrawn` | `hot_reload` | `access_control` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.max_header_bytes` | `new_listener_only` | `listener_limits` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.mime.default_type` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |

@@ -698,6 +698,7 @@ func locationEntries() []Entry {
 		hot(loc+"proxy_connect_timeout", SubProxyTimeouts, reasonHandlerRebuild),
 		hot(loc+"proxy_buffering", SubProxyPass, reasonHandlerRebuild),
 		hot(loc+"proxy_pass", SubProxyPass, reasonHandlerRebuild),
+		hot(loc+"websocket_upstream_protocol", SubProxyPass, reasonHandlerRebuild),
 		hot(loc+"proxy_read_timeout", SubProxyTimeouts, reasonHandlerRebuild),
 		hot(loc+"proxy_retries", SubProxyRetries, reasonHandlerRebuild),
 		hot(loc+"proxy_send_timeout", SubProxyTimeouts, reasonHandlerRebuild),

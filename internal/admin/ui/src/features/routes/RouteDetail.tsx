@@ -132,10 +132,7 @@ const LocationCachePolicyEditor = lazy(() =>
 import { usePermission } from "@/auth/usePermission.ts";
 import type { PendingPatchDraft } from "@/lib/configDraftHandoff.ts";
 import { isEditableAction } from "@/lib/routeEdit.ts";
-import {
-  formatExternalEnforcerNote,
-  formatSharingModeLabel,
-} from "@/lib/sharingIntent.ts";
+import { formatExternalEnforcerNote, formatSharingModeLabel } from "@/lib/sharingIntent.ts";
 import {
   buildServerRemovalBatch,
   canonicalServerNames,
@@ -227,6 +224,9 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   switch (loc.action) {
     case "proxy":
       if (loc.target) lines.push(`  proxy_pass = ${quoted(loc.target)}`);
+      if (loc.websocket_upstream_protocol) {
+        lines.push(`  websocket_upstream_protocol = ${quoted(loc.websocket_upstream_protocol)}`);
+      }
       break;
     case "grpc":
       if (loc.target) lines.push(`  proxy_pass = ${quoted(loc.target)}`);
@@ -317,9 +317,7 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
       lines.push(`    max_ttl = ${quoted(loc.cache_policy.max_ttl)}`);
     }
     if (loc.cache_policy.stale_while_revalidate !== undefined) {
-      lines.push(
-        `    stale_while_revalidate = ${quoted(loc.cache_policy.stale_while_revalidate)}`,
-      );
+      lines.push(`    stale_while_revalidate = ${quoted(loc.cache_policy.stale_while_revalidate)}`);
     }
     if (loc.cache_policy.stale_if_error !== undefined) {
       lines.push(`    stale_if_error = ${quoted(loc.cache_policy.stale_if_error)}`);

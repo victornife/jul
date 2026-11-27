@@ -38,18 +38,25 @@ func (h *proxyHandler) serveExtendedWebSocket(w http.ResponseWriter, r *http.Req
 	key := base64.StdEncoding.EncodeToString(keyBytes)
 	out := r.Clone(r.Context())
 	out.Method = http.MethodGet
+	if h.websocketH3 {
+		out.Method = http.MethodConnect
+		out.Proto = "websocket"
+	}
 	out.Header = r.Header.Clone()
 	out.Body = nil
 	out.GetBody = nil
 	out.ContentLength = 0
 	out.RequestURI = ""
 	removeWebSocketHopHeaders(out.Header)
-	out.Header.Del("Sec-WebSocket-Key")
-	out.Header.Del("Sec-WebSocket-Accept")
-	out.Header.Set("Connection", "Upgrade")
-	out.Header.Set("Upgrade", "websocket")
-	out.Header.Set("Sec-WebSocket-Key", key)
-	out.Header.Set("Sec-WebSocket-Version", "13")
+	if h.websocketH3 {
+		out.Header.Del("Sec-WebSocket-Key")
+		out.Header.Del("Sec-WebSocket-Accept")
+	} else {
+		out.Header.Set("Connection", "Upgrade")
+		out.Header.Set("Upgrade", "websocket")
+		out.Header.Set("Sec-WebSocket-Key", key)
+		out.Header.Set("Sec-WebSocket-Version", "13")
+	}
 
 	pr := &httputil.ProxyRequest{In: r, Out: out}
 	if h.Rewrite == nil {
@@ -69,7 +76,12 @@ func (h *proxyHandler) serveExtendedWebSocket(w http.ResponseWriter, r *http.Req
 		}
 		return
 	}
-	if response.StatusCode != http.StatusSwitchingProtocols || !validBackendWebSocketResponse(response, key) {
+	validHandshake := response.StatusCode == http.StatusSwitchingProtocols && validBackendWebSocketResponse(response, key)
+	if h.websocketH3 {
+		validHandshake = response.StatusCode == http.StatusOK && len(response.Header.Values("Connection")) == 0 &&
+			len(response.Header.Values("Upgrade")) == 0
+	}
+	if !validHandshake {
 		_ = response.Body.Close()
 		if h.ErrorHandler != nil {
 			h.ErrorHandler(w, r, fmt.Errorf("upstream did not accept a valid WebSocket handshake"))
@@ -144,9 +156,13 @@ func validBackendWebSocketResponse(response *http.Response, key string) bool {
 	if !connectionUpgrade || len(upgrade) != 1 || !strings.EqualFold(strings.TrimSpace(upgrade[0]), "websocket") || len(accept) != 1 {
 		return false
 	}
-	sum := sha1.Sum([]byte(key + websocketGUID))
-	want := base64.StdEncoding.EncodeToString(sum[:])
+	want := websocketAccept(key)
 	return strings.TrimSpace(accept[0]) == want
+}
+
+func websocketAccept(key string) string {
+	sum := sha1.Sum([]byte(key + websocketGUID))
+	return base64.StdEncoding.EncodeToString(sum[:])
 }
 
 func validSelectedSubprotocol(request, response http.Header) bool {

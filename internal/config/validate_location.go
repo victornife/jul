@@ -83,12 +83,14 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 	if loc.ProxyPass != "" {
 		errs = append(errs, validateProxyPass(loc.ProxyPass, where, upstreamNames)...)
 	}
+	errs = append(errs, validateWebSocketUpstreamProtocol(loc, where)...)
 	// gRPC passthrough (grpc = true) is a flavor of proxy_pass, not a standalone
 	// action; it requires proxy_pass to name the gRPC backend. Whether the build
 	// can serve it (the "grpc" tag) is reported at handler build time.
 	if loc.GRPC && loc.ProxyPass == "" {
 		errs = append(errs, fmt.Errorf("%s: grpc = true requires proxy_pass (the gRPC backend)", where))
 	}
+
 	if loc.GRPCTranscode != nil {
 		errs = append(errs, validateGRPCTranscode(loc.GRPCTranscode, where+".grpc_transcode", upstreamNames)...)
 	}
@@ -124,6 +126,28 @@ func validateLocation(loc LocationConfig, where string, upstreamNames map[string
 		errs = append(errs, validateAuth(loc.Auth, where+".auth")...)
 	}
 	return errs
+}
+
+func validateWebSocketUpstreamProtocol(loc LocationConfig, where string) []error {
+	protocol := strings.TrimSpace(loc.WebSocketUpstreamProtocol)
+	if protocol == "" {
+		return nil
+	}
+	if loc.ProxyPass == "" || loc.GRPC || loc.GRPCTranscode != nil {
+		return []error{fmt.Errorf("%s.websocket_upstream_protocol: applies only to HTTP proxy routes", where)}
+	}
+	switch protocol {
+	case "http1":
+		return nil
+	case "http3":
+		u, err := url.Parse(loc.ProxyPass)
+		if err != nil || u.Scheme != "https" {
+			return []error{fmt.Errorf("%s.websocket_upstream_protocol: http3 requires an https:// proxy_pass", where)}
+		}
+		return nil
+	default:
+		return []error{fmt.Errorf("%s.websocket_upstream_protocol: unsupported value %q (want %q or %q)", where, protocol, "http1", "http3")}
+	}
 }
 
 func isValidCookieTokenName(s string) bool {

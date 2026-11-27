@@ -50,21 +50,22 @@ func projectRoutes(c *config.Config) []RouteProjection {
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
 			lp := LocationProjection{
-				Index:             j,
-				Match:             loc.Match.Path,
-				Type:              loc.Match.Type,
-				MatchOrdinal:      ordinals[i][j],
-				SelectorVersion:   routeSelectorVersion,
-				RouteID:           routeID(loc),
-				Predicates:        locationPredicateSummary(loc),
-				Methods:           loc.Match.Methods,
-				Auth:              loc.Auth != nil,
-				Cache:             loc.Cache,
-				RateLimit:         loc.RateLimit != nil && loc.RateLimit.Enabled,
-				Compression:       c.Compression.IsEnabled(),
-				Secure:            srv.TLS != nil && srv.TLS.Enabled,
-				RequireClientCert: loc.RequireClientCert,
-				Withdrawn:         loc.Withdrawn,
+				Index:                     j,
+				Match:                     loc.Match.Path,
+				Type:                      loc.Match.Type,
+				MatchOrdinal:              ordinals[i][j],
+				SelectorVersion:           routeSelectorVersion,
+				RouteID:                   routeID(loc),
+				Predicates:                locationPredicateSummary(loc),
+				Methods:                   loc.Match.Methods,
+				Auth:                      loc.Auth != nil,
+				Cache:                     loc.Cache,
+				RateLimit:                 loc.RateLimit != nil && loc.RateLimit.Enabled,
+				Compression:               c.Compression.IsEnabled(),
+				Secure:                    srv.TLS != nil && srv.TLS.Enabled,
+				RequireClientCert:         loc.RequireClientCert,
+				Withdrawn:                 loc.Withdrawn,
+				WebSocketUpstreamProtocol: loc.WebSocketUpstreamProtocol,
 			}
 			if loc.RateLimit != nil {
 				lp.RateLimitDetail = &RateLimitProjection{

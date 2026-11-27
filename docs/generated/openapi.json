@@ -8660,6 +8660,9 @@
                     },
                     "target": {
                       "type": "string"
+                    },
+                    "websocket_upstream_protocol": {
+                      "type": "string"
                     }
                   },
                   "required": [

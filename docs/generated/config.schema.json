@@ -2097,6 +2097,10 @@
                   },
                   "type": "object"
                 },
+                "websocket_upstream_protocol": {
+                  "description": "WebSocketUpstreamProtocol selects the backend handshake used only for WebSocket requests: empty or \"http1\" defaults to HTTP/1.1, while \"http3\" uses HTTPS Extended CONNECT and requires the http3 build tag",
+                  "type": "string"
+                },
                 "withdrawn": {
                   "description": "Withdrawn enables the outermost per-location withdrawal gate (ADR 0026 #642 amendment, spec §8.4/§9.3)",
                   "type": "boolean"

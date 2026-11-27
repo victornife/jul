@@ -251,7 +251,10 @@ func locationActionFromConfig(loc config.LocationConfig) (*locationActionPayload
 	case loc.GRPC && loc.ProxyPass != "":
 		return &locationActionPayload{Kind: "grpc_proxy", Target: loc.ProxyPass}, nil
 	case loc.ProxyPass != "":
-		return &locationActionPayload{Kind: "proxy", Target: loc.ProxyPass}, nil
+		return &locationActionPayload{
+			Kind: "proxy", Target: loc.ProxyPass,
+			WebSocketUpstreamProtocol: loc.WebSocketUpstreamProtocol,
+		}, nil
 	case loc.Root != "":
 		return &locationActionPayload{Kind: "static", Target: loc.Root}, nil
 	case loc.Redirect != "":

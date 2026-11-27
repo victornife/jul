@@ -81,6 +81,7 @@ export interface ActionDraft {
   kind: EditableActionKind;
   target: string; // proxy_pass / root / redirect URL
   status: string; // return status, or optional redirect code
+  websocketUpstreamProtocol: "" | "http3";
 }
 
 export function seedAction(loc: LocationProjection): ActionDraft {
@@ -89,7 +90,12 @@ export function seedAction(loc: LocationProjection): ActionDraft {
       `The ${loc.action} action is not supported by the generic route action editor; use its protocol-specific workflow or raw configuration.`,
     );
   }
-  return { kind: loc.action, target: loc.target ?? "", status: "" };
+  return {
+    kind: loc.action,
+    target: loc.target ?? "",
+    status: "",
+    websocketUpstreamProtocol: loc.websocket_upstream_protocol === "http3" ? "http3" : "",
+  };
 }
 
 export function actionChanged(d: ActionDraft, loc: LocationProjection): boolean {
@@ -97,7 +103,8 @@ export function actionChanged(d: ActionDraft, loc: LocationProjection): boolean 
   return (
     d.kind !== seeded.kind ||
     d.target.trim() !== seeded.target.trim() ||
-    d.status.trim() !== seeded.status.trim()
+    d.status.trim() !== seeded.status.trim() ||
+    d.websocketUpstreamProtocol !== seeded.websocketUpstreamProtocol
   );
 }
 
@@ -107,6 +114,9 @@ export function actionWarnings(d: ActionDraft): string[] {
     case "proxy":
       if (d.target.trim() === "") {
         w.push("The proxy action needs a target (an upstream reference or URL).");
+      }
+      if (d.websocketUpstreamProtocol === "http3" && !d.target.trim().startsWith("https://")) {
+        w.push("HTTP/3 WebSocket upstreams require an https:// proxy target.");
       }
       break;
     case "static":
@@ -144,7 +154,13 @@ export function actionWarnings(d: ActionDraft): string[] {
 export function actionToPatch(d: ActionDraft): LocationActionPatch {
   switch (d.kind) {
     case "proxy":
-      return { kind: "proxy", target: d.target.trim() };
+      return {
+        kind: "proxy",
+        target: d.target.trim(),
+        ...(d.websocketUpstreamProtocol === "http3"
+          ? { websocket_upstream_protocol: "http3" as const }
+          : {}),
+      };
     case "static":
       return { kind: "static", target: d.target.trim() };
     case "redirect": {

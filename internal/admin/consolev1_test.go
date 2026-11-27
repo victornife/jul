@@ -142,7 +142,7 @@ func TestStatusAPI(t *testing.T) {
 			SendTimeout:   config.Duration(time.Minute),
 			Locations: []config.LocationConfig{
 				{Root: "./public", Cache: true},
-				{ProxyPass: "http://127.0.0.1:9000", Auth: &config.AuthConfig{}, RequireClientCert: true},
+				{ProxyPass: "https://127.0.0.1:9000", WebSocketUpstreamProtocol: "http3", Auth: &config.AuthConfig{}, RequireClientCert: true},
 				{GRPCTranscode: &config.GRPCTranscodeConfig{Target: "127.0.0.1:50051"}},
 			},
 		}},
@@ -187,6 +187,7 @@ func TestStatusAPI(t *testing.T) {
 		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)", "ACME DNS-01 (RFC 2136)",
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
 		"WebSocket Extended CONNECT (HTTP/2)", "WebSocket Extended CONNECT (HTTP/3)",
+		"WebSocket upstream HTTP/3",
 		"gRPC transcoding", "Upstream pools", "Active health checks", "Service discovery",
 		"Consistent-hash affinity",
 		"Prometheus metrics", "Access log", "Backend dial-failure accounting",

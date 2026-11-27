@@ -136,6 +136,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		backendTLSInsecure   int
 		backendTLSIdentities int
 		proxyLocs            int
+		websocketH3Upstreams int
 		fastcgiLocs          int
 		grpcProxy            int
 		grpcTranscode        int
@@ -201,6 +202,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 				sendTimeoutLocations++
 			}
 			totalLocs++
+			if strings.TrimSpace(loc.WebSocketUpstreamProtocol) == "http3" {
+				websocketH3Upstreams++
+			}
 			switch {
 			case loc.GRPCTranscode != nil:
 				grpcTranscode++
@@ -459,6 +463,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Upstreams", Name: "Upstream pools", Active: len(c.Upstreams) > 0, Detail: countDetailIf(len(c.Upstreams), "pool")},
 		{Group: "Upstreams", Name: "Active health checks", Active: healthPools > 0, Detail: countDetailIf(healthPools, "pool")},
 		{Group: "Upstreams", Name: "Health probe headers / Host", Active: healthRequestPools > 0, Detail: countDetailIf(healthRequestPools, "pool")},
+		{Group: "Upstreams", Name: "WebSocket upstream HTTP/3", Active: s.deps.HTTP3Compiled && websocketH3Upstreams > 0, Detail: websocketH3UpstreamDetail(s.deps.HTTP3Compiled, websocketH3Upstreams)},
 		{Group: "Upstreams", Name: "Backend TLS trust", Active: backendTLSPools+backendTLSRoutes > 0, Detail: backendTLSDetail},
 		{Group: "Upstreams", Name: "Service discovery", Active: discoveryPools > 0, Detail: discDetail},
 		{Group: "Upstreams", Name: "Consistent-hash affinity", Active: affinityPools > 0, Detail: affinityDetail(affinityPools, affinityKeys)},
@@ -499,6 +504,16 @@ func websocketH3Detail(compiled bool, listeners int) string {
 		return "available in this build; no HTTP/3 listener is configured"
 	}
 	return countUnit(listeners, "HTTP/3 listener") + "; Extended CONNECT is advertised by the HTTP/3 server"
+}
+
+func websocketH3UpstreamDetail(compiled bool, routes int) string {
+	if !compiled {
+		return "unavailable in this build; build with -tags http3"
+	}
+	if routes == 0 {
+		return "available in this build; no HTTP/3 WebSocket upstream route is configured"
+	}
+	return countUnit(routes, "HTTP/3 WebSocket upstream route") + "; backend hop only; outbound UDP required"
 }
 
 // metricsDetail describes the Prometheus surface when it is wired.

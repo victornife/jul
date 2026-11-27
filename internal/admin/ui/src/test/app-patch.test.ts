@@ -197,6 +197,30 @@ describe("buildAppCreationBatch", () => {
     });
   });
 
+  it("uses HTTPS and explicit HTTP/3 only for a mounted WebSocket upstream", () => {
+    const ops = buildAppCreationBatch(
+      draft({
+        mount: {
+          mode: "existing",
+          server: { listen: ":443", serverNames: ["api.example"] },
+          protocol: "http",
+          matchType: "prefix",
+          path: "/ws",
+          websocketUpstreamProtocol: "http3",
+        },
+      }),
+      inventory,
+    );
+    expect(ops.at(-1)).toMatchObject({
+      op: "location_add",
+      action: {
+        kind: "proxy",
+        target: "https://api",
+        websocket_upstream_protocol: "http3",
+      },
+    });
+  });
+
   it("creates a new HTTP server before its location", () => {
     const ops = buildAppCreationBatch(
       draft({

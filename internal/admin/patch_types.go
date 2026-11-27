@@ -353,9 +353,10 @@ type locationMatch struct {
 // richer actions (transcode, FastCGI/uWSGI, handler plugin) stay raw and the
 // editor leaves them read-only.
 type locationActionPayload struct {
-	Kind   string `json:"kind"`             // proxy | grpc | static | redirect | return | deny
-	Target string `json:"target,omitempty"` // proxy_pass / gRPC backend / root / redirect URL
-	Status int    `json:"status,omitempty"` // return status, or optional redirect code
+	Kind                      string `json:"kind"` // proxy | grpc | static | redirect | return | deny
+	Target                    string `json:"target,omitempty"`
+	Status                    int    `json:"status,omitempty"`
+	WebSocketUpstreamProtocol string `json:"websocket_upstream_protocol,omitempty"`
 }
 
 // transcodePatch carries the grpc_transcode fields the two-tier editor mutates

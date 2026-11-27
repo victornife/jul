@@ -4,8 +4,8 @@
   "generated_by": "internal/configcontract",
   "regenerate_command": "make config-contract-generate",
   "counts": {
-    "schema_paths": 481,
-    "schema_leaves": 408,
+    "schema_paths": 482,
+    "schema_leaves": 409,
     "resources": 9
   },
   "capability_build_tags": {
@@ -4202,6 +4202,18 @@
       ],
       "description": "ResponseBodyCheck enables inspection of text/plain, text/html and text/xml response bodies (phase 4) with or without CRS; false disables it",
       "anchor": "servers-x-locations-x-waf-response_body_check"
+    },
+    "servers.*.locations.*.websocket_upstream_protocol": {
+      "kind": "scalar",
+      "scalar": "string",
+      "go_type": "string",
+      "optional": true,
+      "dynamic": true,
+      "subsystem": "proxy_pass",
+      "lifecycle_class": "hot_reload",
+      "lifecycle_reason": "the handler tree is rebuilt from the effective config on each successful reload",
+      "description": "WebSocketUpstreamProtocol selects the backend handshake used only for WebSocket requests: empty or \"http1\" defaults to HTTP/1.1, while \"http3\" uses HTTPS Extended CONNECT and requires the http3 build tag",
+      "anchor": "servers-x-locations-x-websocket_upstream_protocol"
     },
     "servers.*.locations.*.withdrawn": {
       "kind": "scalar",

@@ -8,6 +8,11 @@ certificate provider and server-level client-authentication policy, and
 advertises itself to clients via an `Alt-Svc` response header so browsers can
 upgrade on a later request.
 
+The `http3` build tag also enables the separate, explicitly selected HTTP/3
+WebSocket upstream transport. It applies only to backend WebSocket handshakes;
+see [WebSocket upstream protocol](upstreams.md#websocket-upstream-protocol).
+It does not require enabling an HTTP/3 listener on the front end.
+
 ## Usage
 
 Build with HTTP/3 support:
@@ -142,17 +147,14 @@ staging. The admin listener's client-auth policy still requires a restart.
 
 ## Known limitations
 
-1. **Native HTTP/2 and HTTP/3 WebSocket upstreams are not yet supported.**
-   HTTP/2 and HTTP/3 clients can use WebSocket Extended CONNECT
-   ([RFC 8441][rfc8441] / RFC 9220) through Jul to an HTTP/1.1 WebSocket
-   backend. Jul confirms the backend's `101 Switching Protocols` handshake
-   and prepares the frontend stream before returning the Extended CONNECT
-   success response. HTTP/3 uses its normal duplex request/response streams,
-   preserving handshake middleware rather than taking over the raw QUIC stream.
-   Native HTTP/2
-   upstream support is tracked by [#741](https://github.com/victornife/jul/issues/741);
-   native HTTP/3 upstream support is tracked by
-   [#742](https://github.com/victornife/jul/issues/742).
+1. **Native HTTP/2 WebSocket upstreams are not yet supported.** HTTP/1.1, HTTP/2
+   and HTTP/3 clients can use WebSocket Extended CONNECT
+   ([RFC 8441][rfc8441] / RFC 9220) through Jul to an HTTP/1.1 WebSocket backend.
+   An HTTP/3 backend is available as an explicit per-route option; see
+   [WebSocket upstream protocol](upstreams.md#websocket-upstream-protocol).
+   Jul validates the backend handshake and prepares the frontend stream before
+   returning Extended CONNECT success. Native HTTP/2 upstream support remains
+   tracked by [#741](https://github.com/victornife/jul/issues/741).
 
    Go disables HTTP/2 Extended CONNECT advertisement by default. To enable it,
    set `GODEBUG=http2xconnect=1` before starting Jul; this process-wide switch

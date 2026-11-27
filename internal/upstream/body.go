@@ -19,6 +19,10 @@ import (
 // §15.4.5); treating their empty body as truncated failed every proxied HEAD
 // and counted it against the backend (#534).
 func OwedBodyLength(resp *http.Response) int64 {
+	if resp.Request != nil && resp.Request.Method == http.MethodConnect &&
+		resp.Request.Proto == "websocket" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return -1
+	}
 	if resp.Request != nil && resp.Request.Method == http.MethodHead {
 		return -1
 	}

@@ -92,6 +92,7 @@ describe("routeEdit — action", () => {
       kind: "static",
       target: "/var/www",
       status: "",
+      websocketUpstreamProtocol: "",
     });
     expect(() => seedAction(loc({ action: "grpc" }))).toThrow(/protocol-specific workflow/i);
   });
@@ -99,49 +100,131 @@ describe("routeEdit — action", () => {
   it("detects a change of kind, target, or status", () => {
     const l = loc({ action: "proxy", target: "http://app" });
     expect(actionChanged(seedAction(l), l)).toBe(false);
-    expect(actionChanged({ kind: "deny", target: "", status: "" }, l)).toBe(true);
-    expect(actionChanged({ kind: "proxy", target: "http://other", status: "" }, l)).toBe(true);
+    expect(
+      actionChanged({ kind: "deny", target: "", status: "", websocketUpstreamProtocol: "" }, l),
+    ).toBe(true);
+    expect(
+      actionChanged(
+        { kind: "proxy", target: "http://other", status: "", websocketUpstreamProtocol: "" },
+        l,
+      ),
+    ).toBe(true);
+    expect(actionChanged({ ...seedAction(l), websocketUpstreamProtocol: "http3" }, l)).toBe(true);
   });
 
   it("validates per-kind required fields and status ranges", () => {
-    expect(actionWarnings({ kind: "proxy", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "static", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "redirect", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "200" })).toHaveLength(
-      1,
-    );
-    expect(actionWarnings({ kind: "redirect", target: "https://x", status: "301" })).toHaveLength(
-      0,
-    );
-    expect(actionWarnings({ kind: "return", target: "", status: "" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "return", target: "", status: "700" })).toHaveLength(1);
-    expect(actionWarnings({ kind: "return", target: "", status: "404" })).toHaveLength(0);
-    expect(actionWarnings({ kind: "deny", target: "", status: "" })).toHaveLength(0);
+    expect(
+      actionWarnings({ kind: "proxy", target: "", status: "", websocketUpstreamProtocol: "" }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({
+        kind: "proxy",
+        target: "http://x",
+        status: "",
+        websocketUpstreamProtocol: "http3",
+      }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({ kind: "static", target: "", status: "", websocketUpstreamProtocol: "" }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({ kind: "redirect", target: "", status: "", websocketUpstreamProtocol: "" }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({
+        kind: "redirect",
+        target: "https://x",
+        status: "200",
+        websocketUpstreamProtocol: "",
+      }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({
+        kind: "redirect",
+        target: "https://x",
+        status: "301",
+        websocketUpstreamProtocol: "",
+      }),
+    ).toHaveLength(0);
+    expect(
+      actionWarnings({ kind: "return", target: "", status: "", websocketUpstreamProtocol: "" }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({ kind: "return", target: "", status: "700", websocketUpstreamProtocol: "" }),
+    ).toHaveLength(1);
+    expect(
+      actionWarnings({ kind: "return", target: "", status: "404", websocketUpstreamProtocol: "" }),
+    ).toHaveLength(0);
+    expect(
+      actionWarnings({ kind: "deny", target: "", status: "", websocketUpstreamProtocol: "" }),
+    ).toHaveLength(0);
   });
 
   it("builds the right patch payload per kind", () => {
-    expect(actionToPatch({ kind: "proxy", target: " http://a ", status: "" })).toEqual({
+    expect(
+      actionToPatch({
+        kind: "proxy",
+        target: " http://a ",
+        status: "",
+        websocketUpstreamProtocol: "",
+      }),
+    ).toEqual({
       kind: "proxy",
       target: "http://a",
     });
-    expect(actionToPatch({ kind: "redirect", target: "https://x", status: "301" })).toEqual({
+    expect(
+      actionToPatch({
+        kind: "proxy",
+        target: " https://a ",
+        status: "",
+        websocketUpstreamProtocol: "http3",
+      }),
+    ).toEqual({
+      kind: "proxy",
+      target: "https://a",
+      websocket_upstream_protocol: "http3",
+    });
+    expect(
+      actionToPatch({
+        kind: "redirect",
+        target: "https://x",
+        status: "301",
+        websocketUpstreamProtocol: "",
+      }),
+    ).toEqual({
       kind: "redirect",
       target: "https://x",
       status: 301,
     });
-    expect(actionToPatch({ kind: "redirect", target: "https://x", status: "" })).toEqual({
+    expect(
+      actionToPatch({
+        kind: "redirect",
+        target: "https://x",
+        status: "",
+        websocketUpstreamProtocol: "",
+      }),
+    ).toEqual({
       kind: "redirect",
       target: "https://x",
     });
-    expect(actionToPatch({ kind: "return", target: "", status: "404" })).toEqual({
+    expect(
+      actionToPatch({ kind: "return", target: "", status: "404", websocketUpstreamProtocol: "" }),
+    ).toEqual({
       kind: "return",
       status: 404,
     });
-    expect(actionToPatch({ kind: "deny", target: "", status: "" })).toEqual({ kind: "deny" });
+    expect(
+      actionToPatch({ kind: "deny", target: "", status: "", websocketUpstreamProtocol: "" }),
+    ).toEqual({ kind: "deny" });
   });
 
   it("does not carry a status when the draft enables it but leaves it non-integer", () => {
-    const d: ActionDraft = { kind: "redirect", target: "https://x", status: "abc" };
+    const d: ActionDraft = {
+      kind: "redirect",
+      target: "https://x",
+      status: "abc",
+      websocketUpstreamProtocol: "",
+    };
     expect(actionToPatch(d)).toEqual({ kind: "redirect", target: "https://x" });
   });
 });

@@ -21,7 +21,7 @@ it. Conceptual explanations, operating guidance and examples stay in
 > may pass `jul check` while `jul lint` reports an error-severity finding —
 > lint policy is never converted into structural invalidity.
 
-Coverage: 408 configurable leaves.
+Coverage: 409 configurable leaves.
 
 ## `admin.audit_log_file` {#admin-audit_log_file}
 
@@ -3612,6 +3612,18 @@ ResponseBodyCheck enables inspection of text/plain, text/html and text/xml respo
 | Subsystem | `waf` |
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
+
+## `servers.*.locations.*.websocket_upstream_protocol` {#servers-x-locations-x-websocket_upstream_protocol}
+
+WebSocketUpstreamProtocol selects the backend handshake used only for WebSocket requests: empty or "http1" defaults to HTTP/1.1, while "http3" uses HTTPS Extended CONNECT and requires the http3 build tag.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `proxy_pass` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
 
 ## `servers.*.locations.*.withdrawn` {#servers-x-locations-x-withdrawn}
 

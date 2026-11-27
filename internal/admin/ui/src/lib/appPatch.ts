@@ -40,6 +40,7 @@ interface MountedAppRoute {
   readonly protocol: AppProtocol;
   readonly matchType: AppRouteMatchType;
   readonly path: string;
+  readonly websocketUpstreamProtocol?: "http3";
 }
 
 export type AppMountDraft =
@@ -125,7 +126,10 @@ function locationOperation(
   protocol: AppProtocol,
   matchType: AppRouteMatchType,
   path: string,
+  websocketUpstreamProtocol?: "http3",
 ): ConfigPatch {
+  const https = protocol === "http" && websocketUpstreamProtocol === "http3";
+  const target = `${https ? "https" : "http"}://${name}`;
   return {
     op: "location_add",
     listen: server.listen,
@@ -133,8 +137,14 @@ function locationOperation(
     match_set: { type: matchType, path },
     action:
       protocol === "grpc"
-        ? { kind: "grpc_proxy", target: `http://${name}` }
-        : { kind: "proxy", target: `http://${name}` },
+        ? { kind: "grpc_proxy", target }
+        : {
+            kind: "proxy",
+            target,
+            ...(websocketUpstreamProtocol === "http3"
+              ? { websocket_upstream_protocol: "http3" as const }
+              : {}),
+          },
   };
 }
 
@@ -198,7 +208,16 @@ function appendMount(
         `Native gRPC requires HTTP/2. The selected plaintext server ${formatServerIdentity(server)} does not already have h2c enabled; this workflow will not change an existing listener or its sibling virtual hosts.`,
       ]);
     }
-    ops.push(locationOperation(name, server, mount.protocol, mount.matchType, path));
+    ops.push(
+      locationOperation(
+        name,
+        server,
+        mount.protocol,
+        mount.matchType,
+        path,
+        mount.websocketUpstreamProtocol,
+      ),
+    );
     return;
   }
 
@@ -225,7 +244,16 @@ function appendMount(
     // mutation cannot alter a pre-existing sibling virtual host.
     ops.push({ op: "server_toggle_h2c", listen: server.listen, enabled: true });
   }
-  ops.push(locationOperation(name, server, mount.protocol, mount.matchType, path));
+  ops.push(
+    locationOperation(
+      name,
+      server,
+      mount.protocol,
+      mount.matchType,
+      path,
+      mount.websocketUpstreamProtocol,
+    ),
+  );
 }
 
 /**
