@@ -4,7 +4,9 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -224,6 +226,16 @@ func TestQuotaRuntimeAbortPreservesLivePolicyState(t *testing.T) {
 	}
 }
 
+func TestQuotaRuntimeUnavailableRejectsConfiguredPolicy(t *testing.T) {
+	var runtime *quotaRuntime
+	cfg := &config.Config{
+		QuotaPolicies: map[string]config.QuotaPolicyConfig{"app": {}},
+	}
+	if _, err := runtime.prepare(cfg, &Generation{}); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("prepare without process runtime error = %v", err)
+	}
+}
+
 func TestQuotaRuntimeEvictsOnlyRefilledPoliciesUnderPressure(t *testing.T) {
 	runtime := newQuotaRuntime()
 	policyConfig := func(name string) *config.Config {
@@ -345,5 +357,58 @@ func TestQuotaClassificationDoesNotTrustCIDRWithoutAttributionContext(t *testing
 
 	if class, caller := binding.classify(request); class != "public" || caller != "unattributed:192.0.2.1" {
 		t.Fatalf("unattributed classification = %q, %q", class, caller)
+	}
+}
+
+func TestQuotaClassificationFallsBackForInvalidRemoteAddresses(t *testing.T) {
+	binding := &quotaBinding{principals: map[quotaPrincipalKey]string{}}
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	request.RemoteAddr = "invalid remote address"
+	if class, caller := binding.classify(request); class != "public" || caller != "unknown:invalid remote address" {
+		t.Fatalf("invalid remote classification = %q, %q", class, caller)
+	}
+
+	request = request.WithContext(clientaddr.NewContext(request.Context(), clientaddr.Identity{
+		Result: clientaddr.ResultMalformed,
+	}))
+	if class, caller := binding.classify(request); class != "public" || caller != "unattributed:invalid remote address" {
+		t.Fatalf("unattributed invalid remote classification = %q, %q", class, caller)
+	}
+}
+
+func TestQuotaMiddlewareAdmissionErrorFailsClosedAndLogs(t *testing.T) {
+	policy := quota.Policy{
+		Application: quota.Limit{Rate: 1, Burst: 1},
+		Classes: map[string]quota.Class{
+			"private": {
+				Shared:    quota.Limit{Rate: 1, Burst: 1},
+				PerCaller: quota.Limit{Rate: 1, Burst: 1},
+			},
+		},
+	}
+	coordinator, err := quota.NewCoordinator(policy, 4)
+	if err != nil {
+		t.Fatalf("create coordinator: %v", err)
+	}
+	state := &quotaPolicyState{enforce: coordinator}
+	binding := &quotaBinding{state: state, mode: "enforce"}
+	binding.version.Store(coordinator.AuthorizationVersion())
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	var dispatched atomic.Int32
+	handler := quotaMiddleware(binding, "", logger, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		dispatched.Add(1)
+	}))
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	request.RemoteAddr = "192.0.2.1:1234"
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusInternalServerError || dispatched.Load() != 0 {
+		t.Fatalf("admission error response = %d, dispatched=%d", recorder.Code, dispatched.Load())
+	}
+	if !strings.Contains(logs.String(), "quota admission failed") {
+		t.Fatalf("admission error was not logged: %q", logs.String())
 	}
 }

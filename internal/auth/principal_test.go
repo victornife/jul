@@ -39,6 +39,24 @@ func TestPrincipalOptionsRequireVerifiedAuthority(t *testing.T) {
 	}
 }
 
+func TestBasicPrincipalRejectsForwardResponseHeader(t *testing.T) {
+	err := validatePrincipalOptions(
+		config.AuthConfig{Basic: &config.BasicAuthConfig{}},
+		&PrincipalOptions{Domain: "accounts", ForwardResponseHeader: "X-User"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires forward authentication") {
+		t.Fatalf("basic principal response-header validation error = %v", err)
+	}
+
+	err = validatePrincipalOptions(
+		config.AuthConfig{JWT: &config.JWTAuthConfig{Issuer: "issuer", Audience: "api"}},
+		&PrincipalOptions{Domain: "accounts", ForwardResponseHeader: "X-User"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires forward authentication") {
+		t.Fatalf("JWT principal response-header validation error = %v", err)
+	}
+}
+
 func TestBasicPrincipalRequiresSuccessfulAuthentication(t *testing.T) {
 	path := writeHtpasswd(t, map[string]string{"alice": "secret", strings.Repeat("a", maxPrincipalBytes+1): "secret"})
 	opts := PrincipalOptions{Domain: "staff"}
