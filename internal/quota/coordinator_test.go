@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -324,5 +325,152 @@ func TestConcurrentAdmissionsRespectSharedBurst(t *testing.T) {
 	}
 	if allowed != 4 {
 		t.Fatalf("allowed %d concurrent requests, want 4", allowed)
+	}
+}
+
+func TestFullStoreScanDoesNotBlockAnotherClass(t *testing.T) {
+	now := time.Unix(100, 0)
+	c := testCoordinator(t, testPolicy(), 1, &now)
+	if !admit(t, c, "public", "alice").Allowed {
+		t.Fatal("initial public request denied")
+	}
+
+	var calls atomic.Int32
+	scanStarted := make(chan struct{})
+	releaseScan := make(chan struct{})
+	c.now = func() time.Time {
+		if calls.Add(1) == 1 {
+			close(scanStarted)
+			<-releaseScan
+		}
+		return now
+	}
+	type result struct {
+		decision Decision
+		err      error
+	}
+	public := make(chan result, 1)
+	go func() {
+		decision, err := c.Admit("public", "bob")
+		public <- result{decision, err}
+	}()
+	<-scanStarted
+	protected := make(chan result, 1)
+	go func() {
+		decision, err := c.Admit("private", "carol")
+		protected <- result{decision, err}
+	}()
+	select {
+	case got := <-protected:
+		if got.err != nil || !got.decision.Allowed {
+			t.Errorf("protected admission: %+v, %v", got.decision, got.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("protected admission blocked by another class's scan")
+	}
+	close(releaseScan)
+	if got := <-public; got.err != nil || got.decision.Reason != ReasonCallerCapacity {
+		t.Errorf("public admission: %+v, %v", got.decision, got.err)
+	}
+}
+
+func TestEvictionCandidateRecheckedWhenClockMovesBackwards(t *testing.T) {
+	start := time.Unix(100, 0)
+	now := start
+	policy := Policy{
+		Application: Limit{Rate: 10, Burst: 10},
+		Classes: map[string]Class{
+			"public": {Shared: Limit{Rate: 10, Burst: 10}, PerCaller: Limit{Rate: 1, Burst: 2}},
+		},
+	}
+	c := testCoordinator(t, policy, 2, &now)
+	for i := 0; i < 2; i++ {
+		if !admit(t, c, "public", "alice").Allowed {
+			t.Fatal("initial alice request denied")
+		}
+	}
+	now = start.Add(500 * time.Millisecond)
+	if !admit(t, c, "public", "bob").Allowed {
+		t.Fatal("initial bob request denied")
+	}
+	var calls int
+	c.now = func() time.Time {
+		calls++
+		if calls == 1 {
+			return start.Add(2 * time.Second)
+		}
+		return start.Add(1500 * time.Millisecond)
+	}
+	if got := admit(t, c, "public", "carol"); !got.Allowed {
+		t.Fatalf("new caller denied despite a safe candidate: %+v", got)
+	}
+	state := c.classes["public"]
+	if state.callers[sha256.Sum256([]byte("alice"))] == nil {
+		t.Fatal("partially refilled alice was evicted after clock moved backwards")
+	}
+	if state.callers[sha256.Sum256([]byte("bob"))] != nil {
+		t.Fatal("fully refilled bob was not evicted")
+	}
+}
+
+func TestEvictionDeniedWhenClockMovesBeforeFullRefill(t *testing.T) {
+	start := time.Unix(100, 0)
+	now := start
+	c := testCoordinator(t, testPolicy(), 1, &now)
+	if !admit(t, c, "public", "alice").Allowed {
+		t.Fatal("initial request denied")
+	}
+	var calls int
+	c.now = func() time.Time {
+		calls++
+		if calls == 1 {
+			return start.Add(time.Second)
+		}
+		return start.Add(500 * time.Millisecond)
+	}
+	if got := admit(t, c, "public", "bob"); got.Allowed || got.Reason != ReasonCallerCapacity {
+		t.Fatalf("partially refilled candidate was retired: %+v", got)
+	}
+	if c.classes["public"].callers[sha256.Sum256([]byte("alice"))] == nil {
+		t.Fatal("caller state changed after capacity denial")
+	}
+}
+
+func TestConcurrentAdmissionsAcrossClasses(t *testing.T) {
+	now := time.Unix(100, 0)
+	c := testCoordinator(t, testPolicy(), 100, &now)
+	const attempts = 64
+	start := make(chan struct{})
+	type result struct {
+		class    string
+		decision Decision
+	}
+	results := make(chan result, attempts*2)
+	var wg sync.WaitGroup
+	for _, class := range []string{"public", "private"} {
+		for i := 0; i < attempts; i++ {
+			wg.Add(1)
+			go func(class string, i int) {
+				defer wg.Done()
+				<-start
+				decision, err := c.Admit(class, fmt.Sprint(i))
+				if err != nil {
+					t.Errorf("Admit: %v", err)
+				}
+				results <- result{class, decision}
+			}(class, i)
+		}
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	counts := make(map[string]int)
+	for result := range results {
+		if result.decision.Allowed {
+			counts[result.class]++
+		}
+	}
+	if counts["public"] != 4 || counts["private"] != 6 {
+		t.Fatalf("admitted across classes = %v, want public 4 and private 6", counts)
 	}
 }
