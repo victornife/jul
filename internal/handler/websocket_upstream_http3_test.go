@@ -711,6 +711,17 @@ func TestWebSocketHTTP3UpstreamRejectsUntrustedBackend(t *testing.T) {
 }
 
 func TestWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T) {
+	for _, limit := range []int{0, 1} {
+		t.Run(fmt.Sprintf("max_connections=%d", limit), func(t *testing.T) {
+			testWebSocketHTTP3UpstreamReplacesDrainingConnection(t, limit, false)
+		})
+	}
+	t.Run("retirement wakes capacity waiter", func(t *testing.T) {
+		testWebSocketHTTP3UpstreamReplacesDrainingConnection(t, 1, true)
+	})
+}
+
+func testWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T, limit int, retireWhileWaiting bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	pki := newBackendPKI(t)
@@ -723,11 +734,14 @@ func TestWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transport := &websocketHTTP3Transport{
-		connections:    make(map[string]*websocketHTTP3Connection),
-		tlsConfig:      &tls.Config{RootCAs: roots, ServerName: "inventory.internal", NextProtos: []string{http3.NextProtoH3}},
-		connectTimeout: 5 * time.Second,
+	baseTransport, err := newHTTP3WebSocketUpstreamTransport(config.LocationConfig{
+		Resilience: &config.LocationResilienceConfig{MaxConnectionsPerBackend: limit},
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
+	transport := baseTransport.(*websocketHTTP3Transport)
+	transport.tlsConfig = &tls.Config{RootCAs: roots, ServerName: "inventory.internal", NextProtos: []string{http3.NextProtoH3}}
 	type acceptedConnection struct {
 		conn   *quic.Conn
 		server *http3.Server
@@ -782,9 +796,8 @@ func TestWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T) {
 		}
 	})
 	address := listener.Addr().String()
-	open := func() io.ReadWriteCloser {
+	duplexBody := func(response *http.Response, err error) io.ReadWriteCloser {
 		t.Helper()
-		response, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -797,6 +810,10 @@ func TestWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = body.Close() })
 		return body
+	}
+	open := func() io.ReadWriteCloser {
+		t.Helper()
+		return duplexBody(transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws")))
 	}
 	first := open()
 	var old acceptedConnection
@@ -826,7 +843,67 @@ func TestWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T) {
 		t.Fatalf("failed attempt was replayed or draining connection retained: requests=%d", requests.Load())
 	}
 	echoWebSocketBytes(t, first, first)
-	replacement := open()
+	var replacement io.ReadWriteCloser
+	if limit == 1 {
+		waitCtx, stopWaiting := context.WithTimeout(ctx, 100*time.Millisecond)
+		response, err := transport.RoundTrip(http3WebSocketRequest(waitCtx, address, "/ws"))
+		stopWaiting()
+		if response != nil {
+			_ = response.Body.Close()
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("at-capacity handshake error=%v, want request deadline", err)
+		}
+		echoWebSocketBytes(t, first, first)
+		type result struct {
+			response *http.Response
+			err      error
+		}
+		pending := make(chan result, 1)
+		go func() {
+			response, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws"))
+			pending <- result{response, err}
+		}()
+		select {
+		case <-accepted:
+			t.Fatal("dial exceeded cap while the draining tunnel was still open")
+		case got := <-pending:
+			if got.response != nil {
+				_ = got.response.Body.Close()
+			}
+			t.Fatalf("handshake did not wait for connection capacity: %v", got.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		echoWebSocketBytes(t, first, first)
+		if retireWhileWaiting {
+			if err := transport.Close(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case got := <-pending:
+				if got.response != nil {
+					_ = got.response.Body.Close()
+				}
+				if got.err == nil || !strings.Contains(got.err.Error(), "closed") {
+					t.Fatalf("retired transport waiter error: %v", got.err)
+				}
+			case <-ctx.Done():
+				t.Fatal("retirement did not wake the connection-capacity waiter")
+			}
+			echoWebSocketBytes(t, first, first)
+			_ = first.Close()
+			return
+		}
+		_ = first.Close()
+		select {
+		case got := <-pending:
+			replacement = duplexBody(got.response, got.err)
+		case <-ctx.Done():
+			t.Fatal("handshake did not resume after connection capacity freed")
+		}
+	} else {
+		replacement = open()
+	}
 	select {
 	case next := <-accepted:
 		if next.conn == old.conn {

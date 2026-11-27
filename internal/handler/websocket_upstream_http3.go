@@ -27,14 +27,17 @@ import (
 const websocketHTTP3IdleTimeout = 90 * time.Second
 
 type websocketHTTP3Transport struct {
-	mu             sync.Mutex
-	closed         bool
-	connections    map[string]*websocketHTTP3Connection
-	tlsConfig      *tls.Config
-	pool           *upstream.Pool
-	connectTimeout time.Duration
-	readTimeout    time.Duration
-	writeTimeout   time.Duration
+	mu                sync.Mutex
+	closed            bool
+	connections       map[string]*websocketHTTP3Connection
+	connectionCounts  map[string]int // Includes dials and live connections evicted from reuse.
+	connectionChanged chan struct{}
+	maxConnections    int
+	tlsConfig         *tls.Config
+	pool              *upstream.Pool
+	connectTimeout    time.Duration
+	readTimeout       time.Duration
+	writeTimeout      time.Duration
 }
 
 type websocketHTTP3Connection struct {
@@ -60,6 +63,7 @@ func newHTTP3WebSocketUpstreamTransport(loc config.LocationConfig, policy *backe
 		connections:    make(map[string]*websocketHTTP3Connection),
 		tlsConfig:      tlsConfig,
 		pool:           pool,
+		maxConnections: maxConnsPerBackend(loc, pool),
 		connectTimeout: connectTimeout,
 		readTimeout:    loc.ProxyReadTimeout.Std(),
 		writeTimeout:   loc.ProxySendTimeout.Std(),
@@ -169,37 +173,66 @@ func (t *websocketHTTP3Transport) acquire(ctx context.Context, address string) (
 }
 
 func (t *websocketHTTP3Transport) connection(ctx context.Context, address string) (*websocketHTTP3Connection, error) {
-	t.mu.Lock()
-	if t.closed {
-		t.mu.Unlock()
-		return nil, errors.New("HTTP/3 WebSocket upstream is closed")
-	}
-	if connection := t.connections[address]; connection != nil {
-		ready := connection.ready
-		t.mu.Unlock()
-		select {
-		case <-ready:
-			if connection.err != nil {
-				return nil, connection.err
-			}
-			return connection, nil
-		case <-ctx.Done():
-			return nil, context.Cause(ctx)
+	for {
+		t.mu.Lock()
+		if t.closed {
+			t.mu.Unlock()
+			return nil, errors.New("HTTP/3 WebSocket upstream is closed")
 		}
-	}
+		if connection := t.connections[address]; connection != nil {
+			ready := connection.ready
+			t.mu.Unlock()
+			select {
+			case <-ready:
+				if connection.err != nil {
+					return nil, connection.err
+				}
+				return connection, nil
+			case <-ctx.Done():
+				return nil, context.Cause(ctx)
+			}
+		}
 
-	dialCtx, cancel := context.WithTimeout(ctx, t.connectTimeout)
-	connection := &websocketHTTP3Connection{
-		address:    address,
-		ready:      make(chan struct{}),
-		dialCancel: cancel,
-	}
-	t.connections[address] = connection
-	t.mu.Unlock()
+		if t.connectionCounts == nil {
+			t.connectionCounts = make(map[string]int)
+			t.connectionChanged = make(chan struct{})
+		}
+		if t.maxConnections > 0 && t.connectionCounts[address] >= t.maxConnections {
+			changed := t.connectionChanged
+			t.mu.Unlock()
+			select {
+			case <-changed:
+				continue
+			case <-ctx.Done():
+				return nil, context.Cause(ctx)
+			}
+		}
 
-	t.dial(dialCtx, connection)
-	cancel()
-	return connection, connection.err
+		dialCtx, cancel := context.WithTimeout(ctx, t.connectTimeout)
+		connection := &websocketHTTP3Connection{
+			address:    address,
+			ready:      make(chan struct{}),
+			dialCancel: cancel,
+		}
+		t.connectionCounts[address]++
+		t.connections[address] = connection
+		t.mu.Unlock()
+
+		t.dial(dialCtx, connection)
+		cancel()
+		return connection, connection.err
+	}
+}
+
+func (t *websocketHTTP3Transport) releaseConnectionSlotLocked(address string) {
+	t.connectionCounts[address]--
+	if t.connectionCounts[address] == 0 {
+		delete(t.connectionCounts, address)
+	}
+	if t.connectionChanged != nil {
+		close(t.connectionChanged)
+		t.connectionChanged = make(chan struct{})
+	}
 }
 
 func (t *websocketHTTP3Transport) dial(ctx context.Context, connection *websocketHTTP3Connection) {
@@ -257,6 +290,7 @@ func (t *websocketHTTP3Transport) dial(ctx context.Context, connection *websocke
 						connection.idleTimer.Stop()
 						connection.idleTimer = nil
 					}
+					t.releaseConnectionSlotLocked(connection.address)
 					t.mu.Unlock()
 				}()
 				return
@@ -275,6 +309,7 @@ func (t *websocketHTTP3Transport) dial(ctx context.Context, connection *websocke
 	if t.connections[connection.address] == connection {
 		delete(t.connections, connection.address)
 	}
+	t.releaseConnectionSlotLocked(connection.address)
 	close(connection.ready)
 	t.mu.Unlock()
 }
@@ -333,6 +368,10 @@ func (t *websocketHTTP3Transport) closeIdle(connection *websocketHTTP3Connection
 func (t *websocketHTTP3Transport) Close() error {
 	t.mu.Lock()
 	t.closed = true
+	if t.connectionChanged != nil {
+		close(t.connectionChanged)
+		t.connectionChanged = nil
+	}
 	var connections []*websocketHTTP3Connection
 	for address, connection := range t.connections {
 		delete(t.connections, address)

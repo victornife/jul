@@ -76,6 +76,11 @@ at startup.
 A backend GOAWAY removes its connection from new admission without interrupting
 existing tunnels. A refused handshake is not replayed; a subsequent new handshake
 can establish a replacement connection.
+The transport honors the effective `max_connections_per_backend` bound, including
+dials in progress and draining connections until they close. At the bound, a new
+handshake waits for capacity or request cancellation; transport retirement wakes
+waiters without interrupting existing tunnels. A positive route override wins
+over the pool setting, and zero at route scope inherits the pool's value.
 The Console Status overview reports whether the transport is compiled and how
 many configured upstream pools select it. The Console Apps creation editor and
 App Detail expose the pool-wide selector through preview and live apply; route
