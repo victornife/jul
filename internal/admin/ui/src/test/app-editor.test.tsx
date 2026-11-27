@@ -109,8 +109,11 @@ describe("AppEditor ordered structured handoff", () => {
         action: {
           kind: "proxy",
           target: "https://api",
-          websocket_upstream_protocol: "http3",
         },
+      });
+      expect(requestBody?.ops[0]).toMatchObject({
+        op: "upstream_add",
+        websocket_upstream_protocol: "http3",
       });
     });
   });

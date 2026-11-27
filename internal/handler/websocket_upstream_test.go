@@ -176,46 +176,113 @@ func TestWebSocketUpstreamSelectorPropagatesTransportError(t *testing.T) {
 	}
 }
 
-func TestWebSocketUpstreamUnsupportedConnectIsHealthNeutral(t *testing.T) {
-	pool, err := upstream.NewPool(config.UpstreamConfig{
-		Name:     "backend",
-		Strategy: "round_robin",
-		Servers: []config.UpstreamServer{
-			{Address: "127.0.0.1:1", Weight: 1},
-			{Address: "127.0.0.1:2", Weight: 1},
-		},
-		MaxFails: 1,
-	}, "https")
-	if err != nil {
-		t.Fatal(err)
+func TestWebSocketUpstreamProtocolSelection(t *testing.T) {
+	for _, tt := range []struct {
+		protocol string
+		target   string
+		want     string
+	}{
+		{target: "http://inventory"},
+		{protocol: "http1", target: "https://inventory"},
+		{protocol: "http2", target: "https://inventory", want: "unsupported WebSocket upstream protocol"},
+		{protocol: "http3", target: "http://inventory", want: "requires an https:// proxy_pass"},
+	} {
+		t.Run(tt.protocol+"/"+tt.target, func(t *testing.T) {
+			transport, err := newWebSocketUpstreamTransport(tt.protocol, config.LocationConfig{ProxyPass: tt.target}, nil, nil)
+			if transport != nil || (tt.want == "" && err != nil) || (tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want))) {
+				t.Fatalf("transport=%v error=%v, want no transport and error containing %q", transport, err, tt.want)
+			}
+		})
 	}
-	defer pool.Close()
+}
 
-	attempts, dialFailures := 0, 0
-	transport := &balancingTransport{
-		pool: pool,
-		base: websocketRoundTripFunc(func(*http.Request) (*http.Response, error) {
-			attempts++
-			return nil, errExtendedConnectUnsupported
-		}),
-		tlsBackend:    true,
-		retryOverride: upstream.RetryOverride{Attempts: 3},
-		dialFailure:   func(string) { dialFailures++ },
+func TestWebSocketUpstreamReplayPolicy(t *testing.T) {
+	for _, tt := range []struct {
+		name                string
+		nativeH3, handshake bool
+		want                int
+	}{
+		{name: "H1 handshake retains failover", handshake: true, want: 2},
+		{name: "H3 handshake never replays", nativeH3: true, handshake: true, want: 1},
+		{name: "ordinary HTTP retains failover on H3 pool", nativeH3: true, want: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			pool, err := upstream.NewPool(config.UpstreamConfig{
+				Name: "backend", Strategy: "round_robin",
+				Servers: []config.UpstreamServer{{Address: "127.0.0.1:1", Weight: 1}, {Address: "127.0.0.1:2", Weight: 1}},
+			}, "https")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			attempts := 0
+			transport := &balancingTransport{
+				pool: pool, websocketH3: tt.nativeH3, tlsBackend: true,
+				base: websocketRoundTripFunc(func(*http.Request) (*http.Response, error) {
+					attempts++
+					return nil, io.EOF
+				}),
+			}
+			request := httptest.NewRequest(http.MethodGet, "https://frontend.internal/ws", nil)
+			request.Body = nil
+			if tt.handshake {
+				request.Header.Set("Connection", "Upgrade")
+				request.Header.Set("Upgrade", "websocket")
+			}
+			if _, err := transport.RoundTrip(request); err == nil {
+				t.Fatal("broken backends unexpectedly succeeded")
+			}
+			if attempts != tt.want {
+				t.Fatalf("attempts=%d, want %d", attempts, tt.want)
+			}
+		})
 	}
-	request := httptest.NewRequest(http.MethodGet, "https://frontend.internal/ws", nil)
-	request.Header.Set("Connection", "Upgrade")
-	request.Header.Set("Upgrade", "websocket")
-	_, err = transport.RoundTrip(request)
-	if !errors.Is(err, errExtendedConnectUnsupported) {
-		t.Fatalf("RoundTrip error = %v, want Extended CONNECT refusal", err)
-	}
-	if attempts != 1 || dialFailures != 0 {
-		t.Fatalf("attempts=%d dial failures=%d, want one attempt and no dial failure", attempts, dialFailures)
-	}
-	for _, backend := range pool.Backends() {
-		if !backend.Available() || backend.FailCount() != 0 || backend.Inflight() != 0 {
-			t.Fatalf("backend state after refusal: available=%t failures=%d inflight=%d",
-				backend.Available(), backend.FailCount(), backend.Inflight())
-		}
+}
+
+func TestWebSocketUpstreamUnsupportedConnectIsHealthNeutral(t *testing.T) {
+	for _, refusal := range []error{errExtendedConnectUnsupported, errWebSocketH3StreamUnavailable} {
+		t.Run(refusal.Error(), func(t *testing.T) {
+			pool, err := upstream.NewPool(config.UpstreamConfig{
+				Name:     "backend",
+				Strategy: "round_robin",
+				Servers: []config.UpstreamServer{
+					{Address: "127.0.0.1:1", Weight: 1},
+					{Address: "127.0.0.1:2", Weight: 1},
+				},
+				MaxFails: 1,
+			}, "https")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+
+			attempts, dialFailures := 0, 0
+			transport := &balancingTransport{
+				pool: pool,
+				base: websocketRoundTripFunc(func(*http.Request) (*http.Response, error) {
+					attempts++
+					return nil, refusal
+				}),
+				tlsBackend:    true,
+				retryOverride: upstream.RetryOverride{Attempts: 3},
+				dialFailure:   func(string) { dialFailures++ },
+			}
+			request := httptest.NewRequest(http.MethodGet, "https://frontend.internal/ws", nil)
+			request.Header.Set("Connection", "Upgrade")
+			request.Header.Set("Upgrade", "websocket")
+			_, err = transport.RoundTrip(request)
+			if !errors.Is(err, refusal) {
+				t.Fatalf("RoundTrip error = %v, want Extended CONNECT refusal", err)
+			}
+			if attempts != 1 || dialFailures != 0 {
+				t.Fatalf("attempts=%d dial failures=%d, want one attempt and no dial failure", attempts, dialFailures)
+			}
+			for _, backend := range pool.Backends() {
+				if !backend.Available() || backend.FailCount() != 0 || backend.Inflight() != 0 {
+					t.Fatalf("backend state after refusal: available=%t failures=%d inflight=%d",
+						backend.Available(), backend.FailCount(), backend.Inflight())
+				}
+			}
+		})
 	}
 }

@@ -619,7 +619,7 @@ test.describe("WebSocket Extended CONNECT status", () => {
   }) => {
     await setupApiMocks(page);
     const name = "WebSocket upstream HTTP/3";
-    const detail = "1 HTTP/3 WebSocket upstream route; backend hop only; outbound UDP required";
+    const detail = "1 HTTP/3 WebSocket upstream pool; backend hop only; outbound UDP required";
     await page.route("/api/runtime/overview", (route) =>
       json(route, {
         ...OVERVIEW,

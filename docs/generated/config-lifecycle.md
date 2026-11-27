@@ -386,7 +386,6 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.waf.paranoia` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `servers.*.locations.*.waf.request_body_limit` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `servers.*.locations.*.waf.response_body_check` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
-| `servers.*.locations.*.websocket_upstream_protocol` | `hot_reload` | `proxy_pass` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.withdrawn` | `hot_reload` | `access_control` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.max_header_bytes` | `new_listener_only` | `listener_limits` | cond. | the value is read once when the socket binds; an address kept across the reload keeps the value it bound with |
 | `servers.*.mime.default_type` | `hot_reload` | `static_files` | — | the handler tree is rebuilt from the effective config on each successful reload |
@@ -506,6 +505,7 @@ value is compared as a digest so no secret material leaves the process.
 | `upstreams.*.servers.*.address` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.servers.*.weight` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
 | `upstreams.*.strategy` | `hot_reload` | `upstream` | — | the upstream registry stages and swaps pools on each successful reload |
+| `upstreams.*.websocket_upstream_protocol` | `hot_reload` | `proxy_pass` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `waf.block_status` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `waf.blocking_paranoia` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |
 | `waf.crs_enabled` | `hot_reload` | `waf` | — | the WAF policy is rebuilt on each successful reload |

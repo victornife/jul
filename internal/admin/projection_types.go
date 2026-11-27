@@ -33,12 +33,11 @@ type RouteProjection struct {
 
 // LocationProjection is a structured location within a route.
 type LocationProjection struct {
-	Index                     int    `json:"index"`
-	Match                     string `json:"match"`
-	Type                      string `json:"type"`   // exact, prefix, regex
-	Action                    string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
-	Target                    string `json:"target,omitempty"`
-	WebSocketUpstreamProtocol string `json:"websocket_upstream_protocol,omitempty"`
+	Index  int    `json:"index"`
+	Match  string `json:"match"`
+	Type   string `json:"type"`   // exact, prefix, regex
+	Action string `json:"action"` // static, proxy, grpc, grpc_transcode, fastcgi, redirect, deny, return
+	Target string `json:"target,omitempty"`
 	// MatchOrdinal is the route's 0-based index among the locations across all
 	// matching server blocks sharing its match type and path, which predicates made
 	// non-unique (ADR 0018 §14). A typed patch sends it, together with the
@@ -215,8 +214,9 @@ type LocationCORSState struct {
 
 // AppProjection is a structured upstream/app for the Console v2 Apps panel.
 type AppProjection struct {
-	Name     string `json:"name"`
-	Strategy string `json:"strategy"`
+	WebSocketUpstreamProtocol string `json:"websocket_upstream_protocol,omitempty"`
+	Name                      string `json:"name"`
+	Strategy                  string `json:"strategy"`
 	// Hash is the consistent_hash key policy, so the Console can state the key
 	// source, where it applies and what happens without a key.
 	Hash        *adminapi.UpstreamHash `json:"hash,omitempty"`

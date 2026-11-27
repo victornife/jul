@@ -150,7 +150,7 @@ staging. The admin listener's client-auth policy still requires a restart.
 1. **Native HTTP/2 WebSocket upstreams are not yet supported.** HTTP/1.1, HTTP/2
    and HTTP/3 clients can use WebSocket Extended CONNECT
    ([RFC 8441][rfc8441] / RFC 9220) through Jul to an HTTP/1.1 WebSocket backend.
-   An HTTP/3 backend is available as an explicit per-route option; see
+   An HTTP/3 backend is available as an explicit per-upstream option; see
    [WebSocket upstream protocol](upstreams.md#websocket-upstream-protocol).
    Jul validates the backend handshake and prepares the frontend stream before
    returning Extended CONNECT success. Native HTTP/2 upstream support remains

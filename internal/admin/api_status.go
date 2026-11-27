@@ -202,9 +202,6 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 				sendTimeoutLocations++
 			}
 			totalLocs++
-			if strings.TrimSpace(loc.WebSocketUpstreamProtocol) == "http3" {
-				websocketH3Upstreams++
-			}
 			switch {
 			case loc.GRPCTranscode != nil:
 				grpcTranscode++
@@ -246,6 +243,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 	discoveryKinds := map[string]bool{}
 	for i := range c.Upstreams {
 		up := &c.Upstreams[i]
+		if strings.TrimSpace(up.WebSocketUpstreamProtocol) == "http3" {
+			websocketH3Upstreams++
+		}
 		if h := upstreamHashView(up); h != nil {
 			affinityPools++
 			affinityKeys[h.Key] = true
@@ -506,14 +506,14 @@ func websocketH3Detail(compiled bool, listeners int) string {
 	return countUnit(listeners, "HTTP/3 listener") + "; Extended CONNECT is advertised by the HTTP/3 server"
 }
 
-func websocketH3UpstreamDetail(compiled bool, routes int) string {
+func websocketH3UpstreamDetail(compiled bool, pools int) string {
 	if !compiled {
 		return "unavailable in this build; build with -tags http3"
 	}
-	if routes == 0 {
-		return "available in this build; no HTTP/3 WebSocket upstream route is configured"
+	if pools == 0 {
+		return "available in this build; no HTTP/3 WebSocket upstream pool is configured"
 	}
-	return countUnit(routes, "HTTP/3 WebSocket upstream route") + "; backend hop only; outbound UDP required"
+	return countUnit(pools, "HTTP/3 WebSocket upstream pool") + "; backend hop only; outbound UDP required"
 }
 
 // metricsDetail describes the Prometheus surface when it is wired.

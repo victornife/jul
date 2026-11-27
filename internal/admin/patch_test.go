@@ -863,40 +863,35 @@ func TestApplyPatchLocationSetAction(t *testing.T) {
 	}
 }
 
-func TestApplyPatchLocationSetWebSocketUpstreamProtocol(t *testing.T) {
+func TestApplyPatchUpstreamSetWebSocketProtocol(t *testing.T) {
 	c := patchTestConfig()
-	if _, err := applyPatch(c, patchRequest{
-		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
-		Action: &locationActionPayload{
-			Kind: "proxy", Target: "https://inventory", WebSocketUpstreamProtocol: "http3",
-		},
-	}); err != nil {
-		t.Fatalf("set HTTP/3: %v", err)
-	}
-	loc := &c.Servers[0].Locations[0]
-	if loc.WebSocketUpstreamProtocol != "http3" || loc.ProxyPass != "https://inventory" {
-		t.Fatalf("HTTP/3 action = %+v", loc)
-	}
-
-	if _, err := applyPatch(c, patchRequest{
-		Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api",
-		Action: &locationActionPayload{Kind: "proxy", Target: "http://inventory"},
-	}); err != nil {
-		t.Fatalf("restore HTTP/1.1 default: %v", err)
-	}
-	if loc.WebSocketUpstreamProtocol != "" {
-		t.Fatalf("default protocol left %q configured", loc.WebSocketUpstreamProtocol)
-	}
-
-	for _, action := range []*locationActionPayload{
-		{Kind: "proxy", Target: "http://inventory", WebSocketUpstreamProtocol: "h3"},
-		{Kind: "static", Target: "/var/www", WebSocketUpstreamProtocol: "http3"},
-	} {
-		if _, err := applyPatch(patchTestConfig(), patchRequest{
-			Op: "location_set_action", Listen: ":8080", MatchType: "prefix", Path: "/api", Action: action,
-		}); err == nil {
-			t.Errorf("expected invalid WebSocket upstream settings to fail: %+v", action)
+	for _, protocol := range []string{"http3", "http1", ""} {
+		if _, err := applyPatch(c, patchRequest{
+			Op: "upstream_set_websocket_protocol", Upstream: "pool",
+			WebSocketUpstreamProtocol: &protocol,
+		}); err != nil {
+			t.Fatalf("set %q: %v", protocol, err)
 		}
+		if got := c.Upstreams[0].WebSocketUpstreamProtocol; got != protocol {
+			t.Fatalf("protocol=%q, want %q", got, protocol)
+		}
+	}
+	invalid := "h3"
+	for _, request := range []patchRequest{
+		{Op: "upstream_set_websocket_protocol", Upstream: "pool"},
+		{Op: "upstream_set_websocket_protocol", Upstream: "missing", WebSocketUpstreamProtocol: &invalid},
+		{Op: "upstream_set_websocket_protocol", Upstream: "pool", WebSocketUpstreamProtocol: &invalid},
+		{Op: "upstream_add", Upstream: "new", Address: "127.0.0.1:443", WebSocketUpstreamProtocol: &invalid},
+	} {
+		if _, err := applyPatch(c, request); err == nil {
+			t.Errorf("invalid WebSocket protocol request succeeded: %+v", request)
+		}
+	}
+	protocol := "http3"
+	if _, err := applyPatch(c, patchRequest{
+		Op: "upstream_add", Upstream: "new", Address: "127.0.0.1:443", WebSocketUpstreamProtocol: &protocol,
+	}); err != nil || c.Upstreams[len(c.Upstreams)-1].WebSocketUpstreamProtocol != protocol {
+		t.Fatalf("create HTTP/3 upstream: %v", err)
 	}
 }
 

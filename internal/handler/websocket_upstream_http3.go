@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -82,6 +83,13 @@ func (t *websocketHTTP3Transport) RoundTrip(req *http.Request) (*http.Response, 
 	}
 	stream, err := connection.client.OpenRequestStream(req.Context())
 	if err != nil {
+		if req.Context().Err() == nil {
+			t.evict(connection)
+			// GOAWAY can refuse new streams without interrupting active tunnels.
+			if connection.conn.Context().Err() == nil && !errors.Is(err, net.ErrClosed) {
+				err = fmt.Errorf("%w: %w", errWebSocketH3StreamUnavailable, err)
+			}
+		}
 		release()
 		return nil, err
 	}
@@ -271,6 +279,18 @@ func (t *websocketHTTP3Transport) dial(ctx context.Context, connection *websocke
 	t.mu.Unlock()
 }
 
+func (t *websocketHTTP3Transport) evict(connection *websocketHTTP3Connection) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.connections[connection.address] == connection {
+		delete(t.connections, connection.address)
+	}
+	if connection.idleTimer != nil {
+		connection.idleTimer.Stop()
+		connection.idleTimer = nil
+	}
+}
+
 func (t *websocketHTTP3Transport) release(connection *websocketHTTP3Connection) {
 	t.mu.Lock()
 	connection.active--
@@ -278,7 +298,7 @@ func (t *websocketHTTP3Transport) release(connection *websocketHTTP3Connection) 
 		t.mu.Unlock()
 		return
 	}
-	if t.closed {
+	if t.closed || t.connections[connection.address] != connection {
 		if t.connections[connection.address] == connection {
 			delete(t.connections, connection.address)
 		}

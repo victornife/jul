@@ -698,7 +698,6 @@ func locationEntries() []Entry {
 		hot(loc+"proxy_connect_timeout", SubProxyTimeouts, reasonHandlerRebuild),
 		hot(loc+"proxy_buffering", SubProxyPass, reasonHandlerRebuild),
 		hot(loc+"proxy_pass", SubProxyPass, reasonHandlerRebuild),
-		hot(loc+"websocket_upstream_protocol", SubProxyPass, reasonHandlerRebuild),
 		hot(loc+"proxy_read_timeout", SubProxyTimeouts, reasonHandlerRebuild),
 		hot(loc+"proxy_retries", SubProxyRetries, reasonHandlerRebuild),
 		hot(loc+"proxy_send_timeout", SubProxyTimeouts, reasonHandlerRebuild),
@@ -753,6 +752,7 @@ func upstreamEntries() []Entry {
 		"upstreams.*.servers.*.weight",
 		"upstreams.*.strategy",
 	)
+	out = append(out, hot("upstreams.*.websocket_upstream_protocol", SubProxyPass, reasonHandlerRebuild))
 	// The hash block is part of the pool's construction-time shape, like
 	// strategy: a changed key, fallback or algorithm rebuilds the pool on the
 	// next successful reload, and keys are re-placed from that moment.

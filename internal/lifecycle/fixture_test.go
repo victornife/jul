@@ -194,14 +194,13 @@ func fullConfig() *config.Config {
 				AllowHidden:      true,
 				CacheControl:     "public, max-age=3600",
 
-				ProxyPass:                 "http://app",
-				WebSocketUpstreamProtocol: "http3",
-				ProxyConnectTimeout:       config.Duration(time.Second),
-				ProxyReadTimeout:          config.Duration(5 * time.Second),
-				ProxySendTimeout:          config.Duration(5 * time.Second),
-				SendTimeout:               durationPtr(5 * time.Second),
-				ProxyRetries:              2,
-				GRPC:                      true,
+				ProxyPass:           "http://app",
+				ProxyConnectTimeout: config.Duration(time.Second),
+				ProxyReadTimeout:    config.Duration(5 * time.Second),
+				ProxySendTimeout:    config.Duration(5 * time.Second),
+				SendTimeout:         durationPtr(5 * time.Second),
+				ProxyRetries:        2,
+				GRPC:                true,
 				BackendTLS: &config.BackendTLSConfig{
 					CAFile:             "/etc/jul/route-ca.pem",
 					CAMode:             "file_only",
@@ -316,8 +315,9 @@ func fullConfig() *config.Config {
 			}},
 		}},
 		Upstreams: []config.UpstreamConfig{{
-			Name:     "app",
-			Strategy: "consistent_hash",
+			WebSocketUpstreamProtocol: "http3",
+			Name:                      "app",
+			Strategy:                  "consistent_hash",
 			Hash: &config.HashConfig{
 				Key:       "header",
 				Name:      "X-Tenant",

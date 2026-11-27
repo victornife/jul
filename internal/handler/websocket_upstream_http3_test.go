@@ -21,6 +21,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -679,12 +681,12 @@ func TestWebSocketHTTP3UpstreamRejectsUntrustedBackend(t *testing.T) {
 	}()
 
 	proxy, err := NewProxy(context.Background(), config.ServerConfig{}, config.LocationConfig{
-		ProxyPass:                 "https://inventory",
-		WebSocketUpstreamProtocol: "http3",
-		ProxyConnectTimeout:       config.Duration(time.Second),
+		ProxyPass:           "https://inventory",
+		ProxyConnectTimeout: config.Duration(time.Second),
 	}, map[string]config.UpstreamConfig{
 		"inventory": {
-			Name: "inventory",
+			Name:                      "inventory",
+			WebSocketUpstreamProtocol: "http3",
 			Servers: []config.UpstreamServer{{
 				Address: packetConn.LocalAddr().String(),
 				Weight:  1,
@@ -706,6 +708,149 @@ func TestWebSocketHTTP3UpstreamRejectsUntrustedBackend(t *testing.T) {
 	if recorder.Code == http.StatusSwitchingProtocols || recorder.Code == http.StatusOK {
 		t.Fatalf("untrusted backend returned success status %d", recorder.Code)
 	}
+}
+
+func TestWebSocketHTTP3UpstreamReplacesDrainingConnection(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	pki := newBackendPKI(t)
+	cert := pki.issue(t, "inventory", []string{"inventory.internal"}, nil)
+	roots := x509.NewCertPool()
+	roots.AddCert(pki.cert)
+	listener, err := quic.ListenAddr("127.0.0.1:0", http3.ConfigureTLSConfig(&tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &websocketHTTP3Transport{
+		connections:    make(map[string]*websocketHTTP3Connection),
+		tlsConfig:      &tls.Config{RootCAs: roots, ServerName: "inventory.internal", NextProtos: []string{http3.NextProtoH3}},
+		connectTimeout: 5 * time.Second,
+	}
+	type acceptedConnection struct {
+		conn   *quic.Conn
+		server *http3.Server
+	}
+	accepted := make(chan acceptedConnection, 2)
+	acceptDone := make(chan struct{})
+	var servers []*http3.Server
+	var serving sync.WaitGroup
+	var requests atomic.Int32
+	go func() {
+		defer close(acceptDone)
+		for {
+			conn, err := listener.Accept(ctx)
+			if err != nil {
+				return
+			}
+			server := &http3.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				echoHTTP3WebSocket(w, r)
+			})}
+			servers = append(servers, server)
+			serving.Add(1)
+			go func() {
+				defer serving.Done()
+				_ = server.ServeQUICConn(conn)
+			}()
+			select {
+			case accepted <- acceptedConnection{conn, server}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		_ = listener.Close()
+		<-acceptDone
+		for _, server := range servers {
+			if err := server.Close(); err != nil {
+				t.Errorf("close HTTP/3 backend: %v", err)
+			}
+		}
+		if err := transport.Close(); err != nil {
+			t.Errorf("close HTTP/3 transport: %v", err)
+		}
+		done := make(chan struct{})
+		go func() { serving.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("HTTP/3 backend connections did not stop")
+		}
+	})
+	address := listener.Addr().String()
+	open := func() io.ReadWriteCloser {
+		t.Helper()
+		response, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusOK {
+			t.Fatalf("backend handshake: %d", response.StatusCode)
+		}
+		body, ok := response.Body.(io.ReadWriteCloser)
+		if !ok {
+			t.Fatalf("backend body is not duplex: %T", response.Body)
+		}
+		t.Cleanup(func() { _ = body.Close() })
+		return body
+	}
+	first := open()
+	var old acceptedConnection
+	select {
+	case old = <-accepted:
+	case <-ctx.Done():
+		t.Fatal("first backend connection not accepted")
+	}
+	oldConnection := transport.connections[address]
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- old.server.Shutdown(ctx) }()
+	for {
+		probe, err := oldConnection.client.OpenRequestStream(ctx)
+		if err != nil {
+			if ctx.Err() != nil || old.conn.Context().Err() != nil || errors.Is(err, net.ErrClosed) {
+				t.Fatalf("waiting for GOAWAY: %v", err)
+			}
+			break
+		}
+		probe.CancelRead(quic.StreamErrorCode(http3.ErrCodeRequestCanceled))
+		probe.CancelWrite(quic.StreamErrorCode(http3.ErrCodeRequestCanceled))
+	}
+	if _, err := transport.RoundTrip(http3WebSocketRequest(ctx, address, "/ws")); !errors.Is(err, errWebSocketH3StreamUnavailable) {
+		t.Fatalf("draining connection error: %v", err)
+	}
+	if requests.Load() != 1 || transport.connections[address] != nil {
+		t.Fatalf("failed attempt was replayed or draining connection retained: requests=%d", requests.Load())
+	}
+	echoWebSocketBytes(t, first, first)
+	replacement := open()
+	select {
+	case next := <-accepted:
+		if next.conn == old.conn {
+			t.Fatal("new handshake reused the draining connection")
+		}
+	case <-ctx.Done():
+		t.Fatal("replacement connection not accepted")
+	}
+	echoWebSocketBytes(t, replacement, replacement)
+	_ = first.Close()
+	select {
+	case <-old.conn.Context().Done():
+	case <-ctx.Done():
+		t.Fatal("evicted connection was not closed after its last tunnel")
+	}
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatalf("graceful backend shutdown: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("graceful backend shutdown did not finish")
+	}
+	echoWebSocketBytes(t, replacement, replacement)
 }
 
 func newHTTP3UpstreamTestTransport(t *testing.T, maxStreams int64, handler http.Handler) (*websocketHTTP3Transport, string) {
@@ -762,10 +907,31 @@ func http3WebSocketRequest(ctx context.Context, address, path string) *http.Requ
 func echoHTTP3WebSocket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.(http.Flusher).Flush()
-	_, _ = io.Copy(w, r.Body)
+	writer := websocketFlushingWriter{w}
+	for {
+		var header [6]byte
+		if _, err := io.ReadFull(r.Body, header[:]); err != nil {
+			return
+		}
+		length := int(header[1] & 0x7f)
+		if header[1]&0x80 == 0 || length >= 126 {
+			return
+		}
+		payload := make([]byte, length)
+		if _, err := io.ReadFull(r.Body, payload); err != nil {
+			return
+		}
+		for i := range payload {
+			payload[i] ^= header[2+i%4]
+		}
+		frame := append([]byte{header[0], byte(length)}, payload...)
+		if _, err := writer.Write(frame); err != nil || header[0]&0xf == 8 {
+			return
+		}
+	}
 }
 
-func newWebSocketHTTP3Upstream(t *testing.T) (http.Handler, *backendPKI, chan string, func()) {
+func newWebSocketHTTP3Upstream(t *testing.T, handlers ...http.Handler) (http.Handler, *backendPKI, chan string, func()) {
 	t.Helper()
 	pki := newBackendPKI(t)
 	backendCert := pki.issue(t, "inventory", []string{"inventory.internal"}, nil)
@@ -794,9 +960,11 @@ func newWebSocketHTTP3Upstream(t *testing.T) (http.Handler, *backendPKI, chan st
 			}
 			backendRemote <- r.RemoteAddr
 			w.Header().Set("Sec-WebSocket-Protocol", "chat")
-			w.WriteHeader(http.StatusOK)
-			w.(http.Flusher).Flush()
-			_, _ = io.Copy(w, r.Body)
+			if len(handlers) > 0 {
+				handlers[0].ServeHTTP(w, r)
+			} else {
+				echoHTTP3WebSocket(w, r)
+			}
 			backendClosed <- struct{}{}
 		}),
 	}
@@ -808,10 +976,9 @@ func newWebSocketHTTP3Upstream(t *testing.T) (http.Handler, *backendPKI, chan st
 	go func() { backendDone <- backend.Serve(packetConn) }()
 
 	location := config.LocationConfig{
-		ProxyPass:                 "https://inventory",
-		WebSocketUpstreamProtocol: "http3",
-		ProxyReadTimeout:          config.Duration(5 * time.Second),
-		ProxySendTimeout:          config.Duration(5 * time.Second),
+		ProxyPass:        "https://inventory",
+		ProxyReadTimeout: config.Duration(5 * time.Second),
+		ProxySendTimeout: config.Duration(5 * time.Second),
 		BackendTLS: &config.BackendTLSConfig{
 			CAMode: "file_only", CAFile: pki.caPath, ServerName: "inventory.internal",
 			ClientCert: clientCertPath, ClientKey: clientKeyPath,
@@ -819,7 +986,8 @@ func newWebSocketHTTP3Upstream(t *testing.T) (http.Handler, *backendPKI, chan st
 	}
 	upstreams := map[string]config.UpstreamConfig{
 		"inventory": {
-			Name: "inventory",
+			Name:                      "inventory",
+			WebSocketUpstreamProtocol: "http3",
 			Servers: []config.UpstreamServer{{
 				Address: packetConn.LocalAddr().String(),
 				Weight:  1,
@@ -859,12 +1027,13 @@ func echoWebSocketBytes(t *testing.T, writer io.Writer, reader io.Reader) {
 	if _, err := writer.Write(frame); err != nil {
 		t.Fatalf("write client WebSocket frame: %v", err)
 	}
-	echo := make([]byte, len(frame))
+	want := append([]byte{0x81, byte(len(payload))}, payload...)
+	echo := make([]byte, len(want))
 	if _, err := io.ReadFull(reader, echo); err != nil {
 		t.Fatalf("read echoed WebSocket frame: %v", err)
 	}
-	if !bytes.Equal(echo, frame) {
-		t.Fatalf("echoed frame=%x, want %x", echo, frame)
+	if !bytes.Equal(echo, want) {
+		t.Fatalf("echoed frame=%x, want unmasked server frame %x", echo, want)
 	}
 }
 
@@ -972,8 +1141,9 @@ func echoWebSocketHTTP2(t *testing.T, framer *http2.Framer, streamID uint32) {
 	if err := framer.WriteData(streamID, false, frame); err != nil {
 		t.Fatal(err)
 	}
-	echo := make([]byte, 0, len(frame))
-	for len(echo) < len(frame) {
+	want := append([]byte{0x81, byte(len(payload))}, payload...)
+	echo := make([]byte, 0, len(want))
+	for len(echo) < len(want) {
 		response, err := framer.ReadFrame()
 		if err != nil {
 			t.Fatalf("read H2 WebSocket echo: %v", err)
@@ -982,7 +1152,7 @@ func echoWebSocketHTTP2(t *testing.T, framer *http2.Framer, streamID uint32) {
 			echo = append(echo, data.Data()...)
 		}
 	}
-	if !bytes.Equal(echo, frame) {
-		t.Fatalf("H2 echoed frame=%x, want %x", echo, frame)
+	if !bytes.Equal(echo, want) {
+		t.Fatalf("H2 echoed frame=%x, want unmasked server frame %x", echo, want)
 	}
 }

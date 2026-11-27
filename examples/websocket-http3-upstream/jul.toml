@@ -4,6 +4,7 @@
 [[upstreams]]
 name = "inventory"
 servers = ["inventory.internal:443"]
+websocket_upstream_protocol = "http3"
 
   [upstreams.backend_tls]
   server_name = "inventory.internal"
@@ -14,4 +15,3 @@ listen = ":8080"
   [[servers.locations]]
   match = { type = "prefix", path = "/ws" }
   proxy_pass = "https://inventory"
-  websocket_upstream_protocol = "http3"

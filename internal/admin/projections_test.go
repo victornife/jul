@@ -77,15 +77,11 @@ func TestProjectRoutesIncludesRouteIDWhenPresent(t *testing.T) {
 	}
 }
 
-func TestProjectRoutesIncludesWebSocketUpstreamProtocol(t *testing.T) {
-	c := &config.Config{Servers: []config.ServerConfig{{
-		Listen: ":8080",
-		Locations: []config.LocationConfig{{
-			Match:     config.MatchConfig{Type: "prefix", Path: "/ws"},
-			ProxyPass: "https://inventory", WebSocketUpstreamProtocol: "http3",
-		}},
+func TestProjectAppsIncludesWebSocketUpstreamProtocol(t *testing.T) {
+	c := &config.Config{Upstreams: []config.UpstreamConfig{{
+		Name: "inventory", WebSocketUpstreamProtocol: " http3 ",
 	}}}
-	got := projectRoutes(c)[0].Locations[0].WebSocketUpstreamProtocol
+	got := projectApps(c, nil)[0].WebSocketUpstreamProtocol
 	if got != "http3" {
 		t.Fatalf("WebSocketUpstreamProtocol = %q, want http3", got)
 	}

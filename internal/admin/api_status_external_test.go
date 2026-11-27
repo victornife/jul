@@ -95,11 +95,8 @@ func TestStatusReportsAdminTransportPosture(t *testing.T) {
 }
 
 func TestStatusReportsWebSocketHTTP3Upstream(t *testing.T) {
-	cfg := &config.Config{Servers: []config.ServerConfig{{
-		Listen: ":8443",
-		Locations: []config.LocationConfig{{
-			ProxyPass: "https://inventory", WebSocketUpstreamProtocol: "http3",
-		}},
+	cfg := &config.Config{Upstreams: []config.UpstreamConfig{{
+		Name: "inventory", WebSocketUpstreamProtocol: "http3",
 	}}}
 	s := newTestServer(t, config.AdminConfig{}, Deps{
 		LoadConfig:    func() (*config.Config, error) { return cfg, nil },
@@ -115,7 +112,7 @@ func TestStatusReportsWebSocketHTTP3Upstream(t *testing.T) {
 		if row.Name != "WebSocket upstream HTTP/3" {
 			continue
 		}
-		if !row.Active || !strings.Contains(row.Detail, "1 HTTP/3 WebSocket upstream route") ||
+		if !row.Active || !strings.Contains(row.Detail, "1 HTTP/3 WebSocket upstream pool") ||
 			!strings.Contains(row.Detail, "outbound UDP required") {
 			t.Fatalf("WebSocket upstream status = %+v", row)
 		}

@@ -623,9 +623,6 @@ export function AppEditor({
         protocol,
         matchType,
         path,
-        ...(protocol === "http" && websocketUpstreamProtocol === "http3"
-          ? { websocketUpstreamProtocol }
-          : {}),
       };
     }
     return {
@@ -637,9 +634,6 @@ export function AppEditor({
       protocol,
       matchType,
       path,
-      ...(protocol === "http" && websocketUpstreamProtocol === "http3"
-        ? { websocketUpstreamProtocol }
-        : {}),
     };
   }
 
@@ -651,6 +645,7 @@ export function AppEditor({
       const ops = buildAppCreationBatch(
         {
           name,
+          ...(websocketUpstreamProtocol === "http3" ? { websocketUpstreamProtocol } : {}),
           strategy,
           hash,
           backends,
@@ -753,6 +748,25 @@ export function AppEditor({
           </select>
         </label>
         {strategy === "consistent_hash" && <HashSettingsFields value={hash} onChange={setHash} />}
+
+        <label className="block space-y-1">
+          <span className="text-sm font-medium text-jul-text">WebSocket upstream protocol</span>
+          <select
+            value={websocketUpstreamProtocol}
+            onChange={(event) => {
+              setWebsocketUpstreamProtocol(event.target.value === "http3" ? "http3" : "");
+            }}
+            className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
+          >
+            <option value="">Default (HTTP/1.1)</option>
+            <option value="http3">HTTP/3 Extended CONNECT</option>
+          </select>
+          <span className="text-xs text-jul-muted">
+            Applies to this pool's WebSocket handshakes only, not ordinary HTTP or gRPC. HTTP/3
+            requires outbound UDP and HTTPS proxy routes. A new HTTP mount uses HTTPS with system
+            backend trust; configure private CA or mTLS trust in raw configuration.
+          </span>
+        </label>
 
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -949,28 +963,6 @@ export function AppEditor({
                   </select>
                 </label>
               </div>
-              {protocol === "http" && (
-                <label className="block space-y-1">
-                  <span className="text-sm font-medium text-jul-text">
-                    WebSocket upstream protocol
-                  </span>
-                  <select
-                    value={websocketUpstreamProtocol}
-                    onChange={(event) => {
-                      setWebsocketUpstreamProtocol(event.target.value as "" | "http3");
-                    }}
-                    className="w-full rounded-md border border-jul-border bg-jul-surface px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
-                  >
-                    <option value="">Default (HTTP/1.1)</option>
-                    <option value="http3">HTTP/3 Extended CONNECT</option>
-                  </select>
-                  <span className="text-xs text-jul-muted">
-                    Applies only to WebSocket handshakes. HTTP/3 switches this route to HTTPS and
-                    uses system backend trust; custom CA or mTLS settings can be added in raw
-                    configuration.
-                  </span>
-                </label>
-              )}
               <TextField label="Route path" value={path} placeholder="/" mono onChange={setPath} />
               {protocol === "grpc" && (
                 <p className="rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3 text-xs text-jul-text">

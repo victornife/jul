@@ -197,16 +197,16 @@ describe("buildAppCreationBatch", () => {
     });
   });
 
-  it("uses HTTPS and explicit HTTP/3 only for a mounted WebSocket upstream", () => {
+  it("selects HTTP/3 on the pool and uses HTTPS for its HTTP mount", () => {
     const ops = buildAppCreationBatch(
       draft({
+        websocketUpstreamProtocol: "http3",
         mount: {
           mode: "existing",
           server: { listen: ":443", serverNames: ["api.example"] },
           protocol: "http",
           matchType: "prefix",
           path: "/ws",
-          websocketUpstreamProtocol: "http3",
         },
       }),
       inventory,
@@ -216,8 +216,11 @@ describe("buildAppCreationBatch", () => {
       action: {
         kind: "proxy",
         target: "https://api",
-        websocket_upstream_protocol: "http3",
       },
+    });
+    expect(ops[0]).toMatchObject({
+      op: "upstream_add",
+      websocket_upstream_protocol: "http3",
     });
   });
 

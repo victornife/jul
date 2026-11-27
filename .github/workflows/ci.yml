@@ -938,6 +938,8 @@ jobs:
       # match the Zod schemas in client.ts (schema-drift detection).
       - name: run real-server e2e
         run: pnpm --dir ${{ env.CONSOLE_UI }} exec playwright test --project=real-server
+      - name: WebSocket upstream preview, apply and trusted HTTP/3 tunnel
+        run: pnpm --dir ${{ env.CONSOLE_UI }} exec playwright test --project=websocket-real-server
       - name: upload Playwright report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7

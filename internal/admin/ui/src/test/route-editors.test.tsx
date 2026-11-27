@@ -160,35 +160,6 @@ describe("RouteActionEditor", () => {
     expect(takePendingDraft()?.kind).toBe("patch");
   });
 
-  it("posts the HTTP/3 WebSocket upstream selection", async () => {
-    render(
-      <Wrapper>
-        <RouteActionEditor
-          route={route()}
-          loc={loc({ target: "https://app" })}
-          onClose={() => undefined}
-        />
-      </Wrapper>,
-    );
-
-    fireEvent.change(screen.getByRole("combobox", { name: /^WebSocket upstream protocol/ }), {
-      target: { value: "http3" },
-    });
-    fireEvent.click(screen.getByText("Preview change →"));
-
-    await waitFor(() => {
-      expect(seenBody).not.toBe("");
-    });
-    expect((JSON.parse(seenBody) as { ops: ConfigPatch[] }).ops[0]).toMatchObject({
-      op: "location_set_action",
-      action: {
-        kind: "proxy",
-        target: "https://app",
-        websocket_upstream_protocol: "http3",
-      },
-    });
-  });
-
   it("blocks save when the proxy target is cleared", () => {
     render(
       <Wrapper>

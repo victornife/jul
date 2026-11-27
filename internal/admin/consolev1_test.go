@@ -142,14 +142,15 @@ func TestStatusAPI(t *testing.T) {
 			SendTimeout:   config.Duration(time.Minute),
 			Locations: []config.LocationConfig{
 				{Root: "./public", Cache: true},
-				{ProxyPass: "https://127.0.0.1:9000", WebSocketUpstreamProtocol: "http3", Auth: &config.AuthConfig{}, RequireClientCert: true},
+				{ProxyPass: "https://127.0.0.1:9000", Auth: &config.AuthConfig{}, RequireClientCert: true},
 				{GRPCTranscode: &config.GRPCTranscodeConfig{Target: "127.0.0.1:50051"}},
 			},
 		}},
 		Upstreams: []config.UpstreamConfig{{
-			Name:        "api",
-			HealthCheck: &config.HealthCheckConfig{Enabled: true},
-			Discovery:   &config.DiscoveryConfig{Type: "dns"},
+			WebSocketUpstreamProtocol: "http3",
+			Name:                      "api",
+			HealthCheck:               &config.HealthCheckConfig{Enabled: true},
+			Discovery:                 &config.DiscoveryConfig{Type: "dns"},
 		}, {
 			Name:     "sessions",
 			Strategy: "consistent_hash",

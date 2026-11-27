@@ -19,6 +19,8 @@ import (
 
 var errExtendedConnectUnsupported = errors.New("backend did not advertise WebSocket Extended CONNECT")
 
+var errWebSocketH3StreamUnavailable = errors.New("HTTP/3 WebSocket upstream cannot open a new stream")
+
 type websocketUpstreamTransport interface {
 	RoundTrip(*http.Request) (*http.Response, error)
 	Close() error
@@ -89,11 +91,18 @@ func (t *websocketUpstreamSelector) RoundTrip(req *http.Request) (*http.Response
 	return response, nil
 }
 
-func newWebSocketUpstreamTransport(loc config.LocationConfig, policy *backendtls.Policy, pool *upstream.Pool) (websocketUpstreamTransport, error) {
-	if strings.TrimSpace(loc.WebSocketUpstreamProtocol) != "http3" {
+func newWebSocketUpstreamTransport(protocol string, loc config.LocationConfig, policy *backendtls.Policy, pool *upstream.Pool) (websocketUpstreamTransport, error) {
+	switch strings.TrimSpace(protocol) {
+	case "", "http1":
 		return nil, nil
+	case "http3":
+		if !strings.HasPrefix(loc.ProxyPass, "https://") {
+			return nil, errors.New("HTTP/3 WebSocket upstream requires an https:// proxy_pass")
+		}
+		return newHTTP3WebSocketUpstreamTransport(loc, policy, pool)
+	default:
+		return nil, fmt.Errorf("unsupported WebSocket upstream protocol %q", protocol)
 	}
-	return newHTTP3WebSocketUpstreamTransport(loc, policy, pool)
 }
 
 func isHTTP1WebSocketUpgrade(req *http.Request) bool {

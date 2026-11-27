@@ -556,6 +556,19 @@ func locationMatchTaken(c *config.Config, listen string, serverNames []string, m
 	return false
 }
 
+func patchWebSocketProtocol(value *string) (string, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return "", nil
+	}
+	protocol := strings.TrimSpace(*value)
+	switch protocol {
+	case "http1", "http3":
+		return protocol, nil
+	default:
+		return "", fmt.Errorf("websocket_upstream_protocol must be %q or %q", "http1", "http3")
+	}
+}
+
 // setLocationAction replaces a location's action wholesale: it clears every
 // action discriminator (and the action-specific helper fields) so no
 // conflicting leftover remains, then sets the chosen one. It covers the
@@ -568,17 +581,12 @@ func locationMatchTaken(c *config.Config, listen string, serverNames []string, m
 func setLocationAction(loc *config.LocationConfig, a locationActionPayload) (string, error) {
 	kind := strings.ToLower(strings.TrimSpace(a.Kind))
 	target := strings.TrimSpace(a.Target)
-	websocketProtocol := strings.TrimSpace(a.WebSocketUpstreamProtocol)
-	if websocketProtocol != "" && kind != "proxy" {
-		return "", fmt.Errorf("location_set_action: websocket_upstream_protocol applies only to HTTP proxy routes")
-	}
 
 	// Clear all action discriminators and their action-specific helper fields so
 	// the result is a single clean action with no orphaned config.
 	loc.Root, loc.Index, loc.TryFiles = "", nil, nil
 	loc.DirectoryListing, loc.AllowHidden, loc.CacheControl = false, false, ""
 	loc.ProxyPass, loc.GRPC = "", false
-	loc.WebSocketUpstreamProtocol = ""
 	loc.ProxyConnectTimeout, loc.ProxyReadTimeout, loc.ProxySendTimeout = 0, 0, 0
 	loc.FastCGIPass, loc.FastCGIParams, loc.UWSGIPass = "", nil, ""
 	loc.Redirect, loc.Return, loc.Deny = "", 0, false
@@ -588,13 +596,6 @@ func setLocationAction(loc *config.LocationConfig, a locationActionPayload) (str
 	case "proxy":
 		if target == "" {
 			return "", fmt.Errorf("location_set_action: the proxy action requires a target")
-		}
-		switch websocketProtocol {
-		case "", "http1":
-		case "http3":
-			loc.WebSocketUpstreamProtocol = "http3"
-		default:
-			return "", fmt.Errorf("location_set_action: websocket_upstream_protocol must be %q or %q", "http1", "http3")
 		}
 		loc.ProxyPass = target
 	case "grpc_proxy":

@@ -844,7 +844,6 @@ export const LocationProjectionSchema = z.object({
   type: z.string(),
   action: z.string(),
   target: z.string().optional(),
-  websocket_upstream_protocol: z.enum(["http1", "http3"]).optional(),
   // match_ordinal is the route's 0-based index among the locations of its
   // matching blocks sharing its match type and path (ADR 0018 §14) — a typed
   // patch that targets a location must send it back, together with a
@@ -939,6 +938,7 @@ export type BackendProjection = z.infer<typeof BackendProjectionSchema>;
 
 export const AppProjectionSchema = z.object({
   name: z.string(),
+  websocket_upstream_protocol: z.enum(["http1", "http3"]).optional(),
   strategy: z.string(),
   // consistent_hash key policy; configuration only, never a key value.
   hash: z
@@ -2493,7 +2493,7 @@ export type LocationMatchPatch = {
 // the tag-free actions the console edits structurally are offered; richer
 // actions (gRPC, transcode, FastCGI/uWSGI, handler plugin) stay read-only.
 export type LocationActionPatch =
-  | { kind: "proxy"; target: string; websocket_upstream_protocol?: "http1" | "http3" }
+  | { kind: "proxy"; target: string }
   | { kind: "grpc_proxy"; target: string }
   | { kind: "static"; target: string }
   | { kind: "redirect"; target: string; status?: number }
@@ -2677,6 +2677,11 @@ export type ConfigPatch =
   | { op: "upstream_add_backend"; upstream: string; address: string; weight?: number }
   | { op: "upstream_remove_backend"; upstream: string; address: string }
   | { op: "upstream_set_strategy"; upstream: string; strategy: string; hash?: HashPatch }
+  | {
+      op: "upstream_set_websocket_protocol";
+      upstream: string;
+      websocket_upstream_protocol: "http1" | "http3";
+    }
   | { op: "upstream_set_health_check"; upstream: string; health_check: HealthCheckPatch }
   | { op: "upstream_set_discovery"; upstream: string; discovery: DiscoveryPatch }
   | { op: "server_add"; listen: string; server_names?: string[] }
@@ -2712,6 +2717,7 @@ export type ConfigPatch =
     }
   | {
       op: "upstream_add";
+      websocket_upstream_protocol?: "http1" | "http3";
       upstream: string;
       address: string;
       weight?: number;

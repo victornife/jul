@@ -3759,19 +3759,6 @@
       "secret_digested": false
     },
     {
-      "path": "servers.*.locations.*.websocket_upstream_protocol",
-      "class": "hot_reload",
-      "subsystem": "proxy_pass",
-      "reason": "the handler tree is rebuilt from the effective config on each successful reload",
-      "startup_consumed": false,
-      "address_keyed": false,
-      "conditional": false,
-      "deprecated": false,
-      "ignored": false,
-      "reserved": false,
-      "secret_digested": false
-    },
-    {
       "path": "servers.*.locations.*.withdrawn",
       "class": "hot_reload",
       "subsystem": "access_control",
@@ -5310,6 +5297,19 @@
       "class": "hot_reload",
       "subsystem": "upstream",
       "reason": "the upstream registry stages and swaps pools on each successful reload",
+      "startup_consumed": false,
+      "address_keyed": false,
+      "conditional": false,
+      "deprecated": false,
+      "ignored": false,
+      "reserved": false,
+      "secret_digested": false
+    },
+    {
+      "path": "upstreams.*.websocket_upstream_protocol",
+      "class": "hot_reload",
+      "subsystem": "proxy_pass",
+      "reason": "the handler tree is rebuilt from the effective config on each successful reload",
       "startup_consumed": false,
       "address_keyed": false,
       "conditional": false,

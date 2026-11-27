@@ -30,19 +30,25 @@ proxy_pass = "https://inventory"
 
 WebSocket routes use HTTP/1.1 Upgrade to the backend by default. To use
 HTTP/3 Extended CONNECT for WebSocket handshakes, build Jul with the `http3`
-tag and set `websocket_upstream_protocol = "http3"` on an HTTP proxy location:
+tag and set `websocket_upstream_protocol = "http3"` on the named upstream pool:
 
 ```toml
+[[upstreams]]
+name = "inventory"
+servers = ["inventory.internal:443"]
+websocket_upstream_protocol = "http3"
+
 [[servers.locations]]
 match = { type = "prefix", path = "/ws" }
 proxy_pass = "https://inventory"
-websocket_upstream_protocol = "http3"
 ```
 
 A complete runnable configuration is in
 [`examples/websocket-http3-upstream/jul.toml`](../examples/websocket-http3-upstream/jul.toml).
 
-The route's `proxy_pass` must use `https://`. The setting changes only the
+Every HTTP proxy route referencing that pool must use an `https://` `proxy_pass`;
+plaintext consumers are rejected before publication. Define a named pool to opt
+in; concrete URL targets retain the HTTP/1.1 WebSocket default. The setting changes only the
 WebSocket handshake and duplex tunnel; ordinary HTTP requests on the same
 route continue using the normal proxy transport. If omitted (or set to
 `"http1"`), WebSocket upstreams retain the HTTP/1.1 Upgrade default. Backend
@@ -50,6 +56,8 @@ certificate verification and optional client certificates use the same
 `backend_tls` policy described below. An HTTP/3 capability or TLS failure is
 reported as an upstream error; Jul does not silently fall back or replay the
 handshake over HTTP/1.1.
+Native HTTP/3 WebSocket handshakes are not retried on another backend either;
+the default HTTP/1.1 path retains its existing failover policy.
 
 This setting enables HTTP/3 only on the backend hop. It does not enable the
 front-end HTTP/3 listener, which remains a separate per-server setting in
@@ -65,8 +73,14 @@ streams. Cancellation closes only its request stream; route retirement stops
 new work while existing sibling streams drain. Idle connections and handshake
 setup are bounded. A binary built without the `http3` tag rejects this setting
 at startup.
+A backend GOAWAY removes its connection from new admission without interrupting
+existing tunnels. A refused handshake is not replayed; a subsequent new handshake
+can establish a replacement connection.
 The Console Status overview reports whether the transport is compiled and how
-many configured WebSocket routes select it.
+many configured upstream pools select it. The Console Apps creation editor and
+App Detail expose the pool-wide selector through preview and live apply; route
+actions do not own it. The change is hot-reloadable and rollback restores the
+previous protocol for new handshakes; existing tunnels retain their generation.
 
 #### WebSocket protocol coverage
 

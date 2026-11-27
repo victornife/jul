@@ -61,7 +61,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 		return nil, err
 	}
 	transport := newProxyTransport(loc, policy, maxConnsPerBackend(loc, pool), pool)
-	websocketTransport, err := newWebSocketUpstreamTransport(loc, policy, pool)
+	websocketTransport, err := newWebSocketUpstreamTransport(upstreams[pool.Name()].WebSocketUpstreamProtocol, loc, policy, pool)
 	if err != nil {
 		return nil, err
 	}
@@ -100,6 +100,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 			retryOverride: newLocationRetry(loc),
 			tlsBackend:    scheme == "https",
 			dialFailure:   dialFailure,
+			websocketH3:   websocketTransport != nil,
 		},
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			if captureOriginalProxyHost {
@@ -149,7 +150,7 @@ func NewProxy(ctx context.Context, _ config.ServerConfig, loc config.LocationCon
 		ReverseProxy: rp,
 		transport:    transport,
 		websocket:    websocketTransport,
-		websocketH3:  strings.TrimSpace(loc.WebSocketUpstreamProtocol) == "http3",
+		websocketH3:  websocketTransport != nil,
 		admission:    pool.Admission(),
 		retire:       make(chan struct{}),
 		logger:       log,
@@ -300,9 +301,10 @@ func resolvePool(ctx context.Context, loc config.LocationConfig, upstreams map[s
 // everything that is genuinely HTTP — body rewind, the scheme guard, spans and
 // passive-health logging.
 type balancingTransport struct {
-	pool *upstream.Pool
-	base http.RoundTripper
-	log  *slog.Logger
+	pool        *upstream.Pool
+	base        http.RoundTripper
+	websocketH3 bool
+	log         *slog.Logger
 	// retryOverride holds the location's retry settings. A zero field inherits
 	// the pool policy, which is read per request so a reload takes effect
 	// without rebuilding the transport.
@@ -349,7 +351,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 	defer span.End()
 	span.SetString("upstream.name", t.pool.Name())
 
-	websocketHandshake := websocketx.IsExtendedRequest(req) || isHTTP1WebSocketUpgrade(req)
+	websocketHandshake := t.websocketH3 && (websocketx.IsExtendedRequest(req) || isHTTP1WebSocketUpgrade(req))
 	replayable := !websocketHandshake && isIdempotent(req.Method) && (req.Body == nil || req.GetBody != nil)
 	// A transport error caused by the client's own body (malformed framing, over
 	// client_max_body_size, cut off) is the client's failure, not the backend's.
@@ -431,9 +433,10 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 					t.pool.Release(b.Backend)
 					finishRetryContext()
 				})
-			if r.StatusCode == http.StatusSwitchingProtocols || isExtendedWebSocketUpstreamRequest(req) {
+			if r.StatusCode == http.StatusSwitchingProtocols {
 				if rwc, ok := r.Body.(io.ReadWriteCloser); ok {
-					r.Body = respwriter.AttachUpgradedBackend(req.Context(), rwc, r.Header)
+					isWebSocket := strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket")
+					r.Body = respwriter.AttachUpgradedBackend(req.Context(), rwc, isWebSocket)
 				}
 			}
 			r.Header.Del("X-Jul-WAF-Event")
@@ -443,7 +446,7 @@ func (t *balancingTransport) RoundTrip(req *http.Request) (*http.Response, error
 		aspan.RecordError(err)
 		aspan.End()
 		err = inbound.Attribute(err)
-		if errors.Is(err, errExtendedConnectUnsupported) {
+		if errors.Is(err, errExtendedConnectUnsupported) || errors.Is(err, errWebSocketH3StreamUnavailable) {
 			t.pool.RecordAttempt(b, upstream.JulPolicyFailure(""))
 			return upstream.AttemptResult{Err: err, Terminal: true}
 		}

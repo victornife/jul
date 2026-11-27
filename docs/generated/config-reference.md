@@ -3613,18 +3613,6 @@ ResponseBodyCheck enables inspection of text/plain, text/html and text/xml respo
 | Why | the WAF policy is rebuilt on each successful reload |
 | Requires | `waf` |
 
-## `servers.*.locations.*.websocket_upstream_protocol` {#servers-x-locations-x-websocket_upstream_protocol}
-
-WebSocketUpstreamProtocol selects the backend handshake used only for WebSocket requests: empty or "http1" defaults to HTTP/1.1, while "http3" uses HTTPS Extended CONNECT and requires the http3 build tag.
-
-| | |
-| --- | --- |
-| Type | `string` |
-| Optional | yes |
-| Lifecycle | `hot_reload` |
-| Subsystem | `proxy_pass` |
-| Why | the handler tree is rebuilt from the effective config on each successful reload |
-
 ## `servers.*.locations.*.withdrawn` {#servers-x-locations-x-withdrawn}
 
 Withdrawn enables the outermost per-location withdrawal gate (ADR 0026 #642 amendment, spec §8.4/§9.3).
@@ -5235,6 +5223,22 @@ Strategy is one of "round_robin", "weighted_round_robin", "least_conn", "consist
 | Constraint | exact lowercase enum |
 | Zero/empty semantics | omitted selects the documented default where supported |
 | Active when | upstream configured |
+
+## `upstreams.*.websocket_upstream_protocol` {#upstreams-x-websocket_upstream_protocol}
+
+WebSocketUpstreamProtocol selects this pool's WebSocket handshake only.
+
+| | |
+| --- | --- |
+| Type | `string` |
+| Optional | yes |
+| Lifecycle | `hot_reload` |
+| Subsystem | `proxy_pass` |
+| Why | the handler tree is rebuilt from the effective config on each successful reload |
+| Allowed values | ``, `http1`, `http3` |
+| Constraint | trimmed lowercase enum; http3 requires HTTPS HTTP proxy consumers and UDP backends |
+| Zero/empty semantics | omitted/empty or http1 retains HTTP/1.1 WebSocket Upgrade; ordinary HTTP is unchanged |
+| Active when | WebSocket handshake to this named pool; http3 requires the http3 build tag |
 
 ## `waf.block_status` {#waf-block_status}
 

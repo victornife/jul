@@ -224,9 +224,6 @@ function generatedFragment(route: RouteProjection, loc: LocationProjection): str
   switch (loc.action) {
     case "proxy":
       if (loc.target) lines.push(`  proxy_pass = ${quoted(loc.target)}`);
-      if (loc.websocket_upstream_protocol) {
-        lines.push(`  websocket_upstream_protocol = ${quoted(loc.websocket_upstream_protocol)}`);
-      }
       break;
     case "grpc":
       if (loc.target) lines.push(`  proxy_pass = ${quoted(loc.target)}`);

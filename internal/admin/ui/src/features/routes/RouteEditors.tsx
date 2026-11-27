@@ -242,29 +242,6 @@ export function RouteActionEditor({ route, loc, onClose }: RouteActionEditorProp
             />
           </label>
         )}
-        {draft.kind === "proxy" && (
-          <label className="block space-y-1">
-            <span className="text-sm font-medium text-jul-text">WebSocket upstream protocol</span>
-            <select
-              value={draft.websocketUpstreamProtocol}
-              onChange={(e) => {
-                setDraft((d) => ({
-                  ...d,
-                  websocketUpstreamProtocol: e.target
-                    .value as ActionDraft["websocketUpstreamProtocol"],
-                }));
-              }}
-              className="w-full rounded-md border border-jul-border bg-jul-bg px-3 py-1.5 text-sm text-jul-text focus:outline-none focus:ring-1 focus:ring-jul-accent"
-            >
-              <option value="">Default (HTTP/1.1)</option>
-              <option value="http3">HTTP/3 Extended CONNECT</option>
-            </select>
-            <span className="text-xs text-jul-muted">
-              Applies only to WebSocket handshakes; ordinary HTTP requests keep their existing
-              transport. HTTP/3 requires an HTTPS target.
-            </span>
-          </label>
-        )}
         {needsStatus && (
           <label className="block space-y-1">
             <span className="text-sm font-medium text-jul-text">

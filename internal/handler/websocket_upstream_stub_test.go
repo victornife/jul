@@ -15,9 +15,13 @@ import (
 
 func TestWebSocketHTTP3UpstreamRequiresBuildTag(t *testing.T) {
 	_, err := NewProxy(context.Background(), config.ServerConfig{}, config.LocationConfig{
-		ProxyPass:                 "https://inventory.internal",
-		WebSocketUpstreamProtocol: "http3",
-	}, nil, nil, nil, nil)
+		ProxyPass: "https://inventory",
+	}, map[string]config.UpstreamConfig{
+		"inventory": {
+			Name: "inventory", WebSocketUpstreamProtocol: "http3",
+			Servers: []config.UpstreamServer{{Address: "127.0.0.1:443", Weight: 1}},
+		},
+	}, nil, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "requires rebuilding with -tags http3") {
 		t.Fatalf("NewProxy error = %v, want explicit http3 build-tag requirement", err)
 	}

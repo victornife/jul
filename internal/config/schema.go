@@ -624,14 +624,10 @@ type LocationConfig struct {
 	// Nil retains native automatic streaming; true is not supported.
 	ProxyBuffering *bool `toml:"proxy_buffering,omitempty"`
 	// ProxyPass names an upstream or a concrete HTTP(S) backend URL.
-	ProxyPass string `toml:"proxy_pass"`
-	// WebSocketUpstreamProtocol selects the backend handshake used only for
-	// WebSocket requests: empty or "http1" defaults to HTTP/1.1, while "http3"
-	// uses HTTPS Extended CONNECT and requires the http3 build tag.
-	WebSocketUpstreamProtocol string   `toml:"websocket_upstream_protocol,omitempty"`
-	ProxyConnectTimeout       Duration `toml:"proxy_connect_timeout"`
-	ProxyReadTimeout          Duration `toml:"proxy_read_timeout"`
-	ProxySendTimeout          Duration `toml:"proxy_send_timeout"`
+	ProxyPass           string   `toml:"proxy_pass"`
+	ProxyConnectTimeout Duration `toml:"proxy_connect_timeout"`
+	ProxyReadTimeout    Duration `toml:"proxy_read_timeout"`
+	ProxySendTimeout    Duration `toml:"proxy_send_timeout"`
 	// ProxyRetries caps the number of retry attempts for idempotent requests
 	// against other backends on connection failure. 0 (default) means try every
 	// distinct backend at most once. A positive value limits attempts to the
@@ -826,6 +822,10 @@ type RewriteConfig struct {
 // UpstreamConfig is a named pool of backend servers.
 type UpstreamConfig struct {
 	Name string `toml:"name"`
+	// WebSocketUpstreamProtocol selects this pool's WebSocket handshake only.
+	// Empty or "http1" keeps HTTP/1.1; "http3" requires HTTPS proxy consumers
+	// and the http3 build tag. Ordinary HTTP keeps its existing transport.
+	WebSocketUpstreamProtocol string `toml:"websocket_upstream_protocol,omitempty"`
 	// Strategy is one of "round_robin", "weighted_round_robin", "least_conn",
 	// "consistent_hash".
 	Strategy string           `toml:"strategy"`
