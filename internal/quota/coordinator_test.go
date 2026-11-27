@@ -106,6 +106,36 @@ func TestRefillAndRetry(t *testing.T) {
 	}
 }
 
+func TestDeniedAttemptsDoNotChangeRefill(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := Policy{
+		Application: Limit{Rate: 1, Burst: 1},
+		Classes: map[string]Class{
+			"public": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}},
+		},
+	}
+	control := testCoordinator(t, policy, 1, &now)
+	attempted := testCoordinator(t, policy, 1, &now)
+	for _, c := range []*Coordinator{control, attempted} {
+		if !admit(t, c, "public", "alice").Allowed {
+			t.Fatal("initial request denied")
+		}
+	}
+	start := now
+	for _, elapsed := range []time.Duration{10 * time.Millisecond, 420 * time.Millisecond} {
+		now = start.Add(elapsed)
+		if got := admit(t, attempted, "public", "alice"); got.Allowed {
+			t.Fatalf("premature admission at %s: %+v", elapsed, got)
+		}
+	}
+	now = start.Add(time.Second)
+	for name, c := range map[string]*Coordinator{"control": control, "attempted": attempted} {
+		if got := admit(t, c, "public", "alice"); !got.Allowed {
+			t.Errorf("%s denied at the exact refill boundary: %+v", name, got)
+		}
+	}
+}
+
 func TestSubnanosecondRefillDoesNotExceedBurst(t *testing.T) {
 	now := time.Unix(100, 0)
 	policy := Policy{
@@ -146,6 +176,36 @@ func TestCallerCapacityPreservesActiveBuckets(t *testing.T) {
 	now = now.Add(time.Second)
 	if got := admit(t, c, "public", "bob"); !got.Allowed {
 		t.Fatalf("fully refilled caller could not be retired: %+v", got)
+	}
+}
+
+func TestCallerCapacityFindsRefilledEntryBeyondOldest(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := Policy{
+		Application: Limit{Rate: 10, Burst: 10},
+		Classes: map[string]Class{
+			"public": {Shared: Limit{Rate: 10, Burst: 10}, PerCaller: Limit{Rate: 1, Burst: 2}},
+		},
+	}
+	c := testCoordinator(t, policy, 2, &now)
+	for i := 0; i < 2; i++ {
+		if !admit(t, c, "public", "alice").Allowed {
+			t.Fatal("initial alice request denied")
+		}
+	}
+	now = now.Add(500 * time.Millisecond)
+	if !admit(t, c, "public", "bob").Allowed {
+		t.Fatal("initial bob request denied")
+	}
+	now = now.Add(time.Second)
+	if got := admit(t, c, "public", "carol"); !got.Allowed {
+		t.Fatalf("new caller denied despite a fully refilled candidate: %+v", got)
+	}
+	if !admit(t, c, "public", "alice").Allowed {
+		t.Fatal("partially refilled oldest caller lost its remaining token")
+	}
+	if got := admit(t, c, "public", "alice"); got.Allowed || got.Reason != ReasonCaller {
+		t.Fatalf("partially refilled oldest caller was reset: %+v", got)
 	}
 }
 

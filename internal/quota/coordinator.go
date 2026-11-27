@@ -8,6 +8,7 @@ import (
 	"container/list"
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -80,8 +81,8 @@ type Coordinator struct {
 
 // NewCoordinator creates an independent set of budgets. Class allocations must
 // fit within the application rate and burst. Each class has its own caller
-// capacity. A full caller store rejects new callers unless its least recently
-// admitted caller has fully refilled.
+// capacity. A full caller store scans at most maxCallers entries for the least
+// recently admitted caller that has fully refilled; otherwise it rejects new callers.
 func NewCoordinator(policy Policy, maxCallers int) (*Coordinator, error) {
 	if err := validateLimit(policy.Application); err != nil {
 		return nil, fmt.Errorf("application limit: %w", err)
@@ -155,14 +156,19 @@ func (c *Coordinator) Admit(class, caller string) (Decision, error) {
 	}
 	now := c.now()
 	entry := state.callers[key]
+	var evict *callerState
 	if entry == nil {
 		if len(state.callers) >= c.maxCallers {
-			oldest := state.order.Front().Value.(*callerState)
-			if oldest.limiter.TokensAt(now) < float64(oldest.limiter.Burst()) {
+			for element := state.order.Front(); element != nil; element = element.Next() {
+				candidate := element.Value.(*callerState)
+				if candidate.limiter.TokensAt(now) >= float64(candidate.limiter.Burst()) {
+					evict = candidate
+					break
+				}
+			}
+			if evict == nil {
 				return Decision{Reason: ReasonCallerCapacity}, nil
 			}
-			delete(state.callers, oldest.key)
-			state.order.Remove(oldest.element)
 		}
 		entry = &callerState{key: key, limiter: newLimiter(state.perCaller)}
 	}
@@ -175,16 +181,11 @@ func (c *Coordinator) Admit(class, caller string) (Decision, error) {
 		{state.shared, ReasonClass},
 		{entry.limiter, ReasonCaller},
 	}
-	var reservations [3]*rate.Reservation
 	var decision Decision
-	for i, limit := range limiters {
-		unavailable := limit.limiter.TokensAt(now) < 1
-		reservations[i] = limit.limiter.ReserveN(now, 1)
-		delay := reservations[i].DelayFrom(now)
-		if unavailable || delay > 0 {
-			if delay == 0 {
-				delay = time.Nanosecond
-			}
+	for _, limit := range limiters {
+		tokens := limit.limiter.TokensAt(now)
+		if tokens < 1 {
+			delay := time.Duration(math.Ceil((1 - tokens) / float64(limit.limiter.Limit()) * float64(time.Second)))
 			if decision.Reason == "" {
 				decision.Reason = limit.reason
 			}
@@ -194,10 +195,16 @@ func (c *Coordinator) Admit(class, caller string) (Decision, error) {
 		}
 	}
 	if decision.Reason != "" {
-		for _, reservation := range reservations {
-			reservation.CancelAt(now)
-		}
 		return decision, nil
+	}
+	// The private limiters cannot change between the checks and these charges:
+	// every access is serialized by c.mu and uses the same timestamp.
+	for _, limit := range limiters {
+		limit.limiter.AllowN(now, 1)
+	}
+	if evict != nil {
+		delete(state.callers, evict.key)
+		state.order.Remove(evict.element)
 	}
 	if entry.element == nil {
 		entry.element = state.order.PushBack(entry)
