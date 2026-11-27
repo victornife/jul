@@ -5,6 +5,7 @@ package quota
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -170,6 +171,9 @@ func TestInvalidAdmission(t *testing.T) {
 	}
 	if _, err := c.Admit("public", ""); err == nil {
 		t.Fatal("empty identity accepted")
+	}
+	if _, err := c.Admit("public", strings.Repeat("x", maxCallerBytes+1)); err == nil {
+		t.Fatal("oversized identity accepted")
 	}
 	if got := admit(t, c, "public", "alice"); !got.Allowed {
 		t.Fatalf("invalid requests changed admission state: %+v", got)

@@ -50,7 +50,10 @@ type Decision struct {
 	RetryAfter time.Duration
 }
 
-const maxRateOrBurst = 1_000_000_000
+const (
+	maxRateOrBurst = 1_000_000_000
+	maxCallerBytes = 4096
+)
 
 type classState struct {
 	shared    *rate.Limiter
@@ -138,6 +141,11 @@ func newLimiter(limit Limit) *rate.Limiter {
 // string must already be a verified or canonical identity selected by the
 // request path; this package does not classify or authenticate it.
 func (c *Coordinator) Admit(class, caller string) (Decision, error) {
+	if len(caller) == 0 || len(caller) > maxCallerBytes {
+		return Decision{}, fmt.Errorf("caller identity must be between 1 and %d bytes", maxCallerBytes)
+	}
+	key := sha256.Sum256([]byte(caller))
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -145,11 +153,7 @@ func (c *Coordinator) Admit(class, caller string) (Decision, error) {
 	if !ok {
 		return Decision{}, fmt.Errorf("unknown quota class %q", class)
 	}
-	if caller == "" {
-		return Decision{}, fmt.Errorf("caller identity must not be empty")
-	}
 	now := c.now()
-	key := sha256.Sum256([]byte(caller))
 	entry := state.callers[key]
 	if entry == nil {
 		if len(state.callers) >= c.maxCallers {
