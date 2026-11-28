@@ -35,10 +35,11 @@ func TestRouteTestExplainsEffectiveQuotaClassification(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name      string
-		input     routeTestRequest
-		wantClass string
-		wantRule  string
+		name        string
+		input       routeTestRequest
+		wantClass   string
+		wantRule    string
+		wantWarning bool
 	}{
 		{
 			name: "principal takes precedence",
@@ -67,6 +68,13 @@ func TestRouteTestExplainsEffectiveQuotaClassification(t *testing.T) {
 			wantClass: "public",
 			wantRule:  "public fallback",
 		},
+		{
+			name:        "invalid address is explicit",
+			input:       routeTestRequest{Host: "api.example", Path: "/", ClientAddress: "not-an-address"},
+			wantClass:   "public",
+			wantRule:    "public fallback",
+			wantWarning: true,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -84,6 +92,9 @@ func TestRouteTestExplainsEffectiveQuotaClassification(t *testing.T) {
 			}
 			if classification.Class != tc.wantClass || classification.WinningRule != tc.wantRule {
 				t.Fatalf("classification = %q by %q, want %q by %q", classification.Class, classification.WinningRule, tc.wantClass, tc.wantRule)
+			}
+			if tc.wantWarning && len(classification.Warnings) == 0 {
+				t.Fatal("invalid address produced no warning")
 			}
 			if !strings.Contains(classification.Precedence, "longest matching attributed CIDR") {
 				t.Fatalf("precedence explanation missing: %q", classification.Precedence)
