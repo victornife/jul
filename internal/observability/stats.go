@@ -56,7 +56,7 @@ type StatsSnapshot struct {
 	// keyed by the key kind (ip/header/jwt). It powers the Rate Limit editor's
 	// observability section (Console v2 Milestone 3.3).
 	RateLimited map[string]float64 `json:"rateLimited"`
-	// QuotaDecisions holds per-configured-policy denial counts keyed by mode
+	// QuotaDecisions holds per-configured-policy decision counts keyed by mode
 	// and bounded reason. Caller identities and request data are never keys.
 	QuotaDecisions map[string]map[string]float64 `json:"quotaDecisions,omitempty"`
 

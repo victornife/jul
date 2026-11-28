@@ -96,6 +96,33 @@ function Result({ res }: { readonly res: RouteTestResult }) {
         </div>
       )}
 
+      {res.quota_classification && (
+        <div className="rounded-md border border-jul-accent/40 bg-jul-accent/5 p-3 text-sm">
+          <p className="font-medium text-jul-text">Application quota classification</p>
+          <div className="mt-2 grid grid-cols-[120px_1fr] gap-2">
+            <span className="text-xs uppercase tracking-wider text-jul-muted">Policy</span>
+            <span className="font-mono text-jul-text">
+              {res.quota_classification.policy}
+              {res.quota_classification.operation
+                ? ` · ${res.quota_classification.operation}`
+                : ""}
+            </span>
+            <span className="text-xs uppercase tracking-wider text-jul-muted">Class</span>
+            <span className="text-jul-text">{res.quota_classification.class}</span>
+            <span className="text-xs uppercase tracking-wider text-jul-muted">Winning rule</span>
+            <span className="text-jul-text">{res.quota_classification.winning_rule}</span>
+            <span className="text-xs uppercase tracking-wider text-jul-muted">Precedence</span>
+            <span className="text-xs text-jul-text">{res.quota_classification.precedence}</span>
+          </div>
+          <p className="mt-2 text-xs text-jul-muted">{res.quota_classification.note}</p>
+          {res.quota_classification.warnings?.map((warning) => (
+            <p key={warning} className="mt-1 text-xs text-jul-warning">
+              {warning}
+            </p>
+          ))}
+        </div>
+      )}
+
       {res.warnings && res.warnings.length > 0 && (
         <div className="space-y-1 rounded-md border border-jul-warning/40 bg-jul-warning/10 p-3">
           {res.warnings.map((wn, i) => (
@@ -119,14 +146,40 @@ export function RouteTester({ onClose }: RouteTesterProps) {
   const [method, setMethod] = useState("GET");
   const [path, setPath] = useState("/");
   const [host, setHost] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
+  const [principalMethod, setPrincipalMethod] = useState("");
+  const [principalDomain, setPrincipalDomain] = useState("");
+  const [principalIssuer, setPrincipalIssuer] = useState("");
+  const [principalSubject, setPrincipalSubject] = useState("");
+  const [simulationError, setSimulationError] = useState<string | null>(null);
 
   const run = useMutation({
     mutationFn: (input: RouteTestInput) => testRoute(input),
   });
 
   function onRun(): void {
+    const principalFields = [principalMethod, principalDomain, principalIssuer, principalSubject];
+    const hasPrincipalInput = principalFields.some((value) => value.trim() !== "");
+    if (
+      hasPrincipalInput &&
+      (!principalMethod.trim() || !principalDomain.trim() || !principalSubject.trim())
+    ) {
+      setSimulationError("Provide the principal method, domain, and subject together.");
+      run.reset();
+      return;
+    }
+    setSimulationError(null);
     const input: RouteTestInput = { method, path: path.trim() || "/" };
     if (host.trim()) input.host = host.trim();
+    if (clientAddress.trim()) input.client_address = clientAddress.trim();
+    if (principalMethod.trim() && principalDomain.trim() && principalSubject.trim()) {
+      input.quota_principal = {
+        method: principalMethod.trim(),
+        domain: principalDomain.trim(),
+        subject: principalSubject.trim(),
+      };
+      if (principalIssuer.trim()) input.quota_principal.issuer = principalIssuer.trim();
+    }
     run.mutate(input);
   }
 
@@ -137,11 +190,56 @@ export function RouteTester({ onClose }: RouteTesterProps) {
       onClose={onClose}
     >
       <div className="space-y-5">
+        <p className="text-xs text-jul-muted">
+          Route Test is a dry run. Quota identity inputs below are hypothetical and are not
+          authenticated; client-supplied headers are never trusted for classification.
+        </p>
         <div className="grid grid-cols-[100px_1fr] gap-3">
           <Field label="Method" value={method} placeholder="GET" onChange={setMethod} />
           <Field label="Path" value={path} placeholder="/api/users" onChange={setPath} />
         </div>
         <Field label="Host (optional)" value={host} placeholder="example.com" onChange={setHost} />
+        <details className="rounded-md border border-jul-border p-3">
+          <summary className="cursor-pointer text-sm font-medium text-jul-text">
+            Simulate quota classification inputs
+          </summary>
+          <div className="mt-3 space-y-3">
+            <Field
+              label="Attributed client address (optional)"
+              value={clientAddress}
+              placeholder="192.0.2.10"
+              onChange={setClientAddress}
+            />
+            <p className="text-xs text-jul-muted">
+              The address is simulated as an attributed canonical client address for CIDR-pool
+              matching.
+            </p>
+            <Field
+              label="Hypothetical verified principal method"
+              value={principalMethod}
+              placeholder="forward, basic, or jwt"
+              onChange={setPrincipalMethod}
+            />
+            <Field
+              label="Principal domain"
+              value={principalDomain}
+              placeholder="services"
+              onChange={setPrincipalDomain}
+            />
+            <Field
+              label="Principal issuer (JWT)"
+              value={principalIssuer}
+              placeholder="https://issuer.example"
+              onChange={setPrincipalIssuer}
+            />
+            <Field
+              label="Principal subject"
+              value={principalSubject}
+              placeholder="account identifier"
+              onChange={setPrincipalSubject}
+            />
+          </div>
+        </details>
 
         <button
           type="button"
@@ -157,6 +255,7 @@ export function RouteTester({ onClose }: RouteTesterProps) {
             {run.error instanceof Error ? run.error.message : "Test failed."}
           </p>
         )}
+        {simulationError && <p className="text-xs text-jul-danger">{simulationError}</p>}
         {run.data && <Result res={run.data} />}
       </div>
     </Drawer>

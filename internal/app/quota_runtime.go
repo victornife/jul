@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"net/url"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -55,11 +57,13 @@ type quotaPool struct {
 }
 
 type quotaCandidate struct {
-	runtime  *quotaRuntime
-	next     map[string]*quotaPolicyState
-	bindings map[string]*quotaBinding
-	changes  map[string]bool
-	done     bool
+	runtime   *quotaRuntime
+	reclaim   []string
+	publishAt time.Time
+	next      map[string]*quotaPolicyState
+	bindings  map[string]*quotaBinding
+	changes   map[string]bool
+	done      bool
 }
 
 // The registry holds eight active policies plus one retired identity so one
@@ -79,10 +83,7 @@ func (r *quotaRuntime) prepare(c *config.Config, gen *Generation) (*quotaCandida
 	}
 
 	r.mu.Lock()
-	if r.policies == nil {
-		r.policies = make(map[string]*quotaPolicyState)
-	}
-	r.pruneRefilledPolicies()
+	reclaim := r.refilledRetiredPolicies(c.QuotaPolicies)
 	if len(c.QuotaPolicies) == 0 && len(r.policies) == 0 {
 		r.mu.Unlock()
 		return nil, nil
@@ -93,13 +94,14 @@ func (r *quotaRuntime) prepare(c *config.Config, gen *Generation) (*quotaCandida
 			additions++
 		}
 	}
-	if len(r.policies)+additions > maxQuotaPolicyStates {
-		err := r.failOnPolicyCapacity(additions)
+	if len(r.policies)-len(reclaim)+additions > maxQuotaPolicyStates {
+		err := r.failOnPolicyCapacity(additions, reclaim)
 		r.mu.Unlock()
 		return nil, err
 	}
 	candidate := &quotaCandidate{
 		runtime:  r,
+		reclaim:  reclaim,
 		next:     make(map[string]*quotaPolicyState, len(c.QuotaPolicies)),
 		bindings: make(map[string]*quotaBinding, len(c.QuotaPolicies)),
 		changes:  make(map[string]bool, len(c.QuotaPolicies)),
@@ -109,9 +111,10 @@ func (r *quotaRuntime) prepare(c *config.Config, gen *Generation) (*quotaCandida
 		return nil, err
 	}
 
+	upstreams := IndexUpstreams(c.Upstreams)
 	for name, cfg := range c.QuotaPolicies {
 		policy := quotaPolicy(cfg)
-		security, err := quotaSecurityFingerprint(c, name, cfg, gen)
+		security, err := quotaSecurityFingerprint(c, name, cfg, gen, upstreams)
 		if err != nil {
 			return fail(fmt.Errorf("quota_policies.%s security fingerprint: %w", name, err))
 		}
@@ -175,9 +178,13 @@ func (r *quotaRuntime) prepare(c *config.Config, gen *Generation) (*quotaCandida
 	return candidate, nil
 }
 
-func (r *quotaRuntime) pruneRefilledPolicies() {
+func (r *quotaRuntime) refilledRetiredPolicies(next map[string]config.QuotaPolicyConfig) []string {
+	var reclaim []string
 	for name, state := range r.policies {
 		if state.active {
+			continue
+		}
+		if _, restored := next[name]; restored {
 			continue
 		}
 		enforceFull, _ := state.enforce.RefillStatus()
@@ -186,12 +193,13 @@ func (r *quotaRuntime) pruneRefilledPolicies() {
 		}
 		observeFull, _ := state.observe.RefillStatus()
 		if observeFull {
-			delete(r.policies, name)
+			reclaim = append(reclaim, name)
 		}
 	}
+	return reclaim
 }
 
-func (r *quotaRuntime) failOnPolicyCapacity(additions int) error {
+func (r *quotaRuntime) failOnPolicyCapacity(additions int, reclaim []string) error {
 	var (
 		blocker string
 		wait    time.Duration
@@ -203,7 +211,7 @@ func (r *quotaRuntime) failOnPolicyCapacity(additions int) error {
 	sort.Strings(names)
 	for _, name := range names {
 		state := r.policies[name]
-		if state.active {
+		if state.active || slices.Contains(reclaim, name) {
 			continue
 		}
 		_, enforceWait := state.enforce.RefillStatus()
@@ -229,6 +237,76 @@ func (c *quotaCandidate) Binding(name string) *quotaBinding {
 	return c.bindings[name]
 }
 
+func (c *quotaCandidate) pauseAndCheck() (func(), error) {
+	names := make([]string, 0, len(c.runtime.policies)+len(c.next))
+	seenNames := make(map[string]struct{}, len(c.runtime.policies)+len(c.next))
+	for name := range c.runtime.policies {
+		seenNames[name] = struct{}{}
+		names = append(names, name)
+	}
+	for name := range c.next {
+		if _, ok := seenNames[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+
+	type target struct {
+		name        string
+		mode        string
+		coordinator *quota.Coordinator
+		binding     *quotaBinding
+	}
+	var targets []target
+	seen := make(map[*quota.Coordinator]struct{})
+	for _, name := range names {
+		state := c.next[name]
+		if state == nil {
+			state = c.runtime.policies[name]
+		}
+		if state == nil {
+			continue
+		}
+		for _, item := range []struct {
+			mode        string
+			coordinator *quota.Coordinator
+		}{{"enforce", state.enforce}, {"observe", state.observe}} {
+			if _, ok := seen[item.coordinator]; ok {
+				continue
+			}
+			seen[item.coordinator] = struct{}{}
+			targets = append(targets, target{
+				name: name, mode: item.mode, coordinator: item.coordinator,
+				binding: c.bindings[name],
+			})
+		}
+	}
+
+	releases := make([]func(), 0, len(targets))
+	releaseAll := func() {
+		for i := len(releases) - 1; i >= 0; i-- {
+			releases[i]()
+		}
+	}
+	for _, item := range targets {
+		releases = append(releases, item.coordinator.PauseAdmissions())
+	}
+	now := time.Now()
+	for _, item := range targets {
+		binding := item.binding
+		if binding == nil {
+			continue
+		}
+		if err := item.coordinator.CheckReconfigureAt(binding.policy, binding.maxCallers, now); err != nil {
+			releaseAll()
+			return nil, fmt.Errorf("quota_policies.%s %s state at publication: %w", item.name, item.mode, err)
+		}
+	}
+	c.publishAt = now
+	var once sync.Once
+	return func() { once.Do(releaseAll) }, nil
+}
+
 // Commit publishes the candidate while the handler factory's build lock is
 // held. Policy validation and authorization-version exhaustion are checked in
 // prepare, so this transaction cannot fail.
@@ -236,13 +314,30 @@ func (c *quotaCandidate) Commit() {
 	if c == nil || c.done {
 		return
 	}
+	if c.runtime.policies == nil {
+		c.runtime.policies = make(map[string]*quotaPolicyState)
+	}
+	for _, name := range c.reclaim {
+		delete(c.runtime.policies, name)
+	}
 	for name, state := range c.next {
 		if old := c.runtime.policies[name]; old != nil {
 			binding := c.bindings[name]
-			if _, err := old.enforce.Reconfigure(binding.policy, binding.maxCallers, c.changes[name]); err != nil {
+			var err error
+			if c.publishAt.IsZero() {
+				_, err = old.enforce.Reconfigure(binding.policy, binding.maxCallers, c.changes[name])
+			} else {
+				_, err = old.enforce.ReconfigureWhilePaused(binding.policy, binding.maxCallers, c.changes[name], c.publishAt)
+			}
+			if err != nil {
 				panic(fmt.Sprintf("prepared quota enforcement update failed: %v", err))
 			}
-			if _, err := old.observe.Reconfigure(binding.policy, binding.maxCallers, c.changes[name]); err != nil {
+			if c.publishAt.IsZero() {
+				_, err = old.observe.Reconfigure(binding.policy, binding.maxCallers, c.changes[name])
+			} else {
+				_, err = old.observe.ReconfigureWhilePaused(binding.policy, binding.maxCallers, c.changes[name], c.publishAt)
+			}
+			if err != nil {
 				panic(fmt.Sprintf("prepared quota observation update failed: %v", err))
 			}
 			state.enforce = old.enforce
@@ -349,11 +444,12 @@ func newQuotaBinding(name string, cfg config.QuotaPolicyConfig, policy quota.Pol
 }
 
 type quotaDecisionCounters struct {
-	enforce [7]atomic.Uint64
-	observe [7]atomic.Uint64
+	enforce [len(quotaDecisionReasons)]atomic.Uint64
+	observe [len(quotaDecisionReasons)]atomic.Uint64
 }
 
 var quotaDecisionReasons = [...]string{
+	quotaAdmitted,
 	string(quota.ReasonApplication),
 	string(quota.ReasonClass),
 	string(quota.ReasonCaller),
@@ -362,6 +458,8 @@ var quotaDecisionReasons = [...]string{
 	string(quota.ReasonOperationCaller),
 	string(quota.ReasonStaleAuthorization),
 }
+
+const quotaAdmitted = "admitted"
 
 func (c *quotaDecisionCounters) record(mode, reason string) {
 	if c == nil {
@@ -415,6 +513,8 @@ type quotaSecurityRoute struct {
 	TLS               *config.TLSConfig
 	RequireClientCert bool
 	BasicDigest       [sha256.Size]byte
+	ForwardUpstream   *config.UpstreamConfig
+	JWKSUpstream      *config.UpstreamConfig
 }
 
 type quotaSecurityPool struct {
@@ -429,7 +529,7 @@ type quotaSecurityPolicy struct {
 	Routes  []quotaSecurityRoute
 }
 
-func quotaSecurityFingerprint(c *config.Config, policyName string, cfg config.QuotaPolicyConfig, gen *Generation) ([sha256.Size]byte, error) {
+func quotaSecurityFingerprint(c *config.Config, policyName string, cfg config.QuotaPolicyConfig, gen *Generation, upstreams map[string]config.UpstreamConfig) ([sha256.Size]byte, error) {
 	projection := quotaSecurityPolicy{
 		Mode:    cfg.Mode,
 		Classes: make(map[string][]config.QuotaPrincipalMatch, len(cfg.Classes)),
@@ -472,7 +572,7 @@ func quotaSecurityFingerprint(c *config.Config, policyName string, cfg config.Qu
 			}
 			serverNames := append([]string(nil), server.ServerNames...)
 			sort.Strings(serverNames)
-			projection.Routes = append(projection.Routes, quotaSecurityRoute{
+			route := quotaSecurityRoute{
 				Listen:            server.Listen,
 				ServerNames:       serverNames,
 				Match:             location.Match,
@@ -482,7 +582,24 @@ func quotaSecurityFingerprint(c *config.Config, policyName string, cfg config.Qu
 				TLS:               server.TLS,
 				RequireClientCert: location.RequireClientCert,
 				BasicDigest:       basicDigest,
-			})
+			}
+			if location.Auth != nil {
+				if forward := location.Auth.ForwardAuth; forward != nil {
+					up, err := quotaNamedAuthUpstream(forward.URL, upstreams)
+					if err != nil {
+						return [sha256.Size]byte{}, fmt.Errorf("forward auth authority: %w", err)
+					}
+					route.ForwardUpstream = up
+				}
+				if jwt := location.Auth.JWT; jwt != nil {
+					up, err := quotaNamedAuthUpstream(jwt.JWKSURL, upstreams)
+					if err != nil {
+						return [sha256.Size]byte{}, fmt.Errorf("JWKS authority: %w", err)
+					}
+					route.JWKSUpstream = up
+				}
+			}
+			projection.Routes = append(projection.Routes, route)
 		}
 	}
 	sort.Slice(projection.Routes, func(i, j int) bool {
@@ -495,4 +612,15 @@ func quotaSecurityFingerprint(c *config.Config, policyName string, cfg config.Qu
 		return [sha256.Size]byte{}, err
 	}
 	return sha256.Sum256(raw), nil
+}
+
+func quotaNamedAuthUpstream(rawURL string, upstreams map[string]config.UpstreamConfig) (*config.UpstreamConfig, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if up, ok := upstreams[u.Hostname()]; ok {
+		return &up, nil
+	}
+	return nil, nil
 }

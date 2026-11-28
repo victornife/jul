@@ -652,6 +652,8 @@ The request carries `method`, `path`, `host` and, optionally:
 | `headers` | a `{name: value}` map — the convenient single-value form |
 | `header_values` | an ordered `[{name, value}]` list appended to `headers`, so two field lines of the same name are expressible |
 | `raw_query` | the query string exactly as it appears after `?`, so repeated keys, percent-encoding, `+` and malformed escapes survive. It is *not* derived by splitting `path`, where a `?` stays a literal |
+| `client_address` | an optional hypothetical canonical client address for quota CIDR-pool matching |
+| `quota_principal` | optional hypothetical `{method, domain, issuer?, subject}` input for exact verified-principal mapping |
 
 The result names every candidate the path produced, in the order the router
 visited them: its `match_type`, `match`, `tier`, `match_ordinal`, whether it was
@@ -667,6 +669,16 @@ metric label.
 feed back into a typed patch together with its `selector_version` and the
 `base_version` from that exact projection; it must not be stored or used to correlate a route across
 revisions.
+
+For a selected route with `quota_policy`, the response also includes
+`quota_classification` with the effective policy, optional operation, class,
+winning rule and precedence. Classification precedence is an exact verified
+principal mapping, then the longest matching attributed CIDR, then the public
+fallback. These inputs are simulation-only: Route Test does not authenticate
+the supplied principal, infer identity from client headers, or execute the
+route's authentication middleware. The supplied address is treated as
+attributed only for this hypothetical calculation, and the principal subject
+is never echoed in the result.
 
 After upgrading a server containing duplicate blocks, refresh any already-open
 Console before editing. The server refuses old cross-block selectors even if

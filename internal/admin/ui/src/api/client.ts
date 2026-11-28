@@ -1651,6 +1651,13 @@ export interface RouteTestInput {
   path: string;
   host?: string;
   headers?: Record<string, string>;
+  client_address?: string;
+  quota_principal?: {
+    method: string;
+    domain: string;
+    issuer?: string;
+    subject: string;
+  };
 }
 
 export const RouteTestResultSchema = z.object({
@@ -1683,6 +1690,17 @@ export const RouteTestResultSchema = z.object({
   compression: z.boolean(),
   rate_limit: z.boolean(),
   secure: z.boolean(),
+  quota_classification: z
+    .object({
+      policy: z.string(),
+      operation: z.string().optional(),
+      class: z.string(),
+      winning_rule: z.string(),
+      precedence: z.string(),
+      note: z.string(),
+      warnings: z.array(z.string()).optional(),
+    })
+    .optional(),
   warnings: z.array(z.string()).optional(),
   explanation: z.string(),
 });

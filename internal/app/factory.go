@@ -757,6 +757,9 @@ func (f *HandlerFactory) buildHandlers(ctx context.Context, c *config.Config, ge
 		return nil, err
 	}
 	gen.quotaCandidate = quotaCandidate
+	if quotaCandidate != nil {
+		server.RegisterPublishCheck(ctx, quotaCandidate.pauseAndCheck)
+	}
 
 	// Firewalls are built once per reload. The effective policy for a location
 	// is its own [waf] override when set, otherwise the global [waf] policy;

@@ -37,6 +37,10 @@ func quotaMiddleware(binding *quotaBinding, operation string, logger *slog.Logge
 				return
 			}
 			if decision.Allowed {
+				binding.state.decisions.record(binding.mode, quotaAdmitted)
+				if observe != nil {
+					observe(binding.name, binding.mode, quotaAdmitted)
+				}
 				next.ServeHTTP(w, r)
 				return
 			}

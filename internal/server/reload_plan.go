@@ -114,6 +114,7 @@ type ReloadPlan struct {
 	published bool
 	// phaseDurations records wall-clock time spent in each named phase.
 	phaseDurations map[string]time.Duration
+	publishGuard   *PublishGuard
 }
 
 // AdoptMetadata advances the accepted raw/effective configuration snapshot for
@@ -185,6 +186,7 @@ func (s *Server) newReloadPlan(ctx context.Context, raw *config.Config, candidat
 		Candidate:       candidate,
 		PreparedAdmin:   preparedAdmin,
 		Runtime:         &PreparedRuntime{},
+		publishGuard:    NewPublishGuard(),
 		StartupFP:       s.startupFP,
 		oldAddrs:        setOf(uniqueListenAddrs(s.cfg.Servers)),
 		stagedListeners: make(map[string]*listenerEntry),
@@ -293,7 +295,8 @@ func (p *ReloadPlan) Prepare() error {
 			}
 			p.PreparedAdmin = prepared
 		}
-		handlers, genID, commit, abort, err := p.s.factory(config.WithRawConfig(p.ctx, p.Candidate.Raw), p.Candidate.Effective)
+		ctx := WithPublishGuard(p.ctx, p.publishGuard)
+		handlers, genID, commit, abort, err := p.s.factory(config.WithRawConfig(ctx, p.Candidate.Raw), p.Candidate.Effective)
 		if err != nil {
 			return fmt.Errorf("build: %w", err)
 		}
@@ -373,6 +376,16 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 	if err := p.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("publish: %w", err)
 	}
+	releaseGuard, err := p.publishGuard.PauseAndCheck()
+	if err != nil {
+		return nil, fmt.Errorf("publish preflight: %w", err)
+	}
+	guardReleased := false
+	defer func() {
+		if !guardReleased {
+			releaseGuard()
+		}
+	}()
 	start := time.Now()
 	defer func() {
 		p.phaseDurations["publish"] = time.Since(start)
@@ -467,6 +480,8 @@ func (p *ReloadPlan) Publish() (retirePrev func(), err error) {
 
 	newGen := p.s.newGeneration(p.Handlers, snapshots, p.GenID)
 	p.s.handlers.Store(newGen)
+	releaseGuard()
+	guardReleased = true
 	p.waitEntryRetirements = p.s.exchanges.PublishGeneration(prevGenID, p.GenID, transitions)
 	if p.nextAccessFiles != nil {
 		p.s.loadedAccessFiles = p.nextAccessFiles

@@ -622,7 +622,7 @@
     {
       "name": "jul_quota_decisions_total",
       "type": "counter",
-      "help": "Application quota denials, labeled by mode (enforce/observe) and bounded reason.",
+      "help": "Application quota decisions, labeled by mode (enforce/observe) and bounded reason.",
       "labels": [
         "mode",
         "reason"

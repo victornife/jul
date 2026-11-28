@@ -389,7 +389,7 @@ func NewMetrics(opts ...MetricsOption) *Metrics {
 		}, []string{"key"}),
 		quotaDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_quota_decisions_total",
-			Help: "Application quota denials, labeled by mode (enforce/observe) and bounded reason.",
+			Help: "Application quota decisions, labeled by mode (enforce/observe) and bounded reason.",
 		}, []string{"mode", "reason"}),
 		clientAddrDerived: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "jul_client_addr_derivations_total",
@@ -1023,14 +1023,14 @@ func (m *Metrics) ObserveRateLimited(kind string) {
 	m.ratelimited.WithLabelValues(kind).Inc()
 }
 
-// ObserveQuotaDecision records a denied application quota admission. Labels are
+// ObserveQuotaDecision records an application quota decision. Labels are
 // bounded enums; policy names, callers, and request data are never retained.
 func (m *Metrics) ObserveQuotaDecision(mode, reason string) {
 	if mode != "enforce" && mode != "observe" {
 		mode = "unknown"
 	}
 	switch reason {
-	case "application", "class", "caller", "caller_capacity",
+	case "admitted", "application", "class", "caller", "caller_capacity",
 		"operation", "operation_caller", "stale_authorization":
 	default:
 		reason = "unknown"

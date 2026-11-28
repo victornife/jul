@@ -92,6 +92,7 @@ type callerState struct {
 type Coordinator struct {
 	mu                   sync.Mutex
 	reconfigureMu        sync.Mutex
+	admissionGate        sync.RWMutex
 	application          *rate.Limiter
 	classes              map[string]*classState
 	retiredClasses       map[string]*classState
@@ -224,10 +225,15 @@ func (c *Coordinator) AdvanceAuthorization() (uint64, error) {
 	return version, nil
 }
 
-// CheckReconfigure validates a future policy update and reclaims only retired,
-// fully refilled class and operation state. It does not change active budgets.
+// CheckReconfigure validates a future policy update against the current
+// balances without changing active or retired state.
 func (c *Coordinator) CheckReconfigure(policy Policy, maxCallers int) error {
 	_, err := c.reconfigure(policy, maxCallers, false, false)
+	return err
+}
+
+func (c *Coordinator) CheckReconfigureAt(policy Policy, maxCallers int, now time.Time) error {
+	_, err := c.reconfigureAt(policy, maxCallers, false, false, now)
 	return err
 }
 
@@ -236,10 +242,27 @@ func (c *Coordinator) CheckReconfigure(policy Policy, maxCallers int) error {
 // until all of their buckets are full. A security change advances the
 // authorization version in the same critical publication transaction.
 func (c *Coordinator) Reconfigure(policy Policy, maxCallers int, securityChanged bool) (uint64, error) {
+	c.admissionGate.Lock()
+	defer c.admissionGate.Unlock()
 	return c.reconfigure(policy, maxCallers, true, securityChanged)
 }
 
+func (c *Coordinator) PauseAdmissions() func() {
+	c.admissionGate.Lock()
+	return c.admissionGate.Unlock
+}
+
+// ReconfigureWhilePaused applies a previously checked policy while the caller
+// holds the release function returned by PauseAdmissions.
+func (c *Coordinator) ReconfigureWhilePaused(policy Policy, maxCallers int, securityChanged bool, now time.Time) (uint64, error) {
+	return c.reconfigureAt(policy, maxCallers, true, securityChanged, now)
+}
+
 func (c *Coordinator) reconfigure(policy Policy, maxCallers int, apply, securityChanged bool) (uint64, error) {
+	return c.reconfigureAt(policy, maxCallers, apply, securityChanged, time.Time{})
+}
+
+func (c *Coordinator) reconfigureAt(policy Policy, maxCallers int, apply, securityChanged bool, at time.Time) (uint64, error) {
 	c.reconfigureMu.Lock()
 	defer c.reconfigureMu.Unlock()
 
@@ -273,16 +296,9 @@ func (c *Coordinator) reconfigure(policy Policy, maxCallers int, apply, security
 	if securityChanged && version == ^uint64(0) {
 		return 0, fmt.Errorf("authorization version exhausted")
 	}
-	now := c.now()
-	for name, state := range c.retiredClasses {
-		if _, restored := prepared.classes[name]; !restored && state.fullyRefilled(now) {
-			delete(c.retiredClasses, name)
-		}
-	}
-	for name, state := range c.retiredOperations {
-		if _, restored := prepared.operations[name]; !restored && state.fullyRefilled(now) {
-			delete(c.retiredOperations, name)
-		}
+	now := at
+	if now.IsZero() {
+		now = c.now()
 	}
 	retiredClasses := make(map[string]*classState, len(c.retiredClasses)+len(c.classes))
 	for name, state := range c.retiredClasses {
@@ -296,7 +312,9 @@ func (c *Coordinator) reconfigure(policy Policy, maxCallers int, apply, security
 	}
 	for name, state := range c.classes {
 		if _, retained := prepared.classes[name]; !retained {
-			retiredClasses[name] = state
+			if !state.fullyRefilled(now) {
+				retiredClasses[name] = state
+			}
 		}
 	}
 	retiredOperations := make(map[string]*classState, len(c.retiredOperations)+len(c.operations))
@@ -311,7 +329,9 @@ func (c *Coordinator) reconfigure(policy Policy, maxCallers int, apply, security
 	}
 	for name, state := range c.operations {
 		if _, retained := prepared.operations[name]; !retained {
-			retiredOperations[name] = state
+			if !state.fullyRefilled(now) {
+				retiredOperations[name] = state
+			}
 		}
 	}
 
@@ -364,22 +384,6 @@ func (c *Coordinator) reconfigure(policy Policy, maxCallers int, apply, security
 	}
 
 	if !apply {
-		for name, state := range c.retiredClasses {
-			if _, restored := prepared.classes[name]; restored {
-				continue
-			}
-			if state.fullyRefilled(now) {
-				delete(c.retiredClasses, name)
-			}
-		}
-		for name, state := range c.retiredOperations {
-			if _, restored := prepared.operations[name]; restored {
-				continue
-			}
-			if state.fullyRefilled(now) {
-				delete(c.retiredOperations, name)
-			}
-		}
 		return version, nil
 	}
 	c.application.SetLimitAt(now, rate.Limit(policy.Application.Rate))
@@ -609,6 +613,8 @@ func (c *Coordinator) AdmitOperationForAuthorizationVersion(class, operation, ca
 }
 
 func (c *Coordinator) admit(class, operation, caller string, version uint64, fenced bool) (Decision, error) {
+	c.admissionGate.RLock()
+	defer c.admissionGate.RUnlock()
 	stale := func() bool {
 		return fenced && c.authorizationVersion.Load() != version
 	}

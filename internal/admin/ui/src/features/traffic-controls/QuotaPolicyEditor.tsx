@@ -686,7 +686,7 @@ export function QuotaPolicyEditor({
 
         {stats.data?.quotaDecisions && Object.keys(stats.data.quotaDecisions).length > 0 && (
           <section className="space-y-1 rounded-md border border-jul-border p-3">
-            <h2 className="text-sm font-semibold text-jul-text">Recent quota denials</h2>
+            <h2 className="text-sm font-semibold text-jul-text">Quota decisions</h2>
             {Object.entries(stats.data.quotaDecisions).map(([name, decisions]) => (
               <p key={name} className="text-xs text-jul-muted">
                 <span className="font-mono">{name}</span>:{" "}

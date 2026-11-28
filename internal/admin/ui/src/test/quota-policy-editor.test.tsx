@@ -98,7 +98,7 @@ describe("application quota editor", () => {
     mocks.run.mockReset().mockResolvedValue(undefined);
     mocks.clearError.mockReset();
     mocks.fetchStats.mockResolvedValue({
-      quotaDecisions: { api: { "enforce:application": 3 } },
+      quotaDecisions: { api: { "enforce:admitted": 8, "enforce:application": 3, "observe:class": 2 } },
     });
   });
 
@@ -138,6 +138,7 @@ describe("application quota editor", () => {
     expect(await screen.findByText(/1 verified identity mapping/)).toBeInTheDocument();
     expect(screen.getByText(/office → network \(192\.0\.2\.0\/24\)/)).toBeInTheDocument();
     expect(screen.queryByText(/private-account-id/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/enforce:admitted 8, enforce:application 3, observe:class 2/)).toBeInTheDocument();
 
     const sharedRate = screen.getAllByLabelText("Shared rate").at(0);
     if (sharedRate === undefined) throw new Error("account shared rate field was not rendered");

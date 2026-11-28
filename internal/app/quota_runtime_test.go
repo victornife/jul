@@ -119,6 +119,44 @@ func TestQuotaRuntimeEquivalentSecurityInputPreservesVersion(t *testing.T) {
 	}
 }
 
+func TestQuotaRuntimeVersionsNamedAuthAuthorityChanges(t *testing.T) {
+	for _, method := range []string{"forward", "jwt"} {
+		t.Run(method, func(t *testing.T) {
+			configFor := func(authority, origin string) *config.Config {
+				cfg := quotaRuntimeConfig("enforce")
+				proxy := config.ProxyTarget("http://origin", "127.0.0.1:0")
+				cfg.Servers = proxy.Servers
+				loc := &cfg.Servers[0].Locations[0]
+				loc.QuotaPolicy = "app"
+				loc.Auth = &config.AuthConfig{}
+				if method == "forward" {
+					loc.Auth.ForwardAuth = &config.ForwardAuthConfig{URL: "http://authority/verify"}
+				} else {
+					loc.Auth.JWT = &config.JWTAuthConfig{JWKSURL: "http://authority/keys"}
+				}
+				cfg.Upstreams = []config.UpstreamConfig{
+					{Name: "authority", Servers: []config.UpstreamServer{{Address: authority}}},
+					{Name: "origin", Servers: []config.UpstreamServer{{Address: origin}}},
+				}
+				return cfg
+			}
+			runtime := newQuotaRuntime()
+			publish := func(authority, origin string) uint64 {
+				candidate := prepareQuotaCandidate(t, runtime, configFor(authority, origin))
+				candidate.Commit()
+				return candidate.Binding("app").version.Load()
+			}
+			start := publish("127.0.0.1:8001", "127.0.0.1:9001")
+			if got := publish("127.0.0.1:8001", "127.0.0.1:9002"); got != start {
+				t.Fatalf("unrelated upstream changed authorization version: %d → %d", start, got)
+			}
+			if got := publish("127.0.0.1:8002", "127.0.0.1:9002"); got != start+1 {
+				t.Fatalf("replacement authority version = %d, want %d", got, start+1)
+			}
+		})
+	}
+}
+
 func TestQuotaRuntimeFencesOldBindingsOnSecurityChangeAndRemoval(t *testing.T) {
 	runtime := newQuotaRuntime()
 	cfg := quotaRuntimeConfig("enforce")
@@ -265,17 +303,25 @@ func TestQuotaRuntimeEvictsOnlyRefilledPoliciesUnderPressure(t *testing.T) {
 	}
 
 	time.Sleep(1050 * time.Millisecond)
+	aborted := prepareQuotaCandidate(t, runtime, policyConfig("replacement"))
+	aborted.Abort()
+	if got := len(runtime.policies); got != maxQuotaPolicyStates {
+		t.Fatalf("aborted candidate changed retired registry size to %d", got)
+	}
 	restored := prepareQuotaCandidate(t, runtime, policyConfig("policy-0"))
 	binding := restored.Binding("policy-0")
-	if binding.state.enforce == oldest.state.enforce {
-		t.Fatal("fully refilled policy state was not safely evicted")
+	if binding.state.enforce != oldest.state.enforce {
+		t.Fatal("restored policy did not reuse its retained state")
 	}
 	restored.Commit()
+	if got := len(runtime.policies); got != 1 {
+		t.Fatalf("publish left %d policies; want only the restored policy", got)
+	}
 	if code, dispatched := quotaRequest(oldest); code != http.StatusServiceUnavailable || dispatched {
-		t.Fatalf("evicted policy's stale binding was revived: status=%d dispatched=%v", code, dispatched)
+		t.Fatalf("restored policy's stale binding was revived: status=%d dispatched=%v", code, dispatched)
 	}
 	if code, dispatched := quotaRequest(binding); code != http.StatusOK || !dispatched {
-		t.Fatalf("safe full-state recreation: status=%d dispatched=%v", code, dispatched)
+		t.Fatalf("refilled policy restoration: status=%d dispatched=%v", code, dispatched)
 	}
 }
 
@@ -303,6 +349,9 @@ func TestQuotaObserveUsesCounterfactualStateAndStillServes(t *testing.T) {
 	if got := runtime.decisionSnapshot()["app"]["observe:class"]; got != 1 {
 		t.Fatalf("per-policy observe denial count = %v, want 1", got)
 	}
+	if got := runtime.decisionSnapshot()["app"]["observe:admitted"]; got != 1 {
+		t.Fatalf("per-policy counterfactual admission count = %v, want 1", got)
+	}
 
 	enforce := prepareQuotaCandidate(t, runtime, quotaRuntimeConfig("enforce"))
 	enforceBinding := enforce.Binding("app")
@@ -312,6 +361,9 @@ func TestQuotaObserveUsesCounterfactualStateAndStillServes(t *testing.T) {
 	}
 	if code, dispatched := quotaRequest(enforceBinding); code != http.StatusTooManyRequests || dispatched {
 		t.Fatalf("enforcement state failed after mode transition: status=%d dispatched=%v", code, dispatched)
+	}
+	if got := runtime.decisionSnapshot()["app"]["enforce:admitted"]; got != 1 {
+		t.Fatalf("per-policy enforced admission count = %v, want 1", got)
 	}
 }
 

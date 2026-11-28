@@ -163,9 +163,12 @@ budget to make room.
 
 The Console's application-quota editor manages policy mode, ceilings, class and
 operation allocations, and route attachment through the same typed
-preview/publish workflow. It shows effective route attachments and bounded
-denial reasons, but intentionally does not project principal values; verified
-identity and CIDR mappings remain configuration-owned and are preserved by
+preview/publish workflow. It shows effective route attachments and per-policy
+decision counts. `enforce:admitted` counts admissions; `observe:admitted` counts
+requests that would have been admitted under enforcement. Other observe-mode
+reasons count would-limit decisions, not actual rejections, except stale
+authorization, which is fenced in both modes. The Console intentionally does
+not project principal values; verified identity and CIDR mappings remain configuration-owned and are preserved by
 allocation edits. This application-quota contract is a #745 candidate, not the
 GA legacy rate-limiter contract above. A complete operator walkthrough and
 real-server mixed-load qualification remain part of the issue's acceptance.

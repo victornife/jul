@@ -207,6 +207,7 @@ func TestObserveRateLimited(t *testing.T) {
 func TestObserveQuotaDecisionBoundsLabels(t *testing.T) {
 	m := NewMetrics()
 	m.ObserveQuotaDecision("enforce", "application")
+	m.ObserveQuotaDecision("enforce", "admitted")
 	m.ObserveQuotaDecision("untrusted", "caller-provided-value")
 	families, err := m.Gather()
 	if err != nil {
@@ -216,15 +217,22 @@ func TestObserveQuotaDecisionBoundsLabels(t *testing.T) {
 		if family.GetName() != "jul_quota_decisions_total" {
 			continue
 		}
-		if got := len(family.GetMetric()); got != 2 {
-			t.Fatalf("quota metric series = %d, want 2", got)
+		if got := len(family.GetMetric()); got != 3 {
+			t.Fatalf("quota metric series = %d, want 3", got)
 		}
+		var admitted bool
 		for _, metric := range family.GetMetric() {
 			for _, label := range metric.GetLabel() {
+				if label.GetName() == "reason" && label.GetValue() == "admitted" && metric.GetCounter().GetValue() == 1 {
+					admitted = true
+				}
 				if label.GetValue() == "caller-provided-value" || label.GetValue() == "untrusted" {
 					t.Fatalf("unbounded quota label emitted: %s=%q", label.GetName(), label.GetValue())
 				}
 			}
+		}
+		if !admitted {
+			t.Fatal("quota admission counter was not emitted")
 		}
 		return
 	}

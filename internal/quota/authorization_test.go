@@ -366,11 +366,11 @@ func TestReconfigureRejectsDepletedTombstonePressureAndEvictsFullState(t *testin
 		classes := make(map[string]Class, 8)
 		for i := 0; i < 8; i++ {
 			classes[fmt.Sprintf("%s-%d", prefix, i)] = Class{
-				Shared:    Limit{Rate: 1, Burst: 1},
+				Shared:    Limit{Rate: 10, Burst: 10},
 				PerCaller: Limit{Rate: 1, Burst: 1},
 			}
 		}
-		return Policy{Application: Limit{Rate: 8, Burst: 8}, Classes: classes}
+		return Policy{Application: Limit{Rate: 80, Burst: 80}, Classes: classes}
 	}
 	first := makePolicy("first")
 	c := testCoordinator(t, first, 1, &now)
@@ -384,15 +384,122 @@ func TestReconfigureRejectsDepletedTombstonePressureAndEvictsFullState(t *testin
 	if _, err := c.Reconfigure(second, 1, true); err != nil {
 		t.Fatal(err)
 	}
+	now = now.Add(100 * time.Millisecond)
+	if got, err := c.Admit("second-0", "growth"); err != nil || !got.Allowed {
+		t.Fatalf("deplete second-0 = %+v, %v", got, err)
+	}
 	if err := c.CheckReconfigure(makePolicy("third"), 1); err == nil || !strings.Contains(err.Error(), "retired class") {
 		t.Fatalf("depleted tombstone pressure error = %v", err)
 	}
 	now = now.Add(time.Second)
 	if err := c.CheckReconfigure(makePolicy("third"), 1); err != nil {
-		t.Fatalf("fully refilled tombstones were not evicted: %v", err)
+		t.Fatalf("fully refilled tombstones blocked the check: %v", err)
+	}
+	if got := len(c.retiredClasses); got != len(first.Classes) {
+		t.Fatalf("check removed retired classes: got %d, want %d", got, len(first.Classes))
 	}
 	if _, err := c.Reconfigure(makePolicy("third"), 1, true); err != nil {
 		t.Fatalf("reconfigure after safe eviction: %v", err)
+	}
+	if _, ok := c.retiredClasses["first-0"]; ok {
+		t.Fatal("publication did not remove the refilled retired class")
+	}
+}
+
+func TestReconfigureReclaimsFullyRefilledOutgoingClassAtRegistryBound(t *testing.T) {
+	now := time.Unix(100, 0)
+	makePolicy := func(prefix string) Policy {
+		classes := make(map[string]Class, 8)
+		for i := 0; i < 8; i++ {
+			classes[fmt.Sprintf("%s-%d", prefix, i)] = Class{
+				Shared:    Limit{Rate: 10, Burst: 10},
+				PerCaller: Limit{Rate: 1, Burst: 1},
+			}
+		}
+		return Policy{Application: Limit{Rate: 80, Burst: 80}, Classes: classes}
+	}
+	first := makePolicy("first")
+	c := testCoordinator(t, first, 1, &now)
+	for name := range first.Classes {
+		if got, err := c.Admit(name, name); err != nil || !got.Allowed {
+			t.Fatalf("deplete %s = %+v, %v", name, got, err)
+		}
+	}
+	now = now.Add(100 * time.Millisecond)
+	second := makePolicy("second")
+	if _, err := c.Reconfigure(second, 1, false); err != nil {
+		t.Fatalf("first replacement: %v", err)
+	}
+	candidate := makePolicy("second")
+	delete(candidate.Classes, "second-0")
+	candidate.Classes["third-0"] = Class{
+		Shared:    Limit{Rate: 10, Burst: 10},
+		PerCaller: Limit{Rate: 1, Burst: 1},
+	}
+	if err := c.CheckReconfigureAt(candidate, 1, now); err != nil {
+		t.Fatalf("fully refilled outgoing class blocked exact-bound replacement: %v", err)
+	}
+	if _, err := c.Reconfigure(candidate, 1, false); err != nil {
+		t.Fatalf("publish exact-bound replacement: %v", err)
+	}
+	if _, ok := c.retiredClasses["second-0"]; ok {
+		t.Fatal("fully refilled outgoing class was retained as a tombstone")
+	}
+	if len(c.classes)+len(c.retiredClasses) != maxStoredClasses {
+		t.Fatalf("stored class states = %d, want exact bound %d", len(c.classes)+len(c.retiredClasses), maxStoredClasses)
+	}
+}
+
+func TestReconfigureRechecksCallerGrowthWhileAdmissionsArePaused(t *testing.T) {
+	now := time.Unix(100, 0)
+	makePolicy := func(prefix string) Policy {
+		classes := make(map[string]Class, 8)
+		for i := 0; i < 8; i++ {
+			classes[fmt.Sprintf("%s-%d", prefix, i)] = Class{
+				Shared:    Limit{Rate: 10, Burst: 10},
+				PerCaller: Limit{Rate: 1, Burst: 1},
+			}
+		}
+		return Policy{Application: Limit{Rate: 80, Burst: 80}, Classes: classes}
+	}
+	first := makePolicy("first")
+	c := testCoordinator(t, first, 1, &now)
+	for name := range first.Classes {
+		if got, err := c.Admit(name, name); err != nil || !got.Allowed {
+			t.Fatalf("deplete %s = %+v, %v", name, got, err)
+		}
+	}
+	now = now.Add(100 * time.Millisecond)
+	second := makePolicy("second")
+	if _, err := c.Reconfigure(second, 1, false); err != nil {
+		t.Fatalf("replace initial classes: %v", err)
+	}
+	candidate := makePolicy("third")
+	if err := c.CheckReconfigureAt(candidate, 1, now); err != nil {
+		t.Fatalf("candidate should fit before traffic: %v", err)
+	}
+	if got, err := c.Admit("second-0", "late-caller"); err != nil || !got.Allowed {
+		t.Fatalf("late admission = %+v, %v", got, err)
+	}
+
+	release := c.PauseAdmissions()
+	defer release()
+	version := c.AuthorizationVersion()
+	if err := c.CheckReconfigureAt(candidate, 1, now); err == nil || !strings.Contains(err.Error(), "class-state registry is full") {
+		t.Fatalf("publication check after caller growth = %v", err)
+	}
+	if c.AuthorizationVersion() != version {
+		t.Fatal("failed publication check advanced authorization version")
+	}
+	if _, active := c.classes["second-0"]; !active {
+		t.Fatal("failed publication check changed active classes")
+	}
+	now = now.Add(time.Second)
+	if err := c.CheckReconfigureAt(candidate, 1, now); err != nil {
+		t.Fatalf("refilled outgoing class still blocks replacement: %v", err)
+	}
+	if _, err := c.ReconfigureWhilePaused(candidate, 1, true, now); err != nil {
+		t.Fatalf("reconfigure after safe refill: %v", err)
 	}
 }
 

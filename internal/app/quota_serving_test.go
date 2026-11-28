@@ -496,6 +496,10 @@ func TestQuotaServingHTTPPublicationFencesAuthenticatedOldGeneration(t *testing.
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer authService.Close()
+	replacementAuthService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer replacementAuthService.Close()
 
 	var originRequests atomic.Int64
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -504,8 +508,12 @@ func TestQuotaServingHTTPPublicationFencesAuthenticatedOldGeneration(t *testing.
 	}))
 	defer backend.Close()
 
-	makeConfig := func(subject string) *config.Config {
+	makeConfig := func(subject, authAddress string) *config.Config {
 		cfg := config.ProxyTarget(backend.URL, "127.0.0.1:0")
+		cfg.Upstreams = []config.UpstreamConfig{{
+			Name:    "auth",
+			Servers: []config.UpstreamServer{{Address: authAddress, Weight: 1}},
+		}}
 		cfg.QuotaPolicies = map[string]config.QuotaPolicyConfig{
 			"shared": {
 				Mode:       "enforce",
@@ -527,7 +535,7 @@ func TestQuotaServingHTTPPublicationFencesAuthenticatedOldGeneration(t *testing.
 		cfg.Servers[0].Locations[0].QuotaPolicy = "shared"
 		cfg.Servers[0].Locations[0].Auth = &config.AuthConfig{
 			ForwardAuth: &config.ForwardAuthConfig{
-				URL:                 authService.URL,
+				URL:                 "http://auth/verify",
 				AuthResponseHeaders: []string{"X-Quota-User"},
 			},
 			QuotaPrincipal: &config.AuthQuotaPrincipalConfig{
@@ -540,7 +548,7 @@ func TestQuotaServingHTTPPublicationFencesAuthenticatedOldGeneration(t *testing.
 
 	factory, cleanup := minimalFactory(t)
 	factory.QuotaRuntime = newQuotaRuntime()
-	oldHandlers, _, oldCommit, oldAbort, err := factory.Prepare(context.Background(), makeConfig("alice"))
+	oldHandlers, _, oldCommit, oldAbort, err := factory.Prepare(context.Background(), makeConfig("alice", strings.TrimPrefix(authService.URL, "http://")))
 	if err != nil {
 		cleanup()
 		t.Fatalf("prepare initial generation: %v", err)
@@ -576,7 +584,7 @@ func TestQuotaServingHTTPPublicationFencesAuthenticatedOldGeneration(t *testing.
 		t.Fatal("old request did not reach forward-auth service")
 	}
 
-	newHandlers, _, newCommit, newAbort, err := factory.Prepare(context.Background(), makeConfig("bob"))
+	newHandlers, _, newCommit, newAbort, err := factory.Prepare(context.Background(), makeConfig("alice", strings.TrimPrefix(replacementAuthService.URL, "http://")))
 	if err != nil {
 		close(releaseAuth)
 		t.Fatalf("prepare changed authorization: %v", err)
@@ -605,14 +613,11 @@ func TestQuotaServingHTTPPublicationFencesAuthenticatedOldGeneration(t *testing.
 	if got := originRequests.Load(); got != 0 {
 		t.Fatalf("stale authenticated request reached origin %d times, want 0", got)
 	}
-	if resp := quotaHTTPRequest(t, newServer, http.MethodGet, "/", "", "", ""); resp.StatusCode != http.StatusOK {
-		t.Fatalf("fresh request under new authorization = %d, want 200", resp.StatusCode)
+	if resp := quotaHTTPRequest(t, newServer, http.MethodGet, "/", "", "", ""); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("fresh request under replacement auth authority = %d, want 403", resp.StatusCode)
 	}
-	if resp := quotaHTTPRequest(t, newServer, http.MethodGet, "/", "", "", ""); resp.StatusCode != http.StatusTooManyRequests {
-		t.Fatalf("second fresh request = %d, want retained service-class quota 429", resp.StatusCode)
-	}
-	if got := originRequests.Load(); got != 1 {
-		t.Fatalf("origin received %d requests, want only one fresh admission", got)
+	if got := originRequests.Load(); got != 0 {
+		t.Fatalf("origin received %d requests despite both auth authorities rejecting/fencing", got)
 	}
 }
 
