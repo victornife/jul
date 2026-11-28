@@ -192,6 +192,7 @@ func exerciseAllMetrics(m *Metrics) {
 	m.ObserveCacheInvalidation("exact_url", "succeeded", 1, 1)
 	m.ObserveCacheTagIngestSkipped("invalid")
 	m.ObserveRateLimited("ip")
+	m.ObserveQuotaDecision("enforce", "application")
 	m.ObserveClientAddrDerivation("xff", "accepted")
 	m.ObserveAuthDecision("jwt", "allow")
 	m.ObserveWAFEvent("block", "942100")

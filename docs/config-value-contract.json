@@ -1077,6 +1077,71 @@
       "active_when": "op is exact"
     },
     {
+      "go_field": "QuotaLimitConfig.Burst",
+      "path": "quota_policies.<name>.classes.*.shared.burst / quota_policies.<name>.classes.*.per_caller.burst / quota_policies.<name>.operations.*.shared.burst / quota_policies.<name>.operations.*.per_caller.burst",
+      "kind": "integer",
+      "constraint": "1..1000000000 requests",
+      "zero_semantics": "required; zero is invalid",
+      "active_when": "a quota class or operation is configured"
+    },
+    {
+      "go_field": "QuotaLimitConfig.Rate",
+      "path": "quota_policies.<name>.classes.*.shared.rate / quota_policies.<name>.classes.*.per_caller.rate / quota_policies.<name>.operations.*.shared.rate / quota_policies.<name>.operations.*.per_caller.rate",
+      "kind": "integer",
+      "constraint": "1..1000000000 requests per second",
+      "zero_semantics": "required; zero is invalid",
+      "active_when": "a quota class or operation is configured"
+    },
+    {
+      "go_field": "QuotaPolicyConfig.Burst",
+      "path": "quota_policies.<name>.burst",
+      "kind": "integer",
+      "constraint": "1..1000000000 requests",
+      "zero_semantics": "required; zero is invalid",
+      "active_when": "quota policy is configured"
+    },
+    {
+      "go_field": "QuotaPolicyConfig.MaxCallers",
+      "path": "quota_policies.<name>.max_callers",
+      "kind": "integer",
+      "constraint": "1..4096 callers per class and operation; combined enforcement and observation caller stores are capped at 32768 entries per policy",
+      "zero_semantics": "required; zero is invalid",
+      "active_when": "quota policy is configured"
+    },
+    {
+      "go_field": "QuotaPolicyConfig.Mode",
+      "path": "quota_policies.<name>.mode",
+      "kind": "enum",
+      "constraint": "exact lowercase enforce or observe",
+      "zero_semantics": "required; there is no default",
+      "active_when": "quota policy is configured",
+      "allowed": [
+        "enforce",
+        "observe"
+      ]
+    },
+    {
+      "go_field": "QuotaPolicyConfig.Rate",
+      "path": "quota_policies.<name>.rate",
+      "kind": "integer",
+      "constraint": "1..1000000000 requests per second",
+      "zero_semantics": "required; zero is invalid",
+      "active_when": "quota policy is configured"
+    },
+    {
+      "go_field": "QuotaPrincipalMatch.Method",
+      "path": "quota_policies.<name>.classes.*.principals[].method",
+      "kind": "enum",
+      "constraint": "exact lowercase authentication method",
+      "zero_semantics": "required; there is no default",
+      "active_when": "a class principal mapping is configured",
+      "allowed": [
+        "basic",
+        "forward",
+        "jwt"
+      ]
+    },
+    {
       "go_field": "RFC2136Config.PollInterval",
       "path": "servers[].tls.acme.rfc2136.poll_interval",
       "kind": "duration",

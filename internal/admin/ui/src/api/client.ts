@@ -442,6 +442,7 @@ export const StatsSnapshotSchema = z.object({
   cacheEvents: z.record(z.string(), z.number()).optional(),
   methods: z.record(z.string(), z.number()).optional(),
   rateLimited: z.record(z.string(), z.number()).optional(),
+  quotaDecisions: z.record(z.string(), z.record(z.string(), z.number())).optional(),
   // ── Runtime resources and capacity (#431) ──────────────────────────────
   // A missing/undefined field means unavailable (the platform or collector
   // could not report it) — distinct from a true zero. Never rendered as 0 or
@@ -875,6 +876,8 @@ export const LocationProjectionSchema = z.object({
   cache_effective: LocationCacheEffectiveStateSchema.optional(),
   compression: z.boolean().default(false),
   rate_limit: z.boolean().default(false),
+  quota_policy: z.string().optional(),
+  quota_operation: z.string().optional(),
   rate_limit_detail: z
     .object({
       enabled: z.boolean(),
@@ -1391,6 +1394,40 @@ export const AccessLogProjectionSchema = z.object({
   rotate_keep: z.number().optional(),
 });
 
+const QuotaLimitProjectionSchema = z.object({
+  rate: z.number(),
+  burst: z.number(),
+});
+
+const QuotaPolicyProjectionSchema = z.object({
+  name: z.string(),
+  mode: z.enum(["enforce", "observe"]),
+  rate: z.number(),
+  burst: z.number(),
+  max_callers: z.number(),
+  classes: z.array(
+    z.object({
+      name: z.string(),
+      shared: QuotaLimitProjectionSchema,
+      per_caller: QuotaLimitProjectionSchema,
+      principal_count: z.number(),
+    }),
+  ),
+  pools: z
+    .array(z.object({ name: z.string(), class: z.string(), cidrs: z.array(z.string()) }))
+    .optional(),
+  operations: z
+    .array(
+      z.object({
+        name: z.string(),
+        shared: QuotaLimitProjectionSchema,
+        per_caller: QuotaLimitProjectionSchema,
+      }),
+    )
+    .optional(),
+});
+export type QuotaPolicyProjection = z.infer<typeof QuotaPolicyProjectionSchema>;
+
 export const TrafficControlsSchema = z.object({
   inspection_only: z.boolean().optional(),
   config_authority: z.enum(["managed", "file_owned"]).optional().catch(undefined),
@@ -1398,6 +1435,7 @@ export const TrafficControlsSchema = z.object({
   global: GlobalSettingsProjectionSchema.optional(),
   compression: CompressionProjectionSchema.optional(),
   rate_limit: GlobalRateLimitProjectionSchema.optional(),
+  quota_policies: z.array(QuotaPolicyProjectionSchema).optional(),
   cache: CacheProjectionSchema.optional(),
   servers: z.array(ServerLimitsProjectionSchema).default([]),
   tracing: TracingProjectionSchema.optional(),
@@ -1613,6 +1651,13 @@ export interface RouteTestInput {
   path: string;
   host?: string;
   headers?: Record<string, string>;
+  client_address?: string;
+  quota_principal?: {
+    method: string;
+    domain: string;
+    issuer?: string;
+    subject: string;
+  };
 }
 
 export const RouteTestResultSchema = z.object({
@@ -1645,6 +1690,17 @@ export const RouteTestResultSchema = z.object({
   compression: z.boolean(),
   rate_limit: z.boolean(),
   secure: z.boolean(),
+  quota_classification: z
+    .object({
+      policy: z.string(),
+      operation: z.string().optional(),
+      class: z.string(),
+      winning_rule: z.string(),
+      precedence: z.string(),
+      note: z.string(),
+      warnings: z.array(z.string()).optional(),
+    })
+    .optional(),
   warnings: z.array(z.string()).optional(),
   explanation: z.string(),
 });
@@ -2615,6 +2671,31 @@ export type GlobalRateLimitPatch = {
   max_conns?: number;
 };
 
+export type QuotaLimitPatch = { rate?: number; burst?: number };
+export type QuotaClassPatch = {
+  shared?: QuotaLimitPatch;
+  per_caller?: QuotaLimitPatch;
+};
+export type QuotaPoolPatch = { class?: string; cidrs?: string[] };
+export type QuotaOperationPatch = {
+  shared?: QuotaLimitPatch;
+  per_caller?: QuotaLimitPatch;
+};
+export type QuotaPolicyPatch = {
+  name: string;
+  mode?: "enforce" | "observe";
+  rate?: number;
+  burst?: number;
+  max_callers?: number;
+  classes?: Record<string, QuotaClassPatch>;
+  remove_classes?: string[];
+  pools?: Record<string, QuotaPoolPatch>;
+  remove_pools?: string[];
+  operations?: Record<string, QuotaOperationPatch>;
+  remove_operations?: string[];
+};
+export type RouteQuotaPatch = { policy: string; operation?: string };
+
 export type LocationCachePolicyPatch = {
   default_ttl?: string;
   max_ttl?: string;
@@ -2632,6 +2713,7 @@ export type ConfigPatch =
   | ({ op: "location_cache_policy_clear" } & RouteTarget)
   | ({ op: "route_toggle_rate_limit"; enabled: boolean } & RouteTarget)
   | ({ op: "route_set_rate_limit"; rate_limit: RateLimitPatch } & RouteTarget)
+  | ({ op: "route_set_quota_policy"; route_quota: RouteQuotaPatch } & RouteTarget)
   | ({ op: "location_waf_set"; waf: LocationWAFPatch } & RouteTarget)
   | ({ op: "location_waf_clear" } & RouteTarget)
   | ({ op: "location_set_auth"; auth: LocationAuthPatch } & RouteTarget)
@@ -2746,6 +2828,8 @@ export type ConfigPatch =
     }
   | { op: "compression_set"; compression: CompressionPatch }
   | { op: "rate_limit_global_set"; rate_limit: GlobalRateLimitPatch }
+  | { op: "quota_policy_set"; quota_policy: QuotaPolicyPatch }
+  | { op: "quota_policy_remove"; quota_policy_name: string }
   | ({ op: "location_toggle_require_client_cert"; enabled: boolean } & RouteTarget);
 
 // HashPatch is the [upstreams.hash] block sent with upstream_add and

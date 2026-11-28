@@ -51,6 +51,7 @@ subsystems:
   proxy_pass: "The reverse-proxy target of a location."
   proxy_retries: "Retry budget for idempotent proxied requests."
   proxy_timeouts: "Per-location proxy dial and I/O timeouts."
+  quota: "Process-local application request budgets, class allocation, and caller accounting."
   rate_limit: "Request rate limiting and the per-listener connection cap."
   rbac: "Admin role-based access control policy."
   redact: "Secret redaction applied to logs."
@@ -77,12 +78,12 @@ subsystems:
   worker_threads: "The GOMAXPROCS cap applied to the process."
 
 counts:
-  schema_paths: 482
-  schema_leaves: 409
-  registry_entries: 409
+  schema_paths: 514
+  schema_leaves: 431
+  registry_entries: 431
   startup_consumed: 39
   by_class:
-    hot_reload: 357
+    hot_reload: 379
     restart_required: 39
     new_listener_only: 7
     ignored_deprecated: 4
@@ -639,6 +640,78 @@ fields:
     class: hot_reload
     subsystem: plugins
     reason: "the plugin set is rebuilt and re-instantiated on each successful reload"
+  - path: "quota_policies.*.burst"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.per_caller.burst"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.per_caller.rate"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.principals.*.domain"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.principals.*.issuer"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.principals.*.method"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.principals.*.subject"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.shared.burst"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.classes.*.shared.rate"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.max_callers"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.mode"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.operations.*.per_caller.burst"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.operations.*.per_caller.rate"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.operations.*.shared.burst"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.operations.*.shared.rate"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.pools.*.cidrs"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.pools.*.class"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "quota_policies.*.rate"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
   - path: "rate_limit.burst"
     class: hot_reload
     subsystem: rate_limit
@@ -768,6 +841,14 @@ fields:
     subsystem: auth
     reason: "auth modifiers are rebuilt around each location action on every successful reload"
   - path: "servers.*.locations.*.auth.jwt.timeout"
+    class: hot_reload
+    subsystem: auth
+    reason: "auth modifiers are rebuilt around each location action on every successful reload"
+  - path: "servers.*.locations.*.auth.quota_principal.domain"
+    class: hot_reload
+    subsystem: auth
+    reason: "auth modifiers are rebuilt around each location action on every successful reload"
+  - path: "servers.*.locations.*.auth.quota_principal.response_header"
     class: hot_reload
     subsystem: auth
     reason: "auth modifiers are rebuilt around each location action on every successful reload"
@@ -1014,6 +1095,14 @@ fields:
     class: hot_reload
     subsystem: proxy_timeouts
     reason: "the handler tree is rebuilt from the effective config on each successful reload"
+  - path: "servers.*.locations.*.quota_operation"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
+  - path: "servers.*.locations.*.quota_policy"
+    class: hot_reload
+    subsystem: quota
+    reason: "the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state"
   - path: "servers.*.locations.*.rate_limit.burst"
     class: hot_reload
     subsystem: rate_limit

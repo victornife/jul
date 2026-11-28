@@ -5,6 +5,7 @@
 /dist/
 /examples/alerting/security/secrets/metrics-bearer-token.local
 /examples/alerting/security/secrets/external_webhook_url
+/examples/application-quotas/users.htpasswd
 
 # Go test binaries (`go test -c` / ad-hoc test builds)
 *.test

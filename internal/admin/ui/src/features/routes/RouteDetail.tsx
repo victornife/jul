@@ -10,6 +10,7 @@ import { Sparkline } from "@/components/Sparkline";
 import { useRouteMetricsHistory } from "@/lib/useMetricsHistory";
 import { Drawer } from "@/components/Drawer.tsx";
 import {
+  fetchTrafficControls,
   fetchStats,
   type LocationProjection,
   type LocationWAF,
@@ -1036,6 +1037,18 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
   const { has } = usePermission();
   const canWrite = has("config:write");
   const canReadRaw = has("config:raw");
+  const quotaControls = useQuery({
+    queryKey: ["traffic-controls"],
+    queryFn: fetchTrafficControls,
+    enabled: loc.quota_policy !== undefined,
+    retry: false,
+  });
+  const quotaPolicy = quotaControls.data?.quota_policies?.find(
+    (policy) => policy.name === loc.quota_policy,
+  );
+  const quotaOperation = quotaPolicy?.operations?.find(
+    (operation) => operation.name === loc.quota_operation,
+  );
   const orderNote = routeOrderNote(route, loc);
   const canClone =
     loc.action === "proxy" ||
@@ -1174,6 +1187,55 @@ export function RouteDetail({ route, loc, onClose, onEdit }: RouteDetailProps) {
           )}
           {loc.upstream && (
             <Row label="Upstream" value={<span className="font-mono">{loc.upstream}</span>} />
+          )}
+          {loc.quota_policy && (
+            <Row
+              label="Application quota"
+              value={
+                quotaPolicy ? (
+                  <div className="space-y-1 text-xs">
+                    <p>
+                      <span className="font-mono">{quotaPolicy.name}</span> · {quotaPolicy.mode} ·
+                      application {String(quotaPolicy.rate)}/s, burst {String(quotaPolicy.burst)}
+                    </p>
+                    <p className="text-jul-muted">
+                      Configured class allocations:{" "}
+                      {quotaPolicy.classes
+                        .map(
+                          (item) =>
+                            `${item.name} shared ${String(item.shared.rate)}/s (burst ${String(item.shared.burst)}), caller ${String(item.per_caller.rate)}/s (burst ${String(item.per_caller.burst)})`,
+                        )
+                        .join(", ")}
+                    </p>
+                    <p className="text-jul-muted">
+                      Class selection: exact verified principal mapping, then the longest matching
+                      attributed CIDR pool, then public fallback. Principal values are not shown.
+                    </p>
+                    {quotaPolicy.pools && quotaPolicy.pools.length > 0 && (
+                      <p className="text-jul-muted">
+                        CIDR pools:{" "}
+                        {quotaPolicy.pools
+                          .map(
+                            (pool) =>
+                              `${pool.name} → ${pool.class} (${pool.cidrs.join(", ")})`,
+                          )
+                          .join("; ")}
+                      </p>
+                    )}
+                    {loc.quota_operation && (
+                      <p className="text-jul-muted">
+                        Operation <span className="font-mono">{loc.quota_operation}</span>
+                        {quotaOperation
+                          ? `: ${String(quotaOperation.shared.rate)}/s, burst ${String(quotaOperation.shared.burst)}; caller ${String(quotaOperation.per_caller.rate)}/s, burst ${String(quotaOperation.per_caller.burst)}`
+                          : " · definition unavailable"}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <span className="font-mono">{loc.quota_policy} · details unavailable</span>
+                )
+              }
+            />
           )}
           <Row
             label="TLS"

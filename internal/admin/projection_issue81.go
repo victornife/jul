@@ -111,6 +111,7 @@ type issue81TrafficControlsProjection struct {
 	Global          *GlobalSettingsProjection      `json:"global"`
 	Compression     *CompleteCompressionProjection `json:"compression"`
 	RateLimit       *GlobalRateLimitProjection     `json:"rate_limit"`
+	QuotaPolicies   []QuotaPolicyProjection        `json:"quota_policies"`
 	Cache           *CompleteCacheProjection       `json:"cache"`
 	Servers         []ServerLimitsProjection       `json:"servers"`
 	Tracing         *TracingProjection             `json:"tracing,omitempty"`
@@ -235,12 +236,13 @@ func projectServerLimits(c *config.Config) []ServerLimitsProjection {
 func projectIssue81TrafficControls(c *config.Config) issue81TrafficControlsProjection {
 	legacy := projectTrafficControls(c)
 	return issue81TrafficControlsProjection{
-		Global:      projectGlobalSettings(c),
-		Compression: projectCompressionSettings(c),
-		RateLimit:   projectGlobalRateLimit(c),
-		Cache:       projectCacheSettings(c),
-		Servers:     projectServerLimits(c),
-		Tracing:     legacy.Tracing,
-		AccessLog:   legacy.AccessLog,
+		Global:        projectGlobalSettings(c),
+		Compression:   projectCompressionSettings(c),
+		RateLimit:     projectGlobalRateLimit(c),
+		QuotaPolicies: projectQuotaPolicies(c),
+		Cache:         projectCacheSettings(c),
+		Servers:       projectServerLimits(c),
+		Tracing:       legacy.Tracing,
+		AccessLog:     legacy.AccessLog,
 	}
 }

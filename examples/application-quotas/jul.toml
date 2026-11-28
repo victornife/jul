@@ -1,0 +1,68 @@
+# Copyright 2026 Victor Niharra <vniharrafe@gmail.com>
+# SPDX-License-Identifier: agpl
+
+[global]
+log_level = "info"
+log_format = "text"
+
+[quota_policies.api]
+mode = "enforce"
+rate = 30
+burst = 60
+max_callers = 4096
+
+  [quota_policies.api.classes.public]
+  shared = { rate = 15, burst = 30 }
+  per_caller = { rate = 10, burst = 20 }
+
+  [quota_policies.api.classes.account]
+  shared = { rate = 10, burst = 20 }
+  per_caller = { rate = 3, burst = 6 }
+  principals = [
+    { method = "basic", domain = "local-accounts", subject = "alice" },
+  ]
+
+  [quota_policies.api.classes.integration]
+  shared = { rate = 5, burst = 10 }
+  per_caller = { rate = 2, burst = 4 }
+  principals = [
+    { method = "basic", domain = "local-accounts", subject = "integration" },
+  ]
+
+  [quota_policies.api.operations.export]
+  shared = { rate = 2, burst = 4 }
+  per_caller = { rate = 1, burst = 2 }
+
+[[servers]]
+listen = "127.0.0.1:8080"
+server_names = ["quota.example.test"]
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/public" }
+  proxy_pass = "http://127.0.0.1:3000"
+  quota_policy = "api"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/account" }
+  proxy_pass = "http://127.0.0.1:3000"
+  quota_policy = "api"
+
+    [servers.locations.auth]
+    quota_principal = { domain = "local-accounts" }
+
+      [servers.locations.auth.basic]
+      file = "./users.htpasswd"
+      realm = "Local quota demo"
+
+  [[servers.locations]]
+  match = { type = "prefix", path = "/export" }
+  proxy_pass = "http://127.0.0.1:3000"
+  quota_policy = "api"
+  quota_operation = "export"
+
+    [servers.locations.auth]
+    quota_principal = { domain = "local-accounts" }
+
+      [servers.locations.auth.basic]
+      file = "./users.htpasswd"
+      realm = "Local quota demo"

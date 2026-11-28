@@ -9312,6 +9312,146 @@
                   },
                   "additionalProperties": false
                 },
+                "quota_policy": {
+                  "type": "object",
+                  "properties": {
+                    "burst": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "classes": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "per_caller": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "shared": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "max_callers": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "mode": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "operations": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "per_caller": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "shared": {
+                            "type": "object",
+                            "properties": {
+                              "burst": {
+                                "type": "integer",
+                                "format": "int64"
+                              },
+                              "rate": {
+                                "type": "integer",
+                                "format": "int64"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "pools": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "cidrs": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "class": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "rate": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "remove_classes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "remove_operations": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "remove_pools": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "quota_policy_name": {
+                  "type": "string"
+                },
                 "rate_limit": {
                   "type": "object",
                   "properties": {
@@ -9413,6 +9553,21 @@
                 },
                 "route_id": {
                   "type": "string"
+                },
+                "route_quota": {
+                  "type": "object",
+                  "properties": {
+                    "operation": {
+                      "type": "string"
+                    },
+                    "policy": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "policy"
+                  ],
+                  "additionalProperties": false
                 },
                 "route_selector": {
                   "type": "object",
@@ -11161,6 +11316,9 @@
       "RouteTestRequest": {
         "type": "object",
         "properties": {
+          "client_address": {
+            "type": "string"
+          },
           "header_values": {
             "type": "array",
             "items": {
@@ -11194,6 +11352,29 @@
           },
           "path": {
             "type": "string"
+          },
+          "quota_principal": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "issuer": {
+                "type": "string"
+              },
+              "method": {
+                "type": "string"
+              },
+              "subject": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "domain",
+              "method",
+              "subject"
+            ],
+            "additionalProperties": false
           },
           "raw_query": {
             "type": "string"
@@ -11282,6 +11463,43 @@
           },
           "matched": {
             "type": "boolean"
+          },
+          "quota_classification": {
+            "type": "object",
+            "properties": {
+              "class": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "policy": {
+                "type": "string"
+              },
+              "precedence": {
+                "type": "string"
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "winning_rule": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "class",
+              "note",
+              "policy",
+              "precedence",
+              "winning_rule"
+            ],
+            "additionalProperties": false
           },
           "rate_limit": {
             "type": "boolean"

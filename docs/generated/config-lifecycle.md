@@ -17,11 +17,11 @@ are deterministic renderings of it. Conceptual reload behavior is described in
 
 | Measure | Count |
 | --- | --- |
-| Schema paths (containers included) | 482 |
-| Schema leaves (configurable values) | 409 |
-| Registry entries | 409 |
+| Schema paths (containers included) | 514 |
+| Schema leaves (configurable values) | 431 |
+| Registry entries | 431 |
 | Startup-consumed entries | 39 |
-| Class `hot_reload` | 357 |
+| Class `hot_reload` | 379 |
 | Class `restart_required` | 39 |
 | Class `new_listener_only` | 7 |
 | Class `ignored_deprecated` | 4 |
@@ -86,6 +86,7 @@ set, so preview and apply reach the same verdict.
 | `proxy_pass` | The reverse-proxy target of a location. |
 | `proxy_retries` | Retry budget for idempotent proxied requests. |
 | `proxy_timeouts` | Per-location proxy dial and I/O timeouts. |
+| `quota` | Process-local application request budgets, class allocation, and caller accounting. |
 | `rate_limit` | Request rate limiting and the per-listener connection cap. |
 | `rbac` | Admin role-based access control policy. |
 | `redact` | Secret redaction applied to logs. |
@@ -247,6 +248,24 @@ value is compared as a digest so no secret material leaves the process.
 | `plugins.*.sha256` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.timeout` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
 | `plugins.*.type` | `hot_reload` | `plugins` | — | the plugin set is rebuilt and re-instantiated on each successful reload |
+| `quota_policies.*.burst` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.per_caller.burst` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.per_caller.rate` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.principals.*.domain` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.principals.*.issuer` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.principals.*.method` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.principals.*.subject` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.shared.burst` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.classes.*.shared.rate` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.max_callers` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.mode` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.operations.*.per_caller.burst` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.operations.*.per_caller.rate` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.operations.*.shared.burst` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.operations.*.shared.rate` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.pools.*.cidrs` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.pools.*.class` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `quota_policies.*.rate` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
 | `rate_limit.burst` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `rate_limit.enabled` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `rate_limit.key` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
@@ -277,6 +296,8 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.auth.jwt.issuer` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.jwks_url` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.auth.jwt.timeout` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
+| `servers.*.locations.*.auth.quota_principal.domain` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
+| `servers.*.locations.*.auth.quota_principal.response_header` | `hot_reload` | `auth` | — | auth modifiers are rebuilt around each location action on every successful reload |
 | `servers.*.locations.*.backend_tls.ca_file` | `hot_reload` | `backend_tls` | digest | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
 | `servers.*.locations.*.backend_tls.ca_mode` | `hot_reload` | `backend_tls` | — | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
 | `servers.*.locations.*.backend_tls.client_cert` | `hot_reload` | `backend_tls` | digest | the route's outbound clients (HTTP transport, native gRPC transport, transcoder connections) are built with the handler generation that owns them, so a changed policy takes effect on the next successful reload |
@@ -337,6 +358,8 @@ value is compared as a digest so no secret material leaves the process.
 | `servers.*.locations.*.proxy_read_timeout` | `hot_reload` | `proxy_timeouts` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.proxy_retries` | `hot_reload` | `proxy_retries` | — | the handler tree is rebuilt from the effective config on each successful reload |
 | `servers.*.locations.*.proxy_send_timeout` | `hot_reload` | `proxy_timeouts` | — | the handler tree is rebuilt from the effective config on each successful reload |
+| `servers.*.locations.*.quota_operation` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
+| `servers.*.locations.*.quota_policy` | `hot_reload` | `quota` | — | the process-owned quota registry reconfigures retained buckets at successful handler publication, preserving their accumulated tokens and caller state |
 | `servers.*.locations.*.rate_limit.burst` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `servers.*.locations.*.rate_limit.enabled` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |
 | `servers.*.locations.*.rate_limit.key` | `hot_reload` | `rate_limit` | — | the rate-limiter store accepts a new policy on each successful reload |

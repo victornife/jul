@@ -59,6 +59,11 @@ func TestPolicyValidation(t *testing.T) {
 		{"burst too large", Policy{Application: Limit{Rate: 1, Burst: maxRateOrBurst + 1}}, 2},
 		{"rate oversubscribed", Policy{Application: Limit{Rate: 1, Burst: 3}, Classes: map[string]Class{"x": {Shared: Limit{Rate: 2, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}}}, 2},
 		{"burst oversubscribed", Policy{Application: Limit{Rate: 3, Burst: 1}, Classes: map[string]Class{"x": {Shared: Limit{Rate: 1, Burst: 2}, PerCaller: Limit{Rate: 1, Burst: 1}}}}, 2},
+		{"empty operation name", Policy{Application: Limit{Rate: 1, Burst: 1}, Classes: map[string]Class{"x": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}}, Operations: map[string]Operation{"": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}}}, 2},
+		{"invalid operation shared", Policy{Application: Limit{Rate: 1, Burst: 1}, Classes: map[string]Class{"x": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}}, Operations: map[string]Operation{"op": {PerCaller: Limit{Rate: 1, Burst: 1}}}}, 2},
+		{"invalid operation caller", Policy{Application: Limit{Rate: 1, Burst: 1}, Classes: map[string]Class{"x": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}}, Operations: map[string]Operation{"op": {Shared: Limit{Rate: 1, Burst: 1}}}}, 2},
+		{"too many active states", Policy{Application: Limit{Rate: 1, Burst: 1}, Classes: map[string]Class{"a": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}, "b": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}}, Operations: map[string]Operation{"op": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}}}}, maxCallerSlots},
+		{"caller state registry bound", testPolicy(), maxCallerSlots},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -67,6 +72,96 @@ func TestPolicyValidation(t *testing.T) {
 				t.Fatalf("NewCoordinator error = %v", err)
 			}
 		})
+	}
+}
+
+func TestAuthorizationVersionFencesAdmissions(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := testPolicy()
+	policy.Operations = map[string]Operation{
+		"export": {Shared: Limit{Rate: 2, Burst: 2}, PerCaller: Limit{Rate: 1, Burst: 1}},
+	}
+	c := testCoordinator(t, policy, 10, &now)
+	initial := c.AuthorizationVersion()
+	if got, err := c.AdmitForAuthorizationVersion("public", "alice", initial); err != nil || !got.Allowed {
+		t.Fatalf("current version admission = %+v, %v", got, err)
+	}
+	if got, err := c.AdmitOperationForAuthorizationVersion("private", "export", "alice", initial); err != nil || !got.Allowed {
+		t.Fatalf("current operation admission = %+v, %v", got, err)
+	}
+	if got, err := c.AdmitForAuthorizationVersion("public", "bob", initial-1); err != nil ||
+		got.Allowed || got.Reason != ReasonStaleAuthorization {
+		t.Fatalf("stale authorization admission = %+v, %v", got, err)
+	}
+
+	next, err := c.AdvanceAuthorization()
+	if err != nil || next != initial+1 {
+		t.Fatalf("advance authorization = %d, %v; want %d", next, err, initial+1)
+	}
+	if got, err := c.AdmitForAuthorizationVersion("public", "bob", next); err != nil || !got.Allowed {
+		t.Fatalf("admission at advanced version = %+v, %v", got, err)
+	}
+
+	c.authorizationVersion.Store(^uint64(0))
+	if _, err := c.AdvanceAuthorization(); err == nil || !strings.Contains(err.Error(), "version exhausted") {
+		t.Fatalf("advance exhausted version error = %v", err)
+	}
+	if _, err := c.Reconfigure(policy, 10, true); err == nil || !strings.Contains(err.Error(), "version exhausted") {
+		t.Fatalf("reconfigure exhausted version error = %v", err)
+	}
+}
+
+func TestReconfigureChecksAndRestoresRetiredClassAndOperationState(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := testPolicy()
+	policy.Operations = map[string]Operation{
+		"export": {Shared: Limit{Rate: 2, Burst: 2}, PerCaller: Limit{Rate: 1, Burst: 1}},
+	}
+	c := testCoordinator(t, policy, 10, &now)
+	if got, err := c.AdmitOperation("private", "export", "alice"); err != nil || !got.Allowed {
+		t.Fatalf("initial operation admission = %+v, %v", got, err)
+	}
+	privateState := c.classes["private"]
+	operationState := c.operations["export"]
+	version := c.AuthorizationVersion()
+
+	reduced := Policy{
+		Application: policy.Application,
+		Classes:     map[string]Class{"public": policy.Classes["public"]},
+	}
+	if err := c.CheckReconfigure(reduced, 10); err != nil {
+		t.Fatalf("check reduced policy: %v", err)
+	}
+	if c.classes["private"] != privateState || c.operations["export"] != operationState ||
+		c.AuthorizationVersion() != version {
+		t.Fatal("CheckReconfigure mutated active state")
+	}
+	if got, err := c.Reconfigure(reduced, 10, true); err != nil || got != version+1 {
+		t.Fatalf("remove class and operation = %d, %v", got, err)
+	}
+	if c.retiredClasses["private"] != privateState || c.retiredOperations["export"] != operationState {
+		t.Fatal("depleted class or operation state was not retained")
+	}
+	if full, wait := c.RefillStatus(); full || wait <= 0 {
+		t.Fatalf("depleted coordinator refill status = %v, %s", full, wait)
+	}
+
+	if _, err := c.Reconfigure(policy, 10, true); err != nil {
+		t.Fatalf("restore retired class and operation: %v", err)
+	}
+	if c.classes["private"] != privateState || c.operations["export"] != operationState {
+		t.Fatal("restoring a policy replaced its depleted class or operation state")
+	}
+	if _, ok := c.retiredClasses["private"]; ok {
+		t.Fatal("restored class remains retired")
+	}
+	if _, ok := c.retiredOperations["export"]; ok {
+		t.Fatal("restored operation remains retired")
+	}
+
+	now = now.Add(time.Second)
+	if full, wait := c.RefillStatus(); !full || wait != 0 {
+		t.Fatalf("refilled coordinator status = %v, %s", full, wait)
 	}
 }
 
@@ -91,6 +186,33 @@ func TestDeniedCallerDoesNotSpendSharedBudgets(t *testing.T) {
 		if got := admit(t, c, "private", fmt.Sprint(i)); !got.Allowed {
 			t.Fatalf("protected class denied after public refusals: %+v", got)
 		}
+	}
+}
+
+func TestOperationDenialDoesNotSpendOtherBudgets(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := Policy{
+		Application: Limit{Rate: 10, Burst: 10},
+		Classes: map[string]Class{
+			"public":  {Shared: Limit{Rate: 5, Burst: 5}, PerCaller: Limit{Rate: 5, Burst: 5}},
+			"trusted": {Shared: Limit{Rate: 5, Burst: 5}, PerCaller: Limit{Rate: 5, Burst: 5}},
+		},
+		Operations: map[string]Operation{
+			"export": {Shared: Limit{Rate: 1, Burst: 1}, PerCaller: Limit{Rate: 1, Burst: 1}},
+		},
+	}
+	c := testCoordinator(t, policy, 10, &now)
+	if got, err := c.AdmitOperation("public", "export", "alice"); err != nil || !got.Allowed {
+		t.Fatalf("first operation admission = %+v, %v", got, err)
+	}
+	if got, err := c.AdmitOperation("trusted", "export", "bob"); err != nil || got.Allowed || got.Reason != ReasonOperation {
+		t.Fatalf("shared operation ceiling = %+v, %v", got, err)
+	}
+	if got := admit(t, c, "trusted", "bob"); !got.Allowed {
+		t.Fatalf("operation denial spent application/class/caller budgets: %+v", got)
+	}
+	if got, err := c.AdmitOperation("trusted", "unknown", "carol"); err == nil || got.Allowed {
+		t.Fatalf("unknown operation did not fail explicitly: %+v, %v", got, err)
 	}
 }
 
@@ -230,6 +352,49 @@ func TestCallerCapacityFindsRefilledEntryBeyondOldest(t *testing.T) {
 	}
 	if got := admit(t, c, "public", "alice"); got.Allowed || got.Reason != ReasonCaller {
 		t.Fatalf("partially refilled oldest caller was reset: %+v", got)
+	}
+}
+
+func TestCallerCapacityDecreaseReclaimsEnoughRefilledEntries(t *testing.T) {
+	now := time.Unix(100, 0)
+	policy := testPolicy()
+	policy.Operations = map[string]Operation{
+		"export": {
+			Shared:    Limit{Rate: 10, Burst: 10},
+			PerCaller: Limit{Rate: 1, Burst: 1},
+		},
+	}
+	c := testCoordinator(t, policy, 4, &now)
+	for _, caller := range []string{"alice", "bob", "carol", "david"} {
+		if got, err := c.AdmitOperation("public", "export", caller); err != nil || !got.Allowed {
+			t.Fatalf("initial admission for %s = %+v, %v", caller, got, err)
+		}
+	}
+	if _, err := c.Reconfigure(policy, 2, false); err != nil {
+		t.Fatalf("lower caller cap: %v", err)
+	}
+	if got, err := c.AdmitOperation("public", "export", "erin"); err != nil ||
+		got.Allowed || got.Reason != ReasonCallerCapacity {
+		t.Fatalf("over-cap store admitted a caller without safe candidates: %+v, %v", got, err)
+	}
+	if len(c.classes["public"].callers) != 4 || len(c.operations["export"].callers) != 4 {
+		t.Fatal("denied admission changed over-cap caller stores")
+	}
+
+	now = now.Add(time.Second)
+	if got, err := c.AdmitOperation("public", "export", "erin"); err != nil || !got.Allowed {
+		t.Fatalf("admission after buckets refilled = %+v, %v", got, err)
+	}
+	if len(c.classes["public"].callers) != 2 || len(c.operations["export"].callers) != 2 {
+		t.Fatalf("caller stores after downsize admission = class:%d operation:%d, want 2 each",
+			len(c.classes["public"].callers), len(c.operations["export"].callers))
+	}
+	if got, err := c.AdmitOperation("public", "export", "frank"); err != nil || !got.Allowed {
+		t.Fatalf("admission at downsized capacity = %+v, %v", got, err)
+	}
+	if len(c.classes["public"].callers) != 2 || len(c.operations["export"].callers) != 2 {
+		t.Fatalf("caller stores grew beyond downsized cap: class:%d operation:%d",
+			len(c.classes["public"].callers), len(c.operations["export"].callers))
 	}
 }
 

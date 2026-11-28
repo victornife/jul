@@ -81,6 +81,15 @@ func applyPatch(c *config.Config, req patchRequest) (string, error) {
 	case "route_set_rate_limit":
 		return applyRouteRateLimit(c, req)
 
+	case "quota_policy_set":
+		return applyQuotaPolicySet(c, req.QuotaPolicy)
+
+	case "quota_policy_remove":
+		return applyQuotaPolicyRemove(c, req.QuotaPolicyName)
+
+	case "route_set_quota_policy":
+		return applyRouteQuotaPolicy(c, req)
+
 	case "location_waf_set":
 		loc, err := findLocation(c, req.locationTarget())
 		if err != nil {

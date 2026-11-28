@@ -125,6 +125,7 @@ func TestConfigValueContractCoversEveryNumericPublicLeaf(t *testing.T) {
 		"LocationCachePolicy.ReloadPolicy",
 		"MatchConfig.Methods", "MatchConfig.Type",
 		"PluginConfig.ABI", "PluginConfig.Type", "QueryMatch.Name", "QueryMatch.Op", "QueryMatch.Value",
+		"QuotaPolicyConfig.Mode", "QuotaPrincipalMatch.Method",
 		"RateLimitConfig.Key", "ResponseHeaderOp.Op", "RewriteConfig.Flag", "StreamServer.Protocol",
 		"StreamServer.ProxyProtocol", "TLSConfig.MinVersion", "TracingConfig.Exporter",
 		"UpstreamConfig.Strategy", "WAFConfig.Mode",

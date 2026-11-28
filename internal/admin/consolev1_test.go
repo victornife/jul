@@ -130,6 +130,17 @@ func TestWizardGeneratesValidConfig(t *testing.T) {
 
 func TestStatusAPI(t *testing.T) {
 	cfg := &config.Config{
+		QuotaPolicies: map[string]config.QuotaPolicyConfig{
+			"app": {
+				Mode: "enforce", Rate: 100, Burst: 100, MaxCallers: 100,
+				Classes: map[string]config.QuotaClassConfig{
+					"public": {
+						Shared:    config.QuotaLimitConfig{Rate: 100, Burst: 100},
+						PerCaller: config.QuotaLimitConfig{Rate: 100, Burst: 100},
+					},
+				},
+			},
+		},
 		Servers: []config.ServerConfig{{
 			Listen: ":8443",
 			TLS: &config.TLSConfig{
@@ -141,7 +152,7 @@ func TestStatusAPI(t *testing.T) {
 			ClientAddress: &config.ClientAddressConfig{TrustedProxies: []string{"10.0.0.0/8"}},
 			SendTimeout:   config.Duration(time.Minute),
 			Locations: []config.LocationConfig{
-				{Root: "./public", Cache: true},
+				{Root: "./public", Cache: true, QuotaPolicy: "app"},
 				{ProxyPass: "https://127.0.0.1:9000", Auth: &config.AuthConfig{}, RequireClientCert: true},
 				{GRPCTranscode: &config.GRPCTranscodeConfig{Target: "127.0.0.1:50051"}},
 			},
@@ -179,13 +190,15 @@ func TestStatusAPI(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	active := map[string]bool{}
+	statusRows := map[string]FeatureStatus{}
 	for _, f := range got {
 		active[f.Name] = f.Active
+		statusRows[f.Name] = f
 	}
 	wantActive := []string{
 		"Virtual hosts", "Static file serving", "Reverse proxy", "Response cache",
 		"Downstream send timeout",
-		"Compression", "Rate limiting", "TLS", "Mutual TLS (client certs)", "ACME DNS-01 (RFC 2136)",
+		"Compression", "Rate limiting", "Application quotas", "TLS", "Mutual TLS (client certs)", "ACME DNS-01 (RFC 2136)",
 		"Access control (auth)", "Trusted client address", "HTTP/3 (QUIC)",
 		"WebSocket Extended CONNECT (HTTP/2)", "WebSocket Extended CONNECT (HTTP/3)",
 		"WebSocket upstream HTTP/3",
@@ -201,6 +214,9 @@ func TestStatusAPI(t *testing.T) {
 		} else if !v {
 			t.Errorf("capability %q = inactive, want active", name)
 		}
+	}
+	if got := statusRows["Application quotas"].Detail; got != "1 policy; 1 attached route" {
+		t.Errorf("application quota status detail = %q, want bounded policy and route counts", got)
 	}
 	wantInactive := []string{"FastCGI / uWSGI", "gRPC passthrough", "L4 stream proxy", "WASM plugins", "Secret references", "Web application firewall (WAF)"}
 	for _, name := range wantInactive {

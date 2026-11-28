@@ -103,6 +103,80 @@ different keys contend on independent mutexes.  Buckets are created lazily and
 evicted by a background janitor after an idle TTL (default 10 min), so memory
 stays bounded under churny key spaces such as per-IP limiting.
 
+## Composable application quotas (#745 candidate)
+
+The opt-in `[quota_policies.NAME]` policy is separate from the legacy
+`[rate_limit]` setting. A location joins it only when it sets
+`quota_policy = "NAME"`; a route can also name an operation with
+`quota_operation`. The named policy is process-local and its application
+ceiling is shared by all attached routes and hosts on that Jul process. Routes
+without an attachment keep their existing rate-limit behavior.
+
+The policy composes the application ceiling, a fixed shared allocation for the
+selected class, that class's per-caller limit, and (when attached) an operation
+ceiling and operation per-caller limit. All are checked at one timestamp under
+the coordinator's locks. If any budget denies, none of those same-stage
+budgets is charged. An operation is an additional tightening limit; it does
+not reserve another allocation from the application ceiling. Class allocations
+are fixed and do not borrow unused capacity.
+
+Classification is deterministic:
+
+1. A verified principal explicitly mapped to a class takes precedence. JWT
+   identities include both issuer and subject; Basic and forward-auth
+   identities require an explicitly configured authentication domain. A
+   principal is not itself authorization: only a configured exact mapping
+   selects the class.
+2. Otherwise, the longest matching CIDR pool selects a network class, but only
+   when Jul has an attributed canonical client address. IPv4-mapped IPv6
+   addresses normalize to IPv4. A class with principal mappings is reserved
+   for those verified identities and cannot also be selected by a CIDR pool.
+3. Missing, malformed, or unattributed client identity falls back to the
+   public class; a direct peer with no Jul address context is also public.
+
+An approved CORS preflight skips credential authentication and spends the
+application/class budgets using its attributed address. It has no authenticated
+caller identity. An unapproved preflight continues through the ordinary route
+chain. The legacy limiter remains ahead of quota admission, so a request it
+rejects does not spend quota.
+
+`mode = "observe"` runs a separate counterfactual coordinator. It accumulates
+its own sustained rate and burst state while every non-stale request continues
+to the action; it never debits enforcement state. Decision counters expose only
+configured policy names, mode, and bounded reason codes, never caller
+identities.
+
+Successful reloads update retained buckets in place. Authorization changes
+fence old-generation quota bindings at publication. Removing a policy, class,
+or operation retains its balances under that stable identity; a rollback
+reuses them and allows only the refill that would have occurred while the
+scope was absent. Restored limits use the normal token-bucket update behavior,
+including clamping to a reduced burst. Retired state is reclaimed only after
+all of its shared and per-caller buckets are full. The registry remembers at
+most nine policy identities (eight active plus one retired), and each policy
+coordinator bounds active plus retired class/operation state and caller
+storage. If a candidate would exceed a bound, Jul rejects it before
+publication, keeps the serving generation, and reports the depleted scope and
+an estimated safe-eviction time when calculable. This can temporarily delay a
+configuration change under sustained traffic; it never resets a depleted
+budget to make room.
+
+The Console's application-quota editor manages policy mode, ceilings, class and
+operation allocations, and route attachment through the same typed
+preview/publish workflow. It shows effective route attachments and per-policy
+decision counts. `enforce:admitted` counts admissions; `observe:admitted` counts
+requests that would have been admitted under enforcement. Other observe-mode
+reasons count would-limit decisions, not actual rejections, except stale
+authorization, which is fenced in both modes. The Console intentionally does
+not project principal values; verified identity and CIDR mappings remain configuration-owned and are preserved by
+allocation edits. This application-quota contract is a #745 candidate, not the
+GA legacy rate-limiter contract above. A complete operator walkthrough and
+real-server mixed-load qualification remain part of the issue's acceptance.
+The [provider-free example](../examples/application-quotas/README.md) includes
+public, account, integration and export-operation routes with local Basic
+authentication. Remote `jul plan`/`jul apply` sends the full TOML candidate to
+the server; the server remains authoritative for validation and publication.
+
 ## Connection cap
 
 `max_conns` caps concurrent TCP connections per listener independently of the

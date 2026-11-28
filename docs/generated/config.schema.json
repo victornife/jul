@@ -1001,6 +1001,172 @@
       },
       "type": "object"
     },
+    "quota_policies": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "burst": {
+            "description": "Burst is the aggregate token capacity across attached routes",
+            "type": "integer",
+            "x-jul-constraint": "1..1000000000 requests"
+          },
+          "classes": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "per_caller": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "burst": {
+                      "description": "Burst is the maximum accumulated request-token count",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests"
+                    },
+                    "rate": {
+                      "description": "Rate is the sustained number of requests allowed per second",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests per second"
+                    }
+                  },
+                  "type": "object"
+                },
+                "principals": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "domain": {
+                        "description": "Domain scopes a principal authority independently of its display realm",
+                        "type": "string"
+                      },
+                      "issuer": {
+                        "description": "Issuer distinguishes JWT subjects from different trusted issuers",
+                        "type": "string"
+                      },
+                      "method": {
+                        "description": "Method is \"basic\", \"jwt\", or \"forward\"",
+                        "enum": [
+                          "basic",
+                          "forward",
+                          "jwt"
+                        ],
+                        "type": "string",
+                        "x-jul-constraint": "exact lowercase authentication method"
+                      },
+                      "subject": {
+                        "description": "Subject is the exact verified account or service identifier",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "shared": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "burst": {
+                      "description": "Burst is the maximum accumulated request-token count",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests"
+                    },
+                    "rate": {
+                      "description": "Rate is the sustained number of requests allowed per second",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests per second"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "max_callers": {
+            "description": "MaxCallers bounds each per-class and per-operation caller store",
+            "type": "integer",
+            "x-jul-constraint": "1..4096 callers per class and operation; combined enforcement and observation caller stores are capped at 32768 entries per policy"
+          },
+          "mode": {
+            "description": "Mode is \"enforce\" (reject over-budget requests) or \"observe\" (measure counterfactual denials while allowing requests)",
+            "enum": [
+              "enforce",
+              "observe"
+            ],
+            "type": "string",
+            "x-jul-constraint": "exact lowercase enforce or observe"
+          },
+          "operations": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "per_caller": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "burst": {
+                      "description": "Burst is the maximum accumulated request-token count",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests"
+                    },
+                    "rate": {
+                      "description": "Rate is the sustained number of requests allowed per second",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests per second"
+                    }
+                  },
+                  "type": "object"
+                },
+                "shared": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "burst": {
+                      "description": "Burst is the maximum accumulated request-token count",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests"
+                    },
+                    "rate": {
+                      "description": "Rate is the sustained number of requests allowed per second",
+                      "type": "integer",
+                      "x-jul-constraint": "1..1000000000 requests per second"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "pools": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "cidrs": {
+                  "description": "CIDRs are canonical IPv4 or IPv6 prefixes; longest prefix wins",
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "class": {
+                  "description": "Class is the non-public class assigned to matching addresses",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "rate": {
+            "description": "Rate is the aggregate sustained request rate across attached routes",
+            "type": "integer",
+            "x-jul-constraint": "1..1000000000 requests per second"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
     "rate_limit": {
       "additionalProperties": false,
       "properties": {
@@ -1230,6 +1396,20 @@
                           "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                           "type": "string",
                           "x-jul-constraint": "0s to 60s"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "quota_principal": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "domain": {
+                          "description": "Domain identifies the independently configured authentication authority",
+                          "type": "string"
+                        },
+                        "response_header": {
+                          "description": "ResponseHeader selects the identity field in an allowed forward-auth response; it is ignored for Basic and JWT",
+                          "type": "string"
                         }
                       },
                       "type": "object"
@@ -1690,6 +1870,14 @@
                   "pattern": "^-?([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
                   "type": "string",
                   "x-jul-constraint": "non-negative"
+                },
+                "quota_operation": {
+                  "description": "QuotaOperation adds the named operation's shared and per-caller ceilings",
+                  "type": "string"
+                },
+                "quota_policy": {
+                  "description": "QuotaPolicy opts this location into a process-local named application quota policy",
+                  "type": "string"
                 },
                 "rate_limit": {
                   "additionalProperties": false,

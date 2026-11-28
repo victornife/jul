@@ -58,6 +58,9 @@ cleanup() {
 	if [ -n "${f627_dir:-}" ]; then
 		rm -rf "$f627_dir"
 	fi
+	if [ -n "${quota_example_dir:-}" ]; then
+		rm -rf "$quota_example_dir"
+	fi
 }
 trap cleanup EXIT
 
@@ -123,6 +126,16 @@ while IFS= read -r -d '' f; do
 			echo "   FAILED: examples/cache-invalidation/jul.toml" >&2
 			fail=1
 		fi
+		continue
+		;;
+	examples/application-quotas/jul.toml)
+		# The runnable example asks operators to create private credentials.
+		# Validate its Basic-auth wiring with the repository's existing test
+		# fixture without creating or replacing an ignored local users file.
+		quota_example_dir="$(mktemp -d "${TMPDIR:-/tmp}/jul-quota-example-check.XXXXXX")"
+		cp "$f" "$quota_example_dir/jul.toml"
+		cp testdata/auth/htpasswd "$quota_example_dir/users.htpasswd"
+		check jul.toml "$quota_example_dir"
 		continue
 		;;
 	examples/sharing/f1-standalone/*.toml)

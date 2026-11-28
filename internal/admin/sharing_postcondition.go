@@ -305,6 +305,8 @@ func canonicalWrittenAccessInputs(rawCfg *config.Config, srvIdx, locIdx int, loc
 		"return":                loc.Return,
 		"upstream":              referencedUpstreams,
 		"sharing":               loc.Sharing,
+		"quota_policy":          loc.QuotaPolicy,
+		"quota_operation":       loc.QuotaOperation,
 		"waf":                   effWAF,
 	}
 }
@@ -317,6 +319,8 @@ func IsPatchOpRepeatable(op patchRequest) bool {
 		"route_toggle_cache",
 		"route_toggle_rate_limit",
 		"route_set_rate_limit",
+		"route_set_quota_policy",
+		"quota_policy_set",
 		"location_waf_set",
 		"location_set_auth",
 		"location_set_sharing",

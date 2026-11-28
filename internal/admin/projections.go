@@ -61,6 +61,8 @@ func projectRoutes(c *config.Config) []RouteProjection {
 				Auth:              loc.Auth != nil,
 				Cache:             loc.Cache,
 				RateLimit:         loc.RateLimit != nil && loc.RateLimit.Enabled,
+				QuotaPolicy:       loc.QuotaPolicy,
+				QuotaOperation:    loc.QuotaOperation,
 				Compression:       c.Compression.IsEnabled(),
 				Secure:            srv.TLS != nil && srv.TLS.Enabled,
 				RequireClientCert: loc.RequireClientCert,
@@ -954,7 +956,9 @@ func wafDistribution(c *config.Config) wafDist {
 }
 
 func projectTrafficControls(c *config.Config) TrafficControlsProjection {
-	tcp := TrafficControlsProjection{}
+	tcp := TrafficControlsProjection{
+		QuotaPolicies: projectQuotaPolicies(c),
+	}
 	if c.Compression.IsEnabled() {
 		tcp.Compression = &CompressionProjection{}
 		tcp.Compression.Enabled = true
@@ -995,6 +999,86 @@ func projectTrafficControls(c *config.Config) TrafficControlsProjection {
 		}
 	}
 	return tcp
+}
+
+func projectQuotaPolicies(c *config.Config) []QuotaPolicyProjection {
+	if c == nil || len(c.QuotaPolicies) == 0 {
+		return []QuotaPolicyProjection{}
+	}
+	names := make([]string, 0, len(c.QuotaPolicies))
+	for name := range c.QuotaPolicies {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]QuotaPolicyProjection, 0, len(names))
+	for _, name := range names {
+		policy := c.QuotaPolicies[name]
+		projected := QuotaPolicyProjection{
+			Name:       name,
+			Mode:       policy.Mode,
+			Rate:       policy.Rate,
+			Burst:      policy.Burst,
+			MaxCallers: policy.MaxCallers,
+		}
+		classNames := make([]string, 0, len(policy.Classes))
+		for className := range policy.Classes {
+			classNames = append(classNames, className)
+		}
+		sort.Strings(classNames)
+		projected.Classes = make([]QuotaClassProjection, 0, len(classNames))
+		for _, className := range classNames {
+			class := policy.Classes[className]
+			projected.Classes = append(projected.Classes, QuotaClassProjection{
+				Name: className,
+				Shared: QuotaLimitProjection{
+					Rate:  class.Shared.Rate,
+					Burst: class.Shared.Burst,
+				},
+				PerCaller: QuotaLimitProjection{
+					Rate:  class.PerCaller.Rate,
+					Burst: class.PerCaller.Burst,
+				},
+				PrincipalCount: len(class.Principals),
+			})
+		}
+		poolNames := make([]string, 0, len(policy.Pools))
+		for poolName := range policy.Pools {
+			poolNames = append(poolNames, poolName)
+		}
+		sort.Strings(poolNames)
+		projected.Pools = make([]QuotaPoolProjection, 0, len(poolNames))
+		for _, poolName := range poolNames {
+			pool := policy.Pools[poolName]
+			projected.Pools = append(projected.Pools, QuotaPoolProjection{
+				Name:  poolName,
+				Class: pool.Class,
+				CIDRs: append([]string(nil), pool.CIDRs...),
+			})
+		}
+		operationNames := make([]string, 0, len(policy.Operations))
+		for operationName := range policy.Operations {
+			operationNames = append(operationNames, operationName)
+		}
+		sort.Strings(operationNames)
+		projected.Operations = make([]QuotaOperationProjection, 0, len(operationNames))
+		for _, operationName := range operationNames {
+			operation := policy.Operations[operationName]
+			projected.Operations = append(projected.Operations, QuotaOperationProjection{
+				Name: operationName,
+				Shared: QuotaLimitProjection{
+					Rate:  operation.Shared.Rate,
+					Burst: operation.Shared.Burst,
+				},
+				PerCaller: QuotaLimitProjection{
+					Rate:  operation.PerCaller.Rate,
+					Burst: operation.PerCaller.Burst,
+				},
+			})
+		}
+		out = append(out, projected)
+	}
+	return out
 }
 
 func mustMarshal(b []byte, _ error) []byte { return b }

@@ -71,7 +71,7 @@ func TestPreflightNonPreflightPassesThrough(t *testing.T) {
 	}
 }
 
-func TestPreflightRunsRateLimitThenWAFThenEmits(t *testing.T) {
+func TestPreflightRunsRateLimitThenQuotaThenWAFThenEmits(t *testing.T) {
 	cors := compileCORS(t, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a.example.test"}})
 	var order []string
 	rl := Middleware(func(next http.Handler) http.Handler {
@@ -86,14 +86,20 @@ func TestPreflightRunsRateLimitThenWAFThenEmits(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	})
-	mw := Preflight(cors, rl, waf)
+	quota := Middleware(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			order = append(order, "quota")
+			next.ServeHTTP(w, r)
+		})
+	})
+	mw := Preflight(cors, rl, waf, quota)
 	rec := httptest.NewRecorder()
 	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next must not be called for an approved preflight")
 	})).ServeHTTP(rec, preflightRequest("https://a.example.test", "GET"))
 
-	want := []string{"ratelimit", "waf"}
-	if len(order) != 2 || order[0] != want[0] || order[1] != want[1] {
+	want := []string{"ratelimit", "quota", "waf"}
+	if len(order) != len(want) || order[0] != want[0] || order[1] != want[1] || order[2] != want[2] {
 		t.Errorf("guard order = %v, want %v", order, want)
 	}
 	if rec.Code != http.StatusNoContent {
@@ -103,12 +109,19 @@ func TestPreflightRunsRateLimitThenWAFThenEmits(t *testing.T) {
 
 func TestPreflightRateLimitDenialStopsBeforeEmit(t *testing.T) {
 	cors := compileCORS(t, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a.example.test"}})
+	quotaCalled := false
 	rl := Middleware(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusTooManyRequests)
 		})
 	})
-	mw := Preflight(cors, rl, nil)
+	quota := Middleware(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			quotaCalled = true
+			next.ServeHTTP(w, r)
+		})
+	})
+	mw := Preflight(cors, rl, nil, quota)
 	rec := httptest.NewRecorder()
 	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("ordinary chain must not run for an approved-but-rate-limited preflight")
@@ -116,6 +129,35 @@ func TestPreflightRateLimitDenialStopsBeforeEmit(t *testing.T) {
 
 	if rec.Code != http.StatusTooManyRequests {
 		t.Errorf("status = %d, want 429 from the rate guard", rec.Code)
+	}
+	if quotaCalled {
+		t.Error("quota must not be charged when the legacy rate guard denies")
+	}
+}
+
+func TestPreflightQuotaGuardOnlyRunsForApprovedPreflight(t *testing.T) {
+	cors := compileCORS(t, &config.CORSConfig{Enabled: true, AllowedOrigins: []string{"https://a.example.test"}})
+	calls := 0
+	quota := Middleware(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			next.ServeHTTP(w, r)
+		})
+	})
+	ordinary := Preflight(cors, nil, nil, quota)
+	ordinary(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(
+		httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	denied := Preflight(cors, nil, nil, quota)
+	denied(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(
+		httptest.NewRecorder(), preflightRequest("https://evil.example.test", "GET"))
+	if calls != 0 {
+		t.Fatalf("quota guard called %d times for pass-through requests", calls)
+	}
+	approved := Preflight(cors, nil, nil, quota)
+	approved(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(
+		httptest.NewRecorder(), preflightRequest("https://a.example.test", "GET"))
+	if calls != 1 {
+		t.Fatalf("quota guard calls = %d after approved preflight, want 1", calls)
 	}
 }
 

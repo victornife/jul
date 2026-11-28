@@ -356,6 +356,40 @@ func diffGlobalRateLimit(before, after *config.Config, d *ConfigDiff) {
 }
 
 // diffGlobalWAF compares the global [waf] block.
+func diffQuotaPolicies(before, after *config.Config, d *ConfigDiff) {
+	names := make(map[string]struct{}, len(before.QuotaPolicies)+len(after.QuotaPolicies))
+	for name := range before.QuotaPolicies {
+		names[name] = struct{}{}
+	}
+	for name := range after.QuotaPolicies {
+		names[name] = struct{}{}
+	}
+	ordered := make([]string, 0, len(names))
+	for name := range names {
+		ordered = append(ordered, name)
+	}
+	sort.Strings(ordered)
+	for _, name := range ordered {
+		beforePolicy, hadBefore := before.QuotaPolicies[name]
+		afterPolicy, hasAfter := after.QuotaPolicies[name]
+		switch {
+		case !hadBefore && hasAfter:
+			d.add(DiffEntry{
+				Kind: "quota", Name: name, Detail: "Add application quota policy " + name,
+			}, "quota policy "+name)
+		case hadBefore && !hasAfter:
+			d.del(DiffEntry{
+				Kind: "quota", Name: name, Detail: "Remove application quota policy " + name,
+			}, "quota policy "+name)
+		case hadBefore && hasAfter && !reflect.DeepEqual(beforePolicy, afterPolicy):
+			d.mod(DiffEntry{
+				Kind: "quota", Name: name, Detail: "Change application quota policy " + name,
+			}, "quota policy "+name)
+		}
+	}
+	d.cover("quota_policies")
+}
+
 func diffGlobalWAF(before, after *config.Config, d *ConfigDiff) {
 	b, a := before.WAF, after.WAF
 	if b.Enabled != a.Enabled {

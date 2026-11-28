@@ -14,6 +14,7 @@ import {
 } from "@/features/traffic-controls/TrafficControlEditor.tsx";
 import { TracingEditor } from "@/features/traffic-controls/TracingEditor.tsx";
 import { AccessLogEditor } from "@/features/traffic-controls/AccessLogEditor.tsx";
+import { QuotaPolicyEditor } from "@/features/traffic-controls/QuotaPolicyEditor.tsx";
 import { PanelError } from "@/components/PanelError.tsx";
 import { Loading } from "@/components/ui.tsx";
 
@@ -82,6 +83,7 @@ export function TrafficControlsPanel() {
     queryFn: fetchTrafficControls,
   });
   const [editing, setEditing] = useState<TrafficEditorKind | null>(null);
+  const [quotaEditing, setQuotaEditing] = useState(false);
   const [globalEditing, setGlobalEditing] = useState(false);
   const [tracingEditing, setTracingEditing] = useState(false);
   const [accessLogEditing, setAccessLogEditing] = useState(false);
@@ -175,6 +177,37 @@ export function TrafficControlsPanel() {
         </SectionCard>
 
         <SectionCard
+          title="Application quotas"
+          active={
+            data.quota_policies === undefined ? undefined : data.quota_policies.length > 0
+          }
+          unavailableReason={
+            data.quota_policies === undefined
+              ? "Unavailable on this server; no application-quota projection was provided."
+              : undefined
+          }
+          onEdit={() => {
+            setQuotaEditing(true);
+          }}
+        >
+          <div className="space-y-1">
+            {(data.quota_policies ?? []).length === 0 ? (
+              <p className="text-sm text-jul-muted">No application quota policies are configured.</p>
+            ) : (
+              (data.quota_policies ?? []).map((policy) => (
+                <p key={policy.name} className="text-sm text-jul-text">
+                  <span className="font-mono">{policy.name}</span> · {policy.mode} · {String(policy.rate)}/s
+                  · {String(policy.classes.length)} classes
+                </p>
+              ))
+            )}
+            <p className="text-xs text-jul-muted">
+              Application ceilings and fixed class allocations; routes opt in explicitly.
+            </p>
+          </div>
+        </SectionCard>
+
+        <SectionCard
           title="Cache"
           active={data.cache?.enabled}
           unavailableReason={
@@ -256,6 +289,9 @@ export function TrafficControlsPanel() {
       )}
       {editing && (
         <TrafficControlEditor kind={editing} current={data} onClose={() => { setEditing(null); }} />
+      )}
+      {quotaEditing && (
+        <QuotaPolicyEditor current={data} onClose={() => { setQuotaEditing(false); }} />
       )}
       {tracingEditing && (
         <TracingEditor current={data} onClose={() => { setTracingEditing(false); }} />

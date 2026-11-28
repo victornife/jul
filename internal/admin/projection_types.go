@@ -61,11 +61,13 @@ type LocationProjection struct {
 	// method name is never operator-sensitive (unlike a header/query
 	// predicate's name or value) — it seeds the guided predicates editor's
 	// method field faithfully instead of leaving it blank on every edit.
-	Methods     []string `json:"methods,omitempty"`
-	Auth        bool     `json:"auth"`
-	Cache       bool     `json:"cache"`
-	Compression bool     `json:"compression"`
-	RateLimit   bool     `json:"rate_limit"`
+	Methods        []string `json:"methods,omitempty"`
+	Auth           bool     `json:"auth"`
+	Cache          bool     `json:"cache"`
+	Compression    bool     `json:"compression"`
+	RateLimit      bool     `json:"rate_limit"`
+	QuotaPolicy    string   `json:"quota_policy,omitempty"`
+	QuotaOperation string   `json:"quota_operation,omitempty"`
 	// RateLimitDetail carries the per-location rate-limit configuration (rate,
 	// burst, key) when the location has a rate_limit block, so the guided editor
 	// can seed the detailed rate-limit form and round-trip values faithfully.
@@ -532,11 +534,52 @@ type LocationWAFProjection struct {
 
 // TrafficControlsProjection is the traffic/observability settings panel.
 type TrafficControlsProjection struct {
-	Compression *CompressionProjection `json:"compression,omitempty"`
-	RateLimit   *RateLimitProjection   `json:"rate_limit,omitempty"`
-	Cache       *CacheProjection       `json:"cache,omitempty"`
-	Tracing     *TracingProjection     `json:"tracing,omitempty"`
-	AccessLog   *AccessLogProjection   `json:"access_log,omitempty"`
+	Compression   *CompressionProjection  `json:"compression,omitempty"`
+	RateLimit     *RateLimitProjection    `json:"rate_limit,omitempty"`
+	QuotaPolicies []QuotaPolicyProjection `json:"quota_policies"`
+	Cache         *CacheProjection        `json:"cache,omitempty"`
+	Tracing       *TracingProjection      `json:"tracing,omitempty"`
+	AccessLog     *AccessLogProjection    `json:"access_log,omitempty"`
+}
+
+// QuotaPolicyProjection exposes quota limits without any principal values.
+type QuotaPolicyProjection struct {
+	Name       string                     `json:"name"`
+	Mode       string                     `json:"mode"`
+	Rate       int                        `json:"rate"`
+	Burst      int                        `json:"burst"`
+	MaxCallers int                        `json:"max_callers"`
+	Classes    []QuotaClassProjection     `json:"classes"`
+	Pools      []QuotaPoolProjection      `json:"pools,omitempty"`
+	Operations []QuotaOperationProjection `json:"operations,omitempty"`
+}
+
+// QuotaLimitProjection is one sustained rate and burst pair.
+type QuotaLimitProjection struct {
+	Rate  int `json:"rate"`
+	Burst int `json:"burst"`
+}
+
+// QuotaClassProjection exposes one class's allocations and mapping count.
+type QuotaClassProjection struct {
+	Name           string               `json:"name"`
+	Shared         QuotaLimitProjection `json:"shared"`
+	PerCaller      QuotaLimitProjection `json:"per_caller"`
+	PrincipalCount int                  `json:"principal_count"`
+}
+
+// QuotaPoolProjection exposes a configured address pool.
+type QuotaPoolProjection struct {
+	Name  string   `json:"name"`
+	Class string   `json:"class"`
+	CIDRs []string `json:"cidrs"`
+}
+
+// QuotaOperationProjection exposes one operation's limits.
+type QuotaOperationProjection struct {
+	Name      string               `json:"name"`
+	Shared    QuotaLimitProjection `json:"shared"`
+	PerCaller QuotaLimitProjection `json:"per_caller"`
 }
 
 // AccessLogProjection exposes the complete non-secret access-log block for the

@@ -27,7 +27,7 @@ func BenchmarkBasicVerify(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if !ba.check(req) {
+		if _, ok := ba.check(req); !ok {
 			b.Fatal("check failed")
 		}
 	}

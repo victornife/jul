@@ -145,7 +145,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		cacheLocs            int
 		pluginLocs           int
 		totalLocs            int
+		quotaRoutes          int
 	)
+	quotaPolicies := len(c.QuotaPolicies)
 	trustedAddrs := map[string]bool{}
 	for i := range c.Servers {
 		srv := &c.Servers[i]
@@ -189,6 +191,9 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 		for j := range srv.Locations {
 			loc := &srv.Locations[j]
+			if loc.QuotaPolicy != "" {
+				quotaRoutes++
+			}
 			if loc.Expires != nil {
 				expiresLocs++
 			}
@@ -428,6 +433,17 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		}
 	}
 
+	quotaDetail := ""
+	if quotaPolicies > 0 {
+		quotaDetail = countUnit(quotaPolicies, "policy")
+	}
+	if quotaRoutes > 0 {
+		if quotaDetail != "" {
+			quotaDetail += "; "
+		}
+		quotaDetail += countUnit(quotaRoutes, "attached route")
+	}
+
 	return []FeatureStatus{
 		{Group: "Traffic", Name: "Virtual hosts", Active: len(c.Servers) > 0, Detail: vhostDetail},
 		{Group: "Traffic", Name: "Downstream send timeout", Active: sendTimeoutServers+sendTimeoutLocations > 0, Detail: countUnit(sendTimeoutServers, "server default") + "; " + countUnit(sendTimeoutLocations, "location override")},
@@ -440,6 +456,7 @@ func (s *Server) runtimeStatus(c *config.Config) []FeatureStatus {
 		{Group: "Traffic", Name: "Response cache", Active: c.Cache.Enabled, Detail: cacheDetail},
 		{Group: "Traffic", Name: "Compression", Active: c.Compression.IsEnabled(), Detail: comprDetail},
 		{Group: "Traffic", Name: "Rate limiting", Active: c.RateLimit.Enabled, Detail: rlDetail},
+		{Group: "Traffic", Name: "Application quotas", Active: quotaRoutes > 0, Detail: quotaDetail},
 
 		{Group: "Security", Name: "TLS", Active: tlsServers > 0, Detail: countDetailIf(tlsServers, "server block")},
 		{Group: "Security", Name: "Mutual TLS (client certs)", Active: mtlsServers > 0, Detail: mtlsDetail},

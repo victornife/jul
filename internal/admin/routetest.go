@@ -6,7 +6,9 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -38,6 +40,17 @@ type routeTestRequest struct {
 	// caller can express two field lines of the same name. Headers is retained
 	// verbatim and remains the convenient single-value form.
 	HeaderValues []routeTestHeader `json:"header_values,omitempty"`
+	// ClientAddress and QuotaPrincipal are hypothetical classification inputs.
+	// Route Test never authenticates the principal or trusts request headers.
+	ClientAddress  string                   `json:"client_address,omitempty"`
+	QuotaPrincipal *routeTestQuotaPrincipal `json:"quota_principal,omitempty"`
+}
+
+type routeTestQuotaPrincipal struct {
+	Method  string `json:"method"`
+	Domain  string `json:"domain"`
+	Issuer  string `json:"issuer,omitempty"`
+	Subject string `json:"subject"`
 }
 
 // routeTestHeader is one request header field line.
@@ -91,7 +104,18 @@ type routeTestResult struct {
 	SelectorVersion string `json:"selector_version,omitempty"`
 	// Candidates is every candidate the enumeration visited, including the
 	// rejected ones and the reason each was rejected.
-	Candidates []routeTestCandidate `json:"candidates,omitempty"`
+	Candidates          []routeTestCandidate          `json:"candidates,omitempty"`
+	QuotaClassification *routeTestQuotaClassification `json:"quota_classification,omitempty"`
+}
+
+type routeTestQuotaClassification struct {
+	Policy      string   `json:"policy"`
+	Operation   string   `json:"operation,omitempty"`
+	Class       string   `json:"class"`
+	WinningRule string   `json:"winning_rule"`
+	Precedence  string   `json:"precedence"`
+	Note        string   `json:"note"`
+	Warnings    []string `json:"warnings,omitempty"`
 }
 
 // handleRouteTest resolves a synthetic request against the running config and
@@ -222,8 +246,102 @@ func testRoute(c *config.Config, in routeTestRequest) routeTestResult {
 		SelectorVersion: routeSelectorVersion,
 		Candidates:      candidates,
 	}
+	res.QuotaClassification = classifyRouteTestQuota(c, loc, in)
 	res.Explanation = explainMatch(srv, &lp) + rejectedCandidateNote(candidates)
+	if classification := res.QuotaClassification; classification != nil {
+		res.Explanation += " Quota classification: " + classification.Class +
+			" by " + classification.WinningRule + "."
+	}
 	return res
+}
+
+func classifyRouteTestQuota(c *config.Config, loc *config.LocationConfig, in routeTestRequest) *routeTestQuotaClassification {
+	if loc.QuotaPolicy == "" {
+		return nil
+	}
+	result := &routeTestQuotaClassification{
+		Policy:      loc.QuotaPolicy,
+		Operation:   loc.QuotaOperation,
+		Class:       "public",
+		WinningRule: "public fallback",
+		Precedence:  "verified principal mapping, then longest matching attributed CIDR, then public fallback",
+		Note:        "Simulation only: the supplied address is treated as attributed, and the principal is treated as hypothetically verified. Route Test does not authenticate or trust client-supplied identity headers.",
+	}
+	policy, ok := c.QuotaPolicies[loc.QuotaPolicy]
+	if !ok {
+		result.Class = "unknown"
+		result.WinningRule = "quota policy is not configured"
+		return result
+	}
+
+	if principal := in.QuotaPrincipal; principal != nil {
+		classNames := make([]string, 0, len(policy.Classes))
+		for className := range policy.Classes {
+			classNames = append(classNames, className)
+		}
+		sort.Strings(classNames)
+		for _, className := range classNames {
+			for _, configured := range policy.Classes[className].Principals {
+				if principal.Method == configured.Method &&
+					principal.Domain == configured.Domain &&
+					principal.Issuer == configured.Issuer &&
+					principal.Subject == configured.Subject {
+					result.Class = className
+					result.WinningRule = "exact verified principal mapping"
+					return result
+				}
+			}
+		}
+	}
+
+	if strings.TrimSpace(in.ClientAddress) != "" {
+		address, err := netip.ParseAddr(strings.TrimSpace(in.ClientAddress))
+		if err != nil {
+			result.Warnings = append(result.Warnings, "The simulated client address is invalid; CIDR matching was skipped.")
+		} else {
+			address = address.Unmap()
+			type candidate struct {
+				name   string
+				class  string
+				prefix netip.Prefix
+			}
+			var pools []candidate
+			for name, pool := range policy.Pools {
+				for _, raw := range pool.CIDRs {
+					prefix, parseErr := netip.ParsePrefix(raw)
+					if parseErr != nil {
+						result.Warnings = append(result.Warnings, "A configured quota CIDR is invalid; that pool was skipped.")
+						continue
+					}
+					if prefix.Addr().Is4In6() {
+						if prefix.Bits() < 96 {
+							result.Warnings = append(result.Warnings, "An IPv4-mapped quota prefix is broader than /96 and was skipped.")
+							continue
+						}
+						prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96)
+					}
+					pools = append(pools, candidate{name: name, class: pool.Class, prefix: prefix.Masked()})
+				}
+			}
+			sort.Slice(pools, func(i, j int) bool {
+				if pools[i].prefix.Bits() != pools[j].prefix.Bits() {
+					return pools[i].prefix.Bits() > pools[j].prefix.Bits()
+				}
+				if pools[i].prefix.String() != pools[j].prefix.String() {
+					return pools[i].prefix.String() < pools[j].prefix.String()
+				}
+				return pools[i].name < pools[j].name
+			})
+			for _, pool := range pools {
+				if pool.prefix.Contains(address) {
+					result.Class = pool.class
+					result.WinningRule = "longest matching CIDR pool " + quote(pool.name) + " (" + pool.prefix.String() + ")"
+					return result
+				}
+			}
+		}
+	}
+	return result
 }
 
 // noMatchExplanation says why the request ends in the router's 404. There is no

@@ -70,6 +70,15 @@ function LocationRow({
             {formatSharingModeLabel(loc.sharing.mode)}
           </span>
         )}
+        {loc.quota_policy && (
+          <span
+            title={`Application quota ${loc.quota_policy}${loc.quota_operation ? ` · operation ${loc.quota_operation}` : ""}`}
+            className="ml-2 inline-block rounded-full border border-jul-border bg-jul-bg px-2 py-0.5 text-xs text-jul-accent"
+          >
+            quota: {loc.quota_policy}
+            {loc.quota_operation ? ` · ${loc.quota_operation}` : ""}
+          </span>
+        )}
         {loc.warnings && loc.warnings.length > 0 && (
           <span
             title={loc.warnings.join("\n")}
